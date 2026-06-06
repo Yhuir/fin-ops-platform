@@ -2551,7 +2551,7 @@ Scope: 只做 BankDetails 页面 discovery，不改运行时代码。
 ### P041-phase-6-bank-details-characterization-tests
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: 只更新 BankDetails 和 AutoTagRulesDrawer tests，锁定银行明细页非 MUI/project primitive contract；不改实现。
 
@@ -2575,6 +2575,57 @@ Scope: 只更新 BankDetails 和 AutoTagRulesDrawer tests，锁定银行明细�
 - Behavior contract preserved: yes，锁定旧 right drawer、dialogs、menus、Popper、table、pagination 和 date Popover 形态。
 - Expected failure acceptable: yes，BankDetails runtime still renders MUI roots before P042-P045。
 - Verification defined: targeted BankDetails/AutoTagRulesDrawer Vitest, diff check, status。
+
+#### Execution Notes
+
+- Updated `BankDetailsPage.test.tsx`:
+  - Added `findBankTransactionSurface` to accept native `table` or HeroUI `grid` while preserving accessible name `交易流水`。
+  - Replaced source-level MUI Table contract with target `FinanceTable` / non-MUI menu/date/drawer/dialog/tag source contract。
+  - Replaced MUI chip class assertions with project class assertions。
+  - Replaced BankDetails CSS MUI selectors with project selector contracts。
+  - Stabilized custom date input test by firing `input` before `blur`。
+- Updated `AutoTagRulesDrawer.test.tsx`:
+  - Added `findAutoTagRuleSurface` to accept native `table` or HeroUI `grid` while preserving accessible name `自动标签规则表格`。
+  - Added source-level `AppDrawer` / `AppDialog` / non-MUI table/form/icon contract。
+  - Replaced MUI table/button/input CSS selector assertions with project selector contracts。
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run BankDetailsPage.test.tsx -t "selecting account and filters request accounts and transactions with the same date range"`: passed。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`: expected-fail with 47 passed and 5 failures. Failures are target project primitive contracts against current MUI runtime/CSS。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed。
+
+### P042-phase-6-bank-details-shell-toolbar-dates
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: 迁移 BankDetails 页面壳、账户列表、顶部工具栏、日期筛选、导出菜单和搜索输入；不迁移交易表格、TypeCell、BankCategoryTag 或 AutoTagRulesDrawer。
+
+#### Prompt
+
+```text
+Prompt ID: P042-phase-6-bank-details-shell-toolbar-dates
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 BankDetails 页面壳、账户列表、顶部工具栏、日期筛选、导出菜单和搜索输入；不迁移交易表格、TypeCell、BankCategoryTag 或 AutoTagRulesDrawer。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/components/common/StatePanel.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx 和 web/src/app/styles.css。只修改 `BankDetailsPage.tsx`、必要的 `styles.css` 和必要的 BankDetails test expectations：移除页面壳、账户 sidebar、header controls、date presets/date Popover、export menu/search toolbar 的 MUI layout/input/button/menu/date imports；使用 HeroUI/Tailwind/project primitives 或 native `input[type=month/date]` 保留旧布局、旧 labels、旧 query params、旧 export payload、旧 search behavior、旧 loading/empty/error feedback。不得迁移交易 table/TablePagination、TypeCell category Popper、BankCategoryTag、internal transfer tooltip、AutoTagRulesDrawer；不得修改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts|requests the current year|renders accounts|uses Chinese labels|selecting account and filters|exports all banks"`；运行完整 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P041 中与 table/category/drawer 相关 failures 可以继续 expected-fail，但 shell/toolbar/date/export failures 必须清除；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P043 transaction table prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime scope limited to BankDetails shell/toolbar/date/export/search: yes。
+- Excludes transaction table/pagination: yes，reserved for P043。
+- Excludes category popovers/TypeCell/BankCategoryTag: yes，reserved for P044。
+- Excludes AutoTagRulesDrawer: yes，reserved for P045。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Verification defined: focused BankDetails tests, full expected-fail target set, diff check, status。
 
 ### MG Prompt Template
 

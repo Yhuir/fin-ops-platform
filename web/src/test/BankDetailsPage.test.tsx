@@ -79,6 +79,23 @@ function getCategoryFilterTrigger(page: HTMLElement) {
   return within(page).getByRole("button", { name: /^标签筛选：/ });
 }
 
+async function findBankTransactionSurface(page: HTMLElement) {
+  const scope = within(page);
+  const currentTable = scope.queryByRole("table", { name: "交易流水" });
+  if (currentTable) {
+    return currentTable;
+  }
+  const currentGrid = scope.queryByRole("grid", { name: "交易流水" });
+  if (currentGrid) {
+    return currentGrid;
+  }
+  try {
+    return await scope.findByRole("table", { name: "交易流水" }, { timeout: 500 });
+  } catch {
+    return scope.findByRole("grid", { name: "交易流水" });
+  }
+}
+
 async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement, currentLabel: string, primary: string, sub: string) {
   const [_currentPrimary, currentSub = ""] = currentLabel.split(" / ");
   const currentInput = await within(drawer).findByDisplayValue(currentSub || _currentPrimary);
@@ -103,17 +120,31 @@ afterEach(() => {
 });
 
 describe("Bank details page", () => {
-  test("uses MUI Table with compact server pagination instead of DataGrid", () => {
+  test("targets project table, menu, date, drawer and dialog primitives", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/BankDetailsPage.tsx"), "utf8");
+    const drawerSource = readFileSync(resolve(process.cwd(), "src/features/bankDetails/AutoTagRulesDrawer.tsx"), "utf8");
+    const tagSource = readFileSync(resolve(process.cwd(), "src/features/bankDetails/BankCategoryTag.tsx"), "utf8");
 
+    expect(source).toContain("FinanceTable");
     expect(source).not.toContain("@mui/x-data-grid");
+    expect(source).not.toContain("@mui/material/Table");
+    expect(source).not.toContain("@mui/material/TablePagination");
+    expect(source).not.toContain("@mui/x-date-pickers");
+    expect(source).not.toContain("@mui/material/Popover");
+    expect(source).not.toContain("@mui/material/Popper");
+    expect(source).not.toContain("@mui/material/Menu");
     expect(source).not.toContain("<DataGrid");
     expect(source).not.toContain("disableVirtualization");
     expect(source).not.toContain("getRowHeight={() => \"auto\"}");
     expect(source).not.toContain("role=\"tree\"");
     expect(source).not.toContain("bank-category-tree");
-    expect(source).toContain("<Table aria-label=\"交易流水\"");
-    expect(source).toContain("rowsPerPageOptions={[25, 50, 100]}");
+    expect(source).toContain("pageSizeOptions={[25, 50, 100]}");
+    expect(drawerSource).toContain("AppDrawer");
+    expect(drawerSource).toContain("AppDialog");
+    expect(drawerSource).not.toContain("@mui/material/Drawer");
+    expect(drawerSource).not.toContain("@mui/material/Dialog");
+    expect(tagSource).not.toContain("@mui/material/Chip");
+    expect(tagSource).not.toContain("@mui/material/Tooltip");
   });
 
   test("loads all accounts by default and its transactions", async () => {
@@ -169,7 +200,7 @@ describe("Bank details page", () => {
     expect(within(icbcAccountButton).getByText("130,500.50")).toHaveClass("bank-account-secondary-balance");
     expect(accountList.querySelectorAll(".bank-account-divider")).toHaveLength(2);
 
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     const columnHeaders = within(table).getAllByRole("columnheader").map((header) => header.textContent ?? "");
     expect(columnHeaders).toEqual([
       "对方户名",
@@ -186,7 +217,6 @@ describe("Bank details page", () => {
     expect(await within(table).findByText("云南溯源科技有限公司")).toBeInTheDocument();
     const tradeTimeChip = within(table).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-chip");
     expect(within(table).queryByText("2026-05-01 10:30:00+08:00")).not.toBeInTheDocument();
-    expect(within(table).getByText("2026-05-01 10:30:00")).toHaveClass("MuiChip-label");
     expect(tradeTimeChip).toHaveClass("bank-trade-time-chip-full");
     expect(tradeTimeChip).toHaveClass("bank-chip-auto-size");
     expect(tradeTimeChip?.closest(".bank-relation-time-row")).not.toBeNull();
@@ -196,7 +226,6 @@ describe("Bank details page", () => {
     expect(within(table).getByText("有oa").closest(".bank-relation-chip-row")?.previousElementSibling).toHaveClass("bank-relation-time-row");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-direction-tag-centered");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-chip-auto-size");
-    expect(within(table).getByText("工商银行 6386")).toHaveClass("MuiChip-label");
     expect(within(table).getByText("工商银行 6386").closest(".bank-source-chip")).toHaveClass("bank-chip-auto-size");
     expect(within(table).getByText("货款")).toBeInTheDocument();
     expect(within(table).getByText("项目回款")).toBeInTheDocument();
@@ -241,13 +270,13 @@ describe("Bank details page", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
     expect(source).toMatch(/\.bank-transaction-table-container\s*\{[^}]*flex:\s*1 1 0[^}]*overflow-y:\s*auto/s);
-    expect(source).toMatch(/\.bank-transaction-pagination\.MuiTablePagination-root\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
+    expect(source).toMatch(/\.bank-transaction-pagination\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 
   test("uses a dense three-column grouped category filter layout", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
-    expect(source).toMatch(/\.bank-category-filter-icon-button\.MuiIconButton-root\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/s);
+    expect(source).toMatch(/\.bank-category-filter-icon-button\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/s);
     expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(640px,\s*calc\(100vw - 64px\)\)/s);
     expect(source).not.toMatch(/\.bank-category-filter-panel\s*\{[^}]*max-height:/s);
     expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*max-height:/s);
@@ -260,7 +289,7 @@ describe("Bank details page", () => {
     expect(source).toMatch(/\.bank-category-filter-child-row \.bank-category-filter-label\s*\{[^}]*font-size:\s*8\.5px/s);
     expect(source).toMatch(/\.bank-category-filter-count\s*\{[^}]*font-size:\s*8px/s);
     expect(source).toMatch(/\.bank-category-filter-hierarchy-group::before\s*\{/);
-    expect(source).toMatch(/\.bank-category-filter-hierarchy-item\.MuiListItemButton-root::after\s*\{/);
+    expect(source).toMatch(/\.bank-category-filter-hierarchy-item::after\s*\{/);
     expect(source).not.toMatch(/\.bank-category-filter-group\s*\{[^}]*border:\s*1px[^}]*background:/s);
   });
 
@@ -278,7 +307,7 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     expect(within(table).getByRole("columnheader", { name: "类型" })).toBeInTheDocument();
     expect(await within(table).findByText("费用 / 工资")).toBeInTheDocument();
     expect(within(table).queryByLabelText("bank-detail-001 类型")).not.toBeInTheDocument();
@@ -302,7 +331,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "内部转账");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     const internalTransferTag = (await within(table).findAllByText("内部往来款"))[0];
 
     await user.hover(internalTransferTag);
@@ -479,7 +508,8 @@ describe("Bank details page", () => {
 
     await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
 
-    expect(await screen.findByRole("dialog", { name: "自动标签规则" })).toBeInTheDocument();
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    expect(drawer).toBeInTheDocument();
     expect(screen.getByText("内部往来款").closest("tr")).toHaveTextContent("1");
     expect(screen.getByText("内部往来款")).toBeInTheDocument();
     const rulesRequest = requestUrls(fetchMock, "/api/bank-details/auto-tag-rules").at(-1);
@@ -689,7 +719,7 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("无 295")).not.toBeInTheDocument();
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     const supplierName = await within(table).findByText("普通供应商");
     const supplierRow = supplierName.closest("tr");
     expect(supplierRow).toBeInstanceOf(HTMLElement);
@@ -745,7 +775,7 @@ describe("Bank details page", () => {
     await user.click(within(drawer).getByRole("button", { name: "关闭自动标签规则抽屉" }));
 
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     const supplierName = await within(table).findByText("普通供应商");
     const supplierRow = supplierName.closest("tr");
     expect(supplierRow).toBeInstanceOf(HTMLElement);
@@ -766,7 +796,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "候选供应商");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     const counterpartyName = await within(table).findByText("候选供应商", { exact: true });
     const row = counterpartyName.closest("tr");
     expect(row).toBeInstanceOf(HTMLElement);
@@ -812,7 +842,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "外部候选");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     expect(await within(table).findByText("外部候选供应商")).toBeInTheDocument();
 
     await user.click(within(table).getByRole("button", { name: "待确认" }));
@@ -858,7 +888,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
     const supplierName = await within(table).findByText("普通供应商");
     const row = supplierName.closest("tr");
     expect(row).toBeInstanceOf(HTMLElement);
@@ -900,7 +930,7 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
-    const table = await within(page).findByRole("table", { name: "交易流水" });
+    const table = await findBankTransactionSurface(page);
 
     expect(await within(table).findByText("费用 / 工资")).toBeInTheDocument();
   });
@@ -959,8 +989,12 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-03-31");
     });
 
-    fireEvent.blur(screen.getByLabelText("开始日期"), { target: { value: "2026-02-01" } });
-    fireEvent.blur(screen.getByLabelText("结束日期"), { target: { value: "2026-02-15" } });
+    const startDateInput = screen.getByLabelText("开始日期");
+    const endDateInput = screen.getByLabelText("结束日期");
+    fireEvent.input(startDateInput, { target: { value: "2026-02-01" } });
+    fireEvent.blur(startDateInput);
+    fireEvent.input(endDateInput, { target: { value: "2026-02-15" } });
+    fireEvent.blur(endDateInput);
     await waitFor(() => {
       const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);

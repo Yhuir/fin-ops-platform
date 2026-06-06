@@ -120,13 +120,13 @@ Last updated: 2026-06-07
 - Account/date/search/category/export flows keep query params consistent。
 - Workbench relation and bank detail tag setting events refetch the correct resources。
 
-Current test migration gaps:
+Current test migration gaps after P041:
 
-- Tests still import and render through `MuiProviders`。
-- Several tests assert MUI class names in CSS, including `.MuiTablePagination-root`, `.MuiIconButton-root`, `.MuiListItemButton-root` and `.MuiButton-root`。
-- The source-level "MUI Table not DataGrid" test currently locks MUI Table instead of the target project/FinanceTable contract。
-- Tests do not yet assert the right drawer is implemented through project `AppDrawer` / non-MUI roots。
-- Tests do not yet assert date Popover, export menu, category filter and row type Popper are free of MUI roots after migration。
+- Tests still import and render through `MuiProviders` so the legacy runtime can render until P042-P045 remove the module MUI dependencies。
+- Source-level tests now require `FinanceTable`, project menu/date primitives, `AppDrawer`, `AppDialog` and non-MUI `BankCategoryTag` implementation。
+- CSS tests now require project selectors instead of `.MuiTablePagination-root`, `.MuiIconButton-root`, `.MuiListItemButton-root`, `.MuiTableCell-root`, `.MuiButton-root` and `.MuiInput-root`。
+- Transaction and auto tag rule table helpers now accept either native `table` or HeroUI `grid` role while preserving accessible names and headers。
+- Date custom input test now fires `input` before `blur` to exercise the same `YYYY-MM-DD` path for legacy MUI DatePicker and future native/date primitive。
 
 `web/src/test/AutoTagRulesDrawer.test.tsx` covers:
 
@@ -139,12 +139,11 @@ Current test migration gaps:
 - Reapply disabled when dirty。
 - CSS contract for wide, table-based, non-truncating drawer layout。
 
-Current drawer test migration gaps:
+Current drawer test migration gaps after P041:
 
-- Tests still import `MuiProviders`。
-- Styling test locks MUI selectors such as `.MuiTableCell-root`, `.MuiButton-root` and `.MuiInput-root`。
-- Tests do not yet assert `bank-auto-tag-drawer-paper` is no longer a `.MuiDrawer-paper` root after migration。
-- Tests do not yet assert condition and archive dialogs are project dialogs rather than MUI dialogs。
+- Tests still import `MuiProviders` until P045 removes MUI Drawer/Dialog/Select/TextField/Table dependencies。
+- Source-level tests now require `AutoTagRulesDrawer` to use `AppDrawer`, `AppDialog`, non-MUI table/form controls and non-MUI icons。
+- Styling test now targets `.finance-table__cell` and project button classes instead of MUI table/button/input selectors。
 
 ## Migration Slices
 
@@ -167,6 +166,11 @@ Current drawer test migration gaps:
 6. `MG-P045-phase-6-bank-details`
    - Run BankDetails and AutoTagRulesDrawer tests, table/common/platform regressions, build, BankDetails-scope MUI grep, CSS MUI selector residue grep, docs update, exact stage, commit and push。
 
+## Execution Update
+
+- `P040-phase-6-bank-details-discovery`: BankDetails page、BankCategoryTag、AutoTagRulesDrawer、tests、MUI inventory、user-visible entrypoints and migration slices recorded。
+- `P041-phase-6-bank-details-characterization-tests`: updated `BankDetailsPage.test.tsx` and `AutoTagRulesDrawer.test.tsx` with project primitive source/CSS contracts and table/grid role-compatible helpers. Targeted test expected-failed with 47 passed and 5 failures. All 5 failures are intended red lights caused by current runtime/CSS still using MUI instead of `FinanceTable`, project pagination/category filter selectors, `AppDrawer`, `AppDialog`, non-MUI rule table styles and non-MUI BankDetails primitives。
+
 ## Risks
 
 - This page has several overlay types; migrating everything to a single HeroUI overlay can break interaction shape. Use right drawer for the drawer, dialog for dialogs, popover/menu for old popovers/menus。
@@ -186,4 +190,15 @@ Type: characterization tests
 Scope: 只更新 BankDetails 和 AutoTagRulesDrawer tests，锁定银行明细页非 MUI/project primitive contract；不改实现。
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/features/bankDetails/AutoTagRulesDrawer.tsx、web/src/features/bankDetails/BankCategoryTag.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/test/BankDetailsPage.test.tsx 和 web/src/test/AutoTagRulesDrawer.test.tsx。只修改 `web/src/test/BankDetailsPage.test.tsx` 和 `web/src/test/AutoTagRulesDrawer.test.tsx`：把 source/CSS 中 MUI class assertions 改成 project primitive assertions；新增断言锁定 bank details root/account sidebar/transaction table/pagination/date Popover/export menu/category filter Popper/row type Popper/internal transfer tooltip/auto tag rules right drawer/condition dialog/archive dialog 均保留旧 accessible labels 和旧交互形态，且 migrated root 不再是 `.Mui*`。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P042 shell-toolbar-dates prompt。
+```
+
+## P042 Prompt Draft
+
+```text
+Prompt ID: P042-phase-6-bank-details-shell-toolbar-dates
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 BankDetails 页面壳、账户列表、顶部工具栏、日期筛选、导出菜单和搜索输入；不迁移交易表格、TypeCell、BankCategoryTag 或 AutoTagRulesDrawer。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/components/common/StatePanel.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx 和 web/src/app/styles.css。只修改 `BankDetailsPage.tsx`、必要的 `styles.css` 和必要的 BankDetails test expectations：移除页面壳、账户 sidebar、header controls、date presets/date Popover、export menu/search toolbar 的 MUI layout/input/button/menu/date imports；使用 HeroUI/Tailwind/project primitives 或 native `input[type=month/date]` 保留旧布局、旧 labels、旧 query params、旧 export payload、旧 search behavior、旧 loading/empty/error feedback。不得迁移交易 table/TablePagination、TypeCell category Popper、BankCategoryTag、internal transfer tooltip、AutoTagRulesDrawer；不得修改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts|requests the current year|renders accounts|uses Chinese labels|selecting account and filters|exports all banks"`；运行完整 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P041 中与 table/category/drawer 相关 failures 可以继续 expected-fail，但 shell/toolbar/date/export failures 必须清除；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P043 transaction table prompt。
 ```

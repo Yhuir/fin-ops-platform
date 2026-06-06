@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P041-phase-6-bank-details-characterization-tests`
+- Current Prompt ID: `P042-phase-6-bank-details-shell-toolbar-dates`
 - Current MG ID: `not_drafted`
 
 ## Global Invariants
@@ -54,14 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 bank details characterization tests。
+- Scope: phase 6 bank details shell/toolbar/date/export migration。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_bank_details.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P040 docs checks passed。
-- Failures: none。
-- Next action: 执行 `P041-phase-6-bank-details-characterization-tests`。
+  - `web/src/test/BankDetailsPage.test.tsx`
+  - `web/src/test/AutoTagRulesDrawer.test.tsx`
+- Verification run: P041 targeted tests expected-failed with 47 passed / 5 primitive-contract failures。
+- Failures: expected only, current runtime still uses MUI for BankDetails table/category/date/export/drawer surfaces。
+- Next action: 执行 `P042-phase-6-bank-details-shell-toolbar-dates`。
 
 ## Prompt Lifecycle
 
@@ -93,7 +95,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P041-phase-6-bank-details-characterization-tests` | BankDetails discovery P040 verified；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails characterization tests |
+| page batches | `in_progress` | `P042-phase-6-bank-details-shell-toolbar-dates` | BankDetails characterization P041 verified as expected-fail；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails shell/toolbar/date/export migration |
 
 ## Verification Log
 
@@ -255,6 +257,10 @@
 | 2026-06-07 | `P040-phase-6-bank-details-discovery` | `rg -n "P040-phase-6-bank-details-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P041-phase-6-bank-details-characterization-tests" docs/refactor-ui/modules/phase_6_bank_details.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | BankDetails inventory and next prompt recorded |
 | 2026-06-07 | `P040-phase-6-bank-details-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P040-phase-6-bank-details-discovery` | `git status --short --branch` | passed | 仅 P040 文档变更 |
+| 2026-06-07 | `P041-phase-6-bank-details-characterization-tests` | `cd web && npx vitest run BankDetailsPage.test.tsx -t "selecting account and filters request accounts and transactions with the same date range"` | passed | Date input test stabilized through input+blur event path |
+| 2026-06-07 | `P041-phase-6-bank-details-characterization-tests` | `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` | expected-fail | 47 passed, 5 expected failures; all failures are project primitive contracts against current MUI runtime/CSS |
+| 2026-06-07 | `P041-phase-6-bank-details-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P041-phase-6-bank-details-characterization-tests` | `git status --short --branch` | passed | P041 tests and docs changed |
 
 ## Push Log
 
@@ -286,3 +292,4 @@
 | 2026-06-07 | `MG-P031-phase-6-import-pages-discovery` | `refactor-ui` | `adc8ce62` | pushed |
 | 2026-06-07 | `MG-P035-phase-6-import-pages` | `refactor-ui` | `9e3624a0` | pushed |
 | 2026-06-07 | `MG-P038-phase-6-cost-statistics-table-migration` | `refactor-ui` | `4baffcff` | pushed |
+| 2026-06-07 | `P040-phase-6-bank-details-discovery` | `refactor-ui` | `e720504d` | pushed |

@@ -71,6 +71,23 @@ function matchFieldCombobox(row: HTMLElement) {
   return combobox;
 }
 
+async function findAutoTagRuleSurface(drawer: HTMLElement) {
+  const scope = within(drawer);
+  const currentTable = scope.queryByRole("table", { name: "自动标签规则表格" });
+  if (currentTable) {
+    return currentTable;
+  }
+  const currentGrid = scope.queryByRole("grid", { name: "自动标签规则表格" });
+  if (currentGrid) {
+    return currentGrid;
+  }
+  try {
+    return await scope.findByRole("table", { name: "自动标签规则表格" }, { timeout: 500 });
+  } catch {
+    return scope.findByRole("grid", { name: "自动标签规则表格" });
+  }
+}
+
 function lastEditableRow(drawer: HTMLElement) {
   const emptyPrimaryInput = Array.from(drawer.querySelectorAll('input[placeholder="主标签名称"]'))
     .find((input) => input instanceof HTMLInputElement && input.value === "");
@@ -118,13 +135,26 @@ afterEach(() => {
 });
 
 describe("AutoTagRulesDrawer", () => {
+  test("targets project right drawer and dialog primitives", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/features/bankDetails/AutoTagRulesDrawer.tsx"), "utf8");
+
+    expect(source).toContain("AppDrawer");
+    expect(source).toContain("AppDialog");
+    expect(source).not.toContain("@mui/material/Drawer");
+    expect(source).not.toContain("@mui/material/Dialog");
+    expect(source).not.toContain("@mui/material/Table");
+    expect(source).not.toContain("@mui/material/Select");
+    expect(source).not.toContain("@mui/material/TextField");
+    expect(source).not.toContain("@mui/icons-material");
+  });
+
   test("loads active rules as a wide table with fixed system priority first", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderDrawer();
 
     const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-    const table = within(drawer).getByRole("table", { name: "自动标签规则表格" });
+    const table = await findAutoTagRuleSurface(drawer);
 
     expect(within(table).getByRole("columnheader", { name: "流水类型" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "主标签" })).toBeInTheDocument();
@@ -467,10 +497,10 @@ describe("AutoTagRulesDrawer", () => {
     expect(source).toMatch(/\.bank-auto-tag-table-container\s*\{[^}]*overflow-x:\s*hidden/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*table-layout:\s*fixed/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*width:\s*100%/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-table\s+\.MuiTableCell-root\s*\{[^}]*white-space:\s*normal/s);
-    expect(source).toMatch(/\.bank-auto-tag-condition-field-button\.MuiButton-root\s*\{[^}]*min-height:\s*30px/s);
-    expect(source).toMatch(/\.bank-auto-tag-condition-field-button\.MuiButton-root\s*\{[^}]*background:\s*transparent/s);
-    expect(source).toMatch(/\.bank-auto-tag-rule-row\s+\.MuiInput-root::before/s);
+    expect(source).toMatch(/\.bank-auto-tag-rule-table\s+\.finance-table__cell\s*\{[^}]*white-space:\s*normal/s);
+    expect(source).toMatch(/\.bank-auto-tag-condition-field-button\s*\{[^}]*min-height:\s*30px/s);
+    expect(source).toMatch(/\.bank-auto-tag-condition-field-button\s*\{[^}]*background:\s*transparent/s);
+    expect(source).not.toMatch(/\.bank-auto-tag-rule-row\s+\.MuiInput-root::before/s);
     expect(source).toMatch(/\.bank-auto-tag-condition-preview\s*\{[^}]*white-space:\s*normal/s);
     expect(source).not.toMatch(/bank-auto-tag-primary-cell[\s\S]{0,160}border-right/s);
     expect(source).not.toMatch(/bank-auto-tag-priority-cell[\s\S]{0,160}border-right/s);
