@@ -314,6 +314,189 @@ textarea {
   }
 }
 
+.finance-table {
+  --finance-table-row-height: var(--fp-table-row-height);
+  width: 100%;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-data);
+}
+
+.finance-table__scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.finance-table__content {
+  min-width: var(--finance-table-min-width, 720px);
+}
+
+.finance-table__row {
+  min-height: var(--fp-table-row-height);
+}
+
+.finance-table__column {
+  background: var(--fp-table-header-bg);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.finance-table__cell {
+  padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
+  vertical-align: middle;
+}
+
+.finance-table__cell[data-column-role="identity"] {
+  text-align: left;
+}
+
+.finance-table__cell[data-column-role="account"] {
+  text-align: left;
+}
+
+.finance-table__cell[data-column-role="description"] {
+  text-align: left;
+}
+
+.finance-table__cell[data-column-role="amount"] {
+  text-align: right;
+  font-family: var(--fp-table-data-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-table__cell[data-column-role="quantity"] {
+  text-align: right;
+  font-family: var(--fp-table-data-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-table__cell[data-column-role="date"] {
+  text-align: center;
+}
+
+.finance-table__cell[data-column-role="status"] {
+  text-align: center;
+}
+
+.finance-table__cell[data-column-role="direction"] {
+  text-align: center;
+}
+
+.finance-table__cell[data-column-role="selection"] {
+  text-align: center;
+}
+
+.finance-table__cell[data-column-role="action"] {
+  text-align: center;
+}
+
+.finance-table__footer {
+  border-top: 1px solid var(--fp-border);
+  padding: var(--fp-space-2) var(--fp-space-3);
+}
+
+.finance-table-pagination {
+  width: 100%;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+}
+
+.finance-table-pagination__summary {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 700;
+}
+
+.finance-cell-stack {
+  display: inline-grid;
+  min-width: 0;
+  gap: 2px;
+  text-align: inherit;
+}
+
+.finance-cell-stack__primary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finance-cell-stack__secondary,
+.finance-cell-stack__meta {
+  min-width: 0;
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-label);
+  line-height: 1.35;
+}
+
+.finance-amount-cell {
+  display: inline-grid;
+  width: 100%;
+  gap: 3px;
+  text-align: right;
+  font-family: var(--fp-table-data-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-amount-cell__value {
+  color: var(--fp-ink);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.finance-amount-cell__meta {
+  display: grid;
+  grid-template-columns: var(--fp-tag-direction-min-width) minmax(0, 1fr);
+  align-items: center;
+  justify-content: end;
+  gap: var(--fp-space-1);
+  min-height: var(--fp-tag-height-table);
+}
+
+.finance-amount-cell__direction {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.finance-amount-cell__account {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finance-direction-tag {
+  height: var(--fp-tag-height-table);
+  min-width: var(--fp-tag-direction-min-width);
+  border-radius: var(--fp-tag-radius-table);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+}
+
+.finance-status-tag {
+  min-height: var(--fp-tag-height-table);
+  border-radius: var(--fp-tag-radius-table);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+}
+
+.finance-empty-value {
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-label);
+}
+
+.finance-truncated-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
 .MuiDataGrid-root .MuiDataGrid-columnHeader,
 .MuiDataGrid-root .MuiDataGrid-cell {
   justify-content: center !important;

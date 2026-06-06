@@ -183,3 +183,66 @@ Scope: 只处理表格系统测试契约，不实现 FinanceTable primitives，�
 
 运行 targeted Vitest，预期在 FinanceTable primitives 未实现前失败；再运行 git diff --check 和 git status。更新 refactor_ui_state.md、refactor_ui_prompt.md 和 phase_5_table_system.md，记录失败断言和下一条 P018 implementation prompt 建议。
 ```
+
+## P017 Execution Notes
+
+- Status: verified expected-fail。
+- Changed file: `web/src/test/TableAlignmentStyles.test.ts`。
+- Old assertion removed: MUI theme/DataGrid/grid-table global centering。
+- New contract: FinanceTable shell, column role alignment, amount tabular nums/right alignment, DirectionTag fixed slot, EmptyValue muted style。
+- Verification: `cd web && npx vitest run TableAlignmentStyles.test.ts`。
+- Result: expected fail。
+- Failure evidence:
+  - Missing CSS block for `.finance-table`。
+  - Missing CSS block for `.finance-table__cell[data-column-role="identity"]`。
+  - Missing CSS block for `.finance-amount-cell`。
+
+## P018 Prompt Draft
+
+```text
+Prompt ID: P018-phase-5-finance-table-primitives
+Phase: phase_5_table_system
+Type: extraction/refactor
+Scope: 只实现 FinanceTable CSS contract 和共享 table cell primitives，让 P017 tests 通过；不迁业务页面。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/modules/phase_5_table_system.md、DESIGN.md、web/src/app/styles.css、web/src/test/TableAlignmentStyles.test.ts 和 web/src/components/common。使用 HeroUI MCP Table、Chip、Tooltip、Pagination docs 核对 API。只新增或修改共享表格 primitives 和 CSS：FinanceTable、FinanceTablePagination、TableCellStack、AmountCell、FinanceDirectionTag、FinanceStatusTag、EmptyValue 或等价命名；补齐 `.finance-table`、按 column role 的 `.finance-table__cell[data-column-role="..."]`、`.finance-amount-cell`、`.finance-direction-tag`、`.finance-empty-value` CSS contract。不得迁移业务页面、DataGrid 页面、后端、API、read model、worker 或关联台内部工作区。
+
+运行 `cd web && npx vitest run TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx`、`cd web && npm run build`、MUI import grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，记录下一条 P019 table session primitive prompt。
+```
+
+## P018 Execution Notes
+
+- Status: verified。
+- Added file: `web/src/components/common/FinanceTable.tsx`。
+- Updated CSS: `web/src/app/styles.css`。
+- Updated tests: `web/src/test/TableAlignmentStyles.test.ts`。
+- Added shared primitives:
+  - `FinanceTable` / `FinanceTableColumn` / `FinanceTableCell` / `FinanceTablePagination`。
+  - `TableCellStack` / `AmountCell`。
+  - `FinanceDirectionTag` / `FinanceStatusTag` / `EmptyValue` / `TruncatedCellText`。
+- CSS contract added:
+  - `.finance-table` shell and scroll/content/footer classes。
+  - `.finance-table__cell[data-column-role="..."]` alignment classes。
+  - `.finance-amount-cell` tabular/right alignment and fixed direction slot。
+  - `.finance-direction-tag` fixed height/min-width。
+  - `.finance-empty-value` muted empty display。
+- Verification:
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts`: passed。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx`: passed, 15 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/' web/src/components/common; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+- Not changed: business pages, DataGrid pages, backend, API, read model, worker, workbench internals。
+
+## P019 Prompt Draft
+
+```text
+Prompt ID: P019-phase-5-table-session-primitive
+Phase: phase_5_table_system
+Type: characterization tests -> extraction/refactor
+Scope: 新增 HeroUI table session primitive，替代 MUI DataGrid session 的用户可见状态；不迁业务页面。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/hooks/useMuiDataGridPageSession.ts、web/src/test/useMuiDataGridPageSession.test.tsx、web/src/contexts/PageSessionStateContext.tsx、web/src/contexts/pageSessionStorage.ts 和 web/src/components/common/FinanceTable.tsx。只新增 `useFinanceTableSession` 或等价 hook 及 tests，覆盖用户可见 table 状态：page/pageSize、sort descriptor、row selection、scroll position restore。不要迁移 CostStatistics、ImportWorkflow、settings DataGrid 或任何业务页面；不要删除 `useMuiDataGridPageSession`。
+
+运行新 table session tests、`useMuiDataGridPageSession.test.tsx` 回归、P018 table/common/platform tests、build、MUI import grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，记录下一条低风险 table pilot migration prompt。
+```
