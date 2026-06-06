@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P036-phase-6-cost-statistics-discovery`
+- Current Prompt ID: `P037-phase-6-cost-statistics-characterization-tests`
 - Current MG ID: `not_drafted`
 
 ## Global Invariants
@@ -54,7 +54,7 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 cost statistics discovery。
+- Scope: phase 6 cost statistics characterization tests。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_import_pages.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -62,9 +62,9 @@
   - `web/src/test/ImportCenterPage.test.tsx`
   - `web/src/components/imports/ImportWorkflowPage.tsx`
   - `web/src/app/styles.css`
-- Verification run: MG-P035 pushed commit `9e3624a0` to `origin/refactor-ui`。
+- Verification run: P036 discovery docs created。
 - Failures: none。
-- Next action: 执行 `P036-phase-6-cost-statistics-discovery`。
+- Next action: 执行 `P037-phase-6-cost-statistics-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -96,7 +96,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P036-phase-6-cost-statistics-discovery` | Import pages MG-P035 verified and pushed；next CostStatistics discovery |
+| page batches | `in_progress` | `P037-phase-6-cost-statistics-characterization-tests` | P036 CostStatistics discovery complete；next characterization tests |
 
 ## Verification Log
 
@@ -244,6 +244,8 @@
 | 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `if rg -n '@mui/' web/src/test/ImportCenterPage.test.tsx; then exit 1; else exit 0; fi` | passed | Import tests have no MUI imports; negative MUI class assertions remain by design |
 | 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P035-phase-6-import-pages` | `git push origin refactor-ui` | passed | Commit `9e3624a0` pushed |
+| 2026-06-07 | `P036-phase-6-cost-statistics-discovery` | `test -f docs/refactor-ui/modules/phase_6_cost_statistics.md` | passed | CostStatistics module discovery doc exists |
+| 2026-06-07 | `P036-phase-6-cost-statistics-discovery` | `rg -n "P036-phase-6-cost-statistics-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P037-phase-6-cost-statistics-characterization-tests" docs/refactor-ui/modules/phase_6_cost_statistics.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | CostStatistics inventory and next prompt recorded |
 
 ## Push Log
 

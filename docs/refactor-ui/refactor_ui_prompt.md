@@ -2349,7 +2349,7 @@
 ### P036-phase-6-cost-statistics-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: 成本统计 `/cost-statistics` 页面迁移 discovery，只读代码和测试并建立模块文档。
 
@@ -2373,6 +2373,44 @@ Scope: 只做 CostStatistics 页面 discovery，不改运行时代码。
 - User-visible entry inventory required: yes。
 - Docs on demand: yes，CostStatistics 是 high-risk DataGrid/dialog/export 页面，需要专项 md。
 - Verification defined: docs existence/key phrase checks、diff check、status。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_6_cost_statistics.md`。
+- 记录 CostStatistics runtime MUI inventory：`CostStatisticsTable` 的 MUI X DataGrid、page-level `useMuiDataGridPageSession` / `useMuiDataGridScrollSession`、test wrapper 的 `MuiProviders`。
+- 记录已是 project-owned 的子组件：`CostExplorerList`、`CostStatisticsSummaryCards`、`CostTransactionDetailModal`、`ExportCenterModal`。
+- 生成 P037 characterization tests prompt。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_cost_statistics.md`
+  - `rg -n "P036-phase-6-cost-statistics-discovery|Current MUI Inventory|User-visible Entrypoints|P037-phase-6-cost-statistics-characterization-tests" docs/refactor-ui/modules/phase_6_cost_statistics.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P037-phase-6-cost-statistics-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: 只更新 CostStatisticsPage tests，锁定成本统计页非 MUI/project primitive contract；不改实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_cost_statistics.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/CostStatisticsPage.tsx、web/src/components/cost-statistics/CostStatisticsTable.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/test/CostStatisticsPage.test.tsx。只修改 web/src/test/CostStatisticsPage.test.tsx，新增或调整断言：页面 shell/summary cards/view switcher/scope panels 保留 project classes；按时间统计表、项目对应流水表、银行对应流水表、按费用类型流水表 使用 project/FinanceTable contract 且不是 .MuiDataGrid-root；流水详情 和 导出中心 仍是 dialog 且不是 MUI dialog；测试渲染 wrapper 的 MUI provider 依赖作为待迁移缺口记录。不得修改实现、后端、API、read model、worker、mock 或关联台。运行 cd web && npx vitest run CostStatisticsPage.test.tsx，实现未迁移前 expected-fail 可接受；运行 git diff --check、git status --short --branch。更新 state/prompt/module docs，生成 P038 table migration prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Test-only: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Behavior contract preserved: yes。
+- Expected failure acceptable: yes，CostStatisticsTable still renders MUI X DataGrid before P038。
 
 ### MG Prompt Template
 

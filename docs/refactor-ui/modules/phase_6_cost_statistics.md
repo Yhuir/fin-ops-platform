@@ -1,0 +1,152 @@
+# Phase 6 Cost Statistics Discovery
+
+本文档记录成本统计页迁移 discovery。目标是把 `/cost-statistics` 中仍依赖 MUI X DataGrid 和 MUI session hook 的核心表格迁到 `FinanceTable` / project primitives，同时保留现有四种视图、范围筛选、下钻、详情弹窗和导出中心行为。
+
+Last updated: 2026-06-07
+
+## Boundary
+
+- Scope: `/cost-statistics`、`web/src/pages/CostStatisticsPage.tsx`、`web/src/components/cost-statistics/*`、`web/src/test/CostStatisticsPage.test.tsx`。
+- Non-scope: 不改后端、API contract、read model、worker、成本统计业务规则、导出参数语义、关联台内部工作区。
+- Behavior equivalence:
+  - 旧页面仍是 standalone 成本统计页面，不改路由、不改 App Shell。
+  - 旧四个视图仍是同一页内 tabs/buttons：`按时间`、`按项目`、`按银行`、`按费用类型`。
+  - 旧范围切换仍是浮动面板，不改为抽屉或弹窗。
+  - 旧详情为 `流水详情` 弹窗，新 UI 仍是弹窗。
+  - 旧导出为 `导出中心` 弹窗，新 UI 仍是弹窗。
+  - 旧统计结果仍是表格或左中右下钻列表，不改成卡片流。
+  - 旧行点击/首列按钮进入流水详情的能力必须保留。
+
+## Current MUI Inventory
+
+| Usage | Current file | Migration target | Notes |
+| --- | --- | --- | --- |
+| `useMuiDataGridPageSession`, `useMuiDataGridScrollSession` | `CostStatisticsPage.tsx` | remove or replace with `useFinanceTableSession` only if user-visible scroll restore is kept | Only used to pass `mainGridScrollSession` to `CostStatisticsTable`。 |
+| MUI X `DataGrid`, `GridColDef`, `GridRowParams` | `CostStatisticsTable.tsx` | `FinanceTable` wrapper retaining current generic column contract | One generic table component powers time/project/bank/expense transaction grids。 |
+| `MuiDataGridScrollSessionBinding` type | `CostStatisticsTable.tsx` | project table session type or no session prop | Remove MUI type boundary from component API。 |
+| `.MuiDataGrid-cell` sx selector | `CostStatisticsTable.tsx` | `.finance-table` / `.cost-table-*` classes | Move row/cell alignment into CSS tokens。 |
+| `MuiProviders` test wrapper | `CostStatisticsPage.test.tsx` | project/HeroUI render wrapper after MUI table removal | Current tests need MUI provider only because DataGrid remains。 |
+
+Already non-MUI/project-owned:
+
+- `CostExplorerList.tsx` uses native buttons and project classes。
+- `CostStatisticsSummaryCards.tsx` uses project stat cards。
+- `CostTransactionDetailModal.tsx` is a project modal with `role="dialog"`。
+- `CostTransactionDetailPanel.tsx` is project layout plus `BankAccountValue` / `DirectionTag`。
+- `ExportCenterModal.tsx` is a project modal with native inputs/buttons and a native preview table。
+
+## User-visible Entrypoints
+
+- Page heading: `成本统计`。
+- Header action: `导出中心`。
+- Top view switcher:
+  - `按时间`
+  - `按项目`
+  - `按银行`
+  - `按费用类型`
+  - `项目范围：进行中` / `项目范围：所有项目`
+- Summary cards:
+  - active row label such as `时间流水`、`项目数`、`银行账户数`、`费用类型数`
+  - `支出流水`
+  - `支出总额`
+- Scope controls:
+  - `全部时间`
+  - `按年统计`
+  - `按月统计`
+  - `自定义时间段`
+  - Floating panels for year, month and date range。
+- Table surfaces:
+  - `按时间统计表`
+  - `项目对应流水表`
+  - `银行对应流水表`
+  - `按费用类型流水表`
+  - each row keeps `查看流水 <transactionId>` action。
+- Drilldown list surfaces:
+  - `项目名`
+  - `费用类型`
+  - `银行账户`
+- Dialogs:
+  - `流水详情`
+  - `导出中心`
+- Export center:
+  - view switcher `按时间` / `按项目` / `按费用类型`
+  - range controls
+  - project / expense type multi-select groups
+  - `仅预览`
+  - `导出`
+  - `导出预览表`
+  - success/error feedback inside modal。
+- States:
+  - `正在加载成本统计数据...`
+  - `正在加载流水 <id> 的详情...`
+  - `成本统计数据加载失败，请稍后重试。`
+  - `成本统计数据暂不可用。`
+  - empty messages per view。
+
+## Existing Test Coverage
+
+`web/src/test/CostStatisticsPage.test.tsx` covers:
+
+- Default time view loads month-aware transaction rows and changes month。
+- Project view drills down project -> expense type -> transaction and opens/closes `流水详情`。
+- Project view supports all/year/month/custom scope controls。
+- Expense type view shows transaction table and modal drilldown。
+- Empty state when selected month has no rows。
+- Bank view drilldown bank -> project -> transaction and scope changes。
+- Time and expense type scopes stay independent。
+- Scope picker floating panel and close behavior。
+- Existing content remains visible during background refresh。
+- Explorer loading error state。
+- Refreshing read model does not display final empty data。
+- Export center time/project/expense type preview and export flows。
+
+Current migration gaps:
+
+- Tests still render with `MuiProviders`。
+- Tests assert user-visible table behavior but do not yet lock `CostStatisticsTable` to `FinanceTable` / non-MUI root。
+- Tests do not assert `CostStatisticsTable` has no `.MuiDataGrid-root`。
+- Tests do not lock detail/export dialogs away from MUI roots, though current implementation is already project-owned。
+- Tests still tolerate MUI session hook indirectly through table behavior。
+
+## Migration Slices
+
+1. `P037-phase-6-cost-statistics-characterization-tests`
+   - Update `CostStatisticsPage.test.tsx` only。
+   - Add primitive-contract assertions for CostStatistics page shell, summary cards, view switcher, scope panels, table surfaces, detail dialog and export dialog。
+   - Assert CostStatistics runtime tables use project/FinanceTable contract and not `.MuiDataGrid-root`。
+   - Assert the test render path no longer needs `MuiProviders` after implementation, but allow expected-fail before P038 if wrapper remains。
+2. `P038-phase-6-cost-statistics-table-migration`
+   - Migrate `CostStatisticsTable.tsx` from MUI X DataGrid to `FinanceTable` while preserving generic column contract, row click and first-cell action button。
+   - Remove `DataGrid`, `GridColDef`, `GridRowParams`, `.MuiDataGrid-*` sx and MUI session binding prop。
+3. `P039-phase-6-cost-statistics-session-provider-cleanup`
+   - Remove `useMuiDataGridPageSession` / `useMuiDataGridScrollSession` from `CostStatisticsPage.tsx`。
+   - Remove `MuiProviders` from `CostStatisticsPage.test.tsx` if no longer needed。
+   - Verify detail/export dialogs remain project-owned and no runtime MUI remains in cost statistics scope。
+4. `MG-P039-phase-6-cost-statistics`
+   - Run CostStatistics tests, table/common/platform regressions, build, cost statistics scope MUI grep, docs update, exact stage, commit and push。
+
+## Risks
+
+- `CostStatisticsTable` is generic and reused across multiple view modes; column rendering must preserve `CostStatisticsAmountCell` behavior, `DirectionTag`, `BankAccountValue`, row action labels and row click semantics。
+- MUI X DataGrid currently supplies grid role, column headers, no-row label, row height, sorting and scroll session binding. If sorting/session are not user-visible requirements, do not overbuild hidden feature parity, but keep accessible table/grid names and visible row actions。
+- The page uses `usePageSessionState` for view/scope state; do not modify that state shape in table migration。
+- Export center is already project-owned; avoid unnecessary rewrite。
+- Detail modal is already project-owned; avoid unnecessary rewrite。
+
+## P037 Prompt Draft
+
+```text
+Prompt ID: P037-phase-6-cost-statistics-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: 只更新 CostStatisticsPage tests，锁定成本统计页非 MUI/project primitive contract；不改实现。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_cost_statistics.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/CostStatisticsPage.tsx、web/src/components/cost-statistics/CostStatisticsTable.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/test/CostStatisticsPage.test.tsx。只修改 `web/src/test/CostStatisticsPage.test.tsx`，新增或调整断言：页面 shell/summary cards/view switcher/scope panels 保留 project classes；`按时间统计表`、`项目对应流水表`、`银行对应流水表`、`按费用类型流水表` 使用 project/FinanceTable contract 且不是 `.MuiDataGrid-root`；`流水详情` 和 `导出中心` 仍是 dialog 且不是 MUI dialog；测试渲染 wrapper 的 MUI provider 依赖作为待迁移缺口记录。不得修改实现、后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run CostStatisticsPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P038 table migration prompt。
+```
+
+## Verification For P036
+
+- `test -f docs/refactor-ui/modules/phase_6_cost_statistics.md`
+- `rg -n "P036-phase-6-cost-statistics-discovery|Current MUI Inventory|User-visible Entrypoints|P037-phase-6-cost-statistics-characterization-tests" docs/refactor-ui/modules/phase_6_cost_statistics.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+- `git diff --check`
+- `git status --short --branch`
