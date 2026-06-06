@@ -204,6 +204,7 @@
 | 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `test -f docs/refactor-ui/modules/phase_6_tax_offset.md` | passed | TaxOffset module discovery doc exists |
 | 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `rg -n "P022-phase-6-tax-offset-discovery|Current MUI Inventory|User-visible Entrypoints|P023-phase-6-tax-offset-characterization-tests|MuiDialog-root" docs/refactor-ui/modules/phase_6_tax_offset.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | TaxOffset inventory and next prompt recorded |
 | 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P022-phase-6-tax-offset-discovery` | `git push origin refactor-ui` | passed | `c9b64d4d` pushed |
 
 ## Push Log
 
@@ -228,3 +229,4 @@
 | 2026-06-07 | `MG-P019-phase-5-table-session-primitive` | `refactor-ui` | `230ca704` | pushed |
 | 2026-06-07 | `MG-P020-phase-5-app-health-table-pilot-discovery` | `refactor-ui` | `b9213d67` | pushed |
 | 2026-06-07 | `MG-P021-phase-5-app-health-table-pilot-refactor` | `refactor-ui` | `b47f0689` | pushed |
+| 2026-06-07 | `MG-P022-phase-6-tax-offset-discovery` | `refactor-ui` | `c9b64d4d` | pushed |

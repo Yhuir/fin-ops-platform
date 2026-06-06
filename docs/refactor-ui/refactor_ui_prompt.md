@@ -1396,7 +1396,38 @@
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P021-phase-5-app-health-table-pilot-refactor`。下一条执行 prompt 是 `P022-phase-6-tax-offset-discovery`。
+最近完成的 MG 是 `MG-P022-phase-6-tax-offset-discovery`。下一条执行 prompt 是 `P023-phase-6-tax-offset-characterization-tests`。
+
+### MG-P022-phase-6-tax-offset-discovery
+
+- Status: `verified`
+- Scope:
+  - `docs/refactor-ui/modules/phase_6_tax_offset.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_tax_offset.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P022 TaxOffset discovery 文档：docs/refactor-ui/modules/phase_6_tax_offset.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：test -f docs/refactor-ui/modules/phase_6_tax_offset.md；rg -n "P022-phase-6-tax-offset-discovery|Current MUI Inventory|User-visible Entrypoints|P023-phase-6-tax-offset-characterization-tests|MuiDialog-root" docs/refactor-ui/modules/phase_6_tax_offset.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md；git diff --check；git status --short --branch。提交信息使用 docs: add tax offset migration discovery。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: verified。
+
+#### Execution
+
+- Commit: `c9b64d4d`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### MG-P021-phase-5-app-health-table-pilot-refactor
 
