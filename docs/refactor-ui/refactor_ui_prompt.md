@@ -420,7 +420,7 @@
 
 ### MG-P008-phase-3-app-drawer-primitive
 
-- Status: `mg_reviewed`
+- Status: `verified`
 - Scope:
   - `web/src/components/common/AppDrawer.tsx`
   - `web/src/test/CommonMuiComponents.test.tsx`
@@ -444,7 +444,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `1416b69a`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified
 
 ### P000-docs-bootstrap
 
