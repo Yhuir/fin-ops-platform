@@ -1,9 +1,5 @@
-import MenuOutlinedIcon from "@mui/icons-material/MenuOutlined";
-import AppBar from "@mui/material/AppBar";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import Toolbar from "@mui/material/Toolbar";
-import Tooltip from "@mui/material/Tooltip";
+import { Button, Tooltip } from "@heroui/react";
+import { Menu } from "lucide-react";
 
 type AppTopBarProps = {
   embedded: boolean;
@@ -21,25 +17,31 @@ export default function AppTopBar({
   }
 
   return (
-    <AppBar
-      className={`global-header${embedded ? " embedded-header" : ""}`}
-      color="inherit"
-      elevation={0}
-      position="sticky"
-    >
-      <Toolbar className="global-toolbar" disableGutters>
-        <Stack className="global-header-main" direction="row" alignItems="center" spacing={1.5}>
-          {isCompact ? (
-            <Tooltip title="打开菜单">
-              <IconButton aria-label="打开菜单" edge="start" onClick={onOpenMobileSidebar}>
-                <MenuOutlinedIcon />
-              </IconButton>
-            </Tooltip>
-          ) : null}
-        </Stack>
+    <header className={`global-header${embedded ? " embedded-header" : ""}`}>
+      <div className="global-toolbar">
+        <div className="global-header-main">
+          <Tooltip delay={250}>
+            <Tooltip.Trigger>
+              <Button
+                isIconOnly
+                aria-label="打开菜单"
+                className="global-menu-button"
+                size="sm"
+                variant="tertiary"
+                onPress={onOpenMobileSidebar}
+              >
+                <Menu aria-hidden="true" size={20} strokeWidth={2.1} />
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content placement="bottom" showArrow>
+              <Tooltip.Arrow />
+              打开菜单
+            </Tooltip.Content>
+          </Tooltip>
+        </div>
 
-        <Stack className="header-actions" direction="row" alignItems="center" spacing={1.5} />
-      </Toolbar>
-    </AppBar>
+        <div className="header-actions" />
+      </div>
+    </header>
   );
 }

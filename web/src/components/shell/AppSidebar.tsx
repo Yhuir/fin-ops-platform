@@ -1,29 +1,12 @@
-import ChevronLeftOutlinedIcon from "@mui/icons-material/ChevronLeftOutlined";
-import ChevronRightOutlinedIcon from "@mui/icons-material/ChevronRightOutlined";
-import Collapse from "@mui/material/Collapse";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemIcon from "@mui/material/ListItemIcon";
-import ListItemText from "@mui/material/ListItemText";
-import Stack from "@mui/material/Stack";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Button, Drawer, Separator, Tooltip } from "@heroui/react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 
 import AppStatusIndicator from "./AppStatusIndicator";
 import { sidebarGroups } from "./sidebarItems";
 
 export const expandedSidebarWidth = 232;
 export const collapsedSidebarWidth = 72;
-const sidebarTransitionTimeout = { enter: 150, exit: 110 };
-const sidebarTransitionEasing = {
-  enter: "cubic-bezier(0.22, 1, 0.36, 1)",
-  exit: "cubic-bezier(0.4, 0, 1, 1)",
-};
 
 type AppSidebarProps = {
   embedded: boolean;
@@ -54,173 +37,126 @@ export default function AppSidebar({
   onToggleExpanded,
 }: AppSidebarProps) {
   const location = useLocation();
-  const width = expanded ? expandedSidebarWidth : collapsedSidebarWidth;
   const showExpandedContent = expanded || isCompact;
 
   const drawerContent = (
-    <Stack className="app-sidebar-content" sx={{ width, height: "100%" }}>
-      <Stack
-        className={`app-sidebar-brand${showExpandedContent ? "" : " collapsed"}`}
-        direction="row"
-        alignItems="center"
-        justifyContent={showExpandedContent ? "space-between" : "center"}
-      >
-        <Stack className="app-sidebar-brand-lockup" direction="row" alignItems="center" spacing={showExpandedContent ? 1 : 0}>
+    <div className={`app-sidebar-content${showExpandedContent ? " expanded" : " collapsed"}`}>
+      <div className={`app-sidebar-brand${showExpandedContent ? "" : " collapsed"}`}>
+        <div className="app-sidebar-brand-lockup">
           <AppStatusIndicator />
-          <Collapse
-            in={showExpandedContent}
-            orientation="horizontal"
-            collapsedSize={0}
-            timeout={sidebarTransitionTimeout}
-            easing={sidebarTransitionEasing}
-            className="app-sidebar-horizontal-collapse app-sidebar-brand-copy-collapse"
-            aria-hidden={!showExpandedContent}
-          >
+          {showExpandedContent ? (
             <span className="app-sidebar-brand-text">
-              <Typography className="app-sidebar-eyebrow" component="div">
-                溯源办公系统
-              </Typography>
-              <Typography className="app-sidebar-title" component="div">
-                财务运营平台
-              </Typography>
+              <span className="app-sidebar-eyebrow">溯源办公系统</span>
+              <span className="app-sidebar-title">财务运营平台</span>
             </span>
-          </Collapse>
-        </Stack>
+          ) : null}
+        </div>
         {!isCompact ? (
-          <Tooltip title={expanded ? "折叠菜单" : "展开菜单"} placement="right">
-            <IconButton
-              aria-label={expanded ? "折叠菜单" : "展开菜单"}
-              className="app-sidebar-toggle"
-              size="small"
-              onClick={onToggleExpanded}
-            >
-              {expanded ? <ChevronLeftOutlinedIcon fontSize="small" /> : <ChevronRightOutlinedIcon fontSize="small" />}
-            </IconButton>
+          <Tooltip delay={250}>
+            <Tooltip.Trigger>
+              <Button
+                isIconOnly
+                aria-label={expanded ? "折叠菜单" : "展开菜单"}
+                className="app-sidebar-toggle"
+                size="sm"
+                variant="tertiary"
+                onPress={onToggleExpanded}
+              >
+                {expanded ? <ChevronLeft aria-hidden="true" size={16} strokeWidth={2.2} /> : <ChevronRight aria-hidden="true" size={16} strokeWidth={2.2} />}
+              </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content placement="right" showArrow>
+              <Tooltip.Arrow />
+              {expanded ? "折叠菜单" : "展开菜单"}
+            </Tooltip.Content>
           </Tooltip>
         ) : null}
-      </Stack>
+      </div>
 
-      <Divider />
+      <Separator className="app-sidebar-separator" />
 
-      <Stack className="app-sidebar-scroll">
+      <nav className="app-sidebar-scroll" aria-label="主导航">
         {sidebarGroups.map((group) => (
-          <Stack key={group.title} component="section" className="app-sidebar-group">
-            <Collapse
-              in={showExpandedContent}
-              orientation="horizontal"
-              collapsedSize={0}
-              timeout={sidebarTransitionTimeout}
-              easing={sidebarTransitionEasing}
-              className="app-sidebar-horizontal-collapse app-sidebar-group-title-collapse"
-              aria-hidden={!showExpandedContent}
-            >
-              <Typography className="app-sidebar-group-title" component="h2">
+          <section key={group.title} className="app-sidebar-group" aria-labelledby={`app-sidebar-group-${group.title}`}>
+            {showExpandedContent ? (
+              <h2 id={`app-sidebar-group-${group.title}`} className="app-sidebar-group-title">
                 {group.title}
-              </Typography>
-            </Collapse>
-            <List dense disablePadding aria-label={group.title}>
+              </h2>
+            ) : null}
+            <ul className="app-sidebar-list" aria-label={group.title}>
               {group.items.map((item) => {
                 const Icon = item.icon;
                 const active = item.active === false ? false : isSidebarItemActive(location.pathname, location.search, item.to, item.end);
-                const LinkComponent = item.active === false ? Link : NavLink;
-                const button = (
-                  <ListItemButton
-                    component={LinkComponent}
+                const link = (
+                  <Link
                     to={item.to}
-                    end={item.end}
-                    selected={active}
+                    aria-current={active ? "page" : undefined}
                     aria-label={item.label}
-                    className="app-sidebar-link"
+                    className={`app-sidebar-link${active ? " active" : ""}`}
                     onClick={isCompact ? onCloseMobile : undefined}
                   >
-                    <ListItemIcon className="app-sidebar-link-icon">
+                    <span className="app-sidebar-link-icon">
                       <Icon aria-hidden="true" size={18} strokeWidth={2} />
-                    </ListItemIcon>
-                    <Collapse
-                      in={showExpandedContent}
-                      orientation="horizontal"
-                      collapsedSize={0}
-                      timeout={sidebarTransitionTimeout}
-                      easing={sidebarTransitionEasing}
-                      className="app-sidebar-horizontal-collapse app-sidebar-link-label-collapse"
-                      aria-hidden={!showExpandedContent}
-                    >
-                      <ListItemText className="app-sidebar-link-label" primary={item.label} />
-                    </Collapse>
-                  </ListItemButton>
+                    </span>
+                    {showExpandedContent ? (
+                      <span className="app-sidebar-link-label">
+                        <span className="app-sidebar-link-label-text">{item.label}</span>
+                      </span>
+                    ) : null}
+                  </Link>
                 );
 
                 return (
-                  <ListItem key={item.id ?? item.to} disablePadding className="app-sidebar-item">
-                    {showExpandedContent ? button : (
-                      <Tooltip title={item.label} placement="right">
-                        {button}
+                  <li key={item.id ?? item.to} className="app-sidebar-item">
+                    {showExpandedContent ? (
+                      link
+                    ) : (
+                      <Tooltip delay={350}>
+                        <Tooltip.Trigger>{link}</Tooltip.Trigger>
+                        <Tooltip.Content placement="right" showArrow>
+                          <Tooltip.Arrow />
+                          {item.label}
+                        </Tooltip.Content>
                       </Tooltip>
                     )}
-                  </ListItem>
+                  </li>
                 );
               })}
-            </List>
-          </Stack>
+            </ul>
+          </section>
         ))}
-      </Stack>
+      </nav>
 
-      {embedded ? (
-        <Collapse
-          in={showExpandedContent}
-          orientation="horizontal"
-          collapsedSize={0}
-          timeout={sidebarTransitionTimeout}
-          easing={sidebarTransitionEasing}
-          className="app-sidebar-horizontal-collapse app-sidebar-note-collapse"
-          aria-hidden={!showExpandedContent}
-        >
-          <Typography className="app-sidebar-embedded-note" component="div">
-            OA 嵌入模式默认折叠，避免占用工作台宽度。
-          </Typography>
-        </Collapse>
+      {embedded && showExpandedContent ? (
+        <div className="app-sidebar-embedded-note">
+          OA 嵌入模式默认折叠，避免占用工作台宽度。
+        </div>
       ) : null}
-    </Stack>
+    </div>
   );
 
   if (isCompact) {
     return (
-      <Drawer
-        open={mobileOpen}
-        variant="temporary"
-        onClose={onCloseMobile}
-        ModalProps={{ keepMounted: true }}
-        PaperProps={{ className: "app-sidebar-paper" }}
-      >
-        {drawerContent}
-      </Drawer>
+      <Drawer.Backdrop isOpen={mobileOpen} onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onCloseMobile();
+        }
+      }}>
+        <Drawer.Content placement="left" className="app-sidebar-drawer-content">
+          <Drawer.Dialog aria-label="主导航菜单" className="app-sidebar-paper app-sidebar-dialog">
+            {drawerContent}
+          </Drawer.Dialog>
+        </Drawer.Content>
+      </Drawer.Backdrop>
     );
   }
 
   return (
-    <Drawer
-      open
-      variant="permanent"
-      PaperProps={{ className: "app-sidebar-paper" }}
-      sx={{
-        width,
-        flexShrink: 0,
-        transition: (theme) =>
-          theme.transitions.create("width", {
-            duration: expanded ? sidebarTransitionTimeout.enter : sidebarTransitionTimeout.exit,
-            easing: expanded ? sidebarTransitionEasing.enter : sidebarTransitionEasing.exit,
-          }),
-        "& .MuiDrawer-paper": {
-          width,
-          transition: (theme) =>
-            theme.transitions.create("width", {
-              duration: expanded ? sidebarTransitionTimeout.enter : sidebarTransitionTimeout.exit,
-              easing: expanded ? sidebarTransitionEasing.enter : sidebarTransitionEasing.exit,
-            }),
-        },
-      }}
+    <aside
+      className={`app-sidebar app-sidebar--desktop${expanded ? " expanded" : " collapsed"}`}
+      aria-label="主导航"
     >
-      {drawerContent}
-    </Drawer>
+      <div className="app-sidebar-paper">{drawerContent}</div>
+    </aside>
   );
 }

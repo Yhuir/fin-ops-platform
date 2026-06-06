@@ -11,12 +11,26 @@ import {
   Ticket,
   WalletCards,
 } from "lucide-react";
+import { vi } from "vitest";
 
 import App from "../app/App";
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import { installMockApiFetch } from "./apiMock";
 
 const WORKBENCH_RENDER_TIMEOUT = 3000;
+
+function stubShellCompactMode(matches: boolean) {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(max-width: 899.95px)" ? matches : false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
 
 describe("Finance operations shell", () => {
   test("orders finance business above system operations in the sidebar", () => {
@@ -122,6 +136,27 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("link", { name: "设置" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "导入中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "成本统计" })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("opens the compact sidebar from the top bar and preserves navigation entries", async () => {
+    stubShellCompactMode(true);
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch();
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "成本统计" })).toBeInTheDocument();
+    expect(document.querySelector(".global-header")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开菜单" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "打开菜单" }));
+    const settingsLink = await screen.findByRole("link", { name: "设置" });
+    expect(settingsLink).toHaveAttribute("href", "/settings");
+    await user.click(settingsLink);
+
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/settings");
   });
 
   test("renders the turnover ledger route from the shell sidebar", async () => {

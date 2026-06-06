@@ -115,3 +115,24 @@ Each implementation prompt must preserve user-visible entry points: if a menu it
 - The first verification run failed after removing the full `MuiProviders` because MUI X DatePicker lost localization context; the fix is the narrow compatibility provider, not restoring the full MUI theme runtime.
 - Did not migrate `AppSidebar`, `AppTopBar`, `AppStatusIndicator`, business pages, backend, API, read model, worker, or workbench internals.
 - Build passes with known HeroUI/Tailwind generated CSS minifier warnings and existing chunk size warning.
+
+## Slice P014: Sidebar And Topbar
+
+### Scope
+
+- `web/src/components/shell/AppSidebar.tsx`
+- `web/src/components/shell/AppTopBar.tsx`
+- `web/src/app/styles.css`
+- `web/src/test/App.test.tsx`
+
+### Result
+
+- Status: verified。
+- Added a compact/mobile sidebar characterization test that stubs shell `matchMedia`, verifies the topbar menu button, opens the left navigation drawer, confirms the `设置` entry remains available, and navigates to `/settings`.
+- Migrated `AppSidebar` from MUI Drawer/List/ListItem/ListItemButton/ListItemIcon/ListItemText/Stack/Collapse/Tooltip/IconButton/Divider/Typography to HeroUI Drawer/Button/Tooltip/Separator plus semantic `aside/nav/section/ul/li/a` markup.
+- Migrated `AppTopBar` from MUI AppBar/Toolbar/Stack/Tooltip/IconButton/Menu icon to HeroUI Button/Tooltip plus semantic header markup and lucide `Menu` icon.
+- Preserved desktop expanded/collapsed behavior, compact mobile drawer open/close, embedded mode brand availability, `aria-current="page"`, link labels, href/path behavior, and existing sidebar widths 232/72.
+- Updated sidebar CSS to use project-owned classes (`.app-sidebar-link.active`, `.app-sidebar-list`, `.app-sidebar-dialog`, `.global-menu-button`) instead of MUI selected/collapse/list text classes.
+- Did not migrate `AppStatusIndicator`; it remains the only MUI usage under `web/src/components/shell` and is the next P015 target.
+- Did not migrate business pages, backend, API, read model, worker, or workbench internals.
+- Build passes with known HeroUI/Tailwind generated CSS minifier warnings and existing chunk size warning.

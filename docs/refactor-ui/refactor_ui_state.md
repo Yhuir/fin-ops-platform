@@ -56,12 +56,16 @@
 
 - Scope: phase 4 sidebar/topbar。
 - Files touched:
-  - none yet
+  - `web/src/components/shell/AppSidebar.tsx`
+  - `web/src/components/shell/AppTopBar.tsx`
+  - `web/src/app/styles.css`
+  - `web/src/test/App.test.tsx`
+  - `docs/refactor-ui/modules/phase_4_shell.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: pending
+- Verification run: passed
 - Failures: none
-- Next action: 执行 `P014-phase-4-sidebar-topbar`。
+- Next action: 执行 `MG-P014-phase-4-sidebar-topbar`，精确 staging、commit、push。
 
 ## Prompt Lifecycle
 
@@ -91,7 +95,7 @@
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
-| app shell | `in_progress` | `P014-phase-4-sidebar-topbar` | shell provider runtime verified，MG-P013 已 push；sidebar/topbar prompt ready |
+| app shell | `in_progress` | `P014-phase-4-sidebar-topbar` | sidebar/topbar verified，MG-P014 待执行；AppStatusIndicator remains P015 |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
@@ -162,6 +166,11 @@
 | 2026-06-07 | `P013-phase-4-shell-provider-runtime` | `if rg -n '@mui/' web/src/app/App.tsx; then exit 1; else exit 0; fi` | passed | `App.tsx` has no direct MUI import; temporary MUI X date picker compat exists in `MuiDatePickerCompatProvider.tsx` |
 | 2026-06-07 | `P013-phase-4-shell-provider-runtime` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P013-phase-4-shell-provider-runtime` | `git push origin refactor-ui` | passed | `b26db303` pushed |
+| 2026-06-07 | `P014-phase-4-sidebar-topbar` | `cd web && npx vitest run App.test.tsx` | passed | 14 tests passed; includes compact sidebar characterization |
+| 2026-06-07 | `P014-phase-4-sidebar-topbar` | `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 24 tests passed |
+| 2026-06-07 | `P014-phase-4-sidebar-topbar` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P014-phase-4-sidebar-topbar` | `if rg -n '@mui/' web/src/components/shell/AppSidebar.tsx web/src/components/shell/AppTopBar.tsx; then exit 1; else exit 0; fi` | passed | AppSidebar/AppTopBar have no MUI imports; AppStatusIndicator still contains MUI for P015 |
+| 2026-06-07 | `P014-phase-4-sidebar-topbar` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 
