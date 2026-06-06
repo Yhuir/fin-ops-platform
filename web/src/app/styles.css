@@ -1,10 +1,128 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
 :root {
+  --fp-ink: #111827;
+  --fp-text-primary: #1f2937;
+  --fp-text-secondary: #475569;
+  --fp-text-muted: #64748b;
+  --fp-page: #f6f8fb;
+  --fp-surface: #ffffff;
+  --fp-surface-raised: #fbfdff;
+  --fp-surface-muted: #eef3f8;
+  --fp-border: #d7dee8;
+  --fp-border-strong: #b8c4d4;
+  --fp-primary: #1d4ed8;
+  --fp-primary-hover: #1e40af;
+  --fp-primary-soft: #e8f0ff;
+  --fp-info: #2563eb;
+  --fp-success: #16803c;
+  --fp-success-soft: #e8f7ee;
+  --fp-warning: #b76e00;
+  --fp-warning-soft: #fff4df;
+  --fp-danger: #c2412d;
+  --fp-danger-soft: #fff0ed;
+  --fp-neutral-tag: #edf2f7;
+
+  --fp-font-ui: "Inter", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --fp-font-data: "Roboto Mono", "SFMono-Regular", "Cascadia Mono", "PingFang SC", monospace;
+  --fp-text-display: 24px;
+  --fp-text-headline: 20px;
+  --fp-text-title: 16px;
+  --fp-text-body: 14px;
+  --fp-text-label: 12px;
+  --fp-text-data: 13px;
+
+  --fp-space-1: 4px;
+  --fp-space-2: 8px;
+  --fp-space-3: 12px;
+  --fp-space-4: 16px;
+  --fp-space-5: 20px;
+  --fp-space-6: 24px;
+  --fp-space-8: 32px;
+
+  --fp-radius-xs: 4px;
+  --fp-radius-sm: 6px;
+  --fp-radius-md: 8px;
+  --fp-radius-lg: 10px;
+  --fp-radius-pill: 999px;
+
+  --fp-shadow-popover: 0 10px 24px rgba(15, 23, 42, 0.12);
+  --fp-shadow-dialog: 0 18px 48px rgba(15, 23, 42, 0.18);
+  --fp-shadow-drawer: -12px 0 30px rgba(15, 23, 42, 0.10);
+
+  --fp-table-row-height: 44px;
+  --fp-table-row-height-complex: 60px;
+  --fp-table-cell-padding-x: 10px;
+  --fp-table-cell-padding-y: 8px;
+  --fp-table-header-bg: var(--fp-surface-muted);
+  --fp-table-amount-align: right;
+  --fp-table-data-font: var(--fp-font-data);
+  --fp-table-numeric-variant: tabular-nums;
+  --fp-tag-height-table: 22px;
+  --fp-tag-direction-min-width: 44px;
+  --fp-tag-radius-table: var(--fp-radius-xs);
+
+  --background: var(--fp-page);
+  --foreground: var(--fp-text-primary);
+  --surface: var(--fp-surface);
+  --surface-foreground: var(--fp-text-primary);
+  --overlay: var(--fp-surface);
+  --overlay-foreground: var(--fp-text-primary);
+  --muted: var(--fp-text-muted);
+  --accent: var(--fp-primary);
+  --accent-foreground: var(--fp-surface);
+  --success: var(--fp-success);
+  --success-foreground: var(--fp-surface);
+  --warning: var(--fp-warning);
+  --warning-foreground: var(--fp-ink);
+  --danger: var(--fp-danger);
+  --danger-foreground: var(--fp-surface);
+  --border: var(--fp-border);
+  --separator: var(--fp-border);
+  --focus: var(--fp-primary);
+  --link: var(--fp-primary);
+
   color: #243b53;
   background:
     radial-gradient(circle at top left, rgba(15, 76, 129, 0.08), transparent 28%),
     radial-gradient(circle at top right, rgba(32, 106, 70, 0.08), transparent 30%),
     #f3f6fb;
-  font-family: "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--fp-font-ui);
+}
+
+@theme inline {
+  --color-fp-ink: var(--fp-ink);
+  --color-fp-text-primary: var(--fp-text-primary);
+  --color-fp-text-secondary: var(--fp-text-secondary);
+  --color-fp-text-muted: var(--fp-text-muted);
+  --color-fp-page: var(--fp-page);
+  --color-fp-surface: var(--fp-surface);
+  --color-fp-surface-raised: var(--fp-surface-raised);
+  --color-fp-surface-muted: var(--fp-surface-muted);
+  --color-fp-border: var(--fp-border);
+  --color-fp-border-strong: var(--fp-border-strong);
+  --color-fp-primary: var(--fp-primary);
+  --color-fp-primary-hover: var(--fp-primary-hover);
+  --color-fp-primary-soft: var(--fp-primary-soft);
+  --color-fp-info: var(--fp-info);
+  --color-fp-success: var(--fp-success);
+  --color-fp-success-soft: var(--fp-success-soft);
+  --color-fp-warning: var(--fp-warning);
+  --color-fp-warning-soft: var(--fp-warning-soft);
+  --color-fp-danger: var(--fp-danger);
+  --color-fp-danger-soft: var(--fp-danger-soft);
+  --color-fp-neutral-tag: var(--fp-neutral-tag);
+  --font-fp-ui: var(--fp-font-ui);
+  --font-fp-data: var(--fp-font-data);
+  --radius-fp-xs: var(--fp-radius-xs);
+  --radius-fp-sm: var(--fp-radius-sm);
+  --radius-fp-md: var(--fp-radius-md);
+  --radius-fp-lg: var(--fp-radius-lg);
+  --radius-fp-pill: var(--fp-radius-pill);
+  --shadow-fp-popover: var(--fp-shadow-popover);
+  --shadow-fp-dialog: var(--fp-shadow-dialog);
+  --shadow-fp-drawer: var(--fp-shadow-drawer);
 }
 
 * {

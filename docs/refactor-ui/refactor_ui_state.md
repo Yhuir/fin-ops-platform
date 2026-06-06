@@ -8,8 +8,8 @@
 - Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P001-baseline-doc-gap-fill`
-- Current MG ID: `MG-P001-baseline-doc-gap-fill`
+- Current Prompt ID: `P004-phase-1-token-implementation`
+- Current MG ID: `MG-P004-phase-1-docs-and-tokens`
 
 ## Global Invariants
 
@@ -31,7 +31,7 @@
 | Phase | Status | Started | Completed | Verification | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；MG-P001 已 push |
-| `phase_1_docs_and_tokens` | `pending` |  |  |  | PRODUCT/DESIGN 和 Tailwind token |
+| `phase_1_docs_and_tokens` | `in_progress` | 2026-06-07 |  | `passed` | P004 token implementation verified；MG pending |
 | `phase_2_platform_stack` | `pending` |  |  |  | React 19 + HeroUI v3 + Tailwind v4 |
 | `phase_3_primitives` | `pending` |  |  |  | 本地 UI primitives |
 | `phase_4_shell` | `pending` |  |  |  | App Shell 迁移 |
@@ -54,23 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: 补齐 UI 重构 baseline 文档缺口。
+- Scope: phase 1 token implementation。
 - Files touched:
-  - `PRODUCT.md`
-  - `DESIGN.md`
-  - `docs/refactor-ui/README.md`
-  - `docs/refactor-ui/baseline_inventory.md`
-  - `docs/refactor-ui/platform_stack_migration.md`
-  - `docs/refactor-ui/test_migration_strategy.md`
-  - `docs/refactor-ui/module_inventory.md`
+  - `web/src/app/styles.css`
+  - `web/src/test/DesignTokens.test.ts`
+  - `web/src/test/TableLayoutTokens.test.ts`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `docs/refactor-ui/refactor_ui_master_goal_prompt.md`
-  - `docs/refactor-ui/table_layout_system.md`
-  - `docs/index.md`
+  - `docs/refactor-ui/modules/phase_1_docs_and_tokens.md`
 - Verification run: passed
 - Failures: none
-- Next action: 从 `refactor-ui` 生成并执行 `phase_1_docs_and_tokens` 的下一条 discovery prompt。
+- Next action: 执行 `MG-P004-phase-1-docs-and-tokens`。
 
 ## Prompt Lifecycle
 
@@ -97,6 +91,7 @@
 | --- | --- | --- | --- |
 | docs bootstrap | `verified` | `P000-docs-bootstrap` | 建立工作流文档 |
 | baseline docs gap fill | `verified` | `P001-baseline-doc-gap-fill` | 基线、平台栈、测试策略、模块队列补齐 |
+| docs and tokens | `in_progress` | `P004-phase-1-token-implementation` | Token implementation verified，等待 MG |
 | platform stack | `pending` |  | React 19 + HeroUI + Tailwind |
 | primitives | `pending` |  | UI primitives |
 | app shell | `pending` |  | 新 shell 包住关联台 |
@@ -120,6 +115,10 @@
 | 2026-06-07 | `P001-baseline-doc-gap-fill` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P001-baseline-doc-gap-fill` | `git status --short --branch` | passed | 仅文档变更 |
 | 2026-06-07 | `MG-P001-baseline-doc-gap-fill` | `git push origin refactor-ui` | passed | `8f3daae8` pushed |
+| 2026-06-07 | `P002-phase-1-docs-and-tokens-discovery` | `test -f docs/refactor-ui/modules/phase_1_docs_and_tokens.md` | passed | phase 1 token discovery doc exists |
+| 2026-06-07 | `P002-phase-1-docs-and-tokens-discovery` | `rg -n "P002-phase-1-docs-and-tokens-discovery|Target Token Boundary|Required Characterization Tests|P003-phase-1-token-characterization-tests" docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_1_docs_and_tokens.md` | passed | token discovery and next prompt recommendation exist |
+| 2026-06-07 | `P003-phase-1-token-characterization-tests` | `cd web && npm run test -- DesignTokens.test.ts TableLayoutTokens.test.ts` | expected-fail | Token/import CSS not implemented before P004 |
+| 2026-06-07 | `P004-phase-1-token-implementation` | `cd web && npx vitest run DesignTokens.test.ts TableLayoutTokens.test.ts` | passed | CSS token bridge tests pass |
 
 ## Push Log
 

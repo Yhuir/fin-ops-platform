@@ -61,6 +61,122 @@
 
 ## Current Prompt
 
+### P002-phase-1-docs-and-tokens-discovery
+
+- Phase: `phase_1_docs_and_tokens`
+- Status: `verified`
+- Type: `discovery/planning`
+- Scope: 读取当前前端 CSS/package/Vite/test 入口和 HeroUI/Tailwind 官方事实源，建立 phase 1 token 落地边界和下一条 characterization test prompt。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、refactor_ui_prompt.md、README.md、platform_stack_migration.md、table_layout_system.md、DESIGN.md、PRODUCT.md、web/package.json、web/package-lock.json、web/vite.config.ts、web/src/main.tsx、web/src/app/styles.css、web/src/test/TableAlignmentStyles.test.ts。使用 HeroUI MCP quick-start/theming 和 Tailwind CSS 官方 Vite/theme 文档核对 React 19、Tailwind v4、HeroUI v3、CSS import、@theme inline 事实。只做 discovery/planning，不改依赖、不改前端实现、不改后端。若发现 token 落地信息需要跨切片复用，创建 docs/refactor-ui/modules/phase_1_docs_and_tokens.md。文档必须记录当前 CSS hard-code/token 问题、目标 token groups、HeroUI/Tailwind bridge、下一条 characterization tests prompt 建议和验证命令。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend untouched: yes。
+- Runtime implementation untouched: yes。
+- Workbench internals frozen: yes。
+- Docs on demand: yes，phase 1 token 规则需要跨后续切片复用。
+- Verification defined: 文档路径检查、关键规则检索、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_1_docs_and_tokens.md`。
+- 记录 HeroUI MCP quick start/theming 和 Tailwind CSS v4 Vite/theme 官方事实。
+- 记录当前 `web/package.json`、`web/package-lock.json`、`web/vite.config.ts`、`web/src/main.tsx`、`web/src/app/styles.css` 和 `TableAlignmentStyles.test.ts` 的 token 相关状态。
+- 本切片只改文档，不修改前端实现、后端、依赖或 lockfile。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_1_docs_and_tokens.md`
+  - `rg -n "P002-phase-1-docs-and-tokens-discovery|Target Token Boundary|Required Characterization Tests|P003-phase-1-token-characterization-tests" docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_1_docs_and_tokens.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P003-phase-1-token-characterization-tests
+
+- Phase: `phase_1_docs_and_tokens`
+- Status: `verified`
+- Type: `characterization tests`
+- Scope: 添加 token characterization tests，锁定 Ledger Calm CSS token names、HeroUI/Tailwind import order 目标和表格 token names；不修改 CSS 实现、依赖、Vite 或页面代码。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_1_docs_and_tokens.md、DESIGN.md、table_layout_system.md、platform_stack_migration.md、web/src/app/styles.css 和 web/src/test/TableAlignmentStyles.test.ts。新增 web/src/test/DesignTokens.test.ts 和 web/src/test/TableLayoutTokens.test.ts，测试读取 web/src/app/styles.css，断言 Ledger Calm CSS tokens、HeroUI/Tailwind import order、@theme inline bridge 和表格 token names 存在。只添加 characterization tests，不改 CSS 实现、不改依赖、不改 Vite、不改页面。运行新增测试，预期失败以证明测试能捕获当前缺口。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend untouched: yes。
+- Runtime CSS untouched: yes。
+- Dependencies untouched: yes。
+- Workbench internals frozen: yes。
+- Expected failure acceptable: yes，characterization tests 先暴露 token 缺口。
+- Verification defined: targeted Vitest expected fail、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `web/src/test/DesignTokens.test.ts`。
+- 新增 `web/src/test/TableLayoutTokens.test.ts`。
+- 新增测试只读取 `web/src/app/styles.css`，不渲染页面、不触发后端。
+- 新增测试当前预期失败，下一条 `P004-phase-1-token-implementation` 必须只实现 token/CSS bridge 让它们通过。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npm run test -- DesignTokens.test.ts TableLayoutTokens.test.ts`
+  - `git diff --check`
+  - `git status --short --branch`
+  - Expected: targeted Vitest fails before P004 because CSS tokens/imports are not implemented yet.
+
+### P004-phase-1-token-implementation
+
+- Phase: `phase_1_docs_and_tokens`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 只修改 `web/src/app/styles.css` 的 Ledger Calm token、HeroUI semantic variable bridge、Tailwind v4 `@theme inline` bridge 和表格 layout tokens，让 P003 新增测试通过。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_1_docs_and_tokens.md、DESIGN.md、table_layout_system.md、platform_stack_migration.md、web/src/app/styles.css、web/src/test/DesignTokens.test.ts 和 web/src/test/TableLayoutTokens.test.ts。只修改 web/src/app/styles.css，添加 @import "tailwindcss";、@import "@heroui/styles";、Ledger Calm CSS variables、HeroUI semantic variable overrides、Tailwind v4 @theme inline bridge 和 table layout tokens。不得修改依赖、Vite、页面实现、后端、API、read model 或 worker。运行 P003 新增测试，必须通过；记录 build 尚未运行，因为 Tailwind/HeroUI 依赖尚未在 phase_2 安装。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend untouched: yes。
+- Dependencies untouched: yes。
+- Vite untouched: yes。
+- Page migration untouched: yes。
+- Workbench internals frozen: yes。
+- Verification defined: targeted token tests、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `web/src/app/styles.css` 顶部添加 Tailwind/HeroUI import order。
+- `:root` 添加 `--fp-*` Ledger Calm tokens。
+- `:root` 添加 HeroUI semantic variable bridge。
+- `@theme inline` 添加 project token bridge。
+- 添加 finance table layout tokens。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run DesignTokens.test.ts TableLayoutTokens.test.ts`
+  - `git diff --check`
+  - `git status --short --branch`
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`
@@ -148,13 +264,16 @@
 | --- | --- | --- | --- | --- | --- |
 | `P000-docs-bootstrap` | `phase_0_baseline` | docs bootstrap | `verified` | passed | 文档切片已验证 |
 | `P001-baseline-doc-gap-fill` | `phase_0_baseline` | docs gap fill | `verified` | passed | 基线、平台栈、测试策略、模块队列、文档沉淀规则、完整重构路径、phase-to-prompt 规则、主控 goal prompt 已补齐 |
+| `P002-phase-1-docs-and-tokens-discovery` | `phase_1_docs_and_tokens` | token discovery | `verified` | passed | Token 边界和 P003 characterization test 建议已记录 |
+| `P003-phase-1-token-characterization-tests` | `phase_1_docs_and_tokens` | token tests | `verified` | expected fail | Ledger Calm 和 table token characterization tests 已新增 |
+| `P004-phase-1-token-implementation` | `phase_1_docs_and_tokens` | token implementation | `verified` | passed | CSS token bridge 已落地，P003 tests 通过 |
 
 ## Next Prompt Draft Slot
 
-下一条实现 prompt 必须在 `MG-P001-baseline-doc-gap-fill` 执行并 push 后生成。若用户只要求继续本地规划，可先生成 `phase_1_docs_and_tokens` 的 discovery prompt，但必须明确 MG 尚未 push。
+下一条 prompt 应生成 `P005-phase-1-token-mg` 或 phase_2 platform stack discovery；若先做 MG，scope 必须只包含 phase_1 docs/tests/CSS token files。
 
 ```text
-未生成。执行者必须先读取 refactor_ui_state.md，确认 P001 verified，并决定是否先执行 MG-P001-baseline-doc-gap-fill。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_1_docs_and_tokens.md 和 git status。若 phase_1 token discovery/tests/implementation 均 verified，生成 MG-P004-phase-1-docs-and-tokens，检查 scope、diff、测试和文档状态，精确提交并 push。若决定直接进入 phase_2，必须先说明 phase_1 MG 尚未执行。
 ```
 
 ## Cumulative MG Prompts
@@ -233,6 +352,34 @@
 - Commit: `8f3daae8`
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified
+
+### MG-P004-phase-1-docs-and-tokens
+
+- Status: `reviewed-not-executed`
+- Scope:
+  - `web/src/app/styles.css`
+  - `web/src/test/DesignTokens.test.ts`
+  - `web/src/test/TableLayoutTokens.test.ts`
+  - `docs/refactor-ui/modules/phase_1_docs_and_tokens.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_1_docs_and_tokens.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 phase_1 docs/tokens 文件：web/src/app/styles.css、web/src/test/DesignTokens.test.ts、web/src/test/TableLayoutTokens.test.ts、docs/refactor-ui/modules/phase_1_docs_and_tokens.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run DesignTokens.test.ts TableLayoutTokens.test.ts；git diff --check；git status --short --branch。提交信息使用 feat: add ui design token bridge。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed, not executed in P004 implementation slice。
 
 ### MG Prompt Template
 
