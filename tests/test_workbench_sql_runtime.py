@@ -2180,6 +2180,86 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("on conflict (generation_id, scope_key, zone, group_id)", sql)
         self.assertIn("status = 'active'", sql)
 
+    def test_repository_prunes_old_workbench_generations_after_publish_for_changed_scope(self) -> None:
+        class RetentionAfterPublishConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_generations" in normalized and "status <> 'active'" in normalized:
+                    return [
+                        {
+                            "generation_id": "old-2026-05-gen",
+                            "scope_key": "2026-05",
+                            "status": "superseded",
+                            "activated_at": "2026-05-01T00:00:00+00:00",
+                            "completed_at": "2026-05-01T00:00:00+00:00",
+                            "updated_at": "2026-05-01T00:00:00+00:00",
+                        }
+                    ]
+                return []
+
+        connection = RetentionAfterPublishConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {"paired": {"groups": []}, "open": {"groups": []}},
+                        "source_versions": {"source_version": 6},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        retention_query = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "from read_model.workbench_generations" in sql and "status <> 'active'" in sql
+        )
+        self.assertIn("scope_key = any(%s)", retention_query[0])
+        self.assertEqual(retention_query[1][0], ["2026-05"])
+        generation_deletes = [
+            (sql, params)
+            for sql, params in connection.executed
+            if "delete from read_model.workbench_generations" in sql
+        ]
+        self.assertEqual(len(generation_deletes), 1)
+        self.assertIn("status <> 'active'", generation_deletes[0][0])
+        self.assertEqual(generation_deletes[0][1], (["old-2026-05-gen"],))
+
+    def test_repository_retention_failure_does_not_rollback_published_workbench_generation(self) -> None:
+        class FailingRetentionAfterPublishConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_generations" in normalized and "status <> 'active'" in normalized:
+                    raise TimeoutError("retention query timed out")
+                return []
+
+        connection = FailingRetentionAfterPublishConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {"paired": {"groups": []}, "open": {"groups": []}},
+                        "source_versions": {"source_version": 6},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        sql = "\n".join(statement for statement, _params in connection.executed)
+        self.assertIn("insert into read_model.workbench_generations", sql)
+        self.assertIn("set status = 'active'", sql)
+        self.assertNotIn("delete from read_model.workbench_generations", sql)
+
     def test_repository_rebuilds_all_scope_from_month_group_shards(self) -> None:
         class AggregateAllWorkbenchConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:

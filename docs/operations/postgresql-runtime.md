@@ -40,6 +40,32 @@ FIN_OPS_POSTGRES_CUTOVER_PHASE=postgres_primary
 - Worker 从 durable queue claim event，重建 SQL projection 后 complete dirty scope。
 - Redis 只缓存 freshness gate 后的 payload。
 - RabbitMQ 只能作为可选 transport/wakeup，不能替代 PostgreSQL dirty scope 状态。
+- Workbench read model generation 有保留策略：发布新 active generation 后自动 bounded prune 旧的
+  非 active generation；生产同时使用 `finops-prune-workbench-generations.timer` 兜底，避免
+  `read_model.workbench_*` 历史 generation 长期堆积。
+
+Workbench read model 表空间排障边界：
+
+```sql
+select status, count(*)
+from read_model.workbench_generations
+group by status
+order by status;
+
+select
+  relname,
+  pg_size_pretty(pg_total_relation_size(c.oid)) as total_size
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'read_model'
+  and c.relname like 'workbench_%'
+order by pg_total_relation_size(c.oid) desc;
+```
+
+普通 `delete`/`vacuum` 只能让 PostgreSQL 复用空间，不保证把空间还给文件系统。只有
+`TRUNCATE`、`VACUUM FULL`、`pg_repack` 或表重建会降低 `df` 看到的占用；其中 `VACUUM FULL` 和
+`pg_repack` 需要额外重写空间。Workbench read model 属于可重建投影，执行清空/重建必须进入维护
+窗口、停止 API/worker、使用精确白名单表名且不使用 `CASCADE`，并通过 rehydrate 验证 fresh。
 
 ## 部署和回滚
 

@@ -90,6 +90,27 @@ transport/wakeup，不能作为 read model 状态事实源。
 业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。refresh service
 完成 projection 后调用 queue repository 完成 dirty scope；失败或 dead-letter 后由运维 inspect/requeue。
 
+### Workbench generation retention
+
+Workbench 使用 active generation 原子发布模型，`read_model.workbench_generations.status='active'`
+是页面读路径的边界。发布新的月份或 `all` active generation 后，repository 会对本次发布涉及的
+scope 执行 bounded retention：保留每个 scope 最近 3 个非 active generation，且只删除超过 1 天的
+旧 generation，每次最多 100 个。retention 只删除 `read_model.workbench_*` generation 投影行，
+不删除 `app.*`、`job.*` 或其他业务事实；删除条件始终包含 `status <> 'active'`。
+
+retention 是发布后的维护动作，不得让清理失败回滚已经发布成功的 fresh generation。生产环境还应
+保留 `finops-prune-workbench-generations.timer` 作为兜底防线，低峰期运行同一保留策略并记录：
+
+```bash
+systemctl list-timers finops-prune-workbench-generations.timer
+journalctl -u finops-prune-workbench-generations.service -n 100 --no-pager
+tail -n 100 /var/log/fin-ops/workbench-generation-prune-$(date +%Y%m%d).log
+```
+
+如果 Workbench read model 表再次膨胀，先确认 retention timer、`workbench_generations` 状态分布、
+`pg_wal` 大小和 `/health/ready`。不得直接 `VACUUM FULL` 大表，除非根分区或临时表空间已满足重写
+空间需求；read model 可重建但业务事实表不可清空。
+
 ## 生产启动合同
 
 生产 worker 只使用 registration contract：

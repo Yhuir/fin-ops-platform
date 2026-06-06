@@ -5,6 +5,7 @@ from datetime import date
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import json
+import logging
 import re
 from typing import Any
 from urllib.parse import unquote
@@ -35,6 +36,10 @@ WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggrega
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
+WORKBENCH_GENERATION_RETENTION_KEEP_RECENT = 3
+WORKBENCH_GENERATION_RETENTION_KEEP_DAYS = 1
+WORKBENCH_GENERATION_RETENTION_LIMIT = 100
+LOGGER = logging.getLogger(__name__)
 
 
 def _parse_postgres_timestamp(value: str | None) -> datetime | None:
@@ -4521,12 +4526,30 @@ class PostgresReadModelRepository:
         keep_recent_generations_per_scope: int = 3,
         keep_days: int = 14,
         limit: int = 500,
+        scope_keys: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         keep_recent = max(1, int_value(keep_recent_generations_per_scope, 3))
         keep_days_value = max(1, int_value(keep_days, 14))
         limit_value = min(5000, max(1, int_value(limit, 500)))
+        normalized_scope_keys = self._normalize_workbench_retention_scope_keys(scope_keys)
+        scope_filter = ""
+        params: list[Any] = []
+        if normalized_scope_keys is not None:
+            if not normalized_scope_keys:
+                return {
+                    "dry_run": True,
+                    "keep_recent_generations_per_scope": keep_recent,
+                    "keep_days": keep_days_value,
+                    "limit": limit_value,
+                    "scope_keys": [],
+                    "candidate_count": 0,
+                    "generations": [],
+                }
+            scope_filter = "and scope_key = any(%s)"
+            params.append(normalized_scope_keys)
+        params.extend([keep_recent, keep_days_value, limit_value])
         rows = self._connection.fetch_all(
-            """
+            f"""
             with ranked as (
               select
                 generation_id,
@@ -4542,6 +4565,7 @@ class PostgresReadModelRepository:
               from read_model.workbench_generations
               where tenant_id = 'default'
                 and status <> 'active'
+                {scope_filter}
             )
             select generation_id, scope_key, status, activated_at::text as activated_at,
                    completed_at::text as completed_at, updated_at::text as updated_at
@@ -4551,9 +4575,9 @@ class PostgresReadModelRepository:
             order by scope_key, coalesce(activated_at, completed_at, updated_at)
             limit %s
             """,
-            (keep_recent, keep_days_value, limit_value),
+            tuple(params),
         )
-        return {
+        result = {
             "dry_run": True,
             "keep_recent_generations_per_scope": keep_recent,
             "keep_days": keep_days_value,
@@ -4561,6 +4585,9 @@ class PostgresReadModelRepository:
             "candidate_count": len(rows),
             "generations": [dict(row) for row in rows],
         }
+        if normalized_scope_keys is not None:
+            result["scope_keys"] = normalized_scope_keys
+        return result
 
     def prune_workbench_generations(
         self,
@@ -4569,11 +4596,13 @@ class PostgresReadModelRepository:
         keep_days: int = 14,
         limit: int = 500,
         dry_run: bool = True,
+        scope_keys: set[str] | list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         preview = self.preview_workbench_generation_retention(
             keep_recent_generations_per_scope=keep_recent_generations_per_scope,
             keep_days=keep_days,
             limit=limit,
+            scope_keys=scope_keys,
         )
         generation_ids = [
             text(row.get("generation_id"))
@@ -4587,28 +4616,45 @@ class PostgresReadModelRepository:
             return result
 
         def delete(connection: Any) -> None:
-            params = (generation_ids,)
-            connection.execute("delete from read_model.workbench_generation_stats where generation_id = any(%s)", params)
-            connection.execute("delete from read_model.workbench_group_rows where generation_id = any(%s)", params)
-            connection.execute("delete from read_model.workbench_groups where generation_id = any(%s)", params)
-            connection.execute("delete from read_model.workbench_rows where generation_id = any(%s)", params)
-            connection.execute("delete from read_model.workbench_summary where generation_id = any(%s)", params)
-            connection.execute("delete from read_model.workbench_snapshots where generation_id = any(%s)", params)
-            connection.execute(
-                """
-                delete from read_model.workbench_generations
-                where generation_id = any(%s)
-                  and tenant_id = 'default'
-                  and status <> 'active'
-                """,
-                params,
-            )
+            self._delete_workbench_generations(connection, generation_ids=generation_ids)
 
         run_in_transaction(self._connection, delete)
         result = dict(preview)
         result["dry_run"] = False
         result["deleted_count"] = len(generation_ids)
         return result
+
+    @staticmethod
+    def _normalize_workbench_retention_scope_keys(
+        scope_keys: set[str] | list[str] | tuple[str, ...] | None,
+    ) -> list[str] | None:
+        if scope_keys is None:
+            return None
+        normalized = {
+            str(scope_key or "").strip()
+            for scope_key in scope_keys
+            if str(scope_key or "").strip() == "all" or MONTH_SCOPE_RE.match(str(scope_key or "").strip())
+        }
+        return sorted(normalized)
+
+    @staticmethod
+    def _delete_workbench_generations(connection: Any, *, generation_ids: list[str]) -> None:
+        params = (generation_ids,)
+        connection.execute("delete from read_model.workbench_generation_stats where generation_id = any(%s)", params)
+        connection.execute("delete from read_model.workbench_group_rows where generation_id = any(%s)", params)
+        connection.execute("delete from read_model.workbench_groups where generation_id = any(%s)", params)
+        connection.execute("delete from read_model.workbench_rows where generation_id = any(%s)", params)
+        connection.execute("delete from read_model.workbench_summary where generation_id = any(%s)", params)
+        connection.execute("delete from read_model.workbench_snapshots where generation_id = any(%s)", params)
+        connection.execute(
+            """
+            delete from read_model.workbench_generations
+            where generation_id = any(%s)
+              and tenant_id = 'default'
+              and status <> 'active'
+            """,
+            params,
+        )
 
     @staticmethod
     def _workbench_scope_filter(scope_key: str) -> tuple[str, list[Any]]:
@@ -4794,6 +4840,7 @@ class PostgresReadModelRepository:
 
     def save_workbench_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
         started_generations: list[tuple[str, str, dict[str, Any]]] = []
+        published_scope_keys: set[str] = set()
 
         def write(connection: Any) -> None:
             read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
@@ -5117,8 +5164,10 @@ class PostgresReadModelRepository:
                     group_count=group_count,
                     summary_count=1,
                 )
+                published_scope_keys.add(scope_key)
             if refresh_all_scope:
-                self._refresh_workbench_all_scope_from_month_shards(connection)
+                if self._refresh_workbench_all_scope_from_month_shards(connection):
+                    published_scope_keys.add("all")
 
         try:
             run_in_transaction(self._connection, write)
@@ -5144,8 +5193,36 @@ class PostgresReadModelRepository:
                 except Exception:
                     pass
             raise
+        self._prune_workbench_generations_after_publish(published_scope_keys)
 
-    def _refresh_workbench_all_scope_from_month_shards(self, connection: Any) -> None:
+    def _prune_workbench_generations_after_publish(self, scope_keys: set[str]) -> None:
+        normalized_scope_keys = self._normalize_workbench_retention_scope_keys(scope_keys)
+        if not normalized_scope_keys:
+            return
+        try:
+            result = self.prune_workbench_generations(
+                keep_recent_generations_per_scope=WORKBENCH_GENERATION_RETENTION_KEEP_RECENT,
+                keep_days=WORKBENCH_GENERATION_RETENTION_KEEP_DAYS,
+                limit=WORKBENCH_GENERATION_RETENTION_LIMIT,
+                dry_run=False,
+                scope_keys=normalized_scope_keys,
+            )
+        except Exception:
+            LOGGER.warning(
+                "workbench generation retention failed after publish for scopes=%s",
+                ",".join(normalized_scope_keys),
+                exc_info=True,
+            )
+            return
+        deleted_count = int_value(result.get("deleted_count"), 0)
+        if deleted_count:
+            LOGGER.info(
+                "pruned %s old workbench read model generations for scopes=%s",
+                deleted_count,
+                ",".join(normalized_scope_keys),
+            )
+
+    def _refresh_workbench_all_scope_from_month_shards(self, connection: Any) -> bool:
         self._lock_workbench_generation_scope(connection, scope_key="all")
         consistency_failures = self._workbench_generation_consistency_failures(connection, include_all=False)
         if consistency_failures:
@@ -5164,7 +5241,7 @@ class PostgresReadModelRepository:
                     + self._workbench_generation_consistency_error(consistency_failures)
                 ),
             )
-            return
+            return False
         group_rows = connection.fetch_all(
             """
             select g.scope_key, g.scope_month, g.zone, g.group_id, g.payload, g.source_versions, g.generated_at::text as generated_at
@@ -5223,7 +5300,7 @@ class PostgresReadModelRepository:
             if source_version is not None:
                 max_source_version = max(source_version, max_source_version or source_version)
         if not groups:
-            return
+            return False
 
         aggregate_payload = _aggregate_workbench_all_scope_payload(groups)
         aggregate_source_versions = {
@@ -5544,6 +5621,7 @@ class PostgresReadModelRepository:
             group_count=len(workbench_groups),
             summary_count=1,
         )
+        return True
 
     def _load_workbench_rows_page(
         self,
