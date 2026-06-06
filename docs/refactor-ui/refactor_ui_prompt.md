@@ -1498,22 +1498,24 @@
 | `P025-phase-6-tax-offset-tax-table` | `phase_6_page_batches` | tax offset tables | `verified` | passed | TaxTable 已迁到 FinanceTable/HeroUI/native search |
 | `P026-phase-6-tax-offset-result-panel` | `phase_6_page_batches` | tax offset result cards/page shell | `verified` | passed | result panel、summary cards 和 page-level actions 已迁出 MUI |
 | `P027-phase-6-tax-offset-certified-results` | `phase_6_page_batches` | tax offset certified results | `verified` | passed | 已认证结果 complementary panel 已迁出 MUI |
+| `MG-P027-phase-6-tax-offset` | `phase_6_page_batches` | tax offset cumulative MG | `verified` | pushed | TaxOffset UI migration 已 push 到 refactor-ui |
+| `P028-phase-6-app-health-discovery` | `phase_6_page_batches` | app health discovery | `reviewed` | pending | 下一条执行 prompt，先盘点 AppHealth page-level MUI |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `MG-P027-phase-6-tax-offset`。
+下一条 prompt 应执行 `P028-phase-6-app-health-discovery`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_tax_offset.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 TaxOffset UI migration 文件：web/src/pages/TaxOffsetPage.tsx、web/src/components/tax/CertifiedInvoiceImportModal.tsx、web/src/components/tax/TaxTable.tsx、web/src/components/tax/TaxResultPanel.tsx、web/src/components/tax/TaxSummaryCards.tsx、web/src/components/tax/CertifiedResultsDrawer.tsx、web/src/components/common/FinanceTable.tsx、web/src/app/styles.css、web/src/test/TaxOffsetPage.test.tsx、docs/refactor-ui/modules/phase_6_tax_offset.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax；git diff --check；git status --short --branch。提交信息使用 feat: migrate tax offset ui。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified；下一条 prompt 进入 phase 6 AppHealth page discovery。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx 和相关 AppHealth feature files。只做 AppHealth page discovery/planning，不迁移实现。记录当前 page-level MUI imports、已迁 FinanceTable surfaces、仍需迁移的 Alert/Box/Button/Chip/Stack/Typography/状态面板/刷新入口、用户可见入口、loading/error/permission 状态、测试断言和风险。不得改后端/API/read model/worker/关联台。按需新建 docs/refactor-ui/modules/phase_6_app_health.md；更新 state/prompt docs；运行文档/key grep、git diff --check、git status。
 ```
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P022-phase-6-tax-offset-discovery`。下一条执行 prompt 是 `MG-P027-phase-6-tax-offset`。
+最近完成的 MG 是 `MG-P027-phase-6-tax-offset`。下一条执行 prompt 是 `P028-phase-6-app-health-discovery`。
 
 ### MG-P027-phase-6-tax-offset
 
-- Status: `reviewed`
+- Status: `verified`
 - Scope:
   - `web/src/pages/TaxOffsetPage.tsx`
   - `web/src/components/tax/CertifiedInvoiceImportModal.tsx`
@@ -1543,7 +1545,35 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `4c7a99f5`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
+
+### P028-phase-6-app-health-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `reviewed`
+- Type: `discovery/planning`
+- Scope: 只做 AppHealth page-level UI migration discovery；不迁移实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx 和相关 AppHealth feature files。只做 AppHealth page discovery/planning，不迁移实现。记录当前 page-level MUI imports、已迁 FinanceTable surfaces、仍需迁移的 Alert/Box/Button/Chip/Stack/Typography/状态面板/刷新入口、用户可见入口、loading/error/permission 状态、测试断言和风险。不得改后端/API/read model/worker/关联台。按需新建 docs/refactor-ui/modules/phase_6_app_health.md；更新 state/prompt docs；运行文档/key grep、git diff --check、git status。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime implementation untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Docs on demand: yes，AppHealth 已做 table pilot，但 page-level MUI discovery 需要独立承载。
+- Verification defined: docs/key grep、`git diff --check`、`git status --short --branch`。
 
 ### MG-P022-phase-6-tax-offset-discovery
 

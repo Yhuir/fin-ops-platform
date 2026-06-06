@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P027-phase-6-tax-offset-certified-results`
-- Current MG ID: `MG-P027-phase-6-tax-offset`
+- Current Prompt ID: `P028-phase-6-app-health-discovery`
+- Current MG ID: `not_drafted`
 
 ## Global Invariants
 
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | TaxOffset P023-P027 verified；MG-P027 drafted for push |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | TaxOffset MG-P027 verified and pushed；next AppHealth page discovery |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,19 +54,13 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 tax offset cumulative MG。
+- Scope: phase 6 AppHealth page discovery。
 - Files touched:
-  - `web/src/pages/TaxOffsetPage.tsx`
-  - `web/src/components/tax/*`
-  - `web/src/components/common/FinanceTable.tsx`
-  - `web/src/app/styles.css`
-  - `web/src/test/TaxOffsetPage.test.tsx`
-  - `docs/refactor-ui/modules/phase_6_tax_offset.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: TaxOffset tests, table/common tests, build, TaxOffset MUI grep and diff check passed
+- Verification run: MG-P027 push verified
 - Failures: none
-- Next action: 执行 `MG-P027-phase-6-tax-offset`。
+- Next action: 执行 `P028-phase-6-app-health-discovery`。
 
 ## Prompt Lifecycle
 
@@ -98,7 +92,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P027-phase-6-tax-offset-certified-results` | TaxOffset implementation verified；MG-P027 pending push |
+| page batches | `in_progress` | `P028-phase-6-app-health-discovery` | TaxOffset MG verified；next AppHealth page discovery |
 
 ## Verification Log
 
@@ -216,6 +210,7 @@
 | 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax` | passed | No TaxOffset-scope MUI imports |
 | 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P027-phase-6-tax-offset` | `git push origin refactor-ui` | passed | `4c7a99f5` pushed |
 
 ## Push Log
 
@@ -241,3 +236,4 @@
 | 2026-06-07 | `MG-P020-phase-5-app-health-table-pilot-discovery` | `refactor-ui` | `b9213d67` | pushed |
 | 2026-06-07 | `MG-P021-phase-5-app-health-table-pilot-refactor` | `refactor-ui` | `b47f0689` | pushed |
 | 2026-06-07 | `MG-P022-phase-6-tax-offset-discovery` | `refactor-ui` | `c9b64d4d` | pushed |
+| 2026-06-07 | `MG-P027-phase-6-tax-offset` | `refactor-ui` | `4c7a99f5` | pushed |
