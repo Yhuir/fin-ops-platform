@@ -1304,7 +1304,7 @@
 ### P022-phase-6-tax-offset-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `reviewed`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: 只做 TaxOffsetPage 页面模块 discovery；不迁移页面实现。
 
@@ -1322,6 +1322,45 @@
 - Workbench internals frozen: yes。
 - Micro-JIT phase transition: yes，Phase 5 pilot verified 后进入 Phase 6 page batches。
 - Verification defined: docs/key grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_6_tax_offset.md`。
+- 记录 TaxOffset 页面级 MUI、`components/tax/*` MUI、用户可见入口、现有测试覆盖和迁移切片。
+- 确认 `FileDropzone`、`PageScaffold`、`StatePanel` 已迁移，可复用。
+- 识别 MUI-specific test 断言：`modal.closest(".MuiDialog-root")`。
+- 本切片未修改运行时代码、后端、API、read model、worker 或关联台内部工作区。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_tax_offset.md`
+  - `rg -n "P022-phase-6-tax-offset-discovery|Current MUI Inventory|User-visible Entrypoints|P023-phase-6-tax-offset-characterization-tests|MuiDialog-root" docs/refactor-ui/modules/phase_6_tax_offset.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P023-phase-6-tax-offset-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `reviewed`
+- Type: `characterization tests`
+- Scope: 只调整 TaxOffsetPage tests，锁定新 primitives 的行为契约；不改实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_tax_offset.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/TaxOffsetPage.test.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/tax/CertifiedInvoiceImportModal.tsx、web/src/components/tax/TaxTable.tsx。将 TaxOffsetPage.test.tsx 中 `.MuiDialog-root` 断言改为项目 dialog primitive 语义；为认证导入预览表和 TaxTable 增加稳定的列/role/入口断言，避免 MUI class 断言。不得修改实现、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run TaxOffsetPage.test.tsx`，预期在实现未迁移前可 expected-fail；运行 git diff --check、git status。更新 state/prompt/module docs，生成 P024 import modal refactor prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime implementation untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Expected failure acceptable: yes，new primitive contracts may fail before P024/P025。
+- Verification defined: targeted TaxOffset test expected-fail or pass、`git diff --check`、`git status --short --branch`。
 
 ## Prompt History
 
@@ -1344,14 +1383,15 @@
 | `P019-phase-5-table-session-primitive` | `phase_5_table_system` | table session | `verified` | passed | useFinanceTableSession 已新增，新旧 session tests 和 build 通过 |
 | `P020-phase-5-app-health-table-pilot-discovery` | `phase_5_table_system` | app health table pilot discovery | `verified` | passed | AppHealth 表格 pilot 清单和 P021 refactor prompt 已记录 |
 | `P021-phase-5-app-health-table-pilot-refactor` | `phase_5_table_system` | app health table pilot refactor | `verified` | passed | AppHealth 表格 surfaces 已迁到 FinanceTable primitives |
-| `P022-phase-6-tax-offset-discovery` | `phase_6_page_batches` | tax offset discovery | `reviewed` | pending | 下一条执行 prompt，进入 Phase 6 第一个页面模块 discovery |
+| `P022-phase-6-tax-offset-discovery` | `phase_6_page_batches` | tax offset discovery | `verified` | passed | TaxOffset 专项文档、迁移队列和 P023 prompt 已记录 |
+| `P023-phase-6-tax-offset-characterization-tests` | `phase_6_page_batches` | tax offset tests | `reviewed` | pending | 下一条执行 prompt，先改测试契约 |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P022-phase-6-tax-offset-discovery`。
+下一条 prompt 应执行 `P023-phase-6-tax-offset-characterization-tests`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TaxOffsetPage.tsx、web/src/test/TaxOffsetPage.test.tsx、web/src/components/tax/*、web/src/components/common/FileDropzone.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/FinanceTable.tsx。只做 TaxOffsetPage discovery/planning，记录旧 UI 入口、表格/导入/月份/认证导入弹窗/结果右侧抽屉、MUI imports、已迁 common primitives、测试断言和风险。不得迁移实现，不改后端/API/read model/worker/关联台。按需在 docs/refactor-ui/modules/phase_6_tax_offset.md 新建或更新专项文档；更新 state/prompt docs；运行文档/key grep、git diff --check、git status。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_tax_offset.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/TaxOffsetPage.test.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/tax/CertifiedInvoiceImportModal.tsx、web/src/components/tax/TaxTable.tsx。将 TaxOffsetPage.test.tsx 中 `.MuiDialog-root` 断言改为项目 dialog primitive 语义；为认证导入预览表和 TaxTable 增加稳定的列/role/入口断言，避免 MUI class 断言。不得修改实现、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run TaxOffsetPage.test.tsx`，预期在实现未迁移前可 expected-fail；运行 git diff --check、git status。更新 state/prompt/module docs，生成 P024 import modal refactor prompt。
 ```
 
 ## Cumulative MG Prompts

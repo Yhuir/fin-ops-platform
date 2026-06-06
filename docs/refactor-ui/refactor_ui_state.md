@@ -4,11 +4,11 @@
 
 ## Current Phase
 
-- Phase: `phase_5_table_system`
+- Phase: `phase_6_page_batches`
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P022-phase-6-tax-offset-discovery`
+- Current Prompt ID: `P023-phase-6-tax-offset-characterization-tests`
 - Current MG ID: `not_drafted`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | P022 tax offset discovery 已生成并审查 |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | P022 tax offset discovery 已验证；P023 characterization tests 已生成并审查 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,17 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 tax offset discovery。
+- Scope: phase 6 tax offset characterization tests。
 - Files touched:
-  - `web/src/pages/AppHealthOperationsPage.tsx`
-  - `web/src/test/AppHealthOperationsPage.test.tsx`
-  - `web/src/components/common/FinanceTable.tsx`
+  - `docs/refactor-ui/modules/phase_6_tax_offset.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `docs/refactor-ui/modules/phase_5_table_system.md`
-- Verification run: P021 AppHealth tests, table/common tests, build, MUI table grep and diff check passed；MG-P021 push verified
+- Verification run: P022 docs grep and diff check passed
 - Failures: none
-- Next action: 执行 `P022-phase-6-tax-offset-discovery`。
+- Next action: 执行 `P023-phase-6-tax-offset-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -96,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P022-phase-6-tax-offset-discovery` | 详见 `module_inventory.md` |
+| page batches | `in_progress` | `P023-phase-6-tax-offset-characterization-tests` | TaxOffset discovery verified；详见 `module_inventory.md` 和 `modules/phase_6_tax_offset.md` |
 
 ## Verification Log
 
@@ -204,6 +201,9 @@
 | 2026-06-07 | `P021-phase-5-app-health-table-pilot-refactor` | `if rg -n '@mui/material/(Table|TableBody|TableCell|TableContainer|TableHead|TableRow)' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi` | passed | AppHealth has no MUI table imports |
 | 2026-06-07 | `P021-phase-5-app-health-table-pilot-refactor` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P021-phase-5-app-health-table-pilot-refactor` | `git push origin refactor-ui` | passed | `b47f0689` pushed |
+| 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `test -f docs/refactor-ui/modules/phase_6_tax_offset.md` | passed | TaxOffset module discovery doc exists |
+| 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `rg -n "P022-phase-6-tax-offset-discovery|Current MUI Inventory|User-visible Entrypoints|P023-phase-6-tax-offset-characterization-tests|MuiDialog-root" docs/refactor-ui/modules/phase_6_tax_offset.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | TaxOffset inventory and next prompt recorded |
+| 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 
