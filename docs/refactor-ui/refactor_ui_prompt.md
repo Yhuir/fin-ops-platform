@@ -712,7 +712,7 @@
 
 ### MG-P012-phase-4-shell-icon-dependency
 
-- Status: `mg_reviewed`
+- Status: `verified`
 - Scope:
   - `web/package.json`
   - `web/package-lock.json`
@@ -738,7 +738,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `a96087fc`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### P000-docs-bootstrap
 
