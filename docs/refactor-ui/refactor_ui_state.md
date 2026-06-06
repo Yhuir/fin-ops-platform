@@ -30,7 +30,7 @@
 
 | Phase | Status | Started | Completed | Verification | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；P001 本地验证通过，MG 待执行 |
+| `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；MG-P001 已 push |
 | `phase_1_docs_and_tokens` | `pending` |  |  |  | PRODUCT/DESIGN 和 Tailwind token |
 | `phase_2_platform_stack` | `pending` |  |  |  | React 19 + HeroUI v3 + Tailwind v4 |
 | `phase_3_primitives` | `pending` |  |  |  | 本地 UI primitives |
@@ -70,7 +70,7 @@
   - `docs/index.md`
 - Verification run: passed
 - Failures: none
-- Next action: 执行或确认 `MG-P001-baseline-doc-gap-fill`；MG push 后从 `refactor-ui` 生成 `phase_1_docs_and_tokens` 的下一条 discovery prompt。
+- Next action: 从 `refactor-ui` 生成并执行 `phase_1_docs_and_tokens` 的下一条 discovery prompt。
 
 ## Prompt Lifecycle
 
@@ -119,9 +119,11 @@
 | 2026-06-07 | `P001-baseline-doc-gap-fill` | `rg -n "/goal|完整执行 fin-ops-platform 非关联台 UI 平台迁移计划|最终完成条件|每次最终回复或阶段记录必须包含" docs/refactor-ui/refactor_ui_master_goal_prompt.md` | passed | 主控 goal prompt 存在 |
 | 2026-06-07 | `P001-baseline-doc-gap-fill` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P001-baseline-doc-gap-fill` | `git status --short --branch` | passed | 仅文档变更 |
+| 2026-06-07 | `MG-P001-baseline-doc-gap-fill` | `git push origin refactor-ui` | passed | `8f3daae8` pushed |
 
 ## Push Log
 
 | Date | MG | Branch | Commit | Result |
 | --- | --- | --- | --- | --- |
 | 2026-06-07 | `MG-P000-docs-bootstrap` | `refactor-ui` | `52f4520f` | pushed |
+| 2026-06-07 | `MG-P001-baseline-doc-gap-fill` | `refactor-ui` | `8f3daae8` | pushed |

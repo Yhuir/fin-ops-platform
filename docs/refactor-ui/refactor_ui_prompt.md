@@ -196,7 +196,7 @@
 
 ### MG-P001-baseline-doc-gap-fill
 
-- Status: `reviewed-not-executed`
+- Status: `verified`
 - Scope:
   - `PRODUCT.md`
   - `DESIGN.md`
@@ -226,7 +226,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed, not executed in P001 documentation slice。
+- Status: verified。
+
+#### Execution
+
+- Commit: `8f3daae8`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified
 
 ### MG Prompt Template
 
