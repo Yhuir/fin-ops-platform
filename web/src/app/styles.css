@@ -1806,6 +1806,14 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   align-items: center;
 }
 
+.tax-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+  align-items: center;
+}
+
 .page-note {
   padding: 10px 12px;
   border: 1px solid #d8e1eb;

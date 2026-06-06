@@ -1343,7 +1343,7 @@
 ### P023-phase-6-tax-offset-characterization-tests
 
 - Phase: `phase_6_page_batches`
-- Status: `reviewed`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: 只调整 TaxOffsetPage tests，锁定新 primitives 的行为契约；不改实现。
 
@@ -1361,6 +1361,115 @@
 - Workbench internals frozen: yes。
 - Expected failure acceptable: yes，new primitive contracts may fail before P024/P025。
 - Verification defined: targeted TaxOffset test expected-fail or pass、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `TaxOffsetPage.test.tsx` 已从 `.MuiDialog-root` 和 MUI table role contract 迁到 `finance-dialog`、FinanceTable `grid`、column role 和 preview table contract。
+- 初次运行 `cd web && npx vitest run TaxOffsetPage.test.tsx` expected-fail，6 个失败均来自 TaxOffset 仍渲染 MUI table/dialog surfaces。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run TaxOffsetPage.test.tsx`
+  - Result: expected-fail before P024/P025 implementation。
+
+### P024-phase-6-tax-offset-import-modal
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 迁移 `CertifiedInvoiceImportModal`，保留上传、预览、确认、后台 job polling、关闭和刷新行为。
+
+#### Prompt
+
+```text
+读取 P023 测试、CertifiedInvoiceImportModal、AppDialog、FinanceTable 和 HeroUI Button/Alert/ProgressBar/Chip/Table docs。只迁移 CertifiedInvoiceImportModal 到 AppDialog、HeroUI feedback/buttons/chips/progress 和 FinanceTable preview rows；不得改 TaxTable、TaxResultPanel、CertifiedResultsDrawer、后端、API、read model、worker 或关联台内部工作区。运行 TaxOffset targeted tests，记录剩余 TaxTable expected failures。
+```
+
+#### Execution Notes
+
+- `CertifiedInvoiceImportModal` 已无 MUI import。
+- 已认证导入仍是 page modal，未改为路由或抽屉。
+- `FileDropzone`、预览、确认、queued import job polling 和 `onImported` 回调保持原行为。
+- Preview row table 迁到 `FinanceTable`，列角色为 quantity/identity/account/amount/status/status/description。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run TaxOffsetPage.test.tsx`
+  - Result: remaining failures moved to TaxTable FinanceTable grid contract。
+
+### P025-phase-6-tax-offset-tax-table
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 迁移 `TaxTable` 到 FinanceTable/HeroUI/native search，保留筛选、排序、选择、横向滚动和高亮行。
+
+#### Prompt
+
+```text
+读取 P023 测试、TaxTable、FinanceTable、table_layout_system.md 和 HeroUI Button/Checkbox/Table docs。只迁移 TaxTable，不改后端/API/read model/worker，不改关联台内部工作区。不得继续依赖含 MUI 的 WorkbenchPaneSearch；可保留不含 MUI 的 WorkbenchColumnFilterMenu 使用但不修改其文件。保留表格 accessible name、checkbox aria-label、排序按钮 aria-label、搜索/清空入口、筛选 dialog、横向 scrollbar 和 data-certified-highlighted 行属性。运行 TaxOffset targeted tests、TaxOffset MUI grep、diff check。
+```
+
+#### Execution Notes
+
+- `TaxTable` 已无 MUI import。
+- `WorkbenchPaneSearch` 依赖已移除，TaxTable 使用本页原生 search control，保留旧 aria label。
+- 表格迁到 `FinanceTable`，输出表列角色为 identity/amount/account/amount，进项表为 selection/identity/amount/account/amount。
+- `FinanceTable` 增加可选 `scrollRef` 和 `dataCertifiedHighlighted` row attribute，保留 TaxOffset 横向滚动和高亮测试。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run TaxOffsetPage.test.tsx`
+  - Result: passed, 17 tests。
+
+### P026-phase-6-tax-offset-result-panel
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 迁移 `TaxResultPanel`、`TaxSummaryCards` 和 TaxOffset page-level shell/action MUI。
+
+#### Execution Notes
+
+- `TaxResultPanel` 和 `TaxSummaryCards` 已迁到 HeroUI/native token classes。
+- `TaxOffsetPage.tsx` header action、feedback note、workspace containers、全选/清空按钮已迁出 MUI。
+- 未改 API、read model、worker、权限或业务状态机。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+
+### P027-phase-6-tax-offset-certified-results
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 迁移 `CertifiedResultsDrawer`，保持旧 complementary side panel、collapse/expand 和 row selection 行为。
+
+#### Execution Notes
+
+- `CertifiedResultsDrawer` 已迁到 HeroUI/native controls。
+- 旧 `role="complementary"` / `aria-label="已认证结果"` 保留。
+- 已匹配计划行点击仍定位对应进项计划行。
+- 当前 `web/src/pages/TaxOffsetPage.tsx` 和 `web/src/components/tax/*` 无 `@mui/*` import。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax`
+  - `git diff --check`
 
 ## Prompt History
 
@@ -1384,19 +1493,57 @@
 | `P020-phase-5-app-health-table-pilot-discovery` | `phase_5_table_system` | app health table pilot discovery | `verified` | passed | AppHealth 表格 pilot 清单和 P021 refactor prompt 已记录 |
 | `P021-phase-5-app-health-table-pilot-refactor` | `phase_5_table_system` | app health table pilot refactor | `verified` | passed | AppHealth 表格 surfaces 已迁到 FinanceTable primitives |
 | `P022-phase-6-tax-offset-discovery` | `phase_6_page_batches` | tax offset discovery | `verified` | passed | TaxOffset 专项文档、迁移队列和 P023 prompt 已记录 |
-| `P023-phase-6-tax-offset-characterization-tests` | `phase_6_page_batches` | tax offset tests | `reviewed` | pending | 下一条执行 prompt，先改测试契约 |
+| `P023-phase-6-tax-offset-characterization-tests` | `phase_6_page_batches` | tax offset tests | `verified` | expected fail | 新 dialog/FinanceTable contract 已锁定 |
+| `P024-phase-6-tax-offset-import-modal` | `phase_6_page_batches` | tax offset import modal | `verified` | passed | 已认证导入弹窗和预览表已迁出 MUI |
+| `P025-phase-6-tax-offset-tax-table` | `phase_6_page_batches` | tax offset tables | `verified` | passed | TaxTable 已迁到 FinanceTable/HeroUI/native search |
+| `P026-phase-6-tax-offset-result-panel` | `phase_6_page_batches` | tax offset result cards/page shell | `verified` | passed | result panel、summary cards 和 page-level actions 已迁出 MUI |
+| `P027-phase-6-tax-offset-certified-results` | `phase_6_page_batches` | tax offset certified results | `verified` | passed | 已认证结果 complementary panel 已迁出 MUI |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P023-phase-6-tax-offset-characterization-tests`。
+下一条 prompt 应执行 `MG-P027-phase-6-tax-offset`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_tax_offset.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/TaxOffsetPage.test.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/tax/CertifiedInvoiceImportModal.tsx、web/src/components/tax/TaxTable.tsx。将 TaxOffsetPage.test.tsx 中 `.MuiDialog-root` 断言改为项目 dialog primitive 语义；为认证导入预览表和 TaxTable 增加稳定的列/role/入口断言，避免 MUI class 断言。不得修改实现、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run TaxOffsetPage.test.tsx`，预期在实现未迁移前可 expected-fail；运行 git diff --check、git status。更新 state/prompt/module docs，生成 P024 import modal refactor prompt。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_tax_offset.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 TaxOffset UI migration 文件：web/src/pages/TaxOffsetPage.tsx、web/src/components/tax/CertifiedInvoiceImportModal.tsx、web/src/components/tax/TaxTable.tsx、web/src/components/tax/TaxResultPanel.tsx、web/src/components/tax/TaxSummaryCards.tsx、web/src/components/tax/CertifiedResultsDrawer.tsx、web/src/components/common/FinanceTable.tsx、web/src/app/styles.css、web/src/test/TaxOffsetPage.test.tsx、docs/refactor-ui/modules/phase_6_tax_offset.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax；git diff --check；git status --short --branch。提交信息使用 feat: migrate tax offset ui。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified；下一条 prompt 进入 phase 6 AppHealth page discovery。
 ```
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P022-phase-6-tax-offset-discovery`。下一条执行 prompt 是 `P023-phase-6-tax-offset-characterization-tests`。
+最近完成的 MG 是 `MG-P022-phase-6-tax-offset-discovery`。下一条执行 prompt 是 `MG-P027-phase-6-tax-offset`。
+
+### MG-P027-phase-6-tax-offset
+
+- Status: `reviewed`
+- Scope:
+  - `web/src/pages/TaxOffsetPage.tsx`
+  - `web/src/components/tax/CertifiedInvoiceImportModal.tsx`
+  - `web/src/components/tax/TaxTable.tsx`
+  - `web/src/components/tax/TaxResultPanel.tsx`
+  - `web/src/components/tax/TaxSummaryCards.tsx`
+  - `web/src/components/tax/CertifiedResultsDrawer.tsx`
+  - `web/src/components/common/FinanceTable.tsx`
+  - `web/src/app/styles.css`
+  - `web/src/test/TaxOffsetPage.test.tsx`
+  - `docs/refactor-ui/modules/phase_6_tax_offset.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_tax_offset.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 TaxOffset UI migration 文件。禁止 git add . 和 git add -A。只允许精确 git add 当前 MG scope 文件。验证命令：cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax；git diff --check；git status --short --branch。提交信息使用 feat: migrate tax offset ui。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified；下一条 prompt 进入 phase 6 AppHealth page discovery。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
 
 ### MG-P022-phase-6-tax-offset-discovery
 

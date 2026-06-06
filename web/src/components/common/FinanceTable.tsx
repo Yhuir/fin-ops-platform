@@ -1,5 +1,5 @@
 import { Chip, Pagination, Table, Tooltip } from "@heroui/react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, ReactNode, Ref } from "react";
 
 export type FinanceTableColumnRole =
   | "identity"
@@ -46,16 +46,17 @@ type FinanceTableProps = {
   footer?: ReactNode;
   className?: string;
   minWidth?: number | string;
+  scrollRef?: Ref<HTMLDivElement>;
 };
 
-export function FinanceTable({ ariaLabel, children, footer, className, minWidth = 720 }: FinanceTableProps) {
+export function FinanceTable({ ariaLabel, children, footer, className, minWidth = 720, scrollRef }: FinanceTableProps) {
   const style: FinanceTableStyle = {
     "--finance-table-min-width": typeof minWidth === "number" ? `${minWidth}px` : minWidth,
   };
 
   return (
     <Table className={cx("finance-table", className)}>
-      <Table.ScrollContainer className="finance-table__scroll">
+      <Table.ScrollContainer ref={scrollRef} className="finance-table__scroll">
         <Table.Content aria-label={ariaLabel} className="finance-table__content" style={style}>
           {children}
         </Table.Content>
@@ -123,12 +124,18 @@ type FinanceTableRowProps = {
   children: ReactNode;
   id?: string | number;
   className?: string;
+  dataCertifiedHighlighted?: boolean;
   textValue?: string;
 };
 
-export function FinanceTableRow({ children, id, className, textValue }: FinanceTableRowProps) {
+export function FinanceTableRow({ children, id, className, dataCertifiedHighlighted, textValue }: FinanceTableRowProps) {
   return (
-    <Table.Row className={cx("finance-table__row", className)} id={id} textValue={textValue}>
+    <Table.Row
+      className={cx("finance-table__row", className)}
+      data-certified-highlighted={dataCertifiedHighlighted === undefined ? undefined : String(dataCertifiedHighlighted)}
+      id={id}
+      textValue={textValue}
+    >
       {children}
     </Table.Row>
   );

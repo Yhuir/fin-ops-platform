@@ -78,6 +78,24 @@ Recommended Micro-JIT sequence:
 6. `MG-phase-6-tax-offset`
    - Full TaxOffset tests, build, non-workbench MUI import grep for TaxOffset scope, docs update, push。
 
+## Execution Update
+
+- `P023-phase-6-tax-offset-characterization-tests`: updated `TaxOffsetPage.test.tsx` from MUI class/table assertions to project dialog and FinanceTable grid contracts. Initial targeted run expected-failed with 6 failures because the page still rendered MUI tables.
+- `P024-phase-6-tax-offset-import-modal`: migrated `CertifiedInvoiceImportModal` to `AppDialog`, HeroUI feedback/buttons/chips/progress, and `FinanceTable` preview rows.
+- `P025-phase-6-tax-offset-tax-table`: migrated `TaxTable` to `FinanceTable`, HeroUI `Checkbox`/`Button`, and local non-MUI search while preserving filter, sort, selection, highlighted row and horizontal scrollbar behavior.
+- `P026-phase-6-tax-offset-result-panel`: migrated `TaxResultPanel` and `TaxSummaryCards` to HeroUI/native token classes.
+- `P027-phase-6-tax-offset-certified-results`: migrated `CertifiedResultsDrawer` to HeroUI/native controls while preserving the complementary side panel and collapse/expand behavior.
+- Page-level cleanup: migrated `TaxOffsetPage.tsx` header actions, feedback note, workspace containers and select/clear buttons away from MUI.
+- Current TaxOffset scope has no `@mui/*` imports in `web/src/pages/TaxOffsetPage.tsx` or `web/src/components/tax/*`.
+
+## Verification
+
+- `cd web && npx vitest run TaxOffsetPage.test.tsx`: passed, 17 tests.
+- `cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 32 tests.
+- `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning.
+- `rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax`: passed with no matches.
+- `git diff --check`: passed.
+
 ## P023 Prompt Draft
 
 ```text

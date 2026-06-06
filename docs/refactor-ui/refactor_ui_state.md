@@ -8,18 +8,18 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P023-phase-6-tax-offset-characterization-tests`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `P027-phase-6-tax-offset-certified-results`
+- Current MG ID: `MG-P027-phase-6-tax-offset`
 
 ## Global Invariants
 
 | Invariant | Status | Evidence |
 | --- | --- | --- |
-| Backend untouched | yes | 当前只修改设计/重构文档 |
-| API contract untouched | yes | 当前只修改设计/重构文档 |
-| Read model / worker untouched | yes | 当前只修改设计/重构文档 |
+| Backend untouched | yes | 当前 TaxOffset 切片只修改前端 UI 与重构文档 |
+| API contract untouched | yes | 未修改 tax API client contract 或 backend |
+| Read model / worker untouched | yes | 未修改 read model、worker 或 queue |
 | Reconciliation workbench internals frozen | yes | 当前未改 `ReconciliationWorkbenchPage` 或 `web/src/components/workbench/*` |
-| Non-workbench MUI additions | none | 当前未写实现代码 |
+| Non-workbench MUI additions | none | TaxOffset 页面和 `components/tax/*` 已无 `@mui/*` |
 | User-visible actions preserved | documented | `baseline_inventory.md`、`module_inventory.md` 已要求逐页检查 |
 | Behavior equivalence | documented | 旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗 |
 | HeroUI MCP active | yes | 当前会话已调用 HeroUI MCP quick start、theming、Table/Drawer/Modal docs |
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | P022 tax offset discovery 已验证；P023 characterization tests 已生成并审查 |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | TaxOffset P023-P027 verified；MG-P027 drafted for push |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,14 +54,19 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 tax offset characterization tests。
+- Scope: phase 6 tax offset cumulative MG。
 - Files touched:
+  - `web/src/pages/TaxOffsetPage.tsx`
+  - `web/src/components/tax/*`
+  - `web/src/components/common/FinanceTable.tsx`
+  - `web/src/app/styles.css`
+  - `web/src/test/TaxOffsetPage.test.tsx`
   - `docs/refactor-ui/modules/phase_6_tax_offset.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P022 docs grep and diff check passed
+- Verification run: TaxOffset tests, table/common tests, build, TaxOffset MUI grep and diff check passed
 - Failures: none
-- Next action: 执行 `P023-phase-6-tax-offset-characterization-tests`。
+- Next action: 执行 `MG-P027-phase-6-tax-offset`。
 
 ## Prompt Lifecycle
 
@@ -93,7 +98,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P023-phase-6-tax-offset-characterization-tests` | TaxOffset discovery verified；详见 `module_inventory.md` 和 `modules/phase_6_tax_offset.md` |
+| page batches | `in_progress` | `P027-phase-6-tax-offset-certified-results` | TaxOffset implementation verified；MG-P027 pending push |
 
 ## Verification Log
 
@@ -205,6 +210,12 @@
 | 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `rg -n "P022-phase-6-tax-offset-discovery|Current MUI Inventory|User-visible Entrypoints|P023-phase-6-tax-offset-characterization-tests|MuiDialog-root" docs/refactor-ui/modules/phase_6_tax_offset.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | TaxOffset inventory and next prompt recorded |
 | 2026-06-07 | `P022-phase-6-tax-offset-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P022-phase-6-tax-offset-discovery` | `git push origin refactor-ui` | passed | `c9b64d4d` pushed |
+| 2026-06-07 | `P023-phase-6-tax-offset-characterization-tests` | `cd web && npx vitest run TaxOffsetPage.test.tsx` | expected-fail | 6 failures: TaxOffset still rendered MUI table/dialog surfaces before implementation |
+| 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `cd web && npx vitest run TaxOffsetPage.test.tsx` | passed | 17 tests passed |
+| 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 32 tests passed |
+| 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax` | passed | No TaxOffset-scope MUI imports |
+| 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

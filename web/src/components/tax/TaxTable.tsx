@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { ReactNode } from "react";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Typography from "@mui/material/Typography";
+import { Button, Checkbox } from "@heroui/react";
 
 import type { TaxInvoiceRecord } from "../../features/tax/types";
+import {
+  AmountCell,
+  EmptyValue,
+  FinanceStatusTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+  TableCellStack,
+} from "../common/FinanceTable";
 import WorkbenchColumnFilterMenu from "../workbench/WorkbenchColumnFilterMenu";
-import WorkbenchPaneSearch from "../workbench/WorkbenchPaneSearch";
 
 type TaxTableProps = {
   title: string;
@@ -29,6 +29,89 @@ type TaxTableProps = {
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
   headerActions?: ReactNode;
 };
+
+function TaxTableSearch({
+  paneTitle,
+  open,
+  value,
+  onChange,
+  onClear,
+  onClose,
+  onToggle,
+}: {
+  paneTitle: string;
+  open: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+  onToggle: () => void;
+}) {
+  const normalizedValue = value.trim();
+  const hasAppliedValue = normalizedValue.length > 0;
+  const buttonAriaLabel = open
+    ? `收起搜索 ${paneTitle}`
+    : hasAppliedValue
+      ? `搜索 ${paneTitle}，当前关键词 ${normalizedValue}`
+      : `搜索 ${paneTitle}`;
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open]);
+
+  return (
+    <div className={`pane-search${open ? " open" : ""}${hasAppliedValue ? " has-applied" : ""}`}>
+      {open ? (
+        <div className={`pane-search-popover${hasAppliedValue ? " active" : ""}`}>
+          <input
+            aria-label={`搜索 ${paneTitle}`}
+            autoComplete="off"
+            className="pane-search-field"
+            placeholder={`搜索${paneTitle}`}
+            type="search"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          {value ? (
+            <button
+              aria-label={`清空搜索 ${paneTitle}`}
+              className="pane-search-clear-btn"
+              type="button"
+              onClick={onClear}
+            >
+              清空
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      <button
+        aria-label={buttonAriaLabel}
+        className={`pane-tool-btn pane-search-toggle-btn fixed${open || hasAppliedValue ? " active" : ""}${hasAppliedValue && !open ? " summary" : ""}`}
+        type="button"
+        onClick={onToggle}
+      >
+        {hasAppliedValue && !open ? (
+          <span className="pane-search-summary">{normalizedValue}</span>
+        ) : (
+          <svg aria-hidden="true" className="pane-tool-icon" viewBox="0 0 20 20">
+            <circle cx="9" cy="9" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M13.4 13.4 17 17" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
 
 export default function TaxTable({
   title,
@@ -161,130 +244,150 @@ export default function TaxTable({
   };
 
   return (
-    <Paper className="tax-panel" component="section" variant="outlined">
-      <Stack className="tax-panel-header" component="header" direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-        <Stack className="tax-panel-header-copy" spacing={0.25}>
-          <Typography component="span" fontWeight={800}>
-            {title}
-          </Typography>
-          <Typography component="span" color="text.secondary">
+    <section className="tax-panel">
+      <header className="tax-panel-header">
+        <div className="tax-panel-header-copy">
+          <strong>{title}</strong>
+          <span>
             {selectable
               ? `已选 ${visibleSelectedCount} / ${displayRows.length}${displayRows.length === rows.length ? "" : `（共 ${rows.length}）`}`
               : `共 ${displayRows.length}${displayRows.length === rows.length ? "" : ` / ${rows.length}`} 条`}
-          </Typography>
-        </Stack>
-        <Stack className="tax-panel-header-actions" direction="row" alignItems="center" gap={0.75}>
+          </span>
+        </div>
+        <div className="tax-panel-header-actions">
           <Button
             aria-label={buildTaxTableSortActionLabel(title, sortDirection)}
             className={`pane-tool-btn pane-sort-btn${sortDirection ? " active" : ""}`}
+            size="sm"
             type="button"
-            onClick={handleToggleSort}
-            size="small"
-            variant={sortDirection ? "contained" : "outlined"}
+            variant={sortDirection ? "primary" : "outline"}
+            onPress={handleToggleSort}
           >
             <span className="pane-sort-label">{buildTaxTableSortVisualLabel(sortDirection)}</span>
           </Button>
-          <WorkbenchPaneSearch
+          <TaxTableSearch
             open={searchOpen}
-            appliedValue={searchQuery}
-            draftValue={searchQuery}
             paneTitle={title}
+            value={searchQuery}
             onChange={setSearchQuery}
             onClear={() => setSearchQuery("")}
             onClose={() => setSearchOpen(false)}
             onToggle={() => setSearchOpen((current) => !current)}
           />
           {headerActions}
-        </Stack>
-      </Stack>
-      <TableContainer ref={activeTableWrapRef} className="table-wrap tax-table-wrap">
-        <Table aria-label={title} className="grid-table tax-grid-table" size="small" stickyHeader>
-          <TableHead>
-            <TableRow>
-              {selectable ? <TableCell className="tax-check-column">选择</TableCell> : null}
-              <TableCell className="tax-column-invoice-no">发票编号</TableCell>
-              <TableCell className="cell-money tax-column-tax-amount">税额</TableCell>
-              <TableCell className="tax-column-counterparty">
-                <Box className="tax-column-header-with-filter" component="span">
-                  <span>对方名称</span>
-                  <WorkbenchColumnFilterMenu
-                    label="对方名称"
-                    open={counterpartyFilterOpen}
-                    options={counterpartyOptions}
-                    selectedValues={selectedCounterparties}
-                    onChange={setSelectedCounterparties}
-                    onClose={() => setCounterpartyFilterOpen(false)}
-                    onToggle={() => setCounterpartyFilterOpen((current) => !current)}
-                  />
-                </Box>
-              </TableCell>
-              <TableCell className="cell-money tax-column-amount-rate">金额（税率）</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {displayRows.length === 0 ? (
-              <TableRow className="workbench-empty-row">
-                <TableCell className="workbench-empty-cell" colSpan={selectable ? 5 : 4}>
-                  {hasActiveDisplayFilter ? "当前筛选暂无记录" : "当前栏暂无记录"}
-                </TableCell>
-              </TableRow>
-            ) : null}
-            {displayRows.map((row) => {
-              const checked = selectedIds.includes(row.id);
-              const isLocked = row.isLocked ?? false;
-              const isHighlighted = highlightedRowId === row.id;
-              const invoiceFlow = getInvoiceFlowMeta(row);
-              const statusMeta = getStatusMeta(row.statusLabel);
-              const issueDateMeta = getIssueDateMeta(row.issueDate);
-              const taxRateMeta = getTaxRateMeta(row.taxRate);
+        </div>
+      </header>
+      <FinanceTable ariaLabel={title} className="tax-grid-table" minWidth={760} scrollRef={activeTableWrapRef}>
+        <FinanceTableHeader>
+          {selectable ? <FinanceTableColumn columnRole="selection">选择</FinanceTableColumn> : null}
+          <FinanceTableColumn columnRole="identity" isRowHeader>发票编号</FinanceTableColumn>
+          <FinanceTableColumn columnRole="amount">税额</FinanceTableColumn>
+          <FinanceTableColumn columnRole="account">
+            <span className="tax-column-header-with-filter">
+              <span>对方名称</span>
+              <WorkbenchColumnFilterMenu
+                label="对方名称"
+                open={counterpartyFilterOpen}
+                options={counterpartyOptions}
+                selectedValues={selectedCounterparties}
+                onChange={setSelectedCounterparties}
+                onClose={() => setCounterpartyFilterOpen(false)}
+                onToggle={() => setCounterpartyFilterOpen((current) => !current)}
+              />
+            </span>
+          </FinanceTableColumn>
+          <FinanceTableColumn columnRole="amount">金额（税率）</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          {displayRows.length === 0 ? (
+            <FinanceTableRow id={`${title}-empty`} className="workbench-empty-row" textValue={hasActiveDisplayFilter ? "当前筛选暂无记录" : "当前栏暂无记录"}>
+              {selectable ? (
+                <FinanceTableCell columnRole="selection" className="workbench-empty-cell">
+                  <EmptyValue />
+                </FinanceTableCell>
+              ) : null}
+              <FinanceTableCell columnRole="identity" className="workbench-empty-cell">
+                {hasActiveDisplayFilter ? "当前筛选暂无记录" : "当前栏暂无记录"}
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="amount" className="workbench-empty-cell">
+                <EmptyValue />
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="account" className="workbench-empty-cell">
+                <EmptyValue />
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="amount" className="workbench-empty-cell">
+                <EmptyValue />
+              </FinanceTableCell>
+            </FinanceTableRow>
+          ) : null}
+          {displayRows.map((row) => {
+            const checked = selectedIds.includes(row.id);
+            const isLocked = row.isLocked ?? false;
+            const isHighlighted = highlightedRowId === row.id;
+            const invoiceFlow = getInvoiceFlowMeta(row);
+            const statusMeta = getStatusMeta(row.statusLabel);
+            const issueDateMeta = getIssueDateMeta(row.issueDate);
+            const taxRateMeta = getTaxRateMeta(row.taxRate);
 
-              return (
-                <TableRow
-                  key={row.id}
-                  className={`${checked ? "tax-row-selected" : ""}${isLocked ? " tax-row-locked" : ""}${isHighlighted ? " tax-row-highlighted" : ""}`}
-                  data-certified-highlighted={isHighlighted ? "true" : "false"}
-                >
-                  {selectable ? (
-                    <TableCell className="tax-check-column">
-                      <Checkbox
-                        checked={checked}
-                        disabled={isLocked || row.isSelectable === false}
-                        inputProps={{ "aria-label": `${row.invoiceNo} ${row.counterparty}` }}
-                        onChange={() => onToggleRow?.(row.id)}
-                        size="small"
-                      />
-                    </TableCell>
-                  ) : null}
-                  <TableCell className="tax-column-invoice-no">
-                    <span className="tax-invoice-no-value">
+            return (
+              <FinanceTableRow
+                key={row.id}
+                className={`${checked ? "tax-row-selected" : ""}${isLocked ? " tax-row-locked" : ""}${isHighlighted ? " tax-row-highlighted" : ""}`}
+                dataCertifiedHighlighted={isHighlighted}
+                id={row.id}
+                textValue={`${row.invoiceNo} ${row.counterparty} ${invoiceFlow.label} ${row.statusLabel ?? ""} ${row.issueDate} ${row.taxAmount} ${row.amount} ${row.taxRate}`}
+              >
+                {selectable ? (
+                  <FinanceTableCell columnRole="selection" className="tax-check-column" textValue={`${row.invoiceNo} ${row.counterparty}`}>
+                    <Checkbox
+                      aria-label={`${row.invoiceNo} ${row.counterparty}`}
+                      className="tax-row-checkbox"
+                      isDisabled={isLocked || row.isSelectable === false}
+                      isSelected={checked}
+                      onChange={() => onToggleRow?.(row.id)}
+                    >
+                      <Checkbox.Control>
+                        <Checkbox.Indicator />
+                      </Checkbox.Control>
+                    </Checkbox>
+                  </FinanceTableCell>
+                ) : null}
+                <FinanceTableCell columnRole="identity" className="tax-column-invoice-no" textValue={row.invoiceNo}>
+                  <TableCellStack
+                    className="tax-invoice-no-value"
+                    primary={<span className="tax-invoice-number">{row.invoiceNo}</span>}
+                    secondary={(
                       <span className="tax-invoice-meta-row">
                         <span className={invoiceFlow.className}>{invoiceFlow.label}</span>
-                        {statusMeta ? <span className={statusMeta.className}>{statusMeta.label}</span> : null}
+                        {statusMeta ? <FinanceStatusTag tone={statusMeta.label.includes("已认证") ? "success" : "warning"}>{statusMeta.label}</FinanceStatusTag> : null}
                         {issueDateMeta ? <span className={issueDateMeta.className}>{issueDateMeta.label}</span> : null}
                       </span>
-                      <span className="tax-invoice-number">{row.invoiceNo}</span>
-                    </span>
-                  </TableCell>
-                  <TableCell className="cell-money tax-column-tax-amount">{row.taxAmount}</TableCell>
-                  <TableCell className="tax-column-counterparty">{row.counterparty}</TableCell>
-                  <TableCell className="cell-money tax-column-amount-rate">
-                    <span className="tax-amount-rate-value">
-                      <span className="tax-amount-rate-primary">{row.amount}</span>
-                      {taxRateMeta ? <span className={taxRateMeta.className}>({taxRateMeta.label})</span> : null}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                    )}
+                  />
+                </FinanceTableCell>
+                <FinanceTableCell columnRole="amount" className="tax-column-tax-amount" textValue={row.taxAmount}>
+                  {row.taxAmount}
+                </FinanceTableCell>
+                <FinanceTableCell columnRole="account" className="tax-column-counterparty" textValue={row.counterparty}>
+                  {row.counterparty}
+                </FinanceTableCell>
+                <FinanceTableCell columnRole="amount" className="tax-column-amount-rate" textValue={`${row.amount} ${row.taxRate}`}>
+                  <AmountCell
+                    amount={row.amount}
+                    direction={taxRateMeta ? <span className={taxRateMeta.className}>({taxRateMeta.label})</span> : undefined}
+                  />
+                </FinanceTableCell>
+              </FinanceTableRow>
+            );
+          })}
+        </FinanceTableBody>
+      </FinanceTable>
       {showBottomScrollbar ? (
         <div ref={scrollbarRef} className="tax-horizontal-scrollbar" aria-label={`${title}横向滚动`}>
           <div ref={scrollbarInnerRef} className="tax-horizontal-scrollbar-inner" />
         </div>
       ) : null}
-    </Paper>
+    </section>
   );
 }
 

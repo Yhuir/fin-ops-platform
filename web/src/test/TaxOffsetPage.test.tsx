@@ -16,6 +16,30 @@ function getStatCard(label: string) {
   return card;
 }
 
+function getTaxFinanceGrid(name: string) {
+  const grid = screen.getByRole("grid", { name });
+  expect(grid.closest(".finance-table")).not.toBeNull();
+  return grid;
+}
+
+function getModalFinanceGrid(modal: HTMLElement, name: RegExp | string) {
+  const grid = within(modal).getByRole("grid", { name });
+  expect(grid.closest(".finance-table")).not.toBeNull();
+  return grid;
+}
+
+function expectFinanceColumnRoles(grid: HTMLElement, expectedRoles: string[]) {
+  const headerRoles = within(grid)
+    .getAllByRole("columnheader")
+    .map((header) => header.getAttribute("data-column-role"));
+  expect(headerRoles).toEqual(expectedRoles);
+}
+
+function expectProjectDialogContract(dialog: HTMLElement) {
+  expect(dialog).toHaveClass("finance-dialog");
+  expect(dialog.closest(".MuiDialog-root")).toBeNull();
+}
+
 describe("Tax offset workbench", () => {
   test("clears the initial loading state when the active tax month request is aborted", async () => {
     window.history.pushState({}, "", "/tax-offset");
@@ -81,7 +105,8 @@ describe("Tax offset workbench", () => {
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "返回关联台" })).not.toBeInTheDocument();
 
-    const outputTable = screen.getByRole("table", { name: "销项票开票情况" });
+    const outputTable = getTaxFinanceGrid("销项票开票情况");
+    expectFinanceColumnRoles(outputTable, ["identity", "amount", "account", "amount"]);
     expect(within(outputTable).queryByRole("checkbox")).not.toBeInTheDocument();
     expect(within(outputTable).queryByText("发票类型")).not.toBeInTheDocument();
     expect(within(outputTable).getByText("销")).toBeInTheDocument();
@@ -100,7 +125,8 @@ describe("Tax offset workbench", () => {
     expect(within(outputInvoiceMetaRow as HTMLElement).queryByText("进")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("销项票开票情况横向滚动")).not.toBeInTheDocument();
 
-    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    const inputTable = getTaxFinanceGrid("进项票认证计划");
+    expectFinanceColumnRoles(inputTable, ["selection", "identity", "amount", "account", "amount"]);
     expect(within(inputTable).getByRole("checkbox", { name: /11203490/ })).not.toBeDisabled();
     expect(within(inputTable).getByRole("checkbox", { name: /11203491/ })).not.toBeDisabled();
     expect(within(inputTable).queryByText("发票类型")).not.toBeInTheDocument();
@@ -163,7 +189,7 @@ describe("Tax offset workbench", () => {
 
     const modal = screen.getByRole("dialog", { name: "已认证发票导入" });
     expect(modal).toBeInTheDocument();
-    expect(modal.closest(".MuiDialog-root")).not.toBeNull();
+    expectProjectDialogContract(modal);
     expect(window.location.pathname).toBe("/tax-offset");
     expect(screen.queryByRole("heading", { name: "导入中心" })).not.toBeInTheDocument();
 
@@ -182,7 +208,8 @@ describe("Tax offset workbench", () => {
     expect(within(modal).getAllByText(/匹配计划\s*1\s*条/).length).toBeGreaterThan(0);
     expect(within(modal).getAllByText(/未进入计划\s*1\s*条/).length).toBeGreaterThan(0);
     expect(within(modal).getByText(/无效记录\s*0\s*条/)).toBeInTheDocument();
-    const previewRowTable = within(modal).getByRole("table", { name: /行级预览结果/ });
+    const previewRowTable = getModalFinanceGrid(modal, /行级预览结果/);
+    expectFinanceColumnRoles(previewRowTable, ["quantity", "identity", "account", "amount", "status", "status", "description"]);
     expect(within(previewRowTable).getByText("11203490")).toBeInTheDocument();
     expect(within(previewRowTable).getByText("11203999")).toBeInTheDocument();
     expect(within(previewRowTable).getByText("匹配计划")).toBeInTheDocument();
@@ -198,7 +225,7 @@ describe("Tax offset workbench", () => {
     expect(await screen.findByText("已导入 2 条已认证记录，并已刷新当前税金抵扣页面。")).toBeInTheDocument();
     expect(within(getStatCard("已认证结果进项税额")).getByText("14,080.00")).toBeInTheDocument();
 
-    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    const inputTable = getTaxFinanceGrid("进项票认证计划");
     expect(within(inputTable).getByRole("checkbox", { name: /11203490/ })).toBeDisabled();
 
     const drawer = screen.getByRole("complementary", { name: "已认证结果" });
@@ -349,7 +376,7 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
 
-    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    const inputTable = getTaxFinanceGrid("进项票认证计划");
     const firstCheckbox = within(inputTable).getByRole("checkbox", { name: /11203490/ }) as HTMLInputElement;
     const secondCheckbox = within(inputTable).getByRole("checkbox", { name: /11203491/ }) as HTMLInputElement;
 
@@ -484,7 +511,7 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
 
-    const outputTable = screen.getByRole("table", { name: "销项票开票情况" });
+    const outputTable = getTaxFinanceGrid("销项票开票情况");
     await user.click(screen.getByRole("button", { name: "搜索 销项票开票情况" }));
     await user.type(screen.getByRole("searchbox", { name: "搜索 销项票开票情况" }), "西南");
     expect(within(outputTable).queryByText("90342011")).not.toBeInTheDocument();
@@ -508,7 +535,7 @@ describe("Tax offset workbench", () => {
     expect(within(outputTable).getByText("90342012")).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    const inputTable = getTaxFinanceGrid("进项票认证计划");
     await user.click(screen.getByRole("button", { name: "搜索 进项票认证计划" }));
     await user.type(screen.getByRole("searchbox", { name: "搜索 进项票认证计划" }), "集成");
     expect(within(inputTable).queryByText("11203490")).not.toBeInTheDocument();
@@ -612,7 +639,7 @@ describe("Tax offset workbench", () => {
     render(<App />);
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
-    const outputTable = screen.getByRole("table", { name: "销项票开票情况" });
+    const outputTable = getTaxFinanceGrid("销项票开票情况");
     const outputInvoiceMetaRow = within(outputTable).getByText("2026-03-16").closest(".tax-invoice-meta-row");
     expect(outputInvoiceMetaRow).not.toBeNull();
     expect(within(outputInvoiceMetaRow as HTMLElement).getByText("销")).toBeInTheDocument();
@@ -643,7 +670,7 @@ describe("Tax offset workbench", () => {
     const drawer = screen.getByRole("complementary", { name: "已认证结果" });
     await user.click(within(drawer).getByRole("button", { name: /11203490/ }));
 
-    const inputTable = screen.getByRole("table", { name: "进项票认证计划" });
+    const inputTable = getTaxFinanceGrid("进项票认证计划");
     const highlightedRow = within(inputTable).getByRole("row", { name: /11203490/ });
     expect(highlightedRow).toHaveAttribute("data-certified-highlighted", "true");
   });

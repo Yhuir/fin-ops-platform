@@ -1,23 +1,18 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import LinearProgress from "@mui/material/LinearProgress";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Typography from "@mui/material/Typography";
+import { Alert, Button, Chip, ProgressBar } from "@heroui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import AppDialog from "../common/AppDialog";
 import FileDropzone from "../common/FileDropzone";
+import {
+  EmptyValue,
+  FinanceStatusTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
 import { useSession } from "../../contexts/SessionContext";
 import {
   confirmTaxCertifiedImport,
@@ -63,6 +58,49 @@ function dedupeStatusLabel(row: TaxCertifiedImportPreviewRow) {
     return "新记录";
   }
   return "--";
+}
+
+function rowStatusTone(row: TaxCertifiedImportPreviewRow) {
+  if (row.rowStatus === "invalid") {
+    return "danger";
+  }
+  if (row.matchStatus === "matched_plan") {
+    return "success";
+  }
+  if (row.matchStatus === "outside_plan") {
+    return "warning";
+  }
+  return "neutral";
+}
+
+function Notice({
+  status,
+  children,
+}: {
+  status: "accent" | "danger" | "success" | "warning";
+  children: string;
+}) {
+  return (
+    <Alert role={status === "danger" ? "alert" : "status"} status={status}>
+      <Alert.Indicator />
+      <Alert.Content>
+        <Alert.Description>{children}</Alert.Description>
+      </Alert.Content>
+    </Alert>
+  );
+}
+
+function InlineProgress({ label }: { label: string }) {
+  return (
+    <div className="certified-import-progress" role="status">
+      <p>{label}</p>
+      <ProgressBar aria-label={label} color="accent" isIndeterminate size="sm">
+        <ProgressBar.Track>
+          <ProgressBar.Fill />
+        </ProgressBar.Track>
+      </ProgressBar>
+    </div>
+  );
 }
 
 export default function CertifiedInvoiceImportModal({
@@ -199,162 +237,146 @@ export default function CertifiedInvoiceImportModal({
   }
 
   return (
-    <Dialog
-      aria-labelledby="certified-invoice-import-modal-title"
-      fullWidth
+    <AppDialog
+      disableEscapeClose={isConfirming}
       maxWidth="md"
       open
+      title="已认证发票导入"
+      description="在税金抵扣页内完成已认证发票预览、确认导入和页面刷新，不跳转到关联台导入界面。"
       onClose={() => {
         if (!isConfirming) {
           onClose();
         }
       }}
+      actions={(
+        <>
+          <Button isDisabled={isConfirming} type="button" variant="tertiary" onPress={onClose}>
+            取消
+          </Button>
+          <Button isDisabled={!canPreview} type="button" variant="outline" onPress={handlePreview}>
+            预览识别结果
+          </Button>
+          <Button isDisabled={!canConfirm} isPending={isConfirming} type="button" onPress={handleConfirm}>
+            确认导入
+          </Button>
+        </>
+      )}
     >
-      <DialogTitle id="certified-invoice-import-modal-title">
-        已认证发票导入
-      </DialogTitle>
+      <div className="certified-import-body">
+        <FileDropzone
+          accept=".xlsx,.xls"
+          disabled={!canMutateData || isPreviewing || isConfirming}
+          errorText={errorMessage}
+          helperText={fileHint}
+          label="选择已认证发票文件"
+          multiple
+          onFiles={applyDroppedFiles}
+        />
 
-      <DialogContent className="certified-import-body" dividers>
-        <Stack spacing={2}>
-          <Typography color="text.secondary" variant="body2">
-            在税金抵扣页内完成已认证发票预览、确认导入和页面刷新，不跳转到关联台导入界面。
-          </Typography>
+        {!canMutateData ? (
+          <Notice status="accent">当前账号仅支持查看和导出，不能导入已认证发票。</Notice>
+        ) : null}
 
-          <FileDropzone
-            accept=".xlsx,.xls"
-            disabled={!canMutateData || isPreviewing || isConfirming}
-            errorText={errorMessage}
-            helperText={fileHint}
-            label="选择已认证发票文件"
-            multiple
-            onFiles={applyDroppedFiles}
-          />
+        {selectedFiles.length > 0 ? (
+          <section className="certified-import-file-list" aria-label="已选择文件">
+            {selectedFiles.map((file) => (
+              <div key={`${file.name}-${file.lastModified}-${file.size}`} className="certified-import-file-item">
+                <strong>{file.name}</strong>
+                <span>{(file.size / 1024).toFixed(1)} KB</span>
+              </div>
+            ))}
+          </section>
+        ) : (
+          <Notice status="accent">当前还没有选择文件。</Notice>
+        )}
 
-          {!canMutateData ? (
-            <Alert severity="info">当前账号仅支持查看和导出，不能导入已认证发票。</Alert>
-          ) : null}
+        {isPreviewing ? <InlineProgress label="正在识别已认证发票，请稍候..." /> : null}
+        {isConfirming ? <InlineProgress label={confirmMessage} /> : null}
 
-          {selectedFiles.length > 0 ? (
-            <Stack className="certified-import-file-list" aria-label="已选择文件" spacing={1}>
-              {selectedFiles.map((file) => (
-                <Paper key={`${file.name}-${file.lastModified}-${file.size}`} className="certified-import-file-item" variant="outlined">
-                  <Typography component="strong" fontWeight={800}>
-                    {file.name}
-                  </Typography>
-                  <Typography component="span" color="text.secondary">
-                    {(file.size / 1024).toFixed(1)} KB
-                  </Typography>
-                </Paper>
-              ))}
-            </Stack>
-          ) : (
-            <Alert severity="info" variant="outlined">
-              当前还没有选择文件。
-            </Alert>
-          )}
+        {previewResult ? (
+          <section className="export-center-preview" aria-label="已认证发票预览结果">
+            <div className="export-center-preview-header">
+              <h3>预览结果</h3>
+              <Chip size="sm" variant="secondary">{previewResult.fileCount} 个文件</Chip>
+            </div>
+            <div className="export-center-preview-body">
+              <div className="export-center-preview-summary certified-import-summary">
+                <Chip color="accent" variant="soft">识别记录 {previewResult.summary.recognizedCount} 条</Chip>
+                <Chip variant="secondary">匹配计划 {previewResult.summary.matchedPlanCount} 条</Chip>
+                <Chip variant="secondary">未进入计划 {previewResult.summary.outsidePlanCount} 条</Chip>
+                <Chip variant="secondary">无效记录 {previewResult.summary.invalidCount} 条</Chip>
+              </div>
+              <div className="certified-import-preview-files">
+                {previewResult.files.map((file) => (
+                  <section key={file.id} className="certified-import-preview-file">
+                    <div className="certified-import-preview-file-header">
+                      <strong>{file.fileName}</strong>
+                      <Chip size="sm" variant="secondary">{file.month}</Chip>
+                    </div>
+                    <div className="certified-import-preview-file-meta">
+                      <span>识别 {file.recognizedCount} 条</span>
+                      <span>匹配计划 {file.matchedPlanCount} 条</span>
+                      <span>未进入计划 {file.outsidePlanCount} 条</span>
+                      <span>无效 {file.invalidCount} 条</span>
+                    </div>
+                    {file.rows.length > 0 ? (
+                      <FinanceTable ariaLabel={`${file.fileName} 行级预览结果`} className="certified-import-preview-row-table" minWidth={760}>
+                        <FinanceTableHeader>
+                          <FinanceTableColumn columnRole="quantity">行号</FinanceTableColumn>
+                          <FinanceTableColumn columnRole="identity" isRowHeader>发票号码</FinanceTableColumn>
+                          <FinanceTableColumn columnRole="account">销方</FinanceTableColumn>
+                          <FinanceTableColumn columnRole="amount">税额</FinanceTableColumn>
+                          <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
+                          <FinanceTableColumn columnRole="status">重复</FinanceTableColumn>
+                          <FinanceTableColumn columnRole="description">原因</FinanceTableColumn>
+                        </FinanceTableHeader>
+                        <FinanceTableBody>
+                          {file.rows.map((row) => {
+                            const invoiceNo = row.digitalInvoiceNo || row.invoiceNo || "";
+                            const sellerName = row.sellerName || "";
+                            const taxAmount = row.deductibleTaxAmount || row.taxAmount || "";
+                            const errorMessageText = row.errorMessage || "";
 
-          {isPreviewing ? (
-            <Box>
-              <Typography color="text.secondary" sx={{ mb: 1 }}>
-                正在识别已认证发票，请稍候...
-              </Typography>
-              <LinearProgress />
-            </Box>
-          ) : null}
-          {isConfirming ? (
-            <Box>
-              <Typography color="text.secondary" sx={{ mb: 1 }}>
-                {confirmMessage}
-              </Typography>
-              <LinearProgress />
-            </Box>
-          ) : null}
-
-          {previewResult ? (
-            <Paper className="export-center-preview" component="section" aria-label="已认证发票预览结果" variant="outlined">
-              <Stack className="export-center-preview-header" direction="row" justifyContent="space-between" alignItems="center">
-                <Typography component="h3" variant="subtitle1" fontWeight={800}>
-                  预览结果
-                </Typography>
-                <Chip label={`${previewResult.fileCount} 个文件`} size="small" variant="outlined" />
-              </Stack>
-              <Stack className="export-center-preview-body" spacing={1.5}>
-                <Stack className="export-center-preview-summary certified-import-summary" direction="row" flexWrap="wrap" gap={1}>
-                  <Chip color="primary" label={`识别记录 ${previewResult.summary.recognizedCount} 条`} />
-                  <Chip label={`匹配计划 ${previewResult.summary.matchedPlanCount} 条`} variant="outlined" />
-                  <Chip label={`未进入计划 ${previewResult.summary.outsidePlanCount} 条`} variant="outlined" />
-                  <Chip label={`无效记录 ${previewResult.summary.invalidCount} 条`} variant="outlined" />
-                </Stack>
-                <Stack className="certified-import-preview-files" spacing={1}>
-                  {previewResult.files.map((file) => (
-                    <Paper key={file.id} className="certified-import-preview-file" component="section" variant="outlined">
-                      <Stack className="certified-import-preview-file-header" direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography component="strong" fontWeight={800}>
-                          {file.fileName}
-                        </Typography>
-                        <Chip label={file.month} size="small" variant="outlined" />
-                      </Stack>
-                      <Stack className="certified-import-preview-file-meta" direction="row" flexWrap="wrap" gap={1}>
-                        <Typography component="span">识别 {file.recognizedCount} 条</Typography>
-                        <Typography component="span">匹配计划 {file.matchedPlanCount} 条</Typography>
-                        <Typography component="span">未进入计划 {file.outsidePlanCount} 条</Typography>
-                        <Typography component="span">无效 {file.invalidCount} 条</Typography>
-                      </Stack>
-                      {file.rows.length > 0 ? (
-                        <Table className="certified-import-preview-row-table" size="small" aria-label={`${file.fileName} 行级预览结果`}>
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>行号</TableCell>
-                              <TableCell>发票号码</TableCell>
-                              <TableCell>销方</TableCell>
-                              <TableCell>税额</TableCell>
-                              <TableCell>状态</TableCell>
-                              <TableCell>重复</TableCell>
-                              <TableCell>原因</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {file.rows.map((row) => (
-                              <TableRow key={`${file.id}-${row.sourceRowNumber}-${row.id}`}>
-                                <TableCell>{row.sourceRowNumber}</TableCell>
-                                <TableCell>{row.digitalInvoiceNo || row.invoiceNo || "--"}</TableCell>
-                                <TableCell>{row.sellerName || "--"}</TableCell>
-                                <TableCell>{row.deductibleTaxAmount || row.taxAmount || "--"}</TableCell>
-                                <TableCell>
-                                  <Chip
-                                    color={row.rowStatus === "invalid" ? "error" : row.matchStatus === "matched_plan" ? "success" : "default"}
-                                    label={rowStatusLabel(row)}
-                                    size="small"
-                                    variant={row.matchStatus === "outside_plan" ? "outlined" : "filled"}
-                                  />
-                                </TableCell>
-                                <TableCell>{dedupeStatusLabel(row)}</TableCell>
-                                <TableCell>{row.errorMessage || "--"}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      ) : null}
-                    </Paper>
-                  ))}
-                </Stack>
-              </Stack>
-            </Paper>
-          ) : null}
-        </Stack>
-      </DialogContent>
-
-      <DialogActions>
-        <Button type="button" onClick={onClose} disabled={isConfirming}>
-          取消
-        </Button>
-        <Button type="button" onClick={handlePreview} disabled={!canPreview} variant="outlined">
-          预览识别结果
-        </Button>
-        <Button type="button" onClick={handleConfirm} disabled={!canConfirm} variant="contained">
-          确认导入
-        </Button>
-      </DialogActions>
-    </Dialog>
+                            return (
+                              <FinanceTableRow
+                                key={`${file.id}-${row.sourceRowNumber}-${row.id}`}
+                                id={`${file.id}-${row.sourceRowNumber}-${row.id}`}
+                                textValue={`${invoiceNo} ${sellerName} ${rowStatusLabel(row)} ${dedupeStatusLabel(row)}`}
+                              >
+                                <FinanceTableCell columnRole="quantity" textValue={String(row.sourceRowNumber)}>
+                                  {row.sourceRowNumber}
+                                </FinanceTableCell>
+                                <FinanceTableCell columnRole="identity" textValue={invoiceNo}>
+                                  {invoiceNo || <EmptyValue />}
+                                </FinanceTableCell>
+                                <FinanceTableCell columnRole="account" textValue={sellerName}>
+                                  {sellerName || <EmptyValue />}
+                                </FinanceTableCell>
+                                <FinanceTableCell columnRole="amount" textValue={taxAmount}>
+                                  {taxAmount || <EmptyValue />}
+                                </FinanceTableCell>
+                                <FinanceTableCell columnRole="status" textValue={rowStatusLabel(row)}>
+                                  <FinanceStatusTag tone={rowStatusTone(row)}>{rowStatusLabel(row)}</FinanceStatusTag>
+                                </FinanceTableCell>
+                                <FinanceTableCell columnRole="status" textValue={dedupeStatusLabel(row)}>
+                                  {dedupeStatusLabel(row)}
+                                </FinanceTableCell>
+                                <FinanceTableCell columnRole="description" textValue={errorMessageText}>
+                                  {errorMessageText || <EmptyValue />}
+                                </FinanceTableCell>
+                              </FinanceTableRow>
+                            );
+                          })}
+                        </FinanceTableBody>
+                      </FinanceTable>
+                    ) : null}
+                  </section>
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </AppDialog>
   );
 }
