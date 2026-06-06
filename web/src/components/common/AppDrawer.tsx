@@ -1,9 +1,5 @@
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import type { ReactNode } from "react";
+import { Button, Drawer } from "@heroui/react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 
 type AppDrawerProps = {
   open: boolean;
@@ -14,28 +10,39 @@ type AppDrawerProps = {
   onClose: () => void;
 };
 
+type AppDrawerStyle = CSSProperties & {
+  "--finance-drawer-width": string;
+};
+
 export default function AppDrawer({ open, title, children, footer, width = 420, onClose }: AppDrawerProps) {
+  const titleId = useId();
+  const drawerStyle: AppDrawerStyle = {
+    "--finance-drawer-width": `${width}px`,
+  };
+
   return (
-    <Drawer
-      anchor="right"
-      open={open}
-      onClose={onClose}
-      PaperProps={{ sx: { width: { xs: "100%", sm: width }, maxWidth: "100vw" } }}
+    <Drawer.Backdrop
+      isOpen={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onClose();
+        }
+      }}
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
-          <Typography component="h2" variant="h6" fontWeight={800}>
-            {title}
-          </Typography>
-          <IconButton aria-label="关闭抽屉" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Stack sx={{ flex: 1, minHeight: 0, overflow: "auto", px: 2, py: 1.5 }}>
-          {children}
-        </Stack>
-        {footer ? <Stack sx={{ borderTop: 1, borderColor: "divider", p: 2 }}>{footer}</Stack> : null}
-      </Stack>
-    </Drawer>
+      <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
+        <Drawer.Dialog aria-labelledby={titleId} className="finance-drawer" style={drawerStyle}>
+          <Drawer.Header className="finance-drawer__header">
+            <Drawer.Heading className="finance-drawer__title" id={titleId}>
+              {title}
+            </Drawer.Heading>
+            <Button aria-label="关闭抽屉" isIconOnly onPress={onClose} size="sm" variant="tertiary">
+              <span aria-hidden="true">×</span>
+            </Button>
+          </Drawer.Header>
+          <Drawer.Body className="finance-drawer__body">{children}</Drawer.Body>
+          {footer ? <Drawer.Footer className="finance-drawer__footer">{footer}</Drawer.Footer> : null}
+        </Drawer.Dialog>
+      </Drawer.Content>
+    </Drawer.Backdrop>
   );
 }

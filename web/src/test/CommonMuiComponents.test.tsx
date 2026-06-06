@@ -4,6 +4,7 @@ import type React from "react";
 import { vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
+import AppDrawer from "../components/common/AppDrawer";
 import AppDialog from "../components/common/AppDialog";
 import ConfirmActionDialog from "../components/common/ConfirmActionDialog";
 import FileDropzone from "../components/common/FileDropzone";
@@ -127,6 +128,30 @@ describe("common MUI components", () => {
 
     expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "处理中..." })).toBeDisabled();
+  });
+
+  test("renders app drawer as a right side dialog with body and footer", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderWithMui(
+      <AppDrawer
+        footer={<button type="button">保存设置</button>}
+        onClose={onClose}
+        open
+        title="规则详情"
+      >
+        <p>抽屉正文</p>
+      </AppDrawer>,
+    );
+
+    const drawer = screen.getByRole("dialog", { name: "规则详情" });
+    expect(drawer).toHaveTextContent("抽屉正文");
+    expect(screen.getByRole("button", { name: "保存设置" })).toBeInTheDocument();
+    expect(drawer.closest("[data-placement='right']")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   test("emits dropped files from the shared dropzone", () => {

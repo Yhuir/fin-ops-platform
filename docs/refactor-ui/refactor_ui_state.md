@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P007-phase-3-dialog-primitives`
-- Current MG ID: `MG-P007-phase-3-dialog-primitives`
+- Current Prompt ID: `P008-phase-3-app-drawer-primitive`
+- Current MG ID: `MG-P008-phase-3-app-drawer-primitive`
 
 ## Global Invariants
 
@@ -33,7 +33,7 @@
 | `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；MG-P001 已 push |
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
-| `phase_3_primitives` | `in_progress` | 2026-06-07 |  | `partial-passed` | P006 StatePanel/PermissionNotice verified，P007 AppDialog/ConfirmActionDialog verified，MG-P007 已 push |
+| `phase_3_primitives` | `in_progress` | 2026-06-07 |  | `partial-passed` | P006/P007/P008 primitives verified，MG-P008 待执行 |
 | `phase_4_shell` | `pending` |  |  |  | App Shell 迁移 |
 | `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
@@ -54,10 +54,9 @@
 
 ## Active Checkpoint
 
-- Scope: phase 3 shared dialog primitives。
+- Scope: phase 3 shared drawer primitive。
 - Files touched:
-  - `web/src/components/common/AppDialog.tsx`
-  - `web/src/components/common/ConfirmActionDialog.tsx`
+  - `web/src/components/common/AppDrawer.tsx`
   - `web/src/test/CommonMuiComponents.test.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -65,7 +64,7 @@
   - `docs/refactor-ui/modules/phase_3_primitives.md`
 - Verification run: passed
 - Failures: none
-- Next action: 从 `refactor-ui` 生成下一条 `phase_3_primitives` prompt。
+- Next action: 执行 `MG-P008-phase-3-app-drawer-primitive`。
 
 ## Prompt Lifecycle
 
@@ -94,7 +93,7 @@
 | baseline docs gap fill | `verified` | `P001-baseline-doc-gap-fill` | 基线、平台栈、测试策略、模块队列补齐 |
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
-| primitives | `in_progress` | `P007-phase-3-dialog-primitives` | StatePanel/PermissionNotice verified，dialog primitives verified，MG-P007 已 push |
+| primitives | `in_progress` | `P008-phase-3-app-drawer-primitive` | StatePanel/PermissionNotice verified，dialog primitives verified，AppDrawer verified，MG-P008 待执行 |
 | app shell | `pending` |  | 新 shell 包住关联台 |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
@@ -136,6 +135,10 @@
 | 2026-06-07 | `P007-phase-3-dialog-primitives` | `if rg -n '@mui/' web/src/components/common/AppDialog.tsx web/src/components/common/ConfirmActionDialog.tsx; then exit 1; else exit 0; fi` | passed | No MUI imports in dialog primitives |
 | 2026-06-07 | `P007-phase-3-dialog-primitives` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P007-phase-3-dialog-primitives` | `git push origin refactor-ui` | passed | `32841902` pushed |
+| 2026-06-07 | `P008-phase-3-app-drawer-primitive` | `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 10 tests passed |
+| 2026-06-07 | `P008-phase-3-app-drawer-primitive` | `cd web && npm run build` | failed-then-passed | First failed because Drawer.Content does not accept style; moved CSS variable to Drawer.Dialog and build passed |
+| 2026-06-07 | `P008-phase-3-app-drawer-primitive` | `if rg -n '@mui/' web/src/components/common/AppDrawer.tsx; then exit 1; else exit 0; fi` | passed | No MUI imports in AppDrawer |
+| 2026-06-07 | `P008-phase-3-app-drawer-primitive` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

@@ -225,6 +225,53 @@ textarea {
   padding: var(--fp-space-4) var(--fp-space-5);
 }
 
+.finance-drawer__content {
+  max-width: 100vw;
+}
+
+.finance-drawer {
+  height: 100%;
+  width: min(100vw, var(--finance-drawer-width, 420px));
+  border-radius: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  box-shadow: var(--fp-shadow-drawer);
+}
+
+.finance-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+  border-bottom: 1px solid var(--fp-border);
+  padding: var(--fp-space-4);
+}
+
+.finance-drawer__title {
+  color: var(--fp-ink);
+  font-size: var(--fp-text-title);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.finance-drawer__body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: var(--fp-space-4);
+}
+
+.finance-drawer__footer {
+  border-top: 1px solid var(--fp-border);
+  padding: var(--fp-space-4);
+}
+
+@media (max-width: 640px) {
+  .finance-drawer {
+    width: 100vw;
+  }
+}
+
 .MuiDataGrid-root .MuiDataGrid-columnHeader,
 .MuiDataGrid-root .MuiDataGrid-cell {
   justify-content: center !important;

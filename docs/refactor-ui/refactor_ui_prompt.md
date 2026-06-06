@@ -376,6 +376,76 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified
 
+### P008-phase-3-app-drawer-primitive
+
+- Phase: `phase_3_primitives`
+- Status: `approved_for_execution`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 只迁移 `AppDrawer` 共享右侧抽屉 primitive，从 MUI Drawer/IconButton/Typography/Stack/Close icon 迁到 HeroUI Drawer/Button + Tailwind token classes。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/common/AppDrawer.tsx、web/src/test/CommonMuiComponents.test.tsx 和 `rg -n "AppDrawer" web/src --glob '!components/workbench/**'` 的使用点。使用 HeroUI MCP Drawer/Button docs 核对 controlled drawer、placement、dismiss 和 close button API。只处理 AppDrawer，不迁移 FileDropzone、PageScaffold、PageToolbar、App Shell 或业务页面。先增加 CommonMuiComponents.test.tsx 中 AppDrawer 的用户可观察行为断言：dialog accessible name、right placement、body/footer 渲染、关闭按钮触发 onClose。再把 AppDrawer 实现迁到 HeroUI Drawer/Button + token classes。保留 open/title/children/footer/width/onClose 契约；旧右侧抽屉必须仍为右侧抽屉。不得改后端/API/read model/worker，不得改关联台内部工作区。运行 targeted tests、build、MUI import grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Business pages untouched: yes。
+- Overlay shape preserved: yes，旧右侧抽屉仍为右侧抽屉。
+- User-visible contract preserved: yes，保留 `open/title/children/footer/width/onClose`、关闭按钮和 body/footer。
+- Characterization tests required: yes，断言 dialog name、right placement、body/footer、close button。
+- Verification defined: targeted Vitest、build、MUI import grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `AppDrawer` 已从 MUI Drawer/IconButton/Typography/Stack/Close icon 迁到 HeroUI Drawer/Button + token classes。
+- `Drawer.Content` 固定 `placement="right"`，保持旧右侧抽屉形态。
+- 关闭按钮 accessible name 仍为 `关闭抽屉`。
+- Build 首次失败于 `Drawer.Content` 不接受 `style`；已将动态宽度 CSS variable 移到 `Drawer.Dialog` 后通过。
+- 未迁移 FileDropzone、PageScaffold、PageToolbar、App Shell 或业务页面。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/' web/src/components/common/AppDrawer.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P008-phase-3-app-drawer-primitive
+
+- Status: `mg_reviewed`
+- Scope:
+  - `web/src/components/common/AppDrawer.tsx`
+  - `web/src/test/CommonMuiComponents.test.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_3_primitives.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P008 AppDrawer primitive 文件：web/src/components/common/AppDrawer.tsx、web/src/test/CommonMuiComponents.test.tsx、web/src/app/styles.css、docs/refactor-ui/modules/phase_3_primitives.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/' web/src/components/common/AppDrawer.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate drawer primitive。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`

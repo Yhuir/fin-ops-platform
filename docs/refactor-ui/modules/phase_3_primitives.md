@@ -160,3 +160,57 @@
 - `CommonMuiComponents.test.tsx` 已增加 dialog accessible name/description、body/actions、Esc close、disableEscapeClose、loading disabled 行为断言。
 - Build 首次失败于 `sizeFromMaxWidth` 参数类型包含 `undefined`；根因是对外可选 prop 和内部默认值后的非空边界未区分。已通过 `NonNullable<AppDialogProps["maxWidth"]>` 修正，无运行行为变化。
 - Build 通过；仍存在 phase 2 已记录的 HeroUI/Tailwind generated CSS minifier warnings 和既有 chunk size warning。
+
+## Slice P008: App Drawer
+
+### Scope
+
+- `AppDrawer`
+- 相关公共组件测试
+- 必要的 drawer token classes
+
+### Current Contract
+
+`AppDrawer` 的公开契约是：
+
+- `open`
+- `title`
+- `children`
+- `footer`
+- `width`
+- `onClose`
+
+用户可观察行为必须保持：
+
+- 旧右侧抽屉仍为右侧抽屉。
+- `title` 仍是 drawer dialog accessible name。
+- 关闭按钮文案仍是 `关闭抽屉`。
+- `children` 在可滚动 body 区域。
+- `footer` 保持底部区域。
+- 默认宽度为 420px，小屏退化为 100vw。
+
+### Target Implementation
+
+- 使用 HeroUI `Drawer`。
+- `Drawer.Content` 必须使用 `placement="right"`。
+- 使用 HeroUI `Button` 承载关闭按钮。
+- 不再从 `@mui/*` 引入 `AppDrawer` 实现。
+
+### Verification
+
+- `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+- `cd web && npm run build`
+- `if rg -n '@mui/' web/src/components/common/AppDrawer.tsx; then exit 1; else exit 0; fi`
+- `git diff --check`
+- `git status --short --branch`
+
+### Execution Result
+
+- Status: verified。
+- `AppDrawer` 已迁到 HeroUI controlled `Drawer`。
+- `Drawer.Content` 固定 `placement="right"`，并保留 `data-placement="right"` 测试锚点。
+- 关闭按钮已迁到 HeroUI `Button`，accessible name 保持 `关闭抽屉`。
+- 保留 `open/title/children/footer/width/onClose` 契约。
+- 宽度通过 `Drawer.Dialog` 上的 `--finance-drawer-width` CSS variable 注入；`Drawer.Content` 不接受 `style`，首次 build 因该 API 边界失败，已移动到 `Drawer.Dialog` 后通过。
+- `AppDrawer` 不再引入 `@mui/*`。
+- Build 通过；仍存在 phase 2 已记录的 HeroUI/Tailwind generated CSS minifier warnings 和既有 chunk size warning。
