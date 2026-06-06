@@ -5,7 +5,7 @@
 ## Current Phase
 
 - Phase: `phase_0_baseline`
-- Status: `verifying`
+- Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P000-docs-bootstrap`
@@ -27,7 +27,7 @@
 
 | Phase | Status | Started | Completed | Verification | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `phase_0_baseline` | `verifying` | 2026-06-07 |  | `passed` | docs bootstrap 已验证，进入 MG |
+| `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | docs bootstrap MG 已 push |
 | `phase_1_docs_and_tokens` | `pending` |  |  |  | PRODUCT/DESIGN 和 Tailwind token |
 | `phase_2_platform_stack` | `pending` |  |  |  | React 19 + HeroUI v3 + Tailwind v4 |
 | `phase_3_primitives` | `pending` |  |  |  | 本地 UI primitives |
@@ -61,7 +61,7 @@
   - `docs/index.md`
 - Verification run: pending
 - Failures: none
-- Next action: 完成文档写入后运行文档路径检查和 git status。
+- Next action: 从 `refactor-ui` 分支生成下一条 prompt，进入 `phase_1_docs_and_tokens` 或重新确认是否先处理 PRODUCT.md。
 
 ## Prompt Lifecycle
 
@@ -100,8 +100,10 @@
 | 2026-06-07 | `P000-docs-bootstrap` | `find docs/refactor-ui -maxdepth 1 -type f -name '*.md' | sort` | passed | 四份文档存在 |
 | 2026-06-07 | `P000-docs-bootstrap` | `rg -n "refactor-ui|HeroUI|Micro-JIT|cumulative MG" docs/refactor-ui docs/index.md DESIGN.md` | passed | 关键规则和入口存在 |
 | 2026-06-07 | `P000-docs-bootstrap` | `git status --short --branch` | passed | 仅文档变更和 docs/refactor-ui 新文件 |
+| 2026-06-07 | `MG-P000-docs-bootstrap` | `git push -u origin refactor-ui` | passed | `52f4520f` pushed |
 
 ## Push Log
 
 | Date | MG | Branch | Commit | Result |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P000-docs-bootstrap` | `refactor-ui` | `52f4520f` | pushed |

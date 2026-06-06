@@ -102,7 +102,7 @@
 
 ### MG-P000-docs-bootstrap
 
-- Status: `reviewed`
+- Status: `verified`
 - Scope:
   - `DESIGN.md`
   - `docs/index.md`
@@ -126,6 +126,12 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
+
+#### Execution
+
+- Commit: `52f4520f`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified
 
 ### MG Prompt Template
 
