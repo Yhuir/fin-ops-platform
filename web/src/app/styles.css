@@ -356,6 +356,50 @@ textarea {
   padding: 0;
 }
 
+.app-shell-progress-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-2) var(--fp-space-4) 0;
+}
+
+@media (min-width: 900px) {
+  .app-shell-progress-stack {
+    padding-right: var(--fp-space-6);
+    padding-left: var(--fp-space-6);
+  }
+}
+
+.app-shell-operation-error {
+  max-width: min(520px, 92vw);
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.app-shell-operation-error__close {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--fp-radius-sm);
+  background: transparent;
+  color: var(--fp-danger);
+  cursor: pointer;
+  font-size: var(--fp-text-title);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.app-shell-operation-error__close:hover,
+.app-shell-operation-error__close:focus-visible {
+  background: var(--fp-danger-soft);
+}
+
 .global-header {
   padding: 0;
   border: 1px solid #d8e1eb;

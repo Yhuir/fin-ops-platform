@@ -71,6 +71,7 @@ Each implementation prompt must preserve user-visible entry points: if a menu it
 - `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx`
 - `cd web && npm run build`
 - `if rg -n '@mui/' web/src/app/App.tsx web/src/components/shell web/src/app/pageRegistry.tsx; then exit 1; else exit 0; fi`
+- During P013 only, `App.tsx` must contain no direct `@mui/*` imports. A temporary date picker compatibility provider is allowed until `MonthPicker` and page date pickers migrate.
 - `git diff --check`
 - `git status --short --branch`
 
@@ -93,4 +94,24 @@ Each implementation prompt must preserve user-visible entry points: if a menu it
 - Updated `AppSidebar` icon rendering from MUI `fontSize` to lucide `size/strokeWidth`.
 - Did not migrate AppSidebar layout, AppTopBar, AppStatusIndicator, App runtime provider, backend, or workbench internals.
 - `npm install` still reports 9 vulnerabilities already present in the dependency tree; no `npm audit fix` was run because it is outside this scoped shell icon slice.
+- Build passes with known HeroUI/Tailwind generated CSS minifier warnings and existing chunk size warning.
+
+## Slice P013: Shell Provider Runtime
+
+### Scope
+
+- `web/src/app/App.tsx`
+- `web/src/app/MuiDatePickerCompatProvider.tsx`
+- `web/src/app/styles.css`
+
+### Result
+
+- Status: verified。
+- Removed `MuiProviders` from `App.tsx`; App Shell no longer receives MUI ThemeProvider/CssBaseline as the root UI runtime.
+- Replaced `useTheme`/`useMediaQuery` with a small shell-local `matchMedia` hook.
+- Replaced App Shell `Box` layout wrappers with semantic `div`/`section`/`main` markup and token CSS classes.
+- Replaced the shell operation error `Alert` with HeroUI `Alert` plus an explicit close button that preserves the old dismiss action.
+- Added `MuiDatePickerCompatProvider` as a temporary, narrowly scoped compatibility layer for MUI X date pickers still used by non-shell pages. This keeps `adapterLocale="zh-cn"` and date picker `localeText` so MonthPicker keeps the existing Chinese accessible labels.
+- The first verification run failed after removing the full `MuiProviders` because MUI X DatePicker lost localization context; the fix is the narrow compatibility provider, not restoring the full MUI theme runtime.
+- Did not migrate `AppSidebar`, `AppTopBar`, `AppStatusIndicator`, business pages, backend, API, read model, worker, or workbench internals.
 - Build passes with known HeroUI/Tailwind generated CSS minifier warnings and existing chunk size warning.

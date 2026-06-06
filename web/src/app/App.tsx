@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import useMediaQuery from "@mui/material/useMediaQuery";
-import { useTheme } from "@mui/material/styles";
+import { useEffect, useState, type CSSProperties } from "react";
+import { Alert } from "@heroui/react";
 import { BrowserRouter } from "react-router-dom";
 
 import SessionGate from "../components/auth/SessionGate";
@@ -18,7 +15,7 @@ import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionProvider } from "../contexts/SessionContext";
 import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
-import MuiProviders from "./MuiProviders";
+import MuiDatePickerCompatProvider from "./MuiDatePickerCompatProvider";
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
@@ -49,6 +46,30 @@ function persistSidebarState(storageKey: string, expanded: boolean) {
   }
 }
 
+function useShellMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia(query).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      setMatches(false);
+      return undefined;
+    }
+    const mediaQuery = window.matchMedia(query);
+    const handleChange = () => setMatches(mediaQuery.matches);
+
+    handleChange();
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, [query]);
+
+  return matches;
+}
+
 function AppShell() {
   const {
     primaryJob,
@@ -60,9 +81,8 @@ function AppShell() {
     retryJob,
     clearOperationError,
   } = useBackgroundJobProgress();
-  const theme = useTheme();
   const embedded = isOaEmbeddedMode();
-  const isCompact = useMediaQuery(theme.breakpoints.down("md"), { noSsr: true });
+  const isCompact = useShellMediaQuery("(max-width: 899.95px)");
   const storageKey = embedded ? EMBEDDED_OA_SIDEBAR_STORAGE_KEY : DEFAULT_SIDEBAR_STORAGE_KEY;
   const defaultExpanded = !embedded;
   const [sidebarExpanded, setSidebarExpanded] = useState(() => readPersistedSidebarState(storageKey, defaultExpanded));
@@ -88,8 +108,12 @@ function AppShell() {
 
   const sidebarWidth = isCompact ? 0 : sidebarExpanded ? expandedSidebarWidth : collapsedSidebarWidth;
 
+  const shellStyle = {
+    "--sidebar-width": `${sidebarWidth}px`,
+  } as CSSProperties;
+
   return (
-    <Box className={`app-shell${embedded ? " embedded-shell" : ""}`} sx={{ "--sidebar-width": `${sidebarWidth}px` }}>
+    <div className={`app-shell${embedded ? " embedded-shell" : ""}`} style={shellStyle}>
       <AppSidebar
         embedded={embedded}
         isCompact={isCompact}
@@ -98,25 +122,14 @@ function AppShell() {
         onCloseMobile={() => setMobileOpen(false)}
         onToggleExpanded={toggleSidebarExpanded}
       />
-      <Box className="app-shell-content" component="section">
+      <section className="app-shell-content">
         <AppTopBar
           embedded={embedded}
           isCompact={isCompact}
           onOpenMobileSidebar={() => setMobileOpen(true)}
         />
         {connectionFailed || primaryJob || operationError ? (
-          <Box
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-end",
-              gap: 1,
-              justifyContent: "flex-end",
-              minWidth: 0,
-              px: { xs: 2, md: 3 },
-              pt: 1,
-            }}
-          >
+          <div className="app-shell-progress-stack">
             {connectionFailed ? (
               <BackgroundProgressBlock kind="connection_error" />
             ) : primaryJob ? (
@@ -134,23 +147,30 @@ function AppShell() {
               />
             ) : null}
             {operationError ? (
-              <Alert
-                severity="error"
-                onClose={clearOperationError}
-                sx={{ maxWidth: "min(520px, 92vw)", py: 0.25 }}
-              >
-                {operationError}
+              <Alert className="app-shell-operation-error" role="alert" status="danger">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Description>{operationError}</Alert.Description>
+                </Alert.Content>
+                <button
+                  aria-label="关闭后台操作错误"
+                  className="app-shell-operation-error__close"
+                  type="button"
+                  onClick={clearOperationError}
+                >
+                  ×
+                </button>
               </Alert>
             ) : null}
-          </Box>
+          </div>
         ) : null}
         <main className={`page-body${embedded ? " embedded" : ""}`}>
           <SessionGate>
             <AppRouter />
           </SessionGate>
         </main>
-      </Box>
-    </Box>
+      </section>
+    </div>
   );
 }
 
@@ -160,7 +180,7 @@ export default function App() {
       basename={APP_BASE_PATH === "/" ? undefined : APP_BASE_PATH}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <MuiProviders>
+      <MuiDatePickerCompatProvider>
         <MonthProvider>
           <ImportProgressProvider>
             <SessionProvider>
@@ -178,7 +198,7 @@ export default function App() {
             </SessionProvider>
           </ImportProgressProvider>
         </MonthProvider>
-      </MuiProviders>
+      </MuiDatePickerCompatProvider>
     </BrowserRouter>
   );
 }

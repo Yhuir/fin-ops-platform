@@ -746,6 +746,76 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified。
 
+### P013-phase-4-shell-provider-runtime
+
+- Phase: `phase_4_shell`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 迁移 App Shell root runtime provider：`App.tsx` 移出完整 `MuiProviders`，替换 App runtime 中的 MUI `Box/useMediaQuery/useTheme/Alert`，保留日期选择器临时兼容边界。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md、web/src/app/App.tsx、web/src/app/MuiProviders.tsx、web/src/app/muiTheme.ts、web/src/app/styles.css、web/src/test/App.test.tsx、web/src/test/AppStatusIndicator.test.tsx、web/src/test/PageKeepAliveHost.test.tsx 和 HeroUI Alert docs。只迁移 App Shell provider/runtime：从 App.tsx 移除完整 MuiProviders，替换 useTheme/useMediaQuery/Box/Alert 为 React matchMedia hook、semantic markup、HeroUI Alert 和 token CSS classes。若业务页面仍需要 MUI X DatePicker localization context，只允许新增窄兼容 provider，必须记录为临时边界。不得迁移 AppSidebar layout、AppTopBar、AppStatusIndicator、业务页面、后端/API/read model/worker 或 workbench 内部。运行 shell tests、build、App.tsx direct MUI import grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Business pages untouched: yes。
+- Full MUI ThemeProvider/CssBaseline removed from `App.tsx`: yes。
+- Temporary compatibility justified: yes，existing MUI X DatePicker/MonthPicker still needs localization context until later page/date-picker migration slices.
+- Verification defined: targeted Vitest、build、App.tsx direct MUI import grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `App.tsx` removed `MuiProviders` and no longer imports `@mui/*` directly.
+- Added `useShellMediaQuery` backed by `window.matchMedia`.
+- Converted App Shell wrapper/progress layout from MUI `Box` to semantic HTML and CSS classes.
+- Converted operation error display from MUI `Alert` to HeroUI `Alert` with explicit close button.
+- Added `MuiDatePickerCompatProvider` with MUI X `LocalizationProvider`, `AdapterDayjs`, `adapterLocale="zh-cn"` and date picker `localeText` from `@mui/x-date-pickers/locales`.
+- First targeted Vitest run failed because MUI X pickers lost localization context and Chinese accessible labels after removing `MuiProviders`; the narrow compatibility provider fixed the root cause without restoring MUI ThemeProvider/CssBaseline.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/' web/src/app/App.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P013-phase-4-shell-provider-runtime
+
+- Status: `drafted`
+- Scope:
+  - `web/src/app/App.tsx`
+  - `web/src/app/MuiDatePickerCompatProvider.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_4_shell.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P013 shell provider runtime 文件：web/src/app/App.tsx、web/src/app/MuiDatePickerCompatProvider.tsx、web/src/app/styles.css、docs/refactor-ui/modules/phase_4_shell.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/' web/src/app/App.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate shell runtime provider。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: drafted。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`
@@ -837,13 +907,16 @@
 | `P003-phase-1-token-characterization-tests` | `phase_1_docs_and_tokens` | token tests | `verified` | expected fail | Ledger Calm 和 table token characterization tests 已新增 |
 | `P004-phase-1-token-implementation` | `phase_1_docs_and_tokens` | token implementation | `verified` | passed | CSS token bridge 已落地，P003 tests 通过 |
 | `P005-phase-2-platform-stack-migration` | `phase_2_platform_stack` | platform stack | `verified` | passed | React 19、HeroUI、Tailwind v4 和 Vite plugin 已接入 |
+| `P011-phase-4-shell-discovery` | `phase_4_shell` | shell discovery | `verified` | passed | App Shell 迁移边界和切片计划已记录 |
+| `P012-phase-4-shell-icon-dependency` | `phase_4_shell` | shell icons | `verified` | passed | lucide-react sidebar icon dependency 已迁移 |
+| `P013-phase-4-shell-provider-runtime` | `phase_4_shell` | shell runtime provider | `verified` | passed | App.tsx 移出完整 MuiProviders，保留临时 MUI X date picker compat |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `MG-P005-phase-2-platform-stack`。
+下一条 prompt 应执行 `MG-P013-phase-4-shell-provider-runtime`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_2_platform_stack.md 和 git status。检查 scope 只包含 phase_2 platform stack 文件。运行 build、targeted Vitest、dependency tree、CSS import order、git diff --check、git status。精确 git add，不使用 git add . 或 git add -A。提交信息使用 feat: migrate ui platform stack。push 到 refactor-ui，并更新 state/prompt Push Log。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查 scope 只包含 P013 shell provider runtime 文件。运行 shell targeted Vitest、build、App.tsx direct MUI import grep、git diff --check、git status。精确 git add，不使用 git add . 或 git add -A。提交信息使用 feat: migrate shell runtime provider。push 到 refactor-ui，并更新 state/prompt Push Log。
 ```
 
 ## Cumulative MG Prompts
