@@ -1505,6 +1505,7 @@
 | `P030-phase-6-app-health-page-shell` | `phase_6_page_batches` | app health page shell | `verified` | passed | AppHealth page-level MUI 已迁出 |
 | `MG-P030-phase-6-app-health` | `phase_6_page_batches` | app health cumulative MG | `verified` | pushed | AppHealth UI migration 已 push 到 refactor-ui |
 | `P031-phase-6-import-pages-discovery` | `phase_6_page_batches` | import pages discovery | `verified` | passed | 导入页族 MUI/DataGrid inventory、用户入口和 P032 prompt 已记录 |
+| `MG-P031-phase-6-import-pages-discovery` | `phase_6_page_batches` | import pages discovery MG | `verified` | pushed | Import pages discovery 已 push 到 refactor-ui |
 | `P032-phase-6-import-pages-characterization-tests` | `phase_6_page_batches` | import pages tests | `reviewed` | pending | 下一条执行 prompt，只改 ImportCenterPage tests |
 
 ## Next Prompt Draft Slot
@@ -1767,7 +1768,7 @@
 
 ### MG-P031-phase-6-import-pages-discovery
 
-- Status: `reviewed`
+- Status: `verified`
 - Scope:
   - `docs/refactor-ui/modules/phase_6_import_pages.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -1788,6 +1789,12 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
+
+#### Execution
+
+- Commit: `adc8ce62`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### MG-P028-phase-6-app-health-discovery
 

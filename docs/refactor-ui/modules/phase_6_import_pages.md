@@ -124,6 +124,11 @@ Recommended Micro-JIT sequence:
 5. `MG-phase-6-import-pages`
    - Run import tests, table/common/platform regressions, build, import scope MUI grep, docs update, exact stage, commit and push。
 
+## Execution Update
+
+- `P031-phase-6-import-pages-discovery`: Import pages route wrappers、`ImportWorkflowPage.tsx` MUI/DataGrid inventory、用户入口、测试覆盖和迁移风险已记录。
+- `MG-P031-phase-6-import-pages-discovery`: pushed `adc8ce62` to `refactor-ui`。
+
 ## Risks
 
 - `ImportWorkflowPage.tsx` is a large shared component for three routes; changing it affects bank, invoice and ETC imports simultaneously。

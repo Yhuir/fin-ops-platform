@@ -9,7 +9,7 @@
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P032-phase-6-import-pages-characterization-tests`
-- Current MG ID: `MG-P031-phase-6-import-pages-discovery`
+- Current MG ID: `not_drafted`
 
 ## Global Invariants
 
@@ -61,7 +61,7 @@
   - `docs/refactor-ui/refactor_ui_state.md`
 - Verification run: P031 docs verification passed
 - Failures: none
-- Next action: 执行 `MG-P031-phase-6-import-pages-discovery`，push 后进入 `P032-phase-6-import-pages-characterization-tests`。
+- Next action: 执行 `P032-phase-6-import-pages-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -229,6 +229,7 @@
 | 2026-06-07 | `P031-phase-6-import-pages-discovery` | `rg -n "P031-phase-6-import-pages-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P032-phase-6-import-pages-characterization-tests\|DataGrid\|银行账户冲突确认" docs/refactor-ui/modules/phase_6_import_pages.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Import pages inventory and next prompt recorded |
 | 2026-06-07 | `P031-phase-6-import-pages-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P031-phase-6-import-pages-discovery` | `git status --short --branch` | passed | 仅 P031 文档变更 |
+| 2026-06-07 | `MG-P031-phase-6-import-pages-discovery` | `git push origin refactor-ui` | passed | `adc8ce62` pushed |
 
 ## Push Log
 
@@ -257,3 +258,4 @@
 | 2026-06-07 | `MG-P027-phase-6-tax-offset` | `refactor-ui` | `4c7a99f5` | pushed |
 | 2026-06-07 | `MG-P028-phase-6-app-health-discovery` | `refactor-ui` | `1a806eeb` | pushed |
 | 2026-06-07 | `MG-P030-phase-6-app-health` | `refactor-ui` | `814ad25c` | pushed |
+| 2026-06-07 | `MG-P031-phase-6-import-pages-discovery` | `refactor-ui` | `adc8ce62` | pushed |
