@@ -266,7 +266,7 @@
 
 ### MG-P006-phase-3-state-permission-primitives
 
-- Status: `mg_reviewed`
+- Status: `verified`
 - Scope:
   - `web/src/components/common/StatePanel.tsx`
   - `web/src/components/common/PermissionNotice.tsx`
@@ -291,7 +291,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `ca962587`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified
 
 ### P000-docs-bootstrap
 
