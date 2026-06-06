@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P031-phase-6-import-pages-discovery`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `P032-phase-6-import-pages-characterization-tests`
+- Current MG ID: `MG-P031-phase-6-import-pages-discovery`
 
 ## Global Invariants
 
@@ -54,13 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 import pages discovery。
+- Scope: phase 6 import pages characterization tests。
 - Files touched:
+  - `docs/refactor-ui/modules/phase_6_import_pages.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: MG-P030 push verified
+- Verification run: P031 docs verification passed
 - Failures: none
-- Next action: 执行 `P031-phase-6-import-pages-discovery`。
+- Next action: 执行 `MG-P031-phase-6-import-pages-discovery`，push 后进入 `P032-phase-6-import-pages-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -92,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P031-phase-6-import-pages-discovery` | AppHealth MG verified；next import pages discovery |
+| page batches | `in_progress` | `P032-phase-6-import-pages-characterization-tests` | Import pages P031 discovery implemented；next discovery MG |
 
 ## Verification Log
 
@@ -224,6 +225,10 @@
 | 2026-06-07 | `P030-phase-6-app-health-page-shell` | `if rg -n '@mui/' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi` | passed | AppHealth page has no MUI imports |
 | 2026-06-07 | `P030-phase-6-app-health-page-shell` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P030-phase-6-app-health` | `git push origin refactor-ui` | passed | `814ad25c` pushed |
+| 2026-06-07 | `P031-phase-6-import-pages-discovery` | `test -f docs/refactor-ui/modules/phase_6_import_pages.md` | passed | Import pages discovery doc exists |
+| 2026-06-07 | `P031-phase-6-import-pages-discovery` | `rg -n "P031-phase-6-import-pages-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P032-phase-6-import-pages-characterization-tests\|DataGrid\|银行账户冲突确认" docs/refactor-ui/modules/phase_6_import_pages.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Import pages inventory and next prompt recorded |
+| 2026-06-07 | `P031-phase-6-import-pages-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P031-phase-6-import-pages-discovery` | `git status --short --branch` | passed | 仅 P031 文档变更 |
 
 ## Push Log
 

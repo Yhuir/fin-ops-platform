@@ -1504,14 +1504,15 @@
 | `P029-phase-6-app-health-characterization-tests` | `phase_6_page_batches` | app health tests | `verified` | expected fail | AppHealth page shell/notice primitive contract 已锁定 |
 | `P030-phase-6-app-health-page-shell` | `phase_6_page_batches` | app health page shell | `verified` | passed | AppHealth page-level MUI 已迁出 |
 | `MG-P030-phase-6-app-health` | `phase_6_page_batches` | app health cumulative MG | `verified` | pushed | AppHealth UI migration 已 push 到 refactor-ui |
-| `P031-phase-6-import-pages-discovery` | `phase_6_page_batches` | import pages discovery | `reviewed` | pending | 下一条执行 prompt，先盘点导入页族 |
+| `P031-phase-6-import-pages-discovery` | `phase_6_page_batches` | import pages discovery | `verified` | passed | 导入页族 MUI/DataGrid inventory、用户入口和 P032 prompt 已记录 |
+| `P032-phase-6-import-pages-characterization-tests` | `phase_6_page_batches` | import pages tests | `reviewed` | pending | 下一条执行 prompt，只改 ImportCenterPage tests |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P031-phase-6-import-pages-discovery`。
+下一条 prompt 应执行 `P032-phase-6-import-pages-characterization-tests`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/imports/ImportWorkflowPage.tsx、相关 import page files、相关 import tests 和 web/src/app/styles.css。只做导入页族 discovery/planning，不迁移实现。记录当前 MUI/DataGrid imports、ImportWorkflowPage 旧入口、上传/预览/确认/错误/进度/详情预览、DataGrid session 依赖、用户可见按钮与 overlay 形态、loading/empty/error/permission 状态、测试断言和风险。不得改后端/API/read model/worker/关联台。按需新建 docs/refactor-ui/modules/phase_6_import_pages.md；更新 state/prompt docs；运行文档/key grep、git diff --check、git status。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/ImportCenterPage.test.tsx、web/src/components/imports/ImportWorkflowPage.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/common/AppDialog.tsx 和 web/src/app/styles.css。只修改 `web/src/test/ImportCenterPage.test.tsx`，新增或调整断言：standalone import page shell 使用 project class 且不是 MUI root；action bar 按钮位置/名称保留；upload zone 使用 project class 且不是 MUI Box；feedback/error/confirm notices 不是 `.MuiAlert-root`；audit summary cards 使用 project class；preview tables 使用 project/FinanceTable contract 而不是 `.MuiDataGrid-root`；detail tabs 使用 project/HeroUI tabs contract；银行账户冲突确认仍是 dialog 且不是 `.MuiDialog-root`。不得修改实现、后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P033 shell/forms refactor prompt。
 ```
 
 ## Cumulative MG Prompts
@@ -1725,6 +1726,68 @@
 - Workbench internals frozen: yes。
 - Docs on demand: yes，导入页族含共享 workflow、DataGrid preview/session 和多个 route，需要专项文档承载。
 - Verification defined: docs/key grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_6_import_pages.md`。
+- 记录导入页族 route wrappers、`ImportWorkflowPage.tsx` MUI/DataGrid inventory、用户可见入口、现有测试覆盖和迁移风险。
+- 生成下一条 `P032-phase-6-import-pages-characterization-tests` prompt。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_import_pages.md`
+  - `rg -n "P031-phase-6-import-pages-discovery|Current MUI Inventory|User-visible Entrypoints|P032-phase-6-import-pages-characterization-tests|DataGrid|银行账户冲突确认" docs/refactor-ui/modules/phase_6_import_pages.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P032-phase-6-import-pages-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `reviewed`
+- Type: `characterization tests`
+- Scope: 只调整 ImportCenterPage tests，锁定导入页族 HeroUI/native primitive contract；不改实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/ImportCenterPage.test.tsx、web/src/components/imports/ImportWorkflowPage.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/common/AppDialog.tsx 和 web/src/app/styles.css。只修改 `web/src/test/ImportCenterPage.test.tsx`，新增或调整断言：standalone import page shell 使用 project class 且不是 MUI root；action bar 按钮位置/名称保留；upload zone 使用 project class 且不是 MUI Box；feedback/error/confirm notices 不是 `.MuiAlert-root`；audit summary cards 使用 project class；preview tables 使用 project/FinanceTable contract 而不是 `.MuiDataGrid-root`；detail tabs 使用 project/HeroUI tabs contract；银行账户冲突确认仍是 dialog 且不是 `.MuiDialog-root`。不得修改实现、后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P033 shell/forms refactor prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime implementation untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Characterization before implementation: yes。
+- Expected failure acceptable: yes，旧 MUI/DataGrid roots 仍存在时 tests 应暴露缺口。
+- Verification defined: targeted import Vitest、`git diff --check`、`git status --short --branch`。
+
+### MG-P031-phase-6-import-pages-discovery
+
+- Status: `reviewed`
+- Scope:
+  - `docs/refactor-ui/modules/phase_6_import_pages.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P031 import pages discovery 文档：docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：test -f docs/refactor-ui/modules/phase_6_import_pages.md；rg -n "P031-phase-6-import-pages-discovery|Current MUI Inventory|User-visible Entrypoints|P032-phase-6-import-pages-characterization-tests|DataGrid|银行账户冲突确认" docs/refactor-ui/modules/phase_6_import_pages.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md；git diff --check；git status --short --branch。提交信息使用 docs: add import pages migration discovery。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
 
 ### MG-P028-phase-6-app-health-discovery
 
