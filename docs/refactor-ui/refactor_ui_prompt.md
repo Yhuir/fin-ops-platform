@@ -2468,7 +2468,7 @@ Scope: 只做 CostStatistics 页面 discovery，不改运行时代码。
 
 ### MG-P038-phase-6-cost-statistics-table-migration
 
-- Status: `approved_for_execution`
+- Status: `verified`
 - Scope:
   - `web/src/components/common/FinanceTable.tsx`
   - `web/src/components/cost-statistics/CostStatisticsTable.tsx`
@@ -2494,7 +2494,42 @@ Scope: 只做 CostStatistics 页面 discovery，不改运行时代码。
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: approved_for_execution。
+- Status: verified。
+
+#### Execution
+
+- Commit: `4baffcff`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
+- Note: shared `MonthPicker` still uses MUI and keeps `CostStatisticsPage.test.tsx` on `MuiProviders`; this is not a CostStatistics table residue and must be handled by a shared/global cleanup prompt。
+
+### P040-phase-6-bank-details-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: 银行明细 `/bank-details` 页面迁移 discovery，只读代码和测试并建立模块文档。
+
+#### Prompt
+
+```text
+Prompt ID: P040-phase-6-bank-details-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: 只做 BankDetails 页面 discovery，不改运行时代码。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md、web/src/pages/BankDetailsPage.tsx、web/src/features/bankDetails/*、web/src/test/BankDetailsPage.test.tsx、web/src/test/AutoTagRulesDrawer.test.tsx 和当前 git status。梳理 `/bank-details` 的旧 UI 入口、MUI inventory、表格/分页/日期筛选/导出菜单/分类筛选 popover/自动标签规则右侧抽屉/弹窗/loading empty error permission 状态、现有测试覆盖和迁移切片风险。不得修改实现、测试、后端、API、read model、worker 或关联台。若 discovery 需要跨后续切片复用，创建 docs/refactor-ui/modules/phase_6_bank_details.md。更新 refactor_ui_state.md、refactor_ui_prompt.md 和模块文档，生成下一条 P041 characterization tests prompt。验证命令：test -f docs/refactor-ui/modules/phase_6_bank_details.md；rg -n "P040-phase-6-bank-details-discovery|Current MUI Inventory|User-visible Entrypoints|P041-phase-6-bank-details-characterization-tests" docs/refactor-ui/modules/phase_6_bank_details.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md；git diff --check；git status --short --branch。
+```
+
+#### Review
+
+- Single slice: yes。
+- Discovery only: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Behavior equivalence required: yes，旧导出菜单/分类 popover/右侧抽屉形态必须记录。
+- Docs on demand: yes，BankDetails 是 high-risk table + drawer + popover 页面，需要专项 md。
+- Verification defined: docs existence/key phrase checks、diff check、status。
 
 ### MG Prompt Template
 

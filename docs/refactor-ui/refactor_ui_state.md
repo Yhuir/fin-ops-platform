@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P038-phase-6-cost-statistics-table-migration`
-- Current MG ID: `MG-P038-phase-6-cost-statistics-table-migration`
+- Current Prompt ID: `P040-phase-6-bank-details-discovery`
+- Current MG ID: `not_drafted`
 
 ## Global Invariants
 
@@ -54,7 +54,7 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 cost statistics table migration cumulative merge gate。
+- Scope: phase 6 bank details discovery。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_import_pages.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -62,9 +62,9 @@
   - `web/src/test/ImportCenterPage.test.tsx`
   - `web/src/components/imports/ImportWorkflowPage.tsx`
   - `web/src/app/styles.css`
-- Verification run: P038 targeted Vitest、focused platform/table tests、build、cost statistics runtime MUI grep and diff check passed。
+- Verification run: MG-P038 pushed commit `4baffcff` to `origin/refactor-ui`。
 - Failures: none。
-- Next action: 执行 `MG-P038-phase-6-cost-statistics-table-migration`，精确 stage、commit 并 push。
+- Next action: 执行 `P040-phase-6-bank-details-discovery`。
 
 ## Prompt Lifecycle
 
@@ -96,7 +96,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P038-phase-6-cost-statistics-table-migration` | P038 table migration verified；next cumulative MG |
+| page batches | `in_progress` | `P040-phase-6-bank-details-discovery` | CostStatistics table MG-P038 verified and pushed；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails discovery |
 
 ## Verification Log
 
@@ -253,6 +253,7 @@
 | 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/pages/CostStatisticsPage.tsx web/src/components/cost-statistics; then exit 1; else exit 0; fi` | passed | CostStatistics direct runtime scope has no MUI/DataGrid/session residue |
 | 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `if rg -n 'cost-data-grid-shell|\.cost-data-grid-shell|\.MuiDataGrid' web/src/components/cost-statistics web/src/pages/CostStatisticsPage.tsx web/src/test/CostStatisticsPage.test.tsx; then exit 1; else exit 0; fi` | passed | CostStatistics component/test scope has no cost DataGrid CSS or DataGrid class residue |
 | 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P038-phase-6-cost-statistics-table-migration` | `git push origin refactor-ui` | passed | Commit `4baffcff` pushed |
 
 ## Push Log
 
@@ -283,3 +284,4 @@
 | 2026-06-07 | `MG-P030-phase-6-app-health` | `refactor-ui` | `814ad25c` | pushed |
 | 2026-06-07 | `MG-P031-phase-6-import-pages-discovery` | `refactor-ui` | `adc8ce62` | pushed |
 | 2026-06-07 | `MG-P035-phase-6-import-pages` | `refactor-ui` | `9e3624a0` | pushed |
+| 2026-06-07 | `MG-P038-phase-6-cost-statistics-table-migration` | `refactor-ui` | `4baffcff` | pushed |
