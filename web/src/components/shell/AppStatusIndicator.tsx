@@ -65,7 +65,7 @@ function overallStatusLabel(level: string) {
 }
 
 function domainStatusLabel(status: string) {
-  if (status === "ready") {
+  if (status === "ready" || status === "fresh") {
     return "已同步";
   }
   if (status === "missing") {
@@ -90,6 +90,15 @@ function domainStatusLabel(status: string) {
     return "不可用";
   }
   return status || "状态";
+}
+
+function scopeDiagnostics(domain: AppStatusDomain) {
+  if (domain.level === "ok") {
+    return [];
+  }
+  return domain.readModelScopes
+    .filter((scope) => scope.status !== "ready" && scope.status !== "fresh")
+    .slice(0, 3);
 }
 
 function domainDebugTitle(domain: AppStatusDomain) {
@@ -246,19 +255,42 @@ export default function AppStatusIndicator() {
                   </Stack>
                 </Stack>
                 <Box className="app-status-domain-grid">
-                  {domains.map((domain) => (
-                    <Box
-                      key={domain.key}
-                      aria-label={`${domain.label} ${domainStatusLabel(domain.status)}`}
-                      component={RouterLink}
-                      to={domain.route}
-                      title={domainDebugTitle(domain)}
-                      className="app-status-domain-link"
-                    >
-                      <Typography noWrap fontWeight={700} variant="caption">{domain.label}</Typography>
-                      <Chip className="app-status-domain-chip" size="small" color={domainTone(domain)} label={domainStatusLabel(domain.status)} />
-                    </Box>
-                  ))}
+                  {domains.map((domain) => {
+                    const scopes = scopeDiagnostics(domain);
+                    return (
+                      <Box
+                        key={domain.key}
+                        aria-label={`${domain.label} ${domainStatusLabel(domain.status)}`}
+                        component={RouterLink}
+                        to={domain.route}
+                        title={domainDebugTitle(domain)}
+                        className="app-status-domain-link"
+                      >
+                        <Stack spacing={0.35} minWidth={0}>
+                          <Stack direction="row" alignItems="center" justifyContent="space-between" gap={0.75}>
+                            <Typography noWrap fontWeight={700} variant="caption">{domain.label}</Typography>
+                            <Chip className="app-status-domain-chip" size="small" color={domainTone(domain)} label={domainStatusLabel(domain.status)} />
+                          </Stack>
+                          {scopes.length > 0 ? (
+                            <Stack spacing={0.2}>
+                              {scopes.map((scope) => (
+                                <Typography
+                                  key={`${scope.readModelKey}:${scope.scopeType}:${scope.scopeKey}:${scope.status}`}
+                                  color="text.secondary"
+                                  noWrap
+                                  variant="caption"
+                                >
+                                  <Box component="span" fontWeight={700}>{scope.scopeKey || scope.scopeType}</Box>
+                                  {" · "}
+                                  <Box component="span">{scope.lastError || domainStatusLabel(scope.status)}</Box>
+                                </Typography>
+                              ))}
+                            </Stack>
+                          ) : null}
+                        </Stack>
+                      </Box>
+                    );
+                  })}
                 </Box>
               </Stack>
 

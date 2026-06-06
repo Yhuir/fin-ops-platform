@@ -53,6 +53,36 @@ const globalAppStatus = {
       job_ids: [],
       updated_at: "2026-06-04T10:00:00+08:00",
     },
+    {
+      key: "cost_statistics",
+      label: "成本统计",
+      route: "/cost-statistics",
+      level: "busy",
+      status: "failed",
+      reason: "成本统计局部分片需要重试",
+      details: ["active:2026-05: projection failed"],
+      read_models: ["cost_statistics"],
+      read_model_scopes: [
+        {
+          read_model_key: "cost_statistics",
+          scope_type: "cost_statistics",
+          scope_key: "active:all",
+          status: "fresh",
+          updated_at: "2026-06-04T10:03:00+08:00",
+        },
+        {
+          read_model_key: "cost_statistics",
+          scope_type: "cost_statistics",
+          scope_key: "active:2026-05",
+          status: "failed",
+          last_error: "projection failed",
+          updated_at: "2026-06-04T10:05:00+08:00",
+        },
+      ],
+      workers: ["cost-tax"],
+      job_ids: [],
+      updated_at: "2026-06-04T10:05:00+08:00",
+    },
   ],
   background_tasks: [
     {
@@ -105,6 +135,9 @@ describe("global app status indicator", () => {
     expect(within(statusDialog).getByText("银行明细")).toBeInTheDocument();
     expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
     expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("成本统计")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("active:2026-05")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("projection failed")).toBeInTheDocument();
     expect(within(statusDialog).queryByText("就绪")).not.toBeInTheDocument();
     expect(screen.queryByText("银行明细已同步")).not.toBeInTheDocument();
     expect(screen.queryByText("bank_detail readiness fresh, schema v1")).not.toBeInTheDocument();

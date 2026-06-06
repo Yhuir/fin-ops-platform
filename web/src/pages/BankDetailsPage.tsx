@@ -587,7 +587,6 @@ function BankCategoryFilterControl({
 
   const selectCategoryFilter = (filter: BankCategoryFilter) => {
     onCategoryFilterChange(filter);
-    closeCategoryPanel();
   };
 
   const renderCategoryFilterButton = (
@@ -665,9 +664,9 @@ function BankCategoryFilterControl({
                 "root",
                 "bank-category-filter-action",
               )}
-              <Divider className="bank-category-filter-divider" />
+              <Divider className="bank-category-filter-divider" component="li" />
               {categoryGroups.map((group) => (
-                <Box className="bank-category-filter-group" key={group.key}>
+                <Box className="bank-category-filter-group" component="li" key={group.key}>
                   {renderCategoryFilterButton(
                     group.directItem && group.children.length === 0
                       ? tagCategoryFilter(group.directItem)

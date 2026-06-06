@@ -7826,12 +7826,12 @@ body.column-layout-dragging {
 
 .bank-category-filter-icon-button.MuiIconButton-root {
   position: relative;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--bank-border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: #ffffff;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.12);
   color: #334e68;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
@@ -7841,7 +7841,7 @@ body.column-layout-dragging {
   border-color: #8ab4f8;
   background: #edf5ff;
   color: var(--bank-blue);
-  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 3px 7px rgba(15, 23, 42, 0.14);
 }
 
 .bank-category-filter-icon-button.MuiIconButton-root.active {
@@ -7852,10 +7852,10 @@ body.column-layout-dragging {
 
 .bank-category-filter-active-dot {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 6px;
-  height: 6px;
+  top: 5px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
   border: 1px solid #ffffff;
   border-radius: 999px;
   background: #f1c21b;
@@ -7899,36 +7899,54 @@ body.column-layout-dragging {
 }
 
 .bank-category-filter-panel {
-  width: min(292px, calc(100vw - 40px));
-  max-height: min(520px, calc(100vh - 72px));
+  width: min(430px, calc(100vw - 40px));
+  max-height: min(430px, calc(100vh - 72px));
   overflow: hidden;
   border: 1px solid var(--bank-border);
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.18);
+  border-radius: 6px;
+  background: #fbfcfe;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.18);
 }
 
 .bank-category-filter-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 6px;
   max-height: inherit;
   overflow: auto;
-  padding: 4px;
+  padding: 6px;
 }
 
 .bank-category-filter-row.MuiListItemButton-root {
-  min-height: 24px;
-  border-radius: 5px;
+  min-height: 21px;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
   color: var(--bank-text);
-  padding: 2px 7px;
+  padding: 2px 6px;
+}
+
+.bank-category-filter-row.MuiListItemButton-root:hover {
+  background: #eef4fb;
 }
 
 .bank-category-filter-row.Mui-selected {
-  background: var(--bank-selected);
-  color: var(--bank-blue);
+  border-left-color: var(--bank-blue);
+  background: #e6f0ff;
+  color: #0f4fc7;
+}
+
+.bank-category-filter-group {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 2px;
+  border: 1px solid #e3e8ef;
+  border-radius: 5px;
+  background: #ffffff;
 }
 
 .bank-category-filter-primary-row.MuiListItemButton-root {
-  margin-top: 2px;
-  background: #f7f9fc;
+  background: #f4f7fb;
   color: #243b53;
   font-weight: 800;
 }
@@ -7936,12 +7954,12 @@ body.column-layout-dragging {
 .bank-category-filter-children {
   display: grid;
   gap: 1px;
-  margin: 1px 0 2px;
+  margin: 1px 0 0;
 }
 
 .bank-category-filter-child-row.MuiListItemButton-root {
-  min-height: 23px;
-  padding-left: 22px;
+  min-height: 20px;
+  padding-left: 13px;
   color: #334e68;
 }
 
@@ -7961,26 +7979,40 @@ body.column-layout-dragging {
 .bank-category-filter-label {
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 750;
-  line-height: 1.2;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .bank-category-filter-count {
-  min-width: 22px;
-  color: var(--bank-text-secondary);
-  font-size: 10px;
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #52606d;
+  font-size: 9.5px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  line-height: 1.35;
-  text-align: right;
+  line-height: 1.45;
+  text-align: center;
 }
 
 .bank-category-filter-divider.MuiDivider-root {
-  margin: 4px 2px;
+  grid-column: 1 / -1;
+  margin: 1px 2px;
   border-color: var(--bank-border-subtle);
+}
+
+@media (max-width: 640px) {
+  .bank-category-filter-panel {
+    width: min(300px, calc(100vw - 32px));
+  }
+
+  .bank-category-filter-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .bank-category-confirmation-popper {

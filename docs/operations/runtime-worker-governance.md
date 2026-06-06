@@ -207,6 +207,23 @@ worker readiness 不是 systemd active。发布脚本会等待：
 
 空业务结果可以是 `fresh`，但必须有真实生成事实；没有 readiness 记录的 read model 必须显示 `missing`，不能因为当前没有 dirty scope 而显示 ready。
 
+### Cost Statistics Scope Readiness
+
+`cost-tax` worker 同时处理 `cost_statistics.read_model.refresh` 与 `tax_offset.read_model.refresh`。成本统计是跨银行流水、发票、OA 关系、项目归因和费用分类的派生 read model，因此 App Status 必须展示 scope 级 readiness，而不是只显示一个聚合后的 `cost_statistics=failed`。
+
+成本统计 scope 分为：
+
+- 父 scope：`active:all`、`all:all`。
+- 月份 shard：`active:YYYY-MM`、`all:YYYY-MM`。
+
+处理规则：
+
+- refresh `active:all` 或 `all:all` 时，worker 必须真实重建父 scope，成功后写入 `read_model.app_status_readiness`，再 fan-out 入队月份 shard；fan-out-only 事件不能伪造父 scope 为 fresh。
+- 父 scope failed/unavailable 代表成本统计主体验不可用，App Status domain 可以 blocked/red。
+- 单个月份 shard failed/unavailable 只代表该分片需要重试，App Status domain 应保持 busy/yellow，并暴露 `read_model_scopes[].scope_key`、`last_error` 和 `updated_at`。
+- historical failed readiness 只能由同一 `read_model_key + scope_type + scope_key` 的真实 successful rebuild 覆盖；运维不得手工改写 readiness 为 fresh。
+- 重新入队必须走 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或受控运维工具，保留 dirty scope/outbox 事实链路。
+
 ## 健康字段
 
 `/health` 中的 `runtime_infrastructure` 是 App 对 worker 的管理入口。关键字段：

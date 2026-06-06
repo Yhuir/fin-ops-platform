@@ -244,6 +244,14 @@ describe("Bank details page", () => {
     expect(source).toMatch(/\.bank-transaction-pagination\.MuiTablePagination-root\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 
+  test("uses a compact two-column category filter layout", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
+
+    expect(source).toMatch(/\.bank-category-filter-icon-button\.MuiIconButton-root\s*\{[^}]*width:\s*30px[^}]*height:\s*30px/s);
+    expect(source).toMatch(/\.bank-category-filter-list\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+    expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*10\.5px/s);
+  });
+
   test("formats the internal transfer tooltip as structured rows", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
@@ -322,8 +330,9 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
     expect(within(page).getByRole("button", { name: /标签筛选：费用 1/ })).toBeInTheDocument();
+    categoryPanel = screen.getByRole("menu", { name: "银行明细标签筛选" });
+    expect(categoryPanel).toBeInTheDocument();
 
-    categoryPanel = await openCategoryFilterPanel(user, page);
     const selectedFeeRoot = within(categoryPanel).getByRole("menuitem", { name: "费用 1" });
     expect(selectedFeeRoot).toHaveAttribute("aria-current", "true");
     await user.click(within(categoryPanel).getByRole("menuitem", { name: "工资 1" }));
@@ -341,8 +350,9 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
     expect(within(page).getByRole("button", { name: /标签筛选：费用 \/ 工资 1/ })).toBeInTheDocument();
+    categoryPanel = screen.getByRole("menu", { name: "银行明细标签筛选" });
+    expect(categoryPanel).toBeInTheDocument();
 
-    categoryPanel = await openCategoryFilterPanel(user, page);
     await user.click(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" }));
 
     await waitFor(() => {
@@ -356,6 +366,7 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
     expect(within(page).getByRole("button", { name: /标签筛选：未分类 295/ })).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "银行明细标签筛选" })).toBeInTheDocument();
   });
 
   test("opens the fixed category filter icon by click only and keeps it open on pointer leave", async () => {
@@ -407,7 +418,7 @@ describe("Bank details page", () => {
     expect(within(page).getByText("1-100 / 295")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: /标签筛选：未分类 295/ })).toBeInTheDocument();
 
-    categoryPanel = await openCategoryFilterPanel(user, page);
+    categoryPanel = screen.getByRole("menu", { name: "银行明细标签筛选" });
     expect(within(categoryPanel).getByRole("menuitem", { name: "全部 299" })).toBeInTheDocument();
     expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" })).toBeInTheDocument();
     expect(within(categoryPanel).getByRole("menuitem", { name: "工资 1" })).toBeInTheDocument();

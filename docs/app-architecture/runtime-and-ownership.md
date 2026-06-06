@@ -69,7 +69,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 1. `active:all` / `all:all` 由 `CostStatisticsSqlProjectionBuilder` 基于 `read_model.workbench_groups.scope_key='all'` 直接重建。
 2. `CostStatisticsReadModelRefreshService` 收到 `active:all` 或 `all:all` 时，先重建并完成该父 scope，再入队对应月份 shard。
 3. `ReadModelReadinessReporter` 对 fan-out-only 事件继续不写 `fresh`；如果事件已经完成父 scope rebuild 且带有显式 `readiness_status=fresh`，则必须记录父 scope readiness。
-4. 成本统计 domain 只在真实 failed/unavailable readiness、dirty scope 失败或 worker/依赖失败时 blocked；只有 shard pending/refreshing 时应显示 busy。
+4. 成本统计 domain 根据 scope 级 readiness 推导状态：`active:all` / `all:all` 父 scope failed/unavailable 时 blocked；`active:YYYY-MM` / `all:YYYY-MM` 月份 shard failed/unavailable、pending 或 refreshing 时显示 busy，并在 App Status 面板暴露失败 scope 与 last error。
 
 ## Worker 与队列
 
@@ -88,6 +88,8 @@ App Health 读取后台任务、worker、queue 和 read model 状态，给页面
 Global Runtime Status Plane 是 App Health 之上的用户可见全局投影。它由后端 `AppStatusOverviewService` 生成，输入只来自 session、后台任务、read model dirty scopes、outbox、worker heartbeat、runtime registry、依赖和 alert。React 页面不向它上报当前路由 loading，也不负责推导全局状态。
 
 Runtime facts 的 read-side repository 是 `RuntimeMonitoringRepository.app_status_runtime_snapshot()`。PostgreSQL state store 通过公开方法暴露该 snapshot；`server.py` 只做 `/api/app-health` snapshot 组装，不能直接读取 state store 私有连接，也不能把 `job.*` 或 `read_model.*` SQL 写进 app status service。`AppStatusOverviewService` 只接收已归一化的 runtime facts 并执行状态优先级判定，不执行 rebuild、不写 queue、不调用页面 API。
+
+`RuntimeMonitoringRepository.app_status_runtime_snapshot()` 必须保留 read model scope 明细。聚合后的 `read_model_statuses[read_model_key].status` 用于全局优先级，`read_model_statuses[read_model_key].scopes[]` 用于解释具体 `scope_key`、`status`、`last_error` 和 `updated_at`。App Status domain payload 继续输出聚合字段，同时通过 `read_model_scopes[]` 暴露 scope 诊断；前端只展示该后端事实，不按当前页面筛选自行推断。
 
 ```mermaid
 flowchart LR
@@ -111,7 +113,7 @@ Workbench active generation 在发布前执行对象身份仲裁。`WorkbenchObj
 
 Workbench 首屏读路径必须以 active generation 为边界。`/api/workbench/summary` 优先读取 `read_model.workbench_summary` 中已物化的 summary/stat payload，不在请求热路径扫描 `workbench_group_rows` 或执行银行明细 diagnostics；diagnostics 属于 health/deep health/operations。`/api/workbench/groups?detail_level=summary` 的 Redis page cache 只保存 fresh gate 后的 payload，cache key 使用 active generation version。`worker-workbench` 发布任一月 shard active generation 后，会低优先级 enqueue `all` aggregate-only refresh；`all` aggregate 发布成功后再预热首屏 `paired/open` page 1 summary 和 version key。导入等可判定月份的事件优先 dirty 具体月份，只有无法判定范围或真正跨期时才直接 dirty `all`。
 
-runtime snapshot 读取失败不能被解释成 ready。critical read model failed/unavailable、required worker missing/mismatch/stale、关键依赖 missing/unavailable 或 session 不可用会把全局状态升级到 blocked/red；readiness missing/refreshing/stale/schema_mismatch/source_mismatch、dirty scope、outbox backlog、后台任务 queued/running/attention 和非阻塞 stale 会保持 busy/yellow。
+runtime snapshot 读取失败不能被解释成 ready。critical read model failed/unavailable、required worker missing/mismatch/stale、关键依赖 missing/unavailable 或 session 不可用会把全局状态升级到 blocked/red；readiness missing/refreshing/stale/schema_mismatch/source_mismatch、dirty scope、outbox backlog、后台任务 queued/running/attention 和非阻塞 stale 会保持 busy/yellow。成本统计是特例化的 scope 级聚合：月份 shard failed/unavailable 是局部风险，不能无条件污染已经 fresh 的父 scope。
 
 Registry 强一致由测试保护：domain registry 的 `read_model_keys` 必须存在于 `AppStatusReadModelRegistry`，`worker_instances` 必须存在于 `runtime_worker_registry`，`job_types` 必须存在于 app status background job registry 或 runtime state policy，`dependencies` 必须存在于 app status dependency registry。新增页面、read model、worker、job type 或 dependency 时，如果没有同步 registry 和测试，不能上线。
 

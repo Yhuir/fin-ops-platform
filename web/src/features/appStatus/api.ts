@@ -1,10 +1,20 @@
-import type { AppStatusColor, AppStatusDomain, AppStatusLevel, AppStatusOverview, AppStatusTask } from "./types";
+import type {
+  AppStatusColor,
+  AppStatusDomain,
+  AppStatusLevel,
+  AppStatusOverview,
+  AppStatusReadModelScope,
+  AppStatusTask,
+} from "./types";
 
 type RawRecord = Record<string, unknown>;
 
 const DOMAIN_STATUSES = new Set([
   "ready",
+  "fresh",
   "loading",
+  "pending",
+  "processing",
   "refreshing",
   "stale",
   "failed",
@@ -77,6 +87,23 @@ function appStatusTaskStatus(value: unknown): string | null {
   return TASK_STATUSES.has(text) ? text : null;
 }
 
+function mapReadModelScope(rawValue: unknown): AppStatusReadModelScope | null {
+  const raw = record(rawValue);
+  const readModelKey = stringValue(raw.read_model_key ?? raw.readModelKey);
+  const status = appStatusDomainStatus(raw.status);
+  if (!readModelKey || !status) {
+    return null;
+  }
+  return {
+    readModelKey,
+    scopeType: stringValue(raw.scope_type ?? raw.scopeType),
+    scopeKey: stringValue(raw.scope_key ?? raw.scopeKey),
+    status,
+    lastError: stringValue(raw.last_error ?? raw.lastError),
+    updatedAt: stringValue(raw.updated_at ?? raw.updatedAt),
+  };
+}
+
 function mapDomain(rawValue: unknown): AppStatusDomain | null {
   const raw = record(rawValue);
   const key = stringValue(raw.key);
@@ -84,6 +111,13 @@ function mapDomain(rawValue: unknown): AppStatusDomain | null {
   const status = appStatusDomainStatus(raw.status);
   const reason = stringValue(raw.reason);
   if (!key || !level || !status || !reason) {
+    return null;
+  }
+  const rawReadModelScopes = raw.read_model_scopes ?? raw.readModelScopes;
+  const readModelScopes = Array.isArray(rawReadModelScopes)
+    ? rawReadModelScopes.map(mapReadModelScope)
+    : [];
+  if (readModelScopes.some((scope) => scope === null)) {
     return null;
   }
   return {
@@ -95,6 +129,7 @@ function mapDomain(rawValue: unknown): AppStatusDomain | null {
     reason,
     details: stringList(raw.details),
     readModels: stringList(raw.read_models ?? raw.readModels),
+    readModelScopes: readModelScopes as AppStatusReadModelScope[],
     workers: stringList(raw.workers),
     jobIds: stringList(raw.job_ids ?? raw.jobIds),
     updatedAt: stringValue(raw.updated_at ?? raw.updatedAt),

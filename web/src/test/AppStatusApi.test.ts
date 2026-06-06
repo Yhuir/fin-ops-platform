@@ -80,4 +80,70 @@ describe("app status API mapper", () => {
       alerts: [],
     })).toBeNull();
   });
+
+  test("maps read model scope diagnostics for app status domains", () => {
+    const mapped = mapAppStatusOverview({
+      version: 1,
+      generated_at: "2026-06-04T10:00:00+08:00",
+      overall: {
+        level: "busy",
+        color: "yellow",
+        reason: "成本统计局部分片需要重试",
+        blocks_mutations: false,
+      },
+      domains: [
+        {
+          key: "cost_statistics",
+          label: "成本统计",
+          route: "/cost-statistics",
+          level: "busy",
+          status: "failed",
+          reason: "成本统计局部分片需要重试",
+          details: ["active:2026-05: projection failed"],
+          read_models: ["cost_statistics"],
+          read_model_scopes: [
+            {
+              read_model_key: "cost_statistics",
+              scope_type: "cost_statistics",
+              scope_key: "active:all",
+              status: "fresh",
+              updated_at: "2026-06-04T10:03:00+08:00",
+            },
+            {
+              read_model_key: "cost_statistics",
+              scope_type: "cost_statistics",
+              scope_key: "active:2026-05",
+              status: "failed",
+              last_error: "projection failed",
+              updated_at: "2026-06-04T10:05:00+08:00",
+            },
+          ],
+          workers: ["cost-tax"],
+          job_ids: [],
+          updated_at: "2026-06-04T10:05:00+08:00",
+        },
+      ],
+      background_tasks: [],
+      alerts: [],
+    });
+
+    expect(mapped?.domains[0].readModelScopes).toEqual([
+      {
+        readModelKey: "cost_statistics",
+        scopeType: "cost_statistics",
+        scopeKey: "active:all",
+        status: "fresh",
+        lastError: "",
+        updatedAt: "2026-06-04T10:03:00+08:00",
+      },
+      {
+        readModelKey: "cost_statistics",
+        scopeType: "cost_statistics",
+        scopeKey: "active:2026-05",
+        status: "failed",
+        lastError: "projection failed",
+        updatedAt: "2026-06-04T10:05:00+08:00",
+      },
+    ]);
+  });
 });

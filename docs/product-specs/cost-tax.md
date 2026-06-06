@@ -12,6 +12,8 @@
 - 成本统计 read model 的物化 scope 包含 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 和 `all:all`。`active:all` / `all:all` 是全期间视图的一等 read model，不只是月份分片 fan-out 的父 scope。
 - 刷新 `active:all` / `all:all` 时，worker 必须先重建该全期间 scope 并写入 readiness，再入队对应月份分片。月份分片失败只影响该分片 readiness，不能反向污染已成功的全期间 scope。
 - App Health 只根据 `cost_statistics` read model 的真实 readiness、dirty scope、outbox 和 cost-tax worker 状态判定成本统计页面。历史 failed readiness 必须由后续真实成功 rebuild 覆盖，不能手工伪造绿色。
+- App Status 必须保留 `cost_statistics` 的 scope-level readiness：`active:all`、`all:all`、`active:YYYY-MM`、`all:YYYY-MM`。全期间父 scope failed/unavailable 代表成本统计主体验不可用；单个月份 shard failed/unavailable 只代表局部分片需要重试，域级显示 busy/attention，不阻断已经 fresh 的全期间视图。
+- 页面 API 只表达当前查询 scope 的数据平面状态，例如 `fresh`、`refreshing`、`stale`、`failed` 或 `unavailable`；App Status 负责解释多个 scope、dirty scope、outbox、worker heartbeat 和 last error 的状态平面。两者必须使用同一套 scope key 语义，不能用页面请求线程同步重建来掩盖缺失 read model。
 
 ## 项目归因
 

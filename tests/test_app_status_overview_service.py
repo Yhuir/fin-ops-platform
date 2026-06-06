@@ -299,6 +299,115 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertIn("all scope projection failed", cost_domain["details"])
         self.assertEqual(payload["overall"]["level"], "blocked")
 
+    def test_cost_statistics_month_shard_failure_is_busy_with_scope_detail(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "cost_statistics": {
+                    "status": "failed",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-05",
+                    "last_error": "month shard projection failed",
+                    "scopes": [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "fresh",
+                            "updated_at": "2026-06-04T10:03:00+00:00",
+                        },
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:2026-05",
+                            "status": "failed",
+                            "last_error": "month shard projection failed",
+                            "updated_at": "2026-06-04T10:05:00+00:00",
+                        },
+                    ],
+                },
+            },
+            worker_statuses={"cost-tax": {"status": "ready"}},
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:05:00+00:00",
+                "status": "busy",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
+        self.assertEqual(cost_domain["level"], "busy")
+        self.assertEqual(cost_domain["status"], "failed")
+        self.assertEqual(cost_domain["reason"], "成本统计局部分片需要重试")
+        self.assertIn("active:2026-05: month shard projection failed", cost_domain["details"])
+        self.assertEqual(
+            cost_domain["read_model_scopes"],
+            [
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "status": "fresh",
+                    "last_error": "",
+                    "updated_at": "2026-06-04T10:03:00+00:00",
+                },
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-05",
+                    "status": "failed",
+                    "last_error": "month shard projection failed",
+                    "updated_at": "2026-06-04T10:05:00+00:00",
+                },
+            ],
+        )
+        self.assertEqual(payload["overall"]["level"], "busy")
+
+    def test_cost_statistics_parent_scope_failure_still_blocks_domain(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "cost_statistics": {
+                    "status": "failed",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "last_error": "parent projection failed",
+                    "scopes": [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "failed",
+                            "last_error": "parent projection failed",
+                            "updated_at": "2026-06-04T10:05:00+00:00",
+                        },
+                    ],
+                },
+            },
+            worker_statuses={"cost-tax": {"status": "ready"}},
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:05:00+00:00",
+                "status": "blocked",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
+        self.assertEqual(cost_domain["level"], "blocked")
+        self.assertEqual(cost_domain["status"], "failed")
+        self.assertIn("active:all: parent projection failed", cost_domain["details"])
+        self.assertEqual(payload["overall"]["level"], "blocked")
+
     def test_missing_critical_dependency_key_is_blocked_not_available(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
         dependencies = healthy_dependencies()
@@ -401,6 +510,103 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["status"], "missing")
         self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["reason"], "readiness record missing")
+
+    def test_runtime_repository_preserves_cost_statistics_scope_readiness_details(self) -> None:
+        class CostScopeConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.app_status_readiness" in normalized:
+                    return [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "fresh",
+                            "schema_version": "cost-v1",
+                            "source_versions": {"workbench": 10},
+                            "row_count": 42,
+                            "generated_at": "2026-06-04T10:03:00+00:00",
+                            "updated_at": "2026-06-04T10:03:00+00:00",
+                            "last_error": None,
+                        },
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:2026-05",
+                            "status": "failed",
+                            "schema_version": "cost-v1",
+                            "source_versions": {"workbench": 10},
+                            "row_count": None,
+                            "generated_at": None,
+                            "updated_at": "2026-06-04T10:05:00+00:00",
+                            "last_error": "projection failed",
+                        },
+                    ]
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_key": "all:2026-05",
+                            "status": "processing",
+                            "count": 1,
+                            "last_error": None,
+                            "updated_at": "2026-06-04T10:06:00+00:00",
+                        },
+                    ]
+                if "from job.outbox_events" in normalized:
+                    return []
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return [
+                        {
+                            "worker_id": "cost-tax-1",
+                            "worker_instance": "cost-tax",
+                            "worker_kind": "cost-tax-read-model",
+                            "status": "running",
+                            "heartbeat_lag_seconds": 8,
+                            "payload": {
+                                "worker_instance": "cost-tax",
+                                "configured_event_types": [
+                                    "cost_statistics.read_model.refresh",
+                                    "tax_offset.read_model.refresh",
+                                ],
+                            },
+                        },
+                    ]
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(CostScopeConnection()).app_status_runtime_snapshot()
+        cost_status = snapshot["read_model_statuses"]["cost_statistics"]
+
+        self.assertEqual(cost_status["status"], "failed")
+        self.assertEqual(
+            cost_status["scopes"],
+            [
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "status": "fresh",
+                    "last_error": "",
+                    "updated_at": "2026-06-04T10:03:00+00:00",
+                },
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-05",
+                    "status": "failed",
+                    "last_error": "projection failed",
+                    "updated_at": "2026-06-04T10:05:00+00:00",
+                },
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "all:2026-05",
+                    "status": "refreshing",
+                    "last_error": "",
+                    "updated_at": "2026-06-04T10:06:00+00:00",
+                },
+            ],
+        )
 
     def test_runtime_repository_records_read_model_readiness_through_repository_boundary(self) -> None:
         class RecordingConnection(FakeRuntimeConnection):

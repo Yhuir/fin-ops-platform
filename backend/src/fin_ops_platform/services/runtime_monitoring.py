@@ -136,6 +136,7 @@ class RuntimeMonitoringRepository:
             """
             select
                 scope_type,
+                scope_key,
                 status,
                 count(*)::bigint as count,
                 max(last_error) as last_error,
@@ -143,7 +144,7 @@ class RuntimeMonitoringRepository:
             from job.read_model_dirty_scopes
             where tenant_id = 'default'
               and status in ('pending', 'processing', 'failed')
-            group by scope_type, status
+            group by scope_type, scope_key, status
             """
         )
         for row in rows:
@@ -151,11 +152,12 @@ class RuntimeMonitoringRepository:
             if not scope_type:
                 continue
             read_model_key = definitions_by_scope.get(scope_type).key if scope_type in definitions_by_scope else scope_type
-            current = grouped.setdefault(read_model_key, {"status": "missing", "count": 0, "details": []})
+            current = grouped.setdefault(read_model_key, {"status": "missing", "count": 0, "details": [], "scopes": []})
             current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
+            scope_status = _app_status_dirty_scope_status(row.get("status"))
             current["status"] = _max_app_status(
                 str(current.get("status") or "missing"),
-                _app_status_dirty_scope_status(row.get("status")),
+                scope_status,
             )
             last_error = str(row.get("last_error") or "").strip()
             if last_error:
@@ -163,6 +165,18 @@ class RuntimeMonitoringRepository:
             updated_at = str(row.get("updated_at") or "").strip()
             if updated_at:
                 current["updated_at"] = updated_at
+            scopes = current.setdefault("scopes", [])
+            if isinstance(scopes, list):
+                scopes.append(
+                    _app_status_read_model_scope_payload(
+                        read_model_key=read_model_key,
+                        scope_type=scope_type,
+                        scope_key=row.get("scope_key"),
+                        status=scope_status,
+                        last_error=last_error,
+                        updated_at=updated_at,
+                    )
+                )
         for key, definition in APP_STATUS_READ_MODEL_REGISTRY.items():
             grouped.setdefault(
                 key,
@@ -171,6 +185,7 @@ class RuntimeMonitoringRepository:
                     "reason": "readiness record missing",
                     "scope_type": definition.scope_type,
                     "count": 0,
+                    "scopes": [],
                 },
             )
         return grouped
@@ -212,8 +227,21 @@ class RuntimeMonitoringRepository:
                     "generated_at": row.get("generated_at"),
                     "updated_at": row.get("updated_at"),
                     "last_error": row.get("last_error"),
+                    "scopes": [],
                 },
             )
+            scopes = current.setdefault("scopes", [])
+            if isinstance(scopes, list):
+                scopes.append(
+                    _app_status_read_model_scope_payload(
+                        read_model_key=key,
+                        scope_type=row.get("scope_type"),
+                        scope_key=row.get("scope_key"),
+                        status=status,
+                        last_error=row.get("last_error"),
+                        updated_at=row.get("updated_at"),
+                    )
+                )
             current["status"] = _max_app_status(str(current.get("status") or "fresh"), status)
             current["count"] = int(current.get("count") or 0) + 1
             if row.get("last_error"):
@@ -925,6 +953,25 @@ def _app_status_dirty_scope_status(value: object) -> str:
     if status in {"pending", "processing"}:
         return "refreshing"
     return "ready"
+
+
+def _app_status_read_model_scope_payload(
+    *,
+    read_model_key: object,
+    scope_type: object,
+    scope_key: object,
+    status: object,
+    last_error: object,
+    updated_at: object,
+) -> dict[str, str]:
+    return {
+        "read_model_key": str(read_model_key or "").strip(),
+        "scope_type": str(scope_type or "").strip(),
+        "scope_key": str(scope_key or "").strip(),
+        "status": str(status or "missing").strip().lower() or "missing",
+        "last_error": str(last_error or "").strip(),
+        "updated_at": str(updated_at or "").strip(),
+    }
 
 
 def _max_app_status(left: str, right: str) -> str:

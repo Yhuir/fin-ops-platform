@@ -120,6 +120,10 @@ class AppStatusOverviewService:
             self._normalize_status(read_model_statuses.get(key))
             for key in domain.read_model_keys
         ]
+        read_model_scopes = self._read_model_scope_payloads(
+            read_model_statuses=read_model_statuses,
+            domain=domain,
+        )
         worker_values = [
             self._normalize_status(worker_statuses.get(key))
             for key in domain.worker_instances
@@ -139,6 +143,11 @@ class AppStatusOverviewService:
             reason = str(status_payload.get("last_error") or status_payload.get("reason") or "").strip()
             if reason:
                 details.append(reason)
+        for scope in read_model_scopes:
+            reason = str(scope.get("last_error") or "").strip()
+            if reason:
+                scope_key = str(scope.get("scope_key") or "").strip()
+                details.append(f"{scope_key}: {reason}" if scope_key else reason)
         for key in domain.dependencies:
             dependency = dependencies.get(key)
             if isinstance(dependency, dict):
@@ -155,18 +164,29 @@ class AppStatusOverviewService:
             if warning_code:
                 details.append(warning_code)
 
-        has_blocked = any(status in BLOCKED_READ_MODEL_STATUSES for status in read_model_values)
+        read_model_blocked = any(status in BLOCKED_READ_MODEL_STATUSES for status in read_model_values)
+        cost_statistics_local_failure = False
+        if domain.key == "cost_statistics":
+            read_model_blocked = self._cost_statistics_read_model_blocked(
+                read_model_values=read_model_values,
+                read_model_scopes=read_model_scopes,
+            )
+            cost_statistics_local_failure = self._cost_statistics_local_failure(read_model_scopes)
+
+        has_blocked = read_model_blocked
         has_blocked = has_blocked or any(status in BLOCKED_WORKER_STATUSES for status in worker_values)
         has_blocked = has_blocked or any(status == "unavailable" for status in dependency_values)
         has_busy = bool(domain_task_ids)
         has_busy = has_busy or any(status in BUSY_READ_MODEL_STATUSES for status in read_model_values)
+        has_busy = has_busy or cost_statistics_local_failure
         has_busy = has_busy or any(status in BUSY_WORKER_STATUSES.union(BLOCKED_WORKER_STATUSES) for status in worker_values)
         has_busy = has_busy or any(status in {"pending", "publishing", "failed"} for status in outbox_values)
 
         if has_blocked and domain.critical:
             level = "blocked"
             status = (
-                self._first_status(read_model_values, BLOCKED_READ_MODEL_STATUSES)
+                (self._cost_statistics_blocked_status(read_model_scopes) if domain.key == "cost_statistics" else None)
+                or self._first_status(read_model_values, BLOCKED_READ_MODEL_STATUSES)
                 or self._first_status(worker_values, BLOCKED_WORKER_STATUSES)
                 or "unavailable"
             )
@@ -174,11 +194,16 @@ class AppStatusOverviewService:
         elif has_busy:
             level = "busy"
             status = (
-                self._first_status(read_model_values, BUSY_READ_MODEL_STATUSES)
+                (self._cost_statistics_local_failure_status(read_model_scopes) if cost_statistics_local_failure else None)
+                or self._first_status(read_model_values, BUSY_READ_MODEL_STATUSES)
                 or self._first_status(worker_values, BUSY_WORKER_STATUSES.union(BLOCKED_WORKER_STATUSES))
                 or "refreshing"
             )
-            reason = f"{domain.label}正在同步"
+            reason = (
+                "成本统计局部分片需要重试"
+                if domain.key == "cost_statistics" and cost_statistics_local_failure
+                else f"{domain.label}正在同步"
+            )
         else:
             level = "ok"
             status = "ready"
@@ -193,10 +218,93 @@ class AppStatusOverviewService:
             "reason": reason,
             "details": self._unique(details),
             "read_models": list(domain.read_model_keys),
+            "read_model_scopes": read_model_scopes,
             "workers": list(domain.worker_instances),
             "job_ids": [job_id for job_id in domain_task_ids if job_id],
             "updated_at": generated_at,
         }
+
+    def _read_model_scope_payloads(
+        self,
+        *,
+        read_model_statuses: dict[str, dict[str, Any]],
+        domain: AppStatusDomainDefinition,
+    ) -> list[dict[str, str]]:
+        payloads: list[dict[str, str]] = []
+        for key in domain.read_model_keys:
+            status_payload = read_model_statuses.get(key) or {}
+            if not isinstance(status_payload, dict):
+                continue
+            raw_scopes = status_payload.get("scopes")
+            if not isinstance(raw_scopes, list):
+                continue
+            for raw_scope in raw_scopes:
+                if not isinstance(raw_scope, dict):
+                    continue
+                payloads.append(
+                    {
+                        "read_model_key": str(raw_scope.get("read_model_key") or key).strip(),
+                        "scope_type": str(raw_scope.get("scope_type") or status_payload.get("scope_type") or "").strip(),
+                        "scope_key": str(raw_scope.get("scope_key") or "").strip(),
+                        "status": self._normalize_status(raw_scope),
+                        "last_error": str(raw_scope.get("last_error") or "").strip(),
+                        "updated_at": str(raw_scope.get("updated_at") or "").strip(),
+                    }
+                )
+        return payloads
+
+    @staticmethod
+    def _cost_statistics_read_model_blocked(
+        *,
+        read_model_values: list[str],
+        read_model_scopes: list[dict[str, str]],
+    ) -> bool:
+        if not read_model_scopes:
+            return any(status in BLOCKED_READ_MODEL_STATUSES for status in read_model_values)
+        return any(
+            AppStatusOverviewService._normalize_status(scope) in BLOCKED_READ_MODEL_STATUSES
+            and AppStatusOverviewService._cost_statistics_scope_is_parent(scope)
+            for scope in read_model_scopes
+        )
+
+    @staticmethod
+    def _cost_statistics_local_failure(read_model_scopes: list[dict[str, str]]) -> bool:
+        return any(
+            AppStatusOverviewService._normalize_status(scope) in BLOCKED_READ_MODEL_STATUSES
+            and not AppStatusOverviewService._cost_statistics_scope_is_parent(scope)
+            for scope in read_model_scopes
+        )
+
+    @staticmethod
+    def _cost_statistics_blocked_status(read_model_scopes: list[dict[str, str]]) -> str | None:
+        return next(
+            (
+                AppStatusOverviewService._normalize_status(scope)
+                for scope in read_model_scopes
+                if AppStatusOverviewService._normalize_status(scope) in BLOCKED_READ_MODEL_STATUSES
+                and AppStatusOverviewService._cost_statistics_scope_is_parent(scope)
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _cost_statistics_local_failure_status(read_model_scopes: list[dict[str, str]]) -> str | None:
+        return next(
+            (
+                AppStatusOverviewService._normalize_status(scope)
+                for scope in read_model_scopes
+                if AppStatusOverviewService._normalize_status(scope) in BLOCKED_READ_MODEL_STATUSES
+                and not AppStatusOverviewService._cost_statistics_scope_is_parent(scope)
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _cost_statistics_scope_is_parent(scope: dict[str, str]) -> bool:
+        scope_key = str(scope.get("scope_key") or "").strip()
+        if not scope_key:
+            return True
+        return scope_key in {"active:all", "all:all"} or scope_key.endswith(":all")
 
     def _task_payload(self, job: object) -> dict[str, Any]:
         raw = self._job_payload(job)

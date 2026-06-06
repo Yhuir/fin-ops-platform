@@ -17,8 +17,18 @@ export type AppStatusDomain = {
   reason: string;
   details: string[];
   readModels: string[];
+  readModelScopes: AppStatusReadModelScope[];
   workers: string[];
   jobIds: string[];
+  updatedAt: string;
+};
+
+export type AppStatusReadModelScope = {
+  readModelKey: string;
+  scopeType: string;
+  scopeKey: string;
+  status: string;
+  lastError: string;
   updatedAt: string;
 };
 
