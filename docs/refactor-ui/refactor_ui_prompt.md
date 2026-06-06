@@ -177,6 +177,51 @@
   - `git diff --check`
   - `git status --short --branch`
 
+### P005-phase-2-platform-stack-migration
+
+- Phase: `phase_2_platform_stack`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 升级 React 19，安装 HeroUI v3、Tailwind CSS v4 和 Vite plugin，修复 React 19/type resolution 兼容问题，并添加 HeroUI Button smoke test。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、platform_stack_migration.md、docs/refactor-ui/modules/phase_1_docs_and_tokens.md、web/package.json、web/package-lock.json、web/vite.config.ts、web/tsconfig.node.json、web/src/app/PageKeepAliveHost.tsx、web/src/pages/BankDetailsPage.tsx 和关键测试。安装 React 19、HeroUI v3、Tailwind CSS v4、@tailwindcss/vite；保守保留 Vite 5，因为 @tailwindcss/vite@4.3.0 支持 Vite 5.2+，@vitejs/plugin-react@6 需要 Vite 8。修改 Vite plugin、lockfile 和最小 React 19 类型兼容问题。添加 HeroUIPlatformSmoke.test.tsx。不得迁移业务页面，不移除 MuiProviders，不改后端/API/read model/worker。运行 build、平台 smoke、关键 shell/MUI/month tests，并记录 warnings。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend untouched: yes。
+- API/read model/worker untouched: yes。
+- Business pages not migrated: yes。
+- Workbench internals frozen: yes。
+- MUI removal deferred: yes。
+- Verification defined: build、targeted Vitest、dependency tree、CSS import order、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- Installed React 19.2.7, ReactDOM 19.2.7, React types 19.x, HeroUI 3.1.0, Tailwind 4.3.0, and `@tailwindcss/vite` 4.3.0.
+- Updated `react-is` direct dependency and override to 19.2.7 after npm rejected the conflicting React 18 override.
+- Updated `vite.config.ts` and tracked `vite.config.js` output with Tailwind plugin.
+- Updated `tsconfig.node.json` to `moduleResolution: "Bundler"` for `@tailwindcss/vite` `.d.mts` resolution.
+- Updated `PageKeepAliveHost.tsx` inactive page `inert` prop to boolean.
+- Updated `BankDetailsPage.tsx` DatePicker blur handlers to read the inner input from the text field wrapper.
+- Added `HeroUIPlatformSmoke.test.tsx`.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npm run build`
+  - `cd web && npx vitest run HeroUIPlatformSmoke.test.tsx DesignTokens.test.ts TableLayoutTokens.test.ts App.test.tsx CommonMuiComponents.test.tsx MonthPicker.test.tsx`
+  - `cd web && npm ls react react-dom react-is @types/react @types/react-dom @heroui/react @heroui/styles tailwindcss @tailwindcss/vite --depth=0`
+  - `rg -U -n '@import "tailwindcss";\n@import "@heroui/styles";' web/src web`
+  - `git diff --check`
+  - `git status --short --branch`
+  - Build passed with HeroUI/Tailwind generated CSS minifier warnings and existing bundle size warning.
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`
@@ -267,13 +312,14 @@
 | `P002-phase-1-docs-and-tokens-discovery` | `phase_1_docs_and_tokens` | token discovery | `verified` | passed | Token 边界和 P003 characterization test 建议已记录 |
 | `P003-phase-1-token-characterization-tests` | `phase_1_docs_and_tokens` | token tests | `verified` | expected fail | Ledger Calm 和 table token characterization tests 已新增 |
 | `P004-phase-1-token-implementation` | `phase_1_docs_and_tokens` | token implementation | `verified` | passed | CSS token bridge 已落地，P003 tests 通过 |
+| `P005-phase-2-platform-stack-migration` | `phase_2_platform_stack` | platform stack | `verified` | passed | React 19、HeroUI、Tailwind v4 和 Vite plugin 已接入 |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应生成 `P005-phase-1-token-mg` 或 phase_2 platform stack discovery；若先做 MG，scope 必须只包含 phase_1 docs/tests/CSS token files。
+下一条 prompt 应执行 `MG-P005-phase-2-platform-stack`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_1_docs_and_tokens.md 和 git status。若 phase_1 token discovery/tests/implementation 均 verified，生成 MG-P004-phase-1-docs-and-tokens，检查 scope、diff、测试和文档状态，精确提交并 push。若决定直接进入 phase_2，必须先说明 phase_1 MG 尚未执行。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_2_platform_stack.md 和 git status。检查 scope 只包含 phase_2 platform stack 文件。运行 build、targeted Vitest、dependency tree、CSS import order、git diff --check、git status。精确 git add，不使用 git add . 或 git add -A。提交信息使用 feat: migrate ui platform stack。push 到 refactor-ui，并更新 state/prompt Push Log。
 ```
 
 ## Cumulative MG Prompts
@@ -386,6 +432,39 @@
 - Commit: `541cd8d6`
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified
+
+### MG-P005-phase-2-platform-stack
+
+- Status: `reviewed-not-executed`
+- Scope:
+  - `web/package.json`
+  - `web/package-lock.json`
+  - `web/vite.config.ts`
+  - `web/vite.config.js`
+  - `web/tsconfig.node.json`
+  - `web/src/app/PageKeepAliveHost.tsx`
+  - `web/src/pages/BankDetailsPage.tsx`
+  - `web/src/test/HeroUIPlatformSmoke.test.tsx`
+  - `docs/refactor-ui/modules/phase_2_platform_stack.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_2_platform_stack.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 phase_2 platform stack 文件：web/package.json、web/package-lock.json、web/vite.config.ts、web/vite.config.js、web/tsconfig.node.json、web/src/app/PageKeepAliveHost.tsx、web/src/pages/BankDetailsPage.tsx、web/src/test/HeroUIPlatformSmoke.test.tsx、docs/refactor-ui/modules/phase_2_platform_stack.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npm run build；cd web && npx vitest run HeroUIPlatformSmoke.test.tsx DesignTokens.test.ts TableLayoutTokens.test.ts App.test.tsx CommonMuiComponents.test.tsx MonthPicker.test.tsx；cd web && npm ls react react-dom react-is @types/react @types/react-dom @heroui/react @heroui/styles tailwindcss @tailwindcss/vite --depth=0；rg -U -n '@import "tailwindcss";\n@import "@heroui/styles";' web/src web；git diff --check；git status --short --branch。提交信息使用 feat: migrate ui platform stack。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed, not executed in P005 platform stack slice。
 
 ### MG Prompt Template
 

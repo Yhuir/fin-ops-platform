@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { loadEnv } from "vite";
 import { defineConfig } from "vitest/config";
 function normalizeBasePath(value) {
@@ -14,7 +15,7 @@ export default defineConfig(function (_a) {
     var env = loadEnv(mode, ".", "");
     return {
         base: normalizeBasePath(env.VITE_APP_BASE_PATH),
-        plugins: [react()],
+        plugins: [react(), tailwindcss()],
         server: {
             proxy: {
                 "/api": {

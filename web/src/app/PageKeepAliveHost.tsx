@@ -147,7 +147,7 @@ export default function PageKeepAliveHost({
       {entriesForRender.map((entry) => {
         const active = entry.route.pageKey === matchedRoute.pageKey;
         const PageComponent = entry.route.component;
-        const inertProps = active ? {} : { inert: "" };
+        const inertProps = active ? {} : { inert: true };
         return (
           <div
             key={`${sessionScopeKey}:${entry.route.pageKey}:v${entry.route.sessionVersion}`}

@@ -2384,7 +2384,10 @@ export default function BankDetailsPage() {
                     }
                   },
                 },
-                onBlur: (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => handleCustomDateTextChange("dateFrom", event.target.value),
+                onBlur: (event: FocusEvent<HTMLDivElement>) => {
+                  const input = event.currentTarget.querySelector("input");
+                  handleCustomDateTextChange("dateFrom", input?.value ?? "");
+                },
               },
             }}
           />
@@ -2414,7 +2417,10 @@ export default function BankDetailsPage() {
                     }
                   },
                 },
-                onBlur: (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => handleCustomDateTextChange("dateTo", event.target.value),
+                onBlur: (event: FocusEvent<HTMLDivElement>) => {
+                  const input = event.currentTarget.querySelector("input");
+                  handleCustomDateTextChange("dateTo", input?.value ?? "");
+                },
               },
             }}
           />
