@@ -218,7 +218,10 @@ worker readiness 不是 systemd active。发布脚本会等待：
 
 处理规则：
 
-- refresh `active:all` 或 `all:all` 时，worker 必须真实重建父 scope，成功后写入 `read_model.app_status_readiness`，再 fan-out 入队月份 shard；fan-out-only 事件不能伪造父 scope 为 fresh。
+- refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，worker 从对应工作台月份 read model 构建成本统计 shard，发布成功后重新入队同 project scope 的父 scope，推动全期间视图收敛。
+- refresh `active:all` 或 `all:all` 时，worker 先检查对应月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 入队，父 scope 记录 `refreshing`，不完成 dirty scope，不伪造 `fresh`。
+- 所有所需月份 shard fresh 后，worker 从 `read_model.cost_statistics_rows` 中的月份 rows 聚合生成父 scope，原子写入 `read_model.cost_statistics_read_models` 和 parent rows，并写入父 scope `fresh` readiness。
+- 父 scope 不直接读取 `read_model.workbench_groups(scope_key='all')` 的全量 JSON payload；工作台 `all` scope 超时不能再成为成本统计全期间父 scope rebuild 的关键路径。
 - 父 scope failed/unavailable 代表成本统计主体验不可用，App Status domain 可以 blocked/red。
 - 单个月份 shard failed/unavailable 只代表该分片需要重试，App Status domain 应保持 busy/yellow，并暴露 `read_model_scopes[].scope_key`、`last_error` 和 `updated_at`。
 - historical failed readiness 只能由同一 `read_model_key + scope_type + scope_key` 的真实 successful rebuild 覆盖；运维不得手工改写 readiness 为 fresh。

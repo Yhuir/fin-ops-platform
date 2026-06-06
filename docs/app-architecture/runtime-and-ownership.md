@@ -66,10 +66,12 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 成本统计的 `all` scope 是真实物化视图，不是只负责 fan-out 的队列父 scope：
 
-1. `active:all` / `all:all` 由 `CostStatisticsSqlProjectionBuilder` 基于 `read_model.workbench_groups.scope_key='all'` 直接重建。
-2. `CostStatisticsReadModelRefreshService` 收到 `active:all` 或 `all:all` 时，先重建并完成该父 scope，再入队对应月份 shard。
-3. `ReadModelReadinessReporter` 对 fan-out-only 事件继续不写 `fresh`；如果事件已经完成父 scope rebuild 且带有显式 `readiness_status=fresh`，则必须记录父 scope readiness。
-4. 成本统计 domain 根据 scope 级 readiness 推导状态：`active:all` / `all:all` 父 scope failed/unavailable 时 blocked；`active:YYYY-MM` / `all:YYYY-MM` 月份 shard failed/unavailable、pending 或 refreshing 时显示 busy，并在 App Status 面板暴露失败 scope 与 last error。
+1. `active:YYYY-MM` / `all:YYYY-MM` 月份 shard 由 `CostStatisticsSqlProjectionBuilder` 基于对应工作台月份 read model 重建。
+2. `CostStatisticsReadModelRefreshService` 收到 `active:all` 或 `all:all` 时，先检查所需月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 入队，父 scope 返回 `readiness_status=refreshing`，不写假 fresh。
+3. 所有所需月份 shard fresh 后，`active:all` / `all:all` 从 `read_model.cost_statistics_rows` 的月份 rows 聚合生成，并原子发布到 `read_model.cost_statistics_read_models` 和 parent rows；父 scope 不再读取 `read_model.workbench_groups.scope_key='all'` 的全量 JSON payload。
+4. 月份 shard 发布成功后重新入队同 project scope 的父 scope，使全期间视图最终收敛。
+5. `ReadModelReadinessReporter` 对 fan-out-only 事件继续不写 `fresh`；父 scope 等待 shard 时记录 `refreshing`，只有事件已经完成父 scope rebuild 且带有显式 `readiness_status=fresh` 时，才记录父 scope fresh readiness。
+6. 成本统计 domain 根据 scope 级 readiness 推导状态：`active:all` / `all:all` 父 scope failed/unavailable 时 blocked；`active:YYYY-MM` / `all:YYYY-MM` 月份 shard failed/unavailable、pending 或 refreshing 时显示 busy，并在 App Status 面板暴露失败 scope 与 last error。
 
 ## Worker 与队列
 

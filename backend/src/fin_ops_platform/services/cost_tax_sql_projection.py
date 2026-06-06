@@ -61,8 +61,78 @@ class CostStatisticsSqlProjectionBuilder:
 
     def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
         project_scope, month = _parse_cost_scope_key(scope_key)
+        if month == "all":
+            return self.rebuild_cost_statistics_parent_scope(scope_key)
+        return self.rebuild_cost_statistics_month_scope(scope_key)
+
+    def rebuild_cost_statistics_month_scope(self, scope_key: str) -> dict[str, object]:
+        project_scope, month = _parse_cost_scope_key(scope_key)
+        if month == "all":
+            raise ValueError("month scope rebuild requires a concrete YYYY-MM scope.")
         payload = self._build_explorer_payload(month, project_scope=project_scope)
         source_versions = self._source_versions(month)
+        return self._publish_cost_statistics_scope(
+            month=month,
+            project_scope=project_scope,
+            payload=payload,
+            source_versions=source_versions,
+            refresh_kind="month",
+        )
+
+    def rebuild_cost_statistics_parent_scope(self, scope_key: str) -> dict[str, object]:
+        project_scope, month = _parse_cost_scope_key(scope_key)
+        if month != "all":
+            raise ValueError("parent scope rebuild requires an all scope.")
+        entries, shard_versions = self._cost_entries_from_materialized_shards(project_scope=project_scope)
+        payload = self._build_explorer_payload_from_entries(entries, month="all", project_scope=project_scope)
+        source_versions = {
+            **self._source_versions("all"),
+            "cost_statistics_parent_source": "materialized_shards",
+            "source_shard_count": len(shard_versions),
+            "source_shards": shard_versions,
+        }
+        return self._publish_cost_statistics_scope(
+            month="all",
+            project_scope=project_scope,
+            payload=payload,
+            source_versions=source_versions,
+            refresh_kind="parent",
+        )
+
+    def missing_or_stale_cost_statistics_shards(self, parent_scope_key: str) -> list[str]:
+        project_scope, month = _parse_cost_scope_key(parent_scope_key)
+        if month != "all":
+            return []
+        shard_keys = self.list_cost_statistics_scope_shards(parent_scope_key)
+        if not shard_keys:
+            return []
+        readiness_rows = self._connection.fetch_all(
+            """
+            select scope_key, status
+            from read_model.app_status_readiness
+            where tenant_id = 'default'
+              and read_model_key = 'cost_statistics'
+              and scope_type = 'cost_statistics'
+              and scope_key = any(%s)
+            """,
+            (shard_keys,),
+        )
+        fresh_scopes = {
+            str(row.get("scope_key") or "").strip()
+            for row in readiness_rows
+            if str(row.get("status") or "").strip().lower() == "fresh"
+        }
+        return [scope_key for scope_key in shard_keys if scope_key not in fresh_scopes]
+
+    def _publish_cost_statistics_scope(
+        self,
+        *,
+        month: str,
+        project_scope: str,
+        payload: dict[str, Any],
+        source_versions: dict[str, Any],
+        refresh_kind: str,
+    ) -> dict[str, object]:
         service = CostStatisticsReadModelService()
         read_model = service.upsert_read_model(
             month,
@@ -94,6 +164,9 @@ class CostStatisticsSqlProjectionBuilder:
             "month": month,
             "project_scope": project_scope,
             "entry_count": len(payload.get("time_rows") or []),
+            "row_count": len(payload.get("time_rows") or []),
+            "source_shard_count": source_versions.get("source_shard_count"),
+            "refresh_kind": refresh_kind,
         }
 
     def _source_versions(self, month: str) -> dict[str, Any]:
@@ -108,6 +181,15 @@ class CostStatisticsSqlProjectionBuilder:
 
     def _build_explorer_payload(self, month: str, *, project_scope: str) -> dict[str, Any]:
         entries = self._cost_entries_from_workbench(month, project_scope=project_scope)
+        return self._build_explorer_payload_from_entries(entries, month=month, project_scope=project_scope)
+
+    def _build_explorer_payload_from_entries(
+        self,
+        entries: list[dict[str, Any]],
+        *,
+        month: str,
+        project_scope: str,
+    ) -> dict[str, Any]:
         sorted_entries = sorted(entries, key=lambda item: (str(item["trade_time"]), str(item["transaction_id"])), reverse=True)
         project_groups: dict[str, dict[str, Any]] = {}
         expense_type_groups: dict[str, dict[str, Any]] = {}
@@ -206,6 +288,35 @@ class CostStatisticsSqlProjectionBuilder:
                     }
                 )
         return entries
+
+    def _cost_entries_from_materialized_shards(self, *, project_scope: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            select
+                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
+                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
+                payment_account_label, direction, remark, project_id, project_name, expense_type,
+                expense_content, amount::text as amount, oa_applicant, source_versions,
+                generated_at::text as generated_at, cache_status, payload, raw_payload
+            from read_model.cost_statistics_rows
+            where project_scope = %s
+              and scope_key <> %s
+              and scope_key like %s
+              and scope_month is not null
+            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
+            """,
+            (project_scope, f"{project_scope}:all", f"{project_scope}:%"),
+        )
+        entries: list[dict[str, Any]] = []
+        shard_versions: dict[str, Any] = {}
+        for index, row in enumerate(rows):
+            entry = _cost_entry_from_materialized_row(row, fallback_index=index)
+            entries.append(entry)
+            scope_key = str(row.get("scope_key") or "").strip()
+            if scope_key and scope_key not in shard_versions:
+                versions = row.get("source_versions")
+                shard_versions[scope_key] = versions if isinstance(versions, dict) else {}
+        return entries, shard_versions
 
     def _workbench_payload(self, month: str) -> dict[str, Any]:
         row = self._connection.fetch_one(
@@ -531,6 +642,29 @@ def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "payment_account_label": entry["payment_account_label"],
         "remark": entry["remark"],
         "oa_applicant": entry["oa_applicant"],
+    }
+
+
+def _cost_entry_from_materialized_row(row: dict[str, Any], *, fallback_index: int) -> dict[str, Any]:
+    payload = row_payload(row, "payload", "raw_payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    amount = _decimal(row.get("amount") or payload.get("amount")) or ZERO
+    transaction_id = str(row.get("transaction_id") or payload.get("transaction_id") or f"row-{fallback_index}")
+    return {
+        "group_id": str(row.get("group_id") or payload.get("group_id") or ""),
+        "transaction_id": transaction_id,
+        "trade_time": str(row.get("trade_time_text") or payload.get("trade_time") or row.get("trade_date") or ""),
+        "counterparty_name": str(row.get("counterparty_name") or payload.get("counterparty_name") or ""),
+        "payment_account_label": str(row.get("payment_account_label") or payload.get("payment_account_label") or ""),
+        "direction": str(row.get("direction") or payload.get("direction") or "支出"),
+        "remark": str(row.get("remark") or payload.get("remark") or ""),
+        "project_name": str(row.get("project_name") or payload.get("project_name") or "未归集项目"),
+        "project_id": str(row.get("project_id") or payload.get("project_id") or ""),
+        "expense_type": str(row.get("expense_type") or payload.get("expense_type") or "未分类"),
+        "expense_content": str(row.get("expense_content") or payload.get("expense_content") or ""),
+        "oa_applicant": str(row.get("oa_applicant") or payload.get("oa_applicant") or "—"),
+        "amount_decimal": amount,
     }
 
 

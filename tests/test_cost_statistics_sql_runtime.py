@@ -121,6 +121,108 @@ class CostStatisticsProjectionConnection:
         return None
 
 
+class CostStatisticsParentAggregationConnection:
+    def __init__(self, *, missing_or_stale_shards: list[str] | None = None) -> None:
+        self.missing_or_stale_shards = list(missing_or_stale_shards or [])
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.workbench_groups" in normalized:
+            raise RuntimeError("parent rebuild must not read workbench all payload")
+        if "from read_model.cost_statistics_rows" in normalized:
+            return [
+                {
+                    "scope_key": "active:2026-05",
+                    "project_scope": "active",
+                    "scope_month": "2026-05-01",
+                    "row_key": "txn-1:0",
+                    "transaction_id": "txn-1",
+                    "group_id": "group-1",
+                    "trade_time_text": "2026-05-02 10:00:00",
+                    "trade_date": "2026-05-02",
+                    "counterparty_name": "供应商A",
+                    "payment_account_label": "建行",
+                    "direction": "支出",
+                    "remark": "采购",
+                    "project_id": "P-A",
+                    "project_name": "项目A",
+                    "expense_type": "材料",
+                    "expense_content": "钢材",
+                    "amount": "10.00",
+                    "oa_applicant": "张三",
+                    "source_versions": {"scope": "active:2026-05"},
+                    "generated_at": "2026-06-04T10:00:00+00:00",
+                    "cache_status": "fresh",
+                    "payload": {
+                        "transaction_id": "txn-1",
+                        "group_id": "group-1",
+                        "trade_time": "2026-05-02 10:00:00",
+                        "direction": "支出",
+                        "project_name": "项目A",
+                        "project_id": "P-A",
+                        "expense_type": "材料",
+                        "expense_content": "钢材",
+                        "amount": "10.00",
+                        "counterparty_name": "供应商A",
+                        "payment_account_label": "建行",
+                        "remark": "采购",
+                        "oa_applicant": "张三",
+                    },
+                    "raw_payload": {},
+                },
+                {
+                    "scope_key": "active:2026-04",
+                    "project_scope": "active",
+                    "scope_month": "2026-04-01",
+                    "row_key": "txn-2:0",
+                    "transaction_id": "txn-2",
+                    "group_id": "group-2",
+                    "trade_time_text": "2026-04-11 09:00:00",
+                    "trade_date": "2026-04-11",
+                    "counterparty_name": "供应商B",
+                    "payment_account_label": "招行",
+                    "direction": "支出",
+                    "remark": "服务",
+                    "project_id": "P-B",
+                    "project_name": "项目B",
+                    "expense_type": "服务",
+                    "expense_content": "咨询",
+                    "amount": "5.50",
+                    "oa_applicant": "李四",
+                    "source_versions": {"scope": "active:2026-04"},
+                    "generated_at": "2026-06-04T10:01:00+00:00",
+                    "cache_status": "fresh",
+                    "payload": {
+                        "transaction_id": "txn-2",
+                        "group_id": "group-2",
+                        "trade_time": "2026-04-11 09:00:00",
+                        "direction": "支出",
+                        "project_name": "项目B",
+                        "project_id": "P-B",
+                        "expense_type": "服务",
+                        "expense_content": "咨询",
+                        "amount": "5.50",
+                        "counterparty_name": "供应商B",
+                        "payment_account_label": "招行",
+                        "remark": "服务",
+                        "oa_applicant": "李四",
+                    },
+                    "raw_payload": {},
+                },
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from app.app_settings" in normalized:
+            return {"settings_payload": {"bank_transaction_tags": {"version": 7}}}
+        return None
+
+
 class CostStatisticsSaveRecorder:
     def __init__(self) -> None:
         self.saved: list[tuple[dict, set[str] | None]] = []
@@ -417,10 +519,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:2026-05")])
         self.assertEqual(result["entry_count"], 1)
 
-    def test_cost_statistics_sql_projection_rebuilds_active_all_as_first_class_read_model(self) -> None:
+    def test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows(self) -> None:
         repository = CostStatisticsSaveRecorder()
+        connection = CostStatisticsParentAggregationConnection()
         builder = CostStatisticsSqlProjectionBuilder(
-            connection=CostStatisticsProjectionConnection(),
+            connection=connection,
             read_model_repository=repository,
         )
 
@@ -429,16 +532,22 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["scope_key"], "active:all")
         self.assertEqual(result["month"], "all")
         self.assertEqual(result["project_scope"], "active")
-        self.assertEqual(result["entry_count"], 1)
+        self.assertEqual(result["entry_count"], 2)
+        self.assertTrue(all("workbench_groups" not in sql for sql, _params in connection.fetch_all_calls))
         snapshot, changed_scope_keys = repository.saved[0]
         self.assertEqual(changed_scope_keys, {"active:all"})
         self.assertIn("active:all", snapshot["read_models"])
-        self.assertEqual(snapshot["read_models"]["active:all"]["payload"]["month"], "all")
+        payload = snapshot["read_models"]["active:all"]["payload"]
+        self.assertEqual(payload["month"], "all")
+        self.assertEqual(payload["summary"]["total_amount"], "15.50")
+        self.assertEqual(payload["project_rows"][0]["project_name"], "项目A")
+        self.assertEqual(payload["expense_type_rows"][0]["expense_type"], "材料")
+        self.assertEqual(snapshot["read_models"]["active:all"]["source_versions"]["source_shard_count"], 2)
 
     def test_cost_statistics_sql_projection_rebuilds_all_all_as_first_class_read_model(self) -> None:
         repository = CostStatisticsSaveRecorder()
         builder = CostStatisticsSqlProjectionBuilder(
-            connection=CostStatisticsProjectionConnection(),
+            connection=CostStatisticsParentAggregationConnection(),
             read_model_repository=repository,
         )
 
@@ -449,17 +558,17 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["project_scope"], "all")
         self.assertEqual(repository.saved[0][1], {"all:all"})
 
-    def test_cost_statistics_refresh_handler_rebuilds_all_scope_before_enqueuing_month_shards(self) -> None:
+    def test_cost_statistics_refresh_handler_enqueues_missing_shards_before_parent_rebuild(self) -> None:
         class FakeBuilder:
             def __init__(self) -> None:
                 self.rebuilt: list[str] = []
 
-            def list_cost_statistics_scope_shards(self, scope_key: str) -> list[str]:
+            def missing_or_stale_cost_statistics_shards(self, scope_key: str) -> list[str]:
                 return ["active:2026-05", "active:2026-04"]
 
             def rebuild_cost_statistics_read_model_scope(self, scope_key: str) -> dict[str, object]:
                 self.rebuilt.append(scope_key)
-                return {"scope_key": scope_key, "entry_count": 2}
+                raise AssertionError("parent rebuild must wait for shard convergence")
 
         queue = QueueRecorder()
         builder = FakeBuilder()
@@ -480,7 +589,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         result = service.handle_runtime_event(event)
 
-        self.assertEqual(builder.rebuilt, ["active:all"])
+        self.assertEqual(builder.rebuilt, [])
         self.assertEqual(
             queue.refreshes,
             [
@@ -488,10 +597,48 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 ("cost_statistics", "active:2026-04", "cost_statistics_all_shard"),
             ],
         )
+        self.assertEqual(queue.completed, [])
+        self.assertEqual(result["scope_key"], "active:all")
+        self.assertEqual(result["readiness_status"], "refreshing")
+        self.assertEqual(result["enqueued_scope_keys"], ["active:2026-05", "active:2026-04"])
+
+    def test_cost_statistics_refresh_handler_publishes_parent_after_shards_converge(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.rebuilt_parent: list[str] = []
+
+            def missing_or_stale_cost_statistics_shards(self, scope_key: str) -> list[str]:
+                return []
+
+            def rebuild_cost_statistics_parent_scope(self, scope_key: str) -> dict[str, object]:
+                self.rebuilt_parent.append(scope_key)
+                return {"scope_key": scope_key, "entry_count": 2, "source_shard_count": 2}
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = CostStatisticsReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all",
+            tenant_id="tenant-a",
+            event_type="cost_statistics.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="active:all",
+            scope_type="cost_statistics",
+            scope_key="active:all",
+            dedupe_key=None,
+            payload={"scope_key": "active:all"},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(builder.rebuilt_parent, ["active:all"])
+        self.assertEqual(queue.refreshes, [])
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:all")])
         self.assertEqual(result["scope_key"], "active:all")
-        self.assertEqual(result["entry_count"], 2)
-        self.assertEqual(result["enqueued_scope_keys"], ["active:2026-05", "active:2026-04"])
+        self.assertEqual(result["readiness_status"], "fresh")
+        self.assertEqual(result["refresh_kind"], "parent")
 
     def test_cost_statistics_invalidation_marks_dirty_even_when_no_cached_model_exists(self) -> None:
         class EmptyCostReadModelService:

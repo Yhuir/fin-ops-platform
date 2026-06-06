@@ -10,7 +10,7 @@ from fin_ops_platform.services.app_status_read_model_registry import (
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
-READINESS_WRITE_STATUSES = {"fresh", "failed", "schema_mismatch", "source_mismatch", "unavailable"}
+READINESS_WRITE_STATUSES = {"fresh", "refreshing", "failed", "schema_mismatch", "source_mismatch", "unavailable"}
 
 
 class ReadModelReadinessReporter:

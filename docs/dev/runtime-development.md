@@ -37,7 +37,8 @@
 - 新增页面必须在后端 domain registry 中配置 `key`、`route`、read model、worker 和后台任务类型映射；不能只在 React 页面里维护局部 loading 状态。
 - 新增 read model、worker、outbox event 或后台任务类型时，必须同步更新 `RuntimeMonitoringRepository.app_status_runtime_snapshot()` 可读取的 runtime fact 投影、domain registry、read model registry、job registry 和 app status 测试。
 - 普通 read model refresh worker/service 成功、失败、schema/source mismatch 时，必须通过 repository/state store 公共方法写入 `read_model.app_status_readiness`；没有 readiness 记录不能被解释为 ready。
-- 普通 runtime worker 的 read model handler 由 `ReadModelReadinessReporter` 统一包装；新增 read model refresh handler 不能绕过这个 wrapper。fan-out-only 事件只表示已拆分 scope，不写 `fresh`；如果父 scope 已真实 rebuild 并同时入队 shard，handler 必须返回显式 `readiness_status=fresh`，让 readiness 记录父 scope。
+- 普通 runtime worker 的 read model handler 由 `ReadModelReadinessReporter` 统一包装；新增 read model refresh handler 不能绕过这个 wrapper。fan-out-only 事件只表示已拆分 scope，不写 `fresh`；如果父 scope 需要等待 shard 收敛，handler 必须返回显式 `readiness_status=refreshing`，让 readiness 记录可解释等待状态；只有父 scope 已真实 rebuild 并发布成功时，handler 才能返回 `readiness_status=fresh`。
+- 成本统计 `active:all` / `all:all` 是一等 read model，但构建方式是月份 shard convergence + parent aggregate。父 scope 不得直接读取工作台 `all` scope 全量 payload；缺失或 stale shard 必须通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 入队，月份 shard fresh 后再触发父 scope 收敛。
 - readiness backfill 只能作为真实 convergence 工具使用：`python -m fin_ops_platform.tools.app_status_readiness_backfill --dry-run` 先读取 projection/active generation 事实；`--apply` 只能写入 dry-run 判定出的真实 `fresh/missing/failed/schema_mismatch/source_mismatch/unavailable`，禁止批量伪造 `fresh`。
 - 新增 dependency 时必须更新 app status dependency registry 和 dependency provider。dependency key 缺失不能默认 available；critical dependency missing/unavailable 必须进入 red，optional unavailable 进入 yellow。
 - 新增用户可见后台任务必须写入统一 background job progress contract，至少包含任务身份、状态、短标签、消息、进度字段、影响范围和可跳转 route。
