@@ -435,7 +435,7 @@
 
 ### MG-P005-phase-2-platform-stack
 
-- Status: `reviewed-not-executed`
+- Status: `verified`
 - Scope:
   - `web/package.json`
   - `web/package-lock.json`
@@ -464,7 +464,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed, not executed in P005 platform stack slice。
+- Status: verified。
+
+#### Execution
+
+- Commit: `1eecabb9`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified
 
 ### MG Prompt Template
 

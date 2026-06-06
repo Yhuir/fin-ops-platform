@@ -32,7 +32,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；MG-P001 已 push |
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
-| `phase_2_platform_stack` | `in_progress` | 2026-06-07 |  | `passed` | P005 platform stack verified；MG pending |
+| `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `pending` |  |  |  | 本地 UI primitives |
 | `phase_4_shell` | `pending` |  |  |  | App Shell 迁移 |
 | `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
@@ -69,7 +69,7 @@
   - `docs/refactor-ui/modules/phase_2_platform_stack.md`
 - Verification run: passed
 - Failures: none
-- Next action: 执行 `MG-P005-phase-2-platform-stack`。
+- Next action: 从 `refactor-ui` 生成并执行 `phase_3_primitives` discovery prompt。
 
 ## Prompt Lifecycle
 
@@ -97,7 +97,7 @@
 | docs bootstrap | `verified` | `P000-docs-bootstrap` | 建立工作流文档 |
 | baseline docs gap fill | `verified` | `P001-baseline-doc-gap-fill` | 基线、平台栈、测试策略、模块队列补齐 |
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
-| platform stack | `in_progress` | `P005-phase-2-platform-stack-migration` | Build 和 targeted tests 通过，等待 MG |
+| platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `pending` |  | UI primitives |
 | app shell | `pending` |  | 新 shell 包住关联台 |
 | table system | `pending` |  | HeroUI Table |
@@ -129,6 +129,7 @@
 | 2026-06-07 | `P005-phase-2-platform-stack-migration` | `cd web && npx vitest run HeroUIPlatformSmoke.test.tsx DesignTokens.test.ts TableLayoutTokens.test.ts App.test.tsx CommonMuiComponents.test.tsx MonthPicker.test.tsx` | passed | 26 tests passed |
 | 2026-06-07 | `P005-phase-2-platform-stack-migration` | `cd web && npm ls react react-dom react-is @types/react @types/react-dom @heroui/react @heroui/styles tailwindcss @tailwindcss/vite --depth=0` | passed | Target versions installed |
 | 2026-06-07 | `P005-phase-2-platform-stack-migration` | `rg -U -n '@import "tailwindcss";\n@import "@heroui/styles";' web/src web` | passed | CSS import order exists |
+| 2026-06-07 | `MG-P005-phase-2-platform-stack` | `git push origin refactor-ui` | passed | `1eecabb9` pushed |
 
 ## Push Log
 
@@ -137,3 +138,4 @@
 | 2026-06-07 | `MG-P000-docs-bootstrap` | `refactor-ui` | `52f4520f` | pushed |
 | 2026-06-07 | `MG-P001-baseline-doc-gap-fill` | `refactor-ui` | `8f3daae8` | pushed |
 | 2026-06-07 | `MG-P004-phase-1-docs-and-tokens` | `refactor-ui` | `541cd8d6` | pushed |
+| 2026-06-07 | `MG-P005-phase-2-platform-stack` | `refactor-ui` | `1eecabb9` | pushed |
