@@ -278,3 +278,58 @@ Scope: 只做 AppHealthOperationsPage 表格 pilot discovery；不迁移页面�
 
 更新 docs/refactor-ui/modules/phase_5_table_system.md、refactor_ui_state.md、refactor_ui_prompt.md。运行文档/key grep、git diff --check、git status。
 ```
+
+## P020 Execution Notes
+
+- Status: verified。
+- Scope: AppHealthOperationsPage table pilot discovery only。
+- Runtime code changed: no。
+- Files read:
+  - `web/src/pages/AppHealthOperationsPage.tsx`。
+  - `web/src/test/AppHealthOperationsPage.test.tsx`。
+  - `web/src/components/common/FinanceTable.tsx`。
+  - `web/src/hooks/useFinanceTableSession.ts`。
+
+### AppHealth Table Inventory
+
+| Table | Component | Current UI | Columns | Column roles | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Inventory sources | `InventorySourceRows` | MUI Table | 来源, 数量, 同步 | identity, quantity, date | Rendered three times for bank/invoice/OA blocks. |
+| Request performance | `RequestPerformance` | MUI Table | 接口, 样本, API p95, API p99, DB p95, DB p99, SQL p95, 连接 p95 | identity/description, quantity, status/date-like metric | Performance cells carry `data-tone` and must preserve tone assertions. |
+| Outbox | `OutboxTable` | MUI Table | Outbox, 值 | identity, quantity | `oldest_pending` displays seconds, others numbers. |
+| Queue | `QueueTable` | MUI Table | RabbitMQ, queue, ready, unacked, consumer, DLQ | identity, description, quantity | Long queue names need truncation/wrap behavior. |
+| Read Model | `ReadModelTable` | MUI Table | Read Model, 15m p95, 15m p99, 历史 p95, 15m 样本, stale, unavailable | identity, status metric, quantity | Reuses `PerformanceCell` and `sampleLabel` empty behavior. |
+| Worker | `WorkerTable` | MUI Table | Worker, lag | identity, quantity/date metric | Has explicit empty row when no workers. |
+| Performance cell | `PerformanceCell` | MUI TableCell + custom inline badge | p95/p99 metric cell | status | Must preserve `data-tone=green/yellow/red/unknown` on nearest cell or stable equivalent tested by `AppHealthOperationsPage.test.tsx`. |
+
+### User-visible Entries
+
+- Page route: `/operations/app-health`。
+- Heading: `AppHealth 运维状态`。
+- Refresh button: `aria-label="刷新"`; disabled/loading state when refresh in flight。
+- Admin permission gate: non-admin sees warning and dashboard API is not fetched。
+- Loading/empty: when payload absent and no error, page shows `正在加载。`。
+- Error refresh: failed refresh keeps current dashboard visible and shows alert text。
+- No row click, no pagination, no selection, no drawer, no dialog, no export。
+
+### P021 Scope Recommendation
+
+P021 should migrate only AppHealth table surfaces and related table metric cell styling:
+
+- Replace MUI `Table`, `TableContainer`, `TableHead`, `TableBody`, `TableRow`, `TableCell` in AppHealth table components with `FinanceTable` primitives。
+- Keep existing page-level MUI `Alert`、`Box`、`IconButton`、`Stack`、`Tooltip`、`Typography` for later page-module migration unless required by table extraction。
+- Preserve section layout and refresh behavior。
+- Preserve all current tests in `AppHealthOperationsPage.test.tsx` without weakening behavior assertions。
+- Add or update table semantics assertions if FinanceTable changes accessible table names。
+- Do not touch API, fetch mocks, read model, worker, session permissions, workbench internals。
+
+## P021 Prompt Draft
+
+```text
+Prompt ID: P021-phase-5-app-health-table-pilot-refactor
+Phase: phase_5_table_system
+Type: characterization tests -> extraction/refactor
+Scope: 只迁移 AppHealthOperationsPage 的表格 surfaces 到 FinanceTable primitives；不做整页 HeroUI 化。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx。先补或调整 AppHealthOperationsPage.test.tsx 中表格语义/列入口断言，保留现有 admin gate、refresh failure、unknown metrics 和 data-tone 断言。然后只替换 AppHealth 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell 为 FinanceTable primitives 和 table CSS classes；保留页面级 MUI Alert/Box/IconButton/Stack/Tooltip/Typography 到后续页面模块迁移。不得改后端/API/read model/worker/关联台。运行 AppHealthOperationsPage.test.tsx、TableAlignmentStyles.test.ts、CommonMuiComponents.test.tsx、build、AppHealth 表格 MUI import grep、git diff --check、git status。更新 state/prompt/module docs。
+```

@@ -1226,7 +1226,7 @@
 ### P020-phase-5-app-health-table-pilot-discovery
 
 - Phase: `phase_5_table_system`
-- Status: `reviewed`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: 只做 AppHealthOperationsPage 表格 pilot discovery；不迁移页面实现。
 
@@ -1244,6 +1244,43 @@
 - Workbench internals frozen: yes。
 - Business page migration deferred: yes，P020 只做 pilot discovery。
 - Verification defined: docs/key grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 读取 `web/src/pages/AppHealthOperationsPage.tsx` 和 `web/src/test/AppHealthOperationsPage.test.tsx`。
+- 记录 7 组 table/table-like surfaces：Inventory sources、Request performance、Outbox、Queue、Read Model、Worker、PerformanceCell。
+- 记录 AppHealth 无分页、无选择、无行点击、无抽屉、无导出；保留刷新、admin gate、loading/error 和 existing dashboard visible on refresh failure。
+- 明确 P021 只迁移 AppHealth 表格 surfaces，不做整页 HeroUI 化。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `rg -n "P020-phase-5-app-health-table-pilot-discovery|AppHealth Table Inventory|Inventory sources|Request performance|P021-phase-5-app-health-table-pilot-refactor" docs/refactor-ui/modules/phase_5_table_system.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P021-phase-5-app-health-table-pilot-refactor
+
+- Phase: `phase_5_table_system`
+- Status: `reviewed`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 只迁移 AppHealthOperationsPage 的表格 surfaces 到 FinanceTable primitives；不做整页 HeroUI 化。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx。先补或调整 AppHealthOperationsPage.test.tsx 中表格语义/列入口断言，保留现有 admin gate、refresh failure、unknown metrics 和 data-tone 断言。然后只替换 AppHealth 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell 为 FinanceTable primitives 和 table CSS classes；保留页面级 MUI Alert/Box/IconButton/Stack/Tooltip/Typography 到后续页面模块迁移。不得改后端/API/read model/worker/关联台。运行 AppHealthOperationsPage.test.tsx、TableAlignmentStyles.test.ts、CommonMuiComponents.test.tsx、build、AppHealth 表格 MUI import grep、git diff --check、git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Whole page HeroUI migration deferred: yes。
+- Workbench internals frozen: yes。
+- User-visible behavior preserved: yes，refresh/admin/loading/error/data-tone/table content assertions must remain。
+- Verification defined: AppHealth tests、table/common tests、build、MUI table import grep、`git diff --check`、`git status --short --branch`。
 
 ## Prompt History
 
@@ -1264,19 +1301,20 @@
 | `P017-phase-5-table-characterization-tests` | `phase_5_table_system` | table tests | `verified` | expected fail | 表格系统 characterization tests 已改写，暴露 FinanceTable CSS/primitive 缺口 |
 | `P018-phase-5-finance-table-primitives` | `phase_5_table_system` | table primitives | `verified` | passed | FinanceTable primitives 和 CSS contract 已通过 tests/build |
 | `P019-phase-5-table-session-primitive` | `phase_5_table_system` | table session | `verified` | passed | useFinanceTableSession 已新增，新旧 session tests 和 build 通过 |
-| `P020-phase-5-app-health-table-pilot-discovery` | `phase_5_table_system` | app health table pilot discovery | `reviewed` | pending | 下一条执行 prompt，先 discovery 低风险 operational tables |
+| `P020-phase-5-app-health-table-pilot-discovery` | `phase_5_table_system` | app health table pilot discovery | `verified` | passed | AppHealth 表格 pilot 清单和 P021 refactor prompt 已记录 |
+| `P021-phase-5-app-health-table-pilot-refactor` | `phase_5_table_system` | app health table pilot refactor | `reviewed` | pending | 下一条执行 prompt，只迁 AppHealth 表格 surfaces |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P020-phase-5-app-health-table-pilot-discovery`。
+下一条 prompt 应执行 `P021-phase-5-app-health-table-pilot-refactor`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/hooks/useFinanceTableSession.ts。只做 AppHealthOperationsPage table pilot discovery/planning，记录旧页面表格清单、列角色、用户可见入口、loading/empty/error 状态、MUI imports、测试断言、应复用的 FinanceTable primitives 和下一条 P021 characterization/refactor prompt。不得迁移页面实现，不改后端/API/read model/worker/关联台。更新 docs/refactor-ui/modules/phase_5_table_system.md、refactor_ui_state.md、refactor_ui_prompt.md。运行文档/key grep、git diff --check、git status。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx。先补或调整 AppHealthOperationsPage.test.tsx 中表格语义/列入口断言，保留现有 admin gate、refresh failure、unknown metrics 和 data-tone 断言。然后只替换 AppHealth 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell 为 FinanceTable primitives 和 table CSS classes；保留页面级 MUI Alert/Box/IconButton/Stack/Tooltip/Typography 到后续页面模块迁移。不得改后端/API/read model/worker/关联台。运行 AppHealthOperationsPage.test.tsx、TableAlignmentStyles.test.ts、CommonMuiComponents.test.tsx、build、AppHealth 表格 MUI import grep、git diff --check、git status。更新 state/prompt/module docs。
 ```
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P019-phase-5-table-session-primitive`。下一条执行 prompt 是 `P020-phase-5-app-health-table-pilot-discovery`。
+最近完成的 MG 是 `MG-P019-phase-5-table-session-primitive`。下一条执行 prompt 是 `P021-phase-5-app-health-table-pilot-refactor`。
 
 ### MG-P019-phase-5-table-session-primitive
 
