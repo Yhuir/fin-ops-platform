@@ -1356,7 +1356,41 @@
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P020-phase-5-app-health-table-pilot-discovery`。下一条执行 prompt 是 `P021-phase-5-app-health-table-pilot-refactor`。
+最近完成的 MG 是 `MG-P021-phase-5-app-health-table-pilot-refactor`。下一条执行 prompt 是 `P022-phase-6-tax-offset-discovery`。
+
+### MG-P021-phase-5-app-health-table-pilot-refactor
+
+- Status: `verified`
+- Scope:
+  - `web/src/components/common/FinanceTable.tsx`
+  - `web/src/pages/AppHealthOperationsPage.tsx`
+  - `web/src/test/AppHealthOperationsPage.test.tsx`
+  - `docs/refactor-ui/modules/phase_5_table_system.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P021 AppHealth table pilot 文件：web/src/components/common/FinanceTable.tsx、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run AppHealthOperationsPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx；cd web && npm run build；if rg -n '@mui/material/(Table|TableBody|TableCell|TableContainer|TableHead|TableRow)' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate app health tables。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified；Phase 5 可标记 completed，下一条 prompt 进入 P022 phase 6 tax offset discovery。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: verified。
+
+#### Execution
+
+- Commit: `b47f0689`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### MG-P020-phase-5-app-health-table-pilot-discovery
 
