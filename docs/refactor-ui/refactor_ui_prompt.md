@@ -640,7 +640,7 @@
 
 ### MG-P011-phase-4-shell-discovery
 
-- Status: `mg_reviewed`
+- Status: `verified`
 - Scope:
   - `docs/refactor-ui/modules/phase_4_shell.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -661,7 +661,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `0c0e6b01`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### P000-docs-bootstrap
 

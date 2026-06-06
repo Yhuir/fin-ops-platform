@@ -61,7 +61,7 @@
   - `docs/refactor-ui/refactor_ui_state.md`
 - Verification run: passed
 - Failures: none
-- Next action: 执行 `MG-P011-phase-4-shell-discovery`。
+- Next action: 从 `refactor-ui` 生成并执行 `P012-phase-4-shell-icon-dependency`。
 
 ## Prompt Lifecycle
 
@@ -91,7 +91,7 @@
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
-| app shell | `in_progress` | `P011-phase-4-shell-discovery` | discovery verified，MG-P011 待执行 |
+| app shell | `in_progress` | `P011-phase-4-shell-discovery` | discovery verified，MG-P011 已 push |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
@@ -150,6 +150,7 @@
 | 2026-06-07 | `P011-phase-4-shell-discovery` | `test -f docs/refactor-ui/modules/phase_4_shell.md` | passed | Shell discovery doc exists |
 | 2026-06-07 | `P011-phase-4-shell-discovery` | `rg -n "Phase 4 Boundary|Icon Decision|lucide-react|P012-phase-4-shell-icon-dependency|ReconciliationWorkbenchPage|--sidebar-width" docs/refactor-ui/modules/phase_4_shell.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Key shell constraints recorded |
 | 2026-06-07 | `P011-phase-4-shell-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P011-phase-4-shell-discovery` | `git push origin refactor-ui` | passed | `0c0e6b01` pushed |
 
 ## Push Log
 
@@ -164,3 +165,4 @@
 | 2026-06-07 | `MG-P008-phase-3-app-drawer-primitive` | `refactor-ui` | `1416b69a` | pushed |
 | 2026-06-07 | `MG-P009-phase-3-file-dropzone-primitive` | `refactor-ui` | `baba332d` | pushed |
 | 2026-06-07 | `MG-P010-phase-3-page-layout-primitives` | `refactor-ui` | `d4135cf3` | pushed |
+| 2026-06-07 | `MG-P011-phase-4-shell-discovery` | `refactor-ui` | `0c0e6b01` | pushed |
