@@ -146,6 +146,48 @@ textarea {
   font: inherit;
 }
 
+.page-title {
+  margin: 0;
+  color: var(--fp-ink);
+  font-size: var(--fp-text-display);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.page-description {
+  margin-top: 6px;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+  line-height: 1.5;
+}
+
+.page-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+}
+
+.page-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+@media (max-width: 900px) {
+  .page-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-toolbar__group {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .finance-state-panel {
   border-radius: var(--fp-radius-sm);
   font-size: var(--fp-text-body);

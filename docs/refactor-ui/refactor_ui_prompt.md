@@ -527,6 +527,74 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified。
 
+### P010-phase-3-page-layout-primitives
+
+- Phase: `phase_3_primitives`
+- Status: `approved_for_execution`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 只迁移 `PageScaffold` 与 `PageToolbar` layout primitives，从 MUI Box/Stack/Typography 迁到 semantic HTML + existing CSS classes。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/test/CommonMuiComponents.test.tsx 和 `rg -n "PageScaffold|PageToolbar" web/src --glob '!components/workbench/**'` 的使用点。只处理 PageScaffold 和 PageToolbar，不迁移 App Shell、业务页面或 tax/import 子组件。增加 CommonMuiComponents.test.tsx 中 page scaffold/toolbar 的用户可观察行为断言：h1、description、actions、children、left/right/children fallback。再把实现迁到 semantic HTML + existing CSS classes。保留 title/description/actions/children/className、left/right/children/className 契约。不得改后端/API/read model/worker，不得改关联台内部工作区。运行 targeted tests、build、MUI grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Business pages untouched: yes。
+- User-visible contract preserved: yes，保留 heading、description/actions/children 和 toolbar left/right。
+- Verification defined: targeted Vitest、build、MUI grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `PageScaffold` 已从 MUI Box/Stack/Typography 迁到 semantic HTML + existing classes。
+- `PageToolbar` 已从 MUI Stack 迁到 semantic HTML + toolbar classes。
+- `web/src/components/common` 已无 `@mui/*` import。
+- 未迁移 App Shell、业务页面或 tax/import 子组件。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx App.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/' web/src/components/common/PageScaffold.tsx web/src/components/common/PageToolbar.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P010-phase-3-page-layout-primitives
+
+- Status: `mg_reviewed`
+- Scope:
+  - `web/src/components/common/PageScaffold.tsx`
+  - `web/src/components/common/PageToolbar.tsx`
+  - `web/src/test/CommonMuiComponents.test.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_3_primitives.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P010 page layout primitive 文件：web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/test/CommonMuiComponents.test.tsx、web/src/app/styles.css、docs/refactor-ui/modules/phase_3_primitives.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run CommonMuiComponents.test.tsx App.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/' web/src/components/common/PageScaffold.tsx web/src/components/common/PageToolbar.tsx; then exit 1; else exit 0; fi；if rg -n '@mui/' web/src/components/common --glob '!**/workbench/**'; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate page layout primitives。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified，并将 phase_3_primitives 标记 completed。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`

@@ -268,3 +268,57 @@
 - `FileDropzone`、相关测试和 CSS 不再包含 `@mui/` 或 `mui-file-dropzone`。
 - 初次 targeted tests 通过但 HeroUI 报告 custom `Button render` 返回 `span` 的语义警告；已改为原生 HeroUI Button 后复测通过，警告消失。
 - Build 通过；仍存在 phase 2 已记录的 HeroUI/Tailwind generated CSS minifier warnings 和既有 chunk size warning。
+
+## Slice P010: Page Layout Primitives
+
+### Scope
+
+- `PageScaffold`
+- `PageToolbar`
+- 相关公共组件测试
+
+### Current Contract
+
+`PageScaffold` 的公开契约是：
+
+- `title`
+- `description`
+- `actions`
+- `children`
+- `className`
+
+`PageToolbar` 的公开契约是：
+
+- `left`
+- `right`
+- `children`
+- `className`
+
+用户可观察行为必须保持：
+
+- `PageScaffold` 仍渲染 `h1`。
+- description、actions、children 的区域顺序保持。
+- `PageToolbar` 仍是左/右两组工具栏内容，缺省时 `children` 作为 left 内容。
+
+### Target Implementation
+
+- 使用原生 semantic HTML + existing CSS classes。
+- 不再从 `@mui/*` 引入这两个 layout primitive。
+
+### Verification
+
+- `cd web && npx vitest run CommonMuiComponents.test.tsx App.test.tsx HeroUIPlatformSmoke.test.tsx`
+- `cd web && npm run build`
+- `if rg -n '@mui/' web/src/components/common/PageScaffold.tsx web/src/components/common/PageToolbar.tsx; then exit 1; else exit 0; fi`
+- `git diff --check`
+- `git status --short --branch`
+
+### Execution Result
+
+- Status: verified。
+- `PageScaffold` 已从 MUI Box/Stack/Typography 迁到 semantic HTML。
+- `PageToolbar` 已从 MUI Stack 迁到 semantic HTML。
+- 保留 `PageScaffold` 的 h1、description、actions、children 和 `className`。
+- 保留 `PageToolbar` 的 left/right/children fallback 和 `className`。
+- `web/src/components/common` 当前已无 `@mui/*` import。
+- Build 通过；仍存在 phase 2 已记录的 HeroUI/Tailwind generated CSS minifier warnings 和既有 chunk size warning。

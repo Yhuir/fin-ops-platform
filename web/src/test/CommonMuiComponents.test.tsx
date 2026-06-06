@@ -8,6 +8,8 @@ import AppDrawer from "../components/common/AppDrawer";
 import AppDialog from "../components/common/AppDialog";
 import ConfirmActionDialog from "../components/common/ConfirmActionDialog";
 import FileDropzone from "../components/common/FileDropzone";
+import PageScaffold from "../components/common/PageScaffold";
+import PageToolbar from "../components/common/PageToolbar";
 import PermissionNotice from "../components/common/PermissionNotice";
 import StatePanel from "../components/common/StatePanel";
 
@@ -152,6 +154,42 @@ describe("common MUI components", () => {
 
     await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("renders page scaffold heading, description, actions, and children", () => {
+    renderWithMui(
+      <PageScaffold
+        actions={<button type="button">新增</button>}
+        description="页面说明"
+        title="页面标题"
+      >
+        <section>页面内容</section>
+      </PageScaffold>,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "页面标题" })).toBeInTheDocument();
+    expect(screen.getByText("页面说明")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新增" })).toBeInTheDocument();
+    expect(screen.getByText("页面内容")).toBeInTheDocument();
+  });
+
+  test("renders page toolbar groups and children fallback", () => {
+    const { rerender } = renderWithMui(
+      <PageToolbar left={<button type="button">筛选</button>} right={<button type="button">导出</button>} />,
+    );
+
+    expect(screen.getByRole("button", { name: "筛选" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出" })).toBeInTheDocument();
+
+    rerender(
+      <MuiProviders>
+        <PageToolbar>
+          <button type="button">刷新</button>
+        </PageToolbar>
+      </MuiProviders>,
+    );
+
+    expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
   });
 
   test("emits dropped files from the shared dropzone", () => {
