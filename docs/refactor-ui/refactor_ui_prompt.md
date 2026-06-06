@@ -1499,19 +1499,20 @@
 | `P026-phase-6-tax-offset-result-panel` | `phase_6_page_batches` | tax offset result cards/page shell | `verified` | passed | result panel、summary cards 和 page-level actions 已迁出 MUI |
 | `P027-phase-6-tax-offset-certified-results` | `phase_6_page_batches` | tax offset certified results | `verified` | passed | 已认证结果 complementary panel 已迁出 MUI |
 | `MG-P027-phase-6-tax-offset` | `phase_6_page_batches` | tax offset cumulative MG | `verified` | pushed | TaxOffset UI migration 已 push 到 refactor-ui |
-| `P028-phase-6-app-health-discovery` | `phase_6_page_batches` | app health discovery | `reviewed` | pending | 下一条执行 prompt，先盘点 AppHealth page-level MUI |
+| `P028-phase-6-app-health-discovery` | `phase_6_page_batches` | app health discovery | `verified` | passed | AppHealth page-level MUI inventory、用户入口和 P029 prompt 已记录 |
+| `P029-phase-6-app-health-characterization-tests` | `phase_6_page_batches` | app health tests | `reviewed` | pending | 下一条执行 prompt，只改 AppHealth tests 锁定 page-level primitive contract |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P028-phase-6-app-health-discovery`。
+下一条 prompt 应执行 `P029-phase-6-app-health-characterization-tests`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx 和相关 AppHealth feature files。只做 AppHealth page discovery/planning，不迁移实现。记录当前 page-level MUI imports、已迁 FinanceTable surfaces、仍需迁移的 Alert/Box/Button/Chip/Stack/Typography/状态面板/刷新入口、用户可见入口、loading/error/permission 状态、测试断言和风险。不得改后端/API/read model/worker/关联台。按需新建 docs/refactor-ui/modules/phase_6_app_health.md；更新 state/prompt docs；运行文档/key grep、git diff --check、git status。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_app_health.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/AppHealthOperationsPage.test.tsx、web/src/pages/AppHealthOperationsPage.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/app/styles.css。只修改 `web/src/test/AppHealthOperationsPage.test.tsx`，新增或调整断言：刷新按钮仍名为 `刷新` 且不再依赖 `.MuiIconButton-root`；loading、permission 和 error notices 保留语义但不再是 `.MuiAlert-root`；section wrappers 使用 AppHealth/project classes；既有 FinanceTable grid role/name 断言保持。不得修改实现、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run AppHealthOperationsPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P030 AppHealth page shell refactor prompt。
 ```
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P027-phase-6-tax-offset`。下一条执行 prompt 是 `P028-phase-6-app-health-discovery`。
+最近完成的 MG 是 `MG-P027-phase-6-tax-offset`。当前 discovery MG 是 `MG-P028-phase-6-app-health-discovery`；下一条执行 prompt 是 `P029-phase-6-app-health-characterization-tests`。
 
 ### MG-P027-phase-6-tax-offset
 
@@ -1574,6 +1575,70 @@
 - Workbench internals frozen: yes。
 - Docs on demand: yes，AppHealth 已做 table pilot，但 page-level MUI discovery 需要独立承载。
 - Verification defined: docs/key grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_6_app_health.md`。
+- 记录 AppHealth page-level MUI inventory：Refresh icon、Alert、Box、CircularProgress、IconButton、Stack、Tooltip、Typography。
+- 记录 Phase 5 已迁 `FinanceTable` surfaces：数据来源、请求性能、Outbox、RabbitMQ、Read Model 和 Worker grids。
+- 记录用户可见入口：标题、生成时间、刷新、loading、permission、error、数据/请求/后台 sections、负向后台任务控制契约。
+- 生成下一条 `P029-phase-6-app-health-characterization-tests` prompt。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_app_health.md`
+  - `rg -n "P028-phase-6-app-health-discovery|Current MUI Inventory|Already Migrated Surfaces|User-visible Entrypoints|P029-phase-6-app-health-characterization-tests|RefreshIcon" docs/refactor-ui/modules/phase_6_app_health.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P029-phase-6-app-health-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `reviewed`
+- Type: `characterization tests`
+- Scope: 只调整 AppHealthOperationsPage tests，锁定 page-level HeroUI/native primitive contract；不改实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_app_health.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/AppHealthOperationsPage.test.tsx、web/src/pages/AppHealthOperationsPage.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/app/styles.css。只修改 `web/src/test/AppHealthOperationsPage.test.tsx`，新增或调整断言：刷新按钮仍名为 `刷新` 且不再依赖 `.MuiIconButton-root`；loading、permission 和 error notices 保留语义但不再是 `.MuiAlert-root`；section wrappers 使用 AppHealth/project classes；既有 FinanceTable grid role/name 断言保持。不得修改实现、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run AppHealthOperationsPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P030 AppHealth page shell refactor prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime implementation untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Characterization before implementation: yes。
+- Expected failure acceptable: yes，旧 MUI classes 仍存在时 tests 应暴露缺口。
+- Verification defined: targeted AppHealth Vitest、`git diff --check`、`git status --short --branch`。
+
+### MG-P028-phase-6-app-health-discovery
+
+- Status: `reviewed`
+- Scope:
+  - `docs/refactor-ui/modules/phase_6_app_health.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_app_health.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P028 AppHealth discovery 文档：docs/refactor-ui/modules/phase_6_app_health.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：test -f docs/refactor-ui/modules/phase_6_app_health.md；rg -n "P028-phase-6-app-health-discovery|Current MUI Inventory|Already Migrated Surfaces|User-visible Entrypoints|P029-phase-6-app-health-characterization-tests|RefreshIcon" docs/refactor-ui/modules/phase_6_app_health.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md；git diff --check；git status --short --branch。提交信息使用 docs: add app health migration discovery。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
 
 ### MG-P022-phase-6-tax-offset-discovery
 

@@ -8,18 +8,18 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P028-phase-6-app-health-discovery`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `P029-phase-6-app-health-characterization-tests`
+- Current MG ID: `MG-P028-phase-6-app-health-discovery`
 
 ## Global Invariants
 
 | Invariant | Status | Evidence |
 | --- | --- | --- |
-| Backend untouched | yes | 当前 TaxOffset 切片只修改前端 UI 与重构文档 |
-| API contract untouched | yes | 未修改 tax API client contract 或 backend |
+| Backend untouched | yes | 当前 AppHealth discovery 切片只修改重构文档 |
+| API contract untouched | yes | 未修改 AppHealth API client contract 或 backend |
 | Read model / worker untouched | yes | 未修改 read model、worker 或 queue |
 | Reconciliation workbench internals frozen | yes | 当前未改 `ReconciliationWorkbenchPage` 或 `web/src/components/workbench/*` |
-| Non-workbench MUI additions | none | TaxOffset 页面和 `components/tax/*` 已无 `@mui/*` |
+| Non-workbench MUI additions | none | AppHealth discovery 未修改 runtime UI；P029 将锁定 page-level MUI removal contract |
 | User-visible actions preserved | documented | `baseline_inventory.md`、`module_inventory.md` 已要求逐页检查 |
 | Behavior equivalence | documented | 旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗 |
 | HeroUI MCP active | yes | 当前会话已调用 HeroUI MCP quick start、theming、Table/Drawer/Modal docs |
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | TaxOffset MG-P027 verified and pushed；next AppHealth page discovery |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | TaxOffset MG-P027 verified and pushed；AppHealth P028 discovery verified，next P029 characterization tests |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,13 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 AppHealth page discovery。
+- Scope: phase 6 AppHealth characterization tests。
 - Files touched:
+  - `docs/refactor-ui/modules/phase_6_app_health.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: MG-P027 push verified
+- Verification run: P028 docs verification passed
 - Failures: none
-- Next action: 执行 `P028-phase-6-app-health-discovery`。
+- Next action: 执行 `MG-P028-phase-6-app-health-discovery`，push 后进入 `P029-phase-6-app-health-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -92,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P028-phase-6-app-health-discovery` | TaxOffset MG verified；next AppHealth page discovery |
+| page batches | `in_progress` | `P029-phase-6-app-health-characterization-tests` | AppHealth P028 discovery verified；next characterization tests |
 
 ## Verification Log
 
@@ -211,6 +212,10 @@
 | 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `rg -n '@mui/' web/src/pages/TaxOffsetPage.tsx web/src/components/tax` | passed | No TaxOffset-scope MUI imports |
 | 2026-06-07 | `P024-P027-phase-6-tax-offset-ui-migration` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P027-phase-6-tax-offset` | `git push origin refactor-ui` | passed | `4c7a99f5` pushed |
+| 2026-06-07 | `P028-phase-6-app-health-discovery` | `test -f docs/refactor-ui/modules/phase_6_app_health.md` | passed | AppHealth discovery doc exists |
+| 2026-06-07 | `P028-phase-6-app-health-discovery` | `rg -n "P028-phase-6-app-health-discovery\|Current MUI Inventory\|Already Migrated Surfaces\|User-visible Entrypoints\|P029-phase-6-app-health-characterization-tests\|RefreshIcon" docs/refactor-ui/modules/phase_6_app_health.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | AppHealth inventory and next prompt recorded |
+| 2026-06-07 | `P028-phase-6-app-health-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P028-phase-6-app-health-discovery` | `git status --short --branch` | passed | 仅 P028 文档变更 |
 
 ## Push Log
 
