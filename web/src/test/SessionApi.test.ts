@@ -7,6 +7,7 @@ const originalFetch = global.fetch;
 afterEach(() => {
   global.fetch = originalFetch;
   vi.restoreAllMocks();
+  vi.useRealTimers();
   document.cookie = "Admin-Token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
 });
 
@@ -58,5 +59,28 @@ describe("session api", () => {
     expect(payload.canAccessApp).toBe(true);
     expect(payload.canMutateData).toBe(false);
     expect(payload.canAdminAccess).toBe(false);
+  });
+
+  test("fails the OA session bootstrap when the session endpoint never returns", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }));
+    global.fetch = fetchMock as typeof fetch;
+
+    const pendingSession = fetchSessionMe();
+    const rejection = expect(pendingSession).rejects.toMatchObject({
+      name: "SessionApiError",
+      status: 0,
+      code: "request_timeout",
+      message: "OA 会话校验超时，请检查网络或稍后重试。",
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await rejection;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

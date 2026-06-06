@@ -4,6 +4,8 @@ describe("apiClient", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   test("normalizes production API base path and sends OA auth credentials", async () => {
@@ -62,5 +64,36 @@ describe("apiClient", () => {
     });
     await expect(apiRequestJson("/api/bank-details/categories")).rejects.toBeInstanceOf(ApiClientError);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  test("turns an explicit request timeout into a structured API error", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("VITE_API_BASE_PATH", "/fin-ops-api/");
+    vi.resetModules();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+      const signal = (init as RequestInit | undefined)?.signal;
+      signal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    }));
+
+    const { ApiClientError, apiRequestJson } = await import("../features/apiClient");
+    const pendingRequest = apiRequestJson("/api/session/me", { method: "GET" }, {
+      timeoutMs: 50,
+      timeoutMessage: "会话校验超时。",
+    });
+    const rejection = expect(pendingRequest).rejects.toMatchObject({
+      status: 0,
+      code: "request_timeout",
+      message: "会话校验超时。",
+      url: "/fin-ops-api/api/session/me",
+    });
+    const instanceRejection = expect(pendingRequest).rejects.toBeInstanceOf(ApiClientError);
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    await rejection;
+    await instanceRejection;
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });

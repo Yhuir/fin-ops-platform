@@ -43,6 +43,11 @@ export default function SessionGate({ children }: { children: ReactNode }) {
         title="会话校验失败"
         description={session.message || "会话校验失败，请稍后重试。"}
         tone="danger"
+        action={(
+          <button className="session-primary-action" type="button" onClick={session.refresh}>
+            重新校验
+          </button>
+        )}
       />
     );
   }

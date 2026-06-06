@@ -9,6 +9,8 @@ type ApiErrorPayload = {
 
 export type ApiRequestJsonOptions = {
   defaultErrorMessage?: string;
+  timeoutMs?: number;
+  timeoutMessage?: string;
 };
 
 export class ApiClientError extends Error {
@@ -106,6 +108,51 @@ function errorCodeFromPayload(payload: unknown) {
   return stringField((payload as ApiErrorPayload).code);
 }
 
+function createBoundedSignal(inputSignal: AbortSignal | null | undefined, timeoutMs: number | null | undefined) {
+  const normalizedTimeoutMs = Number(timeoutMs ?? 0);
+  if (!Number.isFinite(normalizedTimeoutMs) || normalizedTimeoutMs <= 0) {
+    return {
+      signal: inputSignal ?? undefined,
+      didTimeout: () => false,
+      cleanup: () => undefined,
+    };
+  }
+
+  const controller = new AbortController();
+  let didTimeout = false;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const abortFromInputSignal = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(inputSignal?.reason);
+    }
+  };
+
+  if (inputSignal?.aborted) {
+    abortFromInputSignal();
+  } else {
+    inputSignal?.addEventListener("abort", abortFromInputSignal, { once: true });
+  }
+
+  timeoutId = setTimeout(() => {
+    didTimeout = true;
+    if (!controller.signal.aborted) {
+      controller.abort(new DOMException("Request timed out", "TimeoutError"));
+    }
+  }, normalizedTimeoutMs);
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => didTimeout,
+    cleanup: () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+      inputSignal?.removeEventListener("abort", abortFromInputSignal);
+    },
+  };
+}
+
 export async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
   return fetch(apiUrl(url), buildApiRequestInit(init));
 }
@@ -120,7 +167,25 @@ export async function apiRequestJson<T>(
   options: ApiRequestJsonOptions = {},
 ): Promise<T> {
   const resolvedUrl = apiUrl(url);
-  const response = await fetch(resolvedUrl, buildApiRequestInit(init));
+  const boundedSignal = createBoundedSignal(init.signal, options.timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(resolvedUrl, buildApiRequestInit({
+      ...init,
+      signal: boundedSignal.signal,
+    }));
+  } catch (error) {
+    if (boundedSignal.didTimeout()) {
+      throw new ApiClientError(options.timeoutMessage ?? `接口 ${url} 请求超时，请稍后重试。`, {
+        status: 0,
+        code: "request_timeout",
+        url: resolvedUrl,
+      });
+    }
+    throw error;
+  } finally {
+    boundedSignal.cleanup();
+  }
   const rawText = await response.text();
   const trimmedText = rawText.trim();
   const contentType = response.headers?.get?.("Content-Type") ?? "";

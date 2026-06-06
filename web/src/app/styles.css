@@ -1120,6 +1120,35 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   line-height: 1.7;
 }
 
+.session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.session-primary-action {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.session-primary-action:hover {
+  background: #1d4ed8;
+}
+
+.session-primary-action:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.24);
+  outline-offset: 2px;
+}
+
 .session-eyebrow {
   margin-bottom: 10px;
   color: rgba(37, 99, 235, 0.86);

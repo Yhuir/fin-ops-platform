@@ -25,6 +25,12 @@
 
 页面组件负责用户可见状态、交互和 DTO 展示。业务口径、权限、freshness、read model 状态和跨页事实不能在前端重新推导。
 
+会话启动规则：
+
+- `SessionProvider` 是 OA session bootstrap 的唯一入口；页面组件不直接调用 `/api/session/me`。
+- `fetchSessionMe()` 必须给 `apiRequestJson` 传入显式 `timeoutMs`，把挂起请求收敛为 `SessionApiError(request_timeout)`。
+- `SessionGate` 的 error 态通过 `SessionProvider.refresh()` 重试，不新增绕过 session state machine 的临时 auth 逻辑。
+
 页面切换保活规则：
 
 - 新页面必须从 `pageRegistry` 注册 route/sidebar/pageKey，并默认接入 `keepAlive`，除非页面明确不需要保留现场。

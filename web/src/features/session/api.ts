@@ -2,6 +2,8 @@ import { ApiClientError, apiRequestJson } from "../apiClient";
 
 export { readOATokenCookie } from "../authToken";
 
+export const SESSION_BOOTSTRAP_TIMEOUT_MS = 10_000;
+
 export type SessionAccessTier = "denied" | "read_export_only" | "full_access" | "admin";
 
 export type SessionUser = {
@@ -84,12 +86,15 @@ export async function fetchSessionMe(signal?: AbortSignal): Promise<SessionPaylo
         "Content-Type": "application/json",
       },
       signal,
+    }, {
+      timeoutMs: SESSION_BOOTSTRAP_TIMEOUT_MS,
+      timeoutMessage: "OA 会话校验超时，请检查网络或稍后重试。",
     });
   } catch (error) {
     if (error instanceof ApiClientError) {
       const errorPayload = error.payload as ApiErrorPayload | null;
       throw new SessionApiError(
-        normalizeString(errorPayload?.message, "会话校验失败，请稍后重试。"),
+        normalizeString(errorPayload?.message, normalizeString(error.message, "会话校验失败，请稍后重试。")),
         error.status,
         typeof errorPayload?.error === "string" ? errorPayload.error : error.code,
       );
