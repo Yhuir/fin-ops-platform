@@ -86,3 +86,77 @@
 2. `AppDrawer`，保持旧右侧抽屉仍为右侧抽屉。
 3. `FileDropzone`，保持 drop/click/file input 行为。
 4. `PageScaffold` + `PageToolbar`，保持页面结构和工具栏入口。
+
+## Slice P007: App Dialog And Confirm Action Dialog
+
+### Scope
+
+- `AppDialog`
+- `ConfirmActionDialog`
+- 相关公共组件测试
+- 必要的 dialog token classes
+
+### Current Contract
+
+`AppDialog` 的公开契约是：
+
+- `open`
+- `title`
+- `description`
+- `children`
+- `actions`
+- `maxWidth`
+- `disableEscapeClose`
+- `onClose`
+
+用户可观察行为必须保持：
+
+- 旧弹窗仍为居中 modal dialog，不改成 drawer/popover/page section。
+- `title` 仍是 dialog accessible name。
+- `description` 仍作为 dialog description。
+- `children` 在 body 区域。
+- `actions` 在 footer 区域。
+- 默认允许 Esc 关闭；`disableEscapeClose` 时 Esc 不触发 `onClose`。
+- 不新增可见关闭按钮，避免改变既有操作入口数量。
+
+`ConfirmActionDialog` 的公开契约是：
+
+- `open/title/description`
+- `confirmLabel/cancelLabel`
+- `loading`
+- `destructive`
+- `onCancel/onConfirm`
+
+用户可观察行为必须保持：
+
+- 取消按钮触发 `onCancel`。
+- 确认按钮触发 `onConfirm`。
+- loading 时两个按钮禁用，确认按钮显示 `处理中...`。
+- destructive 时确认按钮使用危险视觉。
+
+### Target Implementation
+
+- 使用 HeroUI `Modal` 承载共享弹窗。
+- 使用 HeroUI `Button` 承载 `ConfirmActionDialog` 按钮。
+- ETC 页面传入 `AppDialog.actions` 的旧业务按钮暂不在本切片迁移；页面批次迁移时再替换。
+- 不再从 `@mui/*` 引入 `AppDialog` 或 `ConfirmActionDialog` 实现。
+
+### Verification
+
+- `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+- `cd web && npm run build`
+- `if rg -n '@mui/' web/src/components/common/AppDialog.tsx web/src/components/common/ConfirmActionDialog.tsx; then exit 1; else exit 0; fi`
+- `git diff --check`
+- `git status --short --branch`
+
+### Execution Result
+
+- Status: verified。
+- `AppDialog` 已迁到 HeroUI controlled `Modal`。
+- `ConfirmActionDialog` 已迁到 HeroUI `Button`。
+- `AppDialog`/`ConfirmActionDialog` 不再引入 `@mui/*`。
+- 保留 `open/title/description/children/actions/maxWidth/disableEscapeClose/onClose` 契约。
+- 保留旧弹窗形态：居中 modal dialog，不新增可见关闭按钮。
+- `CommonMuiComponents.test.tsx` 已增加 dialog accessible name/description、body/actions、Esc close、disableEscapeClose、loading disabled 行为断言。
+- Build 首次失败于 `sizeFromMaxWidth` 参数类型包含 `undefined`；根因是对外可选 prop 和内部默认值后的非空边界未区分。已通过 `NonNullable<AppDialogProps["maxWidth"]>` 修正，无运行行为变化。
+- Build 通过；仍存在 phase 2 已记录的 HeroUI/Tailwind generated CSS minifier warnings 和既有 chunk size warning。

@@ -183,6 +183,48 @@ textarea {
   font-size: var(--fp-text-data);
 }
 
+.finance-dialog {
+  border-radius: var(--fp-radius-md);
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  box-shadow: var(--fp-shadow-dialog);
+}
+
+.finance-dialog__header {
+  border-bottom: 1px solid var(--fp-border);
+  padding: var(--fp-space-5) var(--fp-space-5) var(--fp-space-4);
+}
+
+.finance-dialog__title {
+  color: var(--fp-ink);
+  font-size: var(--fp-text-title);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.finance-dialog__body {
+  padding: var(--fp-space-5);
+}
+
+.finance-dialog__description {
+  color: var(--fp-text-secondary);
+  line-height: 1.55;
+}
+
+.finance-dialog__content {
+  color: var(--fp-text-primary);
+}
+
+.finance-dialog__description + .finance-dialog__content {
+  margin-top: var(--fp-space-4);
+}
+
+.finance-dialog__footer {
+  gap: var(--fp-space-2);
+  border-top: 1px solid var(--fp-border);
+  padding: var(--fp-space-4) var(--fp-space-5);
+}
+
 .MuiDataGrid-root .MuiDataGrid-columnHeader,
 .MuiDataGrid-root .MuiDataGrid-cell {
   justify-content: center !important;

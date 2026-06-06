@@ -1,9 +1,5 @@
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogContentText from "@mui/material/DialogContentText";
-import DialogTitle from "@mui/material/DialogTitle";
-import type { ReactNode } from "react";
+import { Modal } from "@heroui/react";
+import { useId, type ReactNode } from "react";
 
 type AppDialogProps = {
   open: boolean;
@@ -16,6 +12,16 @@ type AppDialogProps = {
   onClose: () => void;
 };
 
+type AppDialogMaxWidth = NonNullable<AppDialogProps["maxWidth"]>;
+type ModalSize = "xs" | "sm" | "md" | "lg" | "cover";
+
+function sizeFromMaxWidth(maxWidth: AppDialogMaxWidth): ModalSize {
+  if (maxWidth === "xl") {
+    return "cover";
+  }
+  return maxWidth;
+}
+
 export default function AppDialog({
   open,
   title,
@@ -26,30 +32,41 @@ export default function AppDialog({
   disableEscapeClose = false,
   onClose,
 }: AppDialogProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+
   return (
-    <Dialog
-      open={open}
-      fullWidth
-      maxWidth={maxWidth}
-      aria-labelledby="app-dialog-title"
-      aria-describedby={description ? "app-dialog-description" : undefined}
-      onClose={(_, reason) => {
-        if (disableEscapeClose && reason === "escapeKeyDown") {
-          return;
+    <Modal.Backdrop
+      isKeyboardDismissDisabled={disableEscapeClose}
+      isOpen={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onClose();
         }
-        onClose();
       }}
     >
-      <DialogTitle id="app-dialog-title">{title}</DialogTitle>
-      <DialogContent dividers>
-        {description ? (
-          <DialogContentText id="app-dialog-description" sx={{ mb: children ? 2 : 0 }}>
-            {description}
-          </DialogContentText>
-        ) : null}
-        {children}
-      </DialogContent>
-      {actions ? <DialogActions>{actions}</DialogActions> : null}
-    </Dialog>
+      <Modal.Container placement="center" scroll="inside" size={sizeFromMaxWidth(maxWidth)}>
+        <Modal.Dialog
+          aria-describedby={description ? descriptionId : undefined}
+          aria-labelledby={titleId}
+          className="finance-dialog"
+        >
+          <Modal.Header className="finance-dialog__header">
+            <Modal.Heading className="finance-dialog__title" id={titleId}>
+              {title}
+            </Modal.Heading>
+          </Modal.Header>
+          <Modal.Body className="finance-dialog__body">
+            {description ? (
+              <div className="finance-dialog__description" id={descriptionId}>
+                {description}
+              </div>
+            ) : null}
+            {children ? <div className="finance-dialog__content">{children}</div> : null}
+          </Modal.Body>
+          {actions ? <Modal.Footer className="finance-dialog__footer">{actions}</Modal.Footer> : null}
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }

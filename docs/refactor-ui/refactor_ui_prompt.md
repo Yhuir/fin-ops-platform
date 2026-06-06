@@ -299,6 +299,77 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified
 
+### P007-phase-3-dialog-primitives
+
+- Phase: `phase_3_primitives`
+- Status: `approved_for_execution`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 只迁移 `AppDialog` 与 `ConfirmActionDialog` 两个共享弹窗 primitive，从 MUI Dialog/Button 迁到 HeroUI Modal/Button + Tailwind token classes。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/common/AppDialog.tsx、web/src/components/common/ConfirmActionDialog.tsx、web/src/test/CommonMuiComponents.test.tsx 和 `rg -n "AppDialog|ConfirmActionDialog" web/src --glob '!components/workbench/**'` 的使用点。使用 HeroUI MCP Modal/Button docs 和本地 d.ts 核对 controlled modal、dismiss、keyboard dismiss 和 button API。只处理 AppDialog 与 ConfirmActionDialog，不迁移 AppDrawer、FileDropzone、PageScaffold、PageToolbar、App Shell 或业务页面。先增加/调整 CommonMuiComponents.test.tsx 中共享弹窗的用户可观察行为断言：dialog accessible name/description、actions 位置、默认 Esc 关闭、disableEscapeClose 阻止 Esc、confirm/cancel/loading/destructive 行为。再把 AppDialog/ConfirmActionDialog 实现迁到 HeroUI Modal/Button + token classes。保留 open/title/description/children/actions/maxWidth/disableEscapeClose/onClose 契约；旧弹窗仍是居中 modal，不新增可见关闭按钮。不得改后端/API/read model/worker，不得改关联台内部工作区。运行 targeted tests、build、MUI import grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Business pages untouched: yes。
+- Overlay shape preserved: yes，旧弹窗仍为居中 modal dialog。
+- User-visible contract preserved: yes，保留 `open/title/description/children/actions/maxWidth/disableEscapeClose/onClose` 和确认弹窗按钮行为。
+- Characterization tests required: yes，断言 dialog roles/name/description、Esc close、disableEscapeClose、confirm/cancel/loading。
+- Verification defined: targeted Vitest、build、MUI import grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `AppDialog` 已从 MUI Dialog/DialogTitle/DialogContent/DialogActions 迁到 HeroUI controlled Modal + token classes。
+- `ConfirmActionDialog` 已从 MUI Button 迁到 HeroUI Button。
+- 未迁移 ETC 页面内传入 `AppDialog.actions` 的业务按钮；页面批次迁移时处理。
+- 未迁移 AppDrawer、FileDropzone、PageScaffold、PageToolbar、App Shell 或业务页面。
+- Build 首次失败于 `sizeFromMaxWidth` 参数类型包含 `undefined`；已收紧为 `NonNullable<AppDialogProps["maxWidth"]>` 后通过。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/' web/src/components/common/AppDialog.tsx web/src/components/common/ConfirmActionDialog.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P007-phase-3-dialog-primitives
+
+- Status: `mg_reviewed`
+- Scope:
+  - `web/src/components/common/AppDialog.tsx`
+  - `web/src/components/common/ConfirmActionDialog.tsx`
+  - `web/src/test/CommonMuiComponents.test.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_3_primitives.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P007 dialog primitive 文件：web/src/components/common/AppDialog.tsx、web/src/components/common/ConfirmActionDialog.tsx、web/src/test/CommonMuiComponents.test.tsx、web/src/app/styles.css、docs/refactor-ui/modules/phase_3_primitives.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/' web/src/components/common/AppDialog.tsx web/src/components/common/ConfirmActionDialog.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate dialog primitives。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`

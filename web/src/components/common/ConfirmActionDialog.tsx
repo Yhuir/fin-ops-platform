@@ -1,4 +1,4 @@
-import Button from "@mui/material/Button";
+import { Button } from "@heroui/react";
 
 import AppDialog from "./AppDialog";
 
@@ -33,14 +33,14 @@ export default function ConfirmActionDialog({
       onClose={onCancel}
       actions={
         <>
-          <Button disabled={loading} onClick={onCancel}>
+          <Button isDisabled={loading} onPress={onCancel} variant="secondary">
             {cancelLabel}
           </Button>
           <Button
-            variant="contained"
-            color={destructive ? "error" : "primary"}
-            disabled={loading}
-            onClick={onConfirm}
+            isDisabled={loading}
+            isPending={loading}
+            onPress={onConfirm}
+            variant={destructive ? "danger" : "primary"}
           >
             {loading ? "处理中..." : confirmLabel}
           </Button>

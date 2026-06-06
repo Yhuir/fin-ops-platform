@@ -4,6 +4,7 @@ import type React from "react";
 import { vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
+import AppDialog from "../components/common/AppDialog";
 import ConfirmActionDialog from "../components/common/ConfirmActionDialog";
 import FileDropzone from "../components/common/FileDropzone";
 import PermissionNotice from "../components/common/PermissionNotice";
@@ -70,6 +71,62 @@ describe("common MUI components", () => {
 
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  test("renders app dialog with name, description, body, and actions", () => {
+    renderWithMui(
+      <AppDialog
+        actions={<button type="button">保存</button>}
+        description="用于确认本次操作。"
+        onClose={vi.fn()}
+        open
+        title="共享弹窗"
+      >
+        <p>弹窗正文</p>
+      </AppDialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "共享弹窗" });
+    expect(dialog).toHaveAccessibleDescription("用于确认本次操作。");
+    expect(dialog).toHaveTextContent("弹窗正文");
+    expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+  });
+
+  test("closes app dialog with escape unless disabled", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    const { rerender } = renderWithMui(<AppDialog onClose={onClose} open title="可关闭弹窗" />);
+
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    onClose.mockClear();
+    rerender(
+      <MuiProviders>
+        <AppDialog disableEscapeClose onClose={onClose} open title="不可按 Esc 关闭弹窗" />
+      </MuiProviders>,
+    );
+
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  test("disables confirm dialog actions while loading", () => {
+    renderWithMui(
+      <ConfirmActionDialog
+        destructive
+        loading
+        open
+        title="确认删除"
+        description="删除后不可恢复。"
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "处理中..." })).toBeDisabled();
   });
 
   test("emits dropped files from the shared dropzone", () => {
