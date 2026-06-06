@@ -9,7 +9,7 @@
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P029-phase-6-app-health-characterization-tests`
-- Current MG ID: `MG-P028-phase-6-app-health-discovery`
+- Current MG ID: `not_drafted`
 
 ## Global Invariants
 
@@ -61,7 +61,7 @@
   - `docs/refactor-ui/refactor_ui_state.md`
 - Verification run: P028 docs verification passed
 - Failures: none
-- Next action: 执行 `MG-P028-phase-6-app-health-discovery`，push 后进入 `P029-phase-6-app-health-characterization-tests`。
+- Next action: 执行 `P029-phase-6-app-health-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -216,6 +216,7 @@
 | 2026-06-07 | `P028-phase-6-app-health-discovery` | `rg -n "P028-phase-6-app-health-discovery\|Current MUI Inventory\|Already Migrated Surfaces\|User-visible Entrypoints\|P029-phase-6-app-health-characterization-tests\|RefreshIcon" docs/refactor-ui/modules/phase_6_app_health.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | AppHealth inventory and next prompt recorded |
 | 2026-06-07 | `P028-phase-6-app-health-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P028-phase-6-app-health-discovery` | `git status --short --branch` | passed | 仅 P028 文档变更 |
+| 2026-06-07 | `MG-P028-phase-6-app-health-discovery` | `git push origin refactor-ui` | passed | `1a806eeb` pushed |
 
 ## Push Log
 
@@ -242,3 +243,4 @@
 | 2026-06-07 | `MG-P021-phase-5-app-health-table-pilot-refactor` | `refactor-ui` | `b47f0689` | pushed |
 | 2026-06-07 | `MG-P022-phase-6-tax-offset-discovery` | `refactor-ui` | `c9b64d4d` | pushed |
 | 2026-06-07 | `MG-P027-phase-6-tax-offset` | `refactor-ui` | `4c7a99f5` | pushed |
+| 2026-06-07 | `MG-P028-phase-6-app-health-discovery` | `refactor-ui` | `1a806eeb` | pushed |

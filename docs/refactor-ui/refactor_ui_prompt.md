@@ -1500,6 +1500,7 @@
 | `P027-phase-6-tax-offset-certified-results` | `phase_6_page_batches` | tax offset certified results | `verified` | passed | 已认证结果 complementary panel 已迁出 MUI |
 | `MG-P027-phase-6-tax-offset` | `phase_6_page_batches` | tax offset cumulative MG | `verified` | pushed | TaxOffset UI migration 已 push 到 refactor-ui |
 | `P028-phase-6-app-health-discovery` | `phase_6_page_batches` | app health discovery | `verified` | passed | AppHealth page-level MUI inventory、用户入口和 P029 prompt 已记录 |
+| `MG-P028-phase-6-app-health-discovery` | `phase_6_page_batches` | app health discovery MG | `verified` | pushed | AppHealth discovery 已 push 到 refactor-ui |
 | `P029-phase-6-app-health-characterization-tests` | `phase_6_page_batches` | app health tests | `reviewed` | pending | 下一条执行 prompt，只改 AppHealth tests 锁定 page-level primitive contract |
 
 ## Next Prompt Draft Slot
@@ -1512,7 +1513,7 @@
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P027-phase-6-tax-offset`。当前 discovery MG 是 `MG-P028-phase-6-app-health-discovery`；下一条执行 prompt 是 `P029-phase-6-app-health-characterization-tests`。
+最近完成的 MG 是 `MG-P028-phase-6-app-health-discovery`。下一条执行 prompt 是 `P029-phase-6-app-health-characterization-tests`。
 
 ### MG-P027-phase-6-tax-offset
 
@@ -1618,7 +1619,7 @@
 
 ### MG-P028-phase-6-app-health-discovery
 
-- Status: `reviewed`
+- Status: `verified`
 - Scope:
   - `docs/refactor-ui/modules/phase_6_app_health.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -1639,6 +1640,12 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
+
+#### Execution
+
+- Commit: `1a806eeb`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### MG-P022-phase-6-tax-offset-discovery
 
