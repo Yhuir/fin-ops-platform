@@ -134,7 +134,7 @@ export default function AppSidebar({
                     onClick={isCompact ? onCloseMobile : undefined}
                   >
                     <ListItemIcon className="app-sidebar-link-icon">
-                      <Icon fontSize="small" />
+                      <Icon aria-hidden="true" size={18} strokeWidth={2} />
                     </ListItemIcon>
                     <Collapse
                       in={showExpandedContent}

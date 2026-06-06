@@ -669,6 +669,77 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified。
 
+### P012-phase-4-shell-icon-dependency
+
+- Phase: `phase_4_shell`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 安装 `lucide-react`，迁移 `pageRegistry` sidebar icons/type、`AppSidebar` icon render compatibility 和 `App.test.tsx` icon 断言。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md、web/package.json、web/package-lock.json、web/src/app/pageRegistry.tsx、web/src/components/shell/AppSidebar.tsx、web/src/test/App.test.tsx。执行 `cd web && npm install lucide-react`。只迁移 shell sidebar icon dependency：pageRegistry 从 MUI icons/SvgIconComponent 改为 lucide-react/LucideIcon；AppSidebar 只做 icon render compatibility；App.test.tsx 更新为 lucide icon 断言。不得迁移 AppSidebar layout、AppTopBar、AppStatusIndicator、App runtime provider、业务页面、后端或 workbench 内部。运行 shell tests、build、lucide npm ls、MUI icon grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Dependency justified: yes，shell MUI icons 需要非 MUI icon set；phase_4_shell.md 已记录 lucide-react 决策。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- AppSidebar layout migration deferred: yes。
+- Verification defined: targeted Vitest、build、npm ls、MUI icon grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- Installed `lucide-react@1.17.0`。
+- `pageRegistry.tsx` sidebar icon imports/type migrated to `LucideIcon`。
+- `AppSidebar.tsx` icon render changed to lucide `size={18}` / `strokeWidth={2}`。
+- `App.test.tsx` icon assertions migrated to lucide components。
+- `npm install` still reports 9 vulnerabilities; no audit fix run in this slice。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run App.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `cd web && npm ls lucide-react --depth=0`
+  - `if rg -n '@mui/icons-material' web/src/app/pageRegistry.tsx web/src/test/App.test.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P012-phase-4-shell-icon-dependency
+
+- Status: `mg_reviewed`
+- Scope:
+  - `web/package.json`
+  - `web/package-lock.json`
+  - `web/src/app/pageRegistry.tsx`
+  - `web/src/components/shell/AppSidebar.tsx`
+  - `web/src/test/App.test.tsx`
+  - `docs/refactor-ui/modules/phase_4_shell.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P012 shell icon dependency 文件：web/package.json、web/package-lock.json、web/src/app/pageRegistry.tsx、web/src/components/shell/AppSidebar.tsx、web/src/test/App.test.tsx、docs/refactor-ui/modules/phase_4_shell.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run App.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；cd web && npm ls lucide-react --depth=0；if rg -n '@mui/icons-material' web/src/app/pageRegistry.tsx web/src/test/App.test.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate shell icons to lucide。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`

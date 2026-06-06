@@ -1,21 +1,23 @@
-import AccountBalanceWalletOutlinedIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
-import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
-import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
-import AssignmentLateOutlinedIcon from "@mui/icons-material/AssignmentLateOutlined";
-import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
-import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import DirectionsCarFilledOutlinedIcon from "@mui/icons-material/DirectionsCarFilledOutlined";
-import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
-import HandshakeOutlinedIcon from "@mui/icons-material/HandshakeOutlined";
-import HubOutlinedIcon from "@mui/icons-material/HubOutlined";
-import InputOutlinedIcon from "@mui/icons-material/InputOutlined";
-import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
-import MoveToInboxOutlinedIcon from "@mui/icons-material/MoveToInboxOutlined";
-import OutputOutlinedIcon from "@mui/icons-material/OutputOutlined";
-import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined";
-import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
-import TollOutlinedIcon from "@mui/icons-material/TollOutlined";
-import type { SvgIconComponent } from "@mui/icons-material";
+import {
+  Activity,
+  Calculator,
+  Car,
+  ChartColumn,
+  ClipboardCheck,
+  FileInput,
+  FileOutput,
+  FileQuestion,
+  FileText,
+  Handshake,
+  Inbox,
+  Landmark,
+  ListChecks,
+  Network,
+  Settings,
+  Ticket,
+  WalletCards,
+  type LucideIcon,
+} from "lucide-react";
 import type { ComponentType } from "react";
 
 import ReconciliationWorkbenchPage from "../pages/ReconciliationWorkbenchPage";
@@ -50,7 +52,7 @@ export type SidebarItem = {
   id?: string;
   label: string;
   to: string;
-  icon: SvgIconComponent;
+  icon: LucideIcon;
   end?: boolean;
   active?: boolean;
 };
@@ -64,7 +66,7 @@ type AppPageDefinition = AppPageRoute & {
   sidebar?: {
     group: "finance" | "system";
     label: string;
-    icon: SvgIconComponent;
+    icon: LucideIcon;
     id?: string;
     active?: boolean;
   };
@@ -81,7 +83,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
     end: true,
-    sidebar: { group: "finance", label: "关联台", icon: HubOutlinedIcon },
+    sidebar: { group: "finance", label: "关联台", icon: Network },
   },
   {
     path: "/tax-offset",
@@ -90,7 +92,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "税金抵扣", icon: CalculateOutlinedIcon },
+    sidebar: { group: "finance", label: "税金抵扣", icon: Calculator },
   },
   {
     path: "/cost-statistics",
@@ -99,7 +101,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "成本统计", icon: AssessmentOutlinedIcon },
+    sidebar: { group: "finance", label: "成本统计", icon: ChartColumn },
   },
   {
     path: "/bank-details",
@@ -108,7 +110,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "银行明细", icon: AccountBalanceOutlinedIcon },
+    sidebar: { group: "finance", label: "银行明细", icon: Landmark },
   },
   {
     path: "/pending-invoices",
@@ -117,7 +119,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "待找发票", icon: AssignmentLateOutlinedIcon },
+    sidebar: { group: "finance", label: "待找发票", icon: FileQuestion },
   },
   {
     path: "/input-invoice-usage",
@@ -126,7 +128,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "进项发票使用情况", icon: InputOutlinedIcon },
+    sidebar: { group: "finance", label: "进项发票使用情况", icon: FileInput },
   },
   {
     path: "/oa-pending-payments",
@@ -135,7 +137,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "OA待付款核对", icon: FactCheckOutlinedIcon },
+    sidebar: { group: "finance", label: "OA待付款核对", icon: ClipboardCheck },
   },
   {
     path: "/output-invoice-collections",
@@ -144,7 +146,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "销项发票收款情况", icon: OutputOutlinedIcon },
+    sidebar: { group: "finance", label: "销项发票收款情况", icon: FileOutput },
   },
   {
     path: "/no-oa-bank-batches",
@@ -153,7 +155,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "免OA流水批量处理", icon: PlaylistAddCheckOutlinedIcon },
+    sidebar: { group: "finance", label: "免OA流水批量处理", icon: ListChecks },
   },
   {
     path: "/batch-accounting",
@@ -162,7 +164,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "批量账务", icon: AccountBalanceWalletOutlinedIcon },
+    sidebar: { group: "finance", label: "批量账务", icon: WalletCards },
   },
   {
     path: "/turnover-ledger",
@@ -171,7 +173,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "外部往来款管理", icon: HandshakeOutlinedIcon },
+    sidebar: { group: "finance", label: "外部往来款管理", icon: Handshake },
   },
   {
     path: "/etc-tickets",
@@ -180,7 +182,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "finance", label: "ETC票据管理", icon: TollOutlinedIcon },
+    sidebar: { group: "finance", label: "ETC票据管理", icon: Ticket },
   },
   {
     path: "/settings",
@@ -189,7 +191,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "system", label: "设置", icon: SettingsOutlinedIcon },
+    sidebar: { group: "system", label: "设置", icon: Settings },
   },
   {
     path: "/operations/app-health",
@@ -198,7 +200,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
     keepAlive: true,
     sessionVersion: 1,
     maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
-    sidebar: { group: "system", label: "系统状态", icon: MonitorHeartOutlinedIcon },
+    sidebar: { group: "system", label: "系统状态", icon: Activity },
   },
   {
     path: "/imports/bank-transactions",
@@ -211,7 +213,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
       group: "system",
       id: "workbench-bank-import",
       label: "银行流水导入",
-      icon: MoveToInboxOutlinedIcon,
+      icon: Inbox,
       active: false,
     },
   },
@@ -226,7 +228,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
       group: "system",
       id: "workbench-invoice-import",
       label: "发票导入",
-      icon: DescriptionOutlinedIcon,
+      icon: FileText,
       active: false,
     },
   },
@@ -241,7 +243,7 @@ export const appPageDefinitions: AppPageDefinition[] = [
       group: "system",
       id: "workbench-etc-import",
       label: "ETC发票导入",
-      icon: DirectionsCarFilledOutlinedIcon,
+      icon: Car,
       active: false,
     },
   },

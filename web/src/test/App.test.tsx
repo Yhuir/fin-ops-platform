@@ -1,14 +1,16 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import AccountBalanceWalletOutlinedIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
-import AssignmentLateOutlinedIcon from "@mui/icons-material/AssignmentLateOutlined";
-import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
-import InputOutlinedIcon from "@mui/icons-material/InputOutlined";
-import MoveToInboxOutlinedIcon from "@mui/icons-material/MoveToInboxOutlined";
-import OutputOutlinedIcon from "@mui/icons-material/OutputOutlined";
-import PlaylistAddCheckOutlinedIcon from "@mui/icons-material/PlaylistAddCheckOutlined";
-import TollOutlinedIcon from "@mui/icons-material/TollOutlined";
+import {
+  ClipboardCheck,
+  FileInput,
+  FileOutput,
+  FileQuestion,
+  FileText,
+  Inbox,
+  ListChecks,
+  Ticket,
+  WalletCards,
+} from "lucide-react";
 
 import App from "../app/App";
 import { sidebarGroups } from "../components/shell/sidebarItems";
@@ -39,15 +41,15 @@ describe("Finance operations shell", () => {
     const sidebarItems = sidebarGroups.flatMap((group) => group.items);
     const iconByLabel = new Map(sidebarItems.map((item) => [item.label, item.icon]));
 
-    expect(iconByLabel.get("待找发票")).toBe(AssignmentLateOutlinedIcon);
-    expect(iconByLabel.get("进项发票使用情况")).toBe(InputOutlinedIcon);
-    expect(iconByLabel.get("OA待付款核对")).toBe(FactCheckOutlinedIcon);
-    expect(iconByLabel.get("销项发票收款情况")).toBe(OutputOutlinedIcon);
-    expect(iconByLabel.get("免OA流水批量处理")).toBe(PlaylistAddCheckOutlinedIcon);
-    expect(iconByLabel.get("批量账务")).toBe(AccountBalanceWalletOutlinedIcon);
-    expect(iconByLabel.get("ETC票据管理")).toBe(TollOutlinedIcon);
-    expect(iconByLabel.get("银行流水导入")).toBe(MoveToInboxOutlinedIcon);
-    expect(iconByLabel.get("发票导入")).toBe(DescriptionOutlinedIcon);
+    expect(iconByLabel.get("待找发票")).toBe(FileQuestion);
+    expect(iconByLabel.get("进项发票使用情况")).toBe(FileInput);
+    expect(iconByLabel.get("OA待付款核对")).toBe(ClipboardCheck);
+    expect(iconByLabel.get("销项发票收款情况")).toBe(FileOutput);
+    expect(iconByLabel.get("免OA流水批量处理")).toBe(ListChecks);
+    expect(iconByLabel.get("批量账务")).toBe(WalletCards);
+    expect(iconByLabel.get("ETC票据管理")).toBe(Ticket);
+    expect(iconByLabel.get("银行流水导入")).toBe(Inbox);
+    expect(iconByLabel.get("发票导入")).toBe(FileText);
 
     expect(new Set([
       iconByLabel.get("待找发票"),

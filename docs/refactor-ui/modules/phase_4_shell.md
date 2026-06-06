@@ -73,3 +73,24 @@ Each implementation prompt must preserve user-visible entry points: if a menu it
 - `if rg -n '@mui/' web/src/app/App.tsx web/src/components/shell web/src/app/pageRegistry.tsx; then exit 1; else exit 0; fi`
 - `git diff --check`
 - `git status --short --branch`
+
+## Slice P012: Shell Icon Dependency
+
+### Scope
+
+- `web/package.json`
+- `web/package-lock.json`
+- `web/src/app/pageRegistry.tsx`
+- `web/src/components/shell/AppSidebar.tsx`
+- `web/src/test/App.test.tsx`
+
+### Result
+
+- Status: verified。
+- Installed `lucide-react@1.17.0`.
+- Replaced MUI sidebar icon imports and `SvgIconComponent` typing with `LucideIcon`.
+- Updated sidebar icon tests to assert lucide components.
+- Updated `AppSidebar` icon rendering from MUI `fontSize` to lucide `size/strokeWidth`.
+- Did not migrate AppSidebar layout, AppTopBar, AppStatusIndicator, App runtime provider, backend, or workbench internals.
+- `npm install` still reports 9 vulnerabilities already present in the dependency tree; no `npm audit fix` was run because it is outside this scoped shell icon slice.
+- Build passes with known HeroUI/Tailwind generated CSS minifier warnings and existing chunk size warning.
