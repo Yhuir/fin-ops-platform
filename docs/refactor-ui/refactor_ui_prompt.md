@@ -976,30 +976,6 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified。
 
-### P016-phase-5-table-system-discovery
-
-- Phase: `phase_5_table_system`
-- Status: `reviewed`
-- Type: `discovery/planning`
-- Scope: 读取当前表格组件、表格 CSS、测试和页面使用点，建立 HeroUI Table 迁移队列和表格内容排版系统落地边界；不改运行时代码。
-
-#### Prompt
-
-```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、table_layout_system.md、module_inventory.md、baseline_inventory.md、test_migration_strategy.md、docs/refactor-ui/modules/phase_4_shell.md、web/src/app/styles.css、web/src/components/common、web/src/components/tax、web/src/components/cost-statistics、web/src/pages 中包含 Table/DataGrid/grid-table/cell-money/tag/chip/status badge 的文件和相关 tests。使用 HeroUI MCP Table、Chip、Tooltip、Pagination docs 核对 API。只做 discovery/planning，不迁移表格、不改页面、不改后端/API/read model/worker/workbench 内部。创建或更新 docs/refactor-ui/modules/phase_5_table_system.md，记录 MUI Table/DataGrid/自定义表格分类、非关联台/关联台边界、优先迁移队列、表格内容排版规则、收支 tag 上下/左右对齐规则、金额 tabular nums/right alignment、tooltip/truncation、empty/loading/error states、characterization test 建议、下一条 P017 prompt。运行文档存在/关键规则 grep、git diff --check、git status。更新 state/prompt/module docs。
-```
-
-#### Review
-
-- Single slice: yes。
-- Runtime implementation untouched: yes。
-- Backend/API/read model/worker untouched: yes。
-- Workbench internals frozen: yes。
-- Table migration deferred to next prompt: yes。
-- Docs on demand: yes，phase 5 table queue/rules need cross-slice reuse。
-- Verification defined: docs existence/key grep、`git diff --check`、`git status --short --branch`。
-- Status: reviewed。
-
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`
@@ -1081,6 +1057,76 @@
   - `git diff --check`
   - `git status --short --branch`
 
+### P016-phase-5-table-system-discovery
+
+- Phase: `phase_5_table_system`
+- Status: `verified`
+- Type: `discovery/planning`
+- Scope: 只做表格系统 discovery/planning，建立当前表格迁移队列、HeroUI Table 能力边界、内容排版契约、DataGrid session 替代策略和下一条 P017 characterization prompt。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、table_layout_system.md、module_inventory.md、baseline_inventory.md、test_migration_strategy.md、web/src/app/styles.css 和当前表格/测试使用点。只做 phase 5 table system discovery/planning，创建或更新 docs/refactor-ui/modules/phase_5_table_system.md，记录迁移队列、排版规则和下一条 P017 prompt。运行文档/key grep、git diff --check、git status，并更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Runtime implementation untouched: yes。
+- Workbench internals frozen: yes。
+- User-visible behavior preserved: yes，本切片只写迁移边界和排版规则。
+- Characterization tests deferred: yes，P016 是 discovery；P017 必须先补表格系统 tests。
+- Docs on demand: yes，Phase 5 会跨多个表格模块复用 discovery，因此新增 `docs/refactor-ui/modules/phase_5_table_system.md`。
+- Verification defined: 文档路径检查、关键规则 grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_5_table_system.md`。
+- 记录 DataGrid-heavy、MUI Table dense finance tables、operational tables 和 frozen/out-of-phase buckets。
+- 记录 HeroUI Table compound API、sorting、selection、footer pagination 的使用边界。
+- 记录 column role alignment、Amount/DirectionTag 固定槽位、dense text、grouped headers 和 `useFinanceTableSession` 替代策略。
+- 指出 `TableAlignmentStyles.test.ts` 当前仍断言 MUI/DataGrid 全局居中，P017 必须改为按表格列角色测试。
+- 本切片未修改前端实现、CSS、依赖、后端、API、read model、worker 或关联台内部工作区。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_5_table_system.md`
+  - `rg -n "P016-phase-5-table-system-discovery|DataGrid-heavy|MUI Table Dense Finance Tables|DirectionTag|AmountCell|useFinanceTableSession|P017-phase-5-table-characterization-tests" docs/refactor-ui/modules/phase_5_table_system.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P017-phase-5-table-characterization-tests
+
+- Phase: `phase_5_table_system`
+- Status: `reviewed`
+- Type: `characterization tests`
+- Scope: 只处理表格系统测试契约，不实现 FinanceTable primitives，不迁业务页面。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、DESIGN.md、web/src/app/styles.css、web/src/test/TableAlignmentStyles.test.ts、web/src/components/cost-statistics/CostStatisticsTable.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx 和 web/src/hooks/useMuiDataGridPageSession.ts。使用 HeroUI MCP Table/Chip/Tooltip/Pagination docs 核对 Table compound API、sorting、selection 和 footer pagination。
+
+把 TableAlignmentStyles.test.ts 从 MUI/DataGrid/grid-table 全局居中断言改为 FinanceTable column role contract：amount/quantity right + tabular nums、date/status/direction/selection center、identity/account/description left、DirectionTag 固定槽位、EmptyValue 文案统一、HeroUI/Tailwind table tokens 存在。可以新增 web/src/test/FinanceTableContract.test.ts 或等价测试文件；不得修改业务页面、CSS 实现、依赖、后端、API、read model、worker 或关联台内部工作区。
+
+运行 targeted Vitest，预期在 FinanceTable primitives 未实现前失败；再运行 git diff --check 和 git status。更新 refactor_ui_state.md、refactor_ui_prompt.md 和 phase_5_table_system.md，记录失败断言和下一条 P018 implementation prompt 建议。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Runtime CSS/implementation untouched: yes。
+- Workbench internals frozen: yes。
+- Business page migration untouched: yes。
+- Micro-JIT order preserved: yes，P016 discovery 后先写 characterization tests。
+- Expected failure acceptable: yes，P018 primitives 未实现前 targeted tests 应暴露缺口。
+- Verification defined: targeted Vitest expected fail、`git diff --check`、`git status --short --branch`。
+
 ## Prompt History
 
 | Prompt ID | Phase | Slice | Status | Verification | Notes |
@@ -1096,14 +1142,19 @@
 | `P013-phase-4-shell-provider-runtime` | `phase_4_shell` | shell runtime provider | `verified` | passed | App.tsx 移出完整 MuiProviders，保留临时 MUI X date picker compat |
 | `P014-phase-4-sidebar-topbar` | `phase_4_shell` | sidebar/topbar | `verified` | passed | AppSidebar/AppTopBar 已迁出 MUI，AppStatusIndicator 留到 P015 |
 | `P015-phase-4-status-indicator` | `phase_4_shell` | status indicator | `verified` | passed | shell 目录已无 MUI import |
-| `P016-phase-5-table-system-discovery` | `phase_5_table_system` | table discovery | `reviewed` | pending | 下一条执行 prompt，建立表格迁移队列和排版系统落地边界 |
+| `P016-phase-5-table-system-discovery` | `phase_5_table_system` | table discovery | `verified` | passed | 表格迁移队列、HeroUI Table 能力边界、排版契约和 P017 prompt 已记录 |
+| `P017-phase-5-table-characterization-tests` | `phase_5_table_system` | table tests | `reviewed` | pending | 下一条执行 prompt，改写表格系统 characterization tests |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P016-phase-5-table-system-discovery`。
+下一条 prompt 应执行 `P017-phase-5-table-characterization-tests`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、table_layout_system.md、module_inventory.md、baseline_inventory.md、test_migration_strategy.md、web/src/app/styles.css 和当前表格/测试使用点。只做 phase 5 table system discovery/planning，创建或更新 docs/refactor-ui/modules/phase_5_table_system.md，记录迁移队列、排版规则和下一条 P017 prompt。运行文档/key grep、git diff --check、git status，并更新 state/prompt/module docs。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、DESIGN.md、web/src/app/styles.css、web/src/test/TableAlignmentStyles.test.ts、web/src/components/cost-statistics/CostStatisticsTable.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx 和 web/src/hooks/useMuiDataGridPageSession.ts。使用 HeroUI MCP Table/Chip/Tooltip/Pagination docs 核对 Table compound API、sorting、selection 和 footer pagination。
+
+把 TableAlignmentStyles.test.ts 从 MUI/DataGrid/grid-table 全局居中断言改为 FinanceTable column role contract：amount/quantity right + tabular nums、date/status/direction/selection center、identity/account/description left、DirectionTag 固定槽位、EmptyValue 文案统一、HeroUI/Tailwind table tokens 存在。可以新增 web/src/test/FinanceTableContract.test.ts 或等价测试文件；不得修改业务页面、CSS 实现、依赖、后端、API、read model、worker 或关联台内部工作区。
+
+运行 targeted Vitest，预期在 FinanceTable primitives 未实现前失败；再运行 git diff --check 和 git status。更新 refactor_ui_state.md、refactor_ui_prompt.md 和 phase_5_table_system.md，记录失败断言和下一条 P018 implementation prompt 建议。
 ```
 
 ## Cumulative MG Prompts

@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P016-phase-5-table-system-discovery`
+- Current Prompt ID: `P017-phase-5-table-characterization-tests`
 - Current MG ID: `MG-P016-phase-5-table-system-discovery`
 
 ## Global Invariants
@@ -35,7 +35,7 @@
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
-| `phase_5_table_system` | `in_progress` | 2026-06-07 |  | `pending` | P016 table system discovery 已生成并审查 |
+| `phase_5_table_system` | `in_progress` | 2026-06-07 |  | `pending` | P016 table system discovery 已执行并验证；P017 characterization tests 已生成并审查 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
@@ -54,13 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 5 table system discovery。
+- Scope: phase 5 table characterization tests。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: pending
+  - `docs/refactor-ui/modules/phase_5_table_system.md`
+- Verification run: P016 discovery docs verification passed
 - Failures: none
-- Next action: 执行 `P016-phase-5-table-system-discovery`。
+- Next action: 执行 `P017-phase-5-table-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -91,7 +92,7 @@
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
-| table system | `in_progress` | `P016-phase-5-table-system-discovery` | prompt ready |
+| table system | `in_progress` | `P017-phase-5-table-characterization-tests` | P016 discovery verified；P017 prompt ready |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
 ## Verification Log
@@ -173,6 +174,10 @@
 | 2026-06-07 | `P015-phase-4-status-indicator` | `if rg -n '@mui/' web/src/components/shell; then exit 1; else exit 0; fi` | passed | shell components have no MUI imports |
 | 2026-06-07 | `P015-phase-4-status-indicator` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P015-phase-4-status-indicator` | `git push origin refactor-ui` | passed | `6f1ac42a` pushed |
+| 2026-06-07 | `P016-phase-5-table-system-discovery` | `test -f docs/refactor-ui/modules/phase_5_table_system.md` | passed | Phase 5 table system discovery doc exists |
+| 2026-06-07 | `P016-phase-5-table-system-discovery` | `rg -n "P016-phase-5-table-system-discovery|DataGrid-heavy|MUI Table Dense Finance Tables|DirectionTag|AmountCell|useFinanceTableSession|P017-phase-5-table-characterization-tests" docs/refactor-ui/modules/phase_5_table_system.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Key table migration queue, layout rules and next prompt recorded |
+| 2026-06-07 | `P016-phase-5-table-system-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P016-phase-5-table-system-discovery` | `git status --short --branch` | passed | 仅 P016 文档变更 |
 
 ## Push Log
 
