@@ -43,6 +43,7 @@ class DeploymentConfig:
     replace_release: bool
     dry_run: bool
     runtime_worker_ensure_path: str = "/usr/local/sbin/finops-ensure-runtime-workers"
+    remote_min_free_mb: int = 512
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=8,
         help="Number of newest release directories to keep. Active release paths are always preserved.",
     )
+    parser.add_argument(
+        "--remote-min-free-mb",
+        type=int,
+        default=512,
+        help="Minimum free space required on the remote release filesystem before uploading a release.",
+    )
     parser.add_argument("--skip-build", action="store_true", help="Skip local frontend build")
     parser.add_argument("--skip-pip", action="store_true", help="Legacy mode only: skip remote pip install")
     parser.add_argument("--reload-nginx", action="store_true", help="Legacy mode only: reload nginx after deploy")
@@ -103,6 +110,8 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
     validate_release_name(release_name)
     if args.keep_releases < 0:
         raise ValueError("--keep-releases must be >= 0")
+    if args.remote_min_free_mb < 0:
+        raise ValueError("--remote-min-free-mb must be >= 0")
     return DeploymentConfig(
         mode=args.mode,
         host=args.host,
@@ -127,6 +136,7 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
         allow_dirty=bool(args.allow_dirty),
         replace_release=bool(args.replace_release),
         dry_run=bool(args.dry_run),
+        remote_min_free_mb=int(args.remote_min_free_mb),
     )
 
 
@@ -191,13 +201,24 @@ def build_release_remote_deploy_script(config: DeploymentConfig) -> str:
         f"RELEASE_DIR={quoted_release_dir}",
         f"DEPLOY_CONTROL={quoted_deploy_control}",
         f"KEEP_RELEASES={int(config.keep_releases)}",
+        f"REMOTE_MIN_FREE_MB={int(config.remote_min_free_mb)}",
         mark_remote_deploy_step("validate release name"),
         'case "$RELEASE_NAME" in *[!A-Za-z0-9._-]*|"") echo "invalid release name: $RELEASE_NAME" >&2; exit 64 ;; esac',
         mark_remote_deploy_step("verify deploy-control contract"),
         build_deploy_control_contract_check(),
-        mark_remote_deploy_step("prepare release directory"),
+        mark_remote_deploy_step("ensure releases directory"),
         'mkdir -p "$RELEASES_DIR"',
     ]
+    if config.activate and config.keep_releases > 0:
+        commands.append(mark_remote_deploy_step("preflight cleanup old releases"))
+        commands.append(f"sudo -n {quoted_deploy_control} cleanup-releases --keep {int(config.keep_releases)}")
+    commands.extend(
+        [
+            mark_remote_deploy_step("storage preflight"),
+            build_release_storage_preflight_check(),
+            mark_remote_deploy_step("prepare release directory"),
+        ]
+    )
     if config.replace_release:
         commands.append('rm -rf -- "$RELEASE_DIR"')
     else:
@@ -297,6 +318,35 @@ def build_deploy_control_contract_check() -> str:
             "  fi",
             "}",
             "verify_finops_deploy_control_contract",
+        ]
+    )
+
+
+def build_release_storage_preflight_check() -> str:
+    return "\n".join(
+        [
+            "assert_finops_release_storage() {",
+            "  required_mb=\"$1\"",
+            "  path=\"$2\"",
+            "  if [ \"$required_mb\" -le 0 ]; then",
+            "    return 0",
+            "  fi",
+            "  available_mb=$(df -Pm -- \"$path\" | awk 'NR==2 {print $4}')",
+            "  case \"$available_mb\" in ''|*[!0-9]*)",
+            "    printf 'unable to read available storage for release path: %s\\n' \"$path\" >&2",
+            "    df -h -- \"$path\" >&2 || true",
+            "    exit 69",
+            "    ;;",
+            "  esac",
+            "  printf 'release storage available: path=%s available_mb=%s required_mb=%s\\n' \"$path\" \"$available_mb\" \"$required_mb\" >&2",
+            "  if [ \"$available_mb\" -lt \"$required_mb\" ]; then",
+            "    printf 'insufficient storage for release deploy: path=%s available_mb=%s required_mb=%s\\n' \"$path\" \"$available_mb\" \"$required_mb\" >&2",
+            "    df -h -- \"$path\" >&2 || true",
+            "    du -sh -- \"$RELEASES_DIR\" /opt/fin-ops /var/log /var/log/journal 2>/dev/null >&2 || true",
+            "    exit 69",
+            "  fi",
+            "}",
+            'assert_finops_release_storage "$REMOTE_MIN_FREE_MB" "$RELEASES_DIR"',
         ]
     )
 

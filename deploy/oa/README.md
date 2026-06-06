@@ -268,6 +268,8 @@ python -m fin_ops_platform.app.worker \
   已安装、开机自启并重启到当前 release
 - 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致
 - 清理可删除的旧 release，默认保留最近 8 个，并始终保护当前 active release
+- 激活发布会在创建新 release 目录前先执行一次旧 release 清理，并检查 release 所在文件系统至少有
+  512MB 可用空间；空间不足时会输出 `df` 和关键目录大小后停止，不会继续解包到半失败状态
 
 常用参数：
 
@@ -277,6 +279,7 @@ python -m fin_ops_platform.app.worker \
 ./scripts/deploy-oa.sh --release-name main-abcdef12-20260524170000
 ./scripts/deploy-oa.sh --no-activate
 ./scripts/deploy-oa.sh --keep-releases 12
+./scripts/deploy-oa.sh --remote-min-free-mb 1024
 ```
 
 Workbench read model 生产修复需要读取 `/etc/fin-ops` runtime env 时，不要把 DB secret 暴露给
@@ -351,6 +354,13 @@ sudo /usr/local/sbin/finops-deploy-control check-release <已上传的-release-n
 该模式会覆盖 `/www/wwwroot/fin-ops/dist` 和 `/opt/fin-ops/current/backend`，只用于历史兼容，不作为生产主发布路径。
 
 release 会占用服务器磁盘。生产策略不是无限保留，而是默认保留最近 8 个 release，并保护当前 active release 和 deploy-control status 中仍被引用的 release。旧 root-owned 历史 release 如果当前部署用户没有权限删除，脚本会跳过并输出原因，需要单独做一次 root 清理。
+
+磁盘空间治理规则：
+
+- release 自动清理只管理 `/opt/fin-ops/releases`，不能替代服务器根分区治理。
+- 如果部署在 `storage preflight` 失败，应先用服务器 root 检查 `/var/log`、systemd journal、面板日志、对象存储、缓存和已删除但仍被进程占用的文件；不要用 `finops-deploy` 手工删除不可确认来源的系统文件。
+- 建议在生产机配置持久的 journald/logrotate 上限，避免 `/var/log/messages` 或 `/var/log/journal` 持续增长后把 `/` 填满。
+- 只有在确认业务影响后，才降低 `--keep-releases`；降低 release 保留数只能释放 release 目录空间，不能解决日志或系统目录导致的根分区满。
 
 按当前业务要求，初始配置至少要包含：
 
