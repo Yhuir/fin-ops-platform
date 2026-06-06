@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `phase_3_primitives`
-- Status: `completed`
+- Phase: `phase_4_shell`
+- Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P010-phase-3-page-layout-primitives`
-- Current MG ID: `MG-P010-phase-3-page-layout-primitives`
+- Current Prompt ID: `P011-phase-4-shell-discovery`
+- Current MG ID: ``
 
 ## Global Invariants
 
@@ -34,7 +34,7 @@
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
-| `phase_4_shell` | `pending` |  |  |  | App Shell 迁移 |
+| `phase_4_shell` | `in_progress` | 2026-06-07 |  |  | P011 discovery in progress |
 | `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
@@ -54,17 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 3 shared page layout primitives。
+- Scope: phase 4 App Shell discovery。
 - Files touched:
-  - `web/src/components/common/PageScaffold.tsx`
-  - `web/src/components/common/PageToolbar.tsx`
-  - `web/src/test/CommonMuiComponents.test.tsx`
+  - `docs/refactor-ui/modules/phase_4_shell.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `docs/refactor-ui/modules/phase_3_primitives.md`
 - Verification run: passed
 - Failures: none
-- Next action: 从 `refactor-ui` 生成 `phase_4_shell` prompt。
+- Next action: 执行 `MG-P011-phase-4-shell-discovery`。
 
 ## Prompt Lifecycle
 
@@ -94,7 +91,7 @@
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
-| app shell | `pending` |  | 新 shell 包住关联台 |
+| app shell | `in_progress` | `P011-phase-4-shell-discovery` | discovery verified，MG-P011 待执行 |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
@@ -150,6 +147,9 @@
 | 2026-06-07 | `P010-phase-3-page-layout-primitives` | `if rg -n '@mui/' web/src/components/common/PageScaffold.tsx web/src/components/common/PageToolbar.tsx; then exit 1; else exit 0; fi` | passed | No MUI imports in page layout primitives |
 | 2026-06-07 | `P010-phase-3-page-layout-primitives` | `if rg -n '@mui/' web/src/components/common --glob '!**/workbench/**'; then exit 1; else exit 0; fi` | passed | common primitives contain no MUI imports |
 | 2026-06-07 | `MG-P010-phase-3-page-layout-primitives` | `git push origin refactor-ui` | passed | `d4135cf3` pushed |
+| 2026-06-07 | `P011-phase-4-shell-discovery` | `test -f docs/refactor-ui/modules/phase_4_shell.md` | passed | Shell discovery doc exists |
+| 2026-06-07 | `P011-phase-4-shell-discovery` | `rg -n "Phase 4 Boundary|Icon Decision|lucide-react|P012-phase-4-shell-icon-dependency|ReconciliationWorkbenchPage|--sidebar-width" docs/refactor-ui/modules/phase_4_shell.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Key shell constraints recorded |
+| 2026-06-07 | `P011-phase-4-shell-discovery` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

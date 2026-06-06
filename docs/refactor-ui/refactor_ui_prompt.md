@@ -601,6 +601,68 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified。
 
+### P011-phase-4-shell-discovery
+
+- Phase: `phase_4_shell`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: 只建立 App Shell 迁移边界、MUI 使用清单、icon 依赖决策和下一条 prompt；不改运行时代码。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、README.md、baseline_inventory.md、module_inventory.md、platform_stack_migration.md、test_migration_strategy.md、web/src/app/App.tsx、web/src/app/MuiProviders.tsx、web/src/app/pageRegistry.tsx、web/src/components/shell/AppSidebar.tsx、web/src/components/shell/AppTopBar.tsx、web/src/components/shell/AppStatusIndicator.tsx、web/src/test/App.test.tsx、web/src/test/AppStatusIndicator.test.tsx 和相关 shell CSS。只做 discovery/planning，不改运行时代码、不改依赖、不改后端。创建 docs/refactor-ui/modules/phase_4_shell.md，记录 shell 范围、冻结边界、现有用户可见契约、MUI usage、lucide-react icon 依赖决策、Micro-JIT 切片计划和验证目标。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime implementation untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Dependency change deferred: yes，`lucide-react` 只记录决策，下一条 prompt 执行。
+- Verification defined: 文档存在、关键规则 grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_4_shell.md`。
+- 记录 App Shell 范围、workbench 冻结边界、既有 shell contract、MUI usage、lucide-react icon 依赖决策和 phase 4 Micro-JIT 切片计划。
+- 本切片未修改运行时代码、依赖、后端或 workbench 内部。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_4_shell.md`
+  - `rg -n "Phase 4 Boundary|Icon Decision|lucide-react|P012-phase-4-shell-icon-dependency|ReconciliationWorkbenchPage|--sidebar-width" docs/refactor-ui/modules/phase_4_shell.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P011-phase-4-shell-discovery
+
+- Status: `mg_reviewed`
+- Scope:
+  - `docs/refactor-ui/modules/phase_4_shell.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、验证结果和文档状态。确认 scope 只包含 P011 shell discovery 文档文件：docs/refactor-ui/modules/phase_4_shell.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：test -f docs/refactor-ui/modules/phase_4_shell.md；rg -n "Phase 4 Boundary|Icon Decision|lucide-react|P012-phase-4-shell-icon-dependency|ReconciliationWorkbenchPage|--sidebar-width" docs/refactor-ui/modules/phase_4_shell.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md；git diff --check；git status --short --branch。提交信息使用 docs: add shell migration discovery。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`
