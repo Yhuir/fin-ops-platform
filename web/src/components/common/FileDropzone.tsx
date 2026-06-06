@@ -1,9 +1,4 @@
-import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import FormHelperText from "@mui/material/FormHelperText";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
+import { Button } from "@heroui/react";
 import { useId, useRef, useState } from "react";
 
 type FileDropzoneProps = {
@@ -37,15 +32,14 @@ export default function FileDropzone({
   };
 
   return (
-    <Box>
-      <Stack
-        component="label"
+    <div className="finance-file-dropzone-field">
+      <label
         htmlFor={inputId}
         role="button"
         tabIndex={disabled ? -1 : 0}
         aria-disabled={disabled}
         aria-label={label}
-        className={`mui-file-dropzone${isDragging ? " dragging" : ""}${disabled ? " disabled" : ""}`}
+        className={`finance-file-dropzone${isDragging ? " finance-file-dropzone--dragging" : ""}${disabled ? " finance-file-dropzone--disabled" : ""}`}
         onDragEnter={(event) => {
           event.preventDefault();
           if (!disabled) {
@@ -69,10 +63,12 @@ export default function FileDropzone({
           }
         }}
       >
-        <CloudUploadOutlinedIcon color={disabled ? "disabled" : "primary"} />
-        <Typography fontWeight={800}>{label}</Typography>
-        {helperText ? <Typography color="text.secondary">{helperText}</Typography> : null}
-        <Button component="span" variant="outlined" disabled={disabled}>
+        <span aria-hidden="true" className="finance-file-dropzone__icon">
+          ↑
+        </span>
+        <span className="finance-file-dropzone__label">{label}</span>
+        {helperText ? <span className="finance-file-dropzone__helper">{helperText}</span> : null}
+        <Button className="finance-file-dropzone__browse" isDisabled={disabled} variant="outline">
           浏览文件
         </Button>
         <input
@@ -88,8 +84,12 @@ export default function FileDropzone({
             event.currentTarget.value = "";
           }}
         />
-      </Stack>
-      {errorText ? <FormHelperText error>{errorText}</FormHelperText> : null}
-    </Box>
+      </label>
+      {errorText ? (
+        <p className="finance-file-dropzone__error" role="alert">
+          {errorText}
+        </p>
+      ) : null}
+    </div>
   );
 }

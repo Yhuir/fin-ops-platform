@@ -452,6 +452,75 @@
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified
 
+### P009-phase-3-file-dropzone-primitive
+
+- Phase: `phase_3_primitives`
+- Status: `approved_for_execution`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 只迁移 `FileDropzone` 共享上传 primitive，从 MUI icon/Box/Button/FormHelperText/Stack/Typography 迁到 HeroUI Button + Tailwind token classes，并迁移相关测试里的旧 `.mui-file-dropzone` class 断言。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/common/FileDropzone.tsx、web/src/test/CommonMuiComponents.test.tsx、web/src/test/TaxOffsetPage.test.tsx 和 `rg -n "FileDropzone|mui-file-dropzone" web/src --glob '!components/workbench/**'` 的使用点。只处理 FileDropzone 和相关测试，不迁移 PageScaffold、PageToolbar、App Shell 或业务页面。保留 label/helperText/errorText/accept/multiple/disabled/onFiles 契约，保留 root role=button、aria-label、drop、Enter/Space、hidden input、helper/error 文案。把 FileDropzone 实现迁到 HeroUI Button + token classes，移除 @mui/* import 和 `.mui-file-dropzone` 命名。更新 CommonMuiComponents.test.tsx 和 TaxOffsetPage.test.tsx 的用户可观察行为/新 token class 断言。不得改后端/API/read model/worker，不得改关联台内部工作区。运行 targeted tests、build、MUI/class grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Business pages untouched: yes。
+- User-visible contract preserved: yes，保留 upload/drop/key/input/helper/error 行为。
+- Characterization tests required: yes，迁移旧 MUI class 断言。
+- Verification defined: targeted Vitest、build、MUI/class grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `FileDropzone` 已从 MUI icon/Box/Button/FormHelperText/Stack/Typography 迁到 HeroUI Button + token classes。
+- `.mui-file-dropzone` 已替换为 `.finance-file-dropzone`。
+- `TaxOffsetPage.test.tsx` 已迁移旧 class 断言。
+- 初次 targeted tests 通过但 HeroUI 报告 custom `Button render` 返回 `span` 的语义警告；已改为原生 HeroUI Button 后复测通过。
+- 未迁移 PageScaffold、PageToolbar、App Shell 或业务页面。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx TaxOffsetPage.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/|mui-file-dropzone' web/src/components/common/FileDropzone.tsx web/src/test/TaxOffsetPage.test.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P009-phase-3-file-dropzone-primitive
+
+- Status: `mg_reviewed`
+- Scope:
+  - `web/src/components/common/FileDropzone.tsx`
+  - `web/src/test/TaxOffsetPage.test.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_3_primitives.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P009 FileDropzone primitive 文件：web/src/components/common/FileDropzone.tsx、web/src/test/TaxOffsetPage.test.tsx、web/src/app/styles.css、docs/refactor-ui/modules/phase_3_primitives.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run CommonMuiComponents.test.tsx TaxOffsetPage.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/|mui-file-dropzone' web/src/components/common/FileDropzone.tsx web/src/test/TaxOffsetPage.test.tsx web/src/app/styles.css; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate file dropzone primitive。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`

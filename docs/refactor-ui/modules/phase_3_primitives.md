@@ -214,3 +214,57 @@
 - 宽度通过 `Drawer.Dialog` 上的 `--finance-drawer-width` CSS variable 注入；`Drawer.Content` 不接受 `style`，首次 build 因该 API 边界失败，已移动到 `Drawer.Dialog` 后通过。
 - `AppDrawer` 不再引入 `@mui/*`。
 - Build 通过；仍存在 phase 2 已记录的 HeroUI/Tailwind generated CSS minifier warnings 和既有 chunk size warning。
+
+## Slice P009: File Dropzone
+
+### Scope
+
+- `FileDropzone`
+- `CommonMuiComponents.test.tsx`
+- `TaxOffsetPage.test.tsx` 中对旧 `.mui-file-dropzone` 的 class 断言
+- 必要的 file dropzone token classes
+
+### Current Contract
+
+`FileDropzone` 的公开契约是：
+
+- `label`
+- `helperText`
+- `errorText`
+- `accept`
+- `multiple`
+- `disabled`
+- `onFiles`
+
+用户可观察行为必须保持：
+
+- root 仍以 `role="button"` 和 `aria-label={label}` 暴露。
+- drop 文件触发 `onFiles(File[])`。
+- Enter/Space 仍触发隐藏 file input。
+- `accept/multiple/disabled` 仍传给隐藏 input。
+- helper/error 文案仍展示。
+
+### Target Implementation
+
+- 使用 HeroUI `Button` 承载“浏览文件” affordance。
+- 使用 Tailwind/CSS token classes 替代 `.mui-file-dropzone`。
+- 不再从 `@mui/*` 引入 `FileDropzone` 实现。
+
+### Verification
+
+- `cd web && npx vitest run CommonMuiComponents.test.tsx TaxOffsetPage.test.tsx HeroUIPlatformSmoke.test.tsx`
+- `cd web && npm run build`
+- `if rg -n '@mui/|mui-file-dropzone' web/src/components/common/FileDropzone.tsx web/src/test/TaxOffsetPage.test.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`
+- `git diff --check`
+- `git status --short --branch`
+
+### Execution Result
+
+- Status: verified。
+- `FileDropzone` 已迁到 HeroUI `Button` + `finance-file-dropzone*` token classes。
+- 保留 `label/helperText/errorText/accept/multiple/disabled/onFiles` 契约。
+- 保留 root `role="button"`、`aria-label`、drop、Enter/Space、隐藏 input、helper/error 文案。
+- `TaxOffsetPage.test.tsx` 已从旧 `.mui-file-dropzone` class 断言迁到 `.finance-file-dropzone`。
+- `FileDropzone`、相关测试和 CSS 不再包含 `@mui/` 或 `mui-file-dropzone`。
+- 初次 targeted tests 通过但 HeroUI 报告 custom `Button render` 返回 `span` 的语义警告；已改为原生 HeroUI Button 后复测通过，警告消失。
+- Build 通过；仍存在 phase 2 已记录的 HeroUI/Tailwind generated CSS minifier warnings 和既有 chunk size warning。

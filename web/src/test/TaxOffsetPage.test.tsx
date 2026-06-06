@@ -171,7 +171,7 @@ describe("Tax offset workbench", () => {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
     const certifiedDropzone = within(modal).getByLabelText("选择已认证发票文件");
-    expect(certifiedDropzone.closest(".mui-file-dropzone")).not.toBeNull();
+    expect(certifiedDropzone.closest(".finance-file-dropzone")).not.toBeNull();
     await user.upload(certifiedDropzone, certifiedFile);
 
     expect(within(modal).getByText(/2026年3月.*用途确认信息\.xlsx/)).toBeInTheDocument();
