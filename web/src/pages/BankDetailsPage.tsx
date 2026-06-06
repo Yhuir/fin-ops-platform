@@ -668,8 +668,11 @@ function BankCategoryFilterControl({
               </Box>
               <Divider className="bank-category-filter-divider" component="li" />
               <Box className="bank-category-filter-sections" component="li" role="group">
-                {categoryGroups.map((group) => (
-                  <Box className="bank-category-filter-group bank-category-filter-hierarchy-group" key={group.key}>
+                {categoryGroups.map((group, groupIndex) => (
+                  <Box
+                    className={`bank-category-filter-group bank-category-filter-hierarchy-group bank-category-filter-tone-${groupIndex % 6}`}
+                    key={group.key}
+                  >
                     {renderCategoryFilterButton(
                       group.directItem && group.children.length === 0
                         ? tagCategoryFilter(group.directItem)

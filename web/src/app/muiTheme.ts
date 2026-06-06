@@ -51,6 +51,31 @@ export const muiTheme = createTheme(
           arrow: true,
         },
       },
+      MuiTableCell: {
+        styleOverrides: {
+          root: {
+            textAlign: "center",
+            verticalAlign: "middle",
+          },
+          head: {
+            textAlign: "center",
+            verticalAlign: "middle",
+          },
+          body: {
+            textAlign: "center",
+            verticalAlign: "middle",
+          },
+          alignLeft: {
+            textAlign: "center",
+          },
+          alignRight: {
+            textAlign: "center",
+          },
+          alignCenter: {
+            textAlign: "center",
+          },
+        },
+      },
     },
   },
   ...localeLayers,

@@ -244,17 +244,18 @@ describe("Bank details page", () => {
     expect(source).toMatch(/\.bank-transaction-pagination\.MuiTablePagination-root\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 
-  test("uses a flat dense multi-column category filter layout", () => {
+  test("uses a dense three-column grouped category filter layout", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
     expect(source).toMatch(/\.bank-category-filter-icon-button\.MuiIconButton-root\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/s);
-    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(900px,\s*calc\(100vw - 64px\)\)/s);
+    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(640px,\s*calc\(100vw - 64px\)\)/s);
     expect(source).not.toMatch(/\.bank-category-filter-panel\s*\{[^}]*max-height:/s);
     expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*max-height:/s);
     expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*overflow-y:\s*auto/s);
-    expect(source).toMatch(/\.bank-category-filter-sections\s*\{[^}]*column-count:\s*5/s);
-    expect(source).not.toMatch(/\.bank-category-filter-sections\s*\{[^}]*grid-template-columns:/s);
-    expect(source).toMatch(/\.bank-category-filter-group\s*\{[^}]*break-inside:\s*avoid/s);
+    expect(source).toMatch(/\.bank-category-filter-sections\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+    expect(source).not.toMatch(/\.bank-category-filter-sections\s*\{[^}]*column-count:/s);
+    expect(source).toMatch(/\.bank-category-filter-group\s*\{[^}]*background:\s*var\(--bank-category-group-bg\)/s);
+    expect(source).toMatch(/\.bank-category-filter-tone-0\s*\{[^}]*--bank-category-group-bg:/s);
     expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*9px/s);
     expect(source).toMatch(/\.bank-category-filter-child-row \.bank-category-filter-label\s*\{[^}]*font-size:\s*8\.5px/s);
     expect(source).toMatch(/\.bank-category-filter-count\s*\{[^}]*font-size:\s*8px/s);
@@ -332,6 +333,7 @@ describe("Bank details page", () => {
     const salaryGroup = salaryChild.closest(".bank-category-filter-hierarchy-group");
     expect(salaryGroup).not.toBeNull();
     expect(salaryGroup).toContainElement(feeRoot);
+    expect(Array.from(salaryGroup?.classList ?? []).some((className) => className.startsWith("bank-category-filter-tone-"))).toBe(true);
 
     await user.click(feeRoot);
 

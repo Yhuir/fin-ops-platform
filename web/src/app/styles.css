@@ -28,6 +28,23 @@ textarea {
   font: inherit;
 }
 
+.MuiDataGrid-root .MuiDataGrid-columnHeader,
+.MuiDataGrid-root .MuiDataGrid-cell {
+  justify-content: center !important;
+  text-align: center !important;
+  align-items: center;
+}
+
+.MuiDataGrid-root .MuiDataGrid-columnHeaderTitleContainer {
+  justify-content: center !important;
+}
+
+.MuiDataGrid-root .MuiDataGrid-columnHeaderTitle,
+.MuiDataGrid-root .MuiDataGrid-cellContent {
+  width: 100%;
+  text-align: center !important;
+}
+
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -3217,8 +3234,8 @@ body.column-layout-dragging {
   padding: 10px 12px;
   border-bottom: 1px solid #e9eef5;
   border-right: 1px solid #e9eef5;
-  text-align: left;
-  vertical-align: top;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .grid-table th:last-child,
@@ -3237,7 +3254,7 @@ body.column-layout-dragging {
 
 .grid-table th.cell-money,
 .grid-table td.cell-money {
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -5396,8 +5413,8 @@ body.column-layout-dragging {
 .cost-table td {
   padding: 12px 14px;
   border-bottom: 1px solid #e7edf5;
-  text-align: left;
-  vertical-align: top;
+  text-align: center;
+  vertical-align: middle;
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -7899,7 +7916,7 @@ body.column-layout-dragging {
 }
 
 .bank-category-filter-panel {
-  width: min(900px, calc(100vw - 64px));
+  width: min(640px, calc(100vw - 64px));
   overflow: visible;
   border: 1px solid var(--bank-border);
   border-radius: 5px;
@@ -7916,16 +7933,16 @@ body.column-layout-dragging {
 
 .bank-category-filter-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
   min-width: 0;
 }
 
 .bank-category-filter-sections {
-  display: block;
-  column-count: 5;
-  column-gap: 10px;
-  column-fill: balance;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 5px 6px;
   min-width: 0;
 }
 
@@ -7933,32 +7950,70 @@ body.column-layout-dragging {
   box-sizing: border-box;
   width: 100%;
   min-height: 16px;
-  border-left: 2px solid transparent;
   border-radius: 3px;
   color: var(--bank-text);
   padding: 0 4px;
 }
 
 .bank-category-filter-row.MuiListItemButton-root:hover {
-  background: #eef4fb;
+  background: var(--bank-category-group-hover, #eef4fb);
 }
 
 .bank-category-filter-row.Mui-selected {
-  border-left-color: var(--bank-blue);
   background: #edf5ff;
   color: #0f4fc7;
+  outline: 1px solid rgba(15, 79, 199, 0.22);
+  outline-offset: -1px;
 }
 
 .bank-category-filter-group {
+  --bank-category-group-bg: #f6f8fb;
+  --bank-category-group-hover: #edf3fb;
+  --bank-category-group-line: #cbd8e6;
   display: grid;
   align-content: start;
-  break-inside: avoid;
-  page-break-inside: avoid;
   min-width: 0;
   gap: 0;
-  margin: 0 0 3px;
-  padding: 0 0 0 4px;
   position: relative;
+  padding: 1px 2px 2px 4px;
+  border-radius: 4px;
+  background: var(--bank-category-group-bg);
+}
+
+.bank-category-filter-tone-0 {
+  --bank-category-group-bg: #f2f6fb;
+  --bank-category-group-hover: #e7f0fa;
+  --bank-category-group-line: #b8cbe1;
+}
+
+.bank-category-filter-tone-1 {
+  --bank-category-group-bg: #f4f7ef;
+  --bank-category-group-hover: #eaf1df;
+  --bank-category-group-line: #bdcf9e;
+}
+
+.bank-category-filter-tone-2 {
+  --bank-category-group-bg: #f7f3fb;
+  --bank-category-group-hover: #eee8f8;
+  --bank-category-group-line: #c8b8dd;
+}
+
+.bank-category-filter-tone-3 {
+  --bank-category-group-bg: #fff6ec;
+  --bank-category-group-hover: #f8ead6;
+  --bank-category-group-line: #d9bd8f;
+}
+
+.bank-category-filter-tone-4 {
+  --bank-category-group-bg: #edf7f5;
+  --bank-category-group-hover: #e1f0ed;
+  --bank-category-group-line: #a7cec7;
+}
+
+.bank-category-filter-tone-5 {
+  --bank-category-group-bg: #f9f2f4;
+  --bank-category-group-hover: #f2e6ea;
+  --bank-category-group-line: #d9b9c4;
 }
 
 .bank-category-filter-hierarchy-group::before {
@@ -7968,7 +8023,7 @@ body.column-layout-dragging {
   bottom: 2px;
   left: 7px;
   width: 1px;
-  background: #d8e4f2;
+  background: var(--bank-category-group-line);
 }
 
 .bank-category-filter-primary-row.MuiListItemButton-root {
@@ -7978,7 +8033,7 @@ body.column-layout-dragging {
 }
 
 .bank-category-filter-primary-row.MuiListItemButton-root:hover {
-  background: #f4f7fb;
+  background: var(--bank-category-group-hover);
 }
 
 .bank-category-filter-children {
@@ -8004,7 +8059,7 @@ body.column-layout-dragging {
   top: 50%;
   width: 5px;
   height: 1px;
-  background: #d8e4f2;
+  background: var(--bank-category-group-line);
   transform: translateY(-50%);
 }
 
@@ -8016,7 +8071,7 @@ body.column-layout-dragging {
   width: 3px;
   height: 3px;
   border-radius: 999px;
-  background: #9fb3c8;
+  background: var(--bank-category-group-line);
   transform: translate(-50%, -50%);
 }
 
@@ -8072,18 +8127,17 @@ body.column-layout-dragging {
 
 @media (max-width: 760px) {
   .bank-category-filter-panel {
-    width: min(680px, calc(100vw - 32px));
+    width: min(640px, calc(100vw - 32px));
   }
 
   .bank-category-filter-sections {
-    column-count: 4;
-    column-gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
   .bank-category-filter-sections {
-    column-count: 3;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -8097,8 +8151,7 @@ body.column-layout-dragging {
   }
 
   .bank-category-filter-sections {
-    column-count: 2;
-    column-gap: 7px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -8259,6 +8312,7 @@ body.column-layout-dragging {
   font-size: 12.5px;
   line-height: 1.25;
   overflow-wrap: anywhere;
+  text-align: center;
   vertical-align: middle;
   white-space: normal;
 }
@@ -8392,8 +8446,10 @@ body.column-layout-dragging {
 
 .bank-amount-line {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-columns: auto auto;
   align-items: center;
+  justify-content: center;
+  gap: 6px;
   width: 100%;
 }
 
@@ -8403,7 +8459,7 @@ body.column-layout-dragging {
 
 .bank-amount-line .MuiTypography-root {
   min-width: 0;
-  text-align: right;
+  text-align: center;
 }
 
 .bank-details-page .bank-trade-time-chip {
@@ -8473,7 +8529,7 @@ body.column-layout-dragging {
 }
 
 .bank-details-page .bank-source-chip {
-  align-self: flex-end;
+  align-self: center;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
