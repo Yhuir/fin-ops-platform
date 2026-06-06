@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P038-phase-6-cost-statistics-table-migration`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `MG-P038-phase-6-cost-statistics-table-migration`
+- Current MG ID: `MG-P038-phase-6-cost-statistics-table-migration`
 
 ## Global Invariants
 
@@ -54,7 +54,7 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 cost statistics table migration。
+- Scope: phase 6 cost statistics table migration cumulative merge gate。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_import_pages.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -62,9 +62,9 @@
   - `web/src/test/ImportCenterPage.test.tsx`
   - `web/src/components/imports/ImportWorkflowPage.tsx`
   - `web/src/app/styles.css`
-- Verification run: P037 targeted Vitest expected-failed as planned。
-- Failures: 4 expected failures remain, all cost tables still MUI DataGrid。
-- Next action: 执行 `P038-phase-6-cost-statistics-table-migration`。
+- Verification run: P038 targeted Vitest、focused platform/table tests、build、cost statistics runtime MUI grep and diff check passed。
+- Failures: none。
+- Next action: 执行 `MG-P038-phase-6-cost-statistics-table-migration`，精确 stage、commit 并 push。
 
 ## Prompt Lifecycle
 
@@ -96,7 +96,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P038-phase-6-cost-statistics-table-migration` | P037 characterization tests expected-fail on DataGrid；next table migration |
+| page batches | `in_progress` | `MG-P038-phase-6-cost-statistics-table-migration` | P038 table migration verified；next cumulative MG |
 
 ## Verification Log
 
@@ -247,6 +247,12 @@
 | 2026-06-07 | `P036-phase-6-cost-statistics-discovery` | `test -f docs/refactor-ui/modules/phase_6_cost_statistics.md` | passed | CostStatistics module discovery doc exists |
 | 2026-06-07 | `P036-phase-6-cost-statistics-discovery` | `rg -n "P036-phase-6-cost-statistics-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P037-phase-6-cost-statistics-characterization-tests" docs/refactor-ui/modules/phase_6_cost_statistics.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | CostStatistics inventory and next prompt recorded |
 | 2026-06-07 | `P037-phase-6-cost-statistics-characterization-tests` | `cd web && npx vitest run CostStatisticsPage.test.tsx` | expected-fail | 11 passed, 4 expected failures; all failures are project/FinanceTable assertions against current MUI DataGrid tables |
+| 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `cd web && npx vitest run CostStatisticsPage.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/pages/CostStatisticsPage.tsx web/src/components/cost-statistics; then exit 1; else exit 0; fi` | passed | CostStatistics direct runtime scope has no MUI/DataGrid/session residue |
+| 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `if rg -n 'cost-data-grid-shell|\.cost-data-grid-shell|\.MuiDataGrid' web/src/components/cost-statistics web/src/pages/CostStatisticsPage.tsx web/src/test/CostStatisticsPage.test.tsx; then exit 1; else exit 0; fi` | passed | CostStatistics component/test scope has no cost DataGrid CSS or DataGrid class residue |
+| 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

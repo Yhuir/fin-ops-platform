@@ -6650,36 +6650,42 @@ body.column-layout-dragging {
   overflow: hidden;
 }
 
-.cost-data-grid-shell {
+.cost-finance-table-shell {
   min-height: 180px;
 }
 
-.cost-data-grid-shell .MuiDataGrid-root {
+.cost-finance-table {
   color: #102a43;
   font-size: 12px;
 }
 
-.cost-data-grid-shell .MuiDataGrid-columnHeaders {
+.cost-finance-table .finance-table__column {
   background: #f7faff;
-}
-
-.cost-data-grid-shell .MuiDataGrid-columnHeaderTitle {
   color: #486581;
   font-size: 11px;
   font-weight: 800;
 }
 
-.cost-data-grid-shell .MuiDataGrid-row {
+.cost-finance-table .finance-table__row {
+  min-height: 58px;
+}
+
+.cost-finance-table .finance-table__row.cost-table-row--clickable {
   cursor: pointer;
 }
 
-.cost-data-grid-shell .MuiDataGrid-row:hover {
+.cost-finance-table .finance-table__row.cost-table-row--clickable:hover {
   background: #f9fbfe;
 }
 
-.cost-data-grid-shell .MuiDataGrid-cell {
+.cost-finance-table .finance-table__cell {
   border-color: #e7edf5;
   overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.cost-finance-table .finance-table__scroll {
+  max-height: 520px;
 }
 
 .cost-table {

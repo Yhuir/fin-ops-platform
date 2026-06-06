@@ -28,10 +28,6 @@ import {
 } from "../features/cost-statistics/api";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import {
-  useMuiDataGridPageSession,
-  useMuiDataGridScrollSession,
-} from "../hooks/useMuiDataGridPageSession";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   CostExpenseTypeExplorerRow,
@@ -402,12 +398,6 @@ export default function CostStatisticsPage() {
     }));
   }, [costPageSession]);
   const { value: costSession } = costPageSession;
-  const mainGridSession = useMuiDataGridPageSession({
-    pageKey: "cost-statistics",
-    gridKey: "main-explorer-grid",
-    columnsVersion: "cost-main-v1",
-  });
-  const mainGridScrollSession = useMuiDataGridScrollSession(mainGridSession);
   const viewMode = costSession.viewMode;
   const setViewMode = (value: SetStateAction<CostViewMode>) => setCostSessionField("viewMode", value);
   const costProjectScope = costSession.costProjectScope;
@@ -1521,7 +1511,6 @@ export default function CostStatisticsPage() {
                     emptyLabel="当前时间范围没有可用于成本统计的支出流水。"
                     onRowClick={(row) => void openTransactionDetail(row, "time")}
                     getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
-                    gridScrollSession={mainGridScrollSession}
                   />
                 </section>
               </div>
@@ -1703,7 +1692,6 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openTransactionDetail(row, "project")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"
-                        gridScrollSession={mainGridScrollSession}
                       />
                     ) : (
                       <div className="cost-explorer-empty">请先依次选择项目和费用类型。</div>
@@ -1869,7 +1857,6 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openTransactionDetail(row, "bank")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该项目下暂无流水。"
-                        gridScrollSession={mainGridScrollSession}
                       />
                     ) : (
                       <div className="cost-explorer-empty">请先依次选择银行账户和项目。</div>
@@ -2041,7 +2028,6 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openTransactionDetail(row, "expenseType")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"
-                        gridScrollSession={mainGridScrollSession}
                       />
                     ) : (
                       <div className="cost-explorer-empty">请先在左侧选择费用类型。</div>

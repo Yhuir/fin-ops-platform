@@ -2427,7 +2427,7 @@ Scope: 只做 CostStatistics 页面 discovery，不改运行时代码。
 ### P038-phase-6-cost-statistics-table-migration
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 迁移 CostStatisticsTable 从 MUI X DataGrid 到 FinanceTable，保留 CostStatisticsPage 业务 flow。
 
@@ -2445,6 +2445,56 @@ Scope: 只做 CostStatistics 页面 discovery，不改运行时代码。
 - Workbench internals frozen: yes。
 - Business flow preserved: yes。
 - Verification defined: CostStatistics targeted test, platform/table tests, build, scope grep, diff check。
+
+#### Execution Notes
+
+- Migrated `CostStatisticsTable.tsx` from MUI X DataGrid to `FinanceTable`。
+- Removed `DataGrid`、`GridColDef`、`GridRowParams`、MUI DataGrid `sx` selectors and MUI scroll session type from the table component。
+- Removed `useMuiDataGridPageSession` / `useMuiDataGridScrollSession` from `CostStatisticsPage.tsx` because the table no longer accepts MUI session binding。
+- Preserved accessible grid names, column headers, empty label, first-column action button, row click, amount/direction/account stack and detail modal flow。
+- Remaining `MuiProviders` in `CostStatisticsPage.test.tsx` is required by shared `MonthPicker`, not by CostStatistics table runtime; shared MonthPicker cleanup must be handled in a later shared/global prompt。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run CostStatisticsPage.test.tsx`
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/pages/CostStatisticsPage.tsx web/src/components/cost-statistics; then exit 1; else exit 0; fi`
+  - `if rg -n 'cost-data-grid-shell|\.cost-data-grid-shell|\.MuiDataGrid' web/src/components/cost-statistics web/src/pages/CostStatisticsPage.tsx web/src/test/CostStatisticsPage.test.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+- Result: passed. Build has known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+
+### MG-P038-phase-6-cost-statistics-table-migration
+
+- Status: `approved_for_execution`
+- Scope:
+  - `web/src/components/common/FinanceTable.tsx`
+  - `web/src/components/cost-statistics/CostStatisticsTable.tsx`
+  - `web/src/pages/CostStatisticsPage.tsx`
+  - `web/src/app/styles.css`
+  - `web/src/test/CostStatisticsPage.test.tsx`
+  - `docs/refactor-ui/modules/phase_6_cost_statistics.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_cost_statistics.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P037/P038 文件：web/src/components/common/FinanceTable.tsx、web/src/components/cost-statistics/CostStatisticsTable.tsx、web/src/pages/CostStatisticsPage.tsx、web/src/app/styles.css、web/src/test/CostStatisticsPage.test.tsx、docs/refactor-ui/modules/phase_6_cost_statistics.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run CostStatisticsPage.test.tsx；cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/pages/CostStatisticsPage.tsx web/src/components/cost-statistics; then exit 1; else exit 0; fi；if rg -n 'cost-data-grid-shell|\.cost-data-grid-shell|\.MuiDataGrid' web/src/components/cost-statistics web/src/pages/CostStatisticsPage.tsx web/src/test/CostStatisticsPage.test.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate cost statistics table ui。push 到 refactor-ui 分支。完成后更新 docs 状态和 Push Log，标记 MG verified，并生成下一条 Phase 6 module prompt。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: approved_for_execution。
 
 ### MG Prompt Template
 

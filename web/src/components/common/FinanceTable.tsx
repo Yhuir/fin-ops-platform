@@ -125,15 +125,24 @@ type FinanceTableRowProps = {
   id?: string | number;
   className?: string;
   dataCertifiedHighlighted?: boolean;
+  onClick?: () => void;
   textValue?: string;
 };
 
-export function FinanceTableRow({ children, id, className, dataCertifiedHighlighted, textValue }: FinanceTableRowProps) {
+export function FinanceTableRow({
+  children,
+  id,
+  className,
+  dataCertifiedHighlighted,
+  onClick,
+  textValue,
+}: FinanceTableRowProps) {
   return (
     <Table.Row
       className={cx("finance-table__row", className)}
       data-certified-highlighted={dataCertifiedHighlighted === undefined ? undefined : String(dataCertifiedHighlighted)}
       id={id}
+      onClick={onClick}
       textValue={textValue}
     >
       {children}

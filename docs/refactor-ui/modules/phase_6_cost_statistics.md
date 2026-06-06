@@ -129,6 +129,7 @@ Current migration gaps:
 
 - `P036-phase-6-cost-statistics-discovery`: CostStatistics page、`CostStatisticsTable`、detail/export modals、test coverage and MUI inventory recorded。
 - `P037-phase-6-cost-statistics-characterization-tests`: updated `CostStatisticsPage.test.tsx` with project primitive assertions for page shell, summary/view controls, scope controls, cost table surfaces and project dialogs. Targeted test expected-failed with 4 failures, all caused by `CostStatisticsTable` still rendering MUI X DataGrid instead of `FinanceTable`。
+- `P038-phase-6-cost-statistics-table-migration`: migrated `CostStatisticsTable` from MUI X DataGrid to `FinanceTable`, removed page-level MUI DataGrid session hook usage and removed cost DataGrid CSS residue. `CostStatisticsPage.test.tsx` now passes all 15 tests. Remaining `MuiProviders` test wrapper is required by shared `MonthPicker`, not by CostStatistics table runtime。
 
 ## Risks
 
@@ -158,6 +159,17 @@ Type: extraction/refactor
 Scope: 迁移 CostStatisticsTable 从 MUI X DataGrid 到 FinanceTable，保留 CostStatisticsPage 业务 flow。
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_cost_statistics.md、docs/refactor-ui/table_layout_system.md、web/src/components/cost-statistics/CostStatisticsTable.tsx、web/src/pages/CostStatisticsPage.tsx、web/src/test/CostStatisticsPage.test.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/app/styles.css。只迁移 `CostStatisticsTable.tsx` 的表格实现和必要样式：移除 MUI X `DataGrid`、`GridColDef`、`GridRowParams`、`.MuiDataGrid-*` sx 和 `MuiDataGridScrollSessionBinding` prop；使用 `FinanceTable` primitives 保留 `ariaLabel`、column headers、empty label、row click、首列 `查看流水 <id>` action、amount/direction/account stack、row text 和 visible height/scroll behavior。暂不改 CostStatisticsPage 的 `useMuiDataGridPageSession` 调用，除非类型必须同步去除；如去除，必须不改变 view/scope page session state。不得改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run CostStatisticsPage.test.tsx`，本切片结束后 P037 table primitive assertions 必须通过；如果只剩 test wrapper 的 `MuiProviders`/page session hook cleanup，记录为 P039。运行 focused table/common/platform tests、build、cost statistics runtime MUI grep、git diff --check、git status。更新 state/prompt/module docs，生成 P039 cleanup/MG prompt。
+```
+
+## P039 Prompt Draft
+
+```text
+Prompt ID: MG-P038-phase-6-cost-statistics-table-migration
+Phase: phase_6_page_batches
+Type: cumulative MG
+Scope: 提交已验证的 CostStatistics table migration；记录共享 MonthPicker 间接 MUI 依赖留待 shared MonthPicker/global containment。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_cost_statistics.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P037/P038 文件：web/src/components/common/FinanceTable.tsx、web/src/components/cost-statistics/CostStatisticsTable.tsx、web/src/pages/CostStatisticsPage.tsx、web/src/app/styles.css、web/src/test/CostStatisticsPage.test.tsx、docs/refactor-ui/modules/phase_6_cost_statistics.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run CostStatisticsPage.test.tsx；cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/pages/CostStatisticsPage.tsx web/src/components/cost-statistics; then exit 1; else exit 0; fi；if rg -n 'cost-data-grid-shell|\\.cost-data-grid-shell|\\.MuiDataGrid' web/src/components/cost-statistics web/src/pages/CostStatisticsPage.tsx web/src/test/CostStatisticsPage.test.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate cost statistics table ui。push 到 refactor-ui 分支。完成后更新 docs 状态和 Push Log，标记 MG verified，并生成下一条 Phase 6 module prompt。
 ```
 
 ## Verification For P036

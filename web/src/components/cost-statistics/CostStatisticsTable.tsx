@@ -1,9 +1,17 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
-import { DataGrid, type GridColDef, type GridRowParams } from "@mui/x-data-grid";
+import { type ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
-import type { MuiDataGridScrollSessionBinding } from "../../hooks/useMuiDataGridPageSession";
+import {
+  EmptyValue,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+  type FinanceTableColumnRole,
+} from "../common/FinanceTable";
 
 export type CostStatisticsAmountCell = {
   amount: string;
@@ -29,7 +37,6 @@ type CostStatisticsTableProps<Row extends object> = {
   emptyLabel?: string;
   onRowClick?: (row: Row) => void;
   getRowActionLabel?: (row: Row) => string;
-  gridScrollSession?: MuiDataGridScrollSessionBinding;
 };
 
 export default function CostStatisticsTable<Row extends object>({
@@ -40,78 +47,117 @@ export default function CostStatisticsTable<Row extends object>({
   emptyLabel = "当前视图暂无数据。",
   onRowClick,
   getRowActionLabel,
-  gridScrollSession,
 }: CostStatisticsTableProps<Row>) {
-  const onRowClickRef = useRef(onRowClick);
-  const getRowActionLabelRef = useRef(getRowActionLabel);
-
-  useEffect(() => {
-    onRowClickRef.current = onRowClick;
-    getRowActionLabelRef.current = getRowActionLabel;
-  }, [getRowActionLabel, onRowClick]);
-
-  const dataGridColumns = useMemo<GridColDef<Row>[]>(
-    () =>
-      columns.map((column, columnIndex) => ({
-        field: column.key,
-        headerName: column.header,
-        width: column.width,
-        flex: column.flex ?? (column.width ? undefined : 1),
-        minWidth: column.width ? undefined : 140,
-        headerClassName: column.headerClassName,
-        cellClassName: column.cellClassName,
-        sortable: true,
-        renderCell: (params) => {
-          const renderedContent = renderTableCellContent(column.render(params.row));
-          if (columnIndex !== 0) {
-            return renderedContent;
-          }
-          return (
-            <button
-              className="cost-table-row-trigger"
-              type="button"
-              aria-label={getRowActionLabelRef.current ? getRowActionLabelRef.current(params.row) : "查看行详情"}
-              onClick={(event) => {
-                event.stopPropagation();
-                onRowClickRef.current?.(params.row);
-              }}
-            >
-              {renderedContent}
-            </button>
-          );
-        },
-      })),
-    [columns],
-  );
-
-  const gridHeight = rows.length === 0 ? 180 : Math.min(520, 112 + rows.length * 58);
+  const minWidth = columns.reduce((total, column) => total + (column.width ?? (column.flex ? 180 : 140)), 0);
 
   return (
-    <div ref={gridScrollSession?.rootRef} className="cost-table-shell cost-data-grid-shell" style={{ height: gridHeight }}>
-      <DataGrid
-        apiRef={gridScrollSession?.apiRef}
-        aria-label={ariaLabel}
-        columns={dataGridColumns}
-        rows={rows}
-        getRowId={getRowKey}
-        disableRowSelectionOnClick
-        hideFooter
-        initialState={gridScrollSession?.initialState}
-        localeText={{ noRowsLabel: emptyLabel }}
-        onRowClick={(params: GridRowParams<Row>) => onRowClickRef.current?.(params.row)}
-        rowHeight={58}
-        columnHeaderHeight={42}
-        sx={{
-          border: 0,
-          "& .MuiDataGrid-cell": {
-            alignItems: "flex-start",
-            py: 1.25,
-            lineHeight: 1.5,
-          },
-        }}
-      />
+    <div className="cost-table-shell cost-finance-table-shell">
+      <FinanceTable ariaLabel={ariaLabel} className="cost-finance-table" minWidth={Math.max(720, minWidth)}>
+        <FinanceTableHeader>
+          {columns.map((column, columnIndex) => (
+            <FinanceTableColumn
+              key={column.key}
+              className={column.headerClassName}
+              columnRole={getColumnRole(column)}
+              id={column.key}
+              isRowHeader={columnIndex === 0}
+            >
+              {column.header}
+            </FinanceTableColumn>
+          ))}
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          {rows.length === 0 ? (
+            <FinanceTableRow id="empty" textValue={emptyLabel}>
+              {columns.map((column, columnIndex) => (
+                <FinanceTableCell
+                  key={column.key}
+                  columnRole={columnIndex === 0 ? "description" : getColumnRole(column)}
+                  textValue={columnIndex === 0 ? emptyLabel : "--"}
+                >
+                  <EmptyValue value={columnIndex === 0 ? emptyLabel : "--"} />
+                </FinanceTableCell>
+              ))}
+            </FinanceTableRow>
+          ) : rows.map((row) => {
+            const rowKey = getRowKey(row);
+            return (
+              <FinanceTableRow
+                key={rowKey}
+                className={onRowClick ? "cost-table-row cost-table-row--clickable" : "cost-table-row"}
+                id={rowKey}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                textValue={rowKey}
+              >
+                {columns.map((column, columnIndex) => {
+                  const content = column.render(row);
+                  const renderedContent = renderTableCellContent(content);
+                  const cellText = getCellText(content);
+                  const cellContent = columnIndex === 0 && onRowClick ? (
+                    <button
+                      aria-label={getRowActionLabel ? getRowActionLabel(row) : "查看行详情"}
+                      className="cost-table-row-trigger"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onRowClick(row);
+                      }}
+                      type="button"
+                    >
+                      {renderedContent}
+                    </button>
+                  ) : renderedContent;
+
+                  return (
+                    <FinanceTableCell
+                      key={column.key}
+                      className={column.cellClassName}
+                      columnRole={getColumnRole(column)}
+                      textValue={cellText}
+                    >
+                      {cellContent}
+                    </FinanceTableCell>
+                  );
+                })}
+              </FinanceTableRow>
+            );
+          })}
+        </FinanceTableBody>
+      </FinanceTable>
     </div>
   );
+}
+
+function getColumnRole<Row>(column: CostStatisticsTableColumn<Row>): FinanceTableColumnRole {
+  if (column.key.toLowerCase().includes("amount")) {
+    return "amount";
+  }
+  if (column.key.toLowerCase().includes("time")) {
+    return "date";
+  }
+  if (column.key.toLowerCase().includes("account")) {
+    return "account";
+  }
+  if (column.key.toLowerCase().includes("count")) {
+    return "quantity";
+  }
+  if (column.key.toLowerCase().includes("direction")) {
+    return "direction";
+  }
+  return "description";
+}
+
+function getCellText(content: ReactNode | CostStatisticsAmountCell) {
+  if (
+    typeof content === "object" &&
+    content !== null &&
+    "amount" in content
+  ) {
+    return String((content as { amount: string }).amount ?? "--");
+  }
+  if (typeof content === "string" || typeof content === "number") {
+    return String(content);
+  }
+  return "";
 }
 
 function renderTableCellContent(content: ReactNode | CostStatisticsAmountCell) {
