@@ -51,7 +51,7 @@ function requestUrls(fetchMock: ReturnType<typeof installTurnoverLedgerFetch>, p
     .filter((url) => url.pathname === pathname);
 }
 
-function groupedPayload(family: string) {
+function groupedPayload(family: string, overrides: Record<string, unknown> = {}) {
   const allGroups = [
     {
       group_id: "counterparty:personal:zhangsan",
@@ -571,10 +571,14 @@ function groupedPayload(family: string) {
       page_size: 100,
       total: groups.length,
     },
+    ...overrides,
   };
 }
 
-function installTurnoverLedgerFetch() {
+function installTurnoverLedgerFetch(options: {
+  groupedOverrides?: Record<string, unknown>;
+  missingDetailForRelationId?: string;
+} = {}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const method = (init?.method ?? "GET").toUpperCase();
@@ -666,7 +670,7 @@ function installTurnoverLedgerFetch() {
     }
     if (url.pathname === "/api/turnover-ledger" && method === "GET") {
       expect(url.searchParams.get("view")).toBe("grouped");
-      return Response.json(groupedPayload(url.searchParams.get("family") ?? "all"));
+      return Response.json(groupedPayload(url.searchParams.get("family") ?? "all", options.groupedOverrides));
     }
     if (url.pathname === "/api/turnover-ledger/bank-row-tags/batch" && method === "POST") {
       return Response.json({
@@ -685,6 +689,12 @@ function installTurnoverLedgerFetch() {
       });
     }
     if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1" && method === "GET") {
+      if (options.missingDetailForRelationId === "rel-personal-1") {
+        return Response.json(
+          { error: "unknown_relation_id", message: "往来款关系不存在。" },
+          { status: 404 },
+        );
+      }
       return Response.json({
         relation: groupedPayload("personal").groups[0].rows[0],
         bank_rows: [
@@ -715,6 +725,46 @@ function installTurnoverLedgerFetch() {
     if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && method === "PUT") {
       return Response.json({
         relation_id: "rel-personal-1",
+        extra: JSON.parse(String(init?.body)),
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua" && method === "GET") {
+      if (options.missingDetailForRelationId === "rel-jiaxiaohua") {
+        return Response.json(
+          { error: "unknown_relation_id", message: "往来款关系不存在。" },
+          { status: 404 },
+        );
+      }
+      return Response.json({
+        relation: groupedPayload("personal").groups[1].summary_row,
+        bank_rows: [
+          {
+            id: "bank-jia-income-200000",
+            trade_time: "2026-02-04 13:20:48",
+            counterparty_name: "贾小花",
+            direction_label: "收",
+            amount: "200000.00",
+            bank_account_label: "建行 8106",
+            summary: "个人暂借款：待还款",
+          },
+        ],
+        audit_history: [],
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/extra" && method === "GET") {
+      return Response.json({
+        relation_id: "rel-jiaxiaohua",
+        interest_rate_type: "annual",
+        interest_rate_value: "0.060000",
+        interest_paid_amount: "10.00",
+        interest_paid_date: "2026-05-05",
+        interest_payment_method: "转账",
+        note: "页面内维护备注",
+      });
+    }
+    if (url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/extra" && method === "PUT") {
+      return Response.json({
+        relation_id: "rel-jiaxiaohua",
         extra: JSON.parse(String(init?.body)),
       });
     }
@@ -805,11 +855,12 @@ describe("Turnover ledger page", () => {
 
     const page = await screen.findByTestId("turnover-ledger-page");
     expect(within(page).getByRole("heading", { name: "外部往来款管理" })).toBeInTheDocument();
+    expect(within(page).queryByText("基于银行明细标签实时汇总外部往来关系，并把已确认关系同步到关联台。")).not.toBeInTheDocument();
     expect(within(page).getByRole("tab", { name: "全部" })).toHaveAttribute("aria-selected", "true");
-    expect(within(page).getByText("待还款金额")).toBeInTheDocument();
-    expect(within(page).getByText("已还款金额")).toBeInTheDocument();
-    expect(within(page).getByText("待收款金额")).toBeInTheDocument();
-    expect(within(page).getByText("已收款金额")).toBeInTheDocument();
+    expect(within(page).getByText("当前待还款金额")).toBeInTheDocument();
+    expect(within(page).getByText("累计已还款金额")).toBeInTheDocument();
+    expect(within(page).getByText("当前待收款金额")).toBeInTheDocument();
+    expect(within(page).getByText("累计已收款金额")).toBeInTheDocument();
     expect(within(page).queryByText("已闭合金额")).not.toBeInTheDocument();
     expect(within(page).queryByText("待人工确认数量")).not.toBeInTheDocument();
     expect(within(page).queryByText("冲突/异常数量")).not.toBeInTheDocument();
@@ -821,7 +872,7 @@ describe("Turnover ledger page", () => {
     expect(within(page).queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "下载表格" })).toBeInTheDocument();
     const pendingRepaymentCard = within(page).getByTestId("turnover-summary-pending-repayment");
-    expect(within(pendingRepaymentCard).getByText("待还款金额")).toBeInTheDocument();
+    expect(within(pendingRepaymentCard).getByText("当前待还款金额")).toBeInTheDocument();
     expect(within(pendingRepaymentCard).getAllByText("800.00")).toHaveLength(2);
     expect(within(pendingRepaymentCard).getByText("个人往来")).toBeInTheDocument();
     expect(within(pendingRepaymentCard).getByText("公司往来")).toBeInTheDocument();
@@ -853,9 +904,14 @@ describe("Turnover ledger page", () => {
     expect(within(table).getByRole("columnheader", { name: "备注" })).toBeInTheDocument();
     expect(within(table).queryByRole("columnheader", { name: "关系状态" })).not.toBeInTheDocument();
     expect(within(table).queryByRole("columnheader", { name: "对方户名 / 大类 / 余额" })).not.toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "选择" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
 
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:zhangsan");
-    expect(within(table).getByTestId("turnover-row-rel-personal-1")).toHaveClass("turnover-group-start-row");
+    const summaryRow = within(table).getByTestId("turnover-row-rel-personal-1");
+    expect(summaryRow).toHaveClass("turnover-group-start-row");
+    expect(within(summaryRow).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(summaryRow).queryByRole("button", { name: /编辑/ })).not.toBeInTheDocument();
     expect(groupCell).toHaveClass("turnover-sticky-left-cell");
     expect(groupCell).toHaveAttribute("rowspan", "1");
     expect(within(groupCell).getByText("张三")).toBeInTheDocument();
@@ -934,6 +990,8 @@ describe("Turnover ledger page", () => {
 
     const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
     expect(flowRows).toHaveLength(3);
+    expect(within(flowRows[0]).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" })).toBeInTheDocument();
+    expect(within(flowRows[0]).getByRole("button", { name: "编辑流水 bank-jia-income-200000" })).toBeInTheDocument();
     expect(within(table).queryByText("流水")).not.toBeInTheDocument();
     expect(within(table).queryByText("总览不应展示的还款备注")).not.toBeInTheDocument();
     expect(within(flowRows[0]).getByText("200,000.00")).toBeInTheDocument();
@@ -1068,7 +1126,7 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).getByRole("button", { name: "确定" })).toBeDisabled();
   });
 
-  test("opens the extra drawer, enables save when dirty, saves, refreshes, and keeps relation actions in the drawer", async () => {
+  test("opens the extra drawer from a flow row, hides technical relation ids, saves, and keeps relation actions in the drawer", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
     const extraListener = vi.fn();
@@ -1079,11 +1137,23 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     expect(within(table).queryByRole("button", { name: "确认归并" })).not.toBeInTheDocument();
 
-    await user.click(within(table).getByRole("button", { name: "编辑 rel-personal-1" }));
-    const drawer = await screen.findByRole("presentation", { name: "编辑往来补充信息" });
-    expect(within(drawer).getByText("bank-personal-001")).toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "确认归并" })).toBeEnabled();
-    expect(within(drawer).getByRole("button", { name: "撤销归并" })).toBeDisabled();
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+    await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+    const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
+    expect(within(drawer).getByRole("heading", { name: "编辑流水补充信息" })).toBeInTheDocument();
+    expect(within(drawer).getByText("贾小花 / 个人往来 / 2026-02-04 13:20:48")).toBeInTheDocument();
+    expect(within(drawer).queryByText(/turnover_rel_/)).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("rel-jiaxiaohua")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("流水概览")).toBeInTheDocument();
+    expect(within(drawer).getByText("补充信息")).toBeInTheDocument();
+    expect(within(drawer).getByText("操作记录 / 关系操作")).toBeInTheDocument();
+    expect(within(drawer).getAllByText("bank-jia-income-200000").length).toBeGreaterThan(0);
+    expect(within(drawer).getAllByText("建行 8106").length).toBeGreaterThan(0);
+    expect(within(drawer).getAllByText("收").length).toBeGreaterThan(0);
+    expect(within(drawer).getAllByText("200,000.00").length).toBeGreaterThan(0);
+    expect(within(drawer).getByRole("button", { name: "确认归并" })).toBeDisabled();
+    expect(within(drawer).getByRole("button", { name: "撤销归并" })).toBeEnabled();
 
     const saveButton = within(drawer).getByRole("button", { name: "保存补充信息" });
     expect(saveButton).toBeDisabled();
@@ -1095,7 +1165,7 @@ describe("Turnover ledger page", () => {
     await waitFor(() => {
       const saveRequest = fetchMock.mock.calls.find(([input, init]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/turnover-ledger/relations/rel-personal-1/extra" && init?.method === "PUT";
+        return url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/extra" && init?.method === "PUT";
       });
       expect(saveRequest).toBeDefined();
       expect(JSON.parse(String(saveRequest?.[1]?.body))).toMatchObject({
@@ -1111,9 +1181,48 @@ describe("Turnover ledger page", () => {
       expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
     });
     await waitFor(() => {
-      expectCustomEventDetailContaining(extraListener, { relationId: "rel-personal-1" });
+      expectCustomEventDetailContaining(extraListener, { relationId: "rel-jiaxiaohua" });
     });
     window.removeEventListener("turnoverLedgerExtraUpdated", extraListener);
+  });
+
+  test("shows a business error when relation detail disappears after the ledger was rendered", async () => {
+    const user = userEvent.setup();
+    installTurnoverLedgerFetch({ missingDetailForRelationId: "rel-jiaxiaohua" });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+    await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("button", { name: "编辑流水 bank-jia-income-200000" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "编辑流水补充信息" });
+    expect(await within(drawer).findByText("该流水所属往来关系已刷新或不存在，请刷新台账后再编辑。")).toBeInTheDocument();
+    expect(within(drawer).queryByText(/turnover_rel_/)).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("rel-jiaxiaohua")).not.toBeInTheDocument();
+  });
+
+  test("disables turnover write actions while grouped read model is stale", async () => {
+    const user = userEvent.setup();
+    installTurnoverLedgerFetch({
+      groupedOverrides: {
+        read_model_status: "stale",
+        read_model_stale_reasons: ["source_version_mismatch"],
+      },
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    expect(await within(page).findByText("往来款台账正在刷新，当前展示的是非最新数据。")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeDisabled();
+
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+
+    expect(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" })).toBeDisabled();
+    expect(within(table).getByRole("button", { name: "编辑流水 bank-company-expense-1000" })).toBeDisabled();
   });
 
   test("shows bank-detail tags as read-only in turnover management", async () => {

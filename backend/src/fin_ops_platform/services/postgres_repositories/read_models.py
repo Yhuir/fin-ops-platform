@@ -6460,6 +6460,10 @@ class PostgresReadModelRepository:
             for scope_key, payload in iter_mapping(read_models):
                 if changed_scope_keys is not None and scope_key not in changed_scope_keys:
                     continue
+                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+                if _is_cost_statistics_parent_scope(scope_key, payload=model_payload):
+                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+                    continue
                 self._replace_cost_statistics_rows(connection, scope_key=scope_key, payload=payload)
 
         run_in_transaction(self._connection, write)
@@ -6780,7 +6784,11 @@ class PostgresReadModelRepository:
             return
         source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
         project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=model_payload)
+        if scope_month_text == "all":
+            raise ValueError("cost_statistics_rows only supports concrete month scopes.")
         scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_month_text)
+        if scope_month is None:
+            raise ValueError("cost_statistics_rows requires a concrete scope_month.")
         generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
         cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
         for index, item in enumerate(time_rows):
@@ -7536,6 +7544,11 @@ def _parse_cost_statistics_scope_parts(scope_key: str, *, payload: dict[str, Any
         project_scope = "all"
     normalized_month = text(payload.get("month") or month) or "all"
     return project_scope, normalized_month
+
+
+def _is_cost_statistics_parent_scope(scope_key: str, *, payload: dict[str, Any]) -> bool:
+    _project_scope, month = _parse_cost_statistics_scope_parts(scope_key, payload=payload)
+    return month == "all"
 
 
 def _cost_statistics_payload_from_rows(

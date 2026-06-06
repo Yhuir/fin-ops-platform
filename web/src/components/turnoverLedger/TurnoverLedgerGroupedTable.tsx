@@ -153,6 +153,10 @@ function runtimeRow(row: TurnoverLedgerGroupedRow) {
   return row as RuntimeGroupedRow;
 }
 
+function flowDisplayId(row: TurnoverLedgerGroupedRow) {
+  return runtimeRow(row).sourceBankRowId || runtimeRow(row).flowId || row.bankRowIds[0] || row.relationId || "未知流水";
+}
+
 function resolveRows(group: TurnoverLedgerGroup) {
   const compatibleGroup = runtimeGroup(group);
   const rows = Array.isArray(group.rows) ? group.rows : [];
@@ -390,10 +394,12 @@ function RowCells({
   row,
   rowKind,
   onEdit,
+  actionsDisabled,
 }: {
   row: TurnoverLedgerGroupedRow;
   rowKind: "summary" | "flow";
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
+  actionsDisabled: boolean;
 }) {
   const isFlow = rowKind === "flow";
   const hasBorrowAmount = amountNumber(row.borrowAmount) > 0;
@@ -460,14 +466,17 @@ function RowCells({
       </TableCell>
       <TableCell>{formatNullable(row.note)}</TableCell>
       <TableCell>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={() => onEdit(row)}
-          aria-label={`${isFlow ? "编辑流水" : "编辑"} ${row.relationId}`}
-        >
-          编辑
-        </Button>
+        {isFlow ? (
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={actionsDisabled}
+            onClick={() => onEdit(row)}
+            aria-label={`编辑流水 ${flowDisplayId(row)}`}
+          >
+            编辑
+          </Button>
+        ) : null}
       </TableCell>
     </>
   );
@@ -480,6 +489,7 @@ export default function TurnoverLedgerGroupedTable({
   selectedFlowRowIds = new Set<string>(),
   onToggleFlowSelection,
   tableWrapRef,
+  actionsDisabled = false,
 }: {
   groups: TurnoverLedgerGroup[];
   loading: boolean;
@@ -487,6 +497,7 @@ export default function TurnoverLedgerGroupedTable({
   selectedFlowRowIds?: Set<string>;
   onToggleFlowSelection?: (group: TurnoverLedgerGroup, row: TurnoverLedgerGroupedRow) => void;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
+  actionsDisabled?: boolean;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const hasRows = groups.some((group) => resolveRows(group).summaryRow !== null);
@@ -589,13 +600,12 @@ export default function TurnoverLedgerGroupedTable({
                         onToggle={toggleGroup}
                       />
                     </TableCell>
-                    <TableCell padding="checkbox">
-                      <Checkbox disabled aria-label={`${group.counterpartyName || "未命名对方"} 合计行不可选`} />
-                    </TableCell>
+                    <TableCell padding="checkbox" />
                     <RowCells
-                      row={summaryRow}
+                      row={{ ...summaryRow, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel }}
                       rowKind="summary"
                       onEdit={onEdit}
+                      actionsDisabled={actionsDisabled}
                     />
                   </TableRow>
                 );
@@ -616,14 +626,16 @@ export default function TurnoverLedgerGroupedTable({
                       <TableCell padding="checkbox">
                         <Checkbox
                           checked={checked}
+                          disabled={actionsDisabled}
                           onChange={() => onToggleFlowSelection?.(group, row)}
                           inputProps={{ "aria-label": `选择流水 ${rowId}` }}
                         />
                       </TableCell>
                       <RowCells
-                        row={row}
+                        row={{ ...row, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel }}
                         rowKind="flow"
                         onEdit={onEdit}
+                        actionsDisabled={actionsDisabled}
                       />
                     </TableRow>
                   );

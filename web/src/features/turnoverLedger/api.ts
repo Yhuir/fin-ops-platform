@@ -187,6 +187,8 @@ type ApiTurnoverLedgerGroupedResponse = {
   family_summaries?: ApiTurnoverLedgerResponse["family_summaries"];
   groups?: ApiTurnoverLedgerGroup[];
   pagination?: ApiTurnoverLedgerResponse["pagination"];
+  read_model_status?: string | null;
+  read_model_stale_reasons?: string[] | null;
 };
 
 type ApiTurnoverLedgerExtra = {
@@ -768,6 +770,8 @@ export async function fetchTurnoverLedgerGrouped({
       pageSize: payload.pagination?.page_size ?? pageSize,
       total: payload.pagination?.total ?? payload.groups?.length ?? 0,
     },
+    readModelStatus: text(payload.read_model_status, "fresh"),
+    readModelStaleReasons: stringList(payload.read_model_stale_reasons ?? undefined),
   };
 }
 

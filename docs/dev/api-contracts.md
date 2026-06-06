@@ -247,10 +247,10 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 
 | 字段 | 说明 |
 | --- | --- |
-| `pending_repayment_amount` | 待还款总额，来自 `pending_repayment` 动作。 |
-| `repaid_amount` | 已还款总额，来自 `repaid` 动作。 |
-| `pending_collection_amount` | 待收款总额，来自 `pending_collection` 动作。 |
-| `collected_amount` | 已收款总额，来自 `collected` 动作。 |
+| `pending_repayment_amount` | 当前待还款余额总额，来自借入类 principal 未结余额。 |
+| `repaid_amount` | 累计已还款发生额，来自借入类 `repaid` settlement 历史发生额。 |
+| `pending_collection_amount` | 当前待收款余额总额，来自借出/业务应收类 principal 未结余额。 |
+| `collected_amount` | 累计已收款发生额，来自借出/业务应收类 `collected` settlement 历史发生额。 |
 | `closed_amount` | 已闭合兼容金额；主页面不作为页头 block 展示。 |
 | `suggested_count` / `conflict_count` / `row_count` | 兼容计数字段。 |
 
@@ -259,13 +259,15 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 | 字段 | 说明 |
 | --- | --- |
 | `family` / `label` | 类别 code 和展示名。 |
-| `pending_repayment_amount` | 该类别待还款金额。 |
-| `repaid_amount` | 该类别已还款金额。 |
-| `pending_collection_amount` | 该类别待收款金额。 |
-| `collected_amount` | 该类别已收款金额。 |
+| `pending_repayment_amount` | 该类别当前待还款余额。 |
+| `repaid_amount` | 该类别累计已还款发生额。 |
+| `pending_collection_amount` | 该类别当前待收款余额。 |
+| `collected_amount` | 该类别累计已收款发生额。 |
 | `pending_amount` / `closed_amount` / `row_count` | 兼容字段；`pending_amount` 等于待还款与待收款余额合计。 |
 
 `view=grouped` 响应中的 `groups[*]` 还应稳定输出 `pending_repayment_amount`、`repaid_amount`、`pending_collection_amount`、`collected_amount`、`closed_amount`。`summary_row` 和 `flow_rows[*]` 应携带 `bank_account_labels`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path` 和 `repayment_remark`。金额列归属以 `turnover_action_type` 归一后的 `borrow_amount` / `repayment_amount` 为准，不得仅按现金流入/流出判断。前端表头应将 `borrow_amount` 展示为“往来发生”、`repayment_amount` 展示为“结清发生”；金额 chip 使用 `borrow_direction` / `repayment_direction` 展示“收”或“支”，并按实际现金方向着色。
+
+当响应携带 `read_model_status` 且不为 `fresh` 时，前端可以展示当前可用数据，但必须把闭环确认、流水选择、补充信息编辑等写操作置为不可用，直到后续查询恢复 fresh。未返回 `read_model_status` 时按 `fresh` 处理。
 
 外部往来款 `deterministic` 只表示系统识别到零差额候选，不表示已闭环，也不得作为关联台 open 分组或已配对事实。外部往来进入关联台已配对区的唯一入口是人工确认闭环后写入的 Workbench active pair relation。
 

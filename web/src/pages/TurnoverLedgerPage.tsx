@@ -28,6 +28,7 @@ import {
 } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { usePageScrollSession } from "../hooks/usePageScrollSession";
+import { ApiClientError } from "../features/apiClient";
 import {
   confirmTurnoverClosure,
   confirmTurnoverRelation,
@@ -167,6 +168,10 @@ function relationIdForRow(row: TurnoverLedgerGroupedRow) {
   return row.relationId || row.parentRelationId || "";
 }
 
+function isFlowRow(row: TurnoverLedgerGroupedRow) {
+  return row.rowKind === "flow";
+}
+
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -178,6 +183,16 @@ function moneyNumber(value: string | null | undefined) {
 
 function flowBankRowId(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
+}
+
+function relationDetailErrorMessage(caught: unknown) {
+  if (caught instanceof ApiClientError && (caught.status === 404 || caught.code === "unknown_relation_id")) {
+    return "该流水所属往来关系已刷新或不存在，请刷新台账后再编辑。";
+  }
+  if (caught instanceof Error && /往来款关系不存在|unknown_relation_id/i.test(caught.message)) {
+    return "该流水所属往来关系已刷新或不存在，请刷新台账后再编辑。";
+  }
+  return caught instanceof Error ? caught.message : "往来关系详情加载失败";
 }
 
 type ClosureCashDirection = "income" | "expense" | "unknown";
@@ -302,6 +317,8 @@ export default function TurnoverLedgerPage() {
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
+  const readModelStatus = cleanText(ledger?.readModelStatus) || "fresh";
+  const ledgerActionsDisabled = readModelStatus !== "fresh";
   const familySummaryMap = useMemo(() => new Map((ledger?.familySummaries ?? []).map((item) => [item.family, item])), [
     ledger?.familySummaries,
   ]);
@@ -400,6 +417,10 @@ export default function TurnoverLedgerPage() {
   };
 
   const handleToggleClosureRow = (group: { groupId: string; counterpartyName: string; familyLabel: string }, row: TurnoverLedgerGroupedRow) => {
+    if (ledgerActionsDisabled) {
+      setSnackbar({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再操作" });
+      return;
+    }
     const rowId = flowBankRowId(row);
     if (!rowId) {
       setSnackbar({ severity: "error", message: "这条流水缺少银行流水 ID，无法选择" });
@@ -476,7 +497,18 @@ export default function TurnoverLedgerPage() {
   }, [tagSelection.activeTags]);
 
   const handleOpenEditor = (row: TurnoverLedgerGroupedRow) => {
+    if (!isFlowRow(row)) {
+      return;
+    }
+    if (ledgerActionsDisabled) {
+      setSnackbar({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再编辑" });
+      return;
+    }
     const normalizedRow = { ...row, relationId: relationIdForRow(row) };
+    if (!normalizedRow.relationId) {
+      setSnackbar({ severity: "error", message: "这条流水缺少可编辑关系，无法打开补充信息" });
+      return;
+    }
     setSelectedRow(normalizedRow);
     setDetail(null);
     setDetailError(null);
@@ -496,7 +528,7 @@ export default function TurnoverLedgerPage() {
         if (isAbortLikeError(caught)) {
           return;
         }
-        setDetailError(caught instanceof Error ? caught.message : "往来关系详情加载失败");
+        setDetailError(relationDetailErrorMessage(caught));
       })
       .finally(() => setDetailLoading(false));
   };
@@ -606,7 +638,6 @@ export default function TurnoverLedgerPage() {
     <Box data-testid="turnover-ledger-page">
       <PageScaffold
         title="外部往来款管理"
-        description="基于银行明细标签实时汇总外部往来关系，并把已确认关系同步到关联台。"
         actions={(
           <Button disabled={tagLoading} onClick={() => setTagDrawerOpen(true)} variant="outlined">
             外部往来款标签设置
@@ -622,6 +653,11 @@ export default function TurnoverLedgerPage() {
             {error}
           </StatePanel>
         ) : null}
+        {ledgerActionsDisabled ? (
+          <Alert severity="warning">
+            往来款台账正在刷新，当前展示的是非最新数据。
+          </Alert>
+        ) : null}
 
         <Stack
           direction="row"
@@ -634,25 +670,25 @@ export default function TurnoverLedgerPage() {
           }}
         >
           <SummaryCard
-            label="待还款金额"
+            label="当前待还款金额"
             value={formatMoney(summary.pendingRepaymentAmount)}
             breakdown={summaryBreakdown("pendingRepaymentAmount")}
             testId="turnover-summary-pending-repayment"
           />
           <SummaryCard
-            label="已还款金额"
+            label="累计已还款金额"
             value={formatMoney(summary.repaidAmount)}
             breakdown={summaryBreakdown("repaidAmount")}
             testId="turnover-summary-repaid"
           />
           <SummaryCard
-            label="待收款金额"
+            label="当前待收款金额"
             value={formatMoney(summary.pendingCollectionAmount)}
             breakdown={summaryBreakdown("pendingCollectionAmount")}
             testId="turnover-summary-pending-collection"
           />
           <SummaryCard
-            label="已收款金额"
+            label="累计已收款金额"
             value={formatMoney(summary.collectedAmount)}
             breakdown={summaryBreakdown("collectedAmount")}
             testId="turnover-summary-collected"
@@ -669,7 +705,7 @@ export default function TurnoverLedgerPage() {
               </Tabs>
               <Stack direction="row" spacing={1}>
                 <Button
-                  disabled={!canMutateData || selectedClosureRows.length !== 2}
+                  disabled={!canMutateData || ledgerActionsDisabled || selectedClosureRows.length !== 2}
                   onClick={() => setClosureDrawerOpen(true)}
                   variant="outlined"
                 >
@@ -688,6 +724,7 @@ export default function TurnoverLedgerPage() {
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
               tableWrapRef={tableWrapRef}
+              actionsDisabled={ledgerActionsDisabled}
             />
           </Stack>
         </Paper>
@@ -860,7 +897,7 @@ export default function TurnoverLedgerPage() {
         detail={detail}
         extra={extraForm}
         dirty={extraDirty}
-        canMutateData={canMutateData}
+        canMutateData={canMutateData && !ledgerActionsDisabled}
         loading={detailLoading}
         saving={savingExtra}
         mutating={mutatingRelation}

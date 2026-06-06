@@ -669,7 +669,7 @@ function BankCategoryFilterControl({
               <Divider className="bank-category-filter-divider" component="li" />
               <Box className="bank-category-filter-sections" component="li" role="group">
                 {categoryGroups.map((group) => (
-                  <Box className="bank-category-filter-group" key={group.key}>
+                  <Box className="bank-category-filter-group bank-category-filter-hierarchy-group" key={group.key}>
                     {renderCategoryFilterButton(
                       group.directItem && group.children.length === 0
                         ? tagCategoryFilter(group.directItem)
@@ -685,7 +685,7 @@ function BankCategoryFilterControl({
                         group.label,
                         group.directItem.count,
                         "child",
-                        "bank-category-filter-child-row bank-category-filter-direct-child",
+                        "bank-category-filter-child-row bank-category-filter-hierarchy-item bank-category-filter-direct-child",
                       )
                     ) : null}
                     {group.children.length > 0 ? (
@@ -697,7 +697,7 @@ function BankCategoryFilterControl({
                               child.subLabel || child.label,
                               child.count,
                               "child",
-                              "bank-category-filter-child-row",
+                              "bank-category-filter-child-row bank-category-filter-hierarchy-item",
                             )}
                           </Fragment>
                         ))}

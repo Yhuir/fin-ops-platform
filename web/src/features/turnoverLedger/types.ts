@@ -142,6 +142,8 @@ export type TurnoverLedgerGroupedRow = {
   interestPaymentMethod: string;
   note: string;
   bankRowIds: string[];
+  counterpartyName?: string;
+  familyLabel?: string;
 };
 
 export type TurnoverLedgerFlowRow = TurnoverLedgerGroupedRow & {
@@ -192,6 +194,8 @@ export type TurnoverLedgerGroupedResponse = {
   familySummaries: TurnoverLedgerFamilySummary[];
   groups: TurnoverLedgerGroup[];
   pagination: TurnoverLedgerPagination;
+  readModelStatus?: string;
+  readModelStaleReasons?: string[];
 };
 
 export type FetchTurnoverLedgerRequest = {

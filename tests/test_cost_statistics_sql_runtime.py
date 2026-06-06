@@ -68,6 +68,18 @@ class CostStatisticsReadConnection:
         return []
 
 
+class CostStatisticsWriteConnection:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple]] = []
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        normalized = " ".join(sql.lower().split())
+        self.executed.append((normalized, params))
+        if "insert into read_model.cost_statistics_rows" in normalized and params[2] is None:
+            raise AssertionError("parent cost statistics scope must not write rows with null scope_month")
+        return 1
+
+
 class CostStatisticsProjectionConnection:
     def __init__(self) -> None:
         self.fetch_all_calls: list[tuple[str, tuple]] = []
@@ -232,6 +244,47 @@ class CostStatisticsSaveRecorder:
 
 
 class CostStatisticsSqlRuntimeTests(unittest.TestCase):
+    def test_repository_saves_parent_scope_snapshot_without_writing_month_rows(self) -> None:
+        connection = CostStatisticsWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_cost_statistics_read_models(
+            {
+                "read_models": {
+                    "active:all": {
+                        "scope_key": "active:all",
+                        "month": "all",
+                        "project_scope": "active",
+                        "generated_at": "2026-06-06T10:00:00+00:00",
+                        "entry_count": 1,
+                        "source_versions": {"cost_statistics_parent_source": "materialized_shards"},
+                        "payload": {
+                            "month": "all",
+                            "project_scope": "active",
+                            "summary": {"row_count": 1, "total_amount": "10.00"},
+                            "time_rows": [
+                                {
+                                    "transaction_id": "txn-parent-1",
+                                    "trade_time": "2026-05-02 10:00:00",
+                                    "trade_date": "2026-05-02",
+                                    "project_name": "项目A",
+                                    "expense_type": "材料",
+                                    "amount": "10.00",
+                                }
+                            ],
+                            "project_rows": [],
+                            "expense_type_rows": [],
+                        },
+                    }
+                }
+            },
+            changed_scope_keys={"active:all"},
+        )
+
+        self.assertTrue(any("insert into read_model.cost_statistics_read_models" in sql for sql, _params in connection.executed))
+        self.assertTrue(any("delete from read_model.cost_statistics_rows where scope_key" in sql for sql, _params in connection.executed))
+        self.assertFalse(any("insert into read_model.cost_statistics_rows" in sql for sql, _params in connection.executed))
+
     def test_repository_reads_cost_statistics_view_and_dirty_status_from_sql(self) -> None:
         connection = CostStatisticsReadConnection(
             read_model_row={

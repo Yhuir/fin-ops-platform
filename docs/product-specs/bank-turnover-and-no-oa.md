@@ -27,6 +27,7 @@
 - 状态分类应由统一 turnover classification/state policy 维护。
 - 利息、项目归因和对象关系需要可审计。
 - 自动识别只产生候选和差额提示。`deterministic` 表示系统发现同组零差额候选，不表示业务已闭环。
+- 页面汇总行只承载组级聚合、余额和展开入口；流水选择、补充信息编辑、确认闭环和撤销归并等写操作必须以真实流水行为入口。
 - 所有外部往来闭环都必须由用户在外部往来款管理页手动选择同一往来组内两条流水确认；确认前不进入关联台已配对区。
 - 人工闭环成功后，后端在同一写事务中写 Turnover 手动闭环 evidence 和 Workbench active pair relation。关联台已配对区只消费 Workbench pair relation，不消费 Turnover 自动候选 relation。
 - 旧的自动关系和旧 `sync_to_workbench` 字段只能作为历史兼容/候选信息，不作为闭环事实。

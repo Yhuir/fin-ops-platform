@@ -247,11 +247,19 @@ describe("Bank details page", () => {
   test("uses a flat dense multi-column category filter layout", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
-    expect(source).toMatch(/\.bank-category-filter-icon-button\.MuiIconButton-root\s*\{[^}]*width:\s*30px[^}]*height:\s*30px/s);
-    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(600px,\s*calc\(100vw - 40px\)\)/s);
+    expect(source).toMatch(/\.bank-category-filter-icon-button\.MuiIconButton-root\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/s);
+    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(900px,\s*calc\(100vw - 64px\)\)/s);
     expect(source).not.toMatch(/\.bank-category-filter-panel\s*\{[^}]*max-height:/s);
-    expect(source).toMatch(/\.bank-category-filter-sections\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(120px,\s*1fr\)\)/s);
-    expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*10px/s);
+    expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*max-height:/s);
+    expect(source).not.toMatch(/\.bank-category-filter-list\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(source).toMatch(/\.bank-category-filter-sections\s*\{[^}]*column-count:\s*5/s);
+    expect(source).not.toMatch(/\.bank-category-filter-sections\s*\{[^}]*grid-template-columns:/s);
+    expect(source).toMatch(/\.bank-category-filter-group\s*\{[^}]*break-inside:\s*avoid/s);
+    expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*9px/s);
+    expect(source).toMatch(/\.bank-category-filter-child-row \.bank-category-filter-label\s*\{[^}]*font-size:\s*8\.5px/s);
+    expect(source).toMatch(/\.bank-category-filter-count\s*\{[^}]*font-size:\s*8px/s);
+    expect(source).toMatch(/\.bank-category-filter-hierarchy-group::before\s*\{/);
+    expect(source).toMatch(/\.bank-category-filter-hierarchy-item\.MuiListItemButton-root::after\s*\{/);
     expect(source).not.toMatch(/\.bank-category-filter-group\s*\{[^}]*border:\s*1px[^}]*background:/s);
   });
 
@@ -318,7 +326,12 @@ describe("Bank details page", () => {
     const feeRoot = within(categoryPanel).getByRole("menuitem", { name: "费用 1" });
     const salaryChild = within(categoryPanel).getByRole("menuitem", { name: "工资 1" });
     expect(feeRoot).toHaveAttribute("aria-current", "false");
+    expect(feeRoot).toHaveAttribute("data-level", "primary");
     expect(salaryChild).toHaveAttribute("data-level", "child");
+    expect(salaryChild).toHaveClass("bank-category-filter-hierarchy-item");
+    const salaryGroup = salaryChild.closest(".bank-category-filter-hierarchy-group");
+    expect(salaryGroup).not.toBeNull();
+    expect(salaryGroup).toContainElement(feeRoot);
 
     await user.click(feeRoot);
 
