@@ -790,7 +790,7 @@
 
 ### MG-P013-phase-4-shell-provider-runtime
 
-- Status: `drafted`
+- Status: `verified`
 - Scope:
   - `web/src/app/App.tsx`
   - `web/src/app/MuiDatePickerCompatProvider.tsx`
@@ -814,7 +814,37 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: drafted。
+- Status: verified。
+
+#### Execution
+
+- Commit: `b26db303`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
+
+### P014-phase-4-sidebar-topbar
+
+- Phase: `phase_4_shell`
+- Status: `reviewed`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 迁移 `AppSidebar` 和 `AppTopBar` 的 MUI layout/navigation chrome 到 HeroUI/Tailwind/native markup；保持左侧菜单、移动端临时侧边栏、折叠/展开、embedded mode、active link 和 header mounting 行为。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md、DESIGN.md、web/src/components/shell/AppSidebar.tsx、web/src/components/shell/AppTopBar.tsx、web/src/components/shell/sidebarItems.ts、web/src/app/pageRegistry.tsx、web/src/app/styles.css、web/src/test/App.test.tsx 和 PageKeepAliveHost/AppStatusIndicator 相关测试。使用 HeroUI MCP Button/Tooltip/Drawer/Link/Separator docs 核对 API。每次只处理 AppSidebar + AppTopBar，不迁移 AppStatusIndicator、业务页面、后端/API/read model/worker 或 workbench 内部。先补强 App.test.tsx 中 sidebar/topbar 用户可观察行为断言（桌面折叠/展开、mobile open/close、embedded brand/header、active link、菜单入口不丢失），避免 MUI class/theme 断言。然后把 AppSidebar/AppTopBar 从 MUI Drawer/List/ListItem/ListItemButton/ListItemIcon/ListItemText/Stack/Collapse/Tooltip/IconButton/Divider/Typography/AppBar/Toolbar 等迁移到 HeroUI/Tailwind/native markup。保留 expandedSidebarWidth=232、collapsedSidebarWidth=72、aria-label、href/path、active aria-current、mobile overlay 关闭行为、global header hidden/workbench page mode。运行 targeted shell tests、build、shell MUI import grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- AppStatusIndicator deferred: yes。
+- User-visible behavior preserved: yes，same sidebar/topbar controls, labels, routes and mobile drawer shape。
+- Characterization tests required: yes，P014 touches shell navigation behavior。
+- Verification defined: targeted Vitest、build、shell MUI import grep、`git diff --check`、`git status --short --branch`。
+- Status: reviewed。
 
 ### P000-docs-bootstrap
 
@@ -910,13 +940,14 @@
 | `P011-phase-4-shell-discovery` | `phase_4_shell` | shell discovery | `verified` | passed | App Shell 迁移边界和切片计划已记录 |
 | `P012-phase-4-shell-icon-dependency` | `phase_4_shell` | shell icons | `verified` | passed | lucide-react sidebar icon dependency 已迁移 |
 | `P013-phase-4-shell-provider-runtime` | `phase_4_shell` | shell runtime provider | `verified` | passed | App.tsx 移出完整 MuiProviders，保留临时 MUI X date picker compat |
+| `P014-phase-4-sidebar-topbar` | `phase_4_shell` | sidebar/topbar | `reviewed` | pending | 下一条执行 prompt，只迁移 shell sidebar/topbar |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `MG-P013-phase-4-shell-provider-runtime`。
+下一条 prompt 应执行 `P014-phase-4-sidebar-topbar`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查 scope 只包含 P013 shell provider runtime 文件。运行 shell targeted Vitest、build、App.tsx direct MUI import grep、git diff --check、git status。精确 git add，不使用 git add . 或 git add -A。提交信息使用 feat: migrate shell runtime provider。push 到 refactor-ui，并更新 state/prompt Push Log。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md、web/src/components/shell/AppSidebar.tsx、web/src/components/shell/AppTopBar.tsx、web/src/app/styles.css 和 shell tests。先补强 sidebar/topbar 用户可观察行为断言，再迁移 AppSidebar/AppTopBar 到 HeroUI/Tailwind/native markup。运行 targeted shell tests、build、shell MUI import grep、git diff --check、git status，并更新 state/prompt/module docs。
 ```
 
 ## Cumulative MG Prompts

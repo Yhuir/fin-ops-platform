@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P013-phase-4-shell-provider-runtime`
-- Current MG ID: `MG-P013-phase-4-shell-provider-runtime`
+- Current Prompt ID: `P014-phase-4-sidebar-topbar`
+- Current MG ID: `MG-P014-phase-4-sidebar-topbar`
 
 ## Global Invariants
 
@@ -34,7 +34,7 @@
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
-| `phase_4_shell` | `in_progress` | 2026-06-07 |  | `partial-passed` | P011 discovery verified，P012 shell icons verified，P013 shell provider runtime verified，MG-P012 已 push，MG-P013 待执行 |
+| `phase_4_shell` | `in_progress` | 2026-06-07 |  | `partial-passed` | P011 discovery verified，P012 shell icons verified，P013 shell provider runtime verified，MG-P013 已 push；P014 sidebar/topbar 已生成并审查 |
 | `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
@@ -54,17 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 4 shell provider runtime。
+- Scope: phase 4 sidebar/topbar。
 - Files touched:
-  - `web/src/app/App.tsx`
-  - `web/src/app/MuiDatePickerCompatProvider.tsx`
-  - `web/src/app/styles.css`
-  - `docs/refactor-ui/modules/phase_4_shell.md`
+  - none yet
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: passed
-- Failures: first targeted test run failed after removing full `MuiProviders` because MUI X DatePicker lost localization context and Chinese `localeText`; fixed with narrow `MuiDatePickerCompatProvider`.
-- Next action: 执行 `MG-P013-phase-4-shell-provider-runtime`，精确 staging、commit、push。
+- Verification run: pending
+- Failures: none
+- Next action: 执行 `P014-phase-4-sidebar-topbar`。
 
 ## Prompt Lifecycle
 
@@ -94,7 +91,7 @@
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
-| app shell | `in_progress` | `P013-phase-4-shell-provider-runtime` | shell provider runtime verified，MG-P013 待执行 |
+| app shell | `in_progress` | `P014-phase-4-sidebar-topbar` | shell provider runtime verified，MG-P013 已 push；sidebar/topbar prompt ready |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
@@ -164,6 +161,7 @@
 | 2026-06-07 | `P013-phase-4-shell-provider-runtime` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P013-phase-4-shell-provider-runtime` | `if rg -n '@mui/' web/src/app/App.tsx; then exit 1; else exit 0; fi` | passed | `App.tsx` has no direct MUI import; temporary MUI X date picker compat exists in `MuiDatePickerCompatProvider.tsx` |
 | 2026-06-07 | `P013-phase-4-shell-provider-runtime` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P013-phase-4-shell-provider-runtime` | `git push origin refactor-ui` | passed | `b26db303` pushed |
 
 ## Push Log
 
@@ -180,3 +178,4 @@
 | 2026-06-07 | `MG-P010-phase-3-page-layout-primitives` | `refactor-ui` | `d4135cf3` | pushed |
 | 2026-06-07 | `MG-P011-phase-4-shell-discovery` | `refactor-ui` | `0c0e6b01` | pushed |
 | 2026-06-07 | `MG-P012-phase-4-shell-icon-dependency` | `refactor-ui` | `a96087fc` | pushed |
+| 2026-06-07 | `MG-P013-phase-4-shell-provider-runtime` | `refactor-ui` | `b26db303` | pushed |
