@@ -945,7 +945,7 @@
 
 ### MG-P015-phase-4-status-indicator
 
-- Status: `drafted`
+- Status: `verified`
 - Scope:
   - `web/src/components/shell/AppStatusIndicator.tsx`
   - `web/src/app/styles.css`
@@ -968,7 +968,37 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: drafted。
+- Status: verified。
+
+#### Execution
+
+- Commit: `6f1ac42a`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
+
+### P016-phase-5-table-system-discovery
+
+- Phase: `phase_5_table_system`
+- Status: `reviewed`
+- Type: `discovery/planning`
+- Scope: 读取当前表格组件、表格 CSS、测试和页面使用点，建立 HeroUI Table 迁移队列和表格内容排版系统落地边界；不改运行时代码。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、table_layout_system.md、module_inventory.md、baseline_inventory.md、test_migration_strategy.md、docs/refactor-ui/modules/phase_4_shell.md、web/src/app/styles.css、web/src/components/common、web/src/components/tax、web/src/components/cost-statistics、web/src/pages 中包含 Table/DataGrid/grid-table/cell-money/tag/chip/status badge 的文件和相关 tests。使用 HeroUI MCP Table、Chip、Tooltip、Pagination docs 核对 API。只做 discovery/planning，不迁移表格、不改页面、不改后端/API/read model/worker/workbench 内部。创建或更新 docs/refactor-ui/modules/phase_5_table_system.md，记录 MUI Table/DataGrid/自定义表格分类、非关联台/关联台边界、优先迁移队列、表格内容排版规则、收支 tag 上下/左右对齐规则、金额 tabular nums/right alignment、tooltip/truncation、empty/loading/error states、characterization test 建议、下一条 P017 prompt。运行文档存在/关键规则 grep、git diff --check、git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime implementation untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Table migration deferred to next prompt: yes。
+- Docs on demand: yes，phase 5 table queue/rules need cross-slice reuse。
+- Verification defined: docs existence/key grep、`git diff --check`、`git status --short --branch`。
+- Status: reviewed。
 
 ### P000-docs-bootstrap
 
@@ -1066,13 +1096,14 @@
 | `P013-phase-4-shell-provider-runtime` | `phase_4_shell` | shell runtime provider | `verified` | passed | App.tsx 移出完整 MuiProviders，保留临时 MUI X date picker compat |
 | `P014-phase-4-sidebar-topbar` | `phase_4_shell` | sidebar/topbar | `verified` | passed | AppSidebar/AppTopBar 已迁出 MUI，AppStatusIndicator 留到 P015 |
 | `P015-phase-4-status-indicator` | `phase_4_shell` | status indicator | `verified` | passed | shell 目录已无 MUI import |
+| `P016-phase-5-table-system-discovery` | `phase_5_table_system` | table discovery | `reviewed` | pending | 下一条执行 prompt，建立表格迁移队列和排版系统落地边界 |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `MG-P015-phase-4-status-indicator`。
+下一条 prompt 应执行 `P016-phase-5-table-system-discovery`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查 scope 只包含 P015 status indicator 文件。运行 shell targeted Vitest、build、shell MUI import grep、git diff --check、git status。精确 git add，不使用 git add . 或 git add -A。提交信息使用 feat: migrate shell status indicator。push 到 refactor-ui，并更新 state/prompt Push Log。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、table_layout_system.md、module_inventory.md、baseline_inventory.md、test_migration_strategy.md、web/src/app/styles.css 和当前表格/测试使用点。只做 phase 5 table system discovery/planning，创建或更新 docs/refactor-ui/modules/phase_5_table_system.md，记录迁移队列、排版规则和下一条 P017 prompt。运行文档/key grep、git diff --check、git status，并更新 state/prompt/module docs。
 ```
 
 ## Cumulative MG Prompts

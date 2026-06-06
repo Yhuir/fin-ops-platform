@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `phase_4_shell`
+- Phase: `phase_5_table_system`
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P015-phase-4-status-indicator`
-- Current MG ID: `MG-P015-phase-4-status-indicator`
+- Current Prompt ID: `P016-phase-5-table-system-discovery`
+- Current MG ID: `MG-P016-phase-5-table-system-discovery`
 
 ## Global Invariants
 
@@ -34,8 +34,8 @@
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
-| `phase_4_shell` | `in_progress` | 2026-06-07 |  | `partial-passed` | P011 discovery verified，P012 shell icons verified，P013 shell provider runtime verified，P014 sidebar/topbar verified，MG-P014 已 push；P015 status indicator 已生成并审查 |
-| `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
+| `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
+| `phase_5_table_system` | `in_progress` | 2026-06-07 |  | `pending` | P016 table system discovery 已生成并审查 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
@@ -54,16 +54,13 @@
 
 ## Active Checkpoint
 
-- Scope: phase 4 status indicator。
+- Scope: phase 5 table system discovery。
 - Files touched:
-  - `web/src/components/shell/AppStatusIndicator.tsx`
-  - `web/src/app/styles.css`
-  - `docs/refactor-ui/modules/phase_4_shell.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: passed
-- Failures: first implementation using HeroUI Popover Trigger did not open on the existing status hover target; fixed by preserving the existing manual hover/focus/escape logic with a project-owned portal popover.
-- Next action: 执行 `MG-P015-phase-4-status-indicator`，精确 staging、commit、push。
+- Verification run: pending
+- Failures: none
+- Next action: 执行 `P016-phase-5-table-system-discovery`。
 
 ## Prompt Lifecycle
 
@@ -93,8 +90,8 @@
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
-| app shell | `in_progress` | `P015-phase-4-status-indicator` | status indicator verified，MG-P015 待执行；shell 目录已无 MUI import |
-| table system | `pending` |  | HeroUI Table |
+| app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
+| table system | `in_progress` | `P016-phase-5-table-system-discovery` | prompt ready |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
 ## Verification Log
@@ -175,6 +172,7 @@
 | 2026-06-07 | `P015-phase-4-status-indicator` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P015-phase-4-status-indicator` | `if rg -n '@mui/' web/src/components/shell; then exit 1; else exit 0; fi` | passed | shell components have no MUI imports |
 | 2026-06-07 | `P015-phase-4-status-indicator` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P015-phase-4-status-indicator` | `git push origin refactor-ui` | passed | `6f1ac42a` pushed |
 
 ## Push Log
 
@@ -193,3 +191,4 @@
 | 2026-06-07 | `MG-P012-phase-4-shell-icon-dependency` | `refactor-ui` | `a96087fc` | pushed |
 | 2026-06-07 | `MG-P013-phase-4-shell-provider-runtime` | `refactor-ui` | `b26db303` | pushed |
 | 2026-06-07 | `MG-P014-phase-4-sidebar-topbar` | `refactor-ui` | `3b124246` | pushed |
+| 2026-06-07 | `MG-P015-phase-4-status-indicator` | `refactor-ui` | `6f1ac42a` | pushed |
