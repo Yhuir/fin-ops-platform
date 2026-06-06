@@ -64,6 +64,53 @@ function getFileOverrides(formData: FormData) {
   return JSON.parse(String(formData.get("file_overrides")));
 }
 
+function expectProjectImportShell() {
+  const page = screen.getByTestId("import-workflow-page");
+  expect(page).toHaveClass("import-workflow-page");
+  expect(page).not.toHaveClass("MuiBox-root");
+
+  const actions = screen.getByTestId("import-workflow-actions");
+  expect(actions).toHaveClass("import-workflow-actions");
+  expect(actions).not.toHaveClass("MuiStack-root");
+}
+
+function expectProjectUploadZone(label: string) {
+  const input = getUploadInput(label, "上传文件");
+  const zone = input.closest("label");
+  expect(zone).not.toBeNull();
+  const uploadZone = zone as HTMLElement;
+  expect(uploadZone).toHaveClass("import-workflow-upload-zone");
+  expect(uploadZone).not.toHaveClass("MuiBox-root");
+  return input;
+}
+
+function expectProjectNotice(message: HTMLElement) {
+  const notice = message.closest('[role="alert"], [role="status"]');
+  expect(notice).not.toBeNull();
+  const noticeRoot = notice as HTMLElement;
+  expect(noticeRoot).toHaveClass("import-workflow-notice");
+  expect(noticeRoot).not.toHaveClass("MuiAlert-root");
+}
+
+function expectProjectAuditCard(label: string) {
+  const card = screen.getByLabelText(label);
+  expect(card).toHaveClass("import-workflow-audit-card");
+  expect(card).not.toHaveClass("MuiPaper-root");
+}
+
+function expectProjectPreviewTable(name: string) {
+  const table = screen.getByRole("grid", { name });
+  const tableRoot = table.closest(".finance-table");
+  expect(tableRoot).not.toBeNull();
+  expect(table).not.toHaveClass("MuiDataGrid-root");
+}
+
+function expectProjectDetailTabs() {
+  const tabs = screen.getByRole("tablist", { name: "导入预览明细" });
+  expect(tabs).toHaveClass("import-workflow-detail-tabs");
+  expect(tabs).not.toHaveClass("MuiTabs-root");
+}
+
 async function selectReadyEtcTask(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByLabelText("ETC对账任务");
   await user.selectOptions(screen.getByLabelText("ETC对账任务"), "etc_task_ready_001");
@@ -77,9 +124,11 @@ describe("Import pages", () => {
     renderAppAt("/imports/bank-transactions");
 
     expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
+    expectProjectImportShell();
+    const bankUploadInput = expectProjectUploadZone("上传银行流水文件");
     expect(screen.queryByRole("dialog", { name: "银行流水导入" })).not.toBeInTheDocument();
 
-    await user.upload(getUploadInput("上传银行流水文件", "上传文件"), [
+    await user.upload(bankUploadInput, [
       new File(["bank-demo"], "historydetail14080.xlsx", {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         lastModified: 1,
@@ -97,7 +146,8 @@ describe("Import pages", () => {
     expect(previewButton).toBeEnabled();
     await user.click(previewButton);
 
-    expect(await screen.findByText("已完成 2 个文件的预览识别。")).toBeInTheDocument();
+    const successMessage = await screen.findByText("已完成 2 个文件的预览识别。");
+    expectProjectNotice(successMessage);
     const formData = getPreviewFormData(fetchMock);
     expect((formData.getAll("files") as File[]).map((file) => file.name)).toEqual([
       "historydetail14080.xlsx",
@@ -121,6 +171,11 @@ describe("Import pages", () => {
         last4: "8826",
       },
     ]);
+
+    await user.click(screen.getByRole("button", { name: "确认导入" }));
+    const dialog = await screen.findByRole("dialog", { name: "银行账户冲突确认" });
+    expect(dialog).toHaveClass("finance-dialog");
+    expect(dialog).not.toHaveClass("MuiDialog-root");
   });
 
   test("bank transaction import displays preview audit counts and confirm copy", async () => {
@@ -145,12 +200,16 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByLabelText("审计汇总 原始 18")).toBeInTheDocument();
+    expectProjectAuditCard("审计汇总 原始 18");
     expect(screen.getByLabelText("审计汇总 唯一 16")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 重复 2")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 已存在 2")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 可导入 14")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "文件内重复" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "跨文件重复" })).toBeInTheDocument();
+    expectProjectPreviewTable("导入预览结果");
+    expectProjectPreviewTable("重复项明细");
+    expectProjectDetailTabs();
     expect(screen.getByText("将导入 14 条唯一记录，跳过 4 条重复。")).toBeInTheDocument();
   });
 
@@ -161,11 +220,13 @@ describe("Import pages", () => {
     renderAppAt("/imports/invoices");
 
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expectProjectImportShell();
+    const invoiceUploadInput = expectProjectUploadZone("上传发票文件");
     expect(screen.queryByRole("dialog", { name: "发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
 
-    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+    await user.upload(invoiceUploadInput, [
       new File(["invoice-output"], "一月发票.xlsx", {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         lastModified: 1,
@@ -219,11 +280,15 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByLabelText("审计汇总 原始 28")).toBeInTheDocument();
+    expectProjectAuditCard("审计汇总 原始 28");
     expect(screen.getByLabelText("审计汇总 唯一 24")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 可导入 22")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 异常 1")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "已存在" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "可导入" })).toBeInTheDocument();
+    expectProjectPreviewTable("导入预览结果");
+    expectProjectPreviewTable("重复项明细");
+    expectProjectDetailTabs();
     expect(screen.getByText("将导入 22 条唯一记录，跳过 4 条重复，2 条需复核。")).toBeInTheDocument();
   });
 
@@ -420,14 +485,17 @@ describe("Import pages", () => {
     renderAppAt("/imports/etc-invoices");
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expectProjectImportShell();
+    const etcUploadInput = expectProjectUploadZone("上传ETC zip");
     await selectReadyEtcTask(user);
-    await user.upload(getUploadInput("上传ETC zip", "上传文件"), [
+    await user.upload(etcUploadInput, [
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
       new File(["zip-b"], "etc-2026-04.zip", { type: "application/zip" }),
     ]);
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByRole("heading", { name: "ETC导入预览" })).toBeInTheDocument();
+    expectProjectPreviewTable("ETC导入预览结果");
     expect(screen.getByText("etc_import_session_0001")).toBeInTheDocument();
     expect(screen.getByText("ETC-2026-005")).toBeInTheDocument();
     expect(screen.getAllByText("etc-2026-03.zip").length).toBeGreaterThan(0);
@@ -459,10 +527,12 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByLabelText("审计汇总 原始 4")).toBeInTheDocument();
+    expectProjectAuditCard("审计汇总 原始 4");
     expect(screen.getByLabelText("审计汇总 唯一 3")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 重复 1")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 已存在 1")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 可导入 1")).toBeInTheDocument();
+    expectProjectPreviewTable("ETC导入预览结果");
     expect(screen.getByText("将导入 1 条唯一记录，跳过 2 条重复，1 条需复核。")).toBeInTheDocument();
   });
 
@@ -492,6 +562,7 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
     expect(await screen.findByText("ETC对账任务缺失项")).toBeInTheDocument();
+    expectProjectNotice(screen.getByText("ETC对账任务缺失项"));
     expect(screen.getByText("2026-04-27 12:22:09")).toBeInTheDocument();
     expect(screen.getByText("126.35")).toBeInTheDocument();
     expect(screen.getByText("云ADA0381")).toBeInTheDocument();

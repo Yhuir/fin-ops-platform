@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P032-phase-6-import-pages-characterization-tests`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `MG-P035-phase-6-import-pages`
+- Current MG ID: `MG-P035-phase-6-import-pages`
 
 ## Global Invariants
 
@@ -54,14 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 import pages characterization tests。
+- Scope: phase 6 import pages cumulative merge gate。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_import_pages.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P031 docs verification passed
-- Failures: none
-- Next action: 执行 `P032-phase-6-import-pages-characterization-tests`。
+  - `web/src/test/ImportCenterPage.test.tsx`
+  - `web/src/components/imports/ImportWorkflowPage.tsx`
+  - `web/src/app/styles.css`
+- Verification run: P035 targeted Vitest, focused platform/table tests, build, import runtime MUI grep and diff check passed。
+- Failures: none。
+- Next action: 执行 `MG-P035-phase-6-import-pages`，精确 stage、commit 并 push。
 
 ## Prompt Lifecycle
 
@@ -93,7 +96,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P032-phase-6-import-pages-characterization-tests` | Import pages P031 discovery implemented；next discovery MG |
+| page batches | `in_progress` | `MG-P035-phase-6-import-pages` | P035 import pages implementation verified；next cumulative MG |
 
 ## Verification Log
 
@@ -230,6 +233,16 @@
 | 2026-06-07 | `P031-phase-6-import-pages-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P031-phase-6-import-pages-discovery` | `git status --short --branch` | passed | 仅 P031 文档变更 |
 | 2026-06-07 | `MG-P031-phase-6-import-pages-discovery` | `git push origin refactor-ui` | passed | `adc8ce62` pushed |
+| 2026-06-07 | `P032-phase-6-import-pages-characterization-tests` | `cd web && npx vitest run ImportCenterPage.test.tsx` | expected-fail | 7 failures: import shell, audit cards and notice roots still MUI |
+| 2026-06-07 | `P033-phase-6-import-pages-shell-forms` | `cd web && npx vitest run ImportCenterPage.test.tsx` | expected-fail | 4 failures remain, all preview tables still MUI DataGrid; shell/forms/cards/notices/dialog failures cleared |
+| 2026-06-07 | `P033-phase-6-import-pages-shell-forms` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P034-phase-6-import-pages-preview-tables` | `cd web && npx vitest run ImportCenterPage.test.tsx` | expected-fail | 17 passed, 2 expected failures remain; both failures are detail tabs still MUI Tabs |
+| 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `cd web && npx vitest run ImportCenterPage.test.tsx` | passed | 19 tests passed; stderr still includes known HeroUI Tooltip focusable warning from existing truncated text trigger behavior |
+| 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/components/imports web/src/pages/imports; then exit 1; else exit 0; fi` | passed | Import pages runtime scope has no MUI/DataGrid/session hook residue |
+| 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `if rg -n '@mui/' web/src/test/ImportCenterPage.test.tsx; then exit 1; else exit 0; fi` | passed | Import tests have no MUI imports; negative MUI class assertions remain by design |
+| 2026-06-07 | `P035-phase-6-import-pages-detail-tabs` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

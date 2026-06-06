@@ -128,6 +128,43 @@ Recommended Micro-JIT sequence:
 
 - `P031-phase-6-import-pages-discovery`: Import pages route wrappers、`ImportWorkflowPage.tsx` MUI/DataGrid inventory、用户入口、测试覆盖和迁移风险已记录。
 - `MG-P031-phase-6-import-pages-discovery`: pushed `adc8ce62` to `refactor-ui`。
+- `P032-phase-6-import-pages-characterization-tests`: updated `ImportCenterPage.test.tsx` to lock project primitive contracts for import shell, upload zone, notices, audit cards, preview table targets, detail tabs and conflict dialog. Targeted test expected-failed with 7 failures because current implementation still renders MUI `Box`, `Paper` and `Alert` roots。
+- `P033-phase-6-import-pages-shell-forms`: migrated import shell, action bar, notices, upload zone, selected file cards, native select controls, audit cards and bank conflict dialog to HeroUI/native/project classes. Targeted test now has only 4 expected failures, all caused by remaining MUI DataGrid preview surfaces。
+- `P034-phase-6-import-pages-preview-tables`: migrated main preview, duplicate/unimported detail preview and ETC preview surfaces from MUI X DataGrid to `FinanceTable`. The table primitive contract now passes; targeted test has only 2 expected failures, both from detail tabs still rendered by MUI Tabs for P035。
+- `P035-phase-6-import-pages-detail-tabs`: migrated import preview detail tabs from MUI Tabs to HeroUI Tabs. `ImportCenterPage.test.tsx` now passes all 19 tests; import pages runtime scope has no `@mui/*`、MUI class roots、DataGrid or MUI DataGrid session hooks。
+
+## P033 Prompt Draft
+
+```text
+Prompt ID: P033-phase-6-import-pages-shell-forms
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 ImportWorkflowPage page shell、header actions、notices、upload zone、file cards、select controls、audit summary cards 和 conflict dialog；暂不迁 DataGrid preview tables。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx、web/src/components/common/AppDialog.tsx、web/src/app/styles.css。使用 HeroUI MCP Alert/Button/Chip/Select/Spinner/Modal docs 核对 API。把 ImportWorkflowPage 的 page shell、action bar、feedback/error/info/warning notices、upload zone、selected file cards、ETC task metadata chips、bank/invoice/ETC select controls、audit summary cards 和 bank conflict dialog 从 MUI 迁到 HeroUI/native/project classes。保留 PageScaffold、导入 API flow、draft/session restore、drag/drop、file input labels、existing DataGrid preview surfaces 和 useMuiDataGridPageSession。不得改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，本切片结束后允许仍因 DataGrid/table/tabs primitive assertions expected-fail，但 shell/forms/cards/notices/dialog 相关 failures 必须消失；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P034 preview tables prompt。
+```
+
+## P034 Prompt Draft
+
+```text
+Prompt ID: P034-phase-6-import-pages-preview-tables
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 ImportWorkflowPage 的 main preview、detail preview 和 ETC preview table surfaces；保留业务 flow 和 shell/forms。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/modules/phase_5_table_system.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx、web/src/components/common/FinanceTable.tsx、web/src/hooks/useFinanceTableSession.ts 和 web/src/app/styles.css。使用 FinanceTable primitives 替换 `DataGrid`、`GridColDef`、`importGridSx`、`useMuiDataGridPageSession` 和 `useMuiDataGridScrollSession` 在导入页族中的使用，覆盖三类 preview table：`导入预览结果`、`重复项明细`/`未导入项明细`、`ETC导入预览结果`。保留表格 accessible names、关键 columnheader 文案、row text、loading/pending 语义、preview/detail tab 切换和用户可见数据。不得改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，本切片结束后允许只剩 detail tabs primitive assertion failure；运行 focused table/common/platform tests、build、import scope MUI grep、git diff --check、git status。更新 state/prompt/module docs，生成 P035 detail tabs prompt。
+```
+
+## P035 Prompt Draft
+
+```text
+Prompt ID: P035-phase-6-import-pages-detail-tabs
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 ImportWorkflowPage 的导入预览明细 tabs；保留 P034 已迁移的 FinanceTable surfaces 和所有导入业务 flow。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx 和 web/src/app/styles.css。使用 HeroUI Tabs 或项目 native tabs primitive 替换 `@mui/material/Tabs` 与 `@mui/material/Tab`，保留 `导入预览明细` tablist accessible name、`重复项 <n>` / `未导入项 <n>` 文案、selected tab state、用户点击切换 detail table 的行为和键盘可访问语义。不得改后端、API、read model、worker、mock、FinanceTable 数据映射或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx` 必须通过；运行 focused table/common/platform tests、build、import scope MUI grep、git diff --check、git status。更新 state/prompt/module docs；若导入页 scope 已无非冻结 MUI 残留，生成 `MG-P035-phase-6-import-pages`。
+```
 
 ## Risks
 

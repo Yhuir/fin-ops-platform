@@ -1506,14 +1506,16 @@
 | `MG-P030-phase-6-app-health` | `phase_6_page_batches` | app health cumulative MG | `verified` | pushed | AppHealth UI migration 已 push 到 refactor-ui |
 | `P031-phase-6-import-pages-discovery` | `phase_6_page_batches` | import pages discovery | `verified` | passed | 导入页族 MUI/DataGrid inventory、用户入口和 P032 prompt 已记录 |
 | `MG-P031-phase-6-import-pages-discovery` | `phase_6_page_batches` | import pages discovery MG | `verified` | pushed | Import pages discovery 已 push 到 refactor-ui |
-| `P032-phase-6-import-pages-characterization-tests` | `phase_6_page_batches` | import pages tests | `reviewed` | pending | 下一条执行 prompt，只改 ImportCenterPage tests |
+| `P032-phase-6-import-pages-characterization-tests` | `phase_6_page_batches` | import pages tests | `verified` | expected fail | Import pages primitive contract 已锁定 |
+| `P033-phase-6-import-pages-shell-forms` | `phase_6_page_batches` | import pages shell/forms | `verified` | partial expected fail | Shell/forms/cards/notices/dialog 已迁；仅 DataGrid 断言失败 |
+| `P034-phase-6-import-pages-preview-tables` | `phase_6_page_batches` | import pages preview tables | `reviewed` | pending | 下一条执行 prompt，迁移导入预览表格 |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P032-phase-6-import-pages-characterization-tests`。
+下一条 prompt 应执行 `P034-phase-6-import-pages-preview-tables`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/ImportCenterPage.test.tsx、web/src/components/imports/ImportWorkflowPage.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/common/AppDialog.tsx 和 web/src/app/styles.css。只修改 `web/src/test/ImportCenterPage.test.tsx`，新增或调整断言：standalone import page shell 使用 project class 且不是 MUI root；action bar 按钮位置/名称保留；upload zone 使用 project class 且不是 MUI Box；feedback/error/confirm notices 不是 `.MuiAlert-root`；audit summary cards 使用 project class；preview tables 使用 project/FinanceTable contract 而不是 `.MuiDataGrid-root`；detail tabs 使用 project/HeroUI tabs contract；银行账户冲突确认仍是 dialog 且不是 `.MuiDialog-root`。不得修改实现、后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P033 shell/forms refactor prompt。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/modules/phase_5_table_system.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx、web/src/components/common/FinanceTable.tsx、web/src/hooks/useFinanceTableSession.ts 和 web/src/app/styles.css。使用 FinanceTable primitives 替换 `DataGrid`、`GridColDef`、`importGridSx`、`useMuiDataGridPageSession` 和 `useMuiDataGridScrollSession` 在导入页族中的使用，覆盖三类 preview table：`导入预览结果`、`重复项明细`/`未导入项明细`、`ETC导入预览结果`。保留表格 accessible names、关键 columnheader 文案、row text、loading/pending 语义、preview/detail tab 切换和用户可见数据。不得改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，本切片结束后允许只剩 detail tabs primitive assertion failure；运行 focused table/common/platform tests、build、import scope MUI grep、git diff --check、git status。更新 state/prompt/module docs，生成 P035 detail tabs prompt。
 ```
 
 ## Cumulative MG Prompts
@@ -1765,6 +1767,75 @@
 - Characterization before implementation: yes。
 - Expected failure acceptable: yes，旧 MUI/DataGrid roots 仍存在时 tests 应暴露缺口。
 - Verification defined: targeted import Vitest、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `ImportCenterPage.test.tsx` 已新增 import shell、upload zone、notice、audit card、preview table、detail tabs 和 conflict dialog primitive contract。
+- Targeted Vitest expected-failed with 7 failures because current implementation still renders MUI `Box`/`Paper`/`Alert` roots。
+- 未修改 runtime implementation、后端、API、read model、worker、mock 或关联台。
+
+#### Verification
+
+- Status: verified expected-fail。
+- Commands:
+  - `cd web && npx vitest run ImportCenterPage.test.tsx`
+
+### P033-phase-6-import-pages-shell-forms
+
+- Phase: `phase_6_page_batches`
+- Status: `reviewed`
+- Type: `extraction/refactor`
+- Scope: 迁移 ImportWorkflowPage page shell、header actions、notices、upload zone、file cards、select controls、audit summary cards 和 conflict dialog；暂不迁 DataGrid preview tables。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx、web/src/components/common/AppDialog.tsx、web/src/app/styles.css。使用 HeroUI MCP Alert/Button/Chip/Select/Spinner/Modal docs 核对 API。把 ImportWorkflowPage 的 page shell、action bar、feedback/error/info/warning notices、upload zone、selected file cards、ETC task metadata chips、bank/invoice/ETC select controls、audit summary cards 和 bank conflict dialog 从 MUI 迁到 HeroUI/native/project classes。保留 PageScaffold、导入 API flow、draft/session restore、drag/drop、file input labels、existing DataGrid preview surfaces 和 useMuiDataGridPageSession。不得改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，本切片结束后允许仍因 DataGrid/table/tabs primitive assertions expected-fail，但 shell/forms/cards/notices/dialog 相关 failures 必须消失；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P034 preview tables prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- DataGrid migration deferred: yes，P033 保留 preview DataGrid surfaces。
+- User-visible behavior preserved: yes，导入 API、draft/session restore、drag/drop 和 labels 保留。
+- Verification defined: targeted import Vitest expected partial fail allowed only for DataGrid/table/tabs assertions、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `ImportWorkflowPage.tsx` page shell、action bar、notices、upload zone、selected file cards、native selects、audit cards 和 bank conflict dialog 已迁到 HeroUI/native/project classes。
+- `PageScaffold`、导入 API flow、draft/session restore、drag/drop、file input labels、DataGrid preview surfaces 和 `useMuiDataGridPageSession` 保留。
+- `ImportCenterPage.test.tsx` targeted run 从 7 个 expected failures 降到 4 个，剩余 failures 全部是 preview DataGrid 还不是 `FinanceTable`。
+
+#### Verification
+
+- Status: verified partial expected-fail。
+- Commands:
+  - `cd web && npx vitest run ImportCenterPage.test.tsx`
+  - `cd web && npm run build`
+
+### P034-phase-6-import-pages-preview-tables
+
+- Phase: `phase_6_page_batches`
+- Status: `reviewed`
+- Type: `extraction/refactor`
+- Scope: 迁移导入页族 main preview、detail preview 和 ETC preview table surfaces；保留 shell/forms 和业务 flow。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/modules/phase_5_table_system.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx、web/src/components/common/FinanceTable.tsx、web/src/hooks/useFinanceTableSession.ts 和 web/src/app/styles.css。使用 FinanceTable primitives 替换 `DataGrid`、`GridColDef`、`importGridSx`、`useMuiDataGridPageSession` 和 `useMuiDataGridScrollSession` 在导入页族中的使用，覆盖三类 preview table：`导入预览结果`、`重复项明细`/`未导入项明细`、`ETC导入预览结果`。保留表格 accessible names、关键 columnheader 文案、row text、loading/pending 语义、preview/detail tab 切换和用户可见数据。不得改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run ImportCenterPage.test.tsx`，本切片结束后允许只剩 detail tabs primitive assertion failure；运行 focused table/common/platform tests、build、import scope MUI grep、git diff --check、git status。更新 state/prompt/module docs，生成 P035 detail tabs prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Shell/forms preserved: yes。
+- User-visible table names and headers preserved: yes。
+- Verification defined: targeted import Vitest with only detail tabs failure allowed, focused table/common/platform tests, build, MUI grep, `git diff --check`, `git status --short --branch`。
 
 ### MG-P031-phase-6-import-pages-discovery
 
@@ -2165,6 +2236,109 @@
 - Commit: `1eecabb9`
 - Push: `refactor-ui -> origin/refactor-ui`
 - Result: verified
+
+### P034-phase-6-import-pages-preview-tables
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 迁移 ImportWorkflowPage main preview、detail preview 和 ETC preview table surfaces。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/modules/phase_5_table_system.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx、web/src/components/common/FinanceTable.tsx、web/src/hooks/useFinanceTableSession.ts 和 web/src/app/styles.css。使用 FinanceTable primitives 替换 DataGrid、GridColDef、importGridSx、useMuiDataGridPageSession 和 useMuiDataGridScrollSession 在导入页族中的使用，覆盖三类 preview table：导入预览结果、重复项明细/未导入项明细、ETC导入预览结果。保留表格 accessible names、关键 columnheader 文案、row text、loading/pending 语义、preview/detail tab 切换和用户可见数据。不得改后端、API、read model、worker、mock 或关联台。运行 cd web && npx vitest run ImportCenterPage.test.tsx，本切片结束后允许只剩 detail tabs primitive assertion failure；运行 focused table/common/platform tests、build、import scope MUI grep、git diff --check、git status。更新 state/prompt/module docs，生成 P035 detail tabs prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Business flow preserved: yes。
+- Table scope only: yes，P035 tabs 单独处理。
+- Verification defined: targeted ImportCenterPage test，expected-fail 只允许 detail tabs。
+
+#### Execution Notes
+
+- Removed import-page usage of MUI X DataGrid, GridColDef, importGridSx and MUI DataGrid session hooks。
+- Added `FinanceTable` renderers for main import preview, duplicate/unimported detail preview and ETC preview。
+- Adjusted import-page primitive test helper to assert the `FinanceTable` root around HeroUI Table's `role=grid` content。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run ImportCenterPage.test.tsx`
+- Result: expected-fail with 17 passed and 2 failures; both failures are detail tabs still rendered by MUI Tabs, which is the planned P035 scope。
+
+### P035-phase-6-import-pages-detail-tabs
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `extraction/refactor`
+- Scope: 迁移 ImportWorkflowPage 导入预览明细 tabs。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md、web/src/components/imports/ImportWorkflowPage.tsx、web/src/test/ImportCenterPage.test.tsx 和 web/src/app/styles.css。使用 HeroUI Tabs 或项目 native tabs primitive 替换 @mui/material/Tabs 与 @mui/material/Tab，保留 导入预览明细 tablist accessible name、重复项 <n> / 未导入项 <n> 文案、selected tab state、用户点击切换 detail table 的行为和键盘可访问语义。不得改后端、API、read model、worker、mock、FinanceTable 数据映射或关联台。运行 cd web && npx vitest run ImportCenterPage.test.tsx 必须通过；运行 focused table/common/platform tests、build、import scope MUI grep、git diff --check、git status。更新 state/prompt/module docs；若导入页 scope 已无非冻结 MUI 残留，生成 MG-P035-phase-6-import-pages。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Table data untouched: yes。
+- Overlay shape not involved: yes。
+- Verification defined: targeted import test must pass, plus platform/table/build and MUI grep before MG。
+
+#### Execution Notes
+
+- Removed `@mui/material/Tabs` and `@mui/material/Tab` from `ImportWorkflowPage.tsx`。
+- Replaced detail tabs with HeroUI `Tabs` compound components and project classes。
+- Preserved `导入预览明细` accessible tablist name, duplicate/unimported counts and selected tab state。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run ImportCenterPage.test.tsx`
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/components/imports web/src/pages/imports; then exit 1; else exit 0; fi`
+  - `if rg -n '@mui/' web/src/test/ImportCenterPage.test.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+- Result: passed. ImportCenterPage still emits known HeroUI Tooltip focusable warnings from truncated text triggers, but all assertions pass and no MUI remains in import runtime scope。
+
+### MG-P035-phase-6-import-pages
+
+- Status: `approved_for_execution`
+- Scope:
+  - `web/src/components/imports/ImportWorkflowPage.tsx`
+  - `web/src/app/styles.css`
+  - `web/src/test/ImportCenterPage.test.tsx`
+  - `docs/refactor-ui/modules/phase_6_import_pages.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_import_pages.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 Import pages migration 文件：web/src/components/imports/ImportWorkflowPage.tsx、web/src/app/styles.css、web/src/test/ImportCenterPage.test.tsx、docs/refactor-ui/modules/phase_6_import_pages.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run ImportCenterPage.test.tsx；cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/|Mui[A-Z]|MuiDataGrid|DataGrid|GridColDef|useMuiDataGrid' web/src/components/imports web/src/pages/imports; then exit 1; else exit 0; fi；if rg -n '@mui/' web/src/test/ImportCenterPage.test.tsx; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate import workflow ui。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified，并从 refactor-ui 分支生成下一条 Phase 6 prompt。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: approved_for_execution。
 
 ### MG Prompt Template
 

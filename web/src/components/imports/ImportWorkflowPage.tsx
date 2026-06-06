@@ -1,26 +1,21 @@
-import ArrowBackOutlinedIcon from "@mui/icons-material/ArrowBackOutlined";
-import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
-import FileUploadOutlinedIcon from "@mui/icons-material/FileUploadOutlined";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import Paper from "@mui/material/Paper";
-import Select from "@mui/material/Select";
-import Stack from "@mui/material/Stack";
-import Tab from "@mui/material/Tab";
-import Tabs from "@mui/material/Tabs";
-import Typography from "@mui/material/Typography";
-import { DataGrid, type GridColDef } from "@mui/x-data-grid";
-import { type DragEvent, useEffect, useId, useMemo, useState } from "react";
+import { Alert, Button, Chip, Tabs } from "@heroui/react";
+import { ArrowLeft, Trash2, UploadCloud } from "lucide-react";
+import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
+import AppDialog from "../common/AppDialog";
+import {
+  EmptyValue,
+  FinanceDirectionTag,
+  FinanceStatusTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+  TruncatedCellText,
+} from "../common/FinanceTable";
 import PageScaffold from "../common/PageScaffold";
 import {
   confirmImportFiles,
@@ -53,10 +48,6 @@ import type { FileSelectionState } from "../../contexts/ImportWorkflowDraftConte
 import { useImportProgress } from "../../contexts/ImportProgressContext";
 import { useAppHealthStatus } from "../../contexts/AppHealthStatusContext";
 import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
-import {
-  useMuiDataGridPageSession,
-  useMuiDataGridScrollSession,
-} from "../../hooks/useMuiDataGridPageSession";
 
 type ImportWorkflowPageProps = {
   mode: ImportWorkflowMode;
@@ -237,6 +228,80 @@ function displayValue(value?: string | number | null) {
     return "--";
   }
   return String(value);
+}
+
+type ImportNoticeTone = "success" | "danger" | "accent" | "warning";
+
+function ImportNotice({
+  tone,
+  children,
+  ariaLabel,
+}: {
+  tone: ImportNoticeTone;
+  children: ReactNode;
+  ariaLabel?: string;
+}) {
+  return (
+    <Alert
+      aria-label={ariaLabel}
+      className={`import-workflow-notice import-workflow-notice--${tone}`}
+      role={tone === "danger" || tone === "warning" ? "alert" : "status"}
+      status={tone}
+    >
+      <Alert.Indicator />
+      <Alert.Content className="import-workflow-notice__content">
+        <Alert.Description className="import-workflow-notice__description">{children}</Alert.Description>
+      </Alert.Content>
+    </Alert>
+  );
+}
+
+function ImportChip({
+  children,
+  color = "default",
+}: {
+  children: ReactNode;
+  color?: "default" | "accent" | "success" | "warning" | "danger";
+}) {
+  return (
+    <Chip className="import-workflow-chip" color={color} size="sm" variant="secondary">
+      {children}
+    </Chip>
+  );
+}
+
+function ImportSelect({
+  id,
+  label,
+  value,
+  disabled,
+  children,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  disabled?: boolean;
+  children: ReactNode;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="import-workflow-select-field">
+      <label className="import-workflow-select-field__label" htmlFor={id}>
+        {label}
+      </label>
+      <select
+        aria-label={label}
+        className="import-workflow-select-field__control"
+        disabled={disabled}
+        id={id}
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      >
+        {children}
+      </select>
+    </div>
+  );
 }
 
 function isMissingEtcRequirementIssue(issue: EtcReconciliationBlockingIssue) {
@@ -473,60 +538,231 @@ function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }
     ["未导入", audit.skippedCount],
   ] as const;
   return (
-    <Box
-      aria-label="导入预览审计汇总"
-      sx={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(88px, 1fr))",
-        gap: 1,
-      }}
-    >
+    <div aria-label="导入预览审计汇总" className="import-workflow-audit-grid">
       {items.map(([label, value]) => (
-        <Paper
+        <div
           key={label}
-          variant="outlined"
           aria-label={`审计汇总 ${label} ${value}`}
-          sx={{ p: 1, borderColor: "#d5dde8", bgcolor: "#f8fafc" }}
+          className="import-workflow-audit-card"
         >
-          <Typography variant="caption" color="text.secondary">{label}</Typography>
-          <Typography variant="h6" fontWeight={900}>{value}</Typography>
-        </Paper>
+          <div className="import-workflow-audit-card__label">{label}</div>
+          <div className="import-workflow-audit-card__value">{value}</div>
+        </div>
       ))}
-    </Box>
+    </div>
   );
 }
 
-const importGridSx = {
-  border: "1px solid #d5dde8",
-  color: "#1f2937",
-  "--DataGrid-overlayHeight": "220px",
-  "& .MuiDataGrid-columnHeaders": {
-    backgroundColor: "#14263f",
-    color: "#f8fafc",
-    borderBottom: "1px solid #d5dde8",
-  },
-  "& .MuiDataGrid-columnHeader": {
-    backgroundColor: "#14263f",
-    color: "#f8fafc",
-  },
-  "& .MuiDataGrid-columnHeaderTitle": {
-    color: "#f8fafc",
-    fontWeight: 800,
-  },
-  "& .MuiDataGrid-sortIcon, & .MuiDataGrid-menuIconButton, & .MuiDataGrid-iconButtonContainer": {
-    color: "#f8fafc",
-  },
-  "& .MuiDataGrid-columnSeparator": {
-    color: "rgba(248, 250, 252, 0.38)",
-  },
-  "& .MuiDataGrid-cell": {
-    alignItems: "center",
-    borderColor: "#e5eaf2",
-  },
-  "& .MuiDataGrid-row:hover": {
-    backgroundColor: "#f7fafc",
-  },
-} as const;
+function PreviewTableEmptyRow({ message }: { message: string }) {
+  return (
+    <FinanceTableRow id="empty" textValue={message}>
+      <FinanceTableCell columnRole="description" textValue={message}>
+        <EmptyValue value={message} />
+      </FinanceTableCell>
+      {Array.from({ length: 15 }, (_, index) => (
+        <FinanceTableCell key={index} columnRole="description" textValue="--">
+          <EmptyValue value="--" />
+        </FinanceTableCell>
+      ))}
+    </FinanceTableRow>
+  );
+}
+
+function ImportPreviewTable({ rows, loading }: { rows: ImportFilePreviewRow[]; loading: boolean }) {
+  const emptyMessage = loading ? "正在加载..." : "--";
+
+  return (
+    <FinanceTable ariaLabel="导入预览结果" minWidth={1500}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" id="fileName" isRowHeader>文件</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status" id="status">状态</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status" id="batchTypeLabel">类型</FinanceTableColumn>
+        <FinanceTableColumn columnRole="account" id="accountLabel">账户</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditOriginalCount">原始</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditUniqueCount">唯一</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditDuplicateInFileCount">文件内重复</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditDuplicateAcrossFilesCount">跨文件重复</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditExistingDuplicateCount">已存在</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditImportableCount">可导入</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditSuspectedDuplicateCount">需复核</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditErrorCount">异常</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="auditSkippedCount">未导入</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="rowCount">行数</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="successCount">新增</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description" id="message">消息</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
+        {rows.length === 0 ? (
+          <PreviewTableEmptyRow message={emptyMessage} />
+        ) : rows.map((row) => (
+          <FinanceTableRow key={row.id} id={row.id} textValue={row.fileName}>
+            <FinanceTableCell columnRole="identity" textValue={row.fileName}>
+              <TruncatedCellText value={row.fileName} />
+            </FinanceTableCell>
+            <FinanceTableCell columnRole="status" textValue={statusLabel(row.status)}>
+              <FinanceStatusTag tone={row.status === "preview_ready" ? "success" : "warning"}>
+                {statusLabel(row.status)}
+              </FinanceStatusTag>
+            </FinanceTableCell>
+            <FinanceTableCell columnRole="status" textValue={row.batchTypeLabel}>{row.batchTypeLabel}</FinanceTableCell>
+            <FinanceTableCell columnRole="account" textValue={row.accountLabel}>
+              <TruncatedCellText value={row.accountLabel} />
+            </FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditOriginalCount)}>{row.auditOriginalCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditUniqueCount)}>{row.auditUniqueCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditDuplicateInFileCount)}>{row.auditDuplicateInFileCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditDuplicateAcrossFilesCount)}>{row.auditDuplicateAcrossFilesCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditExistingDuplicateCount)}>{row.auditExistingDuplicateCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditImportableCount)}>{row.auditImportableCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditSuspectedDuplicateCount)}>{row.auditSuspectedDuplicateCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditErrorCount)}>{row.auditErrorCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.auditSkippedCount)}>{row.auditSkippedCount}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.rowCount)}>{displayValue(row.rowCount)}</FinanceTableCell>
+            <FinanceTableCell columnRole="quantity" textValue={String(row.successCount)}>{displayValue(row.successCount)}</FinanceTableCell>
+            <FinanceTableCell columnRole="description" textValue={displayValue(row.message)}>
+              <TruncatedCellText value={displayValue(row.message)} />
+            </FinanceTableCell>
+          </FinanceTableRow>
+        ))}
+      </FinanceTableBody>
+    </FinanceTable>
+  );
+}
+
+function DetailTableEmptyRow({ message }: { message: string }) {
+  return (
+    <FinanceTableRow id="empty" textValue={message}>
+      <FinanceTableCell columnRole="description" textValue={message}>
+        <EmptyValue value={message} />
+      </FinanceTableCell>
+      {Array.from({ length: 9 }, (_, index) => (
+        <FinanceTableCell key={index} columnRole="description" textValue="--">
+          <EmptyValue value="--" />
+        </FinanceTableCell>
+      ))}
+    </FinanceTableRow>
+  );
+}
+
+function ImportPreviewDetailTable({
+  ariaLabel,
+  rows,
+  loading,
+}: {
+  ariaLabel: "重复项明细" | "未导入项明细";
+  rows: ImportPreviewDetailGridRow[];
+  loading: boolean;
+}) {
+  const emptyMessage = loading ? "正在加载..." : "--";
+
+  return (
+    <FinanceTable ariaLabel={ariaLabel} minWidth={1240}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" id="fileName" isRowHeader>文件</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity" id="rowNo">行号</FinanceTableColumn>
+        <FinanceTableColumn columnRole="account" id="accountNo">账户</FinanceTableColumn>
+        <FinanceTableColumn columnRole="date" id="tradeTime">交易时间</FinanceTableColumn>
+        <FinanceTableColumn columnRole="direction" id="direction">方向</FinanceTableColumn>
+        <FinanceTableColumn columnRole="amount" id="amount">金额</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description" id="counterpartyName">对方户名</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status" id="duplicateType">类型</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status" id="decision">决策</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description" id="decisionReason">原因</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
+        {rows.length === 0 ? (
+          <DetailTableEmptyRow message={emptyMessage} />
+        ) : rows.map((row) => {
+          const direction = directionLabel(row.direction);
+          return (
+            <FinanceTableRow key={row.id} id={row.id} textValue={`${row.fileName} ${row.rowNo}`}>
+              <FinanceTableCell columnRole="identity" textValue={row.fileName}>
+                <TruncatedCellText value={row.fileName} />
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="quantity" textValue={String(row.rowNo)}>{row.rowNo}</FinanceTableCell>
+              <FinanceTableCell columnRole="account" textValue={displayValue(row.accountNo)}>
+                <TruncatedCellText value={displayValue(row.accountNo)} />
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="date" textValue={displayValue(row.tradeTime)}>{displayValue(row.tradeTime)}</FinanceTableCell>
+              <FinanceTableCell columnRole="direction" textValue={direction}>
+                {direction === "--" ? <EmptyValue value="--" /> : <FinanceDirectionTag direction={direction}>{direction}</FinanceDirectionTag>}
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="amount" textValue={displayValue(row.amount)}>{displayValue(row.amount)}</FinanceTableCell>
+              <FinanceTableCell columnRole="description" textValue={displayValue(row.counterpartyName)}>
+                <TruncatedCellText value={displayValue(row.counterpartyName)} />
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="status" textValue={duplicateTypeLabel(row.duplicateType)}>
+                {duplicateTypeLabel(row.duplicateType)}
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="status" textValue={importRowDecisionLabel(row.decision)}>
+                <FinanceStatusTag tone={row.decision === "error" ? "danger" : row.decision === "suspected_duplicate" ? "warning" : "neutral"}>
+                  {importRowDecisionLabel(row.decision)}
+                </FinanceStatusTag>
+              </FinanceTableCell>
+              <FinanceTableCell columnRole="description" textValue={displayValue(row.decisionReason)}>
+                <TruncatedCellText value={displayValue(row.decisionReason)} />
+              </FinanceTableCell>
+            </FinanceTableRow>
+          );
+        })}
+      </FinanceTableBody>
+    </FinanceTable>
+  );
+}
+
+function EtcTableEmptyRow({ message }: { message: string }) {
+  return (
+    <FinanceTableRow id="empty" textValue={message}>
+      <FinanceTableCell columnRole="description" textValue={message}>
+        <EmptyValue value={message} />
+      </FinanceTableCell>
+      {Array.from({ length: 4 }, (_, index) => (
+        <FinanceTableCell key={index} columnRole="description" textValue="--">
+          <EmptyValue value="--" />
+        </FinanceTableCell>
+      ))}
+    </FinanceTableRow>
+  );
+}
+
+function EtcPreviewTable({ rows, loading }: { rows: EtcPreviewRow[]; loading: boolean }) {
+  const emptyMessage = loading ? "正在加载..." : "--";
+
+  return (
+    <FinanceTable ariaLabel="ETC导入预览结果" minWidth={980}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" id="invoiceNumber" isRowHeader>发票号</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description" id="fileName">文件</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status" id="statusLabel">状态</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status" id="filterStatusLabel">对账筛选</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description" id="reason">原因</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
+        {rows.length === 0 ? (
+          <EtcTableEmptyRow message={emptyMessage} />
+        ) : rows.map((row) => (
+          <FinanceTableRow key={row.id} id={row.id} textValue={displayValue(row.invoiceNumber || row.fileName)}>
+            <FinanceTableCell columnRole="identity" textValue={displayValue(row.invoiceNumber)}>
+              <TruncatedCellText value={displayValue(row.invoiceNumber)} />
+            </FinanceTableCell>
+            <FinanceTableCell columnRole="description" textValue={displayValue(row.fileName)}>
+              <TruncatedCellText value={displayValue(row.fileName)} />
+            </FinanceTableCell>
+            <FinanceTableCell columnRole="status" textValue={row.statusLabel}>
+              <FinanceStatusTag tone={row.status === "failed" ? "danger" : row.status === "duplicate_skipped" ? "warning" : "success"}>
+                {row.statusLabel}
+              </FinanceStatusTag>
+            </FinanceTableCell>
+            <FinanceTableCell columnRole="status" textValue={row.filterStatusLabel}>{row.filterStatusLabel}</FinanceTableCell>
+            <FinanceTableCell columnRole="description" textValue={displayValue(row.reason)}>
+              <TruncatedCellText value={displayValue(row.reason)} />
+            </FinanceTableCell>
+          </FinanceTableRow>
+        ))}
+      </FinanceTableBody>
+    </FinanceTable>
+  );
+}
 
 export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const inputId = useId();
@@ -573,25 +809,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   const title = TITLES[mode];
   const uploadLabel = UPLOAD_LABELS[mode];
-  const importPageKey = `imports.${mode}`;
-  const previewGridSession = useMuiDataGridPageSession({
-    pageKey: importPageKey,
-    gridKey: "preview-main",
-    columnsVersion: 1,
-  });
-  const previewGridScrollSession = useMuiDataGridScrollSession(previewGridSession);
-  const previewDetailGridSession = useMuiDataGridPageSession({
-    pageKey: importPageKey,
-    gridKey: "preview-detail",
-    columnsVersion: 1,
-  });
-  const previewDetailGridScrollSession = useMuiDataGridScrollSession(previewDetailGridSession);
-  const etcPreviewGridSession = useMuiDataGridPageSession({
-    pageKey: importPageKey,
-    gridKey: "etc-preview",
-    columnsVersion: 1,
-  });
-  const etcPreviewGridScrollSession = useMuiDataGridScrollSession(etcPreviewGridSession);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -809,46 +1026,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       filterStatusLabel: etcFilterStatusLabel(item.filterStatus),
     })) ?? []
   ), [etcPreviewPayload]);
-
-  const previewColumns = useMemo<GridColDef<ImportFilePreviewRow>[]>(() => [
-    { field: "fileName", headerName: "文件", flex: 1.4, minWidth: 220 },
-    { field: "status", headerName: "状态", width: 110, valueFormatter: (value) => statusLabel(String(value)) },
-    { field: "batchTypeLabel", headerName: "类型", width: 120 },
-    { field: "accountLabel", headerName: "账户", width: 160 },
-    { field: "auditOriginalCount", headerName: "原始", type: "number", width: 90 },
-    { field: "auditUniqueCount", headerName: "唯一", type: "number", width: 90 },
-    { field: "auditDuplicateInFileCount", headerName: "文件内重复", type: "number", width: 120 },
-    { field: "auditDuplicateAcrossFilesCount", headerName: "跨文件重复", type: "number", width: 120 },
-    { field: "auditExistingDuplicateCount", headerName: "已存在", type: "number", width: 100 },
-    { field: "auditImportableCount", headerName: "可导入", type: "number", width: 100 },
-    { field: "auditSuspectedDuplicateCount", headerName: "需复核", type: "number", width: 100 },
-    { field: "auditErrorCount", headerName: "异常", type: "number", width: 90 },
-    { field: "auditSkippedCount", headerName: "未导入", type: "number", width: 100 },
-    { field: "rowCount", headerName: "行数", type: "number", width: 90 },
-    { field: "successCount", headerName: "新增", type: "number", width: 90 },
-    { field: "message", headerName: "消息", flex: 1.6, minWidth: 240 },
-  ], []);
-
-  const detailColumns = useMemo<GridColDef<ImportPreviewDetailGridRow>[]>(() => [
-    { field: "fileName", headerName: "文件", flex: 1.1, minWidth: 180 },
-    { field: "rowNo", headerName: "行号", type: "number", width: 80 },
-    { field: "accountNo", headerName: "账户", minWidth: 140, valueFormatter: (value) => displayValue(value) },
-    { field: "tradeTime", headerName: "交易时间", minWidth: 170, valueFormatter: (value) => displayValue(value) },
-    { field: "direction", headerName: "方向", width: 90, valueFormatter: (value) => directionLabel(String(value ?? "")) },
-    { field: "amount", headerName: "金额", minWidth: 110, valueFormatter: (value) => displayValue(value) },
-    { field: "counterpartyName", headerName: "对方户名", flex: 1, minWidth: 180, valueFormatter: (value) => displayValue(value) },
-    { field: "duplicateType", headerName: "类型", minWidth: 120, valueFormatter: (value) => duplicateTypeLabel(String(value ?? "")) },
-    { field: "decision", headerName: "决策", minWidth: 110, valueFormatter: (value) => importRowDecisionLabel(String(value ?? "")) },
-    { field: "decisionReason", headerName: "原因", flex: 1.3, minWidth: 220, valueFormatter: (value) => displayValue(value) },
-  ], []);
-
-  const etcColumns = useMemo<GridColDef<EtcPreviewRow>[]>(() => [
-    { field: "invoiceNumber", headerName: "发票号", flex: 1, minWidth: 180 },
-    { field: "fileName", headerName: "文件", flex: 1.2, minWidth: 220 },
-    { field: "statusLabel", headerName: "状态", width: 120 },
-    { field: "filterStatusLabel", headerName: "对账筛选", width: 130 },
-    { field: "reason", headerName: "原因", flex: 1.6, minWidth: 260 },
-  ], []);
 
   function resetPreviewState() {
     setPreviewPayload(null);
@@ -1112,153 +1289,129 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }
 
   return (
-    <Box data-testid="import-workflow-page">
+    <div className="import-workflow-page" data-testid="import-workflow-page">
       <PageScaffold
         title={title}
         actions={
-          <Stack direction="row" spacing={1}>
-            <Button component={RouterLink} to="/" variant="outlined" startIcon={<ArrowBackOutlinedIcon />}>
+          <div className="import-workflow-actions" data-testid="import-workflow-actions">
+            <RouterLink className="button button--secondary button--sm import-workflow-back-link" to="/">
+              <ArrowLeft aria-hidden="true" size={16} strokeWidth={2.2} />
               返回关联台
-            </Button>
-            <Button type="button" variant="outlined" onClick={handleClearFiles} disabled={!hasDraftContent || isPreviewing || isConfirming}>
+            </RouterLink>
+            <Button
+              isDisabled={!hasDraftContent || isPreviewing || isConfirming}
+              onPress={handleClearFiles}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               清空
             </Button>
-            <Button type="button" variant="outlined" onClick={handlePreview} disabled={!canPreview}>
+            <Button isDisabled={!canPreview} onPress={handlePreview} size="sm" type="button" variant="secondary">
               {isPreviewing ? "预览中..." : "开始预览"}
             </Button>
             <Button
+              isDisabled={healthStatus.blocksMutations || (mode === "etc_invoice" ? !canConfirmEtc : !canConfirm)}
+              onPress={handleConfirm}
               type="button"
-              variant="contained"
-              onClick={handleConfirm}
-              disabled={healthStatus.blocksMutations || (mode === "etc_invoice" ? !canConfirmEtc : !canConfirm)}
             >
               {isConfirming ? "确认中..." : "确认导入"}
             </Button>
-          </Stack>
+          </div>
         }
       >
-        <Stack spacing={2.5}>
-          {feedbackMessage ? <Alert severity="success">{feedbackMessage}</Alert> : null}
-          {errorMessage ? <Alert severity="error">{errorMessage}</Alert> : null}
-          {confirmAuditMessage ? <Alert severity="info">{confirmAuditMessage}</Alert> : null}
-          {settingsLoading ? <Alert severity="info">正在加载银行账户映射...</Alert> : null}
-          {!settingsLoading && !canUseBankImport ? <Alert severity="warning">设置里还没有银行账户映射，请先在设置中维护银行。</Alert> : null}
-          {mode === "etc_invoice" && readyEtcTasksLoading ? <Alert severity="info">正在加载可导入的 ETC 对账任务...</Alert> : null}
+        <div className="import-workflow-content">
+          {feedbackMessage ? <ImportNotice tone="success">{feedbackMessage}</ImportNotice> : null}
+          {errorMessage ? <ImportNotice tone="danger">{errorMessage}</ImportNotice> : null}
+          {confirmAuditMessage ? <ImportNotice tone="accent">{confirmAuditMessage}</ImportNotice> : null}
+          {settingsLoading ? <ImportNotice tone="accent">正在加载银行账户映射...</ImportNotice> : null}
+          {!settingsLoading && !canUseBankImport ? <ImportNotice tone="warning">设置里还没有银行账户映射，请先在设置中维护银行。</ImportNotice> : null}
+          {mode === "etc_invoice" && readyEtcTasksLoading ? <ImportNotice tone="accent">正在加载可导入的 ETC 对账任务...</ImportNotice> : null}
           {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length === 0 ? (
-            <Alert severity="warning">
-              <Stack spacing={1}>
-                <Typography variant="body2" fontWeight={700}>
+            <ImportNotice tone="warning">
+              <div className="import-workflow-notice-stack">
+                <p className="import-workflow-notice-strong">
                   当前没有已确认且可导入的 ETC 对账任务。导入页不能新建任务，请先在 ETC 对账页完成确认。
-                </Typography>
+                </p>
                 {unavailableEtcTasks.length > 0 ? (
-                  <Stack spacing={0.75}>
-                    <Typography variant="caption" color="text.secondary">
+                  <div className="import-workflow-notice-stack import-workflow-notice-stack--compact">
+                    <p className="import-workflow-muted-text">
                       已找到 {unavailableEtcTasks.length} 个 ETC 对账任务，但当前不可导入：
-                    </Typography>
+                    </p>
                     {unavailableEtcTasks.slice(0, 5).map((task) => (
-                      <Stack
+                      <div
                         key={task.taskId}
-                        direction={{ xs: "column", sm: "row" }}
-                        spacing={0.75}
-                        sx={{ alignItems: { xs: "flex-start", sm: "center" } }}
+                        className="import-workflow-task-row"
                       >
-                        <Chip size="small" label={`${task.title || task.taskId} / ${task.status}`} />
-                        <Typography variant="caption">{buildUnavailableEtcTaskReason(task)}</Typography>
-                      </Stack>
+                        <ImportChip>{`${task.title || task.taskId} / ${task.status}`}</ImportChip>
+                        <span className="import-workflow-muted-text">{buildUnavailableEtcTaskReason(task)}</span>
+                      </div>
                     ))}
                     {unavailableEtcTasks.length > 5 ? (
-                      <Typography variant="caption" color="text.secondary">
+                      <p className="import-workflow-muted-text">
                         还有 {unavailableEtcTasks.length - 5} 个不可导入任务，请到 ETC 对账页处理。
-                      </Typography>
+                      </p>
                     ) : null}
-                  </Stack>
+                  </div>
                 ) : null}
-              </Stack>
-            </Alert>
+              </div>
+            </ImportNotice>
           ) : null}
           {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length > 0 && !selectedEtcTask ? (
-            <Alert severity="warning">请选择已确认的 ETC 对账任务后再预览 ETC zip。</Alert>
+            <ImportNotice tone="warning">请选择已确认的 ETC 对账任务后再预览 ETC zip。</ImportNotice>
           ) : null}
 
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "1fr", lg: "minmax(360px, 0.9fr) minmax(520px, 1.3fr)" },
-              gap: 2,
-              alignItems: "start",
-            }}
-          >
-            <Paper variant="outlined" sx={{ p: 2, borderColor: "#d5dde8" }}>
-              <Stack spacing={2}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center">
-                  <Typography component="h2" variant="h6" fontWeight={800}>文件</Typography>
-                  <Chip size="small" label={`已选 ${selectedFiles.length}`} />
-                </Stack>
+          <div className="import-workflow-layout">
+            <section className="import-workflow-panel">
+              <div className="import-workflow-panel__content">
+                <div className="import-workflow-panel__header">
+                  <h2 className="import-workflow-panel__title">文件</h2>
+                  <ImportChip>{`已选 ${selectedFiles.length}`}</ImportChip>
+                </div>
 
                 {mode === "etc_invoice" ? (
-                  <Stack spacing={1}>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel id="etc-reconciliation-task-label">ETC对账任务</InputLabel>
-                      <Select
-                        native
-                        labelId="etc-reconciliation-task-label"
-                        label="ETC对账任务"
-                        value={selectedEtcTaskId}
-                        disabled={isPreviewing || isConfirming || readyEtcTasksLoading || readyEtcTasks.length === 0}
-                        inputProps={{ "aria-label": "ETC对账任务" }}
-                        onChange={(event) => handleEtcTaskChange(event.target.value)}
-                      >
+                  <div className="import-workflow-field-stack">
+                    <ImportSelect
+                      disabled={isPreviewing || isConfirming || readyEtcTasksLoading || readyEtcTasks.length === 0}
+                      id="etc-reconciliation-task"
+                      label="ETC对账任务"
+                      onChange={handleEtcTaskChange}
+                      value={selectedEtcTaskId}
+                    >
                         <option aria-label="未选择ETC对账任务" value="" />
                         {readyEtcTasks.map((task) => (
                           <option key={task.taskId} value={task.taskId}>
                             {buildEtcTaskOptionLabel(task)}
                           </option>
                         ))}
-                      </Select>
-                    </FormControl>
+                    </ImportSelect>
                     {selectedEtcTask ? (
-                      <Stack direction="row" flexWrap="wrap" gap={1} aria-label="已选ETC对账任务">
-                        <Chip size="small" label={`任务 ${selectedEtcTask.title || selectedEtcTask.taskId}`} />
-                        <Chip size="small" label={`版本 ${selectedEtcTask.version}`} />
-                        <Chip size="small" label={`ETC票 ${selectedEtcTask.etcInvoiceCount}`} />
-                        <Chip size="small" label={`补充凭证 ${selectedEtcTask.supplementCount}`} />
-                      </Stack>
+                      <div aria-label="已选ETC对账任务" className="import-workflow-chip-row">
+                        <ImportChip>{`任务 ${selectedEtcTask.title || selectedEtcTask.taskId}`}</ImportChip>
+                        <ImportChip>{`版本 ${selectedEtcTask.version}`}</ImportChip>
+                        <ImportChip>{`ETC票 ${selectedEtcTask.etcInvoiceCount}`}</ImportChip>
+                        <ImportChip>{`补充凭证 ${selectedEtcTask.supplementCount}`}</ImportChip>
+                      </div>
                     ) : null}
-                  </Stack>
+                  </div>
                 ) : null}
 
-                <Box
-                  component="label"
+                <label
+                  className={`import-workflow-upload-zone${isDragActive ? " import-workflow-upload-zone--active" : ""}${isPreviewing || isConfirming ? " import-workflow-upload-zone--disabled" : ""}`}
                   htmlFor={inputId}
                   aria-label={uploadLabel}
                   onDragEnter={handleDropzoneDragOver}
                   onDragOver={handleDropzoneDragOver}
                   onDragLeave={handleDropzoneDragLeave}
                   onDrop={handleDropzoneDrop}
-                  sx={{
-                    display: "grid",
-                    placeItems: "center",
-                    gap: 1,
-                    minHeight: 150,
-                    px: 2,
-                    py: 3,
-                    cursor: isPreviewing || isConfirming ? "not-allowed" : "pointer",
-                    border: "1px dashed",
-                    borderColor: isDragActive ? "#2563eb" : "#b8c4d5",
-                    borderRadius: 2,
-                    bgcolor: isDragActive ? "#eff6ff" : "#f8fafc",
-                    color: "#334155",
-                    textAlign: "center",
-                  }}
                 >
-                  <FileUploadOutlinedIcon />
-                  <Typography fontWeight={800}>{uploadLabel}</Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <UploadCloud aria-hidden="true" size={24} strokeWidth={2.2} />
+                  <span className="import-workflow-upload-zone__title">{uploadLabel}</span>
+                  <span className="import-workflow-upload-zone__description">
                     {mode === "etc_invoice" ? "支持 .zip" : "支持 .xls / .xlsx"}
-                  </Typography>
-                  <Box
+                  </span>
+                  <input
                     id={inputId}
-                    component="input"
                     multiple
                     type="file"
                     accept={mode === "etc_invoice" ? ".zip,application/zip" : ".xlsx,.xls"}
@@ -1268,12 +1421,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                       applyDroppedFiles(Array.from(event.currentTarget.files ?? []));
                       event.currentTarget.value = "";
                     }}
-                    sx={{ display: "none" }}
+                    className="import-workflow-upload-zone__input"
                   />
-                </Box>
+                </label>
 
                 {selectedFiles.length > 0 ? (
-                  <Stack spacing={1.25} aria-label="待导入文件">
+                  <div className="import-workflow-file-list" aria-label="待导入文件">
                     {selectedFiles.map((file) => {
                       const key = buildSelectedFileKey(file);
                       const selection = fileSelections[key] ?? {
@@ -1285,223 +1438,200 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                       };
 
                       return (
-                        <Paper key={key} variant="outlined" sx={{ p: 1.25, borderColor: "#e1e7ef" }}>
-                          <Stack spacing={1.25}>
-                            <Stack direction="row" justifyContent="space-between" gap={1}>
-                              <Box sx={{ minWidth: 0 }}>
-                                <Typography fontWeight={800} noWrap title={file.name}>{file.name}</Typography>
-                                <Typography variant="caption" color="text.secondary">{formatFileSize(file)}</Typography>
-                              </Box>
+                        <div key={key} className="import-workflow-file-card">
+                          <div className="import-workflow-file-card__content">
+                            <div className="import-workflow-file-card__header">
+                              <div className="import-workflow-file-card__identity">
+                                <div className="import-workflow-file-card__name" title={file.name}>{file.name}</div>
+                                <div className="import-workflow-muted-text">{formatFileSize(file)}</div>
+                              </div>
                               <Button
+                                className="import-workflow-file-card__remove"
+                                isDisabled={isPreviewing || isConfirming}
+                                onPress={() => handleRemoveFile(file)}
+                                size="sm"
                                 type="button"
-                                size="small"
-                                color="error"
-                                variant="text"
-                                startIcon={<DeleteOutlineOutlinedIcon />}
-                                onClick={() => handleRemoveFile(file)}
-                                disabled={isPreviewing || isConfirming}
+                                variant="danger"
                               >
+                                <Trash2 aria-hidden="true" size={14} strokeWidth={2.2} />
                                 移除
                               </Button>
-                            </Stack>
+                            </div>
 
                             {mode === "bank_transaction" ? (
-                              <FormControl size="small" fullWidth>
-                                <InputLabel id={`${key}-bank-label`}>对应账户</InputLabel>
-                                <Select
-                                  native
-                                  labelId={`${key}-bank-label`}
-                                  label="对应账户"
-                                  value={selection.bankMappingId}
-                                  disabled={isPreviewing || isConfirming || bankOptions.length === 0}
-                                  inputProps={{ "aria-label": `对应账户 ${file.name}` }}
-                                  onChange={(event) => handleSelectionChange(file, "bankMappingId", event.target.value)}
-                                >
+                              <ImportSelect
+                                disabled={isPreviewing || isConfirming || bankOptions.length === 0}
+                                id={`${key}-bank`}
+                                label={`对应账户 ${file.name}`}
+                                onChange={(value) => handleSelectionChange(file, "bankMappingId", value)}
+                                value={selection.bankMappingId}
+                              >
                                   <option aria-label="未选择账户" value="" />
                                   {bankOptions.map((bankOption) => (
                                     <option key={bankOption.id} value={bankOption.id}>
                                       {buildBankAccountOptionLabel(bankOption)}
                                     </option>
                                   ))}
-                                </Select>
-                              </FormControl>
+                              </ImportSelect>
                             ) : mode === "invoice" ? (
-                              <FormControl size="small" fullWidth>
-                                <InputLabel id={`${key}-invoice-label`}>票据方向</InputLabel>
-                                <Select
-                                  native
-                                  labelId={`${key}-invoice-label`}
-                                  label="票据方向"
-                                  value={selection.invoiceBatchType}
-                                  disabled={isPreviewing || isConfirming}
-                                  inputProps={{ "aria-label": `票据方向 ${file.name}` }}
-                                  onChange={(event) => handleSelectionChange(file, "invoiceBatchType", event.target.value)}
-                                >
+                              <ImportSelect
+                                disabled={isPreviewing || isConfirming}
+                                id={`${key}-invoice`}
+                                label={`票据方向 ${file.name}`}
+                                onChange={(value) => handleSelectionChange(file, "invoiceBatchType", value)}
+                                value={selection.invoiceBatchType}
+                              >
                                   <option aria-label="未选择票据方向" value="" />
                                   <option value="input_invoice">进项发票</option>
                                   <option value="output_invoice">销项发票</option>
-                                </Select>
-                              </FormControl>
+                              </ImportSelect>
                             ) : (
-                              <Chip label="ETC zip" size="small" sx={{ alignSelf: "flex-start" }} />
+                              <div className="import-workflow-chip-row">
+                                <ImportChip>ETC zip</ImportChip>
+                              </div>
                             )}
-                          </Stack>
-                        </Paper>
+                          </div>
+                        </div>
                       );
                     })}
-                  </Stack>
+                  </div>
                 ) : (
-                  <Alert severity="info">当前还没有选择文件。</Alert>
+                  <ImportNotice tone="accent">当前还没有选择文件。</ImportNotice>
                 )}
-              </Stack>
-            </Paper>
+              </div>
+            </section>
 
-            <Paper variant="outlined" sx={{ p: 2, borderColor: "#d5dde8" }}>
-              <Stack spacing={2}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center">
-                  <Typography component="h2" variant="h6" fontWeight={800}>预览</Typography>
+            <section className="import-workflow-panel">
+              <div className="import-workflow-panel__content">
+                <div className="import-workflow-panel__header">
+                  <h2 className="import-workflow-panel__title">预览</h2>
                   {isPreviewing || isConfirming ? (
-                    <Chip size="small" color="primary" label={isPreviewing ? "预览中" : "确认中"} />
+                    <ImportChip color="accent">{isPreviewing ? "预览中" : "确认中"}</ImportChip>
                   ) : null}
-                </Stack>
+                </div>
 
                 {mode === "etc_invoice" ? (
-                  <Stack spacing={1.5}>
+                  <div className="import-workflow-preview-stack">
                     {etcPreviewPayload ? (
-                      <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-                        <Typography component="h3" variant="subtitle1" fontWeight={800}>ETC导入预览</Typography>
-                        <Chip size="small" label={etcPreviewPayload.sessionId} />
-                      </Stack>
+                      <div className="import-workflow-preview-heading">
+                        <h3 className="import-workflow-preview-title">ETC导入预览</h3>
+                        <ImportChip>{etcPreviewPayload.sessionId}</ImportChip>
+                      </div>
                     ) : null}
                     <AuditSummaryCards audit={etcPreviewAudit} />
                     {etcPreviewPayload ? (
-                      <Stack direction="row" flexWrap="wrap" gap={1}>
-                        <Chip color="success" label={`本次导入新增 ${etcPreviewPayload.imported}`} />
-                        <Chip label={`本次重复跳过 ${etcPreviewPayload.duplicatesSkipped}`} />
-                        <Chip color="info" label={`本次附件补齐 ${etcPreviewPayload.attachmentsCompleted}`} />
-                        <Chip color={etcPreviewPayload.failed > 0 ? "warning" : "default"} label={`异常 ${etcPreviewPayload.failed}`} />
-                      </Stack>
+                      <div className="import-workflow-chip-row">
+                        <ImportChip color="success">{`本次导入新增 ${etcPreviewPayload.imported}`}</ImportChip>
+                        <ImportChip>{`本次重复跳过 ${etcPreviewPayload.duplicatesSkipped}`}</ImportChip>
+                        <ImportChip color="accent">{`本次附件补齐 ${etcPreviewPayload.attachmentsCompleted}`}</ImportChip>
+                        <ImportChip color={etcPreviewPayload.failed > 0 ? "warning" : "default"}>{`异常 ${etcPreviewPayload.failed}`}</ImportChip>
+                      </div>
                     ) : null}
                     {missingEtcRequirementIssues.length > 0 ? (
-                      <Alert severity="warning" aria-label="ETC对账任务缺失项">
-                        <Stack spacing={1}>
-                          <Typography fontWeight={800}>ETC对账任务缺失项</Typography>
-                          <Stack spacing={0.75}>
+                      <ImportNotice ariaLabel="ETC对账任务缺失项" tone="warning">
+                        <div className="import-workflow-notice-stack">
+                          <p className="import-workflow-notice-strong">ETC对账任务缺失项</p>
+                          <div className="import-workflow-notice-stack import-workflow-notice-stack--compact">
                             {missingEtcRequirementIssues.map((issue) => (
-                              <Paper
+                              <div
                                 key={issue.requirementId || formatMissingRequirementLine(issue)}
-                                variant="outlined"
-                                sx={{ p: 1, borderColor: "#f59e0b", bgcolor: "#fff7ed" }}
+                                className="import-workflow-issue-card"
                               >
-                                <Stack direction="row" flexWrap="wrap" gap={1} alignItems="center">
-                                  <Chip size="small" color="warning" label={displayValue(issue.transactionAt || issue.transactionDate)} />
-                                  <Chip size="small" label={displayValue(issue.amount)} />
-                                  <Chip size="small" label={displayValue(issue.vehiclePlate)} />
-                                  {issue.invoiceCount ? <Chip size="small" label={`${issue.invoiceCount} 张`} /> : null}
-                                  <Typography variant="body2" color="text.secondary">
+                                <div className="import-workflow-chip-row">
+                                  <ImportChip color="warning">{displayValue(issue.transactionAt || issue.transactionDate)}</ImportChip>
+                                  <ImportChip>{displayValue(issue.amount)}</ImportChip>
+                                  <ImportChip>{displayValue(issue.vehiclePlate)}</ImportChip>
+                                  {issue.invoiceCount ? <ImportChip>{`${issue.invoiceCount} 张`}</ImportChip> : null}
+                                  <span className="import-workflow-muted-text">
                                     {issue.requirementId}
-                                  </Typography>
-                                </Stack>
-                              </Paper>
+                                  </span>
+                                </div>
+                              </div>
                             ))}
-                          </Stack>
-                        </Stack>
-                      </Alert>
+                          </div>
+                        </div>
+                      </ImportNotice>
                     ) : null}
                     {etcBlockingIssues.length > 0 && missingEtcRequirementIssues.length === 0 ? (
-                      <Alert severity="warning">ETC 对账任务仍有 {etcBlockingIssues.length} 个阻塞项，请处理后重新预览。</Alert>
+                      <ImportNotice tone="warning">ETC 对账任务仍有 {etcBlockingIssues.length} 个阻塞项，请处理后重新预览。</ImportNotice>
                     ) : null}
-                    <Box ref={etcPreviewGridScrollSession.rootRef} sx={{ height: 420, width: "100%" }}>
-                      <DataGrid
-                        aria-label="ETC导入预览结果"
-                        apiRef={etcPreviewGridScrollSession.apiRef}
-                        columns={etcColumns}
-                        rows={etcRows}
-                        loading={isPreviewing}
-                        disableRowSelectionOnClick
-                        hideFooter
-                        initialState={etcPreviewGridScrollSession.initialState}
-                        showToolbar
-                        sx={importGridSx}
-                      />
-                    </Box>
-                  </Stack>
+                    <div className="import-workflow-grid-shell import-workflow-grid-shell--etc">
+                      <EtcPreviewTable loading={isPreviewing} rows={etcRows} />
+                    </div>
+                  </div>
                 ) : (
-                  <Stack spacing={1.5}>
+                  <div className="import-workflow-preview-stack">
                     <AuditSummaryCards audit={previewAudit} />
-                    <Box ref={previewGridScrollSession.rootRef} sx={{ height: 480, width: "100%" }}>
-                      <DataGrid
-                        aria-label="导入预览结果"
-                        apiRef={previewGridScrollSession.apiRef}
-                        columns={previewColumns}
-                        rows={previewRows}
-                        loading={isPreviewing}
-                        disableRowSelectionOnClick
-                        hideFooter
-                        initialState={previewGridScrollSession.initialState}
-                        showToolbar
-                        sx={importGridSx}
-                      />
-                    </Box>
-                    <Box sx={{ border: "1px solid #d5dde8", borderRadius: 1, overflow: "hidden" }}>
+                    <div className="import-workflow-grid-shell import-workflow-grid-shell--preview">
+                      <ImportPreviewTable loading={isPreviewing} rows={previewRows} />
+                    </div>
+                    <div className="import-workflow-detail-shell">
                       <Tabs
-                        value={previewDetailTab}
-                        onChange={(_, value: "duplicates" | "unimported") => setPreviewDetailTab(value)}
-                        aria-label="导入预览明细"
-                        sx={{ minHeight: 42, px: 1, bgcolor: "#f8fafc", borderBottom: "1px solid #d5dde8" }}
+                        className="import-workflow-detail-tabs-root"
+                        onSelectionChange={(key) => setPreviewDetailTab(key as "duplicates" | "unimported")}
+                        selectedKey={previewDetailTab}
+                        variant="secondary"
                       >
-                        <Tab value="duplicates" label={`重复项 ${duplicateDetailRows.length}`} sx={{ minHeight: 42 }} />
-                        <Tab value="unimported" label={`未导入项 ${unimportedDetailRows.length}`} sx={{ minHeight: 42 }} />
+                        <Tabs.ListContainer className="import-workflow-detail-tabs-container">
+                          <Tabs.List aria-label="导入预览明细" className="import-workflow-detail-tabs">
+                            <Tabs.Tab id="duplicates">
+                              重复项 {duplicateDetailRows.length}
+                              <Tabs.Indicator />
+                            </Tabs.Tab>
+                            <Tabs.Tab id="unimported">
+                              未导入项 {unimportedDetailRows.length}
+                              <Tabs.Indicator />
+                            </Tabs.Tab>
+                          </Tabs.List>
+                        </Tabs.ListContainer>
                       </Tabs>
-                      <Box ref={previewDetailGridScrollSession.rootRef} sx={{ height: 360, width: "100%" }}>
-                        <DataGrid
-                          aria-label={previewDetailTab === "duplicates" ? "重复项明细" : "未导入项明细"}
-                          apiRef={previewDetailGridScrollSession.apiRef}
-                          columns={detailColumns}
-                          rows={previewDetailTab === "duplicates" ? duplicateDetailRows : unimportedDetailRows}
+                      <div className="import-workflow-grid-shell import-workflow-grid-shell--detail">
+                        <ImportPreviewDetailTable
+                          ariaLabel={previewDetailTab === "duplicates" ? "重复项明细" : "未导入项明细"}
                           loading={isPreviewing}
-                          disableRowSelectionOnClick
-                          hideFooter
-                          initialState={previewDetailGridScrollSession.initialState}
-                          showToolbar
-                          sx={{
-                            ...importGridSx,
-                            border: 0,
-                          }}
+                          rows={previewDetailTab === "duplicates" ? duplicateDetailRows : unimportedDetailRows}
                         />
-                      </Box>
-                    </Box>
-                  </Stack>
+                      </div>
+                    </div>
+                  </div>
                 )}
-              </Stack>
-            </Paper>
-          </Box>
-        </Stack>
+              </div>
+            </section>
+          </div>
+        </div>
       </PageScaffold>
 
-      <Dialog open={conflictDialogOpen} onClose={() => setConflictDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>银行账户冲突确认</DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.25}>
-            <Alert severity="warning">以下文件的系统识别结果与所选账户不一致，确认后仍会按你选择的账户导入。</Alert>
+      <AppDialog
+        maxWidth="sm"
+        onClose={() => setConflictDialogOpen(false)}
+        open={conflictDialogOpen}
+        title="银行账户冲突确认"
+        actions={(
+          <>
+            <Button isDisabled={isConfirming} onPress={() => setConflictDialogOpen(false)} type="button" variant="secondary">取消</Button>
+            <Button
+              isDisabled={isConfirming || healthStatus.blocksMutations}
+              onPress={() => { void submitConfirm(); }}
+              type="button"
+            >
+              {isConfirming ? "确认中..." : conflictConfirmLabel}
+            </Button>
+          </>
+        )}
+      >
+          <div className="import-workflow-dialog-stack">
+            <ImportNotice tone="warning">以下文件的系统识别结果与所选账户不一致，确认后仍会按你选择的账户导入。</ImportNotice>
             {conflictingPreviewFiles.map((file) => (
-              <Paper key={file.id} variant="outlined" sx={{ p: 1.25 }}>
-                <Typography fontWeight={800}>{file.fileName}</Typography>
-                <Typography variant="body2" color="text.secondary">
+              <div key={file.id} className="import-workflow-conflict-card">
+                <div className="import-workflow-conflict-card__title">{file.fileName}</div>
+                <p className="import-workflow-muted-text">
                   所选：{`${file.selectedBankName ?? "--"} ${file.selectedBankLast4 ?? "--"}`} / 识别：{`${file.detectedBankName ?? "--"} ${file.detectedLast4 ?? "--"}`}
-                </Typography>
-                {file.conflictMessage ? <Typography variant="body2">{file.conflictMessage}</Typography> : null}
-              </Paper>
+                </p>
+                {file.conflictMessage ? <p className="import-workflow-conflict-card__message">{file.conflictMessage}</p> : null}
+              </div>
             ))}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button type="button" onClick={() => setConflictDialogOpen(false)} disabled={isConfirming}>取消</Button>
-          <Button type="button" variant="contained" onClick={() => { void submitConfirm(); }} disabled={isConfirming || healthStatus.blocksMutations}>
-            {isConfirming ? "确认中..." : conflictConfirmLabel}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+          </div>
+      </AppDialog>
+    </div>
   );
 }
