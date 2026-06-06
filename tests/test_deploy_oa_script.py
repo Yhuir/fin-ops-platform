@@ -154,7 +154,7 @@ class DeployOAScriptTest(unittest.TestCase):
 
         remote_script = self.module.build_release_remote_deploy_script(config)
 
-        self.assertIn("curl -fsS --max-time 5 http://127.0.0.1:18001/health", remote_script)
+        self.assertIn("curl -fsS --max-time 5 http://127.0.0.1:18001/health/ready", remote_script)
         self.assertIn("backend did not become ready after release activation", remote_script)
         self.assertIn("route_deadline=$((SECONDS + 60))", remote_script)
         self.assertIn("return 0", remote_script)

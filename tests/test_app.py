@@ -62,6 +62,46 @@ class AppTests(unittest.TestCase):
         self.assertIn("package_file", runtime_release)
         self.assertIn("expected_source_root", runtime_release)
         self.assertIn("pythonpath", runtime_release)
+        self.assertNotIn("workbench_api_self_test", payload)
+
+    def test_health_endpoint_does_not_run_workbench_api_self_test(self) -> None:
+        app = build_application()
+
+        class FailingWorkbenchRepository:
+            def get_workbench_summary(self, *, scope_key: str):
+                raise AssertionError("/health must stay a lightweight liveness endpoint")
+
+            def get_workbench_groups_page(self, **kwargs):
+                raise AssertionError("/health must stay a lightweight liveness endpoint")
+
+        app._workbench_sql_read_repository = FailingWorkbenchRepository()
+
+        response = app.handle_request("GET", "/health")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["service"], "fin-ops-platform-api")
+        self.assertNotIn("workbench_api_self_test", payload)
+
+    def test_ready_endpoint_reports_readiness_without_workbench_api_self_test(self) -> None:
+        app = build_application()
+
+        class FailingWorkbenchRepository:
+            def get_workbench_summary(self, *, scope_key: str):
+                raise AssertionError("/health/ready must not run deep workbench self-test")
+
+            def get_workbench_groups_page(self, **kwargs):
+                raise AssertionError("/health/ready must not run deep workbench self-test")
+
+        app._workbench_sql_read_repository = FailingWorkbenchRepository()
+
+        response = app.handle_request("GET", "/health/ready")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("storage", payload)
+        self.assertIn("production_runtime_guard", payload)
+        self.assertNotIn("workbench_api_self_test", payload)
 
     def test_health_endpoint_marks_release_import_path_mismatch_not_ready(self) -> None:
         app = build_application()
@@ -78,7 +118,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("package_import_path_mismatch", runtime_release["problems"])
         self.assertIn("release_metadata_missing_or_invalid", runtime_release["problems"])
 
-    def test_health_endpoint_reports_workbench_api_self_test_counts(self) -> None:
+    def test_deep_health_endpoint_reports_workbench_api_self_test_counts(self) -> None:
         app = build_application()
 
         class WorkbenchRepository:
@@ -102,7 +142,7 @@ class AppTests(unittest.TestCase):
         repository = WorkbenchRepository()
         app._workbench_sql_read_repository = repository
 
-        response = app.handle_request("GET", "/health")
+        response = app.handle_request("GET", "/health/deep")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)

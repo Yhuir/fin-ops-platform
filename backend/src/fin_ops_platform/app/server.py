@@ -1420,6 +1420,16 @@ class Application:
 
         if method == "GET" and route_path == "/health":
             return self._json_response(HTTPStatus.OK, self._health_payload())
+        if method == "GET" and route_path == "/health/ready":
+            return self._json_response(
+                HTTPStatus.OK,
+                self._readiness_health_payload(include_workbench_api_self_test=False),
+            )
+        if method == "GET" and route_path == "/health/deep":
+            return self._json_response(
+                HTTPStatus.OK,
+                self._readiness_health_payload(include_workbench_api_self_test=True),
+            )
         if method == "OPTIONS":
             return Response(status_code=int(HTTPStatus.NO_CONTENT), body="")
         if method == "GET" and route_path == "/foundation/seed":
@@ -2126,13 +2136,13 @@ class Application:
             },
         )
 
-    def readiness_summary(self) -> dict[str, object]:
+    def readiness_summary(self, *, check_dependencies: bool = True) -> dict[str, object]:
         storage_summary = {
             "mode": self._state_store.storage_mode if self._state_store is not None else "memory",
             "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
             "database": self._state_store.mongo_database_name if self._state_store is not None else None,
         }
-        if self._state_store is not None and hasattr(self._state_store, "health_summary"):
+        if check_dependencies and self._state_store is not None and hasattr(self._state_store, "health_summary"):
             try:
                 storage_summary.update(getattr(self._state_store, "health_summary")())
             except Exception as exc:  # pragma: no cover - readiness should report degraded dependency state.
@@ -2463,7 +2473,18 @@ class Application:
         }
 
     def _health_payload(self) -> dict[str, object]:
+        payload = self.readiness_summary(check_dependencies=False)
+        self._attach_health_metadata(payload)
+        return payload
+
+    def _readiness_health_payload(self, *, include_workbench_api_self_test: bool) -> dict[str, object]:
         payload = self.readiness_summary()
+        self._attach_health_metadata(payload)
+        if include_workbench_api_self_test:
+            payload["workbench_api_self_test"] = self._workbench_api_self_test()
+        return payload
+
+    def _attach_health_metadata(self, payload: dict[str, object]) -> None:
         payload["seed_counts"] = {
             key: len(value) for key, value in self._seed_payload.items() if isinstance(value, list)
         }
@@ -2484,8 +2505,6 @@ class Application:
             "planned": ["costing"],
         }
         payload["api_performance"] = self._api_performance_recorder.summary()
-        payload["workbench_api_self_test"] = self._workbench_api_self_test()
-        return payload
 
     def _workbench_api_self_test(self) -> dict[str, object]:
         scope_key = "all"

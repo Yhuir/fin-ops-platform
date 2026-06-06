@@ -167,11 +167,11 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertNotIn("url", str(storage).lower())
         self.assertNotIn("password", str(storage).lower())
 
-    def test_health_endpoint_exposes_runtime_infrastructure_contract(self) -> None:
+    def test_ready_endpoint_exposes_runtime_infrastructure_contract(self) -> None:
         with TemporaryDirectory() as temp_dir, patch("fin_ops_platform.app.server.build_state_store", return_value=FakeStore()):
             app = build_application(data_dir=Path(temp_dir))
 
-        response = app.handle_request("GET", "/health")
+        response = app.handle_request("GET", "/health/ready")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)

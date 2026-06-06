@@ -232,8 +232,8 @@ python -m fin_ops_platform.app.worker \
   --worker-instance <instance>
 ```
 
-发布激活阶段会在服务重启后等待 `/health` 中 required worker readiness 收敛；systemd active
-只代表进程存在，不代表 worker 已经按 registry claim 正确 event。
+发布激活阶段会在服务重启后等待 `/health/ready` 返回 `ready`；systemd active 只代表进程存在，
+不代表 API 已经加载正确 release identity 和 readiness 边界。
 
 ## 一键发布脚本
 
@@ -261,9 +261,11 @@ python -m fin_ops_platform.app.worker \
   旧代码
 - `activate` 会把历史 `/opt/fin-ops/current` 归档到 `/opt/fin-ops/legacy-current-archives/current-<timestamp>`；
   release 模式只允许从 `/opt/fin-ops/releases/<release-name>/src` 运行，`current` 目录不再参与运行时
-- `/health` 会暴露 runtime identity，包括工作目录、实际 `fin_ops_platform.__file__`、`PYTHONPATH`
-  和 `RELEASE.json`。release 运行时若实际导入路径不在当前 release 的 `backend/src` 下，健康状态必须是
-  `not_ready`
+- `/health` 是轻量 liveness，暴露 runtime identity，包括工作目录、实际 `fin_ops_platform.__file__`、
+  `PYTHONPATH` 和 `RELEASE.json`，不会跑 workbench read model self-test；release 运行时若实际导入路径
+  不在当前 release 的 `backend/src` 下，健康状态必须是 `not_ready`
+- `/health/ready` 是部署 readiness 边界；`/health/deep` 才执行较重的 workbench API self-test，
+  不作为发布脚本的快速就绪检查
 - 自动执行 `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/<release-name>/src`，确保常驻 worker 矩阵
   已安装、开机自启并重启到当前 release
 - 验证前端 `index.html` 与激活 release 的 `web/dist/index.html` 哈希一致

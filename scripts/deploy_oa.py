@@ -377,7 +377,7 @@ def build_backend_readiness_check() -> str:
             "  deadline=$((SECONDS + 90))",
             "  last_health=\"\"",
             "  while [ \"$SECONDS\" -lt \"$deadline\" ]; do",
-            "    health=$(curl -fsS --max-time 5 http://127.0.0.1:18001/health 2>&1 || true)",
+            "    health=$(curl -fsS --max-time 5 http://127.0.0.1:18001/health/ready 2>&1 || true)",
             (
                 "    if printf '%s' \"$health\" | "
                 "python3 -c 'import json, sys; data = json.load(sys.stdin); "
