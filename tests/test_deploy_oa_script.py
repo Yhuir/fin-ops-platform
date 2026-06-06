@@ -40,7 +40,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertEqual(args.remote_releases_dir, "/opt/fin-ops/releases")
         self.assertEqual(args.deploy_control_path, "/usr/local/sbin/finops-deploy-control")
         self.assertEqual(args.runtime_worker_ensure_path, "/usr/local/sbin/finops-ensure-runtime-workers")
-        self.assertEqual(args.keep_releases, 8)
+        self.assertEqual(args.keep_releases, 4)
         self.assertEqual(args.remote_min_free_mb, 512)
         self.assertFalse(args.skip_build)
         self.assertFalse(args.skip_pip)

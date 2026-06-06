@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--keep-releases",
         type=int,
-        default=8,
+        default=4,
         help="Number of newest release directories to keep. Active release paths are always preserved.",
     )
     parser.add_argument(
