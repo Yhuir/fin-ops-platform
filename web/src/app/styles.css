@@ -188,6 +188,190 @@ textarea {
   }
 }
 
+.app-health-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fp-space-4);
+  min-height: 100%;
+  padding: var(--fp-space-6);
+  background: var(--fp-page);
+}
+
+.app-health-page--status {
+  justify-content: flex-start;
+}
+
+.app-health-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+  min-width: 0;
+}
+
+.app-health-heading {
+  min-width: 0;
+}
+
+.app-health-title {
+  margin: 0;
+  color: var(--fp-ink);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.app-health-generated-at {
+  margin: var(--fp-space-1) 0 0;
+  color: var(--fp-text-muted);
+  font-family: var(--fp-font-data);
+  font-size: var(--fp-text-label);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.app-health-refresh-button {
+  flex: 0 0 auto;
+  border: 1px solid var(--fp-border);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+}
+
+.app-health-refresh-button:hover {
+  border-color: var(--fp-border-strong);
+  background: var(--fp-surface-raised);
+}
+
+.app-health-notice {
+  border-radius: var(--fp-radius-sm);
+  font-size: var(--fp-text-body);
+  line-height: 1.45;
+}
+
+.app-health-notice__content {
+  gap: var(--fp-space-1);
+}
+
+.app-health-notice__description {
+  color: var(--fp-text-secondary);
+}
+
+.app-health-section {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.app-health-section__header {
+  border-bottom: 1px solid var(--fp-border);
+  padding: 10px var(--fp-space-4);
+}
+
+.app-health-section__title {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-title);
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.app-health-section__body {
+  padding: var(--fp-space-4);
+}
+
+.app-health-inventory-grid,
+.app-health-source-grid,
+.app-health-runtime-grid {
+  display: grid;
+  gap: var(--fp-space-3);
+  min-width: 0;
+}
+
+.app-health-inventory-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.app-health-source-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: var(--fp-space-3);
+}
+
+.app-health-runtime-grid--primary {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.2fr);
+}
+
+.app-health-runtime-grid--secondary {
+  grid-template-columns: minmax(420px, 1.4fr) minmax(220px, 0.6fr);
+  margin-top: var(--fp-space-3);
+}
+
+.app-health-inventory-card {
+  min-width: 0;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  padding: var(--fp-space-3);
+  background: var(--fp-surface-raised);
+}
+
+.app-health-inventory-card__title {
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-label);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.app-health-inventory-card__value {
+  margin-top: var(--fp-space-1);
+  color: var(--fp-ink);
+  font-family: var(--fp-font-data);
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.app-health-inventory-card__meta {
+  margin-top: var(--fp-space-1);
+  color: var(--fp-text-muted);
+  font-family: var(--fp-font-data);
+  font-size: var(--fp-text-label);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+@media (max-width: 1024px) {
+  .app-health-source-grid,
+  .app-health-runtime-grid--primary,
+  .app-health-runtime-grid--secondary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-health-page {
+    padding: var(--fp-space-4);
+  }
+
+  .app-health-header {
+    align-items: flex-start;
+  }
+
+  .app-health-title {
+    font-size: 24px;
+  }
+
+  .app-health-inventory-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-health-section__body {
+    padding: var(--fp-space-3);
+  }
+}
+
 .finance-state-panel {
   border-radius: var(--fp-radius-sm);
   font-size: var(--fp-text-body);

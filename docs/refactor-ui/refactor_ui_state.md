@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P029-phase-6-app-health-characterization-tests`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `P030-phase-6-app-health-page-shell`
+- Current MG ID: `MG-P030-phase-6-app-health`
 
 ## Global Invariants
 
@@ -54,14 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 AppHealth characterization tests。
+- Scope: phase 6 AppHealth cumulative MG。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_app_health.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P028 docs verification passed
+  - `web/src/test/AppHealthOperationsPage.test.tsx`
+  - `web/src/pages/AppHealthOperationsPage.tsx`
+  - `web/src/app/styles.css`
+- Verification run: P030 targeted tests, focused regression, build, MUI grep and diff check passed
 - Failures: none
-- Next action: 执行 `P029-phase-6-app-health-characterization-tests`。
+- Next action: 执行 `MG-P030-phase-6-app-health`。
 
 ## Prompt Lifecycle
 
@@ -93,7 +96,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P029-phase-6-app-health-characterization-tests` | AppHealth P028 discovery verified；next characterization tests |
+| page batches | `in_progress` | `MG-P030-phase-6-app-health` | AppHealth P030 verified；next cumulative MG |
 
 ## Verification Log
 
@@ -217,6 +220,13 @@
 | 2026-06-07 | `P028-phase-6-app-health-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P028-phase-6-app-health-discovery` | `git status --short --branch` | passed | 仅 P028 文档变更 |
 | 2026-06-07 | `MG-P028-phase-6-app-health-discovery` | `git push origin refactor-ui` | passed | `1a806eeb` pushed |
+| 2026-06-07 | `P029-phase-6-app-health-characterization-tests` | `cd web && npx vitest run AppHealthOperationsPage.test.tsx` | expected-fail | 3 failures: missing `app-health-page`; permission/error notices still `.MuiAlert-root` |
+| 2026-06-07 | `P029-phase-6-app-health-characterization-tests` | `git diff --check` | passed | Covered by P030 cumulative diff check |
+| 2026-06-07 | `P030-phase-6-app-health-page-shell` | `cd web && npx vitest run AppHealthOperationsPage.test.tsx` | passed | 4 tests passed |
+| 2026-06-07 | `P030-phase-6-app-health-page-shell` | `cd web && npx vitest run AppHealthOperationsPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 19 tests passed |
+| 2026-06-07 | `P030-phase-6-app-health-page-shell` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P030-phase-6-app-health-page-shell` | `if rg -n '@mui/' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi` | passed | AppHealth page has no MUI imports |
+| 2026-06-07 | `P030-phase-6-app-health-page-shell` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

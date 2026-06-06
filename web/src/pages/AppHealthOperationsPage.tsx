@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import RefreshIcon from "@mui/icons-material/Refresh";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import CircularProgress from "@mui/material/CircularProgress";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import { Alert, Button, Spinner, Tooltip } from "@heroui/react";
+import { RefreshCw } from "lucide-react";
 
 import {
   FinanceStatusTag,
@@ -18,7 +12,6 @@ import {
   FinanceTableHeader,
   FinanceTableRow,
 } from "../components/common/FinanceTable";
-import { settingsTokens } from "../components/settings/settingsDesign";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { fetchAppHealthDashboard } from "../features/appHealth/api";
@@ -33,24 +26,35 @@ import type {
 const EMPTY_VALUE = "--";
 const REFRESH_INTERVAL_MS = 10_000;
 
-const sectionSx = {
-  border: `1px solid ${settingsTokens.borderSubtle}`,
-  borderRadius: "8px",
-  bgcolor: "#fff",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-  minWidth: 0,
-};
+type NoticeStatus = "accent" | "warning" | "danger";
 
 function Section({ title, children, testId }: { title: string; children: React.ReactNode; testId: string }) {
   return (
-    <Box component="section" data-testid={testId} sx={sectionSx}>
-      <Box sx={{ borderBottom: `1px solid ${settingsTokens.borderSubtle}`, px: 2, py: 1.25 }}>
-        <Typography component="h2" sx={{ color: settingsTokens.textPrimary, fontSize: 16, fontWeight: 650, lineHeight: 1.3 }}>
-          {title}
-        </Typography>
-      </Box>
-      <Box sx={{ p: { xs: 1.25, md: 1.5 } }}>{children}</Box>
-    </Box>
+    <section className="app-health-section" data-testid={testId}>
+      <header className="app-health-section__header">
+        <h2 className="app-health-section__title">{title}</h2>
+      </header>
+      <div className="app-health-section__body">{children}</div>
+    </section>
+  );
+}
+
+function AppHealthNotice({
+  status,
+  children,
+  role = status === "danger" ? "alert" : "status",
+}: {
+  status: NoticeStatus;
+  children: React.ReactNode;
+  role?: "alert" | "status";
+}) {
+  return (
+    <Alert className={`app-health-notice app-health-notice--${status}`} role={role} status={status}>
+      <Alert.Indicator />
+      <Alert.Content className="app-health-notice__content">
+        <Alert.Description className="app-health-notice__description">{children}</Alert.Description>
+      </Alert.Content>
+    </Alert>
   );
 }
 
@@ -140,13 +144,11 @@ function sampleLabel(row: OperationsDashboardReadModelMetric) {
 
 function InventorySummary({ title, block }: { title: string; block: OperationsDashboardInventoryBlock }) {
   return (
-    <Box sx={{ border: `1px solid ${settingsTokens.borderSubtle}`, borderRadius: "8px", minWidth: 0, p: 1.5 }}>
-      <Typography sx={{ color: settingsTokens.textMuted, fontSize: 12, fontWeight: 600 }}>{title}</Typography>
-      <Typography sx={{ color: settingsTokens.textPrimary, fontSize: 28, fontWeight: 700, lineHeight: 1.2, mt: 0.5 }}>
-        {formatNumber(block.total_count)}
-      </Typography>
-      <Typography sx={{ color: settingsTokens.textMuted, fontSize: 12, mt: 0.5 }}>{formatTimestamp(block.latest_synced_at)}</Typography>
-    </Box>
+    <div className="app-health-inventory-card">
+      <div className="app-health-inventory-card__title">{title}</div>
+      <div className="app-health-inventory-card__value">{formatNumber(block.total_count)}</div>
+      <div className="app-health-inventory-card__meta">{formatTimestamp(block.latest_synced_at)}</div>
+    </div>
   );
 }
 
@@ -174,29 +176,16 @@ function InventorySourceRows({ title, block }: { title: string; block: Operation
 function DataInventory({ payload }: { payload: OperationsDashboardPayload }) {
   return (
     <Section title="数据" testId="app-health-data">
-      <Box
-        sx={{
-          display: "grid",
-          gap: 1.25,
-          gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" },
-        }}
-      >
+      <div className="app-health-inventory-grid">
         <InventorySummary title="流水" block={payload.data_inventory.bank} />
         <InventorySummary title="发票" block={payload.data_inventory.invoice} />
         <InventorySummary title="OA" block={payload.data_inventory.oa} />
-      </Box>
-      <Box
-        sx={{
-          display: "grid",
-          gap: 1.25,
-          gridTemplateColumns: { xs: "1fr", lg: "repeat(3, minmax(0, 1fr))" },
-          mt: 1.25,
-        }}
-      >
+      </div>
+      <div className="app-health-source-grid">
         <InventorySourceRows title="银行流水" block={payload.data_inventory.bank} />
         <InventorySourceRows title="发票" block={payload.data_inventory.invoice} />
         <InventorySourceRows title="OA" block={payload.data_inventory.oa} />
-      </Box>
+      </div>
     </Section>
   );
 }
@@ -343,14 +332,14 @@ function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
 function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }) {
   return (
     <Section title="后台" testId="app-health-runtime">
-      <Box sx={{ display: "grid", gap: 1.25, gridTemplateColumns: { xs: "1fr", xl: "0.8fr 1.2fr" } }}>
+      <div className="app-health-runtime-grid app-health-runtime-grid--primary">
         <OutboxTable payload={payload} />
         <QueueTable payload={payload} />
-      </Box>
-      <Box sx={{ display: "grid", gap: 1.25, gridTemplateColumns: { xs: "1fr", lg: "1.4fr 0.6fr" }, mt: 1.25 }}>
+      </div>
+      <div className="app-health-runtime-grid app-health-runtime-grid--secondary">
         <ReadModelTable rows={payload.runtime_performance.read_models} />
         <WorkerTable payload={payload} />
-      </Box>
+      </div>
     </Section>
   );
 }
@@ -405,53 +394,46 @@ export default function AppHealthOperationsPage() {
 
   if (session.status === "loading") {
     return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="info">正在加载。</Alert>
-      </Box>
+      <div className="app-health-page app-health-page--status" data-testid="app-health-page">
+        <AppHealthNotice status="accent">正在加载。</AppHealthNotice>
+      </div>
     );
   }
 
   if (!permissions.canAdminAccess) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="warning">当前账号没有管理员权限，不能查看 AppHealth 运维状态。</Alert>
-      </Box>
+      <div className="app-health-page app-health-page--status" data-testid="app-health-page">
+        <AppHealthNotice status="warning">当前账号没有管理员权限，不能查看 AppHealth 运维状态。</AppHealthNotice>
+      </div>
     );
   }
 
   return (
-    <Stack spacing={2} sx={{ bgcolor: settingsTokens.layer01, minHeight: "100%", p: { xs: 2, md: 3 } }}>
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", justifyContent: "space-between", minWidth: 0 }}>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography component="h1" sx={{ color: settingsTokens.textPrimary, fontSize: { xs: 24, md: 28 }, fontWeight: 750, lineHeight: 1.2 }}>
-            AppHealth 运维状态
-          </Typography>
-          <Typography sx={{ color: settingsTokens.textMuted, fontSize: 12, mt: 0.5 }}>
-            {payload ? formatTimestamp(payload.generated_at) : EMPTY_VALUE}
-          </Typography>
-        </Box>
-        <Tooltip title="刷新">
-          <span>
-            <IconButton
-              aria-label="刷新"
-              disabled={isLoading}
-              onClick={() => {
-                void loadDashboard();
-              }}
-              size="small"
-              sx={{
-                border: `1px solid ${settingsTokens.borderSubtle}`,
-                bgcolor: "#fff",
-                borderRadius: "8px",
-              }}
-            >
-              {isLoading ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
-            </IconButton>
-          </span>
+    <div className="app-health-page" data-testid="app-health-page">
+      <header className="app-health-header" data-testid="app-health-header">
+        <div className="app-health-heading">
+          <h1 className="app-health-title">AppHealth 运维状态</h1>
+          <p className="app-health-generated-at">{payload ? formatTimestamp(payload.generated_at) : EMPTY_VALUE}</p>
+        </div>
+        <Tooltip delay={0}>
+          <Button
+            aria-label="刷新"
+            className="app-health-refresh-button"
+            isDisabled={isLoading}
+            isIconOnly
+            onPress={() => {
+              void loadDashboard();
+            }}
+            size="sm"
+            variant="tertiary"
+          >
+            {isLoading ? <Spinner color="current" size="sm" /> : <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />}
+          </Button>
+          <Tooltip.Content>刷新</Tooltip.Content>
         </Tooltip>
-      </Stack>
+      </header>
 
-      {loadError ? <Alert severity="error">{loadError}</Alert> : null}
+      {loadError ? <AppHealthNotice status="danger">{loadError}</AppHealthNotice> : null}
 
       {payload ? (
         <>
@@ -460,8 +442,8 @@ export default function AppHealthOperationsPage() {
           <RuntimePerformance payload={payload} />
         </>
       ) : !loadError ? (
-        <Alert severity="info">正在加载。</Alert>
+        <AppHealthNotice status="accent">正在加载。</AppHealthNotice>
       ) : null}
-    </Stack>
+    </div>
   );
 }

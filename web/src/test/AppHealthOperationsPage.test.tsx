@@ -18,16 +18,40 @@ function renderOperationsPage(options: Parameters<typeof installMockApiFetch>[0]
   return fetchMock;
 }
 
+function expectProjectNotice(message: HTMLElement) {
+  const notice = message.closest('[role="alert"], [role="status"]');
+  expect(notice).not.toBeNull();
+  const noticeRoot = notice as HTMLElement;
+  expect(noticeRoot).toHaveClass("app-health-notice");
+  expect(noticeRoot).not.toHaveClass("MuiAlert-root");
+  return noticeRoot;
+}
+
+function expectProjectSection(section: HTMLElement) {
+  expect(section).toHaveClass("app-health-section");
+  expect(section).not.toHaveClass("MuiBox-root");
+}
+
 describe("AppHealthOperationsPage", () => {
   test("renders the read-only operations dashboard", async () => {
     const fetchMock = renderOperationsPage();
 
     expect(await screen.findByRole("heading", { name: "AppHealth 运维状态" }, { timeout: PAGE_TIMEOUT })).toBeInTheDocument();
+    const page = screen.getByTestId("app-health-page");
+    expect(page).toHaveClass("app-health-page");
+    expect(page).not.toHaveClass("MuiStack-root");
+    const header = screen.getByTestId("app-health-header");
+    expect(header).toHaveClass("app-health-header");
+    expect(header).not.toHaveClass("MuiStack-root");
+    const refreshButton = screen.getByRole("button", { name: "刷新" });
+    expect(refreshButton).toHaveClass("app-health-refresh-button");
+    expect(refreshButton).not.toHaveClass("MuiIconButton-root");
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health-dashboard"))).toBe(true);
     });
 
     const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
+    expectProjectSection(data);
     expect(data).toHaveTextContent("数据");
     expect(data).toHaveTextContent("流水");
     expect(data).toHaveTextContent("128");
@@ -40,6 +64,7 @@ describe("AppHealthOperationsPage", () => {
     expect(within(data).getByRole("grid", { name: "OA来源" })).toBeInTheDocument();
 
     const requests = screen.getByTestId("app-health-requests");
+    expectProjectSection(requests);
     expect(requests).toHaveTextContent("请求");
     expect(within(requests).getByRole("grid", { name: "请求性能" })).toBeInTheDocument();
     expect(requests).toHaveTextContent("GET /api/workbench/summary");
@@ -49,6 +74,7 @@ describe("AppHealthOperationsPage", () => {
     expect(within(requests).getByText("260 ms").closest("td")).toHaveAttribute("data-tone", "green");
 
     const runtime = screen.getByTestId("app-health-runtime");
+    expectProjectSection(runtime);
     expect(runtime).toHaveTextContent("后台");
     expect(within(runtime).getByRole("grid", { name: "Outbox 状态" })).toBeInTheDocument();
     expect(within(runtime).getByRole("grid", { name: "RabbitMQ 队列" })).toBeInTheDocument();
@@ -75,7 +101,8 @@ describe("AppHealthOperationsPage", () => {
       sessionDisplayName: "财务用户",
     });
 
-    expect(await screen.findByText("当前账号没有管理员权限，不能查看 AppHealth 运维状态。", {}, { timeout: PAGE_TIMEOUT })).toBeInTheDocument();
+    const permissionMessage = await screen.findByText("当前账号没有管理员权限，不能查看 AppHealth 运维状态。", {}, { timeout: PAGE_TIMEOUT });
+    expectProjectNotice(permissionMessage);
     expect(screen.queryByTestId("app-health-data")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/api/operations/app-health-dashboard"))).toBe(false);
   });
@@ -229,6 +256,8 @@ describe("AppHealthOperationsPage", () => {
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("dashboard failed"));
+    expect(screen.getByRole("alert")).toHaveClass("app-health-notice");
+    expect(screen.getByRole("alert")).not.toHaveClass("MuiAlert-root");
     expect(screen.getByTestId("app-health-data")).toHaveTextContent("128");
   });
 });

@@ -95,6 +95,31 @@ Recommended Micro-JIT sequence:
 3. `MG-phase-6-app-health`
    - Run targeted AppHealth tests, table/common/platform regression tests, build, AppHealth MUI import grep, docs update, exact stage, commit and push。
 
+## Execution Update
+
+- `P028-phase-6-app-health-discovery`: AppHealth page-level MUI inventory、已迁 `FinanceTable` surfaces、用户可见入口和迁移切片已记录。
+- `P029-phase-6-app-health-characterization-tests`: updated `AppHealthOperationsPage.test.tsx` to lock AppHealth page shell, refresh button, section and notice primitive contracts away from MUI classes. Targeted test expected-failed with 3 failures because current implementation still lacks `data-testid="app-health-page"` and still renders MUI Alert roots for permission/error notices。
+- `P030-phase-6-app-health-page-shell`: migrated AppHealth page shell, header, refresh button, notices, sections, inventory cards and responsive grids from MUI to HeroUI/native token classes. All AppHealth `FinanceTable` grid surfaces and API/permission/refresh behavior are preserved。
+
+## Verification
+
+- `cd web && npx vitest run AppHealthOperationsPage.test.tsx`: passed, 4 tests。
+- `cd web && npx vitest run AppHealthOperationsPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 19 tests。
+- `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+- `if rg -n '@mui/' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi`: passed。
+- `git diff --check`: passed。
+
+## P030 Prompt Draft
+
+```text
+Prompt ID: P030-phase-6-app-health-page-shell
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 只迁移 AppHealthOperationsPage page-level shell、sections、notices、refresh button 和 inventory summary cards；保留已迁 FinanceTable surfaces。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_app_health.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/app/styles.css 和 web/src/components/common/FinanceTable.tsx。使用 HeroUI MCP Alert/Button/Spinner/Tooltip docs 核对 API。把 AppHealthOperationsPage.tsx 从 MUI Alert/Box/CircularProgress/IconButton/Stack/Tooltip/Typography/RefreshIcon 迁到 HeroUI Alert/Button/Spinner/Tooltip、lucide RefreshCw、native semantic elements 和 AppHealth token classes。新增必要 `.app-health-*` CSS classes 到 styles.css。保留 AppHealth API flow、权限判断、刷新 interval、error 保留现有 dashboard、所有 FinanceTable grid names、负向后台任务控制契约。不得改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run AppHealthOperationsPage.test.tsx`、`cd web && npx vitest run AppHealthOperationsPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build`、`if rg -n '@mui/' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs。
+```
+
 ## Verification For P028
 
 - `test -f docs/refactor-ui/modules/phase_6_app_health.md`
