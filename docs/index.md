@@ -21,7 +21,7 @@
 | `dev/` | 开发者入口、接口契约、测试、本地运行 |
 | `operations/` | 部署、数据安全、worker/read model、监控告警 |
 | `references/` | 仓库布局、外部系统、原始业务源和迁移历史摘要 |
-| `refactor-ui/` | `refactor-ui` 分支 UI 平台迁移工作流、状态机、切片 prompt 和表格排版系统 |
+| `refactor-ui/` | `refactor-ui` 分支 UI 平台迁移工作流、状态机、切片 prompt、基线清单、平台栈迁移、测试迁移、模块队列和表格排版系统 |
 
 ## 推荐阅读路径
 
@@ -73,8 +73,13 @@
 1. `refactor-ui/README.md`
 2. `refactor-ui/refactor_ui_state.md`
 3. `refactor-ui/refactor_ui_prompt.md`
-4. `refactor-ui/table_layout_system.md`
-5. `../DESIGN.md`
+4. `refactor-ui/baseline_inventory.md`
+5. `refactor-ui/platform_stack_migration.md`
+6. `refactor-ui/test_migration_strategy.md`
+7. `refactor-ui/module_inventory.md`
+8. `refactor-ui/refactor_ui_master_goal_prompt.md`
+9. `refactor-ui/table_layout_system.md`
+9. `../DESIGN.md`
 
 ### PostgreSQL Runtime
 

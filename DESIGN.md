@@ -108,6 +108,8 @@ The system uses React 19, HeroUI v3, and Tailwind CSS v4 for new non-workbench U
 
 Design serves repeated work: importing files, reviewing financial records, comparing OA/bank/invoice facts, handling exceptions, exporting ledgers, and checking system health. Preserve the existing high-level layout and user-visible actions. If an old screen has a refresh button, export button, filter menu, confirmation dialog, drawer, or permission-disabled action, the migrated screen must keep an equivalent action in the same information hierarchy.
 
+**Behavioral Equivalence Rule:** UI migration changes implementation and visual language, not the user's task path. If the old UI opens a right-side drawer, the new UI must open a right-side drawer. If the old UI opens a modal dialog, the new UI must open a modal dialog. If the old UI uses a menu, popover, toolbar action, table row action, pagination control, or disabled permission affordance, the migrated UI must preserve that interaction type, trigger location, and business semantics unless the user explicitly approves a product behavior change.
+
 **Key Characteristics:**
 
 - Dense but readable financial data.
@@ -295,6 +297,7 @@ Use project primitives instead of ad hoc nested spans.
 ### Drawers
 
 - **Use:** Detail panels, export setup, rule editing, relation detail, receipt preview.
+- **Equivalence:** Old right-side drawers remain right-side drawers after migration. Do not replace them with modals, inline cards, accordion panels, route changes, or page-level sidebars.
 - **Width:** Use stable widths by task complexity: compact `420px`, standard `560px`, wide `720px`.
 - **Structure:** Header, body, footer actions. Footer actions remain visible for forms and destructive flows.
 - **Close:** Escape and close button supported. Unsaved changes require confirmation if the old UI protected them.
@@ -338,6 +341,8 @@ Use one state component for loading, empty, error, stale, refreshing, permission
 - **Don't** change backend behavior, API contracts, read models, workers, permissions, or business state machines as part of UI migration.
 - **Don't** migrate `ReconciliationWorkbenchPage` internals or `web/src/components/workbench/*` in this pass.
 - **Don't** remove or hide existing buttons, filters, import/export actions, confirmation flows, drawers, dialogs, or permission controls.
+- **Don't** change an old right-side drawer into a modal, inline panel, card, or route.
+- **Don't** change an old modal dialog into a drawer.
 - **Don't** introduce TanStack Table or TanStack Virtual for this migration.
 - **Don't** rely on HeroUI default styling without mapping it through this design system.
 - **Don't** force all table cells to center alignment. Alignment follows column role.
