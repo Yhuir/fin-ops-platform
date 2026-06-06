@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P021-phase-5-app-health-table-pilot-refactor`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `P022-phase-6-tax-offset-discovery`
+- Current MG ID: `MG-P021-phase-5-app-health-table-pilot-refactor`
 
 ## Global Invariants
 
@@ -35,8 +35,8 @@
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
-| `phase_5_table_system` | `in_progress` | 2026-06-07 |  | `pending` | MG-P020 已 push 并 verified；P021 table pilot refactor 已生成并审查 |
-| `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
+| `phase_5_table_system` | `implemented` | 2026-06-07 |  | `passed` | P021 AppHealth table pilot verified；等待 MG-P021 push 后 completed |
+| `phase_6_page_batches` | `pending` |  |  |  | P022 tax offset discovery 已生成并审查，等待 Phase 5 MG 完成后开始 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,14 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: phase 5 app health table pilot refactor。
+- Scope: phase 6 tax offset discovery。
 - Files touched:
+  - `web/src/pages/AppHealthOperationsPage.tsx`
+  - `web/src/test/AppHealthOperationsPage.test.tsx`
+  - `web/src/components/common/FinanceTable.tsx`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_5_table_system.md`
-- Verification run: P020 docs grep and diff check passed；MG-P020 push verified
+- Verification run: P021 AppHealth tests, table/common tests, build, MUI table grep and diff check passed
 - Failures: none
-- Next action: 执行 `P021-phase-5-app-health-table-pilot-refactor`。
+- Next action: 执行 `MG-P021-phase-5-app-health-table-pilot-refactor`，push 后进入 `P022-phase-6-tax-offset-discovery`。
 
 ## Prompt Lifecycle
 
@@ -92,8 +95,8 @@
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
-| table system | `in_progress` | `P021-phase-5-app-health-table-pilot-refactor` | P020 discovery verified；P021 prompt ready |
-| page batches | `pending` |  | 详见 `module_inventory.md` |
+| table system | `implemented` | `P021-phase-5-app-health-table-pilot-refactor` | P021 verified；等待 MG-P021 |
+| page batches | `pending` | `P022-phase-6-tax-offset-discovery` | Phase 5 MG 后开始；详见 `module_inventory.md` |
 
 ## Verification Log
 
@@ -195,6 +198,11 @@
 | 2026-06-07 | `P020-phase-5-app-health-table-pilot-discovery` | `rg -n "P020-phase-5-app-health-table-pilot-discovery|AppHealth Table Inventory|Inventory sources|Request performance|P021-phase-5-app-health-table-pilot-refactor" docs/refactor-ui/modules/phase_5_table_system.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | AppHealth pilot table inventory and next prompt recorded |
 | 2026-06-07 | `P020-phase-5-app-health-table-pilot-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P020-phase-5-app-health-table-pilot-discovery` | `git push origin refactor-ui` | passed | `b9213d67` pushed |
+| 2026-06-07 | `P021-phase-5-app-health-table-pilot-refactor` | `cd web && npx vitest run AppHealthOperationsPage.test.tsx` | failed-then-passed | First assertion used role table; HeroUI Table exposes role grid; updated tests to assert accessible grid names |
+| 2026-06-07 | `P021-phase-5-app-health-table-pilot-refactor` | `cd web && npx vitest run AppHealthOperationsPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx` | passed | 18 tests passed |
+| 2026-06-07 | `P021-phase-5-app-health-table-pilot-refactor` | `cd web && npm run build` | passed | Known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P021-phase-5-app-health-table-pilot-refactor` | `if rg -n '@mui/material/(Table|TableBody|TableCell|TableContainer|TableHead|TableRow)' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi` | passed | AppHealth has no MUI table imports |
+| 2026-06-07 | `P021-phase-5-app-health-table-pilot-refactor` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

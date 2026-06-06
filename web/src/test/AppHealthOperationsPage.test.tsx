@@ -35,9 +35,13 @@ describe("AppHealthOperationsPage", () => {
     expect(data).toHaveTextContent("256");
     expect(data).toHaveTextContent("OA 解析");
     expect(data).toHaveTextContent("ETC");
+    expect(within(data).getByRole("grid", { name: "银行流水来源" })).toBeInTheDocument();
+    expect(within(data).getByRole("grid", { name: "发票来源" })).toBeInTheDocument();
+    expect(within(data).getByRole("grid", { name: "OA来源" })).toBeInTheDocument();
 
     const requests = screen.getByTestId("app-health-requests");
     expect(requests).toHaveTextContent("请求");
+    expect(within(requests).getByRole("grid", { name: "请求性能" })).toBeInTheDocument();
     expect(requests).toHaveTextContent("GET /api/workbench/summary");
     expect(requests).toHaveTextContent("640 ms");
     expect(requests).toHaveTextContent("260 ms");
@@ -46,6 +50,10 @@ describe("AppHealthOperationsPage", () => {
 
     const runtime = screen.getByTestId("app-health-runtime");
     expect(runtime).toHaveTextContent("后台");
+    expect(within(runtime).getByRole("grid", { name: "Outbox 状态" })).toBeInTheDocument();
+    expect(within(runtime).getByRole("grid", { name: "RabbitMQ 队列" })).toBeInTheDocument();
+    expect(within(runtime).getByRole("grid", { name: "Read Model 刷新" })).toBeInTheDocument();
+    expect(within(runtime).getByRole("grid", { name: "Worker 心跳" })).toBeInTheDocument();
     expect(runtime).toHaveTextContent("pending");
     expect(runtime).toHaveTextContent("finops.workbench.read_model.refresh");
     expect(runtime).toHaveTextContent("workbench");

@@ -1263,7 +1263,7 @@
 ### P021-phase-5-app-health-table-pilot-refactor
 
 - Phase: `phase_5_table_system`
-- Status: `reviewed`
+- Status: `verified`
 - Type: `characterization tests -> extraction/refactor`
 - Scope: 只迁移 AppHealthOperationsPage 的表格 surfaces 到 FinanceTable primitives；不做整页 HeroUI 化。
 
@@ -1281,6 +1281,47 @@
 - Workbench internals frozen: yes。
 - User-visible behavior preserved: yes，refresh/admin/loading/error/data-tone/table content assertions must remain。
 - Verification defined: AppHealth tests、table/common tests、build、MUI table import grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `AppHealthOperationsPage.test.tsx` 新增 HeroUI Table 的 `role="grid"` + accessible name 断言。
+- `AppHealthOperationsPage.tsx` 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell surfaces 已迁到 FinanceTable primitives。
+- `PerformanceCell` 改用 `FinanceStatusTag`，保留 nearest cell `data-tone` 断言。
+- 页面级 MUI `Alert`、`Box`、`IconButton`、`Stack`、`Tooltip`、`Typography` 保留给后续页面模块迁移。
+- 未改后端、API、read model、worker 或关联台内部工作区。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run AppHealthOperationsPage.test.tsx`
+  - `cd web && npx vitest run AppHealthOperationsPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/material/(Table|TableBody|TableCell|TableContainer|TableHead|TableRow)' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - Build passed with known HeroUI/Tailwind generated CSS minifier warnings and existing large chunk warning.
+
+### P022-phase-6-tax-offset-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `reviewed`
+- Type: `discovery/planning`
+- Scope: 只做 TaxOffsetPage 页面模块 discovery；不迁移页面实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TaxOffsetPage.tsx、web/src/test/TaxOffsetPage.test.tsx、web/src/components/tax/*、web/src/components/common/FileDropzone.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/FinanceTable.tsx。只做 TaxOffsetPage discovery/planning，记录旧 UI 入口、表格/导入/月份/认证导入弹窗/结果右侧抽屉、MUI imports、已迁 common primitives、测试断言和风险。不得迁移实现，不改后端/API/read model/worker/关联台。按需在 docs/refactor-ui/modules/phase_6_tax_offset.md 新建或更新专项文档；更新 state/prompt docs；运行文档/key grep、git diff --check、git status。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Runtime implementation untouched: yes。
+- Workbench internals frozen: yes。
+- Micro-JIT phase transition: yes，Phase 5 pilot verified 后进入 Phase 6 page batches。
+- Verification defined: docs/key grep、`git diff --check`、`git status --short --branch`。
 
 ## Prompt History
 
@@ -1302,14 +1343,15 @@
 | `P018-phase-5-finance-table-primitives` | `phase_5_table_system` | table primitives | `verified` | passed | FinanceTable primitives 和 CSS contract 已通过 tests/build |
 | `P019-phase-5-table-session-primitive` | `phase_5_table_system` | table session | `verified` | passed | useFinanceTableSession 已新增，新旧 session tests 和 build 通过 |
 | `P020-phase-5-app-health-table-pilot-discovery` | `phase_5_table_system` | app health table pilot discovery | `verified` | passed | AppHealth 表格 pilot 清单和 P021 refactor prompt 已记录 |
-| `P021-phase-5-app-health-table-pilot-refactor` | `phase_5_table_system` | app health table pilot refactor | `reviewed` | pending | 下一条执行 prompt，只迁 AppHealth 表格 surfaces |
+| `P021-phase-5-app-health-table-pilot-refactor` | `phase_5_table_system` | app health table pilot refactor | `verified` | passed | AppHealth 表格 surfaces 已迁到 FinanceTable primitives |
+| `P022-phase-6-tax-offset-discovery` | `phase_6_page_batches` | tax offset discovery | `reviewed` | pending | 下一条执行 prompt，进入 Phase 6 第一个页面模块 discovery |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P021-phase-5-app-health-table-pilot-refactor`。
+下一条 prompt 应执行 `P022-phase-6-tax-offset-discovery`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx。先补或调整 AppHealthOperationsPage.test.tsx 中表格语义/列入口断言，保留现有 admin gate、refresh failure、unknown metrics 和 data-tone 断言。然后只替换 AppHealth 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell 为 FinanceTable primitives 和 table CSS classes；保留页面级 MUI Alert/Box/IconButton/Stack/Tooltip/Typography 到后续页面模块迁移。不得改后端/API/read model/worker/关联台。运行 AppHealthOperationsPage.test.tsx、TableAlignmentStyles.test.ts、CommonMuiComponents.test.tsx、build、AppHealth 表格 MUI import grep、git diff --check、git status。更新 state/prompt/module docs。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TaxOffsetPage.tsx、web/src/test/TaxOffsetPage.test.tsx、web/src/components/tax/*、web/src/components/common/FileDropzone.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/FinanceTable.tsx。只做 TaxOffsetPage discovery/planning，记录旧 UI 入口、表格/导入/月份/认证导入弹窗/结果右侧抽屉、MUI imports、已迁 common primitives、测试断言和风险。不得迁移实现，不改后端/API/read model/worker/关联台。按需在 docs/refactor-ui/modules/phase_6_tax_offset.md 新建或更新专项文档；更新 state/prompt docs；运行文档/key grep、git diff --check、git status。
 ```
 
 ## Cumulative MG Prompts

@@ -85,12 +85,12 @@ export function FinanceTableColumn({
   return (
     <Table.Column
       allowsSorting={allowsSorting}
-      className={cx("finance-table__column", columnRole && "finance-table__column--role")}
+      className={cx("finance-table__column", columnRole && "finance-table__column--role", className)}
       data-column-role={columnRole}
       id={id}
       isRowHeader={isRowHeader}
     >
-      <span className={className}>{children}</span>
+      {children}
     </Table.Column>
   );
 }
@@ -99,14 +99,16 @@ type FinanceTableCellProps = {
   children: ReactNode;
   columnRole: FinanceTableColumnRole;
   className?: string;
+  dataTone?: string;
   textValue?: string;
 };
 
-export function FinanceTableCell({ children, columnRole, className, textValue }: FinanceTableCellProps) {
+export function FinanceTableCell({ children, columnRole, className, dataTone, textValue }: FinanceTableCellProps) {
   return (
     <Table.Cell
       className={cx("finance-table__cell", className)}
       data-column-role={columnRole}
+      data-tone={dataTone}
       textValue={textValue}
     >
       {children}
@@ -116,7 +118,21 @@ export function FinanceTableCell({ children, columnRole, className, textValue }:
 
 export const FinanceTableHeader = Table.Header;
 export const FinanceTableBody = Table.Body;
-export const FinanceTableRow = Table.Row;
+
+type FinanceTableRowProps = {
+  children: ReactNode;
+  id?: string | number;
+  className?: string;
+  textValue?: string;
+};
+
+export function FinanceTableRow({ children, id, className, textValue }: FinanceTableRowProps) {
+  return (
+    <Table.Row className={cx("finance-table__row", className)} id={id} textValue={textValue}>
+      {children}
+    </Table.Row>
+  );
+}
 
 type FinanceTablePaginationProps = {
   page: number;

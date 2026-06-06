@@ -6,15 +6,18 @@ import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
+import {
+  FinanceStatusTag,
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../components/common/FinanceTable";
 import { settingsTokens } from "../components/settings/settingsDesign";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
@@ -36,27 +39,6 @@ const sectionSx = {
   bgcolor: "#fff",
   boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
   minWidth: 0,
-};
-
-const tableSx = {
-  "& th": {
-    borderColor: settingsTokens.borderSubtle,
-    color: settingsTokens.textMuted,
-    fontSize: 12,
-    fontWeight: 600,
-    py: 1,
-    whiteSpace: "nowrap",
-  },
-  "& td": {
-    borderColor: settingsTokens.borderSubtle,
-    color: settingsTokens.textPrimary,
-    fontSize: 13,
-    py: 1.1,
-    verticalAlign: "top",
-  },
-  "& tr:last-child td": {
-    borderBottom: 0,
-  },
 };
 
 function Section({ title, children, testId }: { title: string; children: React.ReactNode; testId: string }) {
@@ -128,43 +110,14 @@ function metricTone(value: number | null | undefined, kind: "p95" | "p99"): Metr
   return "green";
 }
 
-function metricToneSx(tone: MetricTone) {
-  if (tone === "green") {
-    return { bgcolor: "#ecfdf3", color: "#067647", borderColor: "#abefc6" };
-  }
-  if (tone === "yellow") {
-    return { bgcolor: "#fffaeb", color: "#b54708", borderColor: "#fedf89" };
-  }
-  if (tone === "red") {
-    return { bgcolor: "#fef3f2", color: "#b42318", borderColor: "#fecdca" };
-  }
-  return { bgcolor: "#f8fafc", color: settingsTokens.textMuted, borderColor: settingsTokens.borderSubtle };
-}
-
 function PerformanceCell({ value, kind }: { value: number | null | undefined; kind: "p95" | "p99" }) {
   const tone = metricTone(value, kind);
-  const toneSx = metricToneSx(tone);
   return (
-    <TableCell data-tone={tone} sx={{ minWidth: 92 }}>
-      <Box
-        component="span"
-        sx={{
-          ...toneSx,
-          border: "1px solid",
-          borderRadius: "6px",
-          display: "inline-flex",
-          fontSize: 12,
-          fontWeight: 700,
-          justifyContent: "center",
-          lineHeight: 1.4,
-          minWidth: 72,
-          px: 0.75,
-          py: 0.25,
-        }}
-      >
+    <FinanceTableCell columnRole="status" dataTone={tone}>
+      <FinanceStatusTag tone={tone === "green" ? "success" : tone === "yellow" ? "warning" : tone === "red" ? "danger" : "neutral"}>
         {formatMs(value)}
-      </Box>
-    </TableCell>
+      </FinanceStatusTag>
+    </FinanceTableCell>
   );
 }
 
@@ -197,28 +150,24 @@ function InventorySummary({ title, block }: { title: string; block: OperationsDa
   );
 }
 
-function InventorySourceRows({ block }: { block: OperationsDashboardInventoryBlock }) {
+function InventorySourceRows({ title, block }: { title: string; block: OperationsDashboardInventoryBlock }) {
   return (
-    <TableContainer>
-      <Table size="small" sx={tableSx}>
-        <TableHead>
-          <TableRow>
-            <TableCell>来源</TableCell>
-            <TableCell align="right">数量</TableCell>
-            <TableCell>同步</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+    <FinanceTable ariaLabel={`${title}来源`} minWidth={360}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" isRowHeader>来源</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">数量</FinanceTableColumn>
+        <FinanceTableColumn columnRole="date">同步</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
           {block.sources.map((source) => (
-            <TableRow key={source.key}>
-              <TableCell>{source.label}</TableCell>
-              <TableCell align="right">{formatNumber(source.count)}</TableCell>
-              <TableCell>{formatTimestamp(source.latest_synced_at)}</TableCell>
-            </TableRow>
+            <FinanceTableRow key={source.key} id={source.key}>
+              <FinanceTableCell columnRole="identity" textValue={source.label}>{source.label}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(source.count)}</FinanceTableCell>
+              <FinanceTableCell columnRole="date">{formatTimestamp(source.latest_synced_at)}</FinanceTableCell>
+            </FinanceTableRow>
           ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+      </FinanceTableBody>
+    </FinanceTable>
   );
 }
 
@@ -244,9 +193,9 @@ function DataInventory({ payload }: { payload: OperationsDashboardPayload }) {
           mt: 1.25,
         }}
       >
-        <InventorySourceRows block={payload.data_inventory.bank} />
-        <InventorySourceRows block={payload.data_inventory.invoice} />
-        <InventorySourceRows block={payload.data_inventory.oa} />
+        <InventorySourceRows title="银行流水" block={payload.data_inventory.bank} />
+        <InventorySourceRows title="发票" block={payload.data_inventory.invoice} />
+        <InventorySourceRows title="OA" block={payload.data_inventory.oa} />
       </Box>
     </Section>
   );
@@ -255,34 +204,30 @@ function DataInventory({ payload }: { payload: OperationsDashboardPayload }) {
 function RequestPerformance({ rows }: { rows: OperationsDashboardEndpointPerformance[] }) {
   return (
     <Section title="请求" testId="app-health-requests">
-      <TableContainer>
-        <Table size="small" sx={tableSx}>
-          <TableHead>
-            <TableRow>
-              <TableCell>接口</TableCell>
-              <TableCell align="right">样本</TableCell>
-              <TableCell>API p95</TableCell>
-              <TableCell>API p99</TableCell>
-              <TableCell>DB p95</TableCell>
-              <TableCell>DB p99</TableCell>
-              <TableCell>SQL p95</TableCell>
-              <TableCell>连接 p95</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
+      <FinanceTable ariaLabel="请求性能" minWidth={820}>
+        <FinanceTableHeader>
+          <FinanceTableColumn columnRole="description" isRowHeader>接口</FinanceTableColumn>
+          <FinanceTableColumn columnRole="quantity">样本</FinanceTableColumn>
+          <FinanceTableColumn columnRole="status">API p95</FinanceTableColumn>
+          <FinanceTableColumn columnRole="status">API p99</FinanceTableColumn>
+          <FinanceTableColumn columnRole="status">DB p95</FinanceTableColumn>
+          <FinanceTableColumn columnRole="status">DB p99</FinanceTableColumn>
+          <FinanceTableColumn columnRole="status">SQL p95</FinanceTableColumn>
+          <FinanceTableColumn columnRole="status">连接 p95</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
             {rows.map((row) => (
-              <TableRow key={row.endpoint}>
-                <TableCell sx={{ maxWidth: 260, overflowWrap: "anywhere" }}>{row.endpoint}</TableCell>
-                <TableCell align="right">{formatNumber(row.sample_count)}</TableCell>
+              <FinanceTableRow key={row.endpoint} id={row.endpoint}>
+                <FinanceTableCell columnRole="description" textValue={row.endpoint}>{row.endpoint}</FinanceTableCell>
+                <FinanceTableCell columnRole="quantity">{formatNumber(row.sample_count)}</FinanceTableCell>
                 <PercentileCells value={row.duration_ms} />
                 <PercentileCells value={row.database_duration_ms} />
                 <PerformanceCell value={row.sql_execute_fetch_ms.p95} kind="p95" />
                 <PerformanceCell value={row.connection_acquire_ms.p95} kind="p95" />
-              </TableRow>
+              </FinanceTableRow>
             ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+        </FinanceTableBody>
+      </FinanceTable>
     </Section>
   );
 }
@@ -297,117 +242,101 @@ function OutboxTable({ payload }: { payload: OperationsDashboardPayload }) {
     ["oldest_pending", outbox.oldest_pending_age_seconds],
   ] as const;
   return (
-    <TableContainer>
-      <Table size="small" sx={tableSx}>
-        <TableHead>
-          <TableRow>
-            <TableCell>Outbox</TableCell>
-            <TableCell align="right">值</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+    <FinanceTable ariaLabel="Outbox 状态" minWidth={300}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" isRowHeader>Outbox</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">值</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
           {rows.map(([label, value]) => (
-            <TableRow key={label}>
-              <TableCell>{label}</TableCell>
-              <TableCell align="right">{label === "oldest_pending" ? formatSeconds(value) : formatNumber(value)}</TableCell>
-            </TableRow>
+            <FinanceTableRow key={label} id={label}>
+              <FinanceTableCell columnRole="identity" textValue={label}>{label}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{label === "oldest_pending" ? formatSeconds(value) : formatNumber(value)}</FinanceTableCell>
+            </FinanceTableRow>
           ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+      </FinanceTableBody>
+    </FinanceTable>
   );
 }
 
 function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
   return (
-    <TableContainer>
-      <Table size="small" sx={tableSx}>
-        <TableHead>
-          <TableRow>
-            <TableCell>RabbitMQ</TableCell>
-            <TableCell>queue</TableCell>
-            <TableCell align="right">ready</TableCell>
-            <TableCell align="right">unacked</TableCell>
-            <TableCell align="right">consumer</TableCell>
-            <TableCell align="right">DLQ</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+    <FinanceTable ariaLabel="RabbitMQ 队列" minWidth={720}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" isRowHeader>RabbitMQ</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description">queue</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">ready</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">unacked</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">consumer</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">DLQ</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
           {payload.runtime_performance.queues.map((row) => (
-            <TableRow key={`${row.event_type}:${row.queue}`}>
-              <TableCell>{row.event_type}</TableCell>
-              <TableCell sx={{ maxWidth: 240, overflowWrap: "anywhere" }}>{row.queue}</TableCell>
-              <TableCell align="right">{formatNumber(row.messages)}</TableCell>
-              <TableCell align="right">{formatNumber(row.unacked)}</TableCell>
-              <TableCell align="right">{formatNumber(row.consumers)}</TableCell>
-              <TableCell align="right">{formatNumber(row.dlq_messages)}</TableCell>
-            </TableRow>
+            <FinanceTableRow key={`${row.event_type}:${row.queue}`} id={`${row.event_type}:${row.queue}`}>
+              <FinanceTableCell columnRole="identity">{row.event_type}</FinanceTableCell>
+              <FinanceTableCell columnRole="description" textValue={row.queue}>{row.queue}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.messages)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.unacked)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.consumers)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.dlq_messages)}</FinanceTableCell>
+            </FinanceTableRow>
           ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+      </FinanceTableBody>
+    </FinanceTable>
   );
 }
 
 function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }) {
   return (
-    <TableContainer>
-      <Table size="small" sx={tableSx}>
-        <TableHead>
-          <TableRow>
-            <TableCell>Read Model</TableCell>
-            <TableCell>15m p95</TableCell>
-            <TableCell>15m p99</TableCell>
-            <TableCell>历史 p95</TableCell>
-            <TableCell align="right">15m 样本</TableCell>
-            <TableCell align="right">stale</TableCell>
-            <TableCell align="right">unavailable</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+    <FinanceTable ariaLabel="Read Model 刷新" minWidth={720}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" isRowHeader>Read Model</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status">15m p95</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status">15m p99</FinanceTableColumn>
+        <FinanceTableColumn columnRole="status">历史 p95</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">15m 样本</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">stale</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">unavailable</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
           {rows.map((row) => (
-            <TableRow key={row.key}>
-              <TableCell>{row.key}</TableCell>
+            <FinanceTableRow key={row.key} id={row.key}>
+              <FinanceTableCell columnRole="identity" textValue={row.key}>{row.key}</FinanceTableCell>
               <PercentileCells value={row.refresh_duration_ms} />
               <PerformanceCell value={row.historical_refresh_duration_ms?.p95} kind="p95" />
-              <TableCell align="right">{sampleLabel(row)}</TableCell>
-              <TableCell align="right">{formatNumber(row.stale_count)}</TableCell>
-              <TableCell align="right">{formatNumber(row.unavailable_count)}</TableCell>
-            </TableRow>
+              <FinanceTableCell columnRole="quantity">{sampleLabel(row)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.stale_count)}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{formatNumber(row.unavailable_count)}</FinanceTableCell>
+            </FinanceTableRow>
           ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+      </FinanceTableBody>
+    </FinanceTable>
   );
 }
 
 function WorkerTable({ payload }: { payload: OperationsDashboardPayload }) {
   return (
-    <TableContainer>
-      <Table size="small" sx={tableSx}>
-        <TableHead>
-          <TableRow>
-            <TableCell>Worker</TableCell>
-            <TableCell align="right">lag</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+    <FinanceTable ariaLabel="Worker 心跳" minWidth={300}>
+      <FinanceTableHeader>
+        <FinanceTableColumn columnRole="identity" isRowHeader>Worker</FinanceTableColumn>
+        <FinanceTableColumn columnRole="quantity">lag</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody>
           {payload.runtime_performance.workers.length === 0 ? (
-            <TableRow>
-              <TableCell>{EMPTY_VALUE}</TableCell>
-              <TableCell align="right">{EMPTY_VALUE}</TableCell>
-            </TableRow>
+            <FinanceTableRow id="empty-worker">
+              <FinanceTableCell columnRole="identity">{EMPTY_VALUE}</FinanceTableCell>
+              <FinanceTableCell columnRole="quantity">{EMPTY_VALUE}</FinanceTableCell>
+            </FinanceTableRow>
           ) : (
             payload.runtime_performance.workers.map((row) => (
-              <TableRow key={row.worker_kind}>
-                <TableCell>{row.worker_kind}</TableCell>
-                <TableCell align="right">{formatSeconds(row.heartbeat_lag_seconds)}</TableCell>
-              </TableRow>
+              <FinanceTableRow key={row.worker_kind} id={row.worker_kind}>
+                <FinanceTableCell columnRole="identity" textValue={row.worker_kind}>{row.worker_kind}</FinanceTableCell>
+                <FinanceTableCell columnRole="quantity">{formatSeconds(row.heartbeat_lag_seconds)}</FinanceTableCell>
+              </FinanceTableRow>
             ))
           )}
-        </TableBody>
-      </Table>
-    </TableContainer>
+      </FinanceTableBody>
+    </FinanceTable>
   );
 }
 

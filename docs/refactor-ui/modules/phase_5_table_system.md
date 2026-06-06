@@ -333,3 +333,50 @@ Scope: 只迁移 AppHealthOperationsPage 的表格 surfaces 到 FinanceTable pri
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx。先补或调整 AppHealthOperationsPage.test.tsx 中表格语义/列入口断言，保留现有 admin gate、refresh failure、unknown metrics 和 data-tone 断言。然后只替换 AppHealth 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell 为 FinanceTable primitives 和 table CSS classes；保留页面级 MUI Alert/Box/IconButton/Stack/Tooltip/Typography 到后续页面模块迁移。不得改后端/API/read model/worker/关联台。运行 AppHealthOperationsPage.test.tsx、TableAlignmentStyles.test.ts、CommonMuiComponents.test.tsx、build、AppHealth 表格 MUI import grep、git diff --check、git status。更新 state/prompt/module docs。
 ```
+
+## P021 Execution Notes
+
+- Status: verified。
+- Changed runtime files:
+  - `web/src/pages/AppHealthOperationsPage.tsx`。
+  - `web/src/components/common/FinanceTable.tsx`。
+- Changed tests:
+  - `web/src/test/AppHealthOperationsPage.test.tsx`。
+- AppHealth table surfaces migrated:
+  - Inventory source tables。
+  - Request performance table。
+  - Outbox table。
+  - Queue table。
+  - Read Model table。
+  - Worker table。
+  - Performance metric cells。
+- Test adjustment:
+  - HeroUI Table exposes `role="grid"` through React Aria, not `role="table"`。
+  - Tests now assert accessible grid names: `银行流水来源`、`发票来源`、`OA来源`、`请求性能`、`Outbox 状态`、`RabbitMQ 队列`、`Read Model 刷新`、`Worker 心跳`。
+- Preserved:
+  - Admin permission gate。
+  - Refresh button behavior。
+  - Refresh failure keeps existing dashboard visible。
+  - Unknown metrics render as `--`。
+  - `data-tone` on metric cells。
+- Deferred:
+  - Page-level MUI `Alert`、`Box`、`IconButton`、`Stack`、`Tooltip`、`Typography` remain for Phase 6 page-module migration。
+- Verification:
+  - `cd web && npx vitest run AppHealthOperationsPage.test.tsx`: failed then passed after role assertion changed from `table` to `grid`。
+  - `cd web && npx vitest run AppHealthOperationsPage.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx`: passed, 18 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/material/(Table|TableBody|TableCell|TableContainer|TableHead|TableRow)' web/src/pages/AppHealthOperationsPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+
+## Phase 5 Closeout
+
+Phase 5 table system is ready for MG-P021 after these completed slices:
+
+- P016 discovery: table inventory and migration queue。
+- P017 characterization: FinanceTable CSS/role tests。
+- P018 primitives: FinanceTable, cell primitives, CSS contract。
+- P019 session: `useFinanceTableSession` and tests。
+- P020 pilot discovery: AppHealth table pilot。
+- P021 pilot refactor: AppHealth table surfaces migrated。
+
+After MG-P021 is pushed and verified, continue with `P022-phase-6-tax-offset-discovery`.
