@@ -1234,7 +1234,41 @@
 
 ## Cumulative MG Prompts
 
-最近完成的 MG 是 `MG-P016-phase-5-table-system-discovery`。下一条执行 prompt 是 `P017-phase-5-table-characterization-tests`。
+最近完成的 MG 是 `MG-P018-phase-5-finance-table-primitives`。下一条执行 prompt 是 `P019-phase-5-table-session-primitive`。
+
+### MG-P018-phase-5-finance-table-primitives
+
+- Status: `verified`
+- Scope:
+  - `web/src/components/common/FinanceTable.tsx`
+  - `web/src/app/styles.css`
+  - `web/src/test/TableAlignmentStyles.test.ts`
+  - `docs/refactor-ui/modules/phase_5_table_system.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P017/P018 finance table 文件：web/src/components/common/FinanceTable.tsx、web/src/app/styles.css、web/src/test/TableAlignmentStyles.test.ts、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx；cd web && npm run build；if rg -n '@mui/' web/src/components/common; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: add finance table primitives。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: verified。
+
+#### Execution
+
+- Commit: `aa8cbccb`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### MG-P016-phase-5-table-system-discovery
 
