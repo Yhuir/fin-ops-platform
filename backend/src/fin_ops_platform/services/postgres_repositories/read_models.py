@@ -3573,18 +3573,19 @@ class PostgresReadModelRepository:
             payload = _read_model_payload(materialized_row)
             if isinstance(payload, dict):
                 result = dict(payload)
-                structured_summary = self._workbench_summary_counts_from_group_rows(
-                    scope_key=normalized_scope_key,
-                    generation_id=active_generation_id,
-                )
-                if isinstance(structured_summary, dict):
-                    result["summary"] = structured_summary["summary"]
-                    result["generated_at"] = (
-                        structured_summary.get("generated_at")
-                        or text(materialized_row.get("generated_at"))
-                    )
-                elif isinstance(result.get("summary"), dict):
+                if isinstance(result.get("summary"), dict):
                     result["summary"] = _normalize_workbench_summary_counts(result["summary"])
+                else:
+                    structured_summary = self._workbench_summary_counts_from_group_rows(
+                        scope_key=normalized_scope_key,
+                        generation_id=active_generation_id,
+                    )
+                    if isinstance(structured_summary, dict):
+                        result["summary"] = structured_summary["summary"]
+                        result["generated_at"] = (
+                            structured_summary.get("generated_at")
+                            or text(materialized_row.get("generated_at"))
+                        )
                 result.setdefault("month", normalized_scope_key)
                 result.setdefault("scope_key", normalized_scope_key)
                 result.setdefault("generated_at", text(materialized_row.get("generated_at")))
@@ -3598,11 +3599,7 @@ class PostgresReadModelRepository:
                 result["read_model_status"] = self._workbench_summary_read_model_status(
                     scope_key=normalized_scope_key
                 )
-                result["diagnostics"] = self._workbench_bank_count_diagnostics(
-                    scope_key=normalized_scope_key,
-                    summary=result.get("summary") if isinstance(result.get("summary"), dict) else {},
-                    generation_id=active_generation_id,
-                )
+                result.pop("diagnostics", None)
                 return result
 
         structured_summary = self._workbench_summary_counts_from_group_rows(
@@ -3618,11 +3615,6 @@ class PostgresReadModelRepository:
             "month": normalized_scope_key,
             "scope_key": normalized_scope_key,
             "summary": summary,
-            "diagnostics": self._workbench_bank_count_diagnostics(
-                scope_key=normalized_scope_key,
-                summary=summary,
-                generation_id=active_generation_id,
-            ),
             "invoice_inventory": self._workbench_invoice_inventory(
                 scope_key=normalized_scope_key,
                 generation_id=active_generation_id,

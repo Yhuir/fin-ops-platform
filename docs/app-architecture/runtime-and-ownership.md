@@ -109,6 +109,8 @@ flowchart LR
 
 Workbench active generation 在发布前执行对象身份仲裁。`WorkbenchObjectIdentityArbitrationService` 复用统一 identity policy，为 OA、流水、正式发票和 OA 附件发票写入 `object_identity_*` payload；正式发票与 OA 附件发票命中同一强发票 identity 时只能进入一个展示状态。`read_model.workbench_generation_consistency` 会把强发票 identity 或稳定银行 identity 横跨 `paired/open` 视为 inconsistent generation。
 
+Workbench 首屏读路径必须以 active generation 为边界。`/api/workbench/summary` 优先读取 `read_model.workbench_summary` 中已物化的 summary/stat payload，不在请求热路径扫描 `workbench_group_rows` 或执行银行明细 diagnostics；diagnostics 属于 health/deep health/operations。`/api/workbench/groups?detail_level=summary` 的 Redis page cache 只保存 fresh gate 后的 payload，cache key 使用 active generation version。`worker-workbench` 发布任一月 shard active generation 后，会低优先级 enqueue `all` aggregate-only refresh；`all` aggregate 发布成功后再预热首屏 `paired/open` page 1 summary 和 version key。导入等可判定月份的事件优先 dirty 具体月份，只有无法判定范围或真正跨期时才直接 dirty `all`。
+
 runtime snapshot 读取失败不能被解释成 ready。critical read model failed/unavailable、required worker missing/mismatch/stale、关键依赖 missing/unavailable 或 session 不可用会把全局状态升级到 blocked/red；readiness missing/refreshing/stale/schema_mismatch/source_mismatch、dirty scope、outbox backlog、后台任务 queued/running/attention 和非阻塞 stale 会保持 busy/yellow。
 
 Registry 强一致由测试保护：domain registry 的 `read_model_keys` 必须存在于 `AppStatusReadModelRegistry`，`worker_instances` 必须存在于 `runtime_worker_registry`，`job_types` 必须存在于 app status background job registry 或 runtime state policy，`dependencies` 必须存在于 app status dependency registry。新增页面、read model、worker、job type 或 dependency 时，如果没有同步 registry 和测试，不能上线。

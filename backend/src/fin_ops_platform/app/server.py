@@ -341,6 +341,15 @@ from fin_ops_platform.services.workbench_matching_rules import (
     WORKBENCH_MATCHING_RULES_VERSION,
     WorkbenchMatchingRules,
 )
+from fin_ops_platform.services.workbench_groups_page_cache import (
+    build_workbench_groups_redis_cache_key_from_version,
+    normalize_workbench_group_detail_level,
+    normalize_workbench_group_search_mode,
+    stable_json_value,
+    workbench_groups_redis_cache_version_from_key,
+    workbench_groups_redis_ttl_seconds_from_env,
+    workbench_groups_redis_version_key,
+)
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
@@ -3646,37 +3655,31 @@ class Application:
         cache_version = cache_version_loader(scope_key=scope_key)
         if not cache_version:
             return None
-        key_payload = {
-            "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
-            "scope": scope_key,
-            "zone": zone,
-            "page": page or "1",
-            "page_size": page_size or "50",
-            "status": status or "",
-            "source_kind": source_kind or "",
-            "search": search or "",
-            "search_mode": self._normalize_workbench_group_search_mode(search_mode),
-            "search_by_pane": self._stable_json_value(search_by_pane or {}),
-            "sort": sort or "",
-            "detail_level": self._normalize_workbench_group_detail_level(detail_level),
-            "column_filters": self._stable_json_value(column_filters or {}),
-            "time_filters": self._stable_json_value(time_filters or {}),
-            "filter_semantics": "linked_context_v1",
-        }
-        digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-        return f"workbench:{cache_version}:groups:{digest}"
+        return build_workbench_groups_redis_cache_key_from_version(
+            cache_version=cache_version,
+            schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+            scope_key=scope_key,
+            zone=zone,
+            page=page,
+            page_size=page_size,
+            status=status,
+            source_kind=source_kind,
+            search=search,
+            search_mode=search_mode,
+            search_by_pane=search_by_pane,
+            sort=sort,
+            detail_level=detail_level,
+            column_filters=column_filters,
+            time_filters=time_filters,
+        )
 
     @staticmethod
     def _workbench_groups_redis_version_key(scope_key: str) -> str:
-        safe_scope_key = str(scope_key or "all").strip() or "all"
-        return f"workbench:groups:version:{safe_scope_key}"
+        return workbench_groups_redis_version_key(scope_key)
 
     @staticmethod
     def _workbench_groups_redis_cache_version_from_key(cache_key: str) -> str | None:
-        parts = str(cache_key or "").split(":")
-        if len(parts) >= 3 and parts[0] == "workbench" and parts[2] == "groups":
-            return parts[1]
-        return None
+        return workbench_groups_redis_cache_version_from_key(cache_key)
 
     def _workbench_groups_redis_cache_key_from_version(
         self,
@@ -3696,27 +3699,23 @@ class Application:
         column_filters: dict[str, object] | None = None,
         time_filters: dict[str, object] | None = None,
     ) -> str | None:
-        if not cache_version:
-            return None
-        key_payload = {
-            "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
-            "scope": scope_key,
-            "zone": zone,
-            "page": page or "1",
-            "page_size": page_size or "50",
-            "status": status or "",
-            "source_kind": source_kind or "",
-            "search": search or "",
-            "search_mode": self._normalize_workbench_group_search_mode(search_mode),
-            "search_by_pane": self._stable_json_value(search_by_pane or {}),
-            "sort": sort or "",
-            "detail_level": self._normalize_workbench_group_detail_level(detail_level),
-            "column_filters": self._stable_json_value(column_filters or {}),
-            "time_filters": self._stable_json_value(time_filters or {}),
-            "filter_semantics": "linked_context_v1",
-        }
-        digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-        return f"workbench:{cache_version}:groups:{digest}"
+        return build_workbench_groups_redis_cache_key_from_version(
+            cache_version=cache_version,
+            schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION,
+            scope_key=scope_key,
+            zone=zone,
+            page=page,
+            page_size=page_size,
+            status=status,
+            source_kind=source_kind,
+            search=search,
+            search_mode=search_mode,
+            search_by_pane=search_by_pane,
+            sort=sort,
+            detail_level=detail_level,
+            column_filters=column_filters,
+            time_filters=time_filters,
+        )
 
     @staticmethod
     def _normalize_workbench_group_json_query_param(value: str | None, name: str) -> dict[str, object]:
@@ -3729,40 +3728,23 @@ class Application:
             raise ValueError(f"{name} must be valid JSON object.") from error
         if not isinstance(parsed, dict):
             raise ValueError(f"{name} must be a JSON object.")
-        return Application._stable_json_value(parsed)
+        return stable_json_value(parsed)
 
     @staticmethod
     def _normalize_workbench_group_search_mode(value: str | None) -> str:
-        normalized = str(value or "").strip().lower()
-        return "linked_context" if normalized == "linked_context" else "pane"
+        return normalize_workbench_group_search_mode(value)
 
     @staticmethod
     def _stable_json_value(value: object) -> object:
-        if isinstance(value, dict):
-            return {
-                str(key): Application._stable_json_value(value[key])
-                for key in sorted(value, key=lambda item: str(item))
-                if value[key] is not None
-            }
-        if isinstance(value, list):
-            normalized_items = [Application._stable_json_value(item) for item in value]
-            if all(not isinstance(item, (dict, list)) for item in normalized_items):
-                return sorted(normalized_items, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True))
-            return normalized_items
-        return value
+        return stable_json_value(value)
 
     @staticmethod
     def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
-        normalized = str(detail_level or "full").strip().lower()
-        return "summary" if normalized == "summary" else "full"
+        return normalize_workbench_group_detail_level(detail_level)
 
     @staticmethod
     def _workbench_groups_redis_ttl_seconds() -> int:
-        raw_value = os.getenv("FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS", "600").strip()
-        try:
-            return min(900, max(60, int(raw_value)))
-        except ValueError:
-            return 600
+        return workbench_groups_redis_ttl_seconds_from_env()
 
     @staticmethod
     def _app_health_workbench_status_cache_ttl_seconds() -> float:

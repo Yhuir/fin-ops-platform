@@ -3,6 +3,10 @@ from __future__ import annotations
 from http import HTTPStatus
 import unittest
 
+from fin_ops_platform.services.workbench_groups_page_cache import (
+    WorkbenchGroupsPageCacheWarmer,
+    build_workbench_groups_redis_cache_key_from_version,
+)
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
 
 
@@ -260,6 +264,100 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["retryable"], True)
         self.assertEqual(metrics.calls[0]["endpoint"], "/api/workbench/refresh-status")
         self.assertEqual(metrics.calls[0]["reason"], "query_timeout")
+
+
+class WorkbenchGroupsPageCacheWarmerTests(unittest.TestCase):
+    def test_warmer_sets_version_key_and_homepage_summary_pages(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.page_calls: list[dict[str, object]] = []
+
+            def workbench_groups_cache_version(self, **kwargs: object) -> str:
+                self.version_kwargs = kwargs
+                return "gen-active"
+
+            def get_workbench_groups_page(self, **kwargs: object) -> dict[str, object]:
+                self.page_calls.append(kwargs)
+                return {
+                    "month": kwargs["scope_key"],
+                    "zone": kwargs["zone"],
+                    "page": kwargs["page"],
+                    "page_size": kwargs["page_size"],
+                    "groups": [{"group_id": f"{kwargs['zone']}-1"}],
+                    "read_model_status": "fresh",
+                }
+
+        repository = Repository()
+        redis = RedisRecorder()
+        warmer = WorkbenchGroupsPageCacheWarmer(
+            repository=repository,
+            redis_helper=redis,
+            schema_version="schema-v1",
+            ttl_seconds=120,
+        )
+
+        result = warmer.warm_scope("all")
+
+        self.assertEqual(result["status"], "warmed")
+        self.assertEqual(result["scope_key"], "all")
+        self.assertEqual(result["cache_version"], "gen-active")
+        self.assertEqual(result["warmed_pages"], 2)
+        self.assertEqual(result["skipped_pages"], 0)
+        self.assertEqual(redis.set_text_calls, [("workbench:groups:version:all", "gen-active", 120)])
+        self.assertEqual([call["zone"] for call in repository.page_calls], ["paired", "open"])
+        for call in repository.page_calls:
+            self.assertEqual(call["page"], 1)
+            self.assertEqual(call["page_size"], 200)
+            self.assertEqual(call["detail_level"], "summary")
+            self.assertEqual(call["search_mode"], "pane")
+        expected_keys = [
+            build_workbench_groups_redis_cache_key_from_version(
+                cache_version="gen-active",
+                schema_version="schema-v1",
+                scope_key="all",
+                zone=zone,
+                page="1",
+                page_size="200",
+                status=None,
+                source_kind=None,
+                search=None,
+                search_mode="pane",
+                sort=None,
+                detail_level="summary",
+            )
+            for zone in ("paired", "open")
+        ]
+        self.assertEqual([call[0] for call in redis.set_json_calls], expected_keys)
+        self.assertEqual([call[2] for call in redis.set_json_calls], [120, 120])
+        self.assertEqual(redis.set_json_calls[0][1]["payload"]["read_model_status"], "fresh")
+
+    def test_warmer_does_not_cache_non_fresh_page_payload(self) -> None:
+        class Repository:
+            def workbench_groups_cache_version(self, **_kwargs: object) -> str:
+                return "gen-active"
+
+            def get_workbench_groups_page(self, **kwargs: object) -> dict[str, object]:
+                return {
+                    "month": kwargs["scope_key"],
+                    "zone": kwargs["zone"],
+                    "read_model_status": "refreshing",
+                }
+
+        redis = RedisRecorder()
+        warmer = WorkbenchGroupsPageCacheWarmer(
+            repository=Repository(),
+            redis_helper=redis,
+            schema_version="schema-v1",
+            ttl_seconds=120,
+        )
+
+        result = warmer.warm_scope("all")
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["warmed_pages"], 0)
+        self.assertEqual(result["skipped_pages"], 2)
+        self.assertEqual(redis.set_text_calls, [("workbench:groups:version:all", "gen-active", 120)])
+        self.assertEqual(redis.set_json_calls, [])
 
 
 if __name__ == "__main__":

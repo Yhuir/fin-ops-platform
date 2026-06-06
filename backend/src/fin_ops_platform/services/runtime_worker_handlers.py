@@ -395,7 +395,11 @@ class _RuntimeWorkerDerivedLifecycle:
         save_tax_certified_imports = getattr(self._state_store, "save_tax_certified_imports", None)
         if callable(save_tax_certified_imports):
             save_tax_certified_imports(tax_certified_import_service.snapshot())
-        self._enqueue_scopes("workbench", ["all"], reason="import_state_changed")
+        self._enqueue_scopes(
+            "workbench",
+            _workbench_read_model_scope_keys_for_import_state(cost_statistics_scope_keys),
+            reason="import_state_changed",
+        )
         self._enqueue_scopes("workbench_relation", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes("invoice_lifecycle", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
         self._enqueue_scopes("search", cost_statistics_scope_keys or ["all"], reason="import_state_changed")
@@ -740,6 +744,11 @@ def _cost_statistics_scope_keys_for_import_file_session(session: Any, selected_f
 def _cost_statistics_scope_keys_for_import_rows(rows: Any) -> list[str]:
     months = _workbench_matching_scope_months_for_import_rows(rows)
     return months or ["all"]
+
+
+def _workbench_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
+    month_scope_keys = [scope_key for scope_key in _dedupe_text(scope_keys or []) if SEARCH_MONTH_RE.match(scope_key)]
+    return month_scope_keys or ["all"]
 
 
 class _WorkbenchSqlMatchingRowProvider:

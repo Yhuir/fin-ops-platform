@@ -14,6 +14,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresReadModelRepository,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.runtime_worker_handlers import _RuntimeWorkerDerivedLifecycle
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_CONSUMED,
     DECISION_STATUS_OPEN,
@@ -1190,32 +1191,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-    def test_repository_repairs_materialized_workbench_summary_counts_from_structured_rows(self) -> None:
+    def test_repository_reads_materialized_workbench_summary_without_hot_path_repair(self) -> None:
         connection = MaterializedWorkbenchSummaryConnection()
         repository = PostgresReadModelRepository(connection)
 
         summary = repository.get_workbench_summary(scope_key="all")
 
-        self.assertEqual(summary["summary"]["oa_count"], 3)
-        self.assertEqual(summary["summary"]["bank_count"], 4)
-        self.assertEqual(summary["summary"]["invoice_count"], 5)
-        self.assertEqual(summary["summary"]["paired_count"], 1)
-        self.assertEqual(summary["summary"]["open_count"], 2)
-        self.assertEqual(summary["diagnostics"]["bank_detail_count"], 4)
-        self.assertEqual(summary["diagnostics"]["ignored_bank_count"], 0)
-        self.assertEqual(summary["diagnostics"]["bank_detail_reconciliation_status"], "unavailable")
+        self.assertEqual(summary["summary"]["oa_count"], 10)
+        self.assertEqual(summary["summary"]["bank_count"], 11)
+        self.assertEqual(summary["summary"]["invoice_count"], 12)
+        self.assertEqual(summary["summary"]["paired_count"], 13)
+        self.assertEqual(summary["summary"]["open_count"], 14)
+        self.assertNotIn("diagnostics", summary)
         self.assertEqual(summary["invoice_inventory"]["system_total"], 99)
         self.assertEqual(summary["read_model_status"], "fresh")
         self.assertTrue(any("from read_model.workbench_summary" in sql for sql, _params in connection.fetch_one_calls))
-        self.assertTrue(
-            any(
-                "from read_model.workbench_groups" in sql
-                and "left join read_model.workbench_group_rows" in sql
-                and "coalesce(r.row_role, '') <> 'summary'" in sql
-                and "coalesce(r.source_kind, '') <> 'no_oa_bank_batch_summary'" in sql
-                for sql, _params in connection.fetch_all_calls
-            )
+        self.assertFalse(
+            any("left join read_model.workbench_group_rows" in sql for sql, _params in connection.fetch_all_calls)
         )
+        self.assertFalse(any("from app.bank_transactions" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_repository_reads_workbench_groups_page_from_structured_groups(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
@@ -1810,7 +1804,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-    def test_repository_summary_diagnostics_reconciles_bank_detail_and_ignored_counts(self) -> None:
+    def test_repository_summary_diagnostics_helper_reconciles_bank_detail_and_ignored_counts(self) -> None:
         class DiagnosticsConnection(WorkbenchSummaryGroupsConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
@@ -1825,19 +1819,26 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         repository = PostgresReadModelRepository(connection)
 
         summary = repository.get_workbench_summary(scope_key="all")
+        assert summary is not None
+        diagnostics = repository._workbench_bank_count_diagnostics(
+            scope_key="all",
+            summary=summary["summary"],
+            generation_id=summary["active_generation_id"],
+        )
 
         self.assertEqual(summary["summary"]["bank_count"], 4)
         self.assertEqual(
             summary["summary"]["bank_count"],
             summary["summary"]["zone_counts"]["paired"]["bank"] + summary["summary"]["zone_counts"]["open"]["bank"],
         )
-        self.assertEqual(summary["diagnostics"]["bank_detail_count"], 5)
-        self.assertEqual(summary["diagnostics"]["ignored_bank_count"], 1)
+        self.assertNotIn("diagnostics", summary)
+        self.assertEqual(diagnostics["bank_detail_count"], 5)
+        self.assertEqual(diagnostics["ignored_bank_count"], 1)
         self.assertEqual(
-            summary["diagnostics"]["bank_detail_count"],
-            summary["summary"]["bank_count"] + summary["diagnostics"]["ignored_bank_count"],
+            diagnostics["bank_detail_count"],
+            summary["summary"]["bank_count"] + diagnostics["ignored_bank_count"],
         )
-        self.assertEqual(summary["diagnostics"]["bank_detail_reconciliation_status"], "matched")
+        self.assertEqual(diagnostics["bank_detail_reconciliation_status"], "matched")
         self.assertTrue(
             any(
                 "source_kind in ('bank', 'bank_transaction')" in sql
@@ -3831,6 +3832,62 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["scope_key"], "2026-05")
         self.assertEqual(result["row_count"], 1)
 
+    def test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish(self) -> None:
+        class FakeBuilder:
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {"scope_key": scope_key, "active_generation_id": "gen-2026-05", "source_version": source_version}
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.completed: list[tuple[str, str, str, object]] = []
+                self.enqueued: list[dict[str, object]] = []
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+            def enqueue(self, **kwargs: object) -> None:
+                self.enqueued.append(dict(kwargs))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-month",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05", "source_version": 19},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
+        self.assertEqual(result["aggregate_enqueued"], True)
+        self.assertEqual(len(queue.enqueued), 1)
+        aggregate = queue.enqueued[0]
+        self.assertEqual(aggregate["scope_key"], "all")
+        self.assertEqual(aggregate["priority"], "low")
+        self.assertEqual(aggregate["dedupe_key"], "workbench.read_model.refresh:workbench:all:aggregate:19")
+        self.assertEqual(aggregate["payload"]["aggregate_only"], True)
+        self.assertEqual(aggregate["payload"]["parent_scope_keys"], ["2026-05"])
+
     def test_workbench_refresh_handler_expands_all_into_month_shards(self) -> None:
         class FakeBuilder:
             def __init__(self) -> None:
@@ -3954,6 +4011,152 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(builder.calls, [("all", 9)])
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 9)])
         self.assertEqual(result["active_generation_id"], "gen-all")
+
+    def test_workbench_refresh_handler_warms_homepage_pages_after_publish(self) -> None:
+        class FakeBuilder:
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {"scope_key": scope_key, "active_generation_id": "gen-2026-05", "source_version": source_version}
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.completed: list[tuple[str, str, str, object]] = []
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+        warmed: list[str] = []
+        service = WorkbenchReadModelRefreshService(
+            projection_builder=FakeBuilder(),
+            queue_repository=FakeQueue(),
+            post_refresh_warmer=lambda scope_key: warmed.append(scope_key) or {"warmed": True},
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-month-warm",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05", "source_version": 17},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(warmed, ["2026-05"])
+        self.assertEqual(result["cache_warmup"], {"warmed": True})
+
+    def test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate(self) -> None:
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+                self.calls.append(dict(kwargs))
+
+        class FakeSearch:
+            def __init__(self) -> None:
+                self.clear_count = 0
+
+            def clear_cache(self) -> None:
+                self.clear_count += 1
+
+        class FakeStateStore:
+            def __init__(self) -> None:
+                self.saved_payloads: list[dict[str, object]] = []
+
+            def save(self, payload: dict[str, object]) -> None:
+                self.saved_payloads.append(payload)
+
+        queue = FakeQueue()
+        lifecycle = _RuntimeWorkerDerivedLifecycle(
+            queue_repository=queue,
+            state_store=FakeStateStore(),
+            search_service=FakeSearch(),
+            workbench_source_versions_provider=lambda: {},
+        )
+        snapshot_service = SimpleNamespace(snapshot=lambda: {})
+
+        lifecycle.persist_import_state(
+            import_service=snapshot_service,
+            file_import_service=snapshot_service,
+            etc_service=snapshot_service,
+            etc_reconciliation_task_service=snapshot_service,
+            tax_certified_import_service=snapshot_service,
+            cost_statistics_scope_keys=["2026-05"],
+        )
+
+        workbench_calls = [call for call in queue.calls if call["scope_type"] == "workbench"]
+        self.assertEqual(workbench_calls, [{"scope_type": "workbench", "scope_key": "2026-05", "reason": "import_state_changed"}])
+        self.assertNotIn(
+            {"scope_type": "workbench", "scope_key": "all", "reason": "import_state_changed"},
+            queue.calls,
+        )
+
+    def test_workbench_refresh_handler_reports_warmup_error_without_failing_publish(self) -> None:
+        class FakeBuilder:
+            def refresh_workbench_all_scope_from_active_shards(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {"scope_key": scope_key, "aggregate_only": True, "active_generation_id": "gen-all"}
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.completed: list[tuple[str, str, str, object]] = []
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(
+            projection_builder=FakeBuilder(),
+            queue_repository=queue,
+            post_refresh_warmer=lambda _scope_key: (_ for _ in ()).throw(RuntimeError("redis unavailable")),
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-all-warm-error",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="workbench",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all", "aggregate_only": True, "source_version": 18},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 18)])
+        self.assertEqual(result["active_generation_id"], "gen-all")
+        self.assertEqual(result["cache_warmup"], {"status": "failed", "error": "redis unavailable"})
 
     def test_sql_projection_pairs_materialized_attachment_rows_by_source_oa_relation(self) -> None:
         relation = {

@@ -163,6 +163,8 @@ limit 20;
 - `/api/workbench/groups/detail?...&group_id=...`：单个 group 的完整详情，按用户动作懒加载。
 - Redis page cache key 必须包含 `detail_level`，避免 summary 和 full payload 互相污染。
 - Redis page cache key 必须随 active generation 变化而失效；如果页面显示旧数据，先看 `active_generation_id/read_model_version/generated_at` 是否变化，再看 Redis hit/miss 和版本 key。
+- `worker-workbench` 发布 active generation 后会预热首屏 `paired/open` page 1 summary 和 Redis version key；如果首个用户仍承担冷启动，按顺序检查 worker 结果中的 `cache_warmup`、Redis `set_text/set_json` 错误、`FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS`、`redis_miss_count` 和 page cache key 的 generation version。
+- `/api/workbench/summary` 不应在热路径查询 `app.bank_transactions` 或全量扫描 `read_model.workbench_group_rows` 来修复 counts/diagnostics；summary p95 变慢时先查 `read_model.workbench_summary` active generation 是否缺失，再查 refresh worker 发布失败原因。
 - `read_model.workbench_generations` 中同一 `scope_key` 只能有一个 `status='active'`。如果存在 `building_generation_id` 但页面仍显示旧数据，这是正常刷新中；如果存在 `failed_generation_id`，页面仍读取 active generation，同时运维需要处理 `last_error`。
 - `/api/workbench/groups` 不带 `detail_level` 时保持 `full`，只作为兼容契约，不作为前端首屏路径。
 

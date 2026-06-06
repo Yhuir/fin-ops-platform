@@ -96,6 +96,11 @@ from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_P
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_groups_page_cache import (
+    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
+    WorkbenchGroupsPageCacheWarmer,
+    workbench_groups_redis_ttl_seconds_from_env,
+)
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION, WorkbenchSqlProjectionBuilder
 
@@ -252,7 +257,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             config.event_types.append(ETC_BUSINESS_OA_DETECTION_EVENT_TYPE)
     if args.enable_workbench_read_model_refresh:
         projection_builder = WorkbenchSqlProjectionBuilder(connection=connection)
-        refresh_service = WorkbenchReadModelRefreshService(projection_builder=projection_builder, queue_repository=queue)
+        page_cache_warmer = WorkbenchGroupsPageCacheWarmer(
+            repository=read_model_repository,
+            redis_helper=redis_helper,
+            schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
+            ttl_seconds=workbench_groups_redis_ttl_seconds_from_env(),
+        )
+        refresh_service = WorkbenchReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue,
+            post_refresh_warmer=page_cache_warmer.warm_scope,
+        )
         handlers["workbench.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "workbench.read_model.refresh" not in config.event_types:
             config.event_types.append("workbench.read_model.refresh")

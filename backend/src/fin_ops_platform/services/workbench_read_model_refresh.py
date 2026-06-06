@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from inspect import signature
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -13,9 +13,11 @@ class WorkbenchReadModelRefreshService:
         projection_builder: Any | None = None,
         application: Any | None = None,
         queue_repository: Any | None = None,
+        post_refresh_warmer: Callable[[str], dict[str, Any] | None] | None = None,
     ) -> None:
         self._projection_builder = projection_builder if projection_builder is not None else application
         self._queue_repository = queue_repository
+        self._post_refresh_warmer = post_refresh_warmer
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         if event.event_type != "workbench.read_model.refresh":
@@ -51,6 +53,12 @@ class WorkbenchReadModelRefreshService:
                 scope_key=scope_key,
                 source_version=source_version,
             )
+        aggregate_enqueued = self._enqueue_all_scope_aggregate_after_shard_publish(event, scope_key)
+        if aggregate_enqueued is not None:
+            payload["aggregate_enqueued"] = aggregate_enqueued
+        warmup_payload = self._warm_after_publish(scope_key)
+        if warmup_payload is not None:
+            payload["cache_warmup"] = warmup_payload
         return payload
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
@@ -84,6 +92,43 @@ class WorkbenchReadModelRefreshService:
                 trace_id=event.trace_id,
             )
         return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "aggregate_enqueued": callable(enqueue_event), "row_count": 0}
+
+    def _enqueue_all_scope_aggregate_after_shard_publish(self, event: RuntimeQueueEvent, scope_key: str) -> bool | None:
+        if scope_key == "all":
+            return None
+        enqueue_event = getattr(self._queue_repository, "enqueue", None)
+        if not callable(enqueue_event):
+            return None
+        source_version = event.source_version or event.payload.get("source_version")
+        enqueue_event(
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="workbench",
+            scope_key="all",
+            dedupe_key=f"workbench.read_model.refresh:workbench:all:aggregate:{source_version or 'latest'}",
+            payload={
+                "scope_type": "workbench",
+                "scope_key": "all",
+                "aggregate_only": True,
+                "source_version": source_version,
+                "parent_scope_keys": [scope_key],
+            },
+            tenant_id=event.tenant_id,
+            source_version=source_version,
+            priority="low",
+            trace_id=event.trace_id,
+        )
+        return True
+
+    def _warm_after_publish(self, scope_key: str) -> dict[str, Any] | None:
+        if self._post_refresh_warmer is None:
+            return None
+        try:
+            result = self._post_refresh_warmer(scope_key)
+        except Exception as error:
+            return {"status": "failed", "error": str(error) or error.__class__.__name__}
+        return result if isinstance(result, dict) else None
 
 
 def _truthy(value: Any) -> bool:
