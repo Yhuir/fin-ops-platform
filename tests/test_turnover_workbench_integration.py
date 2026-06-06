@@ -217,6 +217,33 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 
+    def test_manual_closure_accepts_source_bank_row_ids_from_grouped_read_model(self) -> None:
+        with self._temporary_app() as app:
+            transaction_ids = self._import_bank_rows(app, principal_amount="40000.00", settlement_amount="40000.00")
+            self._tag_borrow_in_rows(app, transaction_ids)
+            canonical_rows = app._turnover_bank_transaction_rows()
+            aliased_rows = [
+                {
+                    **row,
+                    "id": f"postgres-{row['id']}",
+                    "source_bank_row_id": row["id"],
+                }
+                for row in canonical_rows
+            ]
+            app._turnover_bank_transaction_rows = lambda: aliased_rows  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "外部往来手动闭环"}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
+        self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
+
     def test_manual_closure_rejects_non_zero_difference(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app, settlement_amount="100000.00")

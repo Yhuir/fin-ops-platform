@@ -705,10 +705,16 @@ class TurnoverRelationService:
         return prepared
 
     def _require_prepared_row(self, row_id: str) -> _PreparedRow:
-        row = self._bank_rows_by_id.get(row_id)
+        normalized_row_id = str(row_id or "").strip()
+        row = self._bank_rows_by_id.get(normalized_row_id)
         if row is None:
             raise TurnoverRelationValidationError("unknown_transaction_id", f"Unknown bank transaction id: {row_id}")
-        prepared = self._prepare_row(row, allow_invalid_direction=False)
+        row_for_confirmation = deepcopy(row)
+        canonical_row_id = self._row_id(row_for_confirmation)
+        if normalized_row_id and normalized_row_id != canonical_row_id:
+            row_for_confirmation["canonical_bank_row_id"] = canonical_row_id
+            row_for_confirmation["id"] = normalized_row_id
+        prepared = self._prepare_row(row_for_confirmation, allow_invalid_direction=False)
         if prepared is None:
             raise TurnoverRelationValidationError(
                 "invalid_category_code",
@@ -787,12 +793,28 @@ class TurnoverRelationService:
 
     def _set_bank_rows(self, bank_rows: list[dict[str, Any]]) -> None:
         self._bank_rows_by_id = {}
-        for row in list(bank_rows or []):
-            if not isinstance(row, dict):
-                continue
+        normalized_rows = [row for row in list(bank_rows or []) if isinstance(row, dict)]
+        for row in normalized_rows:
             row_id = self._row_id(row)
             if row_id:
                 self._bank_rows_by_id[row_id] = deepcopy(row)
+        for row in normalized_rows:
+            for row_id in self._row_aliases(row):
+                self._bank_rows_by_id.setdefault(row_id, deepcopy(row))
+
+    @classmethod
+    def _row_aliases(cls, row: dict[str, Any]) -> list[str]:
+        aliases: list[str] = []
+        for value in (
+            cls._row_id(row),
+            row.get("source_bank_row_id"),
+            row.get("bank_transaction_id"),
+            row.get("legacy_mongo_id"),
+        ):
+            normalized = str(value or "").strip()
+            if normalized and normalized not in aliases:
+                aliases.append(normalized)
+        return aliases
 
     @staticmethod
     def _normalize_row_ids(row_ids: list[str]) -> list[str]:

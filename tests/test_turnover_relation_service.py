@@ -370,6 +370,34 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(service.audit_log()[0]["action"], "confirm_zero_difference_closure")
         self.assertEqual(service.audit_log()[0]["actor"], "YNSYLP005")
 
+    def test_confirm_zero_difference_closure_accepts_source_bank_row_ids(self) -> None:
+        income = bank_row(
+            "canonical-in-1",
+            category_code="borrow_in_personal_pending_repayment",
+            credit_amount="40000.00",
+        )
+        income["source_bank_row_id"] = "txn_imported_1429"
+        expense = bank_row(
+            "canonical-out-1",
+            category_code="borrow_in_personal_repaid",
+            debit_amount="40000.00",
+        )
+        expense["source_bank_row_id"] = "txn_imported_1382"
+        service = TurnoverRelationService.from_snapshot(None, bank_rows=[income, expense])
+
+        relation = service.confirm_zero_difference_closure(
+            ["txn_imported_1429", "txn_imported_1382"],
+            actor="YNSYLP005",
+            note="手动闭环",
+        )
+
+        self.assertEqual(relation["status"], "confirmed")
+        self.assertEqual(set(relation["bank_row_ids"]), {"txn_imported_1429", "txn_imported_1382"})
+        self.assertEqual(
+            set(service.audit_log()[0]["affected_row_ids"]),
+            {"txn_imported_1429", "txn_imported_1382"},
+        )
+
     def test_confirm_zero_difference_closure_rejects_duplicate_row_ids(self) -> None:
         service = TurnoverRelationService.from_snapshot(
             None,
