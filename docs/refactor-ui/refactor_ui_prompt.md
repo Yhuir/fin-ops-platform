@@ -495,7 +495,7 @@
 
 ### MG-P009-phase-3-file-dropzone-primitive
 
-- Status: `mg_reviewed`
+- Status: `verified`
 - Scope:
   - `web/src/components/common/FileDropzone.tsx`
   - `web/src/test/TaxOffsetPage.test.tsx`
@@ -519,7 +519,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `baba332d`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### P000-docs-bootstrap
 
