@@ -2314,7 +2314,7 @@
 
 ### MG-P035-phase-6-import-pages
 
-- Status: `approved_for_execution`
+- Status: `verified`
 - Scope:
   - `web/src/components/imports/ImportWorkflowPage.tsx`
   - `web/src/app/styles.css`
@@ -2338,7 +2338,41 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: approved_for_execution。
+- Status: verified。
+
+#### Execution
+
+- Commit: `9e3624a0`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
+
+### P036-phase-6-cost-statistics-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: 成本统计 `/cost-statistics` 页面迁移 discovery，只读代码和测试并建立模块文档。
+
+#### Prompt
+
+```text
+Prompt ID: P036-phase-6-cost-statistics-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: 只做 CostStatistics 页面 discovery，不改运行时代码。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md、web/src/pages/CostStatisticsPage.tsx、web/src/test/CostStatisticsPage.test.tsx、相关 cost-statistics 组件/feature 文件和当前 git status。梳理 `/cost-statistics` 的旧 UI 入口、MUI/DataGrid/session hook inventory、表格/详情弹窗/导出弹窗/筛选控件/月份或范围控件/loading empty error stale permission 状态、现有测试覆盖和迁移切片风险。不得修改实现、测试、后端、API、read model、worker 或关联台。若 discovery 需要跨后续切片复用，创建 docs/refactor-ui/modules/phase_6_cost_statistics.md。更新 refactor_ui_state.md、refactor_ui_prompt.md 和模块文档，生成下一条 P037 characterization tests prompt。验证命令：test -f docs/refactor-ui/modules/phase_6_cost_statistics.md；rg -n "P036-phase-6-cost-statistics-discovery|Current MUI Inventory|User-visible Entrypoints|P037-phase-6-cost-statistics-characterization-tests" docs/refactor-ui/modules/phase_6_cost_statistics.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md；git diff --check；git status --short --branch。
+```
+
+#### Review
+
+- Single slice: yes。
+- Discovery only: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- User-visible entry inventory required: yes。
+- Docs on demand: yes，CostStatistics 是 high-risk DataGrid/dialog/export 页面，需要专项 md。
+- Verification defined: docs existence/key phrase checks、diff check、status。
 
 ### MG Prompt Template
 
