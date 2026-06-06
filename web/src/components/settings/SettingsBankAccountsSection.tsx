@@ -10,6 +10,10 @@ import { DataGrid } from "@mui/x-data-grid";
 import type { GridColDef, GridRowModel } from "@mui/x-data-grid";
 
 import type { BankAccountMapping } from "../../features/workbench/types";
+import {
+  useMuiDataGridPageSession,
+  useMuiDataGridScrollSession,
+} from "../../hooks/useMuiDataGridPageSession";
 import { settingsButtonSx, settingsDataGridSx, settingsTokens } from "./settingsDesign";
 import type { SettingsBankAccountsSectionProps } from "./types";
 
@@ -39,6 +43,12 @@ export default function SettingsBankAccountsSection({
   onUpdateMapping,
   onDeleteMapping,
 }: SettingsBankAccountsSectionProps) {
+  const gridSession = useMuiDataGridPageSession({
+    pageKey: "settings",
+    gridKey: "bank-account-mappings",
+    columnsVersion: "settings-bank-accounts-v1",
+  });
+  const gridScrollSession = useMuiDataGridScrollSession(gridSession);
   const processRowUpdate = (newRow: GridRowModel<BankAccountMapping>) => {
     const nextRow = {
       ...newRow,
@@ -143,8 +153,9 @@ export default function SettingsBankAccountsSection({
               当前没有银行映射。
             </Alert>
           ) : (
-            <Box sx={{ display: "flex", flexDirection: "column", maxHeight: 420, minHeight: 260 }}>
+            <Box ref={gridScrollSession.rootRef} sx={{ display: "flex", flexDirection: "column", maxHeight: 420, minHeight: 260 }}>
               <DataGrid
+                apiRef={gridScrollSession.apiRef}
                 rows={mappings}
                 columns={columns}
                 rowHeight={44}
@@ -153,6 +164,7 @@ export default function SettingsBankAccountsSection({
                 disableRowSelectionOnClick
                 processRowUpdate={processRowUpdate}
                 onProcessRowUpdateError={() => undefined}
+                initialState={gridScrollSession.initialState}
                 sx={settingsDataGridSx}
               />
             </Box>

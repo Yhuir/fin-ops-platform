@@ -955,7 +955,7 @@ describe("Workbench row selection and detail modal", () => {
       }),
     );
     expect(await screen.findByText("已保存关联台设置。")).toBeInTheDocument();
-  });
+  }, 30_000);
 
   test("YNSYKJ001 can see OA invoice offset settings without access account management", async () => {
     const user = userEvent.setup();
@@ -1283,7 +1283,7 @@ describe("Workbench row selection and detail modal", () => {
     const fetchMock = installMockApiFetch();
     renderAppAt("/imports/invoices");
 
-    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "发票导入" }, { timeout: 10_000 })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();

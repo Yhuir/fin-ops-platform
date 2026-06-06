@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -158,6 +158,7 @@ function rowsRequests(fetchMock: ReturnType<typeof installInputInvoiceUsageFetch
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
   window.sessionStorage.clear();
 });
 
@@ -194,6 +195,57 @@ describe("Input invoice usage page", () => {
     const page = await screen.findByTestId("input-invoice-usage-page");
     expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(within(page).queryByText("进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
+  });
+
+  test("pauses read model retry reload while the keep-alive page is inactive", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/input-invoice-usage/rows") {
+        return new Response(JSON.stringify({
+          rows: [],
+          pagination: { page: 1, pageSize: 20, total: 0 },
+          filterConfig: [],
+          read_model_status: "refreshing",
+        }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.pathname === "/api/input-invoice-usage/filter-options") {
+        return new Response(JSON.stringify({ fields: [], read_model_status: "refreshing" }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(rowsRequests(fetchMock)).toHaveLength(1);
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("link", { name: "设置" }));
+    expect(screen.getByTestId("page-frame-input-invoice-usage")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("page-frame-settings")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(rowsRequests(fetchMock)).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("link", { name: "进项发票使用情况" }));
+    expect(screen.getByTestId("page-frame-input-invoice-usage")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
   test("adds sidebar route and renders the dense MUI Table layout without DataGrid", async () => {

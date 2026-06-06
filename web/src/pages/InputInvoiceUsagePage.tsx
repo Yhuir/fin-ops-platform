@@ -16,6 +16,8 @@ import InputInvoiceUsageTable from "../components/inputInvoiceUsage/InputInvoice
 import OaReverseWorkspaceDrawer, { type OaReversePreviewRequest } from "../components/inputInvoiceUsage/OaReverseWorkspaceDrawer";
 import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
@@ -114,6 +116,7 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
 }
 
 export default function InputInvoiceUsagePage() {
+  const { active } = useOptionalPageActivation("input-invoice-usage");
   const querySession = usePageSessionState({
     pageKey: "input-invoice-usage",
     stateKey: "query",
@@ -134,6 +137,10 @@ export default function InputInvoiceUsagePage() {
   const [readModelStatus, setReadModelStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
+  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "input-invoice-usage",
+    scrollKey: "usage-table",
+  });
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
 
@@ -205,12 +212,12 @@ export default function InputInvoiceUsagePage() {
   }, [loadRows]);
 
   useEffect(() => {
-    if (readModelStatus !== "refreshing" || loading || refreshing) {
+    if (!active || readModelStatus !== "refreshing" || loading || refreshing) {
       return undefined;
     }
     const retryId = window.setTimeout(() => loadRows("refresh"), READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
-  }, [loadRows, loading, readModelStatus, refreshing]);
+  }, [active, loadRows, loading, readModelStatus, refreshing]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({
@@ -379,6 +386,7 @@ export default function InputInvoiceUsagePage() {
                   onOpenDetail={handleOpenDetail}
                   onPageChange={handlePageChange}
                   onPageSizeChange={handlePageSizeChange}
+                  tableWrapRef={tableWrapRef}
                 />
               </>
             )}

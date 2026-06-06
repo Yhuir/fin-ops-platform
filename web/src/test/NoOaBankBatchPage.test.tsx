@@ -4,8 +4,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import MuiProviders from "../app/MuiProviders";
 import { sidebarGroups } from "../components/shell/sidebarItems";
+import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
+import { renderAuthenticatedAppAt } from "./renderHelpers";
 
 const tagSelectionPayload = {
   version: 3,
@@ -216,7 +218,9 @@ const feeDetailPayload = {
 function renderPage() {
   return render(
     <MuiProviders>
-      <NoOaBankBatchPage />
+      <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
+        <NoOaBankBatchPage />
+      </PageRuntimeProvider>
     </MuiProviders>,
   );
 }
@@ -279,6 +283,7 @@ function installFetchMock(payload = listPayload) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("NoOaBankBatchPage", () => {
@@ -734,6 +739,55 @@ describe("NoOaBankBatchPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("免OA流水读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     });
+  });
+
+  test("pauses stale read model retry reload while the keep-alive page is inactive", async () => {
+    let listCallCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+        return jsonResponse(tagSelectionPayload);
+      }
+      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+        listCallCount += 1;
+        return jsonResponse({
+          ...listPayload,
+          batches: batchesForBucket(listPayload, url.searchParams.get("bucket")),
+          read_model_status: "stale",
+          read_model_stale_reasons: ["bank_auto_tag_rules_version_mismatch"],
+        });
+      }
+      if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
+        return jsonResponse(feeDetailPayload);
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAuthenticatedAppAt("/no-oa-bank-batches");
+
+    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(listCallCount).toBe(1);
+    });
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("link", { name: "设置" }));
+    expect(screen.getByTestId("page-frame-no-oa-bank-batches")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("page-frame-settings")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(listCallCount).toBe(1);
+
+    fireEvent.click(screen.getByRole("link", { name: "免OA流水批量处理" }));
+    expect(screen.getByTestId("page-frame-no-oa-bank-batches")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(listCallCount).toBeGreaterThan(1);
   });
 
   test("keeps visible transaction rows while stale read model polling runs in the background", async () => {

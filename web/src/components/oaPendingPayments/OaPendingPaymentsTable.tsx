@@ -15,6 +15,7 @@ import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import type { MutableRefObject } from "react";
 
 import InputInvoiceUsageFilterMenu from "../inputInvoiceUsage/InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "../inputInvoiceUsage/InputInvoiceUsageFilterMenu";
@@ -41,6 +42,7 @@ type OaPendingPaymentsTableProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onOpenDetail: (target: OaPendingPaymentDetailTarget) => void;
+  tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
 type OaPendingPaymentColumn = {
@@ -98,12 +100,13 @@ export default function OaPendingPaymentsTable({
   onPageChange,
   onPageSizeChange,
   onOpenDetail,
+  tableWrapRef,
 }: OaPendingPaymentsTableProps) {
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
 
   return (
     <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-      <TableContainer sx={{ maxHeight: "calc(100vh - 280px)", minHeight: 360 }}>
+      <TableContainer ref={tableWrapRef} sx={{ maxHeight: "calc(100vh - 280px)", minHeight: 360 }}>
         <Table stickyHeader size="small" aria-label="OA待付款核对表格" sx={{ minWidth: 1690, tableLayout: "fixed" }}>
           <TableHead>
             <TableRow>

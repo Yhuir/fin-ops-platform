@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import type {
   GridColumnVisibilityModel,
   GridFilterModel,
+  GridInitialState,
   GridPaginationModel,
   GridRowId,
   GridRowSelectionModel,
   GridSortModel,
 } from "@mui/x-data-grid";
+import { useGridApiRef } from "@mui/x-data-grid";
 
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import type { PageSessionRestoreState } from "../contexts/pageSessionStorage";
@@ -25,6 +27,12 @@ type SerializableMuiDataGridSession = {
   rowSelectionModel: SerializableRowSelectionModel;
   columnWidths: Record<string, number>;
   columnOrder: string[];
+  scrollPosition: GridScrollPosition;
+};
+
+export type GridScrollPosition = {
+  top: number;
+  left: number;
 };
 
 export type MuiDataGridPageSessionOptions = {
@@ -58,8 +66,16 @@ export type MuiDataGridPageSession = {
   setColumnWidths: (model: Record<string, number>) => void;
   columnOrder: string[];
   setColumnOrder: (model: string[]) => void;
+  scrollPosition: GridScrollPosition;
+  setScrollPosition: (position: GridScrollPosition) => void;
   reset: () => void;
   restoreState: PageSessionRestoreState;
+};
+
+export type MuiDataGridScrollSessionBinding = {
+  apiRef: ReturnType<typeof useGridApiRef>;
+  rootRef: MutableRefObject<HTMLDivElement | null>;
+  initialState: GridInitialState;
 };
 
 const DEFAULT_GRID_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -90,6 +106,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isGridScrollPosition(value: unknown): value is GridScrollPosition {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.top === "number"
+    && Number.isFinite(value.top)
+    && typeof value.left === "number"
+    && Number.isFinite(value.left)
+  );
+}
+
+function isGridPaginationModel(value: unknown): value is GridPaginationModel {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.page === "number"
+    && Number.isFinite(value.page)
+    && typeof value.pageSize === "number"
+    && Number.isFinite(value.pageSize)
+  );
+}
+
+function isGridFilterModel(value: unknown): value is GridFilterModel {
+  return isRecord(value) && Array.isArray(value.items);
+}
+
 function isSerializableGridSession(value: unknown): value is SerializableMuiDataGridSession {
   if (!isRecord(value)) {
     return false;
@@ -97,15 +141,16 @@ function isSerializableGridSession(value: unknown): value is SerializableMuiData
   const rowSelection = value.rowSelectionModel;
   return (
     typeof value.columnsVersion === "string"
-    && isRecord(value.paginationModel)
+    && isGridPaginationModel(value.paginationModel)
     && Array.isArray(value.sortModel)
-    && isRecord(value.filterModel)
+    && isGridFilterModel(value.filterModel)
     && isRecord(value.columnVisibilityModel)
     && isRecord(rowSelection)
     && (rowSelection.type === "include" || rowSelection.type === "exclude")
     && Array.isArray(rowSelection.ids)
     && isRecord(value.columnWidths)
     && Array.isArray(value.columnOrder)
+    && isGridScrollPosition(value.scrollPosition)
   );
 }
 
@@ -119,6 +164,39 @@ function createInitialGridSession(options: MuiDataGridPageSessionOptions): Seria
     rowSelectionModel: serializeRowSelectionModel(options.defaultRowSelectionModel ?? defaultRowSelectionModel()),
     columnWidths: options.defaultColumnWidths ?? {},
     columnOrder: options.defaultColumnOrder ?? [],
+    scrollPosition: { top: 0, left: 0 },
+  };
+}
+
+function restoreGridSession(raw: unknown): SerializableMuiDataGridSession {
+  if (!isRecord(raw)) {
+    throw new Error("Invalid grid session payload.");
+  }
+  return {
+    columnsVersion: typeof raw.columnsVersion === "string" ? raw.columnsVersion : "",
+    paginationModel: isGridPaginationModel(raw.paginationModel)
+      ? raw.paginationModel
+      : { page: 0, pageSize: 100 },
+    sortModel: Array.isArray(raw.sortModel) ? raw.sortModel as GridSortModel : [],
+    filterModel: isGridFilterModel(raw.filterModel) ? raw.filterModel : defaultFilterModel(),
+    columnVisibilityModel: isRecord(raw.columnVisibilityModel)
+      ? raw.columnVisibilityModel as GridColumnVisibilityModel
+      : {},
+    rowSelectionModel: isRecord(raw.rowSelectionModel)
+      && (raw.rowSelectionModel.type === "include" || raw.rowSelectionModel.type === "exclude")
+      && Array.isArray(raw.rowSelectionModel.ids)
+      ? raw.rowSelectionModel as SerializableRowSelectionModel
+      : serializeRowSelectionModel(defaultRowSelectionModel()),
+    columnWidths: isRecord(raw.columnWidths) ? raw.columnWidths as Record<string, number> : {},
+    columnOrder: Array.isArray(raw.columnOrder) ? raw.columnOrder as string[] : [],
+    scrollPosition: isGridScrollPosition(raw.scrollPosition) ? raw.scrollPosition : { top: 0, left: 0 },
+  };
+}
+
+function normalizeScrollPosition(position: GridScrollPosition): GridScrollPosition {
+  return {
+    top: Math.max(0, Math.round(position.top)),
+    left: Math.max(0, Math.round(position.left)),
   };
 }
 
@@ -164,6 +242,7 @@ export function useMuiDataGridPageSession(options: MuiDataGridPageSessionOptions
     initialValue,
     ttlMs: options.ttlMs ?? DEFAULT_GRID_SESSION_TTL_MS,
     storage: "session",
+    restore: restoreGridSession,
     validate: isSerializableGridSession,
     debounceMs: options.debounceMs ?? 150,
   });
@@ -211,8 +290,47 @@ export function useMuiDataGridPageSession(options: MuiDataGridPageSessionOptions
     setColumnWidths: (model) => update((current) => ({ ...current, columnWidths: model })),
     columnOrder: storedValue.columnOrder,
     setColumnOrder: (model) => update((current) => ({ ...current, columnOrder: model })),
+    scrollPosition: storedValue.scrollPosition,
+    setScrollPosition: (position) => update((current) => ({
+      ...current,
+      scrollPosition: normalizeScrollPosition(position),
+    })),
     reset: pageSession.reset,
     restoreState: pageSession.restoreState,
   };
 }
 
+export function useMuiDataGridScrollSession(session: MuiDataGridPageSession): MuiDataGridScrollSessionBinding {
+  const apiRef = useGridApiRef();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const setScrollPositionRef = useRef(session.setScrollPosition);
+
+  useEffect(() => {
+    setScrollPositionRef.current = session.setScrollPosition;
+  }, [session.setScrollPosition]);
+
+  const initialState = useMemo<GridInitialState>(() => ({
+    scroll: session.scrollPosition,
+  }), [session.scrollPosition.left, session.scrollPosition.top]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const virtualScroller = root?.querySelector(".MuiDataGrid-virtualScroller");
+    if (!virtualScroller) {
+      return undefined;
+    }
+    const persistScrollPosition = () => {
+      const nextPosition = apiRef.current?.getScrollPosition?.();
+      if (nextPosition) {
+        setScrollPositionRef.current(nextPosition);
+      }
+    };
+    virtualScroller.addEventListener("scroll", persistScrollPosition, { passive: true });
+    return () => {
+      persistScrollPosition();
+      virtualScroller.removeEventListener("scroll", persistScrollPosition);
+    };
+  }, [apiRef]);
+
+  return { apiRef, rootRef, initialState };
+}

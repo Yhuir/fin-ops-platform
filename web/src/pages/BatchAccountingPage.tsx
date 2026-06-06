@@ -32,6 +32,7 @@ import Typography from "@mui/material/Typography";
 
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
   fetchBatchAccounting,
@@ -202,6 +203,10 @@ export default function BatchAccountingPage() {
   const [bankYear, setBankYear] = useState(currentYear);
   const [oaYear, setOaYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
+  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "batch-accounting",
+    scrollKey: "oa-table",
+  });
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
   const [selectedBankRowId, setSelectedBankRowId] = useState<string | null>(null);
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
@@ -577,7 +582,7 @@ export default function BatchAccountingPage() {
             )}
           </Stack>
           <Divider />
-          <TableContainer>
+          <TableContainer ref={tableWrapRef}>
             <Table aria-label={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"} size="small">
               <TableHead>
                 <TableRow>

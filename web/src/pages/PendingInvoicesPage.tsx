@@ -19,6 +19,8 @@ import PendingInvoiceInvoicePickerDrawer from "../components/pendingInvoices/Pen
 import PendingInvoiceRelationDrawer from "../components/pendingInvoices/PendingInvoiceRelationDrawer";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesTable";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   confirmAttachExistingInvoice,
   downloadPendingInvoiceExport,
@@ -110,6 +112,9 @@ function readPersistedTagVersion() {
 }
 
 export default function PendingInvoicesPage() {
+  const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
+  const pageActiveRef = useRef(active);
+  const pendingTagRefreshRef = useRef(false);
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
   const [filter, setFilter] = useState<PendingInvoiceFilter>("all");
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
@@ -132,6 +137,10 @@ export default function PendingInvoicesPage() {
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [dialogRow, setDialogRow] = useState<PendingInvoiceRow | null>(null);
   const [pendingIncomeStatusRows, setPendingIncomeStatusRows] = useState<Set<string>>(() => new Set());
+  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "pending-invoices",
+    scrollKey: "pending-invoices-table",
+  });
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
 
   const filterOpen = Boolean(filterAnchorEl);
@@ -184,11 +193,25 @@ export default function PendingInvoicesPage() {
   }, [loadRows, refreshToken]);
 
   useEffect(() => {
+    pageActiveRef.current = active;
+    if (!active || !pendingTagRefreshRef.current) {
+      return;
+    }
+    pendingTagRefreshRef.current = false;
+    setRulesTagRefreshToken((current) => current + 1);
+    setRefreshToken((current) => current + 1);
+  }, [active, activationGeneration]);
+
+  useEffect(() => {
     const handleTagUpdate = (event: Event) => {
       const version = eventVersion(event);
       if (version !== null) {
         tagVersionRef.current = version;
         persistTagVersion(version);
+      }
+      if (!pageActiveRef.current) {
+        pendingTagRefreshRef.current = true;
+        return;
       }
       setRulesTagRefreshToken((current) => current + 1);
       setRefreshToken((current) => current + 1);
@@ -205,6 +228,9 @@ export default function PendingInvoicesPage() {
     }
 
     const handleFocus = () => {
+      if (!pageActiveRef.current) {
+        return;
+      }
       const persistedVersion = readPersistedTagVersion();
       if (persistedVersion !== null && persistedVersion !== tagVersionRef.current) {
         tagVersionRef.current = persistedVersion;
@@ -491,6 +517,7 @@ export default function PendingInvoicesPage() {
           direction={direction}
           statusFilterControl={statusFilterControl}
           pendingActionRowIds={pendingIncomeStatusRows}
+          tableWrapRef={tableWrapRef}
         />
         <TablePagination
           component="div"

@@ -15,6 +15,7 @@ import TableRow from "@mui/material/TableRow";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import type { SxProps, Theme } from "@mui/material/styles";
+import type { MutableRefObject } from "react";
 
 import type {
   OutputInvoiceCollectionDetailTarget,
@@ -47,6 +48,7 @@ type OutputInvoiceCollectionsTableProps = {
   onSortChange: (field: string, direction?: OutputInvoiceCollectionSortDirection) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
 const defaultFilterConfigs: Record<string, OutputInvoiceCollectionFilterFieldConfig> = {
@@ -236,12 +238,13 @@ export default function OutputInvoiceCollectionsTable({
   onSortChange,
   onPageChange,
   onPageSizeChange,
+  tableWrapRef,
 }: OutputInvoiceCollectionsTableProps) {
   const activeSortLabel = sortField && sortDirection ? `${sortField} ${sortDirection}` : "";
 
   return (
     <Paper variant="outlined" sx={{ width: "100%", minWidth: 0, overflow: "hidden" }}>
-      <TableContainer sx={{ width: "100%", overflowX: "hidden" }}>
+      <TableContainer ref={tableWrapRef} sx={{ width: "100%", overflowX: "hidden" }}>
         <Table
           aria-label="销项发票收款情况表"
           size="small"

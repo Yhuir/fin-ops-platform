@@ -99,6 +99,10 @@ export function renderAuthenticatedAppAt(
                       <Link to="/imports/invoices">发票导入</Link>
                       <Link to="/imports/bank-transactions">银行流水导入</Link>
                       <Link to="/imports/etc-invoices">ETC发票导入</Link>
+                      <Link to="/bank-details">银行明细</Link>
+                      <Link to="/input-invoice-usage">进项发票使用情况</Link>
+                      <Link to="/output-invoice-collections">销项发票收款情况</Link>
+                      <Link to="/no-oa-bank-batches">免OA流水批量处理</Link>
                     </nav>
                     <main>
                       <AppRouter />

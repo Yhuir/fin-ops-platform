@@ -3,6 +3,7 @@ import { DataGrid, type GridColDef, type GridRowParams } from "@mui/x-data-grid"
 
 import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
+import type { MuiDataGridScrollSessionBinding } from "../../hooks/useMuiDataGridPageSession";
 
 export type CostStatisticsAmountCell = {
   amount: string;
@@ -28,6 +29,7 @@ type CostStatisticsTableProps<Row extends object> = {
   emptyLabel?: string;
   onRowClick?: (row: Row) => void;
   getRowActionLabel?: (row: Row) => string;
+  gridScrollSession?: MuiDataGridScrollSessionBinding;
 };
 
 export default function CostStatisticsTable<Row extends object>({
@@ -38,6 +40,7 @@ export default function CostStatisticsTable<Row extends object>({
   emptyLabel = "当前视图暂无数据。",
   onRowClick,
   getRowActionLabel,
+  gridScrollSession,
 }: CostStatisticsTableProps<Row>) {
   const onRowClickRef = useRef(onRowClick);
   const getRowActionLabelRef = useRef(getRowActionLabel);
@@ -84,14 +87,16 @@ export default function CostStatisticsTable<Row extends object>({
   const gridHeight = rows.length === 0 ? 180 : Math.min(520, 112 + rows.length * 58);
 
   return (
-    <div className="cost-table-shell cost-data-grid-shell" style={{ height: gridHeight }}>
+    <div ref={gridScrollSession?.rootRef} className="cost-table-shell cost-data-grid-shell" style={{ height: gridHeight }}>
       <DataGrid
+        apiRef={gridScrollSession?.apiRef}
         aria-label={ariaLabel}
         columns={dataGridColumns}
         rows={rows}
         getRowId={getRowKey}
         disableRowSelectionOnClick
         hideFooter
+        initialState={gridScrollSession?.initialState}
         localeText={{ noRowsLabel: emptyLabel }}
         onRowClick={(params: GridRowParams<Row>) => onRowClickRef.current?.(params.row)}
         rowHeight={58}

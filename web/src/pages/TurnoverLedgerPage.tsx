@@ -25,8 +25,9 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
-  subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
+import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   confirmTurnoverClosure,
   confirmTurnoverRelation,
@@ -179,20 +180,78 @@ function flowBankRowId(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
 }
 
-function flowAmountNumber(row: TurnoverLedgerGroupedRow) {
+type ClosureCashDirection = "income" | "expense" | "unknown";
+
+type ClosurePreviewItem = {
+  bankRowId: string;
+  direction: ClosureCashDirection;
+  directionLabel: string;
+  amount: number;
+  row: TurnoverLedgerGroupedRow;
+};
+
+function normalizeCashDirection(value: string | null | undefined): ClosureCashDirection {
+  if (value === "income" || value === "expense") {
+    return value;
+  }
+  return "unknown";
+}
+
+function closureCashDirection(row: TurnoverLedgerGroupedRow): ClosureCashDirection {
+  const flowDirection = normalizeCashDirection(row.flowDirection);
+  if (flowDirection !== "unknown") {
+    return flowDirection;
+  }
+  const borrowAmount = moneyNumber(row.borrowAmount);
+  const repaymentAmount = moneyNumber(row.repaymentAmount);
+  if (borrowAmount > 0 && repaymentAmount <= 0) {
+    return normalizeCashDirection(row.borrowDirection);
+  }
+  if (repaymentAmount > 0 && borrowAmount <= 0) {
+    return normalizeCashDirection(row.repaymentDirection);
+  }
+  return "unknown";
+}
+
+function closureAmount(row: TurnoverLedgerGroupedRow) {
   const flowAmount = moneyNumber(row.flowAmount);
   if (flowAmount > 0) {
     return flowAmount;
   }
-  return Math.max(moneyNumber(row.borrowAmount), moneyNumber(row.repaymentAmount));
+  const borrowAmount = moneyNumber(row.borrowAmount);
+  const repaymentAmount = moneyNumber(row.repaymentAmount);
+  if (borrowAmount > 0 && repaymentAmount <= 0) {
+    return borrowAmount;
+  }
+  if (repaymentAmount > 0 && borrowAmount <= 0) {
+    return repaymentAmount;
+  }
+  return Math.max(borrowAmount, repaymentAmount);
 }
 
-function isIncomeFlow(row: TurnoverLedgerGroupedRow) {
-  return row.flowDirection === "income" || moneyNumber(row.borrowAmount) > 0;
-}
-
-function isExpenseFlow(row: TurnoverLedgerGroupedRow) {
-  return row.flowDirection === "expense" || moneyNumber(row.repaymentAmount) > 0;
+function buildClosurePreview(rows: TurnoverLedgerGroupedRow[]) {
+  const items: ClosurePreviewItem[] = rows.map((row) => {
+    const direction = closureCashDirection(row);
+    return {
+      bankRowId: flowBankRowId(row),
+      direction,
+      directionLabel: direction === "income" ? "收入" : direction === "expense" ? "支出" : "未知方向",
+      amount: closureAmount(row),
+      row,
+    };
+  });
+  const incomeItems = items.filter((item) => item.direction === "income");
+  const expenseItems = items.filter((item) => item.direction === "expense");
+  const incomeAmount = incomeItems.reduce((sum, item) => sum + item.amount, 0);
+  const expenseAmount = expenseItems.reduce((sum, item) => sum + item.amount, 0);
+  const delta = Math.abs(incomeAmount - expenseAmount);
+  return {
+    items,
+    incomeAmount,
+    expenseAmount,
+    delta,
+    canConfirm: rows.length === 2 && incomeItems.length === 1 && expenseItems.length === 1 && delta === 0,
+  };
 }
 
 function tagPrimaryLabel(tag: TurnoverLedgerTagDefinition) {
@@ -236,6 +295,10 @@ export default function TurnoverLedgerPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportDownloading, setExportDownloading] = useState(false);
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "turnover-ledger",
+    scrollKey: "grouped-table",
+  });
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
@@ -253,19 +316,7 @@ export default function TurnoverLedgerPage() {
     () => new Set(selectedClosureRows.map(flowBankRowId).filter(Boolean)),
     [selectedClosureRows],
   );
-  const closurePreview = useMemo(() => {
-    const incomeRows = selectedClosureRows.filter(isIncomeFlow);
-    const expenseRows = selectedClosureRows.filter(isExpenseFlow);
-    const incomeAmount = incomeRows.reduce((sum, row) => sum + flowAmountNumber(row), 0);
-    const expenseAmount = expenseRows.reduce((sum, row) => sum + flowAmountNumber(row), 0);
-    const delta = Math.abs(incomeAmount - expenseAmount);
-    return {
-      incomeAmount,
-      expenseAmount,
-      delta,
-      canConfirm: selectedClosureRows.length === 2 && incomeRows.length === 1 && expenseRows.length === 1 && delta === 0,
-    };
-  }, [selectedClosureRows]);
+  const closurePreview = useMemo(() => buildClosurePreview(selectedClosureRows), [selectedClosureRows]);
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -314,13 +365,11 @@ export default function TurnoverLedgerPage() {
     return () => controller.abort();
   }, [loadTagSelection]);
 
-  useEffect(() => {
-    const handleCategoryUpdated = () => {
-      loadTagSelection();
-      loadLedger();
-    };
-    return subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
+  const handleCategoryUpdated = useCallback(() => {
+    loadTagSelection();
+    loadLedger();
   }, [loadLedger, loadTagSelection]);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
 
   useEffect(() => {
     if (!exportOpen) {
@@ -638,6 +687,7 @@ export default function TurnoverLedgerPage() {
               onEdit={handleOpenEditor}
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
+              tableWrapRef={tableWrapRef}
             />
           </Stack>
         </Paper>
@@ -753,18 +803,17 @@ export default function TurnoverLedgerPage() {
           </Stack>
           <Divider />
           <Stack spacing={1.5} sx={{ p: 2, overflow: "auto", flex: 1 }}>
-            {selectedClosureRows.map((row) => {
-              const rowId = flowBankRowId(row);
-              const directionLabel = isIncomeFlow(row) ? "收入" : isExpenseFlow(row) ? "支出" : "未知方向";
+            {closurePreview.items.map((item) => {
+              const { row } = item;
               return (
-                <Paper key={rowId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+                <Paper key={item.bankRowId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
                   <Stack spacing={0.75}>
                     <Stack direction="row" justifyContent="space-between" spacing={1}>
-                      <Typography fontWeight={900}>{directionLabel}</Typography>
-                      <Typography fontWeight={900}>{formatMoney(String(flowAmountNumber(row).toFixed(2)))}</Typography>
+                      <Typography fontWeight={900}>{item.directionLabel}</Typography>
+                      <Typography fontWeight={900}>{formatMoney(String(item.amount.toFixed(2)))}</Typography>
                     </Stack>
                     <Typography variant="body2">{formatNullable(row.transactionAt || row.borrowDate || row.repaymentDate)}</Typography>
-                    <Typography variant="body2" color="text.secondary">{rowId}</Typography>
+                    <Typography variant="body2" color="text.secondary">{item.bankRowId}</Typography>
                     <Typography variant="body2" color="text.secondary">{formatNullable(row.repaymentRemark || row.summaryText)}</Typography>
                   </Stack>
                 </Paper>

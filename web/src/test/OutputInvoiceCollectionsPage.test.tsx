@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -339,6 +339,7 @@ function rowsRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectio
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("Output invoice collections page", () => {
@@ -366,6 +367,49 @@ describe("Output invoice collections page", () => {
     const page = await screen.findByTestId("output-invoice-collections-page");
     expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
+  });
+
+  test("pauses read model retry reload while the keep-alive page is inactive", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/output-invoice-collections/rows") {
+        return jsonResponse({
+          rows: [],
+          pagination: { page: 1, pageSize: 20, total: 0 },
+          filterConfig: [],
+          read_model_status: "refreshing",
+          readModelStatus: "refreshing",
+        }, 202);
+      }
+      if (url.pathname === "/api/output-invoice-collections/filter-options") {
+        return jsonResponse({ fields: [], read_model_status: "refreshing", readModelStatus: "refreshing" }, 202);
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    const page = await screen.findByTestId("output-invoice-collections-page");
+    expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
+    expect(rowsRequests(fetchMock)).toHaveLength(1);
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("link", { name: "设置" }));
+    expect(screen.getByTestId("page-frame-output-invoice-collections")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("page-frame-settings")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(rowsRequests(fetchMock)).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("link", { name: "销项发票收款情况" }));
+    expect(screen.getByTestId("page-frame-output-invoice-collections")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
   test("adds sidebar route and renders grouped MUI Table layout without fake export", async () => {
@@ -568,15 +612,18 @@ describe("Output invoice collections page", () => {
     expect(await screen.findByLabelText("作废收据原因")).toBeInTheDocument();
     fireEvent.input(screen.getByLabelText("作废原因"), { target: { value: "客户要求重开抬头" } });
     await user.click(screen.getByRole("button", { name: "确认作废" }));
-    await user.click(await screen.findByRole("button", { name: "重开收据 SK2026050000" }));
-    expect(await screen.findByLabelText("重开收据原因")).toBeInTheDocument();
-    fireEvent.input(screen.getByLabelText("重开原因"), { target: { value: "作废后重新出具" } });
-    await user.click(screen.getByRole("button", { name: "确认重开" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("/api/output-invoice-collections/receipts/receipt-issued-001/void"),
         expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "客户要求重开抬头" }) }),
       );
+      expect(screen.queryByLabelText("作废收据原因")).not.toBeInTheDocument();
+    });
+    await user.click(await screen.findByRole("button", { name: "重开收据 SK2026050000" }, undefined, { timeout: 5_000 }));
+    expect(await screen.findByLabelText("重开收据原因")).toBeInTheDocument();
+    fireEvent.input(screen.getByLabelText("重开原因"), { target: { value: "作废后重新出具" } });
+    await user.click(screen.getByRole("button", { name: "确认重开" }));
+    await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("/api/output-invoice-collections/receipts/receipt-voided-001/reissue"),
         expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "作废后重新出具" }) }),

@@ -36,8 +36,10 @@ import StatePanel from "../components/common/StatePanel";
 import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
-  subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
+import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
+import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatchTagSelection,
@@ -348,6 +350,7 @@ function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey
 }
 
 export default function NoOaBankBatchPage() {
+  const { active } = useOptionalPageActivation("no-oa-bank-batches");
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
   const [accountKey, setAccountKey] = useState("");
@@ -371,6 +374,10 @@ export default function NoOaBankBatchPage() {
   const [withdrawReason, setWithdrawReason] = useState("");
   const [snackbar, setSnackbar] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const detailTableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "no-oa-bank-batch",
+    scrollKey: "detail-transactions-table",
+  });
   const batchRequestSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
   const batchQueryKeyRef = useRef("");
@@ -464,14 +471,14 @@ export default function NoOaBankBatchPage() {
   }, [accountKey, bucket, loadBatches, month, refreshToken]);
 
   useEffect(() => {
-    if (!readModelNeedsRefresh || loading || backgroundRefreshing) {
+    if (!active || !readModelNeedsRefresh || loading || backgroundRefreshing) {
       return undefined;
     }
     const retryId = window.setTimeout(() => {
       loadBatches(undefined, { background: true });
     }, NO_OA_READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
-  }, [backgroundRefreshing, loadBatches, loading, readModelNeedsRefresh]);
+  }, [active, backgroundRefreshing, loadBatches, loading, readModelNeedsRefresh]);
 
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, NoOaTagNode>();
@@ -644,37 +651,28 @@ export default function NoOaBankBatchPage() {
     };
   }, [detailErrors, details, selectedBatchId]);
 
-  useEffect(() => {
-    const handleCategoryUpdated = () => {
-      setDetails({});
-      loadTagSelection();
-      loadBatches();
-    };
-    const unsubscribeCategoryUpdated = subscribeFinanceDomainEvent(
-      FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated,
-      handleCategoryUpdated,
-    );
-    const unsubscribeAutoTagRulesUpdated = subscribeFinanceDomainEvent(
-      FINANCE_DOMAIN_EVENTS.bankAutoTagRulesUpdated,
-      handleCategoryUpdated,
-    );
-    window.addEventListener(TAG_SYNC_EVENT, handleCategoryUpdated);
+  const handleCategoryUpdated = useCallback(() => {
+    setDetails({});
+    loadTagSelection();
+    loadBatches();
+  }, [loadBatches, loadTagSelection]);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankAutoTagRulesUpdated, handleCategoryUpdated);
+  useActivePageEvent(TAG_SYNC_EVENT, handleCategoryUpdated);
 
+  useEffect(() => {
     let channel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
       channel = new BroadcastChannel(TAG_SYNC_EVENT);
       channel.onmessage = () => {
-        handleCategoryUpdated();
+        window.dispatchEvent(new CustomEvent(TAG_SYNC_EVENT));
       };
     }
 
     return () => {
-      unsubscribeCategoryUpdated();
-      unsubscribeAutoTagRulesUpdated();
-      window.removeEventListener(TAG_SYNC_EVENT, handleCategoryUpdated);
       channel?.close();
     };
-  }, [loadBatches, loadTagSelection]);
+  }, []);
 
   const handleMutationComplete = (message: string, result: { affectedMonths?: string[] }) => {
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
@@ -1060,7 +1058,7 @@ export default function NoOaBankBatchPage() {
                     {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
                     {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
                     {selected && rows.length > 0 ? (
-                      <TableContainer>
+                      <TableContainer ref={detailTableWrapRef}>
                         <Table size="small" aria-label={`${accountLabel(batch)}流水`}>
                           <TableHead>
                             <TableRow>

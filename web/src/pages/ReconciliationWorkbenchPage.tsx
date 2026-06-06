@@ -11,6 +11,7 @@ import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
@@ -41,8 +42,8 @@ import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
   eventAffectedMonths,
-  subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
+import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
@@ -315,6 +316,7 @@ export default function ReconciliationWorkbenchPage() {
   const healthStatus = useAppHealthStatus();
   const canMutateWithHealth = useCanMutateWithHealth();
   const { canMutateData } = useSessionPermissions();
+  const { active } = useOptionalPageActivation("reconciliation-workbench");
   const isWorkbenchFreshnessBlocked =
     healthStatus.sources.oaSync === "dirty"
     || healthStatus.sources.oaSync === "refreshing"
@@ -926,6 +928,9 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     if (!workbenchData || isLoading) {
       lastZoneServerPageQueryKeyRef.current = zoneServerPageQueryKey;
       return;
@@ -940,7 +945,7 @@ export default function ReconciliationWorkbenchPage() {
       zoneQueries: zoneServerPageQueries,
     });
     return () => controller.abort();
-  }, [isLoading, workbenchData, zoneServerPageQueries, zoneServerPageQueryKey]);
+  }, [active, isLoading, workbenchData, zoneServerPageQueries, zoneServerPageQueryKey]);
 
   useEffect(() => {
     if (!workbenchData) {
@@ -962,6 +967,9 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     let isActive = true;
     let pollIntervalId: number | null = null;
     let pollController: AbortController | null = null;
@@ -1025,9 +1033,12 @@ export default function ReconciliationWorkbenchPage() {
       }
       window.removeEventListener("focus", handleFocus);
     };
-  }, [applyWorkbenchRefreshStatus]);
+  }, [active, applyWorkbenchRefreshStatus]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     let isActive = true;
     let pollController: AbortController | null = null;
 
@@ -1057,36 +1068,26 @@ export default function ReconciliationWorkbenchPage() {
         oaSyncRefreshTimeoutRef.current = null;
       }
     };
-  }, [applyOaSyncStatus]);
+  }, [active, applyOaSyncStatus]);
 
-  useEffect(() => {
-    const handleRelationUpdated = () => {
+  const handleRelationUpdated = useCallback(() => {
+    refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+  }, [refreshWorkbenchDataInBackground]);
+  const handleBankCategoryUpdated = useCallback((event: Event) => {
+    const affectedMonths = eventAffectedMonths(event);
+    if (
+      affectedMonths.length === 0
+      || WORKBENCH_VIEW_MONTH === "all"
+      || affectedMonths.includes("all")
+      || affectedMonths.includes(WORKBENCH_VIEW_MONTH)
+      || affectedMonths.includes(currentMonth)
+    ) {
       refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-    };
-    const handleBankCategoryUpdated = (event: Event) => {
-      const affectedMonths = eventAffectedMonths(event);
-      if (
-        affectedMonths.length === 0
-        || WORKBENCH_VIEW_MONTH === "all"
-        || affectedMonths.includes("all")
-        || affectedMonths.includes(WORKBENCH_VIEW_MONTH)
-        || affectedMonths.includes(currentMonth)
-      ) {
-        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-      }
-    };
-    const unsubscribeTurnover = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleRelationUpdated);
-    const unsubscribeWorkbench = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleRelationUpdated);
-    const unsubscribeBankCategory = subscribeFinanceDomainEvent(
-      FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated,
-      handleBankCategoryUpdated,
-    );
-    return () => {
-      unsubscribeTurnover();
-      unsubscribeWorkbench();
-      unsubscribeBankCategory();
-    };
+    }
   }, [currentMonth, refreshWorkbenchDataInBackground]);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleRelationUpdated);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleRelationUpdated);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleBankCategoryUpdated);
 
   useEffect(() => {
     document.body.classList.toggle("workbench-focus-mode", expandedZoneId !== null);

@@ -16,7 +16,7 @@ import TableSortLabel from "@mui/material/TableSortLabel";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import type { SxProps, Theme } from "@mui/material/styles";
-import { useState, type ReactNode } from "react";
+import { useState, type MutableRefObject, type ReactNode } from "react";
 
 import type {
   PendingInvoiceObjectDetailTarget,
@@ -45,6 +45,7 @@ type PendingInvoicesTableProps = {
   direction: PendingInvoiceDirection;
   statusFilterControl: ReactNode;
   pendingActionRowIds?: Set<string>;
+  tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
 const GROUP_BORDER = "2px solid";
@@ -253,12 +254,14 @@ export default function PendingInvoicesTable({
   direction,
   statusFilterControl,
   pendingActionRowIds,
+  tableWrapRef,
 }: PendingInvoicesTableProps) {
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
   return (
     <Box sx={{ border: CELL_BORDER, borderColor: "divider", bgcolor: "background.paper" }}>
       <Box
+        ref={tableWrapRef}
         data-testid="pending-invoices-table-shell"
         sx={{
           overflowX: "hidden",

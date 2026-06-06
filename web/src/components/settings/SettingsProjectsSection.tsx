@@ -43,7 +43,6 @@ export default function SettingsProjectsSection({
   isProjectActionBusy,
   canAddProject,
 }: SettingsProjectsSectionProps) {
-
   const getColumns = (isCompleted: boolean): GridColDef[] => [
     { field: "projectName", headerName: "项目名称", flex: 1, minWidth: 150 },
     { field: "projectCode", headerName: "项目编码", width: 120 },

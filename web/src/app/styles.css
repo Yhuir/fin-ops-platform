@@ -7773,6 +7773,7 @@ body.column-layout-dragging {
 }
 
 .bank-transaction-grid {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -7784,6 +7785,51 @@ body.column-layout-dragging {
   border: 1px solid var(--bank-border);
   border-radius: 4px;
   background: var(--bank-surface);
+}
+
+.bank-category-filter-float {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 18;
+  transform: translateY(-50%);
+}
+
+.bank-category-filter-icon-button.MuiIconButton-root {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--bank-border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14);
+  color: #334e68;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.bank-category-filter-icon-button.MuiIconButton-root:hover,
+.bank-category-filter-icon-button.MuiIconButton-root:focus-visible {
+  border-color: #8ab4f8;
+  background: #edf5ff;
+  color: var(--bank-blue);
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.16);
+}
+
+.bank-category-filter-icon-button.MuiIconButton-root.active {
+  border-color: var(--bank-blue);
+  background: var(--bank-blue);
+  color: #ffffff;
+}
+
+.bank-category-filter-active-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid #ffffff;
+  border-radius: 999px;
+  background: #f1c21b;
 }
 
 .bank-transaction-table-container {
@@ -7819,62 +7865,31 @@ body.column-layout-dragging {
   overflow: visible;
 }
 
-.bank-category-filter-entry {
-  position: relative;
-  z-index: 6;
-  flex: 0 1 auto;
-  min-width: 168px;
-  max-width: min(360px, 44vw);
-}
-
-.bank-category-filter-trigger.MuiButton-root {
-  justify-content: flex-start;
-  width: 100%;
-  min-height: 34px;
-  padding-inline: 10px;
-  border-color: var(--bank-border);
-  color: var(--bank-text);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.15;
-  overflow: hidden;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bank-category-filter-trigger.MuiButton-contained {
-  border-color: var(--bank-blue);
-  background: var(--bank-blue);
-  color: #ffffff;
-}
-
 .bank-category-filter-popper {
-  z-index: 25;
-  padding-top: 4px;
+  z-index: 35;
 }
 
 .bank-category-filter-panel {
-  width: min(320px, calc(100vw - 40px));
-  max-height: min(360px, calc(100vh - 180px));
+  width: min(292px, calc(100vw - 40px));
+  max-height: min(520px, calc(100vh - 72px));
   overflow: hidden;
   border: 1px solid var(--bank-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.18);
 }
 
 .bank-category-filter-list {
   max-height: inherit;
   overflow: auto;
-  padding: 5px;
+  padding: 4px;
 }
 
 .bank-category-filter-row.MuiListItemButton-root {
-  min-height: 28px;
+  min-height: 24px;
   border-radius: 5px;
   color: var(--bank-text);
-  padding: 3px 8px;
+  padding: 2px 7px;
 }
 
 .bank-category-filter-row.Mui-selected {
@@ -7891,13 +7906,13 @@ body.column-layout-dragging {
 
 .bank-category-filter-children {
   display: grid;
-  gap: 2px;
-  margin: 1px 0 3px;
+  gap: 1px;
+  margin: 1px 0 2px;
 }
 
 .bank-category-filter-child-row.MuiListItemButton-root {
-  min-height: 26px;
-  padding-left: 24px;
+  min-height: 23px;
+  padding-left: 22px;
   color: #334e68;
 }
 
@@ -7911,23 +7926,23 @@ body.column-layout-dragging {
   align-items: center;
   width: 100%;
   min-width: 0;
-  gap: 8px;
+  gap: 6px;
 }
 
 .bank-category-filter-label {
   min-width: 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 750;
-  line-height: 1.25;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .bank-category-filter-count {
-  min-width: 24px;
+  min-width: 22px;
   color: var(--bank-text-secondary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
@@ -7935,7 +7950,7 @@ body.column-layout-dragging {
 }
 
 .bank-category-filter-divider.MuiDivider-root {
-  margin: 5px 2px;
+  margin: 4px 2px;
   border-color: var(--bank-border-subtle);
 }
 

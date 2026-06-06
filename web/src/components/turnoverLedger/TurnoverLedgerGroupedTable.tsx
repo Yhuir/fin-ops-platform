@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MutableRefObject } from "react";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import Box from "@mui/material/Box";
@@ -479,17 +479,19 @@ export default function TurnoverLedgerGroupedTable({
   onEdit,
   selectedFlowRowIds = new Set<string>(),
   onToggleFlowSelection,
+  tableWrapRef,
 }: {
   groups: TurnoverLedgerGroup[];
   loading: boolean;
   onEdit: (row: TurnoverLedgerGroupedRow) => void;
   selectedFlowRowIds?: Set<string>;
   onToggleFlowSelection?: (group: TurnoverLedgerGroup, row: TurnoverLedgerGroupedRow) => void;
+  tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const hasRows = groups.some((group) => resolveRows(group).summaryRow !== null);
   return (
-    <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 640, overflow: "auto", borderRadius: 1 }}>
+    <TableContainer ref={tableWrapRef} component={Paper} variant="outlined" sx={{ maxHeight: 640, overflow: "auto", borderRadius: 1 }}>
       <Table stickyHeader size="small" aria-label="往来款左右双栏台账" sx={{ minWidth: 1080, tableLayout: "fixed" }}>
         <TableHead>
           <TableRow>

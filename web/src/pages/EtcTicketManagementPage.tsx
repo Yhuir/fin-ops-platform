@@ -39,6 +39,7 @@ import { Link as RouterLink } from "react-router-dom";
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
@@ -613,6 +614,14 @@ export default function EtcTicketManagementPage() {
   const [selectedEvidenceRowId, setSelectedEvidenceRowId] = useState("");
   const [selectedReconciliationRowIds, setSelectedReconciliationRowIds] = useState<Set<string>>(() => new Set());
   const [expandedDescriptionRowIds, setExpandedDescriptionRowIds] = useState<Set<string>>(() => new Set());
+  const invoiceTableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "etc-ticket-management",
+    scrollKey: "invoice-table",
+  });
+  const reconciliationTableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "etc-ticket-management",
+    scrollKey: "reconciliation-table",
+  });
   const [reviewNote, setReviewNote] = useState("");
   const [supplementUploadCard, setSupplementUploadCard] = useState<EtcCreditCardItem | null>(null);
   const [supplementUploadFiles, setSupplementUploadFiles] = useState<File[]>([]);
@@ -1989,7 +1998,7 @@ export default function EtcTicketManagementPage() {
       tableKey,
     }: { ariaLabel: string; emptyText: string; loadingText: string; tableKey: string },
   ) => (
-    <TableContainer className="etc-invoice-table-container">
+    <TableContainer ref={invoiceTableWrapRef} className="etc-invoice-table-container">
       <Table
         key={tableKey}
         aria-label={ariaLabel}
@@ -2600,7 +2609,7 @@ export default function EtcTicketManagementPage() {
                             </span>
                           </Tooltip>
                         </Stack>
-                        <TableContainer className="etc-reconciliation-table-container">
+                        <TableContainer ref={reconciliationTableWrapRef} className="etc-reconciliation-table-container">
                           <Table
                             aria-label="ETC双侧核对明细"
                             className="etc-reconciliation-table"

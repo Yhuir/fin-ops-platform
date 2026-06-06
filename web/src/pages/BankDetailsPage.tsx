@@ -4,6 +4,7 @@ import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import ClickAwayListener from "@mui/material/ClickAwayListener";
 import Divider from "@mui/material/Divider";
+import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import MenuList from "@mui/material/MenuList";
@@ -28,11 +29,13 @@ import ToggleButton from "@mui/material/ToggleButton";
 import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
 import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import FilterListOutlinedIcon from "@mui/icons-material/FilterListOutlined";
 import RuleIcon from "@mui/icons-material/Rule";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 
 import StatePanel from "../components/common/StatePanel";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
@@ -50,8 +53,9 @@ import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
   eventAffectedMonths,
-  subscribeFinanceDomainEvent,
 } from "../features/domainEvents";
+import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import type {
   BankAutoTagRulesResponse,
   BankAutoTagEditableRule,
@@ -105,6 +109,14 @@ type BankCategoryFilterRequestParams = {
   categorySubLabel: string | null;
   categoryThirdLabel: string | null;
 };
+
+type CategoryFilterSnapshot = {
+  queryKey: string;
+  totalCount: number;
+  categoryCounts: BankTransactionCategoryCounts;
+  tagDefinitions: BankTransactionTagDefinition[];
+};
+
 const EXTERNAL_TURNOVER_ROLE = "external_turnover";
 const EXTERNAL_TURNOVER_PRIMARY_LABELS = new Set(["外部往来款付款", "外部往来款收款", "往来款付款", "往来款收款"]);
 const EXTERNAL_TURNOVER_THIRD_LABELS = ["个人往来", "公司往来", "银行往来", "业务往来"];
@@ -269,6 +281,60 @@ function categoryFilterRequestParams(filter: BankCategoryFilter): BankCategoryFi
   };
 }
 
+function hasCategoryRequestFilter(params: BankCategoryFilterRequestParams) {
+  return Boolean(params.categoryCode || params.categoryPrimaryLabel || params.categorySubLabel || params.categoryThirdLabel);
+}
+
+function categoryFilterSnapshotKey({
+  accountKey,
+  dateFrom,
+  dateTo,
+  keyword,
+}: {
+  accountKey: string | null;
+  dateFrom: string;
+  dateTo: string;
+  keyword: string;
+}) {
+  return JSON.stringify({
+    accountKey: accountKey || "",
+    dateFrom,
+    dateTo,
+    keyword: keyword.trim(),
+  });
+}
+
+function activeTagDefinitions(tags: BankTransactionTagDefinition[] | null | undefined) {
+  return Array.isArray(tags) ? tags.filter((tag) => tag.status === "active") : [];
+}
+
+function selectedCategoryFilterLabel({
+  counts,
+  groups,
+  selectedFilter,
+  totalCount,
+  visibleSummary,
+}: {
+  counts: BankTransactionCategoryCounts;
+  groups: CategoryTreeGroup[];
+  selectedFilter: BankCategoryFilter;
+  totalCount: number;
+  visibleSummary: CategorySummaryItem[];
+}) {
+  if (selectedFilter.kind === "uncategorized") {
+    return `未分类 ${counts.uncategorized ?? 0}`;
+  }
+  if (selectedFilter.kind === "primary") {
+    const group = groups.find((item) => item.label === selectedFilter.primaryLabel);
+    return `${selectedFilter.primaryLabel} ${group?.count ?? 0}`;
+  }
+  if (selectedFilter.kind === "tag") {
+    const category = visibleSummary.find((option) => option.code === selectedFilter.code);
+    return category ? `${category.label} ${category.count}` : `${selectedFilter.primaryLabel} 0`;
+  }
+  return `全部 ${totalCount}`;
+}
+
 function selectedCategoryFilterStillExists(filter: BankCategoryFilter, options: BankTransactionTagDefinition[]) {
   if (filter.kind === "all" || filter.kind === "uncategorized") {
     return true;
@@ -306,12 +372,15 @@ function combinedReadModelStatus(
   return "fresh";
 }
 
-type BankDetailsTableToolbarProps = {
-  effectiveCategoryCounts: BankTransactionCategoryCounts;
+type BankCategoryFilterControlProps = {
+  categoryCounts: BankTransactionCategoryCounts;
+  totalCount: number;
   visibleCategorySummary: CategorySummaryItem[];
-  rowCount: number;
   selectedCategoryFilter: BankCategoryFilter;
   onCategoryFilterChange: (filter: BankCategoryFilter) => void;
+};
+
+type BankDetailsTableToolbarProps = {
   searchKeyword: string;
   onSearchKeywordChange: (value: string) => void;
   exportMenuAnchorEl: HTMLElement | null;
@@ -483,76 +552,30 @@ function EmptyTransactionOverlay() {
   );
 }
 
-function BankDetailsTableToolbar({
-  effectiveCategoryCounts = EMPTY_CATEGORY_COUNTS,
+function BankCategoryFilterControl({
+  categoryCounts = EMPTY_CATEGORY_COUNTS,
+  totalCount = 0,
   visibleCategorySummary = [],
-  rowCount = 0,
   selectedCategoryFilter = ALL_CATEGORY_FILTER,
   onCategoryFilterChange = () => undefined,
-  searchKeyword = "",
-  onSearchKeywordChange = () => undefined,
-  exportMenuAnchorEl = null,
-  exportFeedback = null,
-  isExporting = false,
-  canExportCurrentAccount = false,
-  onOpenExportMenu = () => undefined,
-  onCloseExportMenu = () => undefined,
-  onExport = () => undefined,
-}: Partial<BankDetailsTableToolbarProps>) {
-  const exportMenuOpen = Boolean(exportMenuAnchorEl);
+}: Partial<BankCategoryFilterControlProps>) {
   const [categoryAnchorEl, setCategoryAnchorEl] = useState<HTMLElement | null>(null);
-  const categoryCloseTimerRef = useRef<number | null>(null);
   const categoryPanelOpen = Boolean(categoryAnchorEl);
   const categoryPanelId = "bank-category-filter-panel";
   const categoryGroups = useMemo(() => buildCategoryTree(visibleCategorySummary), [visibleCategorySummary]);
-  const selectedCategoryLabel = useMemo(() => {
-    if (selectedCategoryFilter.kind === "uncategorized") {
-      return `未分类 ${effectiveCategoryCounts.uncategorized}`;
-    }
-    if (selectedCategoryFilter.kind === "primary") {
-      const group = categoryGroups.find((item) => item.label === selectedCategoryFilter.primaryLabel);
-      return `${selectedCategoryFilter.primaryLabel} ${group?.count ?? 0}`;
-    }
-    if (selectedCategoryFilter.kind === "tag") {
-      const category = visibleCategorySummary.find((option) => option.code === selectedCategoryFilter.code);
-      return category ? `${category.label} ${category.count}` : `${selectedCategoryFilter.primaryLabel} 0`;
-    }
-    return `全部 ${rowCount}`;
-  }, [categoryGroups, effectiveCategoryCounts.uncategorized, rowCount, selectedCategoryFilter, visibleCategorySummary]);
-
-  useEffect(() => () => {
-    if (categoryCloseTimerRef.current !== null) {
-      window.clearTimeout(categoryCloseTimerRef.current);
-    }
-  }, []);
-
-  const clearCategoryCloseTimer = () => {
-    if (categoryCloseTimerRef.current !== null) {
-      window.clearTimeout(categoryCloseTimerRef.current);
-      categoryCloseTimerRef.current = null;
-    }
-  };
-
-  const openCategoryPanel = (event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => {
-    clearCategoryCloseTimer();
-    setCategoryAnchorEl(event.currentTarget);
-  };
+  const selectedCategoryLabel = selectedCategoryFilterLabel({
+    counts: categoryCounts,
+    groups: categoryGroups,
+    selectedFilter: selectedCategoryFilter,
+    totalCount,
+    visibleSummary: visibleCategorySummary,
+  });
 
   const closeCategoryPanel = () => {
-    clearCategoryCloseTimer();
     setCategoryAnchorEl(null);
   };
 
-  const scheduleCategoryPanelClose = () => {
-    clearCategoryCloseTimer();
-    categoryCloseTimerRef.current = window.setTimeout(() => {
-      setCategoryAnchorEl(null);
-      categoryCloseTimerRef.current = null;
-    }, 140);
-  };
-
   const toggleCategoryPanel = (event: MouseEvent<HTMLElement>) => {
-    clearCategoryCloseTimer();
     setCategoryAnchorEl((current) => (current ? null : event.currentTarget));
   };
 
@@ -576,124 +599,134 @@ function BankDetailsTableToolbar({
   ) => {
     const selected = categoryFilterMatches(selectedCategoryFilter, filter);
     return (
-    <ListItemButton
-      aria-label={`${label} ${count}`}
-      aria-current={selected ? "true" : "false"}
-      className={`bank-category-filter-row ${className}`.trim()}
-      component="button"
-      data-level={level}
-      onClick={() => selectCategoryFilter(filter)}
-      role="menuitem"
-      selected={selected}
-    >
-      <ListItemText
-        disableTypography
-        primary={(
-          <Box className="bank-category-filter-row-content">
-            <Typography className="bank-category-filter-label" component="span">{label}</Typography>
-            <Typography className="bank-category-filter-count" component="span">{count}</Typography>
-          </Box>
-        )}
-      />
-    </ListItemButton>
+      <ListItemButton
+        aria-label={`${label} ${count}`}
+        aria-current={selected ? "true" : "false"}
+        className={`bank-category-filter-row ${className}`.trim()}
+        component="button"
+        data-level={level}
+        onClick={() => selectCategoryFilter(filter)}
+        role="menuitem"
+        selected={selected}
+      >
+        <ListItemText
+          disableTypography
+          primary={(
+            <Box className="bank-category-filter-row-content">
+              <Typography className="bank-category-filter-label" component="span">{label}</Typography>
+              <Typography className="bank-category-filter-count" component="span">{count}</Typography>
+            </Box>
+          )}
+        />
+      </ListItemButton>
     );
   };
 
   return (
+    <ClickAwayListener onClickAway={closeCategoryPanel}>
+      <Box className="bank-category-filter-float" onKeyDown={handleCategoryPanelKeyDown}>
+        <IconButton
+          aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
+          aria-expanded={categoryPanelOpen ? "true" : undefined}
+          aria-haspopup="menu"
+          aria-label={`标签筛选：${selectedCategoryLabel}`}
+          className={`bank-category-filter-icon-button${selectedCategoryFilter.kind === "all" ? "" : " active"}`}
+          onClick={toggleCategoryPanel}
+          size="small"
+          title={selectedCategoryLabel}
+        >
+          <FilterListOutlinedIcon fontSize="small" />
+          {selectedCategoryFilter.kind === "all" ? null : <span className="bank-category-filter-active-dot" aria-hidden="true" />}
+        </IconButton>
+        <Popper
+          anchorEl={categoryAnchorEl}
+          className="bank-category-filter-popper"
+          open={categoryPanelOpen}
+          placement="left"
+          modifiers={[
+            { name: "offset", options: { offset: [0, 8] } },
+            { name: "preventOverflow", options: { padding: 12 } },
+          ]}
+        >
+          <Paper className="bank-category-filter-panel" elevation={6}>
+            <List
+              aria-label="银行明细标签筛选"
+              className="bank-category-filter-list"
+              dense
+              disablePadding
+              id={categoryPanelId}
+              role="menu"
+            >
+              {renderCategoryFilterButton(ALL_CATEGORY_FILTER, "全部", totalCount, "root", "bank-category-filter-action")}
+              {renderCategoryFilterButton(
+                UNCATEGORIZED_CATEGORY_FILTER,
+                "未分类",
+                categoryCounts.uncategorized ?? 0,
+                "root",
+                "bank-category-filter-action",
+              )}
+              <Divider className="bank-category-filter-divider" />
+              {categoryGroups.map((group) => (
+                <Box className="bank-category-filter-group" key={group.key}>
+                  {renderCategoryFilterButton(
+                    group.directItem && group.children.length === 0
+                      ? tagCategoryFilter(group.directItem)
+                      : { kind: "primary", primaryLabel: group.label },
+                    group.label,
+                    group.count,
+                    "primary",
+                    "bank-category-filter-primary-row",
+                  )}
+                  {group.directItem && group.children.length > 0 ? (
+                    renderCategoryFilterButton(
+                      tagCategoryFilter(group.directItem),
+                      group.label,
+                      group.directItem.count,
+                      "child",
+                      "bank-category-filter-child-row bank-category-filter-direct-child",
+                    )
+                  ) : null}
+                  {group.children.length > 0 ? (
+                    <Box className="bank-category-filter-children" role="group">
+                      {group.children.map((child) => (
+                        <Fragment key={child.code}>
+                          {renderCategoryFilterButton(
+                            tagCategoryFilter(child),
+                            child.subLabel || child.label,
+                            child.count,
+                            "child",
+                            "bank-category-filter-child-row",
+                          )}
+                        </Fragment>
+                      ))}
+                    </Box>
+                  ) : null}
+                </Box>
+              ))}
+            </List>
+          </Paper>
+        </Popper>
+      </Box>
+    </ClickAwayListener>
+  );
+}
+
+function BankDetailsTableToolbar({
+  searchKeyword = "",
+  onSearchKeywordChange = () => undefined,
+  exportMenuAnchorEl = null,
+  exportFeedback = null,
+  isExporting = false,
+  canExportCurrentAccount = false,
+  onOpenExportMenu = () => undefined,
+  onCloseExportMenu = () => undefined,
+  onExport = () => undefined,
+}: Partial<BankDetailsTableToolbarProps>) {
+  const exportMenuOpen = Boolean(exportMenuAnchorEl);
+
+  return (
     <Box className="bank-grid-toolbar">
       <Stack className="bank-grid-toolbar-content" direction="row" spacing={0.75} alignItems="center">
-        <ClickAwayListener onClickAway={closeCategoryPanel}>
-          <Box
-            className="bank-category-filter-entry"
-            onKeyDown={handleCategoryPanelKeyDown}
-            onMouseEnter={clearCategoryCloseTimer}
-            onMouseLeave={scheduleCategoryPanelClose}
-          >
-            <Button
-              aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
-              aria-expanded={categoryPanelOpen ? "true" : undefined}
-              aria-haspopup="menu"
-              className="bank-category-filter-trigger"
-              size="small"
-              variant={selectedCategoryFilter.kind === "all" ? "outlined" : "contained"}
-              onClick={toggleCategoryPanel}
-              onFocus={openCategoryPanel}
-              onMouseEnter={openCategoryPanel}
-            >
-              标签筛选：{selectedCategoryLabel}
-            </Button>
-            <Popper
-              anchorEl={categoryAnchorEl}
-              className="bank-category-filter-popper"
-              disablePortal
-              open={categoryPanelOpen}
-              placement="bottom-start"
-            >
-              <Paper
-                className="bank-category-filter-panel"
-                elevation={8}
-                onMouseEnter={clearCategoryCloseTimer}
-                onMouseLeave={scheduleCategoryPanelClose}
-              >
-                <List
-                  aria-label="银行明细标签筛选"
-                  className="bank-category-filter-list"
-                  dense
-                  disablePadding
-                  id={categoryPanelId}
-                  role="menu"
-                >
-                  {renderCategoryFilterButton(ALL_CATEGORY_FILTER, "全部", rowCount, "root", "bank-category-filter-action")}
-                  {renderCategoryFilterButton(
-                    UNCATEGORIZED_CATEGORY_FILTER,
-                    "未分类",
-                    effectiveCategoryCounts.uncategorized,
-                    "root",
-                    "bank-category-filter-action",
-                  )}
-                  <Divider className="bank-category-filter-divider" />
-                  {categoryGroups.map((group) => (
-                    <Box className="bank-category-filter-group" key={group.key}>
-                      {renderCategoryFilterButton(
-                        group.directItem && group.children.length === 0
-                          ? tagCategoryFilter(group.directItem)
-                          : { kind: "primary", primaryLabel: group.label },
-                        group.label,
-                        group.count,
-                        "primary",
-                        "bank-category-filter-primary-row",
-                      )}
-                      {group.directItem && group.children.length > 0 ? (
-                        renderCategoryFilterButton(
-                          tagCategoryFilter(group.directItem),
-                          group.label,
-                          group.directItem.count,
-                          "child",
-                          "bank-category-filter-child-row bank-category-filter-direct-child",
-                        )
-                      ) : null}
-                      {group.children.length > 0 ? (
-                        <Box className="bank-category-filter-children" role="group">
-                          {group.children.map((child) => (
-                            <Fragment key={child.code}>
-                              {renderCategoryFilterButton(
-                                tagCategoryFilter(child),
-                                child.subLabel || child.label,
-                                child.count,
-                                "child",
-                                "bank-category-filter-child-row",
-                              )}
-                            </Fragment>
-                          ))}
-                        </Box>
-                      ) : null}
-                    </Box>
-                  ))}
-                </List>
-              </Paper>
-            </Popper>
-          </Box>
-        </ClickAwayListener>
         <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
           {exportFeedback ? (
             <Typography className="bank-export-feedback" color="text.secondary" variant="caption">
@@ -1281,6 +1314,9 @@ function BankTextCell({ value }: { value: string }) {
 }
 
 export default function BankDetailsPage() {
+  const { active, activationGeneration } = useOptionalPageActivation("bank-details");
+  const pageActiveRef = useRef(active);
+  const pendingTagRefreshRef = useRef(false);
   const selectedAccountSession = usePageSessionState<string | null>({
     pageKey: "bank-details",
     stateKey: "selectedAccountKey",
@@ -1334,8 +1370,12 @@ export default function BankDetailsPage() {
   const [accountRequestPending, setAccountRequestPending] = useState(false);
   const [transactionRequestPending, setTransactionRequestPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [categoryCounts, setCategoryCounts] = useState<BankTransactionCategoryCounts>(EMPTY_CATEGORY_COUNTS);
-  const [categoryOptions, setCategoryOptions] = useState<BankTransactionTagDefinition[]>([]);
+  const [categoryFilterSnapshot, setCategoryFilterSnapshot] = useState<CategoryFilterSnapshot>({
+    queryKey: "",
+    totalCount: 0,
+    categoryCounts: EMPTY_CATEGORY_COUNTS,
+    tagDefinitions: [],
+  });
   const [activeAutoTagRules, setActiveAutoTagRules] = useState<BankAutoTagEditableRule[]>([]);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<BankCategoryFilter>(ALL_CATEGORY_FILTER);
   const selectedCategoryRequestParams = useMemo(
@@ -1359,8 +1399,23 @@ export default function BankDetailsPage() {
   const hasAccountPayloadRef = useRef(false);
   const hasTransactionPayloadRef = useRef(false);
   const [refreshToken, setRefreshToken] = useState(0);
+  const transactionTableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "bank-details",
+    scrollKey: "transactions-table",
+  });
   const readModelStatus = combinedReadModelStatus(accountsReadModelStatus, transactionsReadModelStatus);
   const readModelNeedsRefresh = readModelStatus !== "fresh";
+  const selectedTransactionAccountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey || null;
+  const categoryFilterQueryKey = useMemo(() => categoryFilterSnapshotKey({
+    accountKey: selectedTransactionAccountKey,
+    dateFrom: dateFilter.dateFrom,
+    dateTo: dateFilter.dateTo,
+    keyword: searchKeyword,
+  }), [dateFilter.dateFrom, dateFilter.dateTo, searchKeyword, selectedTransactionAccountKey]);
+  const categorySnapshotCurrent = categoryFilterSnapshot.queryKey === categoryFilterQueryKey;
+  const categoryCounts = categorySnapshotCurrent ? categoryFilterSnapshot.categoryCounts : EMPTY_CATEGORY_COUNTS;
+  const categoryOptions = categorySnapshotCurrent ? categoryFilterSnapshot.tagDefinitions : [];
+  const categoryFilterTotalCount = categorySnapshotCurrent ? categoryFilterSnapshot.totalCount : 0;
 
   const refreshAutoTagRules = useCallback(() => {
     fetchBankAutoTagRules()
@@ -1444,14 +1499,62 @@ export default function BankDetailsPage() {
     if (!selectedAccountKey) {
       setRows([]);
       setRowCount(0);
-      setCategoryCounts(EMPTY_CATEGORY_COUNTS);
+      setCategoryFilterSnapshot({
+        queryKey: "",
+        totalCount: 0,
+        categoryCounts: EMPTY_CATEGORY_COUNTS,
+        tagDefinitions: [],
+      });
       return;
     }
     const controller = new AbortController();
     setTransactionRequestPending(true);
     setRowLoading(!hasTransactionPayloadRef.current);
     setError(null);
-    const accountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey;
+    const accountKey = selectedTransactionAccountKey;
+    const snapshotQueryKey = categoryFilterQueryKey;
+    const requestHasCategoryFilter = hasCategoryRequestFilter(selectedCategoryRequestParams);
+    const updateSnapshotFromPayload = (payload: Awaited<ReturnType<typeof fetchBankDetailTransactions>>) => {
+      setCategoryFilterSnapshot((current) => ({
+        queryKey: snapshotQueryKey,
+        totalCount: payload.pagination.total,
+        categoryCounts: payload.categoryCounts,
+        tagDefinitions: payload.tagDictionary?.tags
+          ? activeTagDefinitions(payload.tagDictionary.tags)
+          : current.queryKey === snapshotQueryKey
+          ? current.tagDefinitions
+          : [],
+      }));
+      if (typeof payload.tagDictionary?.version === "number" && payload.tagDictionary.version > 0) {
+        tagVersionRef.current = payload.tagDictionary.version;
+        persistTagVersion(payload.tagDictionary.version);
+      }
+    };
+
+    if (requestHasCategoryFilter) {
+      fetchBankDetailTransactions({
+        accountKey,
+        dateFrom: dateFilter.dateFrom,
+        dateTo: dateFilter.dateTo,
+        keyword: searchKeyword,
+        page: 1,
+        pageSize: 1,
+        signal: controller.signal,
+      })
+        .then((payload) => {
+          const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
+          if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
+            return;
+          }
+          updateSnapshotFromPayload(payload);
+        })
+        .catch((caught) => {
+          if (!isAbortLikeError(caught)) {
+            setError(caught instanceof Error ? caught.message : "银行流水标签统计加载失败。");
+          }
+        });
+    }
+
     fetchBankDetailTransactions({
       accountKey,
       dateFrom: dateFilter.dateFrom,
@@ -1474,16 +1577,8 @@ export default function BankDetailsPage() {
         hasTransactionPayloadRef.current = true;
         setRows(payload.rows);
         setRowCount(payload.pagination.total);
-        setCategoryCounts((current) => (
-          selectedCategoryRequestParams.categoryCode
-            || selectedCategoryRequestParams.categoryPrimaryLabel
-            || selectedCategoryRequestParams.categorySubLabel
-            || selectedCategoryRequestParams.categoryThirdLabel
-            ? current
-            : payload.categoryCounts
-        ));
-        if (payload.tagDictionary?.tags) {
-          setCategoryOptions(payload.tagDictionary.tags.filter((tag) => tag.status === "active"));
+        if (!requestHasCategoryFilter) {
+          updateSnapshotFromPayload(payload);
         }
         if (typeof payload.tagDictionary?.version === "number" && payload.tagDictionary.version > 0) {
           tagVersionRef.current = payload.tagDictionary.version;
@@ -1503,6 +1598,7 @@ export default function BankDetailsPage() {
       });
     return () => controller.abort();
   }, [
+    categoryFilterQueryKey,
     dateFilter.dateFrom,
     dateFilter.dateTo,
     paginationModel.page,
@@ -1510,6 +1606,7 @@ export default function BankDetailsPage() {
     refreshToken,
     searchKeyword,
     selectedAccountKey,
+    selectedTransactionAccountKey,
     selectedCategoryRequestParams.categoryCode,
     selectedCategoryRequestParams.categoryPrimaryLabel,
     selectedCategoryRequestParams.categorySubLabel,
@@ -1517,10 +1614,13 @@ export default function BankDetailsPage() {
   ]);
 
   useEffect(() => {
+    if (!categorySnapshotCurrent) {
+      return;
+    }
     if (!selectedCategoryFilterStillExists(selectedCategoryFilter, categoryOptions)) {
       setSelectedCategoryFilter(ALL_CATEGORY_FILTER);
     }
-  }, [categoryOptions, selectedCategoryFilter]);
+  }, [categoryOptions, categorySnapshotCurrent, selectedCategoryFilter]);
 
   useEffect(() => {
     if (!rulesRefreshPendingRef.current) {
@@ -1537,28 +1637,33 @@ export default function BankDetailsPage() {
   }, [readModelNeedsRefresh]);
 
   useEffect(() => {
-    if (!readModelNeedsRefresh || loading || rowLoading || accountRequestPending || transactionRequestPending) {
+    if (!active || !readModelNeedsRefresh || loading || rowLoading || accountRequestPending || transactionRequestPending) {
       return undefined;
     }
     const retryId = window.setTimeout(() => {
       setRefreshToken((current) => current + 1);
     }, BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
-  }, [accountRequestPending, loading, readModelNeedsRefresh, refreshToken, rowLoading, transactionRequestPending]);
+  }, [accountRequestPending, active, loading, readModelNeedsRefresh, refreshToken, rowLoading, transactionRequestPending]);
+
+  const handleWorkbenchRelationUpdated = useCallback((event: Event) => {
+    const affectedMonths = eventAffectedMonths(event);
+    if (!affectedMonthsHitDateFilter(affectedMonths, dateFilter)) {
+      return;
+    }
+    setRefreshToken((current) => current + 1);
+  }, [dateFilter]);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleWorkbenchRelationUpdated);
 
   useEffect(() => {
-    const handleWorkbenchRelationUpdated = (event: Event) => {
-      const affectedMonths = eventAffectedMonths(event);
-      if (!affectedMonthsHitDateFilter(affectedMonths, dateFilter)) {
-        return;
-      }
-      setRefreshToken((current) => current + 1);
-    };
-    return subscribeFinanceDomainEvent(
-      FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated,
-      handleWorkbenchRelationUpdated,
-    );
-  }, [dateFilter]);
+    pageActiveRef.current = active;
+    if (!active || !pendingTagRefreshRef.current) {
+      return;
+    }
+    pendingTagRefreshRef.current = false;
+    refreshAutoTagRules();
+    setRefreshToken((current) => current + 1);
+  }, [active, activationGeneration, refreshAutoTagRules]);
 
   useEffect(() => {
     const handleTagUpdate = (event: Event) => {
@@ -1566,6 +1671,10 @@ export default function BankDetailsPage() {
       if (version !== null) {
         tagVersionRef.current = version;
         persistTagVersion(version);
+      }
+      if (!pageActiveRef.current) {
+        pendingTagRefreshRef.current = true;
+        return;
       }
       const activeRules = eventActiveAutoTagRules(event);
       if (activeRules) {
@@ -1593,6 +1702,9 @@ export default function BankDetailsPage() {
     }
 
     const handleFocus = () => {
+      if (!pageActiveRef.current) {
+        return;
+      }
       const persistedVersion = readPersistedTagVersion();
       if (persistedVersion !== null && persistedVersion !== tagVersionRef.current) {
         tagVersionRef.current = persistedVersion;
@@ -1715,11 +1827,18 @@ export default function BankDetailsPage() {
         : currentRows.filter((currentRow) => currentRow.id !== row.id)
     ));
     setRowCount((current) => (rowStillVisible ? current : Math.max(0, current - 1)));
-    setCategoryCounts((current) => ({
-      ...current,
-      uncategorized: Math.max(0, Number(current.uncategorized ?? 0) - 1),
-      [choice.categoryCode]: Number(current[choice.categoryCode] ?? 0) + 1,
-    }));
+    setCategoryFilterSnapshot((current) => (
+      current.queryKey === categoryFilterQueryKey
+        ? {
+          ...current,
+          categoryCounts: {
+            ...current.categoryCounts,
+            uncategorized: Math.max(0, Number(current.categoryCounts.uncategorized ?? 0) - 1),
+            [choice.categoryCode]: Number(current.categoryCounts[choice.categoryCode] ?? 0) + 1,
+          },
+        }
+        : current
+    ));
   };
 
   const handleConfirmCategory = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
@@ -2069,12 +2188,14 @@ export default function BankDetailsPage() {
             <Divider />
 
             <Box className="bank-transaction-grid bank-transaction-grid-readable">
-              <BankDetailsTableToolbar
-                effectiveCategoryCounts={effectiveCategoryCounts}
+              <BankCategoryFilterControl
+                categoryCounts={effectiveCategoryCounts}
+                totalCount={categoryFilterTotalCount}
                 visibleCategorySummary={visibleCategorySummary}
-                rowCount={rowCount}
                 selectedCategoryFilter={selectedCategoryFilter}
                 onCategoryFilterChange={handleCategoryFilterChange}
+              />
+              <BankDetailsTableToolbar
                 searchKeyword={searchInput}
                 onSearchKeywordChange={handleSearchKeywordChange}
                 exportMenuAnchorEl={exportMenuAnchorEl}
@@ -2085,7 +2206,7 @@ export default function BankDetailsPage() {
                 onCloseExportMenu={closeExportMenu}
                 onExport={handleExport}
               />
-              <TableContainer className="bank-transaction-table-container">
+              <TableContainer ref={transactionTableWrapRef} className="bank-transaction-table-container">
                 <Table aria-label="交易流水" className="bank-transaction-table" size="small" stickyHeader>
                   <TableHead>
                     <TableRow>

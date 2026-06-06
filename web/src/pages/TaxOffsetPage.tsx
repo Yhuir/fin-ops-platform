@@ -15,12 +15,15 @@ import TaxSummaryCards from "../components/tax/TaxSummaryCards";
 import TaxTable from "../components/tax/TaxTable";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { ApiClientError } from "../features/apiClient";
 import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../features/tax/api";
-import { FINANCE_DOMAIN_EVENTS, subscribeFinanceDomainEvent } from "../features/domainEvents";
+import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
+import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import type {
   TaxCertifiedImportConfirmedResult,
   TaxMonthData,
@@ -53,6 +56,8 @@ export default function TaxOffsetPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
   const { canMutateData } = useSessionPermissions();
+  const { active } = useOptionalPageActivation("tax-offset");
+  const pageActiveRef = useRef(active);
   const currentMonthSession = usePageSessionState({
     pageKey: "tax-offset",
     stateKey: "currentMonth",
@@ -97,8 +102,8 @@ export default function TaxOffsetPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const [planFeedback, setPlanFeedback] = useState<string | null>(null);
-  const outputTableWrapRef = useRef<HTMLDivElement | null>(null);
-  const inputTableWrapRef = useRef<HTMLDivElement | null>(null);
+  const outputTableWrapRef = usePageScrollSession<HTMLDivElement>({ pageKey: "tax-offset", scrollKey: "output-table" });
+  const inputTableWrapRef = usePageScrollSession<HTMLDivElement>({ pageKey: "tax-offset", scrollKey: "input-plan-table" });
   const taxLayoutScrollbarRef = useRef<HTMLDivElement | null>(null);
   const taxLayoutScrollbarInnerRef = useRef<HTMLDivElement | null>(null);
   const isSyncingTaxLayoutScrollRef = useRef(false);
@@ -188,25 +193,27 @@ export default function TaxOffsetPage() {
     return () => controller.abort();
   }, [loadMonthData]);
 
-  useEffect(() => {
-    function handleRefreshTrigger() {
-      if (document.visibilityState === "hidden") {
-        return;
-      }
-      void loadMonthData("refresh");
+  const handleRefreshTrigger = useCallback(() => {
+    if (!pageActiveRef.current || document.visibilityState === "hidden") {
+      return;
     }
+    void loadMonthData("refresh");
+  }, [loadMonthData]);
 
+  useEffect(() => {
+    pageActiveRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
     window.addEventListener("focus", handleRefreshTrigger);
     document.addEventListener("visibilitychange", handleRefreshTrigger);
-    const unsubscribeInvoice = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleRefreshTrigger);
-    const unsubscribeEtc = subscribeFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, handleRefreshTrigger);
     return () => {
       window.removeEventListener("focus", handleRefreshTrigger);
       document.removeEventListener("visibilitychange", handleRefreshTrigger);
-      unsubscribeInvoice();
-      unsubscribeEtc();
     };
-  }, [loadMonthData]);
+  }, [handleRefreshTrigger]);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleRefreshTrigger);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, handleRefreshTrigger);
 
   useEffect(() => {
     if (!monthData) {

@@ -160,7 +160,6 @@ export function PageSessionStateProvider({ children }: { children: ReactNode }) 
     });
     safeRemoveSessionStoragePrefix(previousPrefix);
     previousUserScope.current = userScope;
-    setGeneration((current) => current + 1);
   }, [userScope]);
 
   useEffect(() => {
@@ -183,12 +182,10 @@ export function PageSessionStateProvider({ children }: { children: ReactNode }) 
   );
 }
 
-export function usePageSessionState<T>(options: PageSessionOptions<T>): PageSessionStateResult<T> {
-  const context = useContext(PageSessionStateContext);
-  if (!context) {
-    throw new Error("usePageSessionState must be used within PageSessionStateProvider.");
-  }
-
+function usePageSessionStateWithContext<T>(
+  context: PageSessionStateContextValue,
+  options: PageSessionOptions<T>,
+): PageSessionStateResult<T> {
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const storageAvailableRef = useRef(true);
@@ -302,10 +299,46 @@ export function usePageSessionState<T>(options: PageSessionOptions<T>): PageSess
   };
 }
 
+export function usePageSessionState<T>(options: PageSessionOptions<T>): PageSessionStateResult<T> {
+  const context = useContext(PageSessionStateContext);
+  if (!context) {
+    throw new Error("usePageSessionState must be used within PageSessionStateProvider.");
+  }
+  return usePageSessionStateWithContext(context, options);
+}
+
+export function useOptionalPageSessionState<T>(options: PageSessionOptions<T>): PageSessionStateResult<T> {
+  const context = useContext(PageSessionStateContext);
+  const fallbackMemoryStore = useRef(new Map<string, PageSessionStoredPayload>());
+  const [fallbackGeneration, setFallbackGeneration] = useState(0);
+  const clearFallback = useCallback(() => {
+    fallbackMemoryStore.current.clear();
+    setFallbackGeneration((current) => current + 1);
+  }, []);
+  const fallbackContext = useMemo<PageSessionStateContextValue>(() => ({
+    userScope: "standalone",
+    generation: fallbackGeneration,
+    memoryStore: fallbackMemoryStore,
+    clearAllForCurrentUser: clearFallback,
+  }), [clearFallback, fallbackGeneration]);
+  return usePageSessionStateWithContext(context ?? fallbackContext, options);
+}
+
 export function useClearPageSessionState() {
   const context = useContext(PageSessionStateContext);
   if (!context) {
     throw new Error("useClearPageSessionState must be used within PageSessionStateProvider.");
   }
   return context.clearAllForCurrentUser;
+}
+
+export function usePageSessionScope() {
+  const context = useContext(PageSessionStateContext);
+  if (!context) {
+    throw new Error("usePageSessionScope must be used within PageSessionStateProvider.");
+  }
+  return {
+    userScope: context.userScope,
+    generation: context.generation,
+  };
 }

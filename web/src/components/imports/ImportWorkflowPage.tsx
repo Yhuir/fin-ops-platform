@@ -53,6 +53,10 @@ import type { FileSelectionState } from "../../contexts/ImportWorkflowDraftConte
 import { useImportProgress } from "../../contexts/ImportProgressContext";
 import { useAppHealthStatus } from "../../contexts/AppHealthStatusContext";
 import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
+import {
+  useMuiDataGridPageSession,
+  useMuiDataGridScrollSession,
+} from "../../hooks/useMuiDataGridPageSession";
 
 type ImportWorkflowPageProps = {
   mode: ImportWorkflowMode;
@@ -569,6 +573,25 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   const title = TITLES[mode];
   const uploadLabel = UPLOAD_LABELS[mode];
+  const importPageKey = `imports.${mode}`;
+  const previewGridSession = useMuiDataGridPageSession({
+    pageKey: importPageKey,
+    gridKey: "preview-main",
+    columnsVersion: 1,
+  });
+  const previewGridScrollSession = useMuiDataGridScrollSession(previewGridSession);
+  const previewDetailGridSession = useMuiDataGridPageSession({
+    pageKey: importPageKey,
+    gridKey: "preview-detail",
+    columnsVersion: 1,
+  });
+  const previewDetailGridScrollSession = useMuiDataGridScrollSession(previewDetailGridSession);
+  const etcPreviewGridSession = useMuiDataGridPageSession({
+    pageKey: importPageKey,
+    gridKey: "etc-preview",
+    columnsVersion: 1,
+  });
+  const etcPreviewGridScrollSession = useMuiDataGridScrollSession(etcPreviewGridSession);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1388,14 +1411,16 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     {etcBlockingIssues.length > 0 && missingEtcRequirementIssues.length === 0 ? (
                       <Alert severity="warning">ETC 对账任务仍有 {etcBlockingIssues.length} 个阻塞项，请处理后重新预览。</Alert>
                     ) : null}
-                    <Box sx={{ height: 420, width: "100%" }}>
+                    <Box ref={etcPreviewGridScrollSession.rootRef} sx={{ height: 420, width: "100%" }}>
                       <DataGrid
                         aria-label="ETC导入预览结果"
+                        apiRef={etcPreviewGridScrollSession.apiRef}
                         columns={etcColumns}
                         rows={etcRows}
                         loading={isPreviewing}
                         disableRowSelectionOnClick
                         hideFooter
+                        initialState={etcPreviewGridScrollSession.initialState}
                         showToolbar
                         sx={importGridSx}
                       />
@@ -1404,14 +1429,16 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 ) : (
                   <Stack spacing={1.5}>
                     <AuditSummaryCards audit={previewAudit} />
-                    <Box sx={{ height: 480, width: "100%" }}>
+                    <Box ref={previewGridScrollSession.rootRef} sx={{ height: 480, width: "100%" }}>
                       <DataGrid
                         aria-label="导入预览结果"
+                        apiRef={previewGridScrollSession.apiRef}
                         columns={previewColumns}
                         rows={previewRows}
                         loading={isPreviewing}
                         disableRowSelectionOnClick
                         hideFooter
+                        initialState={previewGridScrollSession.initialState}
                         showToolbar
                         sx={importGridSx}
                       />
@@ -1426,14 +1453,16 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                         <Tab value="duplicates" label={`重复项 ${duplicateDetailRows.length}`} sx={{ minHeight: 42 }} />
                         <Tab value="unimported" label={`未导入项 ${unimportedDetailRows.length}`} sx={{ minHeight: 42 }} />
                       </Tabs>
-                      <Box sx={{ height: 360, width: "100%" }}>
+                      <Box ref={previewDetailGridScrollSession.rootRef} sx={{ height: 360, width: "100%" }}>
                         <DataGrid
                           aria-label={previewDetailTab === "duplicates" ? "重复项明细" : "未导入项明细"}
+                          apiRef={previewDetailGridScrollSession.apiRef}
                           columns={detailColumns}
                           rows={previewDetailTab === "duplicates" ? duplicateDetailRows : unimportedDetailRows}
                           loading={isPreviewing}
                           disableRowSelectionOnClick
                           hideFooter
+                          initialState={previewDetailGridScrollSession.initialState}
                           showToolbar
                           sx={{
                             ...importGridSx,

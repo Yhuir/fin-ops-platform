@@ -352,7 +352,7 @@ function groupedPayload(family: string) {
       pending_direction: "collection",
       pending_direction_label: "待收款",
       pending_amount: "2000.00",
-      row_span: 3,
+      row_span: 5,
       group_tone: "success",
       rows: [
         {
@@ -441,6 +441,68 @@ function groupedPayload(family: string) {
           interest_payment_method: "",
           note: "",
           bank_row_ids: ["bank-company-income-1000"],
+        },
+        {
+          row_kind: "flow",
+          flow_id: "bank:bank-company-borrow-expense-40000",
+          source_bank_row_id: "bank-company-borrow-expense-40000",
+          relation_id: "rel-company-1",
+          status: "suggested",
+          status_label: "流水",
+          row_tone: "warning",
+          category_label: "外部往来款付款 / 保证金 / 业务往来",
+          category_label_path: ["外部往来款付款", "保证金", "业务往来"],
+          flow_direction: "expense",
+          flow_amount: "40000.00",
+          borrow_amount: "40000.00",
+          borrow_date: "2026-03-11 16:07:35",
+          borrow_direction: "expense",
+          repayment_amount: "0.00",
+          repayment_date: null,
+          repayment_direction: "income",
+          counterparty_bank_name: "建设银行 8106",
+          bank_account_labels: ["建设银行 8106"],
+          repayment_remark: "电子转账 / 投标保证金",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "",
+          bank_row_ids: ["bank-company-borrow-expense-40000"],
+        },
+        {
+          row_kind: "flow",
+          flow_id: "bank:bank-company-repayment-income-40000",
+          source_bank_row_id: "bank-company-repayment-income-40000",
+          relation_id: "rel-company-1",
+          status: "suggested",
+          status_label: "流水",
+          row_tone: "success",
+          category_label: "外部往来款收款 / 退保证金 / 业务往来",
+          category_label_path: ["外部往来款收款", "退保证金", "业务往来"],
+          flow_direction: "income",
+          flow_amount: "40000.00",
+          borrow_amount: "0.00",
+          borrow_date: null,
+          borrow_direction: "expense",
+          repayment_amount: "40000.00",
+          repayment_date: "2026-04-03 18:00:16",
+          repayment_direction: "income",
+          counterparty_bank_name: "建设银行 8106",
+          bank_account_labels: ["建设银行 8106"],
+          repayment_remark: "电子汇入 / 退保证金",
+          interest_rate_type: "none",
+          interest_rate_value: "0.000000",
+          interest_paid_amount: "0.00",
+          loan_days: null,
+          accrued_interest: "0.00",
+          interest_paid_date: null,
+          interest_payment_method: "",
+          note: "",
+          bank_row_ids: ["bank-company-repayment-income-40000"],
         },
       ],
     },
@@ -945,6 +1007,43 @@ describe("Turnover ledger page", () => {
     });
     window.removeEventListener("turnoverRelationUpdated", turnoverListener);
     window.removeEventListener("workbenchRelationUpdated", workbenchListener);
+  });
+
+  test("confirms closure when cash direction crosses turnover stage columns", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-borrow-expense-40000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-repayment-income-40000" }));
+
+    const openButton = within(page).getByRole("button", { name: "确认闭环" });
+    expect(openButton).toBeEnabled();
+    await user.click(openButton);
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    expect(within(drawer).getByText("支出")).toBeInTheDocument();
+    expect(within(drawer).getByText("收入")).toBeInTheDocument();
+    expect(within(drawer).getByText("收入合计").nextElementSibling).toHaveTextContent("40,000.00");
+    expect(within(drawer).getByText("支出合计").nextElementSibling).toHaveTextContent("40,000.00");
+    expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("0.00");
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+      });
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+        bank_row_ids: ["bank-company-borrow-expense-40000", "bank-company-repayment-income-40000"],
+      });
+    });
   });
 
   test("blocks cross-group selection and disables drawer confirmation for non-zero difference", async () => {

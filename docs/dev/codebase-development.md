@@ -15,13 +15,22 @@
 ## 前端结构
 
 - 前端源码位于 `web/src/`。
-- 路由入口：`web/src/app/router.tsx`。
-- 侧边栏：`web/src/components/shell/sidebarItems.ts`。
+- 页面注册表：`web/src/app/pageRegistry.tsx`，集中声明 route、pageKey、keepAlive 和侧边栏元数据。
+- 路由入口：`web/src/app/router.tsx`，通过 `PageKeepAliveHost` 渲染注册页面。
+- 侧边栏：`web/src/components/shell/sidebarItems.ts`，从页面注册表派生。
+- 页面会话与保活：`web/src/contexts/PageSessionStateContext.tsx`、`web/src/contexts/PageRuntimeContext.tsx`、`web/src/hooks/usePageScrollSession.ts`、`web/src/hooks/useMuiDataGridPageSession.ts`、`web/src/hooks/useActiveFinanceDomainEvent.ts`。
 - 页面入口：`web/src/pages/*`。
 - API client：`web/src/features/*/api.ts`。
 - 跨页刷新提示：`web/src/features/domainEvents.ts`。
 
 页面组件负责用户可见状态、交互和 DTO 展示。业务口径、权限、freshness、read model 状态和跨页事实不能在前端重新推导。
+
+页面切换保活规则：
+
+- 新页面必须从 `pageRegistry` 注册 route/sidebar/pageKey，并默认接入 `keepAlive`，除非页面明确不需要保留现场。
+- 页面级普通表格滚动接 `usePageScrollSession`；MUI DataGrid 接 `useMuiDataGridPageSession` 和 `useMuiDataGridScrollSession`。
+- 页面订阅 finance domain event 时使用 `useActiveFinanceDomainEvent`，避免 inactive 页面主动重型刷新；切回 active 后仍通过原 API/read model freshness 边界刷新。
+- 不把 UI session 写入后端 API、facts、audit、dirty scope、outbox 或 read model。
 
 ## 新增或修改功能流程
 

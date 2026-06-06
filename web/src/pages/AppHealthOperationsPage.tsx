@@ -16,6 +16,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
 import { settingsTokens } from "../components/settings/settingsDesign";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { fetchAppHealthDashboard } from "../features/appHealth/api";
 import type {
@@ -428,6 +429,7 @@ function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }
 export default function AppHealthOperationsPage() {
   const session = useSession();
   const permissions = useSessionPermissions();
+  const { active } = useOptionalPageActivation("app-health-operations");
   const [payload, setPayload] = useState<OperationsDashboardPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -458,7 +460,7 @@ export default function AppHealthOperationsPage() {
   }, [permissions.canAdminAccess]);
 
   useEffect(() => {
-    if (!permissions.canAdminAccess) {
+    if (!permissions.canAdminAccess || !active) {
       return undefined;
     }
     void loadDashboard();
@@ -470,7 +472,7 @@ export default function AppHealthOperationsPage() {
       inFlightRef.current?.abort();
       inFlightRef.current = null;
     };
-  }, [loadDashboard, permissions.canAdminAccess]);
+  }, [active, loadDashboard, permissions.canAdminAccess]);
 
   if (session.status === "loading") {
     return (

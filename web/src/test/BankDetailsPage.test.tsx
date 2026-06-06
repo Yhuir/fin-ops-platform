@@ -10,6 +10,7 @@ import { SessionContext, type SessionContextValue } from "../contexts/SessionCon
 import type { SessionPayload } from "../features/session/api";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import { installMockApiFetch } from "./apiMock";
+import { renderAuthenticatedAppAt } from "./renderHelpers";
 
 const defaultSession: SessionPayload = {
   allowed: true,
@@ -54,6 +55,13 @@ function requestUrls(fetchMock: ReturnType<typeof installMockApiFetch>, pathname
     .filter((url) => url.pathname === pathname);
 }
 
+function findTransactionRequest(
+  fetchMock: ReturnType<typeof installMockApiFetch>,
+  predicate: (url: URL) => boolean,
+) {
+  return requestUrls(fetchMock, "/api/bank-details/transactions").find(predicate);
+}
+
 function exactTextContent(text: string) {
   return (_content: string, element: Element | null) => (
     element?.textContent === text
@@ -62,9 +70,13 @@ function exactTextContent(text: string) {
 }
 
 async function openCategoryFilterPanel(user: ReturnType<typeof userEvent.setup>, page: HTMLElement) {
-  const trigger = within(page).getByRole("button", { name: /标签筛选/ });
-  await user.hover(trigger);
-  return within(page).findByRole("menu", { name: "银行明细标签筛选" });
+  const trigger = getCategoryFilterTrigger(page);
+  await user.click(trigger);
+  return screen.findByRole("menu", { name: "银行明细标签筛选" });
+}
+
+function getCategoryFilterTrigger(page: HTMLElement) {
+  return within(page).getByRole("button", { name: /^标签筛选：/ });
 }
 
 async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, drawer: HTMLElement, currentLabel: string, primary: string, sub: string) {
@@ -222,6 +234,7 @@ describe("Bank details page", () => {
     expect(within(page).getByText("1-100 / 299").closest(".bank-transaction-pagination")).toBeInTheDocument();
     expect(within(page).getByPlaceholderText("搜索流水")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /筛选器/ })).not.toBeInTheDocument();
+    expect(within(page).queryByText(/标签筛选：/)).not.toBeInTheDocument();
   });
 
   test("keeps pagination outside the table scroll area", () => {
@@ -299,8 +312,12 @@ describe("Bank details page", () => {
     await user.click(feeRoot);
 
     await waitFor(() => {
-      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
-      expect(transactionRequest?.searchParams.get("category_primary_label")).toBe("费用");
+      const transactionRequest = findTransactionRequest(fetchMock, (url) => (
+        url.searchParams.get("category_primary_label") === "费用"
+        && url.searchParams.get("category_code") === null
+        && url.searchParams.get("page") === "1"
+      ));
+      expect(transactionRequest).toBeDefined();
       expect(transactionRequest?.searchParams.get("category_code")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
@@ -312,8 +329,13 @@ describe("Bank details page", () => {
     await user.click(within(categoryPanel).getByRole("menuitem", { name: "工资 1" }));
 
     await waitFor(() => {
-      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
-      expect(transactionRequest?.searchParams.get("category_code")).toBe("salary");
+      const transactionRequest = findTransactionRequest(fetchMock, (url) => (
+        url.searchParams.get("category_code") === "salary"
+        && url.searchParams.get("category_primary_label") === null
+        && url.searchParams.get("category_sub_label") === null
+        && url.searchParams.get("page") === "1"
+      ));
+      expect(transactionRequest).toBeDefined();
       expect(transactionRequest?.searchParams.get("category_primary_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("category_sub_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
@@ -324,12 +346,71 @@ describe("Bank details page", () => {
     await user.click(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" }));
 
     await waitFor(() => {
-      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
-      expect(transactionRequest?.searchParams.get("category_code")).toBe("uncategorized");
+      const transactionRequest = findTransactionRequest(fetchMock, (url) => (
+        url.searchParams.get("category_code") === "uncategorized"
+        && url.searchParams.get("category_primary_label") === null
+        && url.searchParams.get("page") === "1"
+      ));
+      expect(transactionRequest).toBeDefined();
       expect(transactionRequest?.searchParams.get("category_primary_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
     });
     expect(within(page).getByRole("button", { name: /标签筛选：未分类 295/ })).toBeInTheDocument();
+  });
+
+  test("opens the fixed category filter icon by click only and keeps it open on pointer leave", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    const trigger = getCategoryFilterTrigger(page);
+    expect(trigger.closest(".bank-category-filter-float")).toBeInTheDocument();
+
+    await user.hover(trigger);
+    expect(screen.queryByRole("menu", { name: "银行明细标签筛选" })).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    const panel = await screen.findByRole("menu", { name: "银行明细标签筛选" });
+    expect(panel).toBeInTheDocument();
+
+    await user.unhover(trigger);
+    await user.hover(panel);
+    await user.unhover(panel);
+    await new Promise((resolve) => window.setTimeout(resolve, 200));
+    expect(screen.getByRole("menu", { name: "银行明细标签筛选" })).toBeInTheDocument();
+
+    await user.click(trigger);
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: "银行明细标签筛选" })).not.toBeInTheDocument();
+    });
+  });
+
+  test("keeps category menu counts based on the unfiltered snapshot after selecting uncategorized", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+
+    let categoryPanel = await openCategoryFilterPanel(user, page);
+    expect(within(categoryPanel).getByRole("menuitem", { name: "全部 299" })).toBeInTheDocument();
+    await user.click(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" }));
+
+    await waitFor(() => {
+      expect(findTransactionRequest(fetchMock, (url) => (
+        url.searchParams.get("category_code") === "uncategorized"
+      ))).toBeDefined();
+    });
+    expect(within(page).getByText("1-100 / 295")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: /标签筛选：未分类 295/ })).toBeInTheDocument();
+
+    categoryPanel = await openCategoryFilterPanel(user, page);
+    expect(within(categoryPanel).getByRole("menuitem", { name: "全部 299" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("menuitem", { name: "未分类 295" })).toBeInTheDocument();
+    expect(within(categoryPanel).getByRole("menuitem", { name: "工资 1" })).toBeInTheDocument();
   });
 
   test("filters code-only system tags by category code without derived label constraints", async () => {
@@ -344,8 +425,13 @@ describe("Bank details page", () => {
     await user.click(within(categoryPanel).getByRole("menuitem", { name: "内部往来款 2" }));
 
     await waitFor(() => {
-      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
-      expect(transactionRequest?.searchParams.get("category_code")).toBe("internal_transfer");
+      const transactionRequest = findTransactionRequest(fetchMock, (url) => (
+        url.searchParams.get("category_code") === "internal_transfer"
+        && url.searchParams.get("category_primary_label") === null
+        && url.searchParams.get("category_sub_label") === null
+        && url.searchParams.get("page") === "1"
+      ));
+      expect(transactionRequest).toBeDefined();
       expect(transactionRequest?.searchParams.get("category_primary_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("category_sub_label")).toBeNull();
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
@@ -438,7 +524,10 @@ describe("Bank details page", () => {
     await user.click(within(drawer).getByRole("button", { name: "重新应用规则" }));
 
     await waitFor(() => {
-      expect(screen.getAllByText("已提交重新应用，银行明细正在刷新。").length).toBeGreaterThan(0);
+      expect(
+        screen.queryAllByText("已提交重新应用，银行明细正在刷新。").length
+        + screen.queryAllByText("重新应用已完成，银行明细已刷新。").length,
+      ).toBeGreaterThan(0);
     });
     await waitFor(() => {
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
@@ -481,6 +570,40 @@ describe("Bank details page", () => {
     expect(screen.queryByText("规则已保存，银行明细已刷新。")).not.toBeInTheDocument();
     expect(within(page).getByText("云南溯源科技有限公司")).toBeInTheDocument();
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
+  });
+
+  test("pauses bank detail read model retry while the keep-alive page is inactive", async () => {
+    const fetchMock = installMockApiFetch({
+      bankDetailInitialAccountReadModelStatus: "fresh",
+      bankDetailInitialTransactionReadModelStatus: "refreshing",
+    });
+
+    renderAuthenticatedAppAt("/bank-details");
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("link", { name: "设置" }));
+    expect(screen.getByTestId("page-frame-bank-details")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("page-frame-settings")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(requestUrls(fetchMock, "/api/bank-details/transactions")).toHaveLength(initialTransactionRequests);
+
+    fireEvent.click(screen.getByRole("link", { name: "银行明细" }));
+    expect(screen.getByTestId("page-frame-bank-details")).toHaveAttribute("aria-hidden", "false");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
   });
 
   test("does not replace a fresh total balance with a stale post-rule-save account payload", async () => {
@@ -921,8 +1044,11 @@ describe("Bank details page", () => {
     const categoryPanel = await openCategoryFilterPanel(user, page);
     await user.click(within(categoryPanel).getByRole("menuitem", { name: "费用 1" }));
     await waitFor(() => {
-      const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
-      expect(transactionRequest?.searchParams.get("category_primary_label")).toBe("费用");
+      const transactionRequest = findTransactionRequest(fetchMock, (url) => (
+        url.searchParams.get("category_primary_label") === "费用"
+        && url.searchParams.get("category_code") === null
+      ));
+      expect(transactionRequest).toBeDefined();
       expect(transactionRequest?.searchParams.get("category_code")).toBeNull();
     });
     await user.click(within(page).getByRole("button", { name: "导出" }));

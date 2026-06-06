@@ -21,7 +21,9 @@ import ReceiptHistoryDrawer from "../components/outputInvoiceCollections/Receipt
 import ReceiptPreviewDrawer from "../components/outputInvoiceCollections/ReceiptPreviewDrawer";
 import ReceiptSettingsDrawer from "../components/outputInvoiceCollections/ReceiptSettingsDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   cancelOutputInvoiceCollectionReminder,
   fetchOutputInvoiceCollectionBankTransactionDetail,
@@ -180,6 +182,7 @@ function normalizeFilterValue(filter: {
 }
 
 export default function OutputInvoiceCollectionsPage() {
+  const { active } = useOptionalPageActivation("output-invoice-collections");
   const { canAdminAccess } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "output-invoice-collections",
@@ -213,6 +216,10 @@ export default function OutputInvoiceCollectionsPage() {
   const [readModelStatus, setReadModelStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
+  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "output-invoice-collections",
+    scrollKey: "collections-table",
+  });
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
 
@@ -324,12 +331,12 @@ export default function OutputInvoiceCollectionsPage() {
   }, [loadRows]);
 
   useEffect(() => {
-    if (readModelStatus !== "refreshing" || loading || refreshing) {
+    if (!active || readModelStatus !== "refreshing" || loading || refreshing) {
       return undefined;
     }
     const retryId = window.setTimeout(() => loadRows("refresh"), READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
-  }, [loadRows, loading, readModelStatus, refreshing]);
+  }, [active, loadRows, loading, readModelStatus, refreshing]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({
@@ -578,6 +585,7 @@ export default function OutputInvoiceCollectionsPage() {
                 onSortChange={handleSortChange}
                 onPageChange={handlePageChange}
                 onPageSizeChange={handlePageSizeChange}
+                tableWrapRef={tableWrapRef}
               />
             </>
           )}

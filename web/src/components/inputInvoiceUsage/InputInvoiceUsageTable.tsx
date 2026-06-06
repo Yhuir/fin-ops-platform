@@ -14,7 +14,7 @@ import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import type { ReactNode } from "react";
+import type { MutableRefObject, ReactNode } from "react";
 
 import type {
   InputInvoiceUsageDetailTarget,
@@ -32,6 +32,7 @@ type InputInvoiceUsageTableProps = {
   onOpenDetail: (target: InputInvoiceUsageDetailTarget) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
 const groupHeaderSx = {
@@ -156,10 +157,11 @@ export default function InputInvoiceUsageTable({
   onOpenDetail,
   onPageChange,
   onPageSizeChange,
+  tableWrapRef,
 }: InputInvoiceUsageTableProps) {
   return (
     <Paper variant="outlined" sx={{ width: "100%", minWidth: 0, overflow: "hidden" }}>
-      <TableContainer sx={{ width: "100%", overflowX: "hidden" }}>
+      <TableContainer ref={tableWrapRef} sx={{ width: "100%", overflowX: "hidden" }}>
         <Table
           aria-label="进项发票使用情况表"
           size="small"

@@ -30,6 +30,7 @@ import type {
   OaPendingPaymentSummary,
 } from "../features/oaPendingPayments/types";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
+import { usePageScrollSession } from "../hooks/usePageScrollSession";
 
 const initialQuery: OaPendingPaymentQuery = {
   page: 1,
@@ -57,6 +58,10 @@ function filterConfigsFromOptions(fields: Array<OaPendingPaymentFieldConfig & { 
 export default function OaPendingPaymentsPage() {
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
+  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
+    pageKey: "oa-pending-payments",
+    scrollKey: "payments-table",
+  });
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState<OaPendingPaymentSummary>({ rowCount: 0 });
   const [filterConfigs, setFilterConfigs] = useState<OaPendingPaymentFieldConfig[]>([]);
@@ -280,6 +285,7 @@ export default function OaPendingPaymentsPage() {
                   onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
                   onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
                   onOpenDetail={setDetailTarget}
+                  tableWrapRef={tableWrapRef}
                 />
               </>
             )}
