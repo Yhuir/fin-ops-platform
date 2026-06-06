@@ -35,7 +35,7 @@
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
-| `phase_5_table_system` | `in_progress` | 2026-06-07 |  | `pending` | P020 app health pilot discovery 已验证；P021 table pilot refactor 已生成并审查 |
+| `phase_5_table_system` | `in_progress` | 2026-06-07 |  | `pending` | MG-P020 已 push 并 verified；P021 table pilot refactor 已生成并审查 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
@@ -59,7 +59,7 @@
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_5_table_system.md`
-- Verification run: P020 docs grep and diff check passed
+- Verification run: P020 docs grep and diff check passed；MG-P020 push verified
 - Failures: none
 - Next action: 执行 `P021-phase-5-app-health-table-pilot-refactor`。
 
@@ -194,6 +194,7 @@
 | 2026-06-07 | `MG-P019-phase-5-table-session-primitive` | `git push origin refactor-ui` | passed | `230ca704` pushed |
 | 2026-06-07 | `P020-phase-5-app-health-table-pilot-discovery` | `rg -n "P020-phase-5-app-health-table-pilot-discovery|AppHealth Table Inventory|Inventory sources|Request performance|P021-phase-5-app-health-table-pilot-refactor" docs/refactor-ui/modules/phase_5_table_system.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | AppHealth pilot table inventory and next prompt recorded |
 | 2026-06-07 | `P020-phase-5-app-health-table-pilot-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P020-phase-5-app-health-table-pilot-discovery` | `git push origin refactor-ui` | passed | `b9213d67` pushed |
 
 ## Push Log
 
@@ -216,3 +217,4 @@
 | 2026-06-07 | `MG-P016-phase-5-table-system-discovery` | `refactor-ui` | `599a3d15` | pushed |
 | 2026-06-07 | `MG-P018-phase-5-finance-table-primitives` | `refactor-ui` | `aa8cbccb` | pushed |
 | 2026-06-07 | `MG-P019-phase-5-table-session-primitive` | `refactor-ui` | `230ca704` | pushed |
+| 2026-06-07 | `MG-P020-phase-5-app-health-table-pilot-discovery` | `refactor-ui` | `b9213d67` | pushed |
