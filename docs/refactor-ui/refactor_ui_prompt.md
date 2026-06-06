@@ -355,7 +355,7 @@
 
 ### MG-P004-phase-1-docs-and-tokens
 
-- Status: `reviewed-not-executed`
+- Status: `verified`
 - Scope:
   - `web/src/app/styles.css`
   - `web/src/test/DesignTokens.test.ts`
@@ -379,7 +379,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed, not executed in P004 implementation slice。
+- Status: verified。
+
+#### Execution
+
+- Commit: `541cd8d6`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified
 
 ### MG Prompt Template
 

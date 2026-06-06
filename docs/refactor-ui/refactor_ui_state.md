@@ -31,7 +31,7 @@
 | Phase | Status | Started | Completed | Verification | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；MG-P001 已 push |
-| `phase_1_docs_and_tokens` | `in_progress` | 2026-06-07 |  | `passed` | P004 token implementation verified；MG pending |
+| `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `pending` |  |  |  | React 19 + HeroUI v3 + Tailwind v4 |
 | `phase_3_primitives` | `pending` |  |  |  | 本地 UI primitives |
 | `phase_4_shell` | `pending` |  |  |  | App Shell 迁移 |
@@ -64,7 +64,7 @@
   - `docs/refactor-ui/modules/phase_1_docs_and_tokens.md`
 - Verification run: passed
 - Failures: none
-- Next action: 执行 `MG-P004-phase-1-docs-and-tokens`。
+- Next action: 从 `refactor-ui` 生成并执行 `phase_2_platform_stack` discovery prompt。
 
 ## Prompt Lifecycle
 
@@ -91,7 +91,7 @@
 | --- | --- | --- | --- |
 | docs bootstrap | `verified` | `P000-docs-bootstrap` | 建立工作流文档 |
 | baseline docs gap fill | `verified` | `P001-baseline-doc-gap-fill` | 基线、平台栈、测试策略、模块队列补齐 |
-| docs and tokens | `in_progress` | `P004-phase-1-token-implementation` | Token implementation verified，等待 MG |
+| docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `pending` |  | React 19 + HeroUI + Tailwind |
 | primitives | `pending` |  | UI primitives |
 | app shell | `pending` |  | 新 shell 包住关联台 |
@@ -119,6 +119,7 @@
 | 2026-06-07 | `P002-phase-1-docs-and-tokens-discovery` | `rg -n "P002-phase-1-docs-and-tokens-discovery|Target Token Boundary|Required Characterization Tests|P003-phase-1-token-characterization-tests" docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_1_docs_and_tokens.md` | passed | token discovery and next prompt recommendation exist |
 | 2026-06-07 | `P003-phase-1-token-characterization-tests` | `cd web && npm run test -- DesignTokens.test.ts TableLayoutTokens.test.ts` | expected-fail | Token/import CSS not implemented before P004 |
 | 2026-06-07 | `P004-phase-1-token-implementation` | `cd web && npx vitest run DesignTokens.test.ts TableLayoutTokens.test.ts` | passed | CSS token bridge tests pass |
+| 2026-06-07 | `MG-P004-phase-1-docs-and-tokens` | `git push origin refactor-ui` | passed | `541cd8d6` pushed |
 
 ## Push Log
 
@@ -126,3 +127,4 @@
 | --- | --- | --- | --- | --- |
 | 2026-06-07 | `MG-P000-docs-bootstrap` | `refactor-ui` | `52f4520f` | pushed |
 | 2026-06-07 | `MG-P001-baseline-doc-gap-fill` | `refactor-ui` | `8f3daae8` | pushed |
+| 2026-06-07 | `MG-P004-phase-1-docs-and-tokens` | `refactor-ui` | `541cd8d6` | pushed |
