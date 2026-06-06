@@ -656,52 +656,56 @@ function BankCategoryFilterControl({
               id={categoryPanelId}
               role="menu"
             >
-              {renderCategoryFilterButton(ALL_CATEGORY_FILTER, "全部", totalCount, "root", "bank-category-filter-action")}
-              {renderCategoryFilterButton(
-                UNCATEGORIZED_CATEGORY_FILTER,
-                "未分类",
-                categoryCounts.uncategorized ?? 0,
-                "root",
-                "bank-category-filter-action",
-              )}
+              <Box className="bank-category-filter-actions" component="li">
+                {renderCategoryFilterButton(ALL_CATEGORY_FILTER, "全部", totalCount, "root", "bank-category-filter-action")}
+                {renderCategoryFilterButton(
+                  UNCATEGORIZED_CATEGORY_FILTER,
+                  "未分类",
+                  categoryCounts.uncategorized ?? 0,
+                  "root",
+                  "bank-category-filter-action",
+                )}
+              </Box>
               <Divider className="bank-category-filter-divider" component="li" />
-              {categoryGroups.map((group) => (
-                <Box className="bank-category-filter-group" component="li" key={group.key}>
-                  {renderCategoryFilterButton(
-                    group.directItem && group.children.length === 0
-                      ? tagCategoryFilter(group.directItem)
-                      : { kind: "primary", primaryLabel: group.label },
-                    group.label,
-                    group.count,
-                    "primary",
-                    "bank-category-filter-primary-row",
-                  )}
-                  {group.directItem && group.children.length > 0 ? (
-                    renderCategoryFilterButton(
-                      tagCategoryFilter(group.directItem),
+              <Box className="bank-category-filter-sections" component="li" role="group">
+                {categoryGroups.map((group) => (
+                  <Box className="bank-category-filter-group" key={group.key}>
+                    {renderCategoryFilterButton(
+                      group.directItem && group.children.length === 0
+                        ? tagCategoryFilter(group.directItem)
+                        : { kind: "primary", primaryLabel: group.label },
                       group.label,
-                      group.directItem.count,
-                      "child",
-                      "bank-category-filter-child-row bank-category-filter-direct-child",
-                    )
-                  ) : null}
-                  {group.children.length > 0 ? (
-                    <Box className="bank-category-filter-children" role="group">
-                      {group.children.map((child) => (
-                        <Fragment key={child.code}>
-                          {renderCategoryFilterButton(
-                            tagCategoryFilter(child),
-                            child.subLabel || child.label,
-                            child.count,
-                            "child",
-                            "bank-category-filter-child-row",
-                          )}
-                        </Fragment>
-                      ))}
-                    </Box>
-                  ) : null}
-                </Box>
-              ))}
+                      group.count,
+                      "primary",
+                      "bank-category-filter-primary-row",
+                    )}
+                    {group.directItem && group.children.length > 0 ? (
+                      renderCategoryFilterButton(
+                        tagCategoryFilter(group.directItem),
+                        group.label,
+                        group.directItem.count,
+                        "child",
+                        "bank-category-filter-child-row bank-category-filter-direct-child",
+                      )
+                    ) : null}
+                    {group.children.length > 0 ? (
+                      <Box className="bank-category-filter-children" role="group">
+                        {group.children.map((child) => (
+                          <Fragment key={child.code}>
+                            {renderCategoryFilterButton(
+                              tagCategoryFilter(child),
+                              child.subLabel || child.label,
+                              child.count,
+                              "child",
+                              "bank-category-filter-child-row",
+                            )}
+                          </Fragment>
+                        ))}
+                      </Box>
+                    ) : null}
+                  </Box>
+                ))}
+              </Box>
             </List>
           </Paper>
         </Popper>

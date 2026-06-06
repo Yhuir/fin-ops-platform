@@ -244,12 +244,15 @@ describe("Bank details page", () => {
     expect(source).toMatch(/\.bank-transaction-pagination\.MuiTablePagination-root\s*\{[^}]*flex:\s*0 0 auto[^}]*border-top:\s*1px solid var\(--bank-border-subtle\)/s);
   });
 
-  test("uses a compact two-column category filter layout", () => {
+  test("uses a flat dense multi-column category filter layout", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
     expect(source).toMatch(/\.bank-category-filter-icon-button\.MuiIconButton-root\s*\{[^}]*width:\s*30px[^}]*height:\s*30px/s);
-    expect(source).toMatch(/\.bank-category-filter-list\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*10\.5px/s);
+    expect(source).toMatch(/\.bank-category-filter-panel\s*\{[^}]*width:\s*min\(600px,\s*calc\(100vw - 40px\)\)/s);
+    expect(source).not.toMatch(/\.bank-category-filter-panel\s*\{[^}]*max-height:/s);
+    expect(source).toMatch(/\.bank-category-filter-sections\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(120px,\s*1fr\)\)/s);
+    expect(source).toMatch(/\.bank-category-filter-label\s*\{[^}]*font-size:\s*10px/s);
+    expect(source).not.toMatch(/\.bank-category-filter-group\s*\{[^}]*border:\s*1px[^}]*background:/s);
   });
 
   test("formats the internal transfer tooltip as structured rows", () => {
