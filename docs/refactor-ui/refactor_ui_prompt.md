@@ -2506,7 +2506,7 @@ Scope: 只做 CostStatistics 页面 discovery，不改运行时代码。
 ### P040-phase-6-bank-details-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: 银行明细 `/bank-details` 页面迁移 discovery，只读代码和测试并建立模块文档。
 
@@ -2530,6 +2530,51 @@ Scope: 只做 BankDetails 页面 discovery，不改运行时代码。
 - Behavior equivalence required: yes，旧导出菜单/分类 popover/右侧抽屉形态必须记录。
 - Docs on demand: yes，BankDetails 是 high-risk table + drawer + popover 页面，需要专项 md。
 - Verification defined: docs existence/key phrase checks、diff check、status。
+
+#### Execution Notes
+
+- 新增 `docs/refactor-ui/modules/phase_6_bank_details.md`。
+- 记录 BankDetails runtime MUI inventory：页面 layout/account list/date Popover/export menu/category filter Popper/transaction table/TablePagination/TypeCell Popper/Internal transfer tooltip/BankCategoryTag。
+- 记录 AutoTagRulesDrawer runtime MUI inventory：right Drawer、wide rule table、form controls、active/archived tabs、condition editor dialog、archive confirmation dialog、MUI icons。
+- 记录用户可见入口、现有测试覆盖、测试迁移缺口、后续 P041-P045 切片和 MG 边界。
+- 本切片只改文档，不修改前端实现、测试、mock、后端、API、read model、worker 或关联台。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_bank_details.md`
+  - `rg -n "P040-phase-6-bank-details-discovery|Current MUI Inventory|User-visible Entrypoints|P041-phase-6-bank-details-characterization-tests" docs/refactor-ui/modules/phase_6_bank_details.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### P041-phase-6-bank-details-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: 只更新 BankDetails 和 AutoTagRulesDrawer tests，锁定银行明细页非 MUI/project primitive contract；不改实现。
+
+#### Prompt
+
+```text
+Prompt ID: P041-phase-6-bank-details-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: 只更新 BankDetails 和 AutoTagRulesDrawer tests，锁定银行明细页非 MUI/project primitive contract；不改实现。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/features/bankDetails/AutoTagRulesDrawer.tsx、web/src/features/bankDetails/BankCategoryTag.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/test/BankDetailsPage.test.tsx 和 web/src/test/AutoTagRulesDrawer.test.tsx。只修改 `web/src/test/BankDetailsPage.test.tsx` 和 `web/src/test/AutoTagRulesDrawer.test.tsx`：把 source/CSS 中 MUI class assertions 改成 project primitive assertions；新增断言锁定 bank details root/account sidebar/transaction table/pagination/date Popover/export menu/category filter Popper/row type Popper/internal transfer tooltip/auto tag rules right drawer/condition dialog/archive dialog 均保留旧 accessible labels 和旧交互形态，且 migrated root 不再是 `.Mui*`。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P042 shell-toolbar-dates prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Test-only: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Behavior contract preserved: yes，锁定旧 right drawer、dialogs、menus、Popper、table、pagination 和 date Popover 形态。
+- Expected failure acceptable: yes，BankDetails runtime still renders MUI roots before P042-P045。
+- Verification defined: targeted BankDetails/AutoTagRulesDrawer Vitest, diff check, status。
 
 ### MG Prompt Template
 

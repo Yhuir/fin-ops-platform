@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P040-phase-6-bank-details-discovery`
+- Current Prompt ID: `P041-phase-6-bank-details-characterization-tests`
 - Current MG ID: `not_drafted`
 
 ## Global Invariants
@@ -54,17 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 bank details discovery。
+- Scope: phase 6 bank details characterization tests。
 - Files touched:
-  - `docs/refactor-ui/modules/phase_6_import_pages.md`
+  - `docs/refactor-ui/modules/phase_6_bank_details.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `web/src/test/ImportCenterPage.test.tsx`
-  - `web/src/components/imports/ImportWorkflowPage.tsx`
-  - `web/src/app/styles.css`
-- Verification run: MG-P038 pushed commit `4baffcff` to `origin/refactor-ui`。
+- Verification run: P040 docs checks passed。
 - Failures: none。
-- Next action: 执行 `P040-phase-6-bank-details-discovery`。
+- Next action: 执行 `P041-phase-6-bank-details-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -96,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P040-phase-6-bank-details-discovery` | CostStatistics table MG-P038 verified and pushed；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails discovery |
+| page batches | `in_progress` | `P041-phase-6-bank-details-characterization-tests` | BankDetails discovery P040 verified；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails characterization tests |
 
 ## Verification Log
 
@@ -254,6 +251,10 @@
 | 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `if rg -n 'cost-data-grid-shell|\.cost-data-grid-shell|\.MuiDataGrid' web/src/components/cost-statistics web/src/pages/CostStatisticsPage.tsx web/src/test/CostStatisticsPage.test.tsx; then exit 1; else exit 0; fi` | passed | CostStatistics component/test scope has no cost DataGrid CSS or DataGrid class residue |
 | 2026-06-07 | `P038-phase-6-cost-statistics-table-migration` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P038-phase-6-cost-statistics-table-migration` | `git push origin refactor-ui` | passed | Commit `4baffcff` pushed |
+| 2026-06-07 | `P040-phase-6-bank-details-discovery` | `test -f docs/refactor-ui/modules/phase_6_bank_details.md` | passed | BankDetails module discovery doc exists |
+| 2026-06-07 | `P040-phase-6-bank-details-discovery` | `rg -n "P040-phase-6-bank-details-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P041-phase-6-bank-details-characterization-tests" docs/refactor-ui/modules/phase_6_bank_details.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | BankDetails inventory and next prompt recorded |
+| 2026-06-07 | `P040-phase-6-bank-details-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P040-phase-6-bank-details-discovery` | `git status --short --branch` | passed | 仅 P040 文档变更 |
 
 ## Push Log
 
