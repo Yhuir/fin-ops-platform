@@ -79,6 +79,28 @@ function getStatCard(label: string) {
   return card;
 }
 
+function expectProjectCostShell() {
+  const page = screen.getByRole("heading", { name: "成本统计" }).closest(".cost-page");
+  expect(page).not.toBeNull();
+  expect(page).not.toHaveClass("MuiBox-root");
+  const viewSwitcher = screen.getByRole("tablist", { name: "成本统计视图切换" });
+  expect(viewSwitcher).toHaveClass("cost-view-switcher");
+  expect(viewSwitcher).not.toHaveClass("MuiTabs-root");
+}
+
+function expectProjectCostTable(name: string) {
+  const grid = screen.getByRole("grid", { name });
+  const tableRoot = grid.closest(".finance-table");
+  expect(tableRoot).not.toBeNull();
+  expect(grid).not.toHaveClass("MuiDataGrid-root");
+}
+
+function expectProjectCostDialog(name: string) {
+  const dialog = screen.getByRole("dialog", { name });
+  expect(dialog.closest(".MuiDialog-root")).toBeNull();
+  expect(dialog).toHaveClass(name === "导出中心" ? "export-center-modal" : "cost-detail-modal");
+}
+
 function findCostStatisticsHeading() {
   return screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
 }
@@ -108,8 +130,10 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    expectProjectCostShell();
     expect(screen.getByRole("button", { name: "按时间" })).toHaveClass("active");
     const timeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
+    expectProjectCostTable("按时间统计表");
     expect(within(timeGrid).getByRole("button", { name: "查看流水 cost-txn-003" })).toBeInTheDocument();
     expect(within(timeGrid).queryByRole("button", { name: "查看流水 cost-txn-004" })).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
@@ -125,6 +149,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "四月" }));
 
     const nextTimeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
+    expectProjectCostTable("按时间统计表");
     expect(within(nextTimeGrid).getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=2026-04&project_scope=active", expect.any(Object));
   });
@@ -163,6 +188,7 @@ describe("Cost statistics page", () => {
     await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
 
     const transactionTable = screen.getByRole("grid", { name: "项目对应流水表" });
+    expectProjectCostTable("项目对应流水表");
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
     expect(within(transactionTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
@@ -170,6 +196,7 @@ describe("Cost statistics page", () => {
     await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" }));
 
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
+    expectProjectCostDialog("流水详情");
     expect(dialog).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/transactions/cost-txn-001?project_scope=all",
@@ -246,6 +273,7 @@ describe("Cost statistics page", () => {
     await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /交通费/ }));
 
     const transactionTable = screen.getByRole("grid", { name: "按费用类型流水表" });
+    expectProjectCostTable("按费用类型流水表");
     expect(within(transactionTable).getByText("2026-03-18 17:02:09")).toBeInTheDocument();
     expect(within(transactionTable).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(transactionTable).getByText("860.00")).toBeInTheDocument();
@@ -253,6 +281,7 @@ describe("Cost statistics page", () => {
     expect(within(transactionTable).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     await user.click(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-003" }));
     const dialog = await screen.findByRole("dialog", { name: "流水详情" });
+    expectProjectCostDialog("流水详情");
     expect(dialog).toBeInTheDocument();
     const expenseDetailBankName = within(dialog).getByText("招商银行");
     expect(expenseDetailBankName).toBeInTheDocument();
@@ -304,6 +333,7 @@ describe("Cost statistics page", () => {
 
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
     const transactionTable = screen.getByRole("grid", { name: "银行对应流水表" });
+    expectProjectCostTable("银行对应流水表");
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
     expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
 
@@ -364,6 +394,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "按月统计 2026年3月" }));
     const scopeControls = screen.getByRole("tablist", { name: "时间统计时间范围" }).closest(".cost-scope-controls");
     expect(scopeControls).not.toBeNull();
+    expect(scopeControls).not.toHaveClass("MuiTabs-root");
     const floatingPanel = scopeControls?.querySelector(".cost-scope-floating-panel");
     expect(floatingPanel).not.toBeNull();
   });
@@ -443,6 +474,7 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按时间" })).toHaveClass("active");
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();
     expect(within(dialog).getByRole("button", { name: "统计月份" })).toBeInTheDocument();
@@ -485,6 +517,7 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按项目" })).toHaveClass("active");
     expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked();
     await user.click(within(dialog).getByLabelText("交通费"));
@@ -517,6 +550,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "导出中心" }));
 
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按费用类型" })).toHaveClass("active");
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();
     expect(within(dialog).getByRole("button", { name: "统计月份" })).toBeInTheDocument();
