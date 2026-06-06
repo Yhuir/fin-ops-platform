@@ -33,7 +33,7 @@
 | `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；MG-P001 已 push |
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
-| `phase_3_primitives` | `in_progress` | 2026-06-07 |  | `partial-passed` | P006 StatePanel/PermissionNotice verified，P007 AppDialog/ConfirmActionDialog verified，MG-P007 待执行 |
+| `phase_3_primitives` | `in_progress` | 2026-06-07 |  | `partial-passed` | P006 StatePanel/PermissionNotice verified，P007 AppDialog/ConfirmActionDialog verified，MG-P007 已 push |
 | `phase_4_shell` | `pending` |  |  |  | App Shell 迁移 |
 | `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
@@ -65,7 +65,7 @@
   - `docs/refactor-ui/modules/phase_3_primitives.md`
 - Verification run: passed
 - Failures: none
-- Next action: 执行 `MG-P007-phase-3-dialog-primitives`。
+- Next action: 从 `refactor-ui` 生成下一条 `phase_3_primitives` prompt。
 
 ## Prompt Lifecycle
 
@@ -94,7 +94,7 @@
 | baseline docs gap fill | `verified` | `P001-baseline-doc-gap-fill` | 基线、平台栈、测试策略、模块队列补齐 |
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
-| primitives | `in_progress` | `P007-phase-3-dialog-primitives` | StatePanel/PermissionNotice verified，dialog primitives verified，MG-P007 待执行 |
+| primitives | `in_progress` | `P007-phase-3-dialog-primitives` | StatePanel/PermissionNotice verified，dialog primitives verified，MG-P007 已 push |
 | app shell | `pending` |  | 新 shell 包住关联台 |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
@@ -135,6 +135,7 @@
 | 2026-06-07 | `P007-phase-3-dialog-primitives` | `cd web && npm run build` | failed-then-passed | First failed on optional maxWidth type boundary; fixed with NonNullable and build passed |
 | 2026-06-07 | `P007-phase-3-dialog-primitives` | `if rg -n '@mui/' web/src/components/common/AppDialog.tsx web/src/components/common/ConfirmActionDialog.tsx; then exit 1; else exit 0; fi` | passed | No MUI imports in dialog primitives |
 | 2026-06-07 | `P007-phase-3-dialog-primitives` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P007-phase-3-dialog-primitives` | `git push origin refactor-ui` | passed | `32841902` pushed |
 
 ## Push Log
 
@@ -145,3 +146,4 @@
 | 2026-06-07 | `MG-P004-phase-1-docs-and-tokens` | `refactor-ui` | `541cd8d6` | pushed |
 | 2026-06-07 | `MG-P005-phase-2-platform-stack` | `refactor-ui` | `1eecabb9` | pushed |
 | 2026-06-07 | `MG-P006-phase-3-state-permission-primitives` | `refactor-ui` | `ca962587` | pushed |
+| 2026-06-07 | `MG-P007-phase-3-dialog-primitives` | `refactor-ui` | `32841902` | pushed |

@@ -343,7 +343,7 @@
 
 ### MG-P007-phase-3-dialog-primitives
 
-- Status: `mg_reviewed`
+- Status: `verified`
 - Scope:
   - `web/src/components/common/AppDialog.tsx`
   - `web/src/components/common/ConfirmActionDialog.tsx`
@@ -368,7 +368,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `32841902`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified
 
 ### P000-docs-bootstrap
 
