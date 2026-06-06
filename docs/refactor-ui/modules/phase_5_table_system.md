@@ -246,3 +246,35 @@ Scope: 新增 HeroUI table session primitive，替代 MUI DataGrid session 的�
 
 运行新 table session tests、`useMuiDataGridPageSession.test.tsx` 回归、P018 table/common/platform tests、build、MUI import grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，记录下一条低风险 table pilot migration prompt。
 ```
+
+## P019 Execution Notes
+
+- Status: verified。
+- Added hook: `web/src/hooks/useFinanceTableSession.ts`。
+- Added tests: `web/src/test/useFinanceTableSession.test.tsx`。
+- Session model:
+  - 1-based `page` / `pageSize` for HeroUI Pagination。
+  - `sortDescriptor` with `ascending` / `descending`。
+  - `selectedRowIds` filtered by current valid row ids。
+  - native scroll container `top` / `left` restore。
+- Existing MUI hook retained: `useMuiDataGridPageSession` unchanged。
+- Business pages not migrated。
+- Verification:
+  - `cd web && npx vitest run useFinanceTableSession.test.tsx`: passed, 4 tests。
+  - `cd web && npx vitest run useFinanceTableSession.test.tsx useMuiDataGridPageSession.test.tsx TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx`: passed, 23 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/' web/src/hooks/useFinanceTableSession.ts web/src/test/useFinanceTableSession.test.tsx web/src/components/common/FinanceTable.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+
+## P020 Prompt Draft
+
+```text
+Prompt ID: P020-phase-5-app-health-table-pilot-discovery
+Phase: phase_5_table_system
+Type: discovery/planning
+Scope: 只做 AppHealthOperationsPage 表格 pilot discovery；不迁移页面实现。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/hooks/useFinanceTableSession.ts。只做 AppHealthOperationsPage table pilot discovery/planning，记录旧页面表格清单、列角色、用户可见入口、loading/empty/error 状态、MUI imports、测试断言、应复用的 FinanceTable primitives 和下一条 P021 characterization/refactor prompt。不得迁移页面实现，不改后端/API/read model/worker/关联台。
+
+更新 docs/refactor-ui/modules/phase_5_table_system.md、refactor_ui_state.md、refactor_ui_prompt.md。运行文档/key grep、git diff --check、git status。
+```

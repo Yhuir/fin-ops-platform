@@ -1185,7 +1185,7 @@
 ### P019-phase-5-table-session-primitive
 
 - Phase: `phase_5_table_system`
-- Status: `reviewed`
+- Status: `verified`
 - Type: `characterization tests -> extraction/refactor`
 - Scope: 新增 HeroUI table session primitive，替代 MUI DataGrid session 的用户可见状态；不迁业务页面。
 
@@ -1203,6 +1203,47 @@
 - Existing MUI DataGrid hook untouched: yes，直到页面迁移时逐步替换。
 - Workbench internals frozen: yes。
 - Verification defined: new session tests、old MUI session regression、P018 tests、build、MUI import grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- 新增 `web/src/hooks/useFinanceTableSession.ts`。
+- 新增 `web/src/test/useFinanceTableSession.test.tsx`。
+- Hook 复用 `PageSessionStateContext`，不依赖 MUI。
+- 覆盖用户可见状态：1-based page/pageSize、sort descriptor、row selection、native scroll position restore。
+- 保留旧 `useMuiDataGridPageSession`，未迁移业务页面或 DataGrid 页面。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run useFinanceTableSession.test.tsx`
+  - `cd web && npx vitest run useFinanceTableSession.test.tsx useMuiDataGridPageSession.test.tsx TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/' web/src/hooks/useFinanceTableSession.ts web/src/test/useFinanceTableSession.test.tsx web/src/components/common/FinanceTable.tsx; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - Build passed with known HeroUI/Tailwind generated CSS minifier warnings and existing large chunk warning.
+
+### P020-phase-5-app-health-table-pilot-discovery
+
+- Phase: `phase_5_table_system`
+- Status: `reviewed`
+- Type: `discovery/planning`
+- Scope: 只做 AppHealthOperationsPage 表格 pilot discovery；不迁移页面实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/hooks/useFinanceTableSession.ts。只做 AppHealthOperationsPage table pilot discovery/planning，记录旧页面表格清单、列角色、用户可见入口、loading/empty/error 状态、MUI imports、测试断言、应复用的 FinanceTable primitives 和下一条 P021 characterization/refactor prompt。不得迁移页面实现，不改后端/API/read model/worker/关联台。更新 docs/refactor-ui/modules/phase_5_table_system.md、refactor_ui_state.md、refactor_ui_prompt.md。运行文档/key grep、git diff --check、git status。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Runtime implementation untouched: yes。
+- Workbench internals frozen: yes。
+- Business page migration deferred: yes，P020 只做 pilot discovery。
+- Verification defined: docs/key grep、`git diff --check`、`git status --short --branch`。
 
 ## Prompt History
 
@@ -1222,14 +1263,15 @@
 | `P016-phase-5-table-system-discovery` | `phase_5_table_system` | table discovery | `verified` | passed | 表格迁移队列、HeroUI Table 能力边界、排版契约和 P017 prompt 已记录 |
 | `P017-phase-5-table-characterization-tests` | `phase_5_table_system` | table tests | `verified` | expected fail | 表格系统 characterization tests 已改写，暴露 FinanceTable CSS/primitive 缺口 |
 | `P018-phase-5-finance-table-primitives` | `phase_5_table_system` | table primitives | `verified` | passed | FinanceTable primitives 和 CSS contract 已通过 tests/build |
-| `P019-phase-5-table-session-primitive` | `phase_5_table_system` | table session | `reviewed` | pending | 下一条执行 prompt，新增 HeroUI table session primitive |
+| `P019-phase-5-table-session-primitive` | `phase_5_table_system` | table session | `verified` | passed | useFinanceTableSession 已新增，新旧 session tests 和 build 通过 |
+| `P020-phase-5-app-health-table-pilot-discovery` | `phase_5_table_system` | app health table pilot discovery | `reviewed` | pending | 下一条执行 prompt，先 discovery 低风险 operational tables |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P019-phase-5-table-session-primitive`。
+下一条 prompt 应执行 `P020-phase-5-app-health-table-pilot-discovery`。
 
 ```text
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/hooks/useMuiDataGridPageSession.ts、web/src/test/useMuiDataGridPageSession.test.tsx、web/src/contexts/PageSessionStateContext.tsx、web/src/contexts/pageSessionStorage.ts 和 web/src/components/common/FinanceTable.tsx。只新增 `useFinanceTableSession` 或等价 hook 及 tests，覆盖用户可见 table 状态：page/pageSize、sort descriptor、row selection、scroll position restore。不要迁移 CostStatistics、ImportWorkflow、settings DataGrid 或任何业务页面；不要删除 `useMuiDataGridPageSession`。运行新 table session tests、`useMuiDataGridPageSession.test.tsx` 回归、P018 table/common/platform tests、build、MUI import grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，记录下一条低风险 table pilot migration prompt。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_5_table_system.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/AppHealthOperationsPage.tsx、web/src/test/AppHealthOperationsPage.test.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/hooks/useFinanceTableSession.ts。只做 AppHealthOperationsPage table pilot discovery/planning，记录旧页面表格清单、列角色、用户可见入口、loading/empty/error 状态、MUI imports、测试断言、应复用的 FinanceTable primitives 和下一条 P021 characterization/refactor prompt。不得迁移页面实现，不改后端/API/read model/worker/关联台。更新 docs/refactor-ui/modules/phase_5_table_system.md、refactor_ui_state.md、refactor_ui_prompt.md。运行文档/key grep、git diff --check、git status。
 ```
 
 ## Cumulative MG Prompts
