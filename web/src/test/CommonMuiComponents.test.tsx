@@ -6,6 +6,7 @@ import { vi } from "vitest";
 import MuiProviders from "../app/MuiProviders";
 import ConfirmActionDialog from "../components/common/ConfirmActionDialog";
 import FileDropzone from "../components/common/FileDropzone";
+import PermissionNotice from "../components/common/PermissionNotice";
 import StatePanel from "../components/common/StatePanel";
 
 function renderWithMui(ui: React.ReactElement) {
@@ -13,7 +14,7 @@ function renderWithMui(ui: React.ReactElement) {
 }
 
 describe("common MUI components", () => {
-  test("renders loading and error state panels with accessible roles", () => {
+  test("renders state panels with accessible roles and loading affordances", () => {
     renderWithMui(
       <>
         <StatePanel tone="loading" title="正在加载">
@@ -27,6 +28,26 @@ describe("common MUI components", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("正在加载");
     expect(screen.getByRole("alert")).toHaveTextContent("保存失败");
+    expect(screen.getByLabelText("加载中")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "加载进度" })).toBeInTheDocument();
+  });
+
+  test("keeps compact loading state concise", () => {
+    renderWithMui(
+      <StatePanel tone="loading" title="正在加载" compact>
+        请稍候
+      </StatePanel>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在加载");
+    expect(screen.getByLabelText("加载中")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: "加载进度" })).not.toBeInTheDocument();
+  });
+
+  test("renders permission notice as a warning status", () => {
+    renderWithMui(<PermissionNotice>当前账号没有审核权限。</PermissionNotice>);
+
+    expect(screen.getByRole("status")).toHaveTextContent("当前账号没有审核权限。");
   });
 
   test("confirms and cancels actions through the shared dialog", async () => {

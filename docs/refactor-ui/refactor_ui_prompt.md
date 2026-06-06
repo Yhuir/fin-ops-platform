@@ -222,6 +222,77 @@
   - `git status --short --branch`
   - Build passed with HeroUI/Tailwind generated CSS minifier warnings and existing bundle size warning.
 
+### P006-phase-3-state-permission-primitives
+
+- Phase: `phase_3_primitives`
+- Status: `approved_for_execution`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: 只迁移 `StatePanel` 与 `PermissionNotice` 两个公共提示 primitive，从 MUI Alert/Progress/Spinner/Lock icon 迁到 HeroUI Alert/Spinner/ProgressBar + Tailwind token classes。
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/common/StatePanel.tsx、web/src/components/common/PermissionNotice.tsx、web/src/test/CommonMuiComponents.test.tsx 和相关使用点。使用 HeroUI MCP Alert、Spinner、ProgressBar docs 核对 API。只处理 StatePanel 与 PermissionNotice，不迁移 AppDialog、ConfirmActionDialog、AppDrawer、FileDropzone、App Shell 或业务页面。先把 CommonMuiComponents.test.tsx 中 StatePanel 测试改为用户可观察语义断言，并增加 PermissionNotice 行为断言；再把 StatePanel/PermissionNotice 实现迁到 HeroUI + Tailwind token classes。保留 tone/title/children/compact 契约，保留 loading=status、error=alert、非 error=status、loading indicator 和非 compact progressbar 语义。不得改后端/API/read model/worker，不得改关联台内部工作区。运行 targeted tests、build、MUI import grep、diff check 和 git status。更新 state/prompt/module docs。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Business pages untouched: yes。
+- Overlay shape not involved: yes。
+- User-visible contract preserved: yes，锁定 `tone/title/children/compact`、roles、loading indicator 和 progressbar。
+- Characterization tests required: yes，改为行为/语义断言，避免 MUI class/theme 断言。
+- Verification defined: targeted Vitest、build、MUI import grep、`git diff --check`、`git status --short --branch`。
+
+#### Execution Notes
+
+- `StatePanel` 已从 MUI Alert/CircularProgress/LinearProgress/Typography/Box/Stack 迁到 HeroUI Alert/Spinner/ProgressBar + token classes。
+- `PermissionNotice` 已从 MUI Alert/Lock icon 迁到 HeroUI Alert + token classes。
+- `CommonMuiComponents.test.tsx` 已增加 loading indicator、compact loading、permission notice 行为断言。
+- `web/src/app/styles.css` 已添加 `finance-state-panel*` primitive token classes。
+- 未迁移 AppDialog、ConfirmActionDialog、AppDrawer、FileDropzone、App Shell 或业务页面。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `rg -n '@mui/' web/src/components/common/StatePanel.tsx web/src/components/common/PermissionNotice.tsx`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P006-phase-3-state-permission-primitives
+
+- Status: `mg_reviewed`
+- Scope:
+  - `web/src/components/common/StatePanel.tsx`
+  - `web/src/components/common/PermissionNotice.tsx`
+  - `web/src/test/CommonMuiComponents.test.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_3_primitives.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_3_primitives.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P006 state/permission primitive 文件：web/src/components/common/StatePanel.tsx、web/src/components/common/PermissionNotice.tsx、web/src/test/CommonMuiComponents.test.tsx、web/src/app/styles.css、docs/refactor-ui/modules/phase_3_primitives.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；rg -n '@mui/' web/src/components/common/StatePanel.tsx web/src/components/common/PermissionNotice.tsx；git diff --check；git status --short --branch。提交信息使用 feat: migrate state notice primitives。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: reviewed。
+
 ### P000-docs-bootstrap
 
 - Phase: `phase_0_baseline`

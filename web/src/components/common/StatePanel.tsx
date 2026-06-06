@@ -1,9 +1,4 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import CircularProgress from "@mui/material/CircularProgress";
-import LinearProgress from "@mui/material/LinearProgress";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
+import { Alert, ProgressBar, Spinner } from "@heroui/react";
 import type { ReactNode } from "react";
 
 type StatePanelTone = "loading" | "empty" | "error" | "info" | "success" | "warning";
@@ -15,34 +10,64 @@ type StatePanelProps = {
   compact?: boolean;
 };
 
-function severityFromTone(tone: StatePanelTone) {
-  if (tone === "empty" || tone === "loading") {
-    return "info";
+function statusFromTone(tone: StatePanelTone) {
+  if (tone === "error") {
+    return "danger";
   }
-  return tone;
+  if (tone === "success" || tone === "warning") {
+    return tone;
+  }
+  if (tone === "loading" || tone === "info") {
+    return "accent";
+  }
+  return "default";
+}
+
+function classNames(...values: Array<string | false | undefined>) {
+  return values.filter(Boolean).join(" ");
 }
 
 export default function StatePanel({ tone, title, children, compact = false }: StatePanelProps) {
+  const className = classNames(
+    "finance-state-panel",
+    `finance-state-panel--${tone}`,
+    compact && "finance-state-panel--compact",
+  );
+
   if (tone === "loading") {
     return (
-      <Alert
-        icon={<CircularProgress aria-label="加载中" size={compact ? 16 : 18} />}
-        severity="info"
-        role="status"
-      >
-        <Stack spacing={compact ? 0.5 : 1}>
-          {title ? <Typography fontWeight={800}>{title}</Typography> : null}
-          {children ? <Box>{children}</Box> : null}
-          {!compact ? <LinearProgress aria-label="加载进度" /> : null}
-        </Stack>
+      <Alert className={className} role="status" status="accent">
+        <Alert.Indicator>
+          <Spinner aria-label="加载中" color="accent" size="sm" />
+        </Alert.Indicator>
+        <Alert.Content className="finance-state-panel__content">
+          {title ? <Alert.Title className="finance-state-panel__title">{title}</Alert.Title> : null}
+          {children ? <div className="finance-state-panel__description">{children}</div> : null}
+          {!compact ? (
+            <ProgressBar
+              aria-label="加载进度"
+              className="finance-state-panel__progress"
+              color="accent"
+              isIndeterminate
+              size="sm"
+            >
+              <ProgressBar.Track>
+                <ProgressBar.Fill />
+              </ProgressBar.Track>
+            </ProgressBar>
+          ) : null}
+        </Alert.Content>
       </Alert>
     );
   }
 
   return (
-    <Alert severity={severityFromTone(tone)} role={tone === "error" ? "alert" : "status"}>
-      {title ? <Typography fontWeight={800}>{title}</Typography> : null}
-      {children ? <Box sx={{ mt: title ? 0.5 : 0 }}>{children}</Box> : null}
+    <Alert className={className} role={tone === "error" ? "alert" : "status"} status={statusFromTone(tone)}>
+      <Alert.Indicator />
+      <Alert.Content className="finance-state-panel__content">
+        {title ? <Alert.Title className="finance-state-panel__title">{title}</Alert.Title> : null}
+        {children ? <div className="finance-state-panel__description">{children}</div> : null}
+      </Alert.Content>
     </Alert>
   );
 }

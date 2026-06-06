@@ -1,5 +1,4 @@
-import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
-import Alert from "@mui/material/Alert";
+import { Alert } from "@heroui/react";
 import type { ReactNode } from "react";
 
 type PermissionNoticeProps = {
@@ -8,8 +7,11 @@ type PermissionNoticeProps = {
 
 export default function PermissionNotice({ children }: PermissionNoticeProps) {
   return (
-    <Alert icon={<LockOutlinedIcon fontSize="inherit" />} severity="warning">
-      {children}
+    <Alert className="finance-state-panel finance-state-panel--warning" role="status" status="warning">
+      <Alert.Indicator />
+      <Alert.Content className="finance-state-panel__content">
+        <div className="finance-state-panel__description">{children}</div>
+      </Alert.Content>
     </Alert>
   );
 }

@@ -146,6 +146,43 @@ textarea {
   font: inherit;
 }
 
+.finance-state-panel {
+  border-radius: var(--fp-radius-sm);
+  font-size: var(--fp-text-body);
+  line-height: 1.45;
+}
+
+.finance-state-panel__content {
+  gap: var(--fp-space-1);
+}
+
+.finance-state-panel__title {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.finance-state-panel__description {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+}
+
+.finance-state-panel__progress {
+  margin-top: var(--fp-space-1);
+  width: 100%;
+}
+
+.finance-state-panel--compact {
+  font-size: var(--fp-text-data);
+}
+
+.finance-state-panel--compact .finance-state-panel__title,
+.finance-state-panel--compact .finance-state-panel__description {
+  font-size: var(--fp-text-data);
+}
+
 .MuiDataGrid-root .MuiDataGrid-columnHeader,
 .MuiDataGrid-root .MuiDataGrid-cell {
   justify-content: center !important;
