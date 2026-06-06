@@ -136,3 +136,21 @@ Each implementation prompt must preserve user-visible entry points: if a menu it
 - Did not migrate `AppStatusIndicator`; it remains the only MUI usage under `web/src/components/shell` and is the next P015 target.
 - Did not migrate business pages, backend, API, read model, worker, or workbench internals.
 - Build passes with known HeroUI/Tailwind generated CSS minifier warnings and existing chunk size warning.
+
+## Slice P015: Status Indicator
+
+### Scope
+
+- `web/src/components/shell/AppStatusIndicator.tsx`
+- `web/src/app/styles.css`
+
+### Result
+
+- Status: verified。
+- Migrated the global app status indicator from MUI Box/Chip/ClickAwayListener/Divider/LinearProgress/Paper/Popper/Stack/SvgIcon/Typography to HeroUI Chip/ProgressBar/Separator plus native SVG, portal, and semantic markup.
+- Preserved `role="status"`, `aria-label`, `data-status-reason`, hover/focus/click open behavior, delayed pointer-leave close, Escape close, outside click close, route-change stability while interacting inside the popover, and admin-only `App Health` link.
+- Replaced MUI Popper with project-owned portal positioning so the popover is not clipped by the sidebar and keeps the existing right-side placement behavior.
+- Preserved domain links, task links, task percent progress, scope diagnostics, summary chips, and status text labels.
+- `web/src/components/shell` now has no `@mui/*` imports.
+- Did not migrate business pages, backend, API, read model, worker, or workbench internals.
+- Build passes with known HeroUI/Tailwind generated CSS minifier warnings and existing chunk size warning.

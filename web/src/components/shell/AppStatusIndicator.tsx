@@ -1,14 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import Box from "@mui/material/Box";
-import Chip from "@mui/material/Chip";
-import ClickAwayListener from "@mui/material/ClickAwayListener";
-import Divider from "@mui/material/Divider";
-import LinearProgress from "@mui/material/LinearProgress";
-import Paper from "@mui/material/Paper";
-import Popper from "@mui/material/Popper";
-import Stack from "@mui/material/Stack";
-import SvgIcon from "@mui/material/SvgIcon";
-import Typography from "@mui/material/Typography";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { Chip, ProgressBar, Separator } from "@heroui/react";
 import { Link as RouterLink } from "react-router-dom";
 
 import { useAppHealthStatus, useAppStatusOverview } from "../../contexts/AppHealthStatusContext";
@@ -27,7 +19,7 @@ function toneFromLevel(level: string) {
 
 function domainTone(domain: AppStatusDomain) {
   if (domain.level === "blocked") {
-    return "error";
+    return "danger";
   }
   if (domain.level === "busy") {
     return "warning";
@@ -109,12 +101,14 @@ export default function AppStatusIndicator() {
   const healthStatus = useAppHealthStatus();
   const appStatus = useAppStatusOverview();
   const { canAdminAccess } = useOptionalSessionPermissions();
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState({ left: 0, top: 0 });
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const reason = appStatus?.overall.reason ?? healthStatus.reason;
   const level = appStatus?.overall.level ?? healthStatus.level;
   const tone = toneFromLevel(level);
-  const open = Boolean(anchorEl);
   const popperId = "global-app-status-popover";
   const tasks = appStatus?.backgroundTasks ?? [];
   const domains = appStatus?.domains ?? [];
@@ -131,22 +125,63 @@ export default function AppStatusIndicator() {
   const scheduleClose = () => {
     clearCloseTimer();
     closeTimerRef.current = window.setTimeout(() => {
-      setAnchorEl(null);
+      setOpen(false);
       closeTimerRef.current = null;
     }, 120);
   };
 
-  const openPopover = (target: HTMLElement) => {
+  const updatePopoverPosition = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) {
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const popoverWidth = 480;
+    const left = Math.max(8, Math.min(rect.right + 8, window.innerWidth - popoverWidth - 16));
+    const top = Math.max(8, Math.min(rect.top - 4, window.innerHeight - 32));
+    setPopoverPosition({ left, top });
+  };
+
+  const openPopover = () => {
     clearCloseTimer();
-    setAnchorEl(target);
+    updatePopoverPosition();
+    setOpen(true);
   };
 
   const closePopover = () => {
     clearCloseTimer();
-    setAnchorEl(null);
+    setOpen(false);
   };
 
   useEffect(() => () => clearCloseTimer(), []);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    updatePopoverPosition();
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
+        return;
+      }
+      closePopover();
+    };
+    const handlePositionChange = () => updatePopoverPosition();
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    window.addEventListener("resize", handlePositionChange);
+    window.addEventListener("scroll", handlePositionChange, true);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      window.removeEventListener("resize", handlePositionChange);
+      window.removeEventListener("scroll", handlePositionChange, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -163,149 +198,148 @@ export default function AppStatusIndicator() {
 
   return (
     <>
-      <span
-        aria-label={reason}
-        aria-controls={open ? popperId : undefined}
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-live="polite"
-        className={`app-sidebar-brand-mark ${tone}`}
-        data-status-reason={reason}
-        role="status"
-        tabIndex={0}
-        onClick={(event) => openPopover(event.currentTarget)}
-        onFocus={(event) => openPopover(event.currentTarget)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            closePopover();
-          }
-        }}
-        onMouseEnter={(event) => openPopover(event.currentTarget)}
-        onMouseLeave={scheduleClose}
-      >
-        <SvgIcon className="app-sidebar-brand-status-icon" viewBox="0 0 100 100" aria-hidden="true">
-          <circle className="app-sidebar-brand-status-track" cx="50" cy="50" r="37" />
-          <circle className="app-sidebar-brand-status-sweep" cx="50" cy="50" r="37" />
-        </SvgIcon>
-      </span>
-      <Popper
-        id={popperId}
-        open={open}
-        anchorEl={anchorEl}
-        placement="right-start"
-        modifiers={[
-          { name: "offset", options: { offset: [8, -4] } },
-          { name: "preventOverflow", options: { padding: 16 } },
-        ]}
-        sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}
-      >
-        <ClickAwayListener mouseEvent="onMouseDown" touchEvent="onTouchStart" onClickAway={closePopover}>
-          <Paper
-            aria-label="全局运行状态"
-            className="app-status-popover"
-            elevation={8}
-            role="dialog"
-            tabIndex={-1}
-            onMouseEnter={clearCloseTimer}
-            onMouseLeave={scheduleClose}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                closePopover();
-              }
-            }}
-          >
-            <Stack spacing={1} sx={{ width: 480, maxWidth: "calc(100vw - 32px)", p: 1.25 }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
-                <Stack minWidth={0} spacing={0.25}>
-                  <Typography component="h2" fontWeight={800} variant="body2">运行状态</Typography>
-                  <Typography color="text.secondary" noWrap variant="caption">{reason}</Typography>
-                </Stack>
-                <Chip size="small" color={tone === "error" ? "error" : tone === "pending" ? "warning" : "success"} label={overallStatusLabel(level)} />
-              </Stack>
+        <span
+          ref={triggerRef}
+          aria-label={reason}
+          aria-controls={open ? popperId : undefined}
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-live="polite"
+          className={`app-sidebar-brand-mark ${tone}`}
+          data-status-reason={reason}
+          role="status"
+          tabIndex={0}
+          onClick={openPopover}
+          onFocus={openPopover}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closePopover();
+            }
+          }}
+          onMouseEnter={openPopover}
+          onMouseLeave={scheduleClose}
+        >
+          <svg className="app-sidebar-brand-status-icon" viewBox="0 0 100 100" aria-hidden="true">
+            <circle className="app-sidebar-brand-status-track" cx="50" cy="50" r="37" />
+            <circle className="app-sidebar-brand-status-sweep" cx="50" cy="50" r="37" />
+          </svg>
+        </span>
+      {open ? createPortal(
+        <div
+          ref={popoverRef}
+          id={popperId}
+          aria-label="全局运行状态"
+          className="app-status-popover"
+          role="dialog"
+          tabIndex={-1}
+          style={{
+            "--app-status-popover-left": `${popoverPosition.left}px`,
+            "--app-status-popover-top": `${popoverPosition.top}px`,
+          } as CSSProperties}
+          onMouseEnter={clearCloseTimer}
+          onMouseLeave={scheduleClose}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closePopover();
+            }
+          }}
+        >
+          <div className="app-status-popover-stack">
+            <div className="app-status-popover-header">
+              <div className="app-status-popover-heading">
+                <h2>运行状态</h2>
+                <p>{reason}</p>
+              </div>
+              <Chip size="sm" color={tone === "error" ? "danger" : tone === "pending" ? "warning" : "success"} variant="soft">
+                {overallStatusLabel(level)}
+              </Chip>
+            </div>
 
               {tasks.length > 0 ? (
                 <>
-                  <Divider />
-                  <Stack spacing={0.75}>
-                    <Typography color="text.secondary" fontWeight={700} variant="caption">任务</Typography>
+                  <Separator />
+                  <section className="app-status-section">
+                    <h3>任务</h3>
                     {tasks.map((task) => (
-                    <Box key={task.jobId} component={RouterLink} to={task.route} className="app-status-task-link">
-                      <Stack spacing={0.4}>
-                        <Stack direction="row" justifyContent="space-between" gap={1}>
-                          <Typography noWrap fontWeight={700} variant="caption">{task.shortLabel}</Typography>
-                          <Chip size="small" label={taskStatusLabel(task)} />
-                        </Stack>
-                        {task.percent !== null ? <LinearProgress variant="determinate" value={task.percent} /> : null}
-                      </Stack>
-                    </Box>
+                      <RouterLink key={task.jobId} to={task.route} className="app-status-task-link">
+                        <span className="app-status-task-main">
+                          <span className="app-status-task-label">{task.shortLabel}</span>
+                          <Chip size="sm" variant="soft">{taskStatusLabel(task)}</Chip>
+                        </span>
+                        {task.percent !== null ? (
+                          <ProgressBar
+                            aria-label={`${task.shortLabel} 进度`}
+                            className="app-status-task-progress"
+                            maxValue={100}
+                            value={task.percent}
+                          />
+                        ) : null}
+                      </RouterLink>
                     ))}
-                  </Stack>
+                  </section>
                 </>
               ) : null}
 
-              <Divider />
+              <Separator />
 
-              <Stack spacing={0.75}>
-                <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
-                  <Typography color="text.secondary" fontWeight={700} variant="caption">数据域</Typography>
-                  <Stack direction="row" gap={0.5}>
-                    {blockedDomainCount > 0 ? <Chip size="small" color="error" label={`阻断 ${blockedDomainCount}`} /> : null}
-                    {busyDomainCount > 0 ? <Chip size="small" color="warning" label={`同步 ${busyDomainCount}`} /> : null}
-                    {blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="small" color="success" label={`已同步 ${domains.length}`} /> : null}
-                  </Stack>
-                </Stack>
-                <Box className="app-status-domain-grid">
+              <section className="app-status-section">
+                <div className="app-status-section-header">
+                  <h3>数据域</h3>
+                  <div className="app-status-summary-chips">
+                    {blockedDomainCount > 0 ? <Chip size="sm" color="danger" variant="soft">{`阻断 ${blockedDomainCount}`}</Chip> : null}
+                    {busyDomainCount > 0 ? <Chip size="sm" color="warning" variant="soft">{`同步 ${busyDomainCount}`}</Chip> : null}
+                    {blockedDomainCount === 0 && busyDomainCount === 0 ? <Chip size="sm" color="success" variant="soft">{`已同步 ${domains.length}`}</Chip> : null}
+                  </div>
+                </div>
+                <div className="app-status-domain-grid">
                   {domains.map((domain) => {
                     const scopes = scopeDiagnostics(domain);
                     return (
-                      <Box
+                      <RouterLink
                         key={domain.key}
                         aria-label={`${domain.label} ${domainStatusLabel(domain.status)}`}
-                        component={RouterLink}
                         to={domain.route}
                         title={domainDebugTitle(domain)}
                         className="app-status-domain-link"
                       >
-                        <Stack spacing={0.35} minWidth={0}>
-                          <Stack direction="row" alignItems="center" justifyContent="space-between" gap={0.75}>
-                            <Typography noWrap fontWeight={700} variant="caption">{domain.label}</Typography>
-                            <Chip className="app-status-domain-chip" size="small" color={domainTone(domain)} label={domainStatusLabel(domain.status)} />
-                          </Stack>
+                        <span className="app-status-domain-main">
+                          <span className="app-status-domain-label">{domain.label}</span>
+                          <Chip className="app-status-domain-chip" size="sm" color={domainTone(domain)} variant="soft">
+                            {domainStatusLabel(domain.status)}
+                          </Chip>
+                        </span>
                           {scopes.length > 0 ? (
-                            <Stack spacing={0.2}>
+                            <span className="app-status-scope-list">
                               {scopes.map((scope) => (
-                                <Typography
+                                <span
                                   key={`${scope.readModelKey}:${scope.scopeType}:${scope.scopeKey}:${scope.status}`}
-                                  color="text.secondary"
-                                  noWrap
-                                  variant="caption"
+                                  className="app-status-scope-row"
                                 >
-                                  <Box component="span" fontWeight={700}>{scope.scopeKey || scope.scopeType}</Box>
+                                  <strong>{scope.scopeKey || scope.scopeType}</strong>
                                   {" · "}
-                                  <Box component="span">{scope.lastError || domainStatusLabel(scope.status)}</Box>
-                                </Typography>
+                                  <span>{scope.lastError || domainStatusLabel(scope.status)}</span>
+                                </span>
                               ))}
-                            </Stack>
+                            </span>
                           ) : null}
-                        </Stack>
-                      </Box>
+                      </RouterLink>
                     );
                   })}
-                </Box>
-              </Stack>
+                </div>
+              </section>
 
               {canAdminAccess ? (
                 <>
-                  <Divider />
-                  <Typography component={RouterLink} to="/operations/app-health" variant="caption">
+                  <Separator />
+                  <RouterLink className="app-status-admin-link" to="/operations/app-health">
                     App Health
-                  </Typography>
+                  </RouterLink>
                 </>
               ) : null}
-            </Stack>
-          </Paper>
-        </ClickAwayListener>
-      </Popper>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
     </>
   );
 }

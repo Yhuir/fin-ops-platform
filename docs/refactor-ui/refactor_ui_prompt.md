@@ -904,7 +904,7 @@
 ### P015-phase-4-status-indicator
 
 - Phase: `phase_4_shell`
-- Status: `reviewed`
+- Status: `verified`
 - Type: `characterization tests -> extraction/refactor`
 - Scope: 迁移 `AppStatusIndicator` 的状态点、popover、domain chips、progress 和任务链接展示，从 MUI Popper/Paper/ClickAway/Chip/LinearProgress/Stack/Typography/SvgIcon/Box 迁到 HeroUI/Tailwind/native markup。
 
@@ -923,7 +923,52 @@
 - User-visible behavior preserved: yes，same status indicator role/name, popover content, admin operations link and health domain links。
 - Characterization tests required: yes，P015 touches global status behavior and permission-based operations link。
 - Verification defined: targeted Vitest、build、shell MUI import grep、`git diff --check`、`git status --short --branch`。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution Notes
+
+- Migrated `AppStatusIndicator` from MUI imports to HeroUI `Chip`/`ProgressBar`/`Separator` plus native SVG, semantic links and a project-owned portal popover.
+- Preserved status role/name, hover/focus/click open, delayed unhover close, Escape close, outside click close, route-change stability, domain links, task links, task progress, scope diagnostics and admin-only `App Health` link.
+- Replaced MUI Popper with portal positioning to avoid sidebar clipping while keeping right-side placement.
+- `web/src/components/shell` now has no `@mui/*` imports.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run AppStatusIndicator.test.tsx`
+  - `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npm run build`
+  - `if rg -n '@mui/' web/src/components/shell; then exit 1; else exit 0; fi`
+  - `git diff --check`
+  - `git status --short --branch`
+
+### MG-P015-phase-4-status-indicator
+
+- Status: `drafted`
+- Scope:
+  - `web/src/components/shell/AppStatusIndicator.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_4_shell.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+
+#### Prompt
+
+```text
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查当前分支必须是 refactor-ui。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 P015 status indicator 文件：web/src/components/shell/AppStatusIndicator.tsx、web/src/app/styles.css、docs/refactor-ui/modules/phase_4_shell.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。禁止 git add . 和 git add -A。只允许精确 git add 这些文件。验证命令：cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx；cd web && npm run build；if rg -n '@mui/' web/src/components/shell; then exit 1; else exit 0; fi；git diff --check；git status --short --branch。提交信息使用 feat: migrate shell status indicator。push 到 refactor-ui 分支。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Branch check required: yes。
+- Scope precise: yes。
+- Untracked check required: yes。
+- Diff check required: yes。
+- Exact staging required: yes。
+- Push required: yes。
+- Docs update after MG required: yes。
+- Status: drafted。
 
 ### P000-docs-bootstrap
 
@@ -1020,14 +1065,14 @@
 | `P012-phase-4-shell-icon-dependency` | `phase_4_shell` | shell icons | `verified` | passed | lucide-react sidebar icon dependency 已迁移 |
 | `P013-phase-4-shell-provider-runtime` | `phase_4_shell` | shell runtime provider | `verified` | passed | App.tsx 移出完整 MuiProviders，保留临时 MUI X date picker compat |
 | `P014-phase-4-sidebar-topbar` | `phase_4_shell` | sidebar/topbar | `verified` | passed | AppSidebar/AppTopBar 已迁出 MUI，AppStatusIndicator 留到 P015 |
-| `P015-phase-4-status-indicator` | `phase_4_shell` | status indicator | `reviewed` | pending | 下一条执行 prompt，迁移 shell 剩余 MUI usage |
+| `P015-phase-4-status-indicator` | `phase_4_shell` | status indicator | `verified` | passed | shell 目录已无 MUI import |
 
 ## Next Prompt Draft Slot
 
-下一条 prompt 应执行 `P015-phase-4-status-indicator`。
+下一条 prompt 应执行 `MG-P015-phase-4-status-indicator`。
 
 ```text
-读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md、web/src/components/shell/AppStatusIndicator.tsx、web/src/app/styles.css 和 AppStatusIndicator/App shell tests。先补强状态指示器用户可观察行为断言，再迁移 AppStatusIndicator 到 HeroUI/Tailwind/native markup。运行 targeted shell tests、build、shell MUI import grep、git diff --check、git status，并更新 state/prompt/module docs。
+读取 refactor_ui_state.md、refactor_ui_prompt.md、docs/refactor-ui/modules/phase_4_shell.md 和 git status。检查 scope 只包含 P015 status indicator 文件。运行 shell targeted Vitest、build、shell MUI import grep、git diff --check、git status。精确 git add，不使用 git add . 或 git add -A。提交信息使用 feat: migrate shell status indicator。push 到 refactor-ui，并更新 state/prompt Push Log。
 ```
 
 ## Cumulative MG Prompts

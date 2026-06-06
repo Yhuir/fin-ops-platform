@@ -701,9 +701,78 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-status-popover {
+  position: fixed;
+  top: var(--app-status-popover-top);
+  left: var(--app-status-popover-left);
+  z-index: 1301;
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  padding: 10px;
   border: 1px solid #d8e1eb;
   border-radius: 8px;
+  background: #fff;
   box-shadow: 0 14px 34px rgba(16, 42, 67, 0.14);
+  color: #243b53;
+}
+
+.app-status-popover-content {
+  z-index: 1301;
+}
+
+.app-status-popover-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-status-popover-header,
+.app-status-section-header,
+.app-status-task-main,
+.app-status-domain-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-status-popover-heading {
+  min-width: 0;
+}
+
+.app-status-popover-heading h2,
+.app-status-section h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.app-status-popover-heading p {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: #486581;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-status-section h3 {
+  color: #486581;
+}
+
+.app-status-summary-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .app-status-task-link,
@@ -718,6 +787,25 @@ body.workbench-focus-mode .global-header {
   padding: 6px 7px;
   border: 1px solid #d8e1eb;
   background: #f9fbfe;
+}
+
+.app-status-task-label,
+.app-status-domain-label,
+.app-status-scope-row {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-status-task-label,
+.app-status-domain-label {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.app-status-task-progress {
+  margin-top: 4px;
 }
 
 .app-status-domain-grid {
@@ -741,15 +829,41 @@ body.workbench-focus-mode .global-header {
   height: 20px;
 }
 
-.app-status-domain-chip .MuiChip-label {
-  padding-right: 6px;
-  padding-left: 6px;
+.app-status-scope-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.app-status-scope-row {
+  display: block;
+  color: #486581;
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.app-status-scope-row strong {
+  color: #243b53;
+  font-weight: 800;
+}
+
+.app-status-admin-link {
+  width: fit-content;
+  border-radius: 6px;
+  color: #0f4c81;
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
 }
 
 .app-status-task-link:hover,
 .app-status-domain-link:hover,
 .app-status-task-link:focus-visible,
-.app-status-domain-link:focus-visible {
+.app-status-domain-link:focus-visible,
+.app-status-admin-link:hover,
+.app-status-admin-link:focus-visible {
   background: #eef7ff;
   outline: none;
 }

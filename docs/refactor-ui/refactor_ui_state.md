@@ -56,11 +56,14 @@
 
 - Scope: phase 4 status indicator。
 - Files touched:
+  - `web/src/components/shell/AppStatusIndicator.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_4_shell.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: pending
-- Failures: none
-- Next action: 执行 `P015-phase-4-status-indicator`。
+- Verification run: passed
+- Failures: first implementation using HeroUI Popover Trigger did not open on the existing status hover target; fixed by preserving the existing manual hover/focus/escape logic with a project-owned portal popover.
+- Next action: 执行 `MG-P015-phase-4-status-indicator`，精确 staging、commit、push。
 
 ## Prompt Lifecycle
 
@@ -90,7 +93,7 @@
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
-| app shell | `in_progress` | `P015-phase-4-status-indicator` | sidebar/topbar verified，MG-P014 已 push；status indicator prompt ready |
+| app shell | `in_progress` | `P015-phase-4-status-indicator` | status indicator verified，MG-P015 待执行；shell 目录已无 MUI import |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
 
@@ -167,6 +170,11 @@
 | 2026-06-07 | `P014-phase-4-sidebar-topbar` | `if rg -n '@mui/' web/src/components/shell/AppSidebar.tsx web/src/components/shell/AppTopBar.tsx; then exit 1; else exit 0; fi` | passed | AppSidebar/AppTopBar have no MUI imports; AppStatusIndicator still contains MUI for P015 |
 | 2026-06-07 | `P014-phase-4-sidebar-topbar` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P014-phase-4-sidebar-topbar` | `git push origin refactor-ui` | passed | `3b124246` pushed |
+| 2026-06-07 | `P015-phase-4-status-indicator` | `cd web && npx vitest run AppStatusIndicator.test.tsx` | failed-then-passed | HeroUI Popover Trigger changed hover target behavior; replaced with project-owned portal popover preserving old interaction; 2 tests passed |
+| 2026-06-07 | `P015-phase-4-status-indicator` | `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 24 tests passed |
+| 2026-06-07 | `P015-phase-4-status-indicator` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P015-phase-4-status-indicator` | `if rg -n '@mui/' web/src/components/shell; then exit 1; else exit 0; fi` | passed | shell components have no MUI imports |
+| 2026-06-07 | `P015-phase-4-status-indicator` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 
