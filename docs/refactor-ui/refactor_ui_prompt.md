@@ -568,7 +568,7 @@
 
 ### MG-P010-phase-3-page-layout-primitives
 
-- Status: `mg_reviewed`
+- Status: `verified`
 - Scope:
   - `web/src/components/common/PageScaffold.tsx`
   - `web/src/components/common/PageToolbar.tsx`
@@ -593,7 +593,13 @@
 - Exact staging required: yes。
 - Push required: yes。
 - Docs update after MG required: yes。
-- Status: reviewed。
+- Status: verified。
+
+#### Execution
+
+- Commit: `d4135cf3`
+- Push: `refactor-ui -> origin/refactor-ui`
+- Result: verified。
 
 ### P000-docs-bootstrap
 

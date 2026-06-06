@@ -5,7 +5,7 @@
 ## Current Phase
 
 - Phase: `phase_3_primitives`
-- Status: `in_progress`
+- Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P010-phase-3-page-layout-primitives`
@@ -33,7 +33,7 @@
 | `phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | baseline/platform/test/module 文档、文档沉淀规则、完整重构路径和 phase-to-prompt 规则已补齐；MG-P001 已 push |
 | `phase_1_docs_and_tokens` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P004 已 push |
 | `phase_2_platform_stack` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P005 已 push |
-| `phase_3_primitives` | `in_progress` | 2026-06-07 |  | `partial-passed` | P006-P010 primitives verified，MG-P010 待执行；common 目录已无 MUI import |
+| `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `pending` |  |  |  | App Shell 迁移 |
 | `phase_5_table_system` | `pending` |  |  |  | HeroUI Table 和表格排版 |
 | `phase_6_page_batches` | `pending` |  |  |  | 非关联台页面模块迁移 |
@@ -64,7 +64,7 @@
   - `docs/refactor-ui/modules/phase_3_primitives.md`
 - Verification run: passed
 - Failures: none
-- Next action: 执行 `MG-P010-phase-3-page-layout-primitives`。
+- Next action: 从 `refactor-ui` 生成 `phase_4_shell` prompt。
 
 ## Prompt Lifecycle
 
@@ -93,7 +93,7 @@
 | baseline docs gap fill | `verified` | `P001-baseline-doc-gap-fill` | 基线、平台栈、测试策略、模块队列补齐 |
 | docs and tokens | `verified` | `P004-phase-1-token-implementation` | Token implementation 和 MG-P004 已完成 |
 | platform stack | `verified` | `P005-phase-2-platform-stack-migration` | Build、targeted tests 和 MG-P005 已完成 |
-| primitives | `in_progress` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 待执行 |
+| primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `pending` |  | 新 shell 包住关联台 |
 | table system | `pending` |  | HeroUI Table |
 | page batches | `pending` |  | 详见 `module_inventory.md` |
@@ -149,6 +149,7 @@
 | 2026-06-07 | `P010-phase-3-page-layout-primitives` | `cd web && npm run build` | passed | Build passed with known generated CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P010-phase-3-page-layout-primitives` | `if rg -n '@mui/' web/src/components/common/PageScaffold.tsx web/src/components/common/PageToolbar.tsx; then exit 1; else exit 0; fi` | passed | No MUI imports in page layout primitives |
 | 2026-06-07 | `P010-phase-3-page-layout-primitives` | `if rg -n '@mui/' web/src/components/common --glob '!**/workbench/**'; then exit 1; else exit 0; fi` | passed | common primitives contain no MUI imports |
+| 2026-06-07 | `MG-P010-phase-3-page-layout-primitives` | `git push origin refactor-ui` | passed | `d4135cf3` pushed |
 
 ## Push Log
 
@@ -162,3 +163,4 @@
 | 2026-06-07 | `MG-P007-phase-3-dialog-primitives` | `refactor-ui` | `32841902` | pushed |
 | 2026-06-07 | `MG-P008-phase-3-app-drawer-primitive` | `refactor-ui` | `1416b69a` | pushed |
 | 2026-06-07 | `MG-P009-phase-3-file-dropzone-primitive` | `refactor-ui` | `baba332d` | pushed |
+| 2026-06-07 | `MG-P010-phase-3-page-layout-primitives` | `refactor-ui` | `d4135cf3` | pushed |
