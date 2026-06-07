@@ -4551,7 +4551,7 @@ Scope: completed `/no-oa-bank-batches` UI migration slices P073-P078 only.
 ### P079-phase-6-batch-accounting-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: `/batch-accounting` only. Do not modify runtime implementation or tests.
 
@@ -4573,6 +4573,47 @@ Scope: `/batch-accounting` only. Do not modify runtime implementation or tests.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Next prompt: P080 characterization tests only after P079 is verified。
+
+#### Execution Notes
+
+- Status: verified.
+- Created `docs/refactor-ui/modules/phase_6_batch_accounting.md`.
+- Runtime implementation changed: no.
+- Test implementation changed: no.
+- Backend/API/read model/worker and workbench internals changed: no.
+- Discovery recorded current MUI inventory, user-visible entrypoints, API/read model boundary, existing test coverage, migration slice plan and risks.
+- Verification:
+  - `test -f docs/refactor-ui/modules/phase_6_batch_accounting.md`: passed.
+  - `rg -n "P079-phase-6-batch-accounting-discovery|Current MUI Inventory|User-visible Entrypoints|P080-phase-6-batch-accounting-characterization-tests" docs/refactor-ui/modules/phase_6_batch_accounting.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P079 docs changed.
+
+### P080-phase-6-batch-accounting-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: `/batch-accounting` tests only. Do not modify runtime implementation.
+
+#### Prompt
+
+```text
+Prompt ID: P080-phase-6-batch-accounting-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/batch-accounting` tests only. Do not modify runtime implementation.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/features/batchAccounting/api.ts、web/src/features/batchAccounting/types.ts 和 web/src/test/BatchAccountingPage.test.tsx。只修改 `web/src/test/BatchAccountingPage.test.tsx`：新增 source-level contract，未来 `BatchAccountingPage.tsx` 不得依赖 `@mui/*`、`Mui[A-Z]`、MUI icons (`ClearOutlinedIcon`/`RefreshOutlinedIcon`/`SearchOutlinedIcon`/`WarningAmberRoundedIcon`)、`ToggleButton`、`TextField`、`TableCell`、`TableRow`、`TableHead`、`TableBody`、`DialogTitle`、`DialogContent`、`DialogActions`、`Snackbar`、`Chip`、`IconButton`、`Tooltip`；要求页面继续使用 `PageScaffold`、`StatePanel` and project/native table/panel/dialog/feedback classes or primitives。保留并必要补强行为断言：route/sidebar label `批量账务`、heading `日常报销批量账务管理`、refresh、status buttons `未提交`/`已提交`、fields `流水年份`/`OA年份`/`搜索OA内容`/`差额说明`、region `批量账务流水`、bank row accessible names and `aria-pressed`, table aria-label `可关联OA项`/`已关联OA项`, OA checkbox labels, search clear button, amount summary and mismatch tooltip, submit payload/event, withdraw dialog payload, feedback messages, loading/empty/error states, and selection/note reset behavior。不得修改页面实现、API client、mock data shape、backend、read model、worker 或关联台内部工作区。运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`，实现未迁移前 source-level contract expected-fail 可接受，但 existing behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P081 page shell filters prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Runtime implementation excluded: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract should fail against current MUI runtime until P081-P084.
+- Next prompt: P081 page shell filters only after P080 behavior tests are preserved.
 
 ### MG Prompt Template
 
