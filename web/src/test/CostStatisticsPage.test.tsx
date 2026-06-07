@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
@@ -119,6 +120,20 @@ function renderCostStatisticsPage() {
 }
 
 describe("Cost statistics page", () => {
+  test("locks compact premium surface and motion styling contracts", () => {
+    const css = readFileSync("src/app/styles.css", "utf8");
+
+    expect(css).toContain(".cost-page .stat-card");
+    expect(css).toMatch(/\.cost-page \.stat-card\s*{[^}]*border-radius:\s*var\(--fp-radius-sm\)/s);
+    expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*padding:\s*var\(--fp-space-2\) var\(--fp-space-3\)/s);
+    expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
+    expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-scope-toggle-btn\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*padding:\s*10px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
+    expect(css).toMatch(/\.cost-detail-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
+  });
+
   test("defaults to time view and loads month-aware transaction rows", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();

@@ -175,6 +175,38 @@ Non-scope for PV-009:
 - Do not change view mode semantics, scope state semantics, row selection semantics, or export query parameters.
 - Do not replace `FinanceTable` with another table library.
 
+## PV-009 Premium Visual Implementation
+
+Prompt ID: `PV-009-cost-statistics-premium-visual`
+
+Implemented on `main`:
+
+- Added a cost-scoped premium treatment for summary counters so they stay compact ledger counters instead of generic large dashboard cards.
+- Tightened the view toolbar, content shell, scope buttons, floating year/date panels, drilldown lanes, table shells, export center and detail dialog surfaces.
+- Replaced cost page large-radius surfaces with Ledger Calm tokenized radii: summary/toolbar/table/lane surfaces use `var(--fp-radius-sm)`, dialogs use `var(--fp-radius-lg)`.
+- Added motion-token hover/press feedback for `cost-export-button`, `cost-view-tab`, `cost-project-scope-trigger`, `cost-scope-toggle-btn`, `cost-year-picker-chip`, `cost-explorer-item` and `cost-table-row-trigger`.
+- Preserved all existing behavior: route, four views, project scope switch, scope floating panels, left-to-right drilldown, four `FinanceTable` table surfaces, `流水详情` dialog, `导出中心` dialog, export preview/export flow, loading/error/empty/read-model-refreshing states and all API contracts.
+- Added explicit `--fp-accent`, `--fp-accent-hover` and `--fp-accent-soft` aliases to the design tokens so existing and new premium active states resolve consistently.
+- Added a `CostStatisticsPage.test.tsx` CSS contract test that locks compact premium surface and motion-token usage.
+
+Verification:
+
+- `cd web && npx vitest run CostStatisticsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- forbidden keepalive/snapshot/scroll-session grep
+- non-workbench runtime MUI import grep
+- Browser smoke at `http://127.0.0.1:4173/cost-statistics`
+
+Browser smoke result:
+
+- Project view shows 3 drilldown lanes and 3 summary counters.
+- Top-level horizontal overflow is `0`.
+- Summary card and toolbar radius are `6px`; export center dialog radius is `10px`.
+- Export center opens with 3 sections and 23 checkbox controls.
+- Screenshot: `/tmp/cost-statistics-premium-smoke.png`.
+
 ## Migration Slices
 
 1. `P037-phase-6-cost-statistics-characterization-tests`

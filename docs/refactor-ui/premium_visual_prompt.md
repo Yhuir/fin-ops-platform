@@ -469,7 +469,13 @@ Notes:
 
 - Code tests were not run for PV-008 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-009-cost-statistics-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-009-cost-statistics-premium-visual`
 
@@ -498,3 +504,59 @@ Notes:
 - 如 dev server 可用，浏览器 smoke `/cost-statistics`：确认 heading、summary counters、view switcher、scope controls、表格、drilldown、detail dialog、export dialog 能显示/打开/关闭，无明显重叠或顶层横向溢出。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_cost_statistics.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Added cost-scoped compact premium summary counter styling with tabular numeric treatment.
+- Tightened cost view toolbar, scope controls, floating panels, explorer lanes, table shells, export center and detail dialog surfaces.
+- Added motion-token hover/press feedback for the cost export button, view tabs, project scope trigger, scope buttons, year chips, explorer rows and table row trigger.
+- Preserved all CostStatistics behavior: four views, project scope, date/range floating panels, left-to-right drilldown, `FinanceTable` surfaces, detail dialog, export dialog, API/export flows and loading/error/empty/read-model-refreshing states.
+- Added CSS contract coverage in `CostStatisticsPage.test.tsx` for compact premium treatment and motion-token usage.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run CostStatisticsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke for `/cost-statistics`
+
+Browser smoke result:
+
+- 3 summary counters, 4 view tabs, project drilldown lanes `项目名` / `费用类型` / `对应流水`.
+- Top-level horizontal overflow: `0`.
+- Summary and toolbar radius: `6px`; export center modal radius: `10px`.
+- Export center opened with 3 sections and 23 checkbox controls.
+- Screenshot: `/tmp/cost-statistics-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-010-pending-invoices-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_pending_invoices.md`、`web/src/pages/PendingInvoicesPage.tsx`、`web/src/components/pending-invoices/*`、相关 `PendingInvoices` tests 和当前 `git status`。本切片只做待找发票 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_6_pending_invoices.md` 追加 premium visual discovery；如果现有文档不足，补齐旧入口清单和下一条 prompt。
+- 清点 `/pending-invoices` 的旧页面入口：筛选/search、表格、规则/配置入口、右侧抽屉或弹窗、行操作、loading/empty/error/stale/permission 状态。
+- 标明哪些元素必须功能等价保留：旧表格仍为表格，旧抽屉仍为同方向抽屉，旧弹窗仍为弹窗，旧按钮/行操作仍在原信息层级。
+- 列出表格列角色和排版要求：金额/数量右对齐、tabular nums、状态/tag 稳定高度、长发票/项目/供应商文本截断或换行规则、行 hover 不改变行高。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
+- 生成下一条唯一 prompt：`PV-011-pending-invoices-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_pending_invoices.md`，精确 staging，commit 并 push 到 `origin/main`。

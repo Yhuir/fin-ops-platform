@@ -38,7 +38,7 @@ Last updated: 2026-06-08
 | 6 | `PV-006-import-pages-discovery` | verified | `/imports/*` discovery。 |
 | 7 | `PV-007-import-pages-premium-visual` | verified | 导入页族 premium visual slice。 |
 | 8 | `PV-008-cost-statistics-discovery` | verified | `/cost-statistics` discovery。 |
-| 9 | `PV-009-cost-statistics-premium-visual` | pending | 成本统计 premium visual slice。 |
+| 9 | `PV-009-cost-statistics-premium-visual` | verified | 成本统计 premium visual slice。 |
 | 10 | `PV-010-pending-invoices-discovery` | pending | `/pending-invoices` discovery。 |
 | 11 | `PV-011-pending-invoices-premium-visual` | pending | 待找发票 premium visual slice。 |
 | 12 | `PV-012-input-invoice-usage-discovery` | pending | `/input-invoice-usage` discovery。 |
@@ -62,31 +62,30 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-009-cost-statistics-premium-visual`
+`PV-010-pending-invoices-discovery`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/modules/phase_6_cost_statistics.md`
-- `web/src/pages/CostStatisticsPage.tsx`
-- `web/src/components/cost-statistics/*`
-- `web/src/app/styles.css`
-- `web/src/test/CostStatisticsPage.test.tsx`
+- `docs/refactor-ui/premium_visual_master_state.md`
+- `docs/refactor-ui/premium_visual_prompt.md`
+- `docs/refactor-ui/module_inventory.md`
+- `docs/refactor-ui/modules/phase_6_pending_invoices.md`
+- `web/src/pages/PendingInvoicesPage.tsx`
+- `web/src/components/pending-invoices/*`
+- `web/src/test/*PendingInvoices*`
 
 ### Verification
 
-Required:
+Required for PV-010:
 
-- `cd web && npx vitest run CostStatisticsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- Browser smoke for `/cost-statistics` where practical.
+- `git status --short --branch`
 
-PV-009 is a runtime visual/interactions slice. It must preserve CostStatistics behavior and only polish the current FinanceTable/project-dialog implementation.
+PV-010 is discovery-only. It must read the pending invoices code/tests and generate the next single implementation prompt without changing runtime code unless a tiny characterization-only test gap is clearly justified.
 
 ## Execution Rules
 
@@ -113,4 +112,5 @@ Each implementation slice must:
 | 2026-06-08 | `PV-005-app-health-premium-visual` | current commit | pushed to `origin/main` | AppHealth premium visual polish verified and pushed with the current commit. |
 | 2026-06-08 | `PV-006-import-pages-discovery` | current commit | pushed to `origin/main` | Import pages premium discovery and PV-007 prompt generated with the current commit. |
 | 2026-06-08 | `PV-007-import-pages-premium-visual` | current commit | pushed to `origin/main` | Import pages premium visual polish verified and pushed with the current commit. |
-| 2026-06-08 | `PV-008-cost-statistics-discovery` | current commit | pending push | Cost Statistics premium discovery and PV-009 prompt generated with the current commit. |
+| 2026-06-08 | `PV-008-cost-statistics-discovery` | `44dd84de` | pushed to `origin/main` | Cost Statistics premium discovery and PV-009 prompt generated. |
+| 2026-06-08 | `PV-009-cost-statistics-premium-visual` | current commit | pending push | Cost Statistics premium visual polish verified; PV-010 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
