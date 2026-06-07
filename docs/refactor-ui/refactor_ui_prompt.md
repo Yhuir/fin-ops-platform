@@ -4665,6 +4665,7 @@ Scope: `/batch-accounting` page shell, refresh action, status switch and year/se
 - Replaced MUI year/search TextFields, InputAdornment, IconButton and MUI search/clear icons for `流水年份`, `OA年份`, `搜索OA内容` and `清空搜索` with native labelled controls and `batch-accounting-*` CSS classes.
 - Added `web/src/app/styles.css` `batch-accounting-*` shell/filter classes.
 - Did not migrate bank list, amount summary, OA table, withdraw dialog, snackbar/alert feedback, API client, backend, read model, worker or workbench internals.
+- Committed and pushed `64aa7da3 feat: migrate batch accounting page shell` to `origin/refactor-ui`.
 - Verification:
   - `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|filters right side OA rows|clears difference note when switching submitted and unsubmitted buckets|keeps selected bank and OA rows"`: expected-fail; selected behavior tests passed and source-level contract failed as expected.
   - `cd web && npx vitest run BatchAccountingPage.test.tsx`: expected-fail; 12 behavior tests passed and 1 source-level contract failed.

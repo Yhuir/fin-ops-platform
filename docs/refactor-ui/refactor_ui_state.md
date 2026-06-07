@@ -533,3 +533,4 @@
 | 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `refactor-ui` | `f5736c0c` | pushed |
 | 2026-06-07 | `P079-phase-6-batch-accounting-discovery` | `refactor-ui` | `e113d6e6` | pushed |
 | 2026-06-07 | `P080-phase-6-batch-accounting-characterization-tests` | `refactor-ui` | `cae1d091` | pushed |
+| 2026-06-07 | `P081-phase-6-batch-accounting-page-shell-filters` | `refactor-ui` | `64aa7da3` | pushed |

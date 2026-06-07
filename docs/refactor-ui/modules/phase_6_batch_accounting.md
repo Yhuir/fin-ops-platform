@@ -139,6 +139,7 @@ Scope: `/batch-accounting` page shell, refresh action, status switch and year/se
 - Test implementation changed: no.
 - Backend/API/read model/worker changed: no.
 - Workbench internals changed: no.
+- Commit: `64aa7da3 feat: migrate batch accounting page shell`, pushed to `origin/refactor-ui`.
 - Migrated header `刷新` action from MUI Button/MUI icon to project native button with lucide `RefreshCw`.
 - Migrated `批量账务状态` from MUI ToggleButtonGroup/ToggleButton to project native segmented buttons with `aria-pressed`.
 - Migrated `流水年份`, `OA年份`, `搜索OA内容` and `清空搜索` from MUI TextField/InputAdornment/IconButton/MUI icons to native labelled controls with project CSS and lucide `Search`/`X`.
