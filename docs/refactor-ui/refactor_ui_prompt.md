@@ -4497,6 +4497,7 @@ Scope: final `/no-oa-bank-batches` UI migration slice: tag-management right draw
 - Replaced final MUI wrapper/layout, tag drawer, withdraw dialog and snackbar surfaces with native/project markup, `AppDialog`, native checkboxes/textarea and project CSS classes.
 - Preserved tag-management right-side shape, labels, version display, inactive warning, group indeterminate semantics, child labels, open/refetch/save/live update behavior, withdraw reason payload, feedback messages and current page shell/filter/rail/transaction behavior.
 - Did not modify API client, backend, read model, worker or workbench internals.
+- Committed and pushed `87b92e20 feat: complete no oa bank batch ui migration` to `origin/refactor-ui`.
 - Verification:
   - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: passed; 20 tests passed.
   - `cd web && npx vitest run NoOaBankBatchApi.test.ts`: passed; 7 tests passed.

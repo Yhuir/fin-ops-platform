@@ -318,6 +318,7 @@ Scope: final `/no-oa-bank-batches` UI migration slice: tag-management right draw
   - `if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P078 implementation files changed before docs.
+- Commit: `87b92e20 feat: complete no oa bank batch ui migration`, pushed to `origin/refactor-ui`.
 
 ## MG-P078 Prompt Draft
 

@@ -510,3 +510,4 @@
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `refactor-ui` | `1c872bfe` | pushed |
 | 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `refactor-ui` | `379d24cd` | pushed |
 | 2026-06-07 | `P077-phase-6-no-oa-bank-batches-transaction-region` | `refactor-ui` | `00e0ca44` | pushed |
+| 2026-06-07 | `P078-phase-6-no-oa-bank-batches-overlays-feedback` | `refactor-ui` | `87b92e20` | pushed |
