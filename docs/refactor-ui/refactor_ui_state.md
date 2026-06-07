@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P045-phase-6-bank-details`
+- Current Prompt ID: `P046-phase-6-pending-invoices-discovery`
 - Current MG ID: `MG-P045-phase-6-bank-details`
 
 ## Global Invariants
@@ -54,18 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 BankDetails cumulative merge gate。
+- Scope: phase 6 pending invoices discovery prompt generated after BankDetails MG。
 - Files touched:
-  - `docs/refactor-ui/modules/phase_6_bank_details.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `web/src/components/common/AppDrawer.tsx`
-  - `web/src/features/bankDetails/AutoTagRulesDrawer.tsx`
-  - `web/src/pages/BankDetailsPage.tsx`
-  - `web/src/app/styles.css`
-- Verification run: P045 drawer tests, full BankDetails/AutoTagRulesDrawer target set, common/table/platform regressions, build and MUI residue greps passed。
-- Failures: none in BankDetails target set。
-- Next action: 执行 `MG-P045-phase-6-bank-details`。
+  - `docs/refactor-ui/modules/phase_6_bank_details.md`
+- Verification run: MG-P045 pushed commit `9a0b74ea` to `origin/refactor-ui`。
+- Failures: none。
+- Next action: 执行 `P046-phase-6-pending-invoices-discovery`。
 
 ## Prompt Lifecycle
 
@@ -97,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P045-phase-6-bank-details` | BankDetails P045 auto tag drawer verified；BankDetails module reached cumulative MG boundary |
+| page batches | `in_progress` | `P046-phase-6-pending-invoices-discovery` | BankDetails MG-P045 pushed；next module is PendingInvoices discovery |
 
 ## Verification Log
 
@@ -287,6 +283,7 @@
 | 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `if rg -n '@mui\|Mui\|<Button\|<Chip\|<Stack\|<Typography' web/src/pages/BankDetailsPage.tsx web/src/features/bankDetails/AutoTagRulesDrawer.tsx web/src/features/bankDetails/BankCategoryTag.tsx; then exit 1; else exit 0; fi` | passed | BankDetails runtime scope has no direct MUI imports/usages |
 | 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `if rg -n 'bank-details-page[^\n]*Mui\|bank-[^\n]*Mui\|Mui[^\n]*bank-\|bank-auto-tag[^\n]*Mui\|Mui[^\n]*bank-auto-tag' web/src/app/styles.css; then exit 1; else exit 0; fi` | passed | BankDetails CSS scope has no MUI selector residue |
 | 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P045-phase-6-bank-details` | `git push origin refactor-ui` | passed | Commit `9a0b74ea` pushed |
 
 ## Push Log
 
@@ -319,3 +316,4 @@
 | 2026-06-07 | `MG-P035-phase-6-import-pages` | `refactor-ui` | `9e3624a0` | pushed |
 | 2026-06-07 | `MG-P038-phase-6-cost-statistics-table-migration` | `refactor-ui` | `4baffcff` | pushed |
 | 2026-06-07 | `P040-phase-6-bank-details-discovery` | `refactor-ui` | `e720504d` | pushed |
+| 2026-06-07 | `MG-P045-phase-6-bank-details` | `refactor-ui` | `9a0b74ea` | pushed |

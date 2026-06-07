@@ -210,6 +210,14 @@ Scope: BankDetails module P040-P045 only: docs/refactor-ui BankDetails state/pro
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、当前 git status 和当前 diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 BankDetails runtime scope no MUI grep 和 BankDetails CSS no MUI selector residue grep 已通过；确认 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`、`cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build` 已通过。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_bank_details.md web/src/app/styles.css web/src/components/common/AppDrawer.tsx web/src/features/bankDetails/AutoTagRulesDrawer.tsx web/src/pages/BankDetailsPage.tsx`；如实际 diff 包含 BankDetails test 文档变更，也必须逐个精确列出，禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: migrate bank details auto tag drawer` 或更准确的 BankDetails module message。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
 ```
 
+## MG-P045 Execution
+
+- Status: mg_verified。
+- Exact staged files: `docs/refactor-ui/refactor_ui_state.md`, `docs/refactor-ui/refactor_ui_prompt.md`, `docs/refactor-ui/modules/phase_6_bank_details.md`, `web/src/app/styles.css`, `web/src/components/common/AppDrawer.tsx`, `web/src/features/bankDetails/AutoTagRulesDrawer.tsx`, `web/src/pages/BankDetailsPage.tsx`。
+- Commit: `9a0b74ea feat: migrate bank details auto tag drawer`。
+- Push: `origin/refactor-ui` updated from `f6d96346` to `9a0b74ea`。
+- Next prompt generated in `refactor_ui_prompt.md`: `P046-phase-6-pending-invoices-discovery`。
+
 ## P041 Prompt Draft
 
 ```text

@@ -2789,7 +2789,7 @@ Scope: 迁移 AutoTagRulesDrawer 到 AppDrawer/AppDialog、FinanceTable/project 
 ### MG-P045-phase-6-bank-details
 
 - Phase: `phase_6_page_batches`
-- Status: `mg_reviewed`
+- Status: `mg_verified`
 - Type: `cumulative MG`
 - Scope: BankDetails module P040-P045 discovery, characterization tests, shell/toolbar/date/export/search, transaction table/pagination, category popovers/tags/tooltips, AutoTagRulesDrawer and associated styles/common drawer extension。
 
@@ -2812,6 +2812,47 @@ Scope: BankDetails module P040-P045 only: docs/refactor-ui BankDetails state/pro
 - Workbench internals frozen: yes。
 - Verification required before push: yes，BankDetails target tests, common/table/platform regressions, build, MUI residue greps and diff check。
 - Push target: `origin refactor-ui`。
+
+#### Execution Notes
+
+- Exact staged files: `docs/refactor-ui/refactor_ui_state.md`, `docs/refactor-ui/refactor_ui_prompt.md`, `docs/refactor-ui/modules/phase_6_bank_details.md`, `web/src/app/styles.css`, `web/src/components/common/AppDrawer.tsx`, `web/src/features/bankDetails/AutoTagRulesDrawer.tsx`, `web/src/pages/BankDetailsPage.tsx`。
+- Commit: `9a0b74ea feat: migrate bank details auto tag drawer`。
+- Push: `origin/refactor-ui` updated from `f6d96346` to `9a0b74ea`。
+
+#### Verification
+
+- Status: mg_verified。
+- Commands:
+  - `git diff --check`: passed before exact staging。
+  - `git diff --cached --name-only`: confirmed only the seven BankDetails MG files were staged。
+  - `git push origin refactor-ui`: passed。
+
+### P046-phase-6-pending-invoices-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/pending-invoices` module only. Discovery/planning for pending invoice UI migration; do not modify runtime implementation or tests except docs/state/prompt/module doc required for discovery.
+
+#### Prompt
+
+```text
+Prompt ID: P046-phase-6-pending-invoices-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/pending-invoices` only: PendingInvoices page, pending invoice components/features/tests and UI migration documentation. Do not modify backend, API contracts, read models, workers, mocks, reconciliation workbench internals, or unrelated page modules.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md、web/src/pages/PendingInvoicesPage.tsx、web/src/components/pendingInvoices/*、相关 pending invoice feature/api/types 文件、相关 tests 和当前 git status。梳理 `/pending-invoices` 的旧 UI 入口、MUI/DataGrid/session hook inventory、表格/分页/筛选/搜索/详情右侧抽屉/关系右侧抽屉/规则右侧抽屉/导出弹窗/发票选择右侧抽屉/手工发票弹窗/loading empty error stale permission 状态、现有测试覆盖、API/read model 风险和迁移切片风险。不得修改实现、测试、后端、API、read model、worker、mock 或关联台。若 discovery 需要跨后续切片复用，创建 `docs/refactor-ui/modules/phase_6_pending_invoices.md`；更新 `docs/refactor-ui/refactor_ui_state.md`、`docs/refactor-ui/refactor_ui_prompt.md` 和模块文档，生成下一条 P047 characterization tests prompt。验证命令：`test -f docs/refactor-ui/modules/phase_6_pending_invoices.md`；`rg -n "P046-phase-6-pending-invoices-discovery|Current MUI Inventory|User-visible Entrypoints|P047-phase-6-pending-invoices-characterization-tests" docs/refactor-ui/modules/phase_6_pending_invoices.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；`git diff --check`；`git status --short --branch`。
+```
+
+#### Review
+
+- Single slice: yes，discovery/planning only。
+- Runtime implementation untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Module doc allowed: yes，pending invoices has high risk and multiple drawers/dialogs/tables。
+- Next prompt: P047 characterization tests only after discovery is implemented and verified。
 
 ### MG Prompt Template
 
