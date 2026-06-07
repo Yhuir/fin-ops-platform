@@ -1,22 +1,9 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import Box from "@mui/material/Box";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
-import ClickAwayListener from "@mui/material/ClickAwayListener";
-import Divider from "@mui/material/Divider";
-import IconButton from "@mui/material/IconButton";
-import MenuList from "@mui/material/MenuList";
-import Popper from "@mui/material/Popper";
-import Paper from "@mui/material/Paper";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
-import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
-import FilterListOutlinedIcon from "@mui/icons-material/FilterListOutlined";
-import { Tags } from "lucide-react";
+import { Filter, Tags } from "lucide-react";
 
 import {
   FinanceTable,
@@ -545,6 +532,23 @@ function EmptyTransactionOverlay() {
   );
 }
 
+function useCloseOnOutsidePointer(open: boolean, rootRef: RefObject<HTMLElement | null>, onClose: () => void) {
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) {
+        return;
+      }
+      onClose();
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [onClose, open, rootRef]);
+}
+
 function BankCategoryFilterControl({
   categoryCounts = EMPTY_CATEGORY_COUNTS,
   totalCount = 0,
@@ -555,6 +559,7 @@ function BankCategoryFilterControl({
   const [categoryAnchorEl, setCategoryAnchorEl] = useState<HTMLElement | null>(null);
   const categoryPanelOpen = Boolean(categoryAnchorEl);
   const categoryPanelId = "bank-category-filter-panel";
+  const categoryFilterRef = useRef<HTMLDivElement | null>(null);
   const categoryGroups = useMemo(() => buildCategoryTree(visibleCategorySummary), [visibleCategorySummary]);
   const selectedCategoryLabel = selectedCategoryFilterLabel({
     counts: categoryCounts,
@@ -582,6 +587,8 @@ function BankCategoryFilterControl({
     onCategoryFilterChange(filter);
   };
 
+  useCloseOnOutsidePointer(categoryPanelOpen, categoryFilterRef, closeCategoryPanel);
+
   const renderCategoryFilterButton = (
     filter: BankCategoryFilter,
     label: string,
@@ -591,65 +598,48 @@ function BankCategoryFilterControl({
   ) => {
     const selected = categoryFilterMatches(selectedCategoryFilter, filter);
     return (
-      <ListItemButton
+      <button
         aria-label={`${label} ${count}`}
         aria-current={selected ? "true" : "false"}
         className={`bank-category-filter-row ${className}`.trim()}
-        component="button"
         data-level={level}
         onClick={() => selectCategoryFilter(filter)}
         role="menuitem"
-        selected={selected}
+        type="button"
       >
-        <ListItemText
-          disableTypography
-          primary={(
-            <Box className="bank-category-filter-row-content">
-              <Typography className="bank-category-filter-label" component="span">{label}</Typography>
-              <Typography className="bank-category-filter-count" component="span">{count}</Typography>
-            </Box>
-          )}
-        />
-      </ListItemButton>
+        <span className="bank-category-filter-row-content">
+          <span className="bank-category-filter-label">{label}</span>
+          <span className="bank-category-filter-count">{count}</span>
+        </span>
+      </button>
     );
   };
 
   return (
-    <ClickAwayListener onClickAway={closeCategoryPanel}>
-      <Box className="bank-category-filter-float" onKeyDown={handleCategoryPanelKeyDown}>
-        <IconButton
-          aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
-          aria-expanded={categoryPanelOpen ? "true" : undefined}
-          aria-haspopup="menu"
-          aria-label={`标签筛选：${selectedCategoryLabel}`}
-          className={`bank-category-filter-icon-button${selectedCategoryFilter.kind === "all" ? "" : " active"}`}
-          onClick={toggleCategoryPanel}
-          size="small"
-          title={selectedCategoryLabel}
-        >
-          <FilterListOutlinedIcon fontSize="small" />
-          {selectedCategoryFilter.kind === "all" ? null : <span className="bank-category-filter-active-dot" aria-hidden="true" />}
-        </IconButton>
-        <Popper
-          anchorEl={categoryAnchorEl}
-          className="bank-category-filter-popper"
-          open={categoryPanelOpen}
-          placement="left"
-          modifiers={[
-            { name: "offset", options: { offset: [0, 8] } },
-            { name: "preventOverflow", options: { padding: 12 } },
-          ]}
-        >
-          <Paper className="bank-category-filter-panel" elevation={6}>
-            <List
+    <div ref={categoryFilterRef} className="bank-category-filter-float" onKeyDown={handleCategoryPanelKeyDown}>
+      <button
+        aria-controls={categoryPanelOpen ? categoryPanelId : undefined}
+        aria-expanded={categoryPanelOpen ? "true" : undefined}
+        aria-haspopup="menu"
+        aria-label={`标签筛选：${selectedCategoryLabel}`}
+        className={`bank-category-filter-icon-button${selectedCategoryFilter.kind === "all" ? "" : " active"}`}
+        onClick={toggleCategoryPanel}
+        title={selectedCategoryLabel}
+        type="button"
+      >
+        <Filter size={14} strokeWidth={2.2} />
+        {selectedCategoryFilter.kind === "all" ? null : <span className="bank-category-filter-active-dot" aria-hidden="true" />}
+      </button>
+      {categoryPanelOpen ? (
+        <div className="bank-category-filter-popper">
+          <div className="bank-category-filter-panel">
+            <div
               aria-label="银行明细标签筛选"
               className="bank-category-filter-list"
-              dense
-              disablePadding
               id={categoryPanelId}
               role="menu"
             >
-              <Box className="bank-category-filter-actions" component="li">
+              <div className="bank-category-filter-actions" role="group">
                 {renderCategoryFilterButton(ALL_CATEGORY_FILTER, "全部", totalCount, "root", "bank-category-filter-action")}
                 {renderCategoryFilterButton(
                   UNCATEGORIZED_CATEGORY_FILTER,
@@ -658,11 +648,11 @@ function BankCategoryFilterControl({
                   "root",
                   "bank-category-filter-action",
                 )}
-              </Box>
-              <Divider className="bank-category-filter-divider" component="li" />
-              <Box className="bank-category-filter-sections" component="li" role="group">
+              </div>
+              <div className="bank-category-filter-divider" aria-hidden="true" role="separator" />
+              <div className="bank-category-filter-sections" role="group">
                 {categoryGroups.map((group, groupIndex) => (
-                  <Box
+                  <div
                     className={`bank-category-filter-group bank-category-filter-hierarchy-group bank-category-filter-tone-${groupIndex % 6}`}
                     key={group.key}
                   >
@@ -685,7 +675,7 @@ function BankCategoryFilterControl({
                       )
                     ) : null}
                     {group.children.length > 0 ? (
-                      <Box className="bank-category-filter-children" role="group">
+                      <div className="bank-category-filter-children" role="group">
                         {group.children.map((child) => (
                           <Fragment key={child.code}>
                             {renderCategoryFilterButton(
@@ -697,16 +687,16 @@ function BankCategoryFilterControl({
                             )}
                           </Fragment>
                         ))}
-                      </Box>
+                      </div>
                     ) : null}
-                  </Box>
+                  </div>
                 ))}
-              </Box>
-            </List>
-          </Paper>
-        </Popper>
-      </Box>
-    </ClickAwayListener>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1054,6 +1044,8 @@ function TypeCell({
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [stagedChoice, setStagedChoice] = useState<ConfirmationChoice | null>(null);
+  const [internalTooltipOpen, setInternalTooltipOpen] = useState(false);
+  const confirmationRef = useRef<HTMLSpanElement | null>(null);
   const confirmationGroups = useMemo(
     () => (row.categoryResolutionStatus === "needs_confirmation"
       ? buildConfirmationChoiceGroups(row.autoCandidateCategories, autoTagRules)
@@ -1132,49 +1124,31 @@ function TypeCell({
       .then(() => setStagedChoice(null))
       .catch(() => setStagedChoice(null));
   };
+  useCloseOnOutsidePointer(Boolean(anchorEl), confirmationRef, closeConfirmationPanel);
 
   if (selectionGroups.length > 0) {
     return (
-      <>
-        <Button
+      <span ref={confirmationRef} className="bank-category-confirmation-host">
+        <button
           aria-controls={anchorEl ? `bank-category-confirmation-${row.id}` : undefined}
           aria-expanded={anchorEl ? "true" : undefined}
           aria-haspopup="menu"
           className="bank-category-confirmation-trigger"
-          size="small"
-          variant="outlined"
-          color={isManualAssignment ? "info" : "warning"}
           onClick={(event) => {
             if (!confirming) {
               setAnchorEl(event.currentTarget);
             }
           }}
           aria-disabled={confirming ? "true" : undefined}
+          data-tone={isManualAssignment ? "info" : "warning"}
+          type="button"
         >
           {triggerLabel}
-        </Button>
-        <Popper
-          anchorEl={anchorEl}
-          className="bank-category-confirmation-popper"
-          open={Boolean(anchorEl)}
-          placement="bottom-start"
-          modifiers={[
-            {
-              name: "preventOverflow",
-              enabled: true,
-              options: { padding: 8, altAxis: true },
-            },
-            {
-              name: "flip",
-              enabled: true,
-              options: { padding: 8 },
-            },
-          ]}
-        >
-          <ClickAwayListener onClickAway={closeConfirmationPanel}>
-            <Paper
+        </button>
+        {anchorEl ? (
+          <div className="bank-category-confirmation-popper">
+            <div
               className="bank-category-confirmation-panel"
-              elevation={8}
               id={`bank-category-confirmation-${row.id}`}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
@@ -1182,18 +1156,16 @@ function TypeCell({
                 }
               }}
             >
-              <Box className={`bank-category-confirmation-columns${selectedSubGroup?.hasThirdLevel ? " bank-category-confirmation-columns--three-level" : ""}`}>
-                <MenuList
+              <div className={`bank-category-confirmation-columns${selectedSubGroup?.hasThirdLevel ? " bank-category-confirmation-columns--three-level" : ""}`}>
+                <div
                   aria-label={`${selectionLabel}主标签`}
-                  autoFocus
                   className="bank-category-confirmation-primary-list"
-                  dense
-                  variant="menu"
+                  role="menu"
                 >
                   {selectionGroups.map((group) => (
-                    <ListItemButton
+                    <button
+                      aria-current={group.key === selectedGroup?.key ? "true" : "false"}
                       className="bank-category-confirmation-primary-item"
-                      component="button"
                       key={group.key}
                       onClick={() => {
                         setSelectedPrimaryKey(group.key);
@@ -1201,23 +1173,22 @@ function TypeCell({
                         setStagedChoice(null);
                       }}
                       role="menuitem"
-                      selected={group.key === selectedGroup?.key}
+                      type="button"
                     >
-                      <ListItemText disableTypography primary={<Typography component="span">{group.primaryLabel}</Typography>} />
-                    </ListItemButton>
+                      <span>{group.primaryLabel}</span>
+                    </button>
                   ))}
-                </MenuList>
-                <Divider flexItem orientation="vertical" />
-                <MenuList
+                </div>
+                <div className="bank-category-confirmation-divider" aria-hidden="true" role="separator" />
+                <div
                   aria-label={`${selectedGroup?.primaryLabel ?? "已选主标签"}${childLabelSuffix}`}
                   className="bank-category-confirmation-child-list"
-                  dense
-                  variant="menu"
+                  role="menu"
                 >
                   {selectedSubGroups.map((subGroup) => (
-                    <ListItemButton
+                    <button
+                      aria-current={subGroup.key === selectedSubGroup?.key || subGroup.choices.some((choice) => stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) : false) ? "true" : "false"}
                       className="bank-category-confirmation-child-item"
-                      component="button"
                       key={subGroup.key}
                       onClick={() => {
                         if (subGroup.hasThirdLevel) {
@@ -1230,60 +1201,53 @@ function TypeCell({
                         }
                       }}
                       role="menuitem"
-                      selected={subGroup.key === selectedSubGroup?.key || subGroup.choices.some((choice) => stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) : false)}
+                      type="button"
                     >
-                      <ListItemText
-                        disableTypography
-                        primary={<Typography component="span">{subGroup.subLabel}</Typography>}
-                      />
-                    </ListItemButton>
+                      <span>{subGroup.subLabel}</span>
+                    </button>
                   ))}
-                </MenuList>
+                </div>
                 {selectedSubGroup?.hasThirdLevel ? (
                   <>
-                    <Divider flexItem orientation="vertical" />
-                    <MenuList
+                    <div className="bank-category-confirmation-divider" aria-hidden="true" role="separator" />
+                    <div
                       aria-label={`${selectedSubGroup.subLabel}${thirdLabelSuffix}`}
                       className="bank-category-confirmation-third-list"
-                      dense
-                      variant="menu"
+                      role="menu"
                     >
                       {selectedSubGroup.choices.map((choice) => (
-                        <ListItemButton
+                        <button
+                          aria-current={stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) ? "true" : "false" : "false"}
                           className="bank-category-confirmation-third-item"
-                          component="button"
                           key={choiceKey(choice)}
                           onClick={() => stageChoice(choice)}
                           role="menuitem"
-                          selected={stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) : false}
+                          type="button"
                         >
-                          <ListItemText
-                            disableTypography
-                            primary={<Typography component="span">{choice.thirdLabel ?? choiceSubLabel(choice)}</Typography>}
-                          />
-                        </ListItemButton>
+                          <span>{choice.thirdLabel ?? choiceSubLabel(choice)}</span>
+                        </button>
                       ))}
-                    </MenuList>
+                    </div>
                   </>
                 ) : null}
-              </Box>
-              <Box className="bank-category-confirmation-footer">
-                <Button size="small" variant="outlined" onClick={closeConfirmationPanel}>
+              </div>
+              <div className="bank-category-confirmation-footer">
+                <button className="bank-category-confirmation-cancel" type="button" onClick={closeConfirmationPanel}>
                   取消
-                </Button>
-                <Button
-                  size="small"
-                  variant="contained"
+                </button>
+                <button
+                  className="bank-category-confirmation-save"
                   onClick={saveStagedChoice}
                   disabled={!stagedChoice || confirming}
+                  type="button"
                 >
                   {confirming ? "保存中" : "保存"}
-                </Button>
-              </Box>
-            </Paper>
-          </ClickAwayListener>
-        </Popper>
-      </>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </span>
     );
   }
   if (row.categoryResolutionStatus === "manual_confirmed" && row.effectiveCategoryCode) {
@@ -1344,32 +1308,36 @@ function TypeCell({
     return categoryTag;
   }
   const accountText = [counterpart.bankName, counterpart.accountLast4].filter(Boolean).join(" ") || "-";
+  const tooltipId = `bank-internal-transfer-tooltip-${row.id}`;
   return (
-    <Tooltip
-      arrow
-      placement="left"
-      title={(
-        <Box className="bank-internal-transfer-tooltip">
-          <Typography className="bank-internal-transfer-tooltip-title" variant="caption">
-            对应内部往来流水
-          </Typography>
-          <Box className="bank-internal-transfer-tooltip-grid">
-            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">时间</Typography>
-            <Typography className="bank-internal-transfer-tooltip-value" variant="caption" color="inherit">{counterpart.tradeTime || "-"}</Typography>
-            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">账户</Typography>
-            <Typography className="bank-internal-transfer-tooltip-value" variant="caption" color="inherit">{accountText}</Typography>
-            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">金额</Typography>
-            <Typography className="bank-internal-transfer-tooltip-value bank-internal-transfer-tooltip-amount" variant="caption" color="inherit">{formatMoney(counterpart.amount) || "-"}</Typography>
-            <Typography className="bank-internal-transfer-tooltip-label" variant="caption" color="inherit">对方户名</Typography>
-            <Typography className="bank-internal-transfer-tooltip-value" variant="caption" color="inherit">{counterpart.counterpartyName || "-"}</Typography>
-          </Box>
-        </Box>
-      )}
+    <span
+      aria-describedby={internalTooltipOpen ? tooltipId : undefined}
+      className="bank-internal-transfer-tag-anchor"
+      onBlur={() => setInternalTooltipOpen(false)}
+      onFocus={() => setInternalTooltipOpen(true)}
+      onMouseEnter={() => setInternalTooltipOpen(true)}
+      onMouseLeave={() => setInternalTooltipOpen(false)}
+      tabIndex={0}
     >
-      <Box component="span" className="bank-internal-transfer-tag-anchor">
-        {categoryTag}
-      </Box>
-    </Tooltip>
+      {categoryTag}
+      {internalTooltipOpen ? (
+        <span className="bank-internal-transfer-tooltip" id={tooltipId} role="tooltip">
+          <span className="bank-internal-transfer-tooltip-title">
+            对应内部往来流水
+          </span>
+          <span className="bank-internal-transfer-tooltip-grid">
+            <span className="bank-internal-transfer-tooltip-label">时间</span>
+            <span className="bank-internal-transfer-tooltip-value">{counterpart.tradeTime || "-"}</span>
+            <span className="bank-internal-transfer-tooltip-label">账户</span>
+            <span className="bank-internal-transfer-tooltip-value">{accountText}</span>
+            <span className="bank-internal-transfer-tooltip-label">金额</span>
+            <span className="bank-internal-transfer-tooltip-value bank-internal-transfer-tooltip-amount">{formatMoney(counterpart.amount) || "-"}</span>
+            <span className="bank-internal-transfer-tooltip-label">对方户名</span>
+            <span className="bank-internal-transfer-tooltip-value">{counterpart.counterpartyName || "-"}</span>
+          </span>
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -2243,7 +2211,7 @@ export default function BankDetailsPage() {
 
             <hr className="bank-transaction-divider" />
 
-            <Box className="bank-transaction-grid bank-transaction-grid-readable">
+            <div className="bank-transaction-grid bank-transaction-grid-readable">
               <BankCategoryFilterControl
                 categoryCounts={effectiveCategoryCounts}
                 totalCount={categoryFilterTotalCount}
@@ -2383,7 +2351,7 @@ export default function BankDetailsPage() {
                   setPaginationModel({ page: 0, pageSize });
                 }}
               />
-            </Box>
+            </div>
           </section>
         </div>
       </div>

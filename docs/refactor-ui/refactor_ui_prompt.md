@@ -2695,7 +2695,7 @@ Scope: 迁移 BankDetails 交易流水表格和分页；不迁移 category filte
 ### P044-phase-6-bank-details-category-popovers
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 迁移 BankDetails category filter Popper、TypeCell category confirmation/assignment Popper、BankCategoryTag 和 internal transfer tooltip；不迁移 AutoTagRulesDrawer。
 
@@ -2719,6 +2719,52 @@ Scope: 迁移 BankDetails category filter Popper、TypeCell category confirmatio
 - Preserves old overlay shape: yes，category filter and TypeCell remain click popovers/menus, internal transfer remains tooltip。
 - Excludes AutoTagRulesDrawer: yes，reserved for P045。
 - Verification defined: focused category/tooltip tests, full expected-fail target set, build, MUI residue grep, diff check, status。
+
+#### Execution Notes
+
+- Replaced BankDetails category filter MUI Popper/List/IconButton/Paper stack with project/native trigger, menu and dense three-column hierarchy markup.
+- Replaced TypeCell MUI Popper/MenuList/ListItemButton flow with project/native popover menus while preserving staged choice, `待确认`/`待分类`, `取消`, `保存`, `保存中`, and third-level external turnover choices.
+- Replaced internal transfer MUI Tooltip with project hover/focus tooltip keeping `role="tooltip"` and structured rows.
+- Replaced `BankCategoryTag` MUI Chip/Tooltip with project span tag and project hierarchy tooltip.
+- Left `AutoTagRulesDrawer` unchanged for P045.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `if rg -n '@mui/material/(Popper|MenuList|Menu|Tooltip)|@mui/icons-material/FilterListOutlined|@mui/material/(ClickAwayListener|IconButton|List|ListItem|ListItemButton|ListItemText|Paper)' web/src/pages/BankDetailsPage.tsx web/src/features/bankDetails/BankCategoryTag.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx -t "category|internal transfer|manual classification|needs-confirmation|external turnover|targets project table|dense three-column"`: expected-fail only on P045 drawer source assertion; all P044 category/tag/tooltip/TypeCell behavior tests passed。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`: expected-fail with 49 passed and 3 failures. Remaining failures are assigned to P045 AutoTagRulesDrawer。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests。
+  - `git diff --check`: passed。
+
+### P045-phase-6-bank-details-auto-tag-drawer
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: 迁移 AutoTagRulesDrawer 到 AppDrawer/AppDialog、FinanceTable/project form controls 和 lucide/project icons；不改 BankDetails page 已迁移 surfaces。
+
+#### Prompt
+
+```text
+Prompt ID: P045-phase-6-bank-details-auto-tag-drawer
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 AutoTagRulesDrawer 到 AppDrawer/AppDialog、FinanceTable/project form controls 和 lucide/project icons；不改 BankDetails page 已迁移 surfaces。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/features/bankDetails/AutoTagRulesDrawer.tsx、web/src/test/AutoTagRulesDrawer.test.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/app/styles.css。只修改 AutoTagRulesDrawer.tsx、必要 styles.css 和必要 tests：移除 AutoTagRulesDrawer 的 MUI Drawer/Dialog/Table/TextField/Select/Checkbox/Button/IconButton/Alert/Progress/Tooltip/icons 依赖；使用 AppDrawer 保留右侧抽屉、`自动标签规则` dialog name、关闭按钮、版本/readonly text、active/archived tabs、toolbar actions `新增标签`/`重新应用规则`/`保存`、loading/error/feedback；使用 FinanceTable/project table 保留 `自动标签规则表格`、system row priority 1、active rule wide editor columns、match fields `全选`/`清空`、condition editor dialog `取消`/`确定`、archive confirmation dialog `确认停用标签`、archived empty/re-enable flow、save/reapply payloads and dirty validation behavior。不得修改后端、API、read model、worker、mock、BankDetails page migrated surfaces 或关联台。运行 `cd web && npx vitest run AutoTagRulesDrawer.test.tsx`；运行 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P045 结束后 full target set 必须通过；运行 `cd web && npm run build`；运行 BankDetails scope MUI grep、CSS MUI selector residue grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，并生成 `MG-P045-phase-6-bank-details` prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime scope limited to AutoTagRulesDrawer: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Preserves old overlay shape: yes，right drawer stays right drawer; condition/archive overlays stay dialogs。
+- Verification defined: drawer tests, full BankDetails target set, build, MUI residue grep, diff check, status。
 
 ### MG Prompt Template
 

@@ -1,7 +1,4 @@
-import Box from "@mui/material/Box";
-import Chip from "@mui/material/Chip";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import { useState } from "react";
 
 import { getBankCategoryToneClass, splitBankCategoryLabel } from "./categoryOptions";
 import type { BankTransactionCategoryCode } from "./types";
@@ -26,9 +23,12 @@ export default function BankCategoryTag({
   const labelLines = splitBankCategoryLabel(label);
   const displayLabel = count === undefined ? label : `${label} ${count}`;
   const hierarchyParts = categoryHierarchyParts(label);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const tooltipId = `bank-category-hierarchy-${categoryCode ?? "empty"}-${displayLabel.replace(/\s+/g, "-")}`;
 
   const chip = (
-    <Chip
+    <span
+      aria-label={displayLabel}
       className={[
         "bank-category-tag",
         "bank-chip-auto-size",
@@ -36,30 +36,32 @@ export default function BankCategoryTag({
         compact ? "compact" : "",
         className ?? "",
       ].filter(Boolean).join(" ")}
-      label={(
-        <span className="bank-category-tag-label" aria-label={displayLabel}>
-          {labelLines.map((line, index) => (
-            <span className="bank-category-tag-line" key={`${line}-${index}`}>
-              {index === labelLines.length - 1 && count !== undefined ? `${line} ${count}` : line}
-            </span>
-          ))}
-        </span>
-      )}
-      size="small"
-      variant="outlined"
-    />
+    >
+      <span className="bank-category-tag-label">
+        {labelLines.map((line, index) => (
+          <span className="bank-category-tag-line" key={`${line}-${index}`}>
+            {index === labelLines.length - 1 && count !== undefined ? `${line} ${count}` : line}
+          </span>
+        ))}
+      </span>
+    </span>
   );
   if (!hierarchyTooltip || hierarchyParts.length < 2) {
     return chip;
   }
   return (
-    <Tooltip
-      arrow
-      placement="top"
-      title={<CategoryHierarchyTooltip parts={hierarchyParts} count={count} />}
+    <span
+      aria-describedby={tooltipOpen ? tooltipId : undefined}
+      className="bank-category-hierarchy-tooltip-anchor"
+      onBlur={() => setTooltipOpen(false)}
+      onFocus={() => setTooltipOpen(true)}
+      onMouseEnter={() => setTooltipOpen(true)}
+      onMouseLeave={() => setTooltipOpen(false)}
+      tabIndex={0}
     >
       {chip}
-    </Tooltip>
+      {tooltipOpen ? <CategoryHierarchyTooltip id={tooltipId} parts={hierarchyParts} count={count} /> : null}
+    </span>
   );
 }
 
@@ -75,24 +77,24 @@ function categoryHierarchyParts(label: string) {
   return [label.trim()].filter(Boolean);
 }
 
-function CategoryHierarchyTooltip({ parts, count }: { parts: string[]; count?: number }) {
+function CategoryHierarchyTooltip({ id, parts, count }: { id: string; parts: string[]; count?: number }) {
   return (
-    <Box className="bank-category-hierarchy-tooltip">
-      <Typography className="bank-category-hierarchy-title" variant="caption" color="inherit">
+    <span className="bank-category-hierarchy-tooltip" id={id} role="tooltip">
+      <span className="bank-category-hierarchy-title">
         {parts.join(" / ")}{count === undefined ? "" : ` ${count}`}
-      </Typography>
-      <Box className="bank-category-hierarchy-tree">
+      </span>
+      <span className="bank-category-hierarchy-tree">
         {parts.map((part, index) => (
-          <Box className="bank-category-hierarchy-row" key={`${part}-${index}`}>
-            <Box className="bank-category-hierarchy-branch" aria-hidden="true">
+          <span className="bank-category-hierarchy-row" key={`${part}-${index}`}>
+            <span className="bank-category-hierarchy-branch" aria-hidden="true">
               {index === 0 ? "*" : "-"}
-            </Box>
-            <Typography className="bank-category-hierarchy-node" variant="caption" color="inherit">
+            </span>
+            <span className="bank-category-hierarchy-node">
               {part}
-            </Typography>
-          </Box>
+            </span>
+          </span>
         ))}
-      </Box>
-    </Box>
+      </span>
+    </span>
   );
 }
