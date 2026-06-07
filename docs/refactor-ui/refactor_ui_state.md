@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P086-phase-6-turnover-ledger-characterization-tests`
+- Current Prompt ID: `P087-phase-6-turnover-ledger-page-shell-tabs-summary`
 - Current MG ID: `MG-P084-phase-6-batch-accounting`
 
 ## Global Invariants
@@ -54,15 +54,15 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 turnover ledger characterization tests prompt generated after P085 discovery。
-- Files touched in P085:
+- Scope: phase 6 turnover ledger page shell/tabs/summary prompt generated after P086 characterization tests。
+- Files touched in P086:
+  - `web/src/test/TurnoverLedgerPage.test.tsx`
   - `docs/refactor-ui/modules/phase_6_turnover_ledger.md`
-  - `docs/refactor-ui/modules/phase_6_batch_accounting.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P085 discovery doc exists；required discovery terms and P086 prompt are recorded；diff/status passed。
-- Failures: none。
-- Next action: 执行 `P086-phase-6-turnover-ledger-characterization-tests`。
+- Verification run: P086 `TurnoverLedgerPage.test.tsx` expected-fail with 11 behavior tests passed and 1 source-level primitive contract failure；diff/status passed。
+- Failures: expected source-level contract lists current TurnoverLedger MUI imports/legacy surfaces and missing project primitives.
+- Next action: 执行 `P087-phase-6-turnover-ledger-page-shell-tabs-summary`。
 
 ## Prompt Lifecycle
 
@@ -94,12 +94,15 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P086-phase-6-turnover-ledger-characterization-tests` | TurnoverLedger P085 discovery verified；next characterization tests |
+| page batches | `in_progress` | `P087-phase-6-turnover-ledger-page-shell-tabs-summary` | TurnoverLedger P086 characterization tests verified with expected source-level failure；next page shell/tabs/summary |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P086-phase-6-turnover-ledger-characterization-tests` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level no-MUI/project primitive contract failed against current MUI runtime |
+| 2026-06-07 | `P086-phase-6-turnover-ledger-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P086-phase-6-turnover-ledger-characterization-tests` | `git status --short --branch` | passed | Only P086 test file changed before docs |
 | 2026-06-07 | `P085-phase-6-turnover-ledger-discovery` | `test -f docs/refactor-ui/modules/phase_6_turnover_ledger.md` | passed | TurnoverLedger module discovery doc exists |
 | 2026-06-07 | `P085-phase-6-turnover-ledger-discovery` | `rg -n "P085-phase-6-turnover-ledger-discovery\|Current MUI Inventory\|User-visible Entrypoints\|Recommended Micro-JIT Queue\|P086-phase-6-turnover-ledger-characterization-tests" docs/refactor-ui/modules/phase_6_turnover_ledger.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Discovery terms and next prompt recorded |
 | 2026-06-07 | `P085-phase-6-turnover-ledger-discovery` | `git diff --check` | passed | 无 whitespace error |

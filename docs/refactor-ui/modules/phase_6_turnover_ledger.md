@@ -84,3 +84,28 @@ Scope: `/turnover-ledger` source-level and behavior guardrails only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx、web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx、web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx、web/src/test/TurnoverLedgerPage.test.tsx、web/src/test/TurnoverLedgerApi.test.ts、web/src/features/turnoverLedger/api.ts 和 web/src/features/turnoverLedger/types.ts。只修改 `web/src/test/TurnoverLedgerPage.test.tsx`，新增 source-level no-MUI/project primitive contract 和必要的用户可见行为 characterization tests。不得修改 runtime code、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。测试必须覆盖：page shell actions, family tabs, summary cards, grouped table accessible name and row selection, closure right drawer, extra right drawer, export dialog, feedback messages and relevant domain events。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 source-level contract against current MUI runtime is expected-fail while existing/new behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P087 page shell/tabs/summary prompt。
 ```
+
+## P086 Execution Notes
+
+- Status: verified with expected source-level failure.
+- Runtime implementation changed: no.
+- Test implementation changed: yes, only `web/src/test/TurnoverLedgerPage.test.tsx`.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Added source-level contract for `TurnoverLedgerPage.tsx`, `TurnoverLedgerGroupedTable.tsx`, `TurnoverLedgerExtraDrawer.tsx` and `TurnoverLedgerExportDialog.tsx`.
+- Expected current failure lists direct MUI imports and legacy surfaces in all four runtime files, one MUI selector residue in grouped table, and missing project table/drawer/dialog/feedback primitives.
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: expected-fail; 11 behavior tests passed and 1 source-level contract failed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P086 test file changed before docs.
+
+## P087 Prompt Draft
+
+```text
+Prompt ID: P087-phase-6-turnover-ledger-page-shell-tabs-summary
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/turnover-ledger` page shell actions, family tabs and summary cards only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/test/TurnoverLedgerPage.test.tsx 和 web/src/app/styles.css。只迁移 `TurnoverLedgerPage.tsx` 的 outer `Box`, page action buttons (`外部往来款标签设置`, `下载表格`), family tabs (`全部`/`个人往来`/`公司往来`/`银行往来`/`业务往来`) and summary cards (`当前待还款金额`/`累计已还款金额`/`当前待收款金额`/`累计已收款金额`) 到 native/project controls and `turnover-ledger-*` classes；必要时只补 `web/src/app/styles.css` 中的 turnover ledger shell/tabs/summary classes。不得迁移 grouped table、tag settings drawer、closure drawer、extra drawer、export dialog、feedback/Snackbar、API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：page heading, action button labels and disabled states, family tab accessible roles/selected state, family switch clears closure selection, summary card labels/amounts/family breakdown text, grouped table still renders and existing behavior tests still pass。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|renders grouped|opens tag selection drawer|reloads on category updates"`，预期 source-level contract remains expected-fail but selected behavior tests must pass；运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 11 behavior tests pass and source-level contract remains expected-fail until P088-P091；运行 scoped grep `if rg -n 'DownloadOutlinedIcon|<Box|<Tabs|<Tab|label=\"全部\"|label=\"个人往来\"|label=\"公司往来\"|label=\"银行往来\"|label=\"业务往来\"' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P088 grouped table prompt。
+```

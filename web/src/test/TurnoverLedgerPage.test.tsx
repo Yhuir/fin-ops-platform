@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -8,6 +10,13 @@ import { SessionContext, type SessionContextValue } from "../contexts/SessionCon
 import type { SessionPayload } from "../features/session/api";
 import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
+
+const turnoverLedgerSourceFiles = [
+  "src/pages/TurnoverLedgerPage.tsx",
+  "src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx",
+  "src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx",
+  "src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx",
+] as const;
 
 const fullSession: SessionPayload = {
   allowed: true,
@@ -43,6 +52,10 @@ function renderTurnoverLedgerPage(session: SessionPayload = fullSession) {
       </SessionContext.Provider>
     </MuiProviders>,
   );
+}
+
+function readWebSource(path: string) {
+  return readFileSync(resolve(path), "utf8");
 }
 
 function requestUrls(fetchMock: ReturnType<typeof installTurnoverLedgerFetch>, pathname: string) {
@@ -849,6 +862,56 @@ afterEach(() => {
 });
 
 describe("Turnover ledger page", () => {
+  test("targets project primitives for shell, grouped table, right drawers, export dialog, and feedback", () => {
+    const sourceByPath = Object.fromEntries(turnoverLedgerSourceFiles.map((path) => [path, readWebSource(path)]));
+    const forbiddenMuiImports = turnoverLedgerSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
+    });
+    const forbiddenMuiSelectors = turnoverLedgerSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /\.Mui[A-Z][A-Za-z-]*/.test(source) ? [path] : [];
+    });
+    const forbiddenLegacySurfaces = turnoverLedgerSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /DownloadOutlinedIcon|KeyboardArrowDownIcon|KeyboardArrowRightIcon|CloseIcon|TextField|TableCell|TableRow|TableHead|TableBody|TableContainer|DialogTitle|DialogContent|DialogActions|Snackbar|Drawer|Chip|IconButton|Tooltip|Tabs|Tab|FormControlLabel|MenuItem/.test(source)
+        ? [path]
+        : [];
+    });
+    const pageSource = sourceByPath["src/pages/TurnoverLedgerPage.tsx"];
+    const tableSource = sourceByPath["src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx"];
+    const extraDrawerSource = sourceByPath["src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx"];
+    const exportDialogSource = sourceByPath["src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx"];
+    const missingPrimitiveTargets = [
+      pageSource.includes("PageScaffold") ? null : "TurnoverLedgerPage.tsx should keep PageScaffold",
+      pageSource.includes("StatePanel") ? null : "TurnoverLedgerPage.tsx should keep StatePanel for loading/empty/error states",
+      /FinanceTable|finance-table|turnover.*table/.test(tableSource)
+        ? null
+        : "Grouped rows should use FinanceTable or project/native table classes",
+      /AppDrawer|turnover.*drawer/.test(pageSource) && /AppDrawer|turnover.*drawer/.test(extraDrawerSource)
+        ? null
+        : "Tag, closure and extra info surfaces should use AppDrawer or project drawer classes",
+      /AppDialog|turnover.*dialog/.test(exportDialogSource)
+        ? null
+        : "Export confirmation should use AppDialog or project dialog classes",
+      /turnover.*toast|turnover.*feedback|turnover.*notice/.test(pageSource)
+        ? null
+        : "Mutation feedback should use a project feedback/toast class",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      forbiddenLegacySurfaces,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      forbiddenLegacySurfaces: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
   test("renders grouped MUI table with collapsed summary rows, sticky left cells, and no status column", async () => {
     const fetchMock = installTurnoverLedgerFetch();
     renderTurnoverLedgerPage();

@@ -4890,7 +4890,7 @@ Scope: `/turnover-ledger` only.
 ### P086-phase-6-turnover-ledger-characterization-tests
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: `/turnover-ledger` source-level and behavior guardrails only.
 
@@ -4912,6 +4912,43 @@ Scope: `/turnover-ledger` source-level and behavior guardrails only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level no-MUI contract should fail until P087-P091 clear runtime MUI surfaces。
+
+#### Execution Notes
+
+- Test implementation changed: yes，only `web/src/test/TurnoverLedgerPage.test.tsx`.
+- Runtime implementation changed: no.
+- Added source-level no-MUI/project primitive contract for `TurnoverLedgerPage.tsx`, `TurnoverLedgerGroupedTable.tsx`, `TurnoverLedgerExtraDrawer.tsx` and `TurnoverLedgerExportDialog.tsx`.
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: expected-fail；11 behavior tests passed，1 source-level contract failed against current MUI runtime。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P086 test file changed before docs。
+- Next prompt generated: `P087-phase-6-turnover-ledger-page-shell-tabs-summary`.
+
+### P087-phase-6-turnover-ledger-page-shell-tabs-summary
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/turnover-ledger` page shell actions, family tabs and summary cards only.
+
+#### Prompt
+
+```text
+Prompt ID: P087-phase-6-turnover-ledger-page-shell-tabs-summary
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/turnover-ledger` page shell actions, family tabs and summary cards only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/test/TurnoverLedgerPage.test.tsx 和 web/src/app/styles.css。只迁移 `TurnoverLedgerPage.tsx` 的 outer `Box`, page action buttons (`外部往来款标签设置`, `下载表格`), family tabs (`全部`/`个人往来`/`公司往来`/`银行往来`/`业务往来`) and summary cards (`当前待还款金额`/`累计已还款金额`/`当前待收款金额`/`累计已收款金额`) 到 native/project controls and `turnover-ledger-*` classes；必要时只补 `web/src/app/styles.css` 中的 turnover ledger shell/tabs/summary classes。不得迁移 grouped table、tag settings drawer、closure drawer、extra drawer、export dialog、feedback/Snackbar、API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：page heading, action button labels and disabled states, family tab accessible roles/selected state, family switch clears closure selection, summary card labels/amounts/family breakdown text, grouped table still renders and existing behavior tests still pass。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|renders grouped|opens tag selection drawer|reloads on category updates"`，预期 source-level contract remains expected-fail but selected behavior tests must pass；运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 11 behavior tests pass and source-level contract remains expected-fail until P088-P091；运行 scoped grep `if rg -n 'DownloadOutlinedIcon|<Box|<Tabs|<Tab|label=\"全部\"|label=\"个人往来\"|label=\"公司往来\"|label=\"银行往来\"|label=\"业务往来\"' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P088 grouped table prompt。
+```
+
+#### Review
+
+- Single slice: yes，only page shell actions, family tabs and summary cards。
+- Runtime implementation limited: yes，does not touch table/drawers/dialog/feedback/API。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract remains expected-fail until later slices clear table/drawer/dialog/feedback surfaces。
 
 ### MG Prompt Template
 
