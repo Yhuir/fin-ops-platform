@@ -132,3 +132,42 @@ Scope: `/oa-pending-payments` page shell/actions/query/loading/error only. Do no
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_oa_pending_payments.md、web/src/pages/OaPendingPaymentsPage.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx、web/src/test/OaPendingPaymentsPage.test.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/OaPendingPaymentsPage.tsx`、必要 `web/src/app/styles.css` 和必要测试 expectation：移除 page shell/actions/query/loading/error scope 的 MUI imports/usages，包括 `RefreshOutlinedIcon`、`TuneOutlinedIcon`、`Alert`、`Button`、`MenuItem`、`Skeleton`、`Stack`、`TextField`。使用 project/native toolbar controls、native text/month/date/select inputs、project loading skeleton/status message and lucide icons。必须保留 `data-testid="oa-pending-payments-page"`、heading `OA 待付款核对`、buttons `支出流水无需开票规则设置` and `刷新`、search label `全页面检索`、`查询` button、Enter submit、date labels `月份`/`交易开始`/`交易结束`、payment status label `支付状态` and old options `全部`/`未支付`/`已支付`/`合并支付`/`支付少了`/`支付多了`/`待核对`、refresh disabled while refreshing、error text `OA 待付款核对加载失败。`、loading label `OA待付款核对加载中`、empty state `当前条件下暂无记录。`、detail/rules drawer wiring and API query behavior。不得修改 `OaPendingPaymentsTable.tsx`、shared filter/detail/rules drawers、mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OaPendingPaymentsPage.test.tsx -t "targets project primitives|adds sidebar route|keeps pending invoice rules drawer|uses a standard empty state|shows neutral unavailable detail"`；运行完整 `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`，P064 table source contract failure 可以继续 expected-fail，但 `src/pages/OaPendingPaymentsPage.tsx` must disappear from source-level failure lists；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|TuneOutlinedIcon|Skeleton|TextField|MenuItem' web/src/pages/OaPendingPaymentsPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P064 grouped table prompt。
 ```
+
+## Execution Update: P063 Page Shell / Toolbar
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/pages/OaPendingPaymentsPage.tsx`
+  - `web/src/app/styles.css`
+  - `web/src/test/OaPendingPaymentsPage.test.tsx`
+- Runtime changed:
+  - Migrated page actions, query toolbar, loading skeleton and error alert from MUI to project/native controls.
+  - Replaced page action icons with `lucide-react` icons.
+  - Preserved route/sidebar, heading, refresh behavior, rules drawer trigger, query labels, Enter submit, status options, empty state, detail drawer wiring and rules drawer wiring.
+- Table changed: no. `OaPendingPaymentsTable.tsx` remains the only OA pending payments MUI implementation surface.
+- Shared filter/detail/rules drawers changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|TuneOutlinedIcon|Skeleton|TextField|MenuItem' web/src/pages/OaPendingPaymentsPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run OaPendingPaymentsPage.test.tsx -t "targets project primitives|adds sidebar route|keeps pending invoice rules drawer|uses a standard empty state|shows neutral unavailable detail"`: expected-fail; 4 behavior tests passed and the remaining source-level failure lists only `src/components/oaPendingPayments/OaPendingPaymentsTable.tsx`.
+  - `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`: expected-fail; 5 behavior tests passed and 1 source-level contract failed, limited to table residue.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P063 files and docs changed.
+
+## Current Expected Failures After P063
+
+- `src/components/oaPendingPayments/OaPendingPaymentsTable.tsx`: still imports MUI table/tag/button/tooltip/pagination controls and contains `.MuiChip-label`; P064 owns this.
+- `src/pages/OaPendingPaymentsPage.tsx`: cleared from source-level no-MUI failure lists.
+
+## P064 Prompt Draft
+
+```text
+Prompt ID: P064-phase-6-oa-pending-payments-grouped-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/oa-pending-payments` grouped dense table only: `OaPendingPaymentsTable.tsx`, necessary `web/src/app/styles.css` and necessary `OaPendingPaymentsPage.test.tsx` expectation updates. Do not modify page shell, shared drawers or shared `InputInvoiceUsageFilterMenu`.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_oa_pending_payments.md、docs/refactor-ui/table_layout_system.md、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx、web/src/components/common/FinanceTable.tsx、web/src/test/OaPendingPaymentsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 `OaPendingPaymentsTable.tsx` 的 MUI imports/usages，包括 `InfoOutlinedIcon`、`SortOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Paper`、`Stack`、`Table*`、`TablePagination`、`Tooltip`、`Typography` 和 `.MuiChip-label` selector。使用 `FinanceTable`/project dense table primitives or native project table shell、project tags/buttons/tooltips、lucide icons and project pagination。必须保留 `aria-label="OA待付款核对表格"`、group headers `OA情况`/`支付状态`/`支出流水`/`发票情况`、10 leaf columns、shared `InputInvoiceUsageFilterMenu` trigger `筛选 OA申请人` and prop contract、sort button `交易时间 排序` and `bank_trade_time` query behavior、status cell project class or equivalent contract, amount right alignment/tabular nums, date/status/direction/account tags stable height, detail button labels `查看 OA <applicant> 详情` / `查看流水 <applicant> 详情` / `查看发票 <applicant> 详情` / relation-list labels, empty row `暂无 OA 待付款核对数据`, server pagination labels/options `每页`, `[20, 50, 100]` and total behavior。不得修改 page shell, shared filter/detail/rules drawers, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`，now all OA pending payments source-level no-MUI contracts must pass；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|Mui[A-Z]|TablePagination|InfoOutlinedIcon|SortOutlinedIcon|TableCell|TableRow|TableHead|TableBody|Chip|IconButton' web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx; then exit 1; else exit 0; fi`；运行 full OA pending payments residue grep：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OaPendingPaymentsPage.tsx web/src/components/oaPendingPayments; then exit 1; else exit 0; fi`。运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 OA pending payments cumulative MG prompt。
+```

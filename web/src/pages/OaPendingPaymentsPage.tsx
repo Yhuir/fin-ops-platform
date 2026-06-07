@@ -1,14 +1,8 @@
-import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
-import TuneOutlinedIcon from "@mui/icons-material/TuneOutlined";
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import MenuItem from "@mui/material/MenuItem";
-import Skeleton from "@mui/material/Skeleton";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
+import { RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
@@ -176,98 +170,105 @@ export default function OaPendingPaymentsPage() {
   );
 
   const actions = useMemo(() => (
-    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-      <Button
+    <div className="oa-pending-payments-actions">
+      <button
         aria-label="支出流水无需开票规则设置"
-        startIcon={<TuneOutlinedIcon />}
-        variant="outlined"
         onClick={() => setRulesOpen(true)}
+        className="oa-pending-payments-button"
+        type="button"
       >
+        <SlidersHorizontal aria-hidden="true" size={16} />
         支出流水无需开票规则设置
-      </Button>
-      <Button
-        startIcon={<RefreshOutlinedIcon />}
-        variant="contained"
+      </button>
+      <button
+        className="oa-pending-payments-button oa-pending-payments-button--primary"
         disabled={refreshing}
         onClick={() => loadRows("refresh")}
+        type="button"
       >
+        <RefreshCw aria-hidden="true" size={16} />
         刷新
-      </Button>
-    </Stack>
+      </button>
+    </div>
   ), [loadRows, refreshing]);
   const isEmpty = !loading && !error && rows.length === 0;
 
   return (
     <>
-      <Stack data-testid="oa-pending-payments-page" sx={{ minWidth: 0, overflowX: "hidden" }}>
+      <div className="oa-pending-payments-page" data-testid="oa-pending-payments-page">
         <PageScaffold title="OA 待付款核对" actions={actions}>
-          <Stack spacing={1.5} sx={{ minWidth: 0 }}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-              <TextField
-                label="全页面检索"
-                inputProps={{ "aria-label": "全页面检索" }}
-                size="small"
-                value={keywordDraft}
-                onChange={(event) => setKeywordDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleKeywordSubmit();
-                  }
-                }}
-                sx={{ width: { xs: "100%", md: 320 } }}
-              />
-              <Button variant="outlined" onClick={handleKeywordSubmit}>查询</Button>
-              <TextField
-                label="月份"
-                size="small"
-                type="month"
-                value={query.month}
-                onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
-                InputLabelProps={{ shrink: true }}
-                sx={{ width: { xs: "100%", md: 150 } }}
-              />
-              <TextField
-                label="交易开始"
-                size="small"
-                type="date"
-                value={query.tradeDateFrom}
-                onChange={(event) => setQuery((current) => ({ ...current, page: 1, tradeDateFrom: event.target.value }))}
-                InputLabelProps={{ shrink: true }}
-                sx={{ width: { xs: "100%", md: 150 } }}
-              />
-              <TextField
-                label="交易结束"
-                size="small"
-                type="date"
-                value={query.tradeDateTo}
-                onChange={(event) => setQuery((current) => ({ ...current, page: 1, tradeDateTo: event.target.value }))}
-                InputLabelProps={{ shrink: true }}
-                sx={{ width: { xs: "100%", md: 150 } }}
-              />
-              <TextField
-                select
-                label="支付状态"
-                size="small"
-                value={query.filters.find((filter) => filter.field === "payment_status")?.values?.[0] ?? ""}
-                onChange={(event) => applyPaymentStatusFilter(event.target.value)}
-                sx={{ width: { xs: "100%", md: 170 } }}
-              >
-                <MenuItem value="">全部</MenuItem>
-                <MenuItem value="unpaid">未支付</MenuItem>
-                <MenuItem value="paid">已支付</MenuItem>
-                <MenuItem value="merged_paid">合并支付</MenuItem>
-                <MenuItem value="partially_paid">支付少了</MenuItem>
-                <MenuItem value="overpaid">支付多了</MenuItem>
-                <MenuItem value="pending_review">待核对</MenuItem>
-              </TextField>
-            </Stack>
-            {error ? <Alert severity="error">{error}</Alert> : null}
+          <div className="oa-pending-payments-content">
+            <PageToolbar
+              className="oa-pending-payments-query"
+              left={(
+                <div className="oa-pending-payments-query__grid">
+                  <label className="oa-pending-payments-field oa-pending-payments-field--search">
+                    <span>全页面检索</span>
+                    <input
+                      aria-label="全页面检索"
+                      value={keywordDraft}
+                      onChange={(event) => setKeywordDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          handleKeywordSubmit();
+                        }
+                      }}
+                    />
+                  </label>
+                  <button className="oa-pending-payments-button" onClick={handleKeywordSubmit} type="button">查询</button>
+                  <label className="oa-pending-payments-field">
+                    <span>月份</span>
+                    <input
+                      type="month"
+                      value={query.month}
+                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
+                    />
+                  </label>
+                  <label className="oa-pending-payments-field">
+                    <span>交易开始</span>
+                    <input
+                      type="date"
+                      value={query.tradeDateFrom}
+                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, tradeDateFrom: event.target.value }))}
+                    />
+                  </label>
+                  <label className="oa-pending-payments-field">
+                    <span>交易结束</span>
+                    <input
+                      type="date"
+                      value={query.tradeDateTo}
+                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, tradeDateTo: event.target.value }))}
+                    />
+                  </label>
+                  <label className="oa-pending-payments-field">
+                    <span>支付状态</span>
+                    <select
+                      value={query.filters.find((filter) => filter.field === "payment_status")?.values?.[0] ?? ""}
+                      onChange={(event) => applyPaymentStatusFilter(event.target.value)}
+                    >
+                      <option value="">全部</option>
+                      <option value="unpaid">未支付</option>
+                      <option value="paid">已支付</option>
+                      <option value="merged_paid">合并支付</option>
+                      <option value="partially_paid">支付少了</option>
+                      <option value="overpaid">支付多了</option>
+                      <option value="pending_review">待核对</option>
+                    </select>
+                  </label>
+                </div>
+              )}
+            />
+            {error ? (
+              <div className="oa-pending-payments-alert" role="alert">
+                {error}
+              </div>
+            ) : null}
             {loading ? (
-              <Stack spacing={1.25} aria-label="OA待付款核对加载中">
-                <Skeleton variant="rounded" height={44} />
-                <Skeleton variant="rounded" height={96} />
-                <Skeleton variant="rounded" height={96} />
-              </Stack>
+              <div className="oa-pending-payments-loading" aria-label="OA待付款核对加载中">
+                <span className="oa-pending-payments-loading__bar" />
+                <span className="oa-pending-payments-loading__panel" />
+                <span className="oa-pending-payments-loading__panel" />
+              </div>
             ) : (
               <>
                 {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
@@ -289,9 +290,9 @@ export default function OaPendingPaymentsPage() {
                 />
               </>
             )}
-          </Stack>
+          </div>
         </PageScaffold>
-      </Stack>
+      </div>
       <InputInvoiceUsageDetailDrawer
         open={detailTarget !== null}
         target={detailTarget}

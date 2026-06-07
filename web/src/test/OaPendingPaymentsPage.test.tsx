@@ -358,7 +358,7 @@ describe("OA pending payments page", () => {
     expect(within(page).queryByText("销方名称")).not.toBeInTheDocument();
     expect(await within(page).findByText("张三")).toBeInTheDocument();
     expect(within(page).getByText("报销")).toBeInTheDocument();
-    expect(within(page).getByText("支付少了").closest(".oa-pending-payment-status-cell")).toBeInTheDocument();
+    expect(within(page).getAllByText("支付少了").some((element) => element.closest(".oa-pending-payment-status-cell"))).toBe(true);
     expect(within(page).getByText("26532000000123456789")).toBeInTheDocument();
     expect(within(page).getAllByText("进项发票方名称").length).toBeGreaterThan(0);
     expect(within(page).getByText("建设银行 1234")).toBeInTheDocument();

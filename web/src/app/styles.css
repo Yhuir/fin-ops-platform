@@ -1313,6 +1313,178 @@ textarea {
   }
 }
 
+.oa-pending-payments-page {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.oa-pending-payments-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.oa-pending-payments-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fp-space-1);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 0 var(--fp-space-3);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  white-space: nowrap;
+}
+
+.oa-pending-payments-button:hover:not(:disabled),
+.oa-pending-payments-button:focus-visible {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  outline: none;
+}
+
+.oa-pending-payments-button:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.oa-pending-payments-button--primary {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary);
+  color: var(--fp-surface);
+}
+
+.oa-pending-payments-button--primary:hover:not(:disabled),
+.oa-pending-payments-button--primary:focus-visible {
+  background: var(--fp-primary-hover);
+  color: var(--fp-surface);
+}
+
+.oa-pending-payments-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.oa-pending-payments-content {
+  display: grid;
+  min-width: 0;
+  gap: var(--fp-space-3);
+}
+
+.oa-pending-payments-query {
+  align-items: flex-end;
+}
+
+.oa-pending-payments-query__grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(220px, 320px) auto repeat(4, minmax(130px, 170px));
+  align-items: end;
+  gap: var(--fp-space-2);
+}
+
+.oa-pending-payments-field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+}
+
+.oa-pending-payments-field input,
+.oa-pending-payments-field select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font: inherit;
+  font-size: var(--fp-text-body);
+  font-weight: 600;
+  outline: none;
+  padding: 0 var(--fp-space-3);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.oa-pending-payments-field select {
+  appearance: auto;
+}
+
+.oa-pending-payments-field input:hover,
+.oa-pending-payments-field select:hover {
+  border-color: var(--fp-border-strong);
+}
+
+.oa-pending-payments-field input:focus-visible,
+.oa-pending-payments-field select:focus-visible {
+  border-color: var(--fp-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.oa-pending-payments-alert {
+  border: 1px solid color-mix(in srgb, var(--fp-danger) 32%, var(--fp-border));
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-danger-soft);
+  color: var(--fp-danger);
+  font-size: var(--fp-text-body);
+  line-height: 1.45;
+  padding: var(--fp-space-3);
+}
+
+.oa-pending-payments-loading {
+  display: grid;
+  gap: var(--fp-space-3);
+}
+
+.oa-pending-payments-loading__bar,
+.oa-pending-payments-loading__panel {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  background: linear-gradient(90deg, var(--fp-surface-muted), var(--fp-surface), var(--fp-surface-muted));
+  background-size: 240% 100%;
+  animation: input-invoice-usage-loading 1.2s ease-in-out infinite;
+}
+
+.oa-pending-payments-loading__bar {
+  height: 44px;
+}
+
+.oa-pending-payments-loading__panel {
+  height: 96px;
+}
+
+@media (max-width: 1180px) {
+  .oa-pending-payments-query__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .oa-pending-payments-field--search {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .oa-pending-payments-query__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .oa-pending-payments-field--search {
+    grid-column: auto;
+  }
+}
+
 .pending-invoices-page {
   min-height: 100%;
   padding: var(--fp-space-5) var(--fp-space-6);
