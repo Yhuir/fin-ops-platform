@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P048-phase-6-pending-invoices-page-shell-toolbar`
+- Current Prompt ID: `P049-phase-6-pending-invoices-four-zone-table`
 - Current MG ID: `MG-P045-phase-6-bank-details`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices P047 characterization tests verified as expected-fail；next P048 page shell/toolbar migration |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices P048 page shell/toolbar migration verified as expected-fail；next P049 four-zone table migration |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,14 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 pending invoices page shell/toolbar migration prompt generated after characterization tests。
+- Scope: phase 6 pending invoices four-zone table migration prompt generated after page shell/toolbar migration。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_pending_invoices.md`
-- Verification run: `cd web && npx vitest run PendingInvoicesPage.test.tsx` expected-fail with 14 passed and 1 failure；failure is the new source-level project primitive contract against current pending invoice MUI runtime。
-- Failures: expected until P048-P052 remove pending invoice MUI imports and add required project primitives。
-- Next action: 执行 `P048-phase-6-pending-invoices-page-shell-toolbar`。
+- Verification run: `cd web && npx vitest run PendingInvoicesPage.test.tsx` expected-fail with 14 passed and 1 failure；page source has cleared P048 source contract, and the remaining source-level failure lists only table/drawer/dialog files for P049-P052。
+- Failures: expected until P049-P052 remove pending invoice table/drawer/dialog MUI imports and add required project primitives。
+- Next action: 执行 `P049-phase-6-pending-invoices-four-zone-table`。
 
 ## Prompt Lifecycle
 
@@ -93,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P048-phase-6-pending-invoices-page-shell-toolbar` | PendingInvoices P047 characterization tests verified as expected-fail；next P048 page shell/toolbar migration |
+| page batches | `in_progress` | `P049-phase-6-pending-invoices-four-zone-table` | PendingInvoices P048 page shell/toolbar migration verified as expected-fail；next P049 four-zone table migration |
 
 ## Verification Log
 
@@ -289,6 +289,11 @@
 | 2026-06-07 | `P047-phase-6-pending-invoices-characterization-tests` | `cd web && npx vitest run PendingInvoicesPage.test.tsx` | expected-fail | 14 passed, 1 expected failure. Failure lists 9 pending invoice files still importing `@mui/*` and missing PageScaffold/PageToolbar/FinanceTable/AppDrawer/AppDialog targets |
 | 2026-06-07 | `P047-phase-6-pending-invoices-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P047-phase-6-pending-invoices-characterization-tests` | `git status --short --branch` | passed | P047 test and docs changed |
+| 2026-06-07 | `P048-phase-6-pending-invoices-page-shell-toolbar` | `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract\|shows income rule-group filters\|keeps row status actions available\|targets project primitives"` | expected-fail | Page shell/toolbar targets cleared; source contract now lists only 8 table/drawer/dialog files |
+| 2026-06-07 | `P048-phase-6-pending-invoices-page-shell-toolbar` | `cd web && npx vitest run PendingInvoicesPage.test.tsx` | expected-fail | 14 passed, 1 expected source-level failure remains for P049-P052 |
+| 2026-06-07 | `P048-phase-6-pending-invoices-page-shell-toolbar` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P048-phase-6-pending-invoices-page-shell-toolbar` | `if rg -n '@mui/\|MuiButton-endIcon\|MuiToggleButton-root\|KeyboardArrowDownOutlinedIcon\|TablePagination\|ToggleButton\|ToggleButtonGroup' web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi` | passed | PendingInvoices page shell has no P048 MUI residue |
+| 2026-06-07 | `P048-phase-6-pending-invoices-page-shell-toolbar` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

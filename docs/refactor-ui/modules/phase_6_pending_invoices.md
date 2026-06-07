@@ -34,7 +34,7 @@
 | File | MUI / legacy usage | Migration target |
 | --- | --- | --- |
 | `PendingInvoicesPage.tsx` | MUI icon `KeyboardArrowDownOutlinedIcon`; `Box`, `Button`, `LinearProgress`, `Menu`, `MenuItem`, `Stack`, `TablePagination`, `TextField`, `ToggleButton`, `ToggleButtonGroup`, `Typography`; `.MuiButton-endIcon`, `.MuiToggleButton-root` sx selectors | Page shell/native or HeroUI controls, project menu/popover, project pagination, project loading bar |
-| `PendingInvoicesTable.tsx` | MUI icons `InfoOutlinedIcon`, `MoreVertOutlinedIcon`; `Box`, `Button`, `Chip`, `IconButton`, `Menu`, `MenuItem`, `Stack`, `Table`, `TableBody`, `TableCell`, `TableHead`, `TableRow`, `TableSortLabel`, `Tooltip`, `Typography`, MUI `SxProps/Theme`, `.MuiChip-label` sx selectors | `FinanceTable` or native project table, project sort buttons, project row action menu, `FinanceTag`/project tags, lucide icons, project tooltip |
+| `PendingInvoicesTable.tsx` | MUI icons `InfoOutlinedIcon`, `MoreVertOutlinedIcon`; `Box`, `Button`, `Chip`, `IconButton`, `Menu`, `MenuItem`, `Stack`, `Table`, `TableBody`, `TableCell`, `TableHead`, `TableRow`, `TableSortLabel`, `Tooltip`, `Typography`, MUI `SxProps/Theme`, `.MuiChip-label` sx selectors | `FinanceTable` or native project table, project sort buttons, project row action menu, `FinanceDirectionTag`/`FinanceStatusTag`/project tags, lucide icons, project tooltip |
 | `PendingInvoiceDrawerFrame.tsx` | MUI `Drawer`, `IconButton`, `Divider`, layout primitives, close icon, `SxProps/Theme` | `AppDrawer` with right placement and close label preservation |
 | `PendingInvoiceRulesDrawer.tsx` | MUI `Alert`, `Button`, `CircularProgress`, `Checkbox`, `FormControlLabel`, `Paper`, `Stack`, `Typography`, MUI selector in checkbox label sx | `AppDrawer`, project checkbox lists, project alerts/loading, project action buttons |
 | `PendingInvoiceRelationDrawer.tsx` | MUI alert/loading/layout/table/button | `AppDrawer`, project metric cards, `FinanceTable`/native table for `历史支付流水` |
@@ -241,4 +241,53 @@ Type: extraction/refactor
 Scope: `/pending-invoices` page shell/toolbar/pagination only. Do not migrate `PendingInvoicesTable` internals or any pending invoice drawer/dialog component.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/PendingInvoicesPage.tsx、web/src/test/PendingInvoicesPage.test.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/PendingInvoicesPage.tsx`、必要 `web/src/app/styles.css` 和必要的 `web/src/test/PendingInvoicesPage.test.tsx` expectation：移除 page shell/toolbar/status menu/pagination/search/loading 的 MUI imports/usages，包括 `KeyboardArrowDownOutlinedIcon`、`Box`、`Button`、`LinearProgress`、`Menu`、`MenuItem`、`Stack`、`TablePagination`、`TextField`、`ToggleButton`、`ToggleButtonGroup`、`Typography` 以及 `.MuiButton-endIcon`、`.MuiToggleButton-root` sx selector。使用 PageScaffold/PageToolbar、native/project buttons、project menu/listbox/popover、native search input、project pagination/loading/status markup 或 HeroUI primitives，保留旧 `data-testid="pending-invoices-page"`、route/sidebar link、direction counts/buttons `全部 <n>`/`支出 <n>`/`收入 <n>`、status menu trigger `筛选发票获取状态：<label>` 和 options、search `搜索流水`、refresh `刷新`、rules/export buttons、non-fresh read model disables export、loading `待找发票加载中`、server page/pageSize/total behavior and pagination labels。不得修改 pending invoices API/mock/read model/worker/backend/关联台；不得改 `web/src/components/pendingInvoices/*`，除非测试证明 page-only migration needs a prop-compatible no-op adjustment and the prompt must record why。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract|shows income rule-group filters|keeps row status actions available|targets project primitives"`；运行完整 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，P049-P052 table/drawer/dialog source contract failures 可以继续 expected-fail，但 P048 page shell/toolbar/pagination targets and page-level MUI import failure must clear；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|MuiButton-endIcon|MuiToggleButton-root|KeyboardArrowDownOutlinedIcon|TablePagination|ToggleButton|ToggleButtonGroup' web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P049 four-zone table prompt。
+```
+
+## Execution Update: P048 Page Shell / Toolbar
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/pages/PendingInvoicesPage.tsx`
+  - `web/src/app/styles.css`
+- Runtime implementation changed: page shell/toolbar/pagination only.
+- Pending invoice table/drawer/dialog components changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - `PendingInvoicesPage.tsx` now uses `PageScaffold` and `PageToolbar`.
+  - Direction controls are native segmented buttons with `aria-label="待找发票流水范围"`.
+  - Status filter trigger/menu are native project controls with the old accessible trigger name `筛选发票获取状态：<label>`.
+  - Toolbar rules/export/search/refresh controls and pagination no longer use MUI.
+  - Page loading indicator keeps `aria-label="待找发票加载中"`.
+- Verification:
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract|shows income rule-group filters|keeps row status actions available|targets project primitives"`: expected-fail. Page shell/toolbar source target cleared.
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx`: expected-fail, 14 passed and 1 failed.
+  - Remaining failure: `targets project primitives for page shell, tables, drawers, and dialogs`.
+  - The failure now lists only 8 pending invoice table/drawer/dialog files; `src/pages/PendingInvoicesPage.tsx` no longer appears.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|MuiButton-endIcon|MuiToggleButton-root|KeyboardArrowDownOutlinedIcon|TablePagination|ToggleButton|ToggleButtonGroup' web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+
+## Current Expected Failures After P048
+
+The single source-level failure is expected until P049-P052 complete:
+
+- `src/components/pendingInvoices/PendingInvoicesTable.tsx`: still imports MUI table/menu/tag/tooltip controls; P049 owns this.
+- `src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx`: still imports MUI Drawer; P050 owns this.
+- `src/components/pendingInvoices/PendingInvoiceRelationDrawer.tsx`: still imports MUI alert/loading/table/button/layout controls; P050 owns this.
+- `src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx`: still imports MUI alert/loading/dialog/button/layout controls; P050 owns this.
+- `src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx`: still imports MUI alert/loading/table/button/layout controls; P050 owns this.
+- `src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx`: still imports MUI alert/loading/checkbox/button/layout controls; P051 owns this.
+- `src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx`: still imports MUI alert/loading/table/pagination/button/input controls; P052 owns this.
+- `src/components/pendingInvoices/ManualInvoiceDialog.tsx`: still imports MUI Dialog/form controls; P052 owns this.
+
+## P049 Prompt Draft
+
+```text
+Prompt ID: P049-phase-6-pending-invoices-four-zone-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: PendingInvoices main four-zone table only. Do not migrate drawer frame, drawers, rules drawer, invoice picker drawer or manual invoice dialog.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/table_layout_system.md、web/src/components/pendingInvoices/PendingInvoicesTable.tsx、web/src/pages/PendingInvoicesPage.tsx、web/src/components/common/FinanceTable.tsx、web/src/test/PendingInvoicesPage.test.tsx 和 web/src/app/styles.css。只修改 `PendingInvoicesTable.tsx`、必要 `styles.css` 和必要的 `PendingInvoicesPage.test.tsx` expectations：移除主四区表的 MUI imports/usages，包括 `InfoOutlinedIcon`、`MoreVertOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Menu`、`MenuItem`、`Stack`、`Table`、`TableBody`、`TableCell`、`TableHead`、`TableRow`、`TableSortLabel`、`Tooltip`、`Typography`、`SxProps`、`Theme` 和 `.MuiChip-label` selector。使用 FinanceTable/project native table markup、project buttons/menu/tooltip/tag classes 或 HeroUI primitives，保留 accessible table name `待找发票四区表`、`pending-invoices-table-shell` scroll container、group headers `支出流水/收入流水/流水`、`发票获取状态`、`进项发票/销项发票/发票`、`OA`、所有 subheaders、sticky header behavior、dense four-zone row layout、loading row `正在加载待找发票。`、empty row `当前条件下没有待找发票流水。`、row action button `<counterparty> 发票获取操作`、menu items `选择发票`/`补票`/`查看支付明细`/income status actions、object detail buttons such as `发票详情 DIG-001` and `OA详情 李四`、direction/status tags、amount/payment difference tabular numeric alignment and server sorting behavior。不得修改 page shell、pending invoice API/mock/read model/worker/backend/关联台；不得改 any drawer/dialog component。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract|shows income rule-group filters|keeps row status actions available|targets project primitives"`；运行完整 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，P050-P052 drawer/dialog source contract failures 可以继续 expected-fail，但 `PendingInvoicesTable.tsx` must disappear from the source-level failure list；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|MuiChip-label|SxProps|TableSortLabel|MoreVertOutlinedIcon|InfoOutlinedIcon' web/src/components/pendingInvoices/PendingInvoicesTable.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P050 drawer frame/simple drawers prompt。
 ```

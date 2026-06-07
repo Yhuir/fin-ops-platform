@@ -1,17 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import KeyboardArrowDownOutlinedIcon from "@mui/icons-material/KeyboardArrowDownOutlined";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import LinearProgress from "@mui/material/LinearProgress";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import Stack from "@mui/material/Stack";
-import TablePagination from "@mui/material/TablePagination";
-import TextField from "@mui/material/TextField";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
-import Typography from "@mui/material/Typography";
+import { ChevronDown } from "lucide-react";
 
+import PageScaffold from "../components/common/PageScaffold";
+import PageToolbar from "../components/common/PageToolbar";
 import ManualInvoiceDialog from "../components/pendingInvoices/ManualInvoiceDialog";
 import PendingInvoiceDetailDrawer from "../components/pendingInvoices/PendingInvoiceDetailDrawer";
 import PendingInvoiceExportDrawer from "../components/pendingInvoices/PendingInvoiceExportDrawer";
@@ -111,6 +102,17 @@ function readPersistedTagVersion() {
   }
 }
 
+function displayedPendingInvoiceRange(page: number, pageSize: number, total: number) {
+  if (total <= 0) {
+    return "0-0 / 0";
+  }
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const from = (currentPage - 1) * pageSize + 1;
+  const to = Math.min(currentPage * pageSize, total);
+  return `${from}-${to} / ${total}`;
+}
+
 export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const pageActiveRef = useRef(active);
@@ -132,7 +134,7 @@ export default function PendingInvoicesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [readModelStatus, setReadModelStatus] = useState("");
-  const [filterAnchorEl, setFilterAnchorEl] = useState<HTMLElement | null>(null);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [dialogRow, setDialogRow] = useState<PendingInvoiceRow | null>(null);
@@ -143,7 +145,7 @@ export default function PendingInvoicesPage() {
   });
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
 
-  const filterOpen = Boolean(filterAnchorEl);
+  const filterOpen = filterMenuOpen;
 
   const query = useMemo<FetchPendingInvoiceRowsRequest>(() => ({
     direction,
@@ -394,117 +396,123 @@ export default function PendingInvoicesPage() {
     expense: sourceSummary?.expenseRows ?? 0,
     income: sourceSummary?.incomeRows ?? 0,
   };
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
 
   const statusFilterControl = (
-    <Button
-      variant="outlined"
-      size="small"
-      aria-haspopup="menu"
-      aria-label={`筛选发票获取状态：${filterLabel(direction, filter)}`}
-      aria-expanded={filterOpen ? "true" : undefined}
-      onClick={(event) => setFilterAnchorEl(event.currentTarget)}
-      endIcon={<KeyboardArrowDownOutlinedIcon fontSize="small" />}
-      sx={{
-        minHeight: 24,
-        height: 24,
-        px: 0.75,
-        py: 0,
-        fontSize: 11,
-        lineHeight: 1,
-        borderRadius: 1,
-        whiteSpace: "nowrap",
-        "& .MuiButton-endIcon": {
-          ml: 0.25,
-          mr: -0.25,
-        },
+    <div
+      className="pending-invoice-status-filter"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setFilterMenuOpen(false);
+        }
       }}
     >
-      {filterLabel(direction, filter)}
-    </Button>
+      <button
+        aria-expanded={filterOpen ? "true" : undefined}
+        aria-haspopup="menu"
+        aria-label={`筛选发票获取状态：${filterLabel(direction, filter)}`}
+        className="pending-invoice-status-filter-button"
+        onClick={() => setFilterMenuOpen((current) => !current)}
+        type="button"
+      >
+        <span>{filterLabel(direction, filter)}</span>
+        <ChevronDown aria-hidden="true" size={12} strokeWidth={2.4} />
+      </button>
+      {filterOpen ? (
+        <div className="pending-invoice-status-filter-menu" role="menu">
+          {filterOptions.map((option) => (
+            <button
+              aria-current={option === filter ? "true" : undefined}
+              className="pending-invoice-status-filter-menu-item"
+              key={option}
+              onClick={() => {
+                setFilter(option);
+                setPage(1);
+                setFilterMenuOpen(false);
+              }}
+              role="menuitem"
+              type="button"
+            >
+              {filterLabel(direction, option)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 
   return (
-    <Box data-testid="pending-invoices-page" sx={{ px: { xs: 2, md: 3 }, py: 2 }}>
-      <Stack spacing={1}>
-        <Box sx={{ borderBottom: "1px solid", borderColor: "divider", pb: 1 }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between">
-            <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-              <Typography component="h1" fontWeight={900} sx={{ fontSize: 18, lineHeight: 1.3 }}>待找发票</Typography>
-              <ToggleButtonGroup
-                exclusive
-                size="small"
-                value={direction}
-                onChange={(_event, nextDirection: PendingInvoiceDirection | null) => {
-                  if (nextDirection) {
-                    handleDirectionChange(nextDirection);
-                  }
-                }}
-                aria-label="待找发票流水范围"
-                sx={{
-                  "& .MuiToggleButton-root": {
-                    minHeight: 30,
-                    px: 1.2,
-                    py: 0.25,
-                    fontSize: 12,
-                    fontWeight: 800,
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap",
-                  },
-                }}
+    <div className="pending-invoices-page" data-testid="pending-invoices-page">
+      <PageScaffold
+        actions={(
+          <div aria-label="待找发票流水范围" className="pending-invoices-direction-segment" role="group">
+            {([
+              ["all", `全部 ${summaryCounts.all}`],
+              ["expense", `支出 ${summaryCounts.expense}`],
+              ["income", `收入 ${summaryCounts.income}`],
+            ] as const).map(([value, label]) => (
+              <button
+                aria-pressed={direction === value}
+                className="pending-invoices-direction-button"
+                key={value}
+                onClick={() => handleDirectionChange(value)}
+                type="button"
               >
-                <ToggleButton value="all">全部 {summaryCounts.all}</ToggleButton>
-                <ToggleButton value="expense">支出 {summaryCounts.expense}</ToggleButton>
-                <ToggleButton value="income">收入 {summaryCounts.income}</ToggleButton>
-              </ToggleButtonGroup>
-              <Menu anchorEl={filterAnchorEl} open={filterOpen} onClose={() => setFilterAnchorEl(null)}>
-                {filterOptions.map((option) => (
-                  <MenuItem
-                    key={option}
-                    selected={option === filter}
-                    onClick={() => {
-                      setFilter(option);
-                      setPage(1);
-                      setFilterAnchorEl(null);
-                    }}
-                  >
-                    {filterLabel(direction, option)}
-                  </MenuItem>
-                ))}
-              </Menu>
-            </Stack>
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent={{ xs: "space-between", md: "flex-end" }}>
-              <Typography
-                color={error ? "error" : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus) ? "warning.main" : "text.secondary"}
-                sx={{ minWidth: 74, fontSize: 12, lineHeight: 1.25 }}
-              >
-                {compactStatusText}
-              </Typography>
-              <Button size="small" variant="outlined" onClick={() => handleOpenRules("expense")} sx={{ whiteSpace: "nowrap" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        className="pending-invoices-page__scaffold"
+        title="待找发票"
+      >
+        <PageToolbar
+          className="pending-invoices-toolbar"
+          left={(
+            <div
+              className={`pending-invoices-status-text${error ? " pending-invoices-status-text--error" : readModelStatus && !["fresh", "refreshing"].includes(readModelStatus) ? " pending-invoices-status-text--warning" : ""}`}
+              role={error ? "alert" : "status"}
+            >
+              {compactStatusText}
+            </div>
+          )}
+          right={(
+            <div className="pending-invoices-toolbar-actions">
+              <button className="pending-invoices-button" onClick={() => handleOpenRules("expense")} type="button">
                 支出待找发票规则设置
-              </Button>
-              <Button size="small" variant="outlined" onClick={() => handleOpenRules("income")} sx={{ whiteSpace: "nowrap" }}>
+              </button>
+              <button className="pending-invoices-button" onClick={() => handleOpenRules("income")} type="button">
                 收入待找发票规则设置
-              </Button>
-              <Button size="small" variant="contained" disabled={exportDisabled} onClick={() => setActiveDrawer("export")} sx={{ whiteSpace: "nowrap" }}>
+              </button>
+              <button
+                className="pending-invoices-button pending-invoices-button--primary"
+                disabled={exportDisabled}
+                onClick={() => setActiveDrawer("export")}
+                type="button"
+              >
                 筛选内容导出
-              </Button>
-              <TextField
-                size="small"
-                placeholder="搜索流水"
-                value={keyword}
+              </button>
+              <input
+                aria-label="搜索流水"
+                className="pending-invoices-search"
                 onChange={(event) => {
                   setKeyword(event.target.value);
                   setPage(1);
                 }}
-                inputProps={{ "aria-label": "搜索流水" }}
+                placeholder="搜索流水"
+                type="search"
+                value={keyword}
               />
-              <Button size="small" variant="outlined" onClick={() => setRefreshToken((current) => current + 1)}>
+              <button className="pending-invoices-button" onClick={() => setRefreshToken((current) => current + 1)} type="button">
                 刷新
-              </Button>
-            </Stack>
-          </Stack>
-        </Box>
-        <Box sx={{ height: 2 }}>{loading ? <LinearProgress aria-label="待找发票加载中" sx={{ height: 2 }} /> : null}</Box>
+              </button>
+            </div>
+          )}
+        />
+        <div className="pending-invoices-loading-slot">
+          {loading ? <div aria-label="待找发票加载中" className="pending-invoices-loading-bar" role="progressbar" /> : null}
+        </div>
         <PendingInvoicesTable
           rows={rows}
           config={tableConfig}
@@ -519,21 +527,45 @@ export default function PendingInvoicesPage() {
           pendingActionRowIds={pendingIncomeStatusRows}
           tableWrapRef={tableWrapRef}
         />
-        <TablePagination
-          component="div"
-          count={total}
-          page={Math.max(0, page - 1)}
-          rowsPerPage={pageSize}
-          rowsPerPageOptions={[25, 50, 100]}
-          labelRowsPerPage="每页行数"
-          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
-          onPageChange={(_event, nextPage) => setPage(nextPage + 1)}
-          onRowsPerPageChange={(event) => {
-            setPageSize(Number(event.target.value));
-            setPage(1);
-          }}
-        />
-      </Stack>
+        <div className="pending-invoices-pagination">
+          <label className="pending-invoices-pagination-size">
+            <span>每页行数</span>
+            <select
+              aria-label="每页行数"
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+              value={pageSize}
+            >
+              {[25, 50, 100].map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </label>
+          <span className="pending-invoices-pagination-range">
+            {displayedPendingInvoiceRange(currentPage, pageSize, total)}
+          </span>
+          <div className="pending-invoices-pagination-actions">
+            <button
+              aria-label="上一页"
+              disabled={currentPage <= 1}
+              onClick={() => setPage(currentPage - 1)}
+              type="button"
+            >
+              上一页
+            </button>
+            <button
+              aria-label="下一页"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage(currentPage + 1)}
+              type="button"
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      </PageScaffold>
       <PendingInvoiceRulesDrawer
         open={activeDrawer === "rules"}
         loadRules={loadRules}
@@ -581,6 +613,6 @@ export default function PendingInvoicesPage() {
         onClose={() => setDialogRow(null)}
         onConfirmed={handleManualConfirmed}
       />
-    </Box>
+    </div>
   );
 }

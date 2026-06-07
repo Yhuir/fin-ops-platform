@@ -2660,7 +2660,7 @@ Phase: phase_6_page_batches
 Type: extraction/refactor
 Scope: 迁移 BankDetails 交易流水表格和分页；不迁移 category filter Popper、TypeCell、BankCategoryTag、internal transfer tooltip 或 AutoTagRulesDrawer。
 
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/common/FinanceTag.tsx、web/src/components/common/AmountCell.tsx 和 web/src/app/styles.css。只修改 BankDetailsPage.tsx、必要的 styles.css 和必要的 BankDetails test expectations：移除交易流水表格区域的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell/TablePagination imports 和 usage；使用 FinanceTable/project pagination 保留 accessible name `交易流水`、headers、loading row `正在加载流水。`、empty row `当前时间范围内没有流水。`、row classes、counterparty cell、TypeCell 嵌入位置、amount/balance tabular numeric alignment、direction/source chip vertical alignment、server page/pageSize/total behavior、pagination labels `每页行数`、`1-100 / 299`、`下一页` 和 page size options `[25, 50, 100]`。不得修改后端、API、read model、worker、mock 或关联台。不得迁移 category filter Popper、TypeCell menu internals、BankCategoryTag/internal transfer tooltip 或 AutoTagRulesDrawer；这些仍归属 P044/P045。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "交易流水|pagination|searches current account|loads all accounts|uses Chinese labels"`；运行完整 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P044/P045 category/drawer failures 可以继续 expected-fail，但 P043 table/pagination failures 必须清除；运行 `cd web && npm run build`；运行 BankDetails transaction-table MUI import grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P044 category popovers prompt。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/app/styles.css。只修改 BankDetailsPage.tsx、必要的 styles.css 和必要的 BankDetails test expectations：移除交易流水表格区域的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell/TablePagination imports 和 usage；使用 FinanceTable/project pagination 保留 accessible name `交易流水`、headers、loading row `正在加载流水。`、empty row `当前时间范围内没有流水。`、row classes、counterparty cell、TypeCell 嵌入位置、amount/balance tabular numeric alignment、direction/source chip vertical alignment、server page/pageSize/total behavior、pagination labels `每页行数`、`1-100 / 299`、`下一页` 和 page size options `[25, 50, 100]`。不得修改后端、API、read model、worker、mock 或关联台。不得迁移 category filter Popper、TypeCell menu internals、BankCategoryTag/internal transfer tooltip 或 AutoTagRulesDrawer；这些仍归属 P044/P045。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "交易流水|pagination|searches current account|loads all accounts|uses Chinese labels"`；运行完整 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P044/P045 category/drawer failures 可以继续 expected-fail，但 P043 table/pagination failures 必须清除；运行 `cd web && npm run build`；运行 BankDetails transaction-table MUI import grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P044 category popovers prompt。
 ```
 
 #### Review
@@ -2915,7 +2915,7 @@ Scope: 只更新 pending invoices tests，锁定 `/pending-invoices` 非 MUI/pro
 ### P048-phase-6-pending-invoices-page-shell-toolbar
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只迁移 PendingInvoices page shell、direction segmented control、status filter menu、toolbar actions/search/loading 和 pagination；不迁移 `PendingInvoicesTable` internals、drawer frame、drawers、rules drawer、invoice picker 或 manual invoice dialog。
 
@@ -2939,6 +2939,53 @@ Scope: `/pending-invoices` page shell/toolbar/pagination only. Do not migrate `P
 - User-visible entrypoints preserved: required，direction buttons, status filter, rules/export/search/refresh and pagination labels must remain。
 - Expected failure allowed: yes，P049-P052 source contracts can continue failing after P048, but page shell/toolbar failures must clear。
 - Next prompt: P049 four-zone table migration only after P048 implementation is verified/expected-fail documented。
+
+#### Execution Notes
+
+- Replaced `PendingInvoicesPage.tsx` page shell, direction segmented control, status filter trigger/menu, toolbar actions/search/loading and pagination with `PageScaffold`, `PageToolbar`, lucide icon, native/project controls and pending invoice CSS classes.
+- Removed page-level MUI imports and sx selectors for `KeyboardArrowDownOutlinedIcon`, `Box`, `Button`, `LinearProgress`, `Menu`, `MenuItem`, `Stack`, `TablePagination`, `TextField`, `ToggleButton`, `ToggleButtonGroup`, `Typography`, `.MuiButton-endIcon` and `.MuiToggleButton-root`.
+- Added `pending-invoices-*` styles for page shell, segmented buttons, status text, menu, search, loading bar and pagination.
+- Did not modify `web/src/components/pendingInvoices/*`, backend, API, mocks, read model, worker or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract|shows income rule-group filters|keeps row status actions available|targets project primitives"`: expected-fail. Page source target cleared; remaining failure lists only 8 table/drawer/dialog files。
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx`: expected-fail with 14 passed and 1 source-level failure. The remaining failure belongs to P049-P052。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|MuiButton-endIcon|MuiToggleButton-root|KeyboardArrowDownOutlinedIcon|TablePagination|ToggleButton|ToggleButtonGroup' web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed。
+
+### P049-phase-6-pending-invoices-four-zone-table
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: 只迁移 `web/src/components/pendingInvoices/PendingInvoicesTable.tsx` 主四区表、排序 trigger、row action menu、tag/tooltip markup 和必要 table styles/tests；不迁移 shared drawer frame、rules/relation/detail/export/invoice-picker drawers 或 manual invoice dialog。
+
+#### Prompt
+
+```text
+Prompt ID: P049-phase-6-pending-invoices-four-zone-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: PendingInvoices main four-zone table only. Do not migrate drawer frame, drawers, rules drawer, invoice picker drawer or manual invoice dialog.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/table_layout_system.md、web/src/components/pendingInvoices/PendingInvoicesTable.tsx、web/src/pages/PendingInvoicesPage.tsx、web/src/components/common/FinanceTable.tsx、web/src/test/PendingInvoicesPage.test.tsx 和 web/src/app/styles.css。只修改 `PendingInvoicesTable.tsx`、必要 `styles.css` 和必要的 `PendingInvoicesPage.test.tsx` expectations：移除主四区表的 MUI imports/usages，包括 `InfoOutlinedIcon`、`MoreVertOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Menu`、`MenuItem`、`Stack`、`Table`、`TableBody`、`TableCell`、`TableHead`、`TableRow`、`TableSortLabel`、`Tooltip`、`Typography`、`SxProps`、`Theme` 和 `.MuiChip-label` selector。使用 FinanceTable/project native table markup、project buttons/menu/tooltip/tag classes 或 HeroUI primitives，保留 accessible table name `待找发票四区表`、`pending-invoices-table-shell` scroll container、group headers `支出流水/收入流水/流水`、`发票获取状态`、`进项发票/销项发票/发票`、`OA`、所有 subheaders、sticky header behavior、dense four-zone row layout、loading row `正在加载待找发票。`、empty row `当前条件下没有待找发票流水。`、row action button `<counterparty> 发票获取操作`、menu items `选择发票`/`补票`/`查看支付明细`/income status actions、object detail buttons such as `发票详情 DIG-001` and `OA详情 李四`、direction/status tags、amount/payment difference tabular numeric alignment and server sorting behavior。不得修改 page shell、pending invoice API/mock/read model/worker/backend/关联台；不得改 any drawer/dialog component。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract|shows income rule-group filters|keeps row status actions available|targets project primitives"`；运行完整 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，P050-P052 drawer/dialog source contract failures 可以继续 expected-fail，但 `PendingInvoicesTable.tsx` must disappear from the source-level failure list；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|MuiChip-label|SxProps|TableSortLabel|MoreVertOutlinedIcon|InfoOutlinedIcon' web/src/components/pendingInvoices/PendingInvoicesTable.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P050 drawer frame/simple drawers prompt。
+```
+
+#### Review
+
+- Single slice: yes，main four-zone table only。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Page shell untouched except necessary test expectation: required，P048 already owns it。
+- Drawer/dialog components untouched: required for P049 scope control。
+- User-visible table contract preserved: required，headers, row action menu, object detail buttons, loading/empty, sorting and amount/tag layout must remain。
+- Expected failure allowed: yes，P050-P052 drawer/dialog source contracts can remain after P049, but `PendingInvoicesTable.tsx` must clear。
+- Next prompt: P050 drawer frame and simple drawers only after P049 implementation is verified/expected-fail documented。
 
 ### MG Prompt Template
 
