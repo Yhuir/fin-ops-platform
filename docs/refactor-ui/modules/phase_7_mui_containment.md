@@ -323,6 +323,7 @@ Scope: global CSS MUI containment only.
   - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts`: passed, 46 tests.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
+- Commit: `320a8286 feat: contain global mui css`, pushed to `origin/refactor-ui`.
 
 ## P113 Prompt Draft
 
