@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P106-phase-6-settings-closeout`
-- Current MG ID: `MG-P098-phase-6-etc-tickets`
+- Current Prompt ID: `MG-P106-phase-6-settings`
+- Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
 
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 Settings closeout generated after P105 OA manual search/import table migration。
-- Files touched in P105:
-  - `web/src/components/settings/OaManualSearchImportTable.tsx`
-  - `web/src/app/styles.css`
+- Scope: phase 6 Settings cumulative merge gate generated after P106 Settings closeout。
+- Files touched in P106:
+  - `web/src/components/settings/settingsDesign.ts`
+  - `web/src/test/SettingsPage.test.tsx`
   - `docs/refactor-ui/modules/phase_6_settings.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Settings OA manual scoped MUI grep passed；Settings OA manual table tests passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for `settingsDesign.ts`；build passed；diff check passed。
+- Verification run: Settings runtime settingsDesign reference grep passed；Settings scoped no-MUI grep passed；Settings page/table tests passed；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P106-phase-6-settings-closeout`。
+- Next action: 执行 `MG-P106-phase-6-settings`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +95,17 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P106-phase-6-settings-closeout` | P105 Settings OA manual search/import table verified；next close out Settings `settingsDesign.ts` |
+| page batches | `in_progress` | `MG-P106-phase-6-settings` | P106 Settings closeout verified；next run Settings cumulative MG |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P106-phase-6-settings-closeout` | runtime settingsDesign reference grep excluding tests | passed | No runtime `settingsDesign` / `settingsTokens` / settings MUI bridge references remain |
+| 2026-06-07 | `P106-phase-6-settings-closeout` | scoped Settings no-MUI grep | passed | `SettingsPage.tsx` and `web/src/components/settings` have no scoped MUI residue |
+| 2026-06-07 | `P106-phase-6-settings-closeout` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | passed | 13 tests passed |
+| 2026-06-07 | `P106-phase-6-settings-closeout` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P106-phase-6-settings-closeout` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | scoped OA manual table no-MUI grep | passed | `OaManualSearchImportTable.tsx` has no scoped MUI residue |
 | 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | `cd web && npx vitest run SettingsOaManualSearchImportTable.test.tsx` | passed | 5 tests passed |
 | 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 13 behavior tests passed；source-level contract failed only for `src/components/settings/settingsDesign.ts` |

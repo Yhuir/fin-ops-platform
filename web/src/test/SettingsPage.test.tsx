@@ -20,7 +20,6 @@ const settingsSourceFiles = [
   "src/components/settings/SettingsDataResetSection.tsx",
   "src/components/settings/SettingsDataResetDialogs.tsx",
   "src/components/settings/OaManualSearchImportTable.tsx",
-  "src/components/settings/settingsDesign.ts",
 ] as const;
 
 function readWebSource(path: (typeof settingsSourceFiles)[number]) {

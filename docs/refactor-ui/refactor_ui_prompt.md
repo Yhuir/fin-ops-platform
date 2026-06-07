@@ -5841,7 +5841,7 @@ Scope: `/settings` OA manual search/import table only.
 ### P106-phase-6-settings-closeout
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/settings` closeout for `settingsDesign.ts` only。
 
@@ -5863,6 +5863,48 @@ Scope: `/settings` closeout for `settingsDesign.ts` only.
 - Workbench internals frozen: required。
 - MonthPicker/frozen legacy MUI untouched: required。
 - Expected source-level failure allowed: no，Settings source-level contract must pass after P106。
+
+#### Execution Notes
+
+- Runtime implementation changed:
+  - Deleted unused `web/src/components/settings/settingsDesign.ts`; Settings no longer carries a MUI theme/DataGrid/Sx bridge。
+  - Removed the deleted file from the Settings source-level no-MUI contract file list in `SettingsPage.test.tsx`。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- MonthPicker/frozen legacy MUI changed: no。
+- Verification:
+  - runtime settingsDesign/settingsTokens/settingsTheme/settingsButtonSx/settingsDataGridSx/settingsSectionSx reference grep excluding tests: passed。
+  - scoped Settings no-MUI grep for `SettingsPage.tsx` and `web/src/components/settings`: passed。
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: passed；13 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+- Next prompt generated: `MG-P106-phase-6-settings`。
+
+### MG-P106-phase-6-settings
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `cumulative merge gate`
+- Scope: `/settings` P099-P106 migration only。
+
+#### Prompt
+
+```text
+Prompt ID: MG-P106-phase-6-settings
+Phase: phase_6_page_batches
+Type: cumulative merge gate
+Scope: `/settings` P099-P106 migration only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、web/src/pages/SettingsPage.tsx、web/src/components/settings/*、web/src/test/SettingsPage.test.tsx、web/src/test/SettingsOaManualSearchImportTable.test.tsx 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 P099-P106 已记录并且 Settings source-level no-MUI contract passed。运行 `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|settingsTheme|settingsButtonSx|settingsDataGridSx|settingsSectionSx|<(Alert|Box|Button|Checkbox|Chip|CircularProgress|Collapse|Dialog|FormControl|IconButton|List|Menu|Select|Table|TextField|Tooltip|Typography)\\b' web/src/pages/SettingsPage.tsx web/src/components/settings; then exit 1; else exit 0; fi`；运行 runtime settingsDesign reference grep：`if rg -n "settingsDesign|settingsTokens|settingsTheme|settingsButtonSx|settingsDataGridSx|settingsPageSx|settingsHeaderSx|settingsLayoutSx|settingsNavShellSx|settingsContentSx|settingsSectionSx" web/src --glob '!**/*.test.tsx' --glob '!**/*.test.ts'; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。确认 scope 只包含 Settings P106 closeout files and docs files：`web/src/components/settings/settingsDesign.ts` deletion, `web/src/test/SettingsPage.test.tsx`, `docs/refactor-ui/modules/phase_6_settings.md`, `docs/refactor-ui/refactor_ui_prompt.md`, `docs/refactor-ui/refactor_ui_state.md`。禁止 `git add .` 和 `git add -A`，只允许精确 git add。MG 通过后提交并 push 到 `origin/refactor-ui`，再更新 state/prompt/module docs 的 MG execution notes 和 Push Log，标记 MG verified，并从 `refactor-ui` 分支生成下一条 Micro-JIT prompt。
+```
+
+#### Review
+
+- Single MG scope: yes，only Settings P099-P106。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Exact staging required: yes。
+- Expected outcome: Settings module committed, pushed and ready to move to next Phase 6 module。
 
 ### MG Prompt Template
 
