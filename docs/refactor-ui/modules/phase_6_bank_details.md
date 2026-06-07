@@ -173,12 +173,11 @@ Current drawer test migration gaps after P041:
 - `P042-phase-6-bank-details-shell-toolbar-dates`: migrated BankDetails page shell, account sidebar, header controls, date presets/date popover, export menu and search field away from MUI layout/input/menu/date primitives. Native semantic elements and project classes now preserve the old left-account/right-transaction geometry, `日期快捷筛选`, `年月筛选`/`开始日期`/`结束日期`, export menu labels and search behavior. P042 deliberately leaves transaction table/TablePagination, category Popper/TypeCell/BankCategoryTag and AutoTagRulesDrawer for P043-P045.
 - `P043-phase-6-bank-details-transaction-table`: migrated the `交易流水` table and pagination from MUI Table/TablePagination to `FinanceTable` plus BankDetails project pagination. The table keeps seven original headers, loading/empty messages, counterparty/time/relation stack, TypeCell placement, amount/direction/source stack, tabular balance and server pagination labels/options. Full target tests now have 48 passed and 4 expected failures, all outside the transaction table slice.
 - `P044-phase-6-bank-details-category-popovers`: migrated category filter, TypeCell confirmation/assignment popovers, BankCategoryTag and internal transfer tooltip away from MUI Popper/MenuList/List/IconButton/Paper/Tooltip/Chip dependencies. The page keeps click-only category filtering, dense three-column hierarchy, staged `待确认`/`待分类` save flow, third-level external turnover choices, `撤销`, and `对应内部往来流水` tooltip. Full target tests now have 49 passed and 3 expected failures, all assigned to P045 AutoTagRulesDrawer.
+- `P045-phase-6-bank-details-auto-tag-drawer`: migrated `AutoTagRulesDrawer` away from MUI Drawer/Dialog/Table/TextField/Select/Checkbox/Button/IconButton/Alert/Progress/Tooltip/icons to `AppDrawer`, `AppDialog`, native/project table and form controls, and lucide icons. The right drawer keeps `自动标签规则`, `关闭自动标签规则抽屉`, active/archived tabs, toolbar actions, wide rule editor, condition editor dialog, archive confirmation dialog, archived restore flow, validation, save payloads and reapply behavior. The final ordinary MUI `Button`/`Chip`/`Stack`/`Typography` usages in `BankDetailsPage` were also replaced with equivalent native project markup so the BankDetails runtime scope is MUI-free.
 
-## Current Expected Failures After P044
+## Current Expected Failures After P045
 
-- `BankDetailsPage.test.tsx > targets project table, menu, date, drawer and dialog primitives`: page and tag assertions now pass; it still fails because `AutoTagRulesDrawer` does not yet contain `AppDrawer`/`AppDialog`.
-- `AutoTagRulesDrawer.test.tsx > targets project right drawer and dialog primitives`: still expects `AppDrawer`/`AppDialog`; assigned to P045 auto tag drawer.
-- `AutoTagRulesDrawer.test.tsx > keeps automatic tag rule drawer styling table-based and non-truncating`: still expects project rule table selectors; assigned to P045 auto tag drawer.
+- None in the BankDetails target set. `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` passes with 52 tests.
 
 ## Risks
 
@@ -189,6 +188,27 @@ Current drawer test migration gaps after P041:
 - `TypeCell` has staged local choice state. Do not call assignment/confirmation APIs on menu item click; only call after `保存`。
 - `AutoTagRulesDrawer` payload semantics are high risk: do not alter `active_rules`, `archived_rules`, `expected_version`, `refresh_scope` or reapply endpoint behavior。
 - Shared CSS currently mixes page classes with MUI selectors. Replace selectors surgically; do not remove bank layout classes that tests and users rely on。
+
+## P045 Verification
+
+- `cd web && npx vitest run AutoTagRulesDrawer.test.tsx`: passed, 14 tests。
+- `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`: passed, 52 tests。
+- `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests。
+- `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+- `if rg -n '@mui|Mui|<Button|<Chip|<Stack|<Typography' web/src/pages/BankDetailsPage.tsx web/src/features/bankDetails/AutoTagRulesDrawer.tsx web/src/features/bankDetails/BankCategoryTag.tsx; then exit 1; else exit 0; fi`: passed。
+- `if rg -n 'bank-details-page[^\n]*Mui|bank-[^\n]*Mui|Mui[^\n]*bank-|bank-auto-tag[^\n]*Mui|Mui[^\n]*bank-auto-tag' web/src/app/styles.css; then exit 1; else exit 0; fi`: passed。
+- `git diff --check`: passed。
+
+## MG-P045 Prompt Draft
+
+```text
+Prompt ID: MG-P045-phase-6-bank-details
+Phase: phase_6_page_batches
+Type: cumulative MG
+Scope: BankDetails module P040-P045 only: docs/refactor-ui BankDetails state/prompt/module docs, AppDrawer compatibility extension, BankDetailsPage non-MUI UI, BankCategoryTag, AutoTagRulesDrawer, BankDetails tests and required styles. Do not include backend, API, read model, worker, reconciliation workbench internals, unrelated pages or unrelated generated files.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、当前 git status 和当前 diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 BankDetails runtime scope no MUI grep 和 BankDetails CSS no MUI selector residue grep 已通过；确认 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`、`cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build` 已通过。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_bank_details.md web/src/app/styles.css web/src/components/common/AppDrawer.tsx web/src/features/bankDetails/AutoTagRulesDrawer.tsx web/src/pages/BankDetailsPage.tsx`；如实际 diff 包含 BankDetails test 文档变更，也必须逐个精确列出，禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: migrate bank details auto tag drawer` 或更准确的 BankDetails module message。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
+```
 
 ## P041 Prompt Draft
 

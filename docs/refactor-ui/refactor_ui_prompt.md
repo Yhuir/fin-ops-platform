@@ -2742,7 +2742,7 @@ Scope: 迁移 BankDetails category filter Popper、TypeCell category confirmatio
 ### P045-phase-6-bank-details-auto-tag-drawer
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 迁移 AutoTagRulesDrawer 到 AppDrawer/AppDialog、FinanceTable/project form controls 和 lucide/project icons；不改 BankDetails page 已迁移 surfaces。
 
@@ -2765,6 +2765,53 @@ Scope: 迁移 AutoTagRulesDrawer 到 AppDrawer/AppDialog、FinanceTable/project 
 - Workbench internals frozen: yes。
 - Preserves old overlay shape: yes，right drawer stays right drawer; condition/archive overlays stay dialogs。
 - Verification defined: drawer tests, full BankDetails target set, build, MUI residue grep, diff check, status。
+
+#### Execution Notes
+
+- Extended `AppDrawer` with optional class name, close label and string width support so migrated right drawers can keep old width and accessible close labels without custom drawer shells。
+- Replaced `AutoTagRulesDrawer` MUI Drawer/Dialog/Table/TextField/Select/Checkbox/Button/IconButton/Alert/Progress/Tooltip/icons with `AppDrawer`, `AppDialog`, native/project table and form controls, and lucide icons。
+- Kept the right drawer accessible name `自动标签规则`, close button `关闭自动标签规则抽屉`, active/archived tabs, toolbar actions, loading/error/feedback messages, wide rule table, condition editor dialog, archive confirmation dialog, archived restore flow, validation, save payload and reapply endpoint behavior。
+- Removed the final BankDetails page MUI `Button`/`Chip`/`Stack`/`Typography` usages in ordinary table cells and manual category state while preserving class names and user-visible layout。
+- Removed BankDetails/bank-auto-tag CSS MUI selector residue and replaced chip/table/form selectors with project classes。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run AutoTagRulesDrawer.test.tsx`: passed, 14 tests。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`: passed, 52 tests。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui|Mui|<Button|<Chip|<Stack|<Typography' web/src/pages/BankDetailsPage.tsx web/src/features/bankDetails/AutoTagRulesDrawer.tsx web/src/features/bankDetails/BankCategoryTag.tsx; then exit 1; else exit 0; fi`: passed。
+  - `if rg -n 'bank-details-page[^\n]*Mui|bank-[^\n]*Mui|Mui[^\n]*bank-|bank-auto-tag[^\n]*Mui|Mui[^\n]*bank-auto-tag' web/src/app/styles.css; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+
+### MG-P045-phase-6-bank-details
+
+- Phase: `phase_6_page_batches`
+- Status: `mg_reviewed`
+- Type: `cumulative MG`
+- Scope: BankDetails module P040-P045 discovery, characterization tests, shell/toolbar/date/export/search, transaction table/pagination, category popovers/tags/tooltips, AutoTagRulesDrawer and associated styles/common drawer extension。
+
+#### Prompt
+
+```text
+Prompt ID: MG-P045-phase-6-bank-details
+Phase: phase_6_page_batches
+Type: cumulative MG
+Scope: BankDetails module P040-P045 only: docs/refactor-ui BankDetails state/prompt/module docs, AppDrawer compatibility extension, BankDetailsPage non-MUI UI, BankCategoryTag, AutoTagRulesDrawer, BankDetails tests and required styles. Do not include backend, API, read model, worker, reconciliation workbench internals, unrelated pages or unrelated generated files.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、当前 git status 和当前 diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 BankDetails runtime scope no MUI grep 和 BankDetails CSS no MUI selector residue grep 已通过；确认 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`、`cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build` 已通过。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_bank_details.md web/src/app/styles.css web/src/components/common/AppDrawer.tsx web/src/features/bankDetails/AutoTagRulesDrawer.tsx web/src/pages/BankDetailsPage.tsx`；如实际 diff 包含 BankDetails test 文档变更，也必须逐个精确列出，禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: migrate bank details auto tag drawer` 或更准确的 BankDetails module message。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
+```
+
+#### Review
+
+- Single MG boundary: yes，BankDetails module only。
+- Scope guard: yes，explicit allowed files and exact staging only。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Verification required before push: yes，BankDetails target tests, common/table/platform regressions, build, MUI residue greps and diff check。
+- Push target: `origin refactor-ui`。
 
 ### MG Prompt Template
 

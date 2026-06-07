@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P045-phase-6-bank-details-auto-tag-drawer`
-- Current MG ID: `not_drafted`
+- Current Prompt ID: `MG-P045-phase-6-bank-details`
+- Current MG ID: `MG-P045-phase-6-bank-details`
 
 ## Global Invariants
 
@@ -54,16 +54,18 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 bank details auto tag rules right drawer migration。
+- Scope: phase 6 BankDetails cumulative merge gate。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_bank_details.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
+  - `web/src/components/common/AppDrawer.tsx`
+  - `web/src/features/bankDetails/AutoTagRulesDrawer.tsx`
   - `web/src/pages/BankDetailsPage.tsx`
   - `web/src/app/styles.css`
-- Verification run: P044 focused category/tag/tooltip tests passed; full BankDetails/AutoTagRulesDrawer target set expected-failed with 49 passed / 3 failures。
-- Failures: expected only; current runtime/CSS still needs P045 auto tag drawer。
-- Next action: 执行 `P045-phase-6-bank-details-auto-tag-drawer`。
+- Verification run: P045 drawer tests, full BankDetails/AutoTagRulesDrawer target set, common/table/platform regressions, build and MUI residue greps passed。
+- Failures: none in BankDetails target set。
+- Next action: 执行 `MG-P045-phase-6-bank-details`。
 
 ## Prompt Lifecycle
 
@@ -95,7 +97,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P045-phase-6-bank-details-auto-tag-drawer` | BankDetails P044 category popovers/tag/tooltip verified；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails auto tag rules drawer migration |
+| page batches | `in_progress` | `MG-P045-phase-6-bank-details` | BankDetails P045 auto tag drawer verified；BankDetails module reached cumulative MG boundary |
 
 ## Verification Log
 
@@ -278,6 +280,13 @@
 | 2026-06-07 | `P044-phase-6-bank-details-category-popovers` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P044-phase-6-bank-details-category-popovers` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
 | 2026-06-07 | `P044-phase-6-bank-details-category-popovers` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `cd web && npx vitest run AutoTagRulesDrawer.test.tsx` | passed | 14 tests passed |
+| 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` | passed | 52 tests passed |
+| 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `if rg -n '@mui\|Mui\|<Button\|<Chip\|<Stack\|<Typography' web/src/pages/BankDetailsPage.tsx web/src/features/bankDetails/AutoTagRulesDrawer.tsx web/src/features/bankDetails/BankCategoryTag.tsx; then exit 1; else exit 0; fi` | passed | BankDetails runtime scope has no direct MUI imports/usages |
+| 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `if rg -n 'bank-details-page[^\n]*Mui\|bank-[^\n]*Mui\|Mui[^\n]*bank-\|bank-auto-tag[^\n]*Mui\|Mui[^\n]*bank-auto-tag' web/src/app/styles.css; then exit 1; else exit 0; fi` | passed | BankDetails CSS scope has no MUI selector residue |
+| 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 

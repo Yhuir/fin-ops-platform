@@ -1,8 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
 import { Filter, Tags } from "lucide-react";
 
 import {
@@ -526,9 +522,9 @@ function isBankDateFilter(value: unknown): value is BankDateFilter {
 
 function EmptyTransactionOverlay() {
   return (
-    <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 240, px: 2, textAlign: "center" }}>
-      <Typography color="text.secondary">当前时间范围内没有流水。</Typography>
-    </Stack>
+    <div className="bank-empty-transaction-overlay">
+      <span>当前时间范围内没有流水。</span>
+    </div>
   );
 }
 
@@ -1255,16 +1251,16 @@ function TypeCell({
       ? row.effectiveCategoryLabelPath.join(" / ")
       : [row.effectiveCategoryPrimaryLabel, row.effectiveCategorySubLabel].filter(Boolean).join(" / ") || row.effectiveCategoryLabel || row.effectiveCategoryCode;
     return (
-      <Stack spacing={0.5} alignItems="center">
+      <span className="bank-manual-category-stack">
         <BankCategoryTag
           categoryCode={row.effectiveCategoryCode}
           compact
           hierarchyTooltip
           label={displayLabel}
         />
-        <Button
-          size="small"
-          variant="text"
+        <button
+          type="button"
+          className="bank-manual-category-revoke"
           onClick={() => {
             if (row.effectiveCategorySource === "manual") {
               onClearAssignment(row);
@@ -1275,12 +1271,12 @@ function TypeCell({
           disabled={confirming}
         >
           撤销
-        </Button>
-      </Stack>
+        </button>
+      </span>
     );
   }
   if (!row.autoCategoryCode || !row.autoCategoryLabel) {
-    return <Typography className="bank-auto-type-empty" component="span">-</Typography>;
+    return <span className="bank-auto-type-empty">-</span>;
   }
   const structuredLabelPath = [row.autoCategoryPrimaryLabel, row.autoCategorySubLabel]
     .map((value) => value?.trim() ?? "")
@@ -1343,9 +1339,9 @@ function TypeCell({
 
 function BankTextCell({ value }: { value: string }) {
   return (
-    <Typography className="bank-table-text-cell" component="span" variant="body2">
+    <span className="bank-table-text-cell">
       {value.trim() || "-"}
-    </Typography>
+    </span>
   );
 }
 
@@ -2276,30 +2272,26 @@ export default function BankDetailsPage() {
                         textValue={row.counterpartyName}
                       >
                         <FinanceTableCell className="bank-col-counterparty" columnRole="identity" textValue={row.counterpartyName}>
-                          <Stack className="bank-counterparty-cell" justifyContent="center" spacing={0.5} sx={{ minWidth: 0, width: "100%" }}>
-                            <Typography
-                              className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}
-                              component="span"
-                              variant="body2"
-                              fontWeight={750}
-                            >
+                          <div className="bank-counterparty-cell">
+                            <span className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}>
                               {row.counterpartyName}
-                            </Typography>
-                            <Stack className="bank-relation-time-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
-                              <Chip className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size" label={row.tradeTime} size="small" variant="outlined" />
-                            </Stack>
-                            <Stack className="bank-relation-chip-row" direction="row" spacing={0.5} sx={{ minWidth: 0, maxWidth: "100%" }}>
+                            </span>
+                            <div className="bank-relation-time-row">
+                              <span className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size">
+                                <span className="bank-chip-label">{row.tradeTime}</span>
+                              </span>
+                            </div>
+                            <div className="bank-relation-chip-row">
                               {row.relationTags.map((tag) => (
-                                <Chip
+                                <span
                                   key={`${row.id}-${tag}`}
                                   className={`bank-relation-tag bank-relation-tag-${relationTagTone(tag)} bank-chip-auto-size`}
-                                  label={tag}
-                                  size="small"
-                                  variant="outlined"
-                                />
+                                >
+                                  <span className="bank-chip-label">{tag}</span>
+                                </span>
                               ))}
-                            </Stack>
-                          </Stack>
+                            </div>
+                          </div>
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-type" columnRole="status" textValue={row.effectiveCategoryLabel || row.autoCategoryLabel || row.categoryResolutionStatus}>
                           <TypeCell
@@ -2313,25 +2305,24 @@ export default function BankDetailsPage() {
                           />
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-amount" columnRole="amount" textValue={formatMoney(row.amount)}>
-                          <Stack className="bank-amount-cell" alignItems="stretch" justifyContent="center" spacing={0.5} sx={{ width: "100%" }}>
-                            <Stack className="bank-amount-line" direction="row" alignItems="center" justifyContent="flex-end" spacing={0.75}>
-                              <Chip
-                                className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}
-                                label={row.directionLabel}
-                                size="small"
-                                variant="filled"
-                              />
-                              <Typography component="span" variant="body2" fontWeight={800} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                          <div className="bank-amount-cell">
+                            <div className="bank-amount-line">
+                              <span className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}>
+                                <span className="bank-chip-label">{row.directionLabel}</span>
+                              </span>
+                              <span className="bank-amount-value">
                                 {formatMoney(row.amount)}
-                              </Typography>
-                            </Stack>
-                            <Chip className="bank-source-chip bank-chip-auto-size" label={`${row.bankName} ${row.accountLast4}`} size="small" variant="outlined" />
-                          </Stack>
+                              </span>
+                            </div>
+                            <span className="bank-source-chip bank-chip-auto-size">
+                              <span className="bank-chip-label">{`${row.bankName} ${row.accountLast4}`}</span>
+                            </span>
+                          </div>
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-balance" columnRole="amount" textValue={formatMoney(row.balance)}>
-                          <Typography component="span" variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>
+                          <span className="bank-balance-value">
                             {formatMoney(row.balance)}
-                          </Typography>
+                          </span>
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-purpose" columnRole="description" textValue={row.purposeText}><BankTextCell value={row.purposeText} /></FinanceTableCell>
                         <FinanceTableCell className="bank-col-summary" columnRole="description" textValue={row.summaryText}><BankTextCell value={row.summaryText} /></FinanceTableCell>

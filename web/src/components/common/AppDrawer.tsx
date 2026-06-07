@@ -4,9 +4,11 @@ import { useId, type CSSProperties, type ReactNode } from "react";
 type AppDrawerProps = {
   open: boolean;
   title: string;
+  className?: string;
   children: ReactNode;
+  closeLabel?: string;
   footer?: ReactNode;
-  width?: number;
+  width?: number | string;
   onClose: () => void;
 };
 
@@ -14,10 +16,19 @@ type AppDrawerStyle = CSSProperties & {
   "--finance-drawer-width": string;
 };
 
-export default function AppDrawer({ open, title, children, footer, width = 420, onClose }: AppDrawerProps) {
+export default function AppDrawer({
+  open,
+  title,
+  className,
+  children,
+  closeLabel,
+  footer,
+  width = 420,
+  onClose,
+}: AppDrawerProps) {
   const titleId = useId();
   const drawerStyle: AppDrawerStyle = {
-    "--finance-drawer-width": `${width}px`,
+    "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
 
   return (
@@ -30,12 +41,12 @@ export default function AppDrawer({ open, title, children, footer, width = 420, 
       }}
     >
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
-        <Drawer.Dialog aria-labelledby={titleId} className="finance-drawer" style={drawerStyle}>
+        <Drawer.Dialog aria-labelledby={titleId} className={`finance-drawer${className ? ` ${className}` : ""}`} style={drawerStyle}>
           <Drawer.Header className="finance-drawer__header">
             <Drawer.Heading className="finance-drawer__title" id={titleId}>
               {title}
             </Drawer.Heading>
-            <Button aria-label="关闭抽屉" isIconOnly onPress={onClose} size="sm" variant="tertiary">
+            <Button aria-label={closeLabel ?? "关闭抽屉"} isIconOnly onPress={onClose} size="sm" variant="tertiary">
               <span aria-hidden="true">×</span>
             </Button>
           </Drawer.Header>
