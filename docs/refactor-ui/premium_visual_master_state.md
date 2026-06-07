@@ -37,7 +37,7 @@ Last updated: 2026-06-08
 | 5 | `PV-005-app-health-premium-visual` | verified | 系统状态 premium visual slice。 |
 | 6 | `PV-006-import-pages-discovery` | verified | `/imports/*` discovery。 |
 | 7 | `PV-007-import-pages-premium-visual` | verified | 导入页族 premium visual slice。 |
-| 8 | `PV-008-cost-statistics-discovery` | pending | `/cost-statistics` discovery。 |
+| 8 | `PV-008-cost-statistics-discovery` | verified | `/cost-statistics` discovery。 |
 | 9 | `PV-009-cost-statistics-premium-visual` | pending | 成本统计 premium visual slice。 |
 | 10 | `PV-010-pending-invoices-discovery` | pending | `/pending-invoices` discovery。 |
 | 11 | `PV-011-pending-invoices-premium-visual` | pending | 待找发票 premium visual slice。 |
@@ -62,28 +62,31 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-008-cost-statistics-discovery`
+`PV-009-cost-statistics-premium-visual`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/module_inventory.md`
 - `docs/refactor-ui/modules/phase_6_cost_statistics.md`
 - `web/src/pages/CostStatisticsPage.tsx`
 - `web/src/components/cost-statistics/*`
-- related CostStatistics tests
+- `web/src/app/styles.css`
+- `web/src/test/CostStatisticsPage.test.tsx`
 
 ### Verification
 
 Required:
 
+- `cd web && npx vitest run CostStatisticsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- targeted CostStatistics discovery test inventory, if tests exist.
+- Browser smoke for `/cost-statistics` where practical.
 
-PV-008 is discovery-only unless a small pure characterization gap can be added without runtime behavior changes.
+PV-009 is a runtime visual/interactions slice. It must preserve CostStatistics behavior and only polish the current FinanceTable/project-dialog implementation.
 
 ## Execution Rules
 
@@ -110,3 +113,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-005-app-health-premium-visual` | current commit | pushed to `origin/main` | AppHealth premium visual polish verified and pushed with the current commit. |
 | 2026-06-08 | `PV-006-import-pages-discovery` | current commit | pushed to `origin/main` | Import pages premium discovery and PV-007 prompt generated with the current commit. |
 | 2026-06-08 | `PV-007-import-pages-premium-visual` | current commit | pushed to `origin/main` | Import pages premium visual polish verified and pushed with the current commit. |
+| 2026-06-08 | `PV-008-cost-statistics-discovery` | current commit | pending push | Cost Statistics premium discovery and PV-009 prompt generated with the current commit. |

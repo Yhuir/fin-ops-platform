@@ -1,8 +1,8 @@
 # Phase 6 Cost Statistics Discovery
 
-本文档记录成本统计页迁移 discovery。目标是把 `/cost-statistics` 中仍依赖 MUI X DataGrid 和 MUI session hook 的核心表格迁到 `FinanceTable` / project primitives，同时保留现有四种视图、范围筛选、下钻、详情弹窗和导出中心行为。
+本文档记录成本统计页迁移和 premium visual discovery。当前 `main` 上 `/cost-statistics` 已完成核心表格平台迁移；下一步目标是在保留四种视图、范围筛选、下钻、详情弹窗和导出中心行为的前提下，做 Ledger Calm premium visual polish。
 
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 
 ## Boundary
 
@@ -17,15 +17,18 @@ Last updated: 2026-06-07
   - 旧统计结果仍是表格或左中右下钻列表，不改成卡片流。
   - 旧行点击/首列按钮进入流水详情的能力必须保留。
 
-## Current MUI Inventory
+## Current Platform Inventory
 
 | Usage | Current file | Migration target | Notes |
 | --- | --- | --- | --- |
-| `useMuiDataGridPageSession`, `useMuiDataGridScrollSession` | `CostStatisticsPage.tsx` | remove or replace with `useFinanceTableSession` only if user-visible scroll restore is kept | Only used to pass `mainGridScrollSession` to `CostStatisticsTable`。 |
-| MUI X `DataGrid`, `GridColDef`, `GridRowParams` | `CostStatisticsTable.tsx` | `FinanceTable` wrapper retaining current generic column contract | One generic table component powers time/project/bank/expense transaction grids。 |
-| `MuiDataGridScrollSessionBinding` type | `CostStatisticsTable.tsx` | project table session type or no session prop | Remove MUI type boundary from component API。 |
-| `.MuiDataGrid-cell` sx selector | `CostStatisticsTable.tsx` | `.finance-table` / `.cost-table-*` classes | Move row/cell alignment into CSS tokens。 |
-| `MuiProviders` test wrapper | `CostStatisticsPage.test.tsx` | project/HeroUI render wrapper after MUI table removal | Current tests need MUI provider only because DataGrid remains。 |
+| Generic table | `CostStatisticsTable.tsx` | Already `FinanceTable` | Powers time/project/bank/expense transaction grids and keeps first-cell `查看流水 <id>` actions。 |
+| Page state | `CostStatisticsPage.tsx` | `usePageSessionState` | Keeps view/scope/date selections; retain it。 |
+| View switcher | `CostStatisticsPage.tsx` | Project button tabs | Four view buttons plus project scope toggle。 |
+| Scope controls | `CostStatisticsPage.tsx` | Project floating panels + `MonthPicker` | Year/month/custom panels stay floating, not drawer/dialog。 |
+| Summary counters | `CostStatisticsSummaryCards.tsx` | Project `stat-card` | Needs premium compact counter treatment, not dashboard cards。 |
+| Drilldown lanes | `CostExplorerList.tsx` | Project list lanes | Needs tighter row density and motion-token selection/hover polish。 |
+| Detail dialog | `CostTransactionDetailModal.tsx` | Project modal | Already `role="dialog"` with `cost-detail-modal` root。 |
+| Export center | `ExportCenterModal.tsx` | Project modal | Already `role="dialog"` with project controls and preview table。 |
 
 Already non-MUI/project-owned:
 
@@ -100,13 +103,77 @@ Already non-MUI/project-owned:
 - Refreshing read model does not display final empty data。
 - Export center time/project/expense type preview and export flows。
 
-Current migration gaps:
+Current premium gaps:
 
-- Tests still render with `MuiProviders`。
-- Tests assert user-visible table behavior but do not yet lock `CostStatisticsTable` to `FinanceTable` / non-MUI root。
-- Tests do not assert `CostStatisticsTable` has no `.MuiDataGrid-root`。
-- Tests do not lock detail/export dialogs away from MUI roots, though current implementation is already project-owned。
-- Tests still tolerate MUI session hook indirectly through table behavior。
+- Tests already assert page shell/view switcher, `FinanceTable` roots and project dialogs are not MUI roots。
+- Tests already cover time/project/bank/expense views, range controls, drilldown, detail modal, loading/error/read-model refreshing states and export center flows。
+- Tests do not yet lock premium compact visual treatment for cost summary counters, view toolbar, scope toggles, explorer lanes and cost table shell。
+- Tests do not yet lock local interaction smoothness tokens for view tabs、scope buttons、explorer items、row triggers、detail/export modal buttons。
+- Current visual style still risks feeling like older dense utility CSS rather than the bank-details premium sample: summary cards, explorer lanes and section shells need better alignment, lower shadow/card emphasis and more consistent table rhythm。
+
+## PV-008 Premium Visual Discovery
+
+Prompt ID: `PV-008-cost-statistics-discovery`
+
+Current source files:
+
+- `web/src/pages/CostStatisticsPage.tsx`
+- `web/src/components/cost-statistics/CostStatisticsTable.tsx`
+- `web/src/components/cost-statistics/CostExplorerList.tsx`
+- `web/src/components/cost-statistics/CostStatisticsSummaryCards.tsx`
+- `web/src/components/cost-statistics/CostTransactionDetailModal.tsx`
+- `web/src/components/cost-statistics/ExportCenterModal.tsx`
+- `web/src/test/CostStatisticsPage.test.tsx`
+- `web/src/app/styles.css`
+
+Current implementation status on `main`:
+
+- Runtime table surfaces already use `FinanceTable`, not MUI DataGrid。
+- Tests already lock `按时间统计表`、`项目对应流水表`、`银行对应流水表`、`按费用类型流水表` as project/FinanceTable grids。
+- `流水详情` and `导出中心` are project dialogs, not MUI dialogs。
+- Page still uses `usePageSessionState` for view/scope state, which is intentionally retained by the global plan。
+
+User-visible entrypoint matrix:
+
+| Area | Current UI | Must preserve |
+| --- | --- | --- |
+| Route | `/cost-statistics` | Standalone route inside App Shell。 |
+| Page header | `成本统计`, supporting copy, `导出中心` | Header action remains top-right. |
+| Summary | `CostStatisticsSummaryCards`: active row count, `支出流水`, `支出总额` | Keep compact counters; do not convert to large dashboard cards. |
+| View switcher | `按时间`, `按项目`, `按银行`, `按费用类型`, project scope toggle | Same view modes and selected state. |
+| Scope controls | `全部时间`, `按年统计`, `按月统计`, `自定义时间段` | Floating panel stays floating; not drawer/dialog. |
+| Time table | `按时间统计表` | `FinanceTable`, row click and `查看流水 <id>` action remain. |
+| Project drilldown | `项目名` lane -> `费用类型` lane -> `项目对应流水表` | Left-to-right drilldown remains. |
+| Bank drilldown | `银行账户` lane -> `项目名` lane -> `银行对应流水表` | Left-to-right drilldown remains. |
+| Expense drilldown | `费用类型` lane -> `按费用类型流水表` | Same table and detail action. |
+| Detail overlay | `流水详情` | Dialog stays dialog; fields and close behavior preserved. |
+| Export overlay | `导出中心` | Dialog stays dialog; preview/export flows preserved. |
+| States | loading, error, unavailable, empty, refreshing-preserve-content | Same copy and non-blocking behavior. |
+
+Table and layout requirements for PV-009:
+
+- Amount cells remain `money-cell-stack` with amount, direction tag and optional bank account tag.
+- Amount columns use `amount` role, right alignment and tabular nums through `FinanceTable`/money-cell styles.
+- Time columns use date role; count columns use quantity role; account columns use account role.
+- Explorer lane rows keep primary/secondary/meta hierarchy and selected state without changing row height.
+- Scope floating panels must not take layout height and must remain anchored under their toggle row.
+- Detail and export dialogs keep role/name/focusable controls and do not become drawers.
+- Summary counters should be compact ledger counters, not large card metrics.
+
+Premium visual opportunities for PV-009:
+
+- Tighten `stats-row`/`stat-card` usage on this page or add cost-scoped summary classes so counters match import/tax/app-health density.
+- Reduce ordinary section/card shadow emphasis in `.cost-content-shell`, `.cost-table-section`, `.cost-explorer-lane` and table shells.
+- Add motion-token hover/press/focus treatment for `cost-export-button`, `cost-view-tab`, `cost-project-scope-trigger`, `cost-scope-toggle-btn`, `cost-explorer-item` and `cost-table-row-trigger`.
+- Make explorer lanes feel like dense drilldown columns: stable header, compact rows, right-aligned amount/percentage metadata.
+- Harmonize table shell spacing and row trigger treatment with bank details/import pages.
+- Polish detail/export modal surfaces with existing project classes only where needed; do not rewrite modal behavior.
+
+Non-scope for PV-009:
+
+- Do not change cost APIs, export APIs, read model behavior, cache behavior, worker, route, session state shape, mock data, detail/export payloads or workbench internals.
+- Do not change view mode semantics, scope state semantics, row selection semantics, or export query parameters.
+- Do not replace `FinanceTable` with another table library.
 
 ## Migration Slices
 

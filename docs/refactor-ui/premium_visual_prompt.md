@@ -421,7 +421,13 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-008-cost-statistics-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-008-cost-statistics-discovery`
 
@@ -442,3 +448,53 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+### Execution Notes
+
+- Updated `docs/refactor-ui/modules/phase_6_cost_statistics.md` to reflect current `main`: CostStatistics tables already use `FinanceTable`, detail/export overlays are project dialogs, and `CostStatisticsPage.test.tsx` already locks non-MUI primitive contracts.
+- Recorded the current user-visible entrypoint matrix for route, summary counters, view switcher, scope controls, drilldown lanes, four table surfaces, detail dialog, export dialog and loading/error/empty states.
+- Identified PV-009 as a visual/interactions polish slice: compact counters, lower card/shadow emphasis, motion-token controls, dense drilldown lanes, table shell rhythm and modal surface polish.
+- Did not change runtime code and did not add tests because PV-008 is discovery-only.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-008 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-009-cost-statistics-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_cost_statistics.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/CostStatisticsPage.tsx`、`web/src/components/cost-statistics/*`、`web/src/app/styles.css`、`web/src/test/CostStatisticsPage.test.tsx` 和当前 `git status`。本切片只做 `/cost-statistics` premium visual implementation：保留现有 route、四种视图、项目范围切换、范围 floating panel、左中右 drilldown、四个 `FinanceTable` 表格、`流水详情` dialog、`导出中心` dialog、loading/error/empty/read-model-refreshing 状态和所有 API/export 行为。禁止改后端/API/read model/worker/关联台内部工作区。
+
+实现要求：
+
+- 不做大 card 设计，不制造大留白；把 summary counters、view toolbar、scope controls、explorer lanes 和 table shells 调整成紧凑、统一、银行明细 sample 同方向的 premium finance UI。
+- 继续使用 `FinanceTable`、项目 dialogs、项目 explorer lanes 和现有 primitives；不新增依赖，不新增 MUI。
+- Summary counters 保持小型辅助计数，不做 dashboard metric cards；数字使用 tabular nums。
+- `cost-export-button`、`cost-view-tab`、`cost-project-scope-trigger`、`cost-scope-toggle-btn`、`cost-explorer-item`、`cost-table-row-trigger` 使用 `interaction_smoothness.md` motion tokens 做 hover/press/focus/active feedback；不得增加页面转场或阻塞路由。
+- Scope floating panel 仍浮在 toggle row 下方，不改 drawer/dialog，不增加布局高度。
+- `按时间统计表`、`项目对应流水表`、`银行对应流水表`、`按费用类型流水表` 继续使用 `FinanceTable`，保留 accessible names、columns、row click 和 `查看流水 <id>` action。
+- Drilldown lanes 保持 `项目名`、`费用类型`、`银行账户` 左到右选择结构；selected state 清楚但不改变行高。
+- `流水详情` 和 `导出中心` 继续是 dialog，保留 title、close、preview/export controls 和 feedback。
+- loading/error/empty/read-model-refreshing states 保持原文案和行为，不放大成占屏提示。
+
+验证：
+
+- `cd web && npx vitest run CostStatisticsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 如 dev server 可用，浏览器 smoke `/cost-statistics`：确认 heading、summary counters、view switcher、scope controls、表格、drilldown、detail dialog、export dialog 能显示/打开/关闭，无明显重叠或顶层横向溢出。
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_cost_statistics.md`，精确 staging，commit 并 push 到 `origin/main`。
