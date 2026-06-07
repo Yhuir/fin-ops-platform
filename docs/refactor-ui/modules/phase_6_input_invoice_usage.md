@@ -205,6 +205,78 @@ Do not change:
 - Export preview/download current filter request semantics.
 - Page session state key `input-invoice-usage` and table scroll key `usage-table`.
 
+## PV-012 Premium Visual Discovery
+
+Prompt ID: `PV-012-input-invoice-usage-discovery`
+
+Current source files on `main`:
+
+- `web/src/pages/InputInvoiceUsagePage.tsx`
+- `web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx`
+- `web/src/components/inputInvoiceUsage/ExpandableCellText.tsx`
+- `web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx`
+- `web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx`
+- `web/src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx`
+- `web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx`
+- `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`
+- `web/src/test/InputInvoiceUsagePage.test.tsx`
+- `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`
+- `web/src/app/styles.css`
+
+Current implementation status on `main`:
+
+- Page shell and toolbar already use `PageScaffold`, `PageToolbar` and project buttons/inputs.
+- Main `进项发票使用情况表` is a project-owned dense native table with four group headers: `进项发票`, `支付状态`, `OA`, `流水`.
+- `ExpandableCellText` uses project/native expandable text controls.
+- Shared `InputInvoiceUsageFilterMenu` is project-owned and still preserves `menuitemcheckbox` / `menuitemradio` semantics for `OaPendingPaymentsTable`.
+- Detail, export, payment rules and OA reverse workflows already use `AppDrawer` right drawers.
+- Source-level no-MUI contracts in `InputInvoiceUsagePage.test.tsx` and `InputInvoiceUsageFiltersAndDrawers.test.tsx` currently pass.
+- Runtime source in this scope has no `@mui/*` imports.
+
+Current user-visible entrypoint matrix:
+
+| Area | Current UI | Must preserve |
+| --- | --- | --- |
+| Route | `/input-invoice-usage` inside App Shell | Same route and sidebar link. |
+| Page root | `data-testid="input-invoice-usage-page"` | Preserve root contract. |
+| Header actions | `以发票反提 OA`, `发票与支付状态规则设置`, `筛选内容导出`, `刷新` | Same toolbar positions, disabled refresh while refreshing. |
+| Search | label `关键字`, button `查询`, Enter submits | Same trim/page reset behavior. |
+| Main table | `进项发票使用情况表` | Dense table remains table; no card conversion. |
+| Table groups | `进项发票`, `支付状态`, `OA`, `流水` | Same group geometry and boundaries. |
+| Detail buttons | `查看发票 <invoice> 详情`, `查看OA <applicant/id> 详情`, `查看流水 <counterparty/id> 详情` | Same labels and disabled/unavailable behavior. |
+| Expandable text | `展开 <preview>` / `收起 <preview>` | Same labels, row-local expansion state. |
+| Detail drawer | `发票详情`, `银行流水详情`, `OA详情`, `关联明细` | Right drawer remains right drawer; preserve lazy load and unavailable OA detail behavior. |
+| Export drawer | `进项发票使用情况导出`, title `筛选内容导出` | Right drawer remains right drawer; preserve preview/download/success behavior. |
+| Payment rules drawer | `发票与支付状态规则设置` | Right drawer remains right drawer; preserve read-only/edit/versioned save/conflict behavior. |
+| OA reverse drawer | `以发票反提 OA 工作流` | Right drawer remains right drawer; preserve preview, candidate selection, batch/draft/status/revoke/manual fallback. |
+| Shared filter menu | `筛选 <field label>` | Preserve external consumer contract in `OaPendingPaymentsTable`; do not add new page filters without product prompt. |
+| States | loading skeleton, empty state, read-model refreshing retry, drawer loading/error/success/unavailable states | Same copy, roles and non-blocking behavior. |
+
+Table and layout requirements for PV-013:
+
+- Main table keeps 10 columns and four zone groups.
+- Amount columns (`价税合计`, `金额`) keep right alignment and tabular nums.
+- Payment status cell keeps clear emphasis through project tokens without a hard-coded one-off yellow panel.
+- Date/status/application type/bank direction tags keep stable height; hover/expanded states must not change row height unexpectedly.
+- Long invoice item, project, counterparty and remark text must clamp/expand inside the column without causing top-level horizontal overflow.
+- Pagination remains compact and aligned to the table shell.
+- Drawer sample/rules/candidate tables keep table semantics and numeric alignment.
+
+Premium visual opportunities for PV-013:
+
+- Harmonize page padding, query toolbar, header actions and loading skeleton with bank details/cost statistics/pending invoices premium slices.
+- Add motion-token hover/press feedback for page action buttons, query submit, table detail buttons, expandable text buttons, pagination buttons, filter-menu trigger/items and drawer actions.
+- Refine table zone header colors and separators to feel more premium and less utility-table.
+- Tighten drawer body gaps, metric panels, export summary/sample table, payment rules table and OA reverse workspace panels.
+- Add CSS contract tests for compact premium surface and motion-token usage while keeping behavior tests focused on observable workflows.
+
+Non-scope for PV-013:
+
+- Do not change input invoice usage API calls, request/response shape, read model retry behavior, page session state, detail endpoints, export semantics, payment rules save/conflict semantics or OA reverse backend workflow.
+- Do not add new column filters to `/input-invoice-usage`; the shared filter menu remains documented because `OaPendingPaymentsTable` consumes it.
+- Do not change right drawers into dialogs, inline panels or routes.
+- Do not change workbench internals or backend code.
+
 ## Migration Slices
 
 1. `P054-phase-6-input-invoice-usage-characterization-tests`

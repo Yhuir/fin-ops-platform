@@ -646,7 +646,7 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-012-input-invoice-usage-discovery
 
 `PV-012-input-invoice-usage-discovery`
 
@@ -667,5 +667,55 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Updated `docs/refactor-ui/modules/phase_6_input_invoice_usage.md` with current `main` discovery: page shell/toolbar, main dense table, filter menu, detail/export/payment-rules/OA-reverse drawers are already project primitives with no runtime `@mui/*` imports.
+- Recorded the current user-visible entrypoint matrix for page actions, search, main grouped table, detail/export/payment-rules/OA-reverse drawers, shared filter menu and states.
+- Captured PV-013 table requirements: preserve 10 columns, four zone groups, right-aligned amounts, tabular nums, payment status emphasis, stable tags and drawer table semantics.
+- Identified PV-013 as a visual/interactions polish slice: compact page/query toolbar, refined grouped table surface, motion-token controls, tighter drawer panels and OA reverse workspace.
+- Did not change runtime code and did not add tests because PV-012 is discovery-only and existing tests already lock non-MUI/project primitive contracts.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-012 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-013-input-invoice-usage-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_input_invoice_usage.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/InputInvoiceUsagePage.tsx`、`web/src/components/inputInvoiceUsage/*`、`web/src/app/styles.css`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` 和当前 `git status`。本切片只做 `/input-invoice-usage` premium visual implementation：保留现有 route、search/query、header actions、main grouped table、detail drawer、export drawer、payment rules drawer、OA reverse drawer、shared filter menu behavior、loading/error/empty/read-model-refreshing states and all API/workflow behavior。禁止改后端/API/read model/worker/关联台内部工作区。
+
+实现要求：
+
+- 不做大 card 设计，不制造大留白；把 page shell、query toolbar、main grouped table、pagination、detail/export/rules/OA drawers 调整成紧凑、统一、银行明细 sample 同方向的 premium finance UI。
+- 继续使用项目 primitives：`PageScaffold`、`PageToolbar`、project native dense table、`AppDrawer`、project filter menu and existing table/drawer components；不新增依赖，不新增 MUI。
+- 主表继续是 `进项发票使用情况表`，保留 `进项发票` / `支付状态` / `OA` / `流水` 四个 group、10 列结构、detail buttons and expandable text controls；不要改成 cards 或普通单区表。
+- 金额列右对齐、tabular nums；payment status cell 保持清晰强调但使用 project tokens；date/status/application/bank tags 稳定高度；行 hover/expanded state 不改变行高；长发票/项目/供应商/OA 文本在列内截断或展开，不造成顶层横向溢出。
+- `input-invoice-usage-button`、query submit、table detail buttons、expandable text buttons、pagination buttons、filter-menu trigger/items、drawer footer/actions 使用 `interaction_smoothness.md` motion tokens 做 hover/press/focus feedback；不得增加页面转场或阻塞路由。
+- 所有旧右侧抽屉仍为右侧抽屉：详情、导出、支付状态规则、以发票反提 OA；保持 close labels、titles、footer actions, loading/error/success/unavailable states。
+- Drawer metric/panel/simple-table/rules-table/OA-workspace surfaces 应更 compact、少阴影、低卡片感；不要做 dashboard metric cards。
+- Existing tests must keep passing; add or adjust CSS contract tests only where they lock premium compact treatment and motion-token usage without testing implementation trivia.
+
+验证：
+
+- `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 如 dev server 可用，浏览器 smoke `/input-invoice-usage`：确认 heading、query toolbar、main grouped table、detail drawer、export drawer、payment rules drawer、OA reverse drawer 能显示/打开/关闭，无明显重叠或顶层横向溢出。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`，精确 staging，commit 并 push 到 `origin/main`。
