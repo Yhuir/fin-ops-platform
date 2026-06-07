@@ -1,6 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import WorkbenchPaneSearch from "../components/workbench/WorkbenchPaneSearch";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 
 const panes = [
@@ -98,6 +102,190 @@ function dispatchMouseEvent(target: EventTarget, type: string, clientX: number) 
 }
 
 describe("WorkbenchZone", () => {
+  test("keeps selection toolbar actions and counts in the zone header", async () => {
+    const user = userEvent.setup();
+    const onClearSelection = vi.fn();
+    const onPrimarySelectionAction = vi.fn();
+    const onSecondarySelectionAction = vi.fn();
+    const onTertiarySelectionAction = vi.fn();
+    const onAuxiliaryAction = vi.fn();
+
+    render(
+      <WorkbenchZone
+        auxiliaryHeaderActions={[{ label: "查看已处理异常", onClick: onAuxiliaryAction, tone: "warning" }]}
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        primarySelectionActionDisabled
+        primarySelectionActionLabel="确认关联"
+        secondarySelectionActionLabel="异常处理"
+        selectionSummary={{
+          total: 3,
+          oa: 1,
+          bank: 1,
+          invoice: 1,
+          amounts: {
+            oa: "128,000.00",
+            bank: "128,000.00",
+            invoice: "144,640.00",
+          },
+        }}
+        tertiarySelectionActionLabel="取消异常"
+        title="未配对"
+        tone="warning"
+        onClearSelection={onClearSelection}
+        onOpenDetail={() => {}}
+        onPrimarySelectionAction={onPrimarySelectionAction}
+        onRowAction={() => {}}
+        onSecondarySelectionAction={onSecondarySelectionAction}
+        onSelectRow={() => {}}
+        onTertiarySelectionAction={onTertiarySelectionAction}
+        onToggleExpand={() => {}}
+        panes={panes}
+        zoneId="open"
+      />,
+    );
+
+    const zone = screen.getByTestId("zone-open");
+    const toolbar = within(zone).getByText("已选 3").closest(".zone-selection-toolbar");
+
+    expect(toolbar).not.toBeNull();
+    expect(within(toolbar as HTMLElement).getByText("OA 1 / 128,000.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByText("发票 1 / 144,640.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByRole("button", { name: "确认关联" })).toBeDisabled();
+
+    await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "清空选择" }));
+    await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "异常处理" }));
+    await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "取消异常" }));
+    await user.click(within(zone).getByRole("button", { name: "查看已处理异常" }));
+
+    expect(onClearSelection).toHaveBeenCalledTimes(1);
+    expect(onPrimarySelectionAction).not.toHaveBeenCalled();
+    expect(onSecondarySelectionAction).toHaveBeenCalledTimes(1);
+    expect(onTertiarySelectionAction).toHaveBeenCalledTimes(1);
+    expect(onAuxiliaryAction).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps pane toggles pressed state and expand callback accessible", async () => {
+    const user = userEvent.setup();
+    const onToggleExpand = vi.fn();
+
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        title="已配对"
+        tone="success"
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={onToggleExpand}
+        panes={panes}
+        zoneId="paired"
+      />,
+    );
+
+    const zone = screen.getByTestId("zone-paired");
+    const oaToggle = within(zone).getByRole("button", { name: "OA" });
+    const bankToggle = within(zone).getByRole("button", { name: "银行流水" });
+    const invoiceToggle = within(zone).getByRole("button", { name: "进销项发票" });
+
+    expect(oaToggle).toHaveAttribute("aria-pressed", "true");
+    expect(bankToggle).toHaveAttribute("aria-pressed", "true");
+    expect(invoiceToggle).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(bankToggle);
+    expect(bankToggle).toHaveAttribute("aria-pressed", "false");
+    expect(oaToggle).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(invoiceToggle);
+    expect(invoiceToggle).toHaveAttribute("aria-pressed", "false");
+    expect(oaToggle).toBeDisabled();
+
+    await user.click(within(zone).getByRole("button", { name: "放大 已配对" }));
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps pane search focus, clear, applied summary, and outside-close behavior", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const onClear = vi.fn();
+    const onClose = vi.fn();
+    const onToggle = vi.fn();
+
+    const { rerender } = render(
+      <div>
+        <button type="button">外部区域</button>
+        <WorkbenchPaneSearch
+          appliedValue=""
+          draftValue="陈涛"
+          open
+          paneTitle="OA"
+          onChange={onChange}
+          onClear={onClear}
+          onClose={onClose}
+          onToggle={onToggle}
+        />
+      </div>,
+    );
+
+    const searchbox = screen.getByRole("searchbox", { name: "搜索 OA" });
+    expect(searchbox).toHaveFocus();
+    expect(searchbox).toHaveValue("陈涛");
+
+    await user.type(searchbox, "A");
+    expect(onChange).toHaveBeenLastCalledWith("陈涛A");
+
+    await user.click(screen.getByRole("button", { name: "清空搜索 OA" }));
+    expect(onClear).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "外部区域" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <WorkbenchPaneSearch
+        appliedValue="陈涛"
+        draftValue="陈涛"
+        open={false}
+        paneTitle="OA"
+        onChange={onChange}
+        onClear={onClear}
+        onClose={onClose}
+        onToggle={onToggle}
+      />,
+    );
+
+    const summaryButton = screen.getByRole("button", { name: "搜索 OA，当前关键词 陈涛" });
+    expect(summaryButton).toHaveTextContent("陈涛");
+    await user.click(summaryButton);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  test("records current workbench MUI migration targets without broadening the tri-pane core scope", () => {
+    const sourceRoot = resolve(__dirname, "..");
+    const runtimeTargets = [
+      "components/workbench/WorkbenchZone.tsx",
+      "components/workbench/WorkbenchPaneSearch.tsx",
+      "components/workbench/WorkbenchRecordCard.tsx",
+    ];
+    const runtimeOffenders = runtimeTargets.flatMap((path) => {
+      const source = readFileSync(resolve(sourceRoot, path), "utf8");
+      return /from ["']@mui\/|import\s+[^;]*@mui\/|Mui[A-Z]|\.Mui/.test(source) ? [path] : [];
+    });
+    const triPaneCoreFiles = [
+      "components/workbench/ResizableTriPane.tsx",
+      "components/workbench/CandidateGroupGrid.tsx",
+    ].flatMap((path) => {
+      const source = readFileSync(resolve(sourceRoot, path), "utf8");
+      return /from ["']@mui\/|import\s+[^;]*@mui\/|Mui[A-Z]|\.Mui/.test(source) ? [path] : [];
+    });
+
+    expect(runtimeOffenders).toEqual(runtimeTargets);
+    expect(triPaneCoreFiles).toEqual([]);
+  });
+
   test("shows batch accounting mismatch details from the paired bank amount warning", async () => {
     const user = userEvent.setup();
     render(

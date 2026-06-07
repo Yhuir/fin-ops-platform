@@ -141,6 +141,41 @@ Workbench-related tests at baseline:
 - `WorkbenchRecordCard`: warning icon, tooltip, row click, detail entry, action bubbling isolation.
 - Source contract: current MUI runtime files are expected-fail targets until phases 2-4 migrate them.
 
+## P-WB002 Characterization
+
+- Prompt ID: `P-WB002-characterization-tests`
+- Phase: `wb_phase_1_characterization`
+- Type: `characterization tests`
+- Runtime changed: no.
+- CSS changed: no.
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Tests Added
+
+`web/src/test/WorkbenchZone.test.tsx` now covers:
+
+- Selection toolbar counts, actions and disabled primary action.
+- Pane toggle `aria-pressed`, last-visible-pane disabled state and expand callback.
+- `WorkbenchPaneSearch` focus, typing, clear action, outside close and applied summary state.
+- Source-level current target contract: direct residual MUI runtime targets are exactly `WorkbenchZone.tsx`, `WorkbenchPaneSearch.tsx`, `WorkbenchRecordCard.tsx`; `ResizableTriPane.tsx` and `CandidateGroupGrid.tsx` remain no-MUI core files.
+
+`web/src/test/WorkbenchColumns.test.tsx` now covers:
+
+- Bank amount mismatch warning icon click opens the warning detail without selecting the row or opening detail.
+- Invoice row action column `详情` and `忽略` do not bubble into row selection.
+
+### Verification
+
+```bash
+cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx
+cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx
+if rg -n "from \"@mui|from '@mui|@mui/" web/src --glob "!web/src/components/workbench/**" --glob "!web/src/test/**"; then exit 1; else exit 0; fi
+git diff --check
+```
+
+Results: targeted tests passed; 2 files / 36 tests and 8 files / 118 tests. Non-workbench runtime MUI scan and diff check passed.
+
 ## Recommended Micro-JIT Queue
 
 1. `P-WB002-characterization-tests`

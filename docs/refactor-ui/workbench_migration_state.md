@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `wb_phase_0_baseline`
-- Status: `completed`
+- Phase: `wb_phase_1_characterization`
+- Status: `implemented`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P-WB001-baseline-discovery`
-- Current MG ID: `MG-WB001-baseline`
+- Current Prompt ID: `P-WB002-characterization-tests`
+- Current MG ID: `MG-WB002-characterization`
 
 ## Global Invariants
 
@@ -29,7 +29,7 @@
 | Phase | Status | Started | Completed | Verification | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `wb_phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | 专项 state/prompt/module 文档已创建，MUI/CSS/test/dependency 基线已记录；MG-WB001 已 push |
-| `wb_phase_1_characterization` | `pending` | pending | pending | pending | 下一步：补 WorkbenchZone/PaneSearch/RecordCard 行为和 source contract 测试 |
+| `wb_phase_1_characterization` | `implemented` | 2026-06-07 | pending | `passed` | WorkbenchZone/PaneSearch/RecordCard 行为 characterization tests 已补，等待 MG push |
 | `wb_phase_2_zone_header_controls` | `pending` | pending | pending | pending | 迁移 `WorkbenchZone.tsx` 的 MUI controls |
 | `wb_phase_3_pane_search` | `pending` | pending | pending | pending | 迁移 `WorkbenchPaneSearch.tsx` |
 | `wb_phase_4_record_card_actions` | `pending` | pending | pending | pending | 迁移 `WorkbenchRecordCard.tsx` |
@@ -45,7 +45,9 @@
 | --- | --- | --- | --- | --- |
 | `P-WB001-baseline-discovery` | `wb_phase_0_baseline` | `discovery/planning` | `verified` | 文档和基线扫描完成 |
 | `MG-WB001-baseline` | `wb_phase_0_baseline` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
-| `P-WB002-characterization-tests` | `wb_phase_1_characterization` | `characterization tests` | `drafted` | MG-WB001 push 后执行 |
+| `P-WB002-characterization-tests` | `wb_phase_1_characterization` | `characterization tests` | `verified` | Zone toolbar/toggle/search、RecordCard warning/action bubbling、source target contract 已覆盖 |
+| `MG-WB002-characterization` | `wb_phase_1_characterization` | `cumulative MG` | `pending` | 等待精确 stage、commit、push |
+| `P-WB003-zone-header-controls` | `wb_phase_2_zone_header_controls` | `extraction/refactor` | `drafted` | MG-WB002 push 后执行 |
 
 ## Verification Log
 
@@ -56,6 +58,10 @@
 | 2026-06-07 | `P-WB001-baseline-discovery` | non-workbench runtime MUI scan | passed | `rg` 无输出，非关联台 runtime 当前无 `@mui/*` import |
 | 2026-06-07 | `P-WB001-baseline-discovery` | `rg --files web/src/components/workbench web/src/test` | passed | 工作台组件/测试清单已记录到模块文档 |
 | 2026-06-07 | `MG-WB001-baseline` | `git add docs/refactor-ui/README.md docs/refactor-ui/workbench_migration_master_goal_prompt.md docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `1b2ef143` pushed to `origin/refactor-ui` |
+| 2026-06-07 | `P-WB002-characterization-tests` | `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx` | passed | 2 files / 36 tests passed |
+| 2026-06-07 | `P-WB002-characterization-tests` | `cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx` | passed | 8 files / 118 tests passed |
+| 2026-06-07 | `P-WB002-characterization-tests` | non-workbench runtime MUI scan | passed | 无 `@mui/*` import 命中 |
+| 2026-06-07 | `P-WB002-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 
@@ -65,4 +71,4 @@
 
 ## Next Action
 
-从远端最新 `refactor-ui` 继续执行 `P-WB002-characterization-tests`。该 prompt 只补关联台残留 MUI 三个切片的行为和 source-level characterization tests，不改 runtime implementation。
+执行 `MG-WB002-characterization`：检查 scope、untracked files、diff、测试和文档状态；只精确 stage 本次测试和专项文档；commit 并 push 到 `refactor-ui`。push 后从远端最新 `refactor-ui` 继续执行 `P-WB003-zone-header-controls`。

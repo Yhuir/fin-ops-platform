@@ -124,12 +124,12 @@
   - `git commit -m "docs: add workbench mui migration baseline"`
   - `git push origin refactor-ui`
 
-## Next Prompt
+## Prompt History
 
 ### P-WB002-characterization-tests
 
 - Phase: `wb_phase_1_characterization`
-- Status: `drafted`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: 只补关联台残留 MUI 三个切片的行为和 source-level characterization tests，不改 runtime implementation。
 
@@ -137,4 +137,73 @@
 
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/test_migration_strategy.md、PRODUCT.md、DESIGN.md、web/src/components/workbench/WorkbenchZone.tsx、WorkbenchPaneSearch.tsx、WorkbenchRecordCard.tsx、web/src/test/WorkbenchZone.test.tsx、WorkbenchSelection.test.tsx、WorkbenchColumns.test.tsx、CandidateGroupGrid.test.tsx、WorkbenchPaneFilter.test.ts、WorkbenchColumnLayout.test.tsx、WorkbenchExceptionModal.test.tsx 和 workbenchRenderHelpers.tsx。只修改或新增测试，不改 runtime code、CSS、依赖、backend、API、read model、worker。补充 WorkbenchZone 标题/统计/selection toolbar/toggle/expand/disabled-loading-tooltip 行为测试；补充 WorkbenchPaneSearch 打开/输入/清空/focus/result summary 行为测试；补充 WorkbenchRecordCard 风险 icon/tooltip/row click/action bubbling 行为测试；新增 source-level workbench MUI contract，当前允许行为测试通过但 source contract 记录 `WorkbenchZone.tsx`、`WorkbenchPaneSearch.tsx`、`WorkbenchRecordCard.tsx` 为 expected-fail targets。运行工作台相关 targeted tests，记录 expected-fail 或 pass 结果；运行 git diff --check 和 git status。更新 state/prompt/module docs，并生成下一条 implementation prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- Runtime implementation untouched: yes。
+- CSS untouched: yes。
+- Dependencies untouched: yes。
+- Tri-pane core preserved: yes。
+- Characterization coverage: yes，覆盖 zone toolbar/toggle/expand、pane search focus/clear/summary/outside-close、record card warning/action bubbling。
+- Source contract: yes，记录当前 residual MUI targets，同时证明 `ResizableTriPane` 和 `CandidateGroupGrid` 不在迁移目标中。
+
+#### Execution Notes
+
+- `WorkbenchZone.test.tsx` 增加：
+  - selection toolbar counts/actions/disabled primary action；
+  - pane toggles `aria-pressed`、last-visible-pane disabled 和 expand callback；
+  - `WorkbenchPaneSearch` focus、clear、outside close、applied summary；
+  - source-level current target contract，限定 MUI runtime targets 为 `WorkbenchZone.tsx`、`WorkbenchPaneSearch.tsx`、`WorkbenchRecordCard.tsx`，并证明 tri-pane core 无 MUI。
+- `WorkbenchColumns.test.tsx` 增加：
+  - bank amount warning icon click 不触发行选择/详情；
+  - invoice action column `详情`/`忽略` 不冒泡到行选择。
+- 未修改 runtime code、CSS、依赖、backend、API、read model 或 worker。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx`: passed，2 files / 36 tests。
+  - `cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`: passed，8 files / 118 tests。
+  - `if rg -n "from \"@mui|from '@mui|@mui/" web/src --glob "!web/src/components/workbench/**" --glob "!web/src/test/**"; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+
+### MG-WB002-characterization
+
+- Phase: `wb_phase_1_characterization`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push 关联台 characterization tests 和专项文档更新。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- web/src/test/WorkbenchZone.test.tsx web/src/test/WorkbenchColumns.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB002 tests 和专项文档。只允许精确 git add web/src/test/WorkbenchZone.test.tsx web/src/test/WorkbenchColumns.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 test: characterize workbench mui migration。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB002 和 wb_phase_1_characterization 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- Runtime code untouched: yes。
+- CSS/dependencies untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+- Verification before commit specified: yes。
+
+## Next Prompt
+
+### P-WB003-zone-header-controls
+
+- Phase: `wb_phase_2_zone_header_controls`
+- Status: `drafted`
+- Type: `extraction/refactor`
+- Scope: 只迁移 `web/src/components/workbench/WorkbenchZone.tsx` 的 MUI controls，不改 PaneSearch、RecordCard、CSS cleanup、test provider、dependencies 或后端。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/workbench/WorkbenchZone.tsx、web/src/components/workbench/ResizableTriPane.tsx、web/src/test/WorkbenchZone.test.tsx、web/src/test/WorkbenchColumns.test.tsx 和 web/src/app/styles.css。只迁移 WorkbenchZone.tsx：移除 Box、Button、Chip、IconButton、Stack、ToggleButton、ToggleButtonGroup、Tooltip、Typography 的 MUI imports 和 JSX；使用 HeroUI Button/Tooltip 或语义化 button + project classes 替代 selection toolbar、auxiliary actions、pane toggle group、expand icon button、load more button。保留旧布局位置、class hooks、按钮顺序、disabled/loading、aria-pressed、expand aria-label、selection counts、auxiliary action callback、page footer load-more 行为。不得迁移 WorkbenchPaneSearch.tsx、WorkbenchRecordCard.tsx，不得清理 styles.css 的 .Mui selectors，不得修改 backend/API/read model/worker。运行 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx`，运行工作台专项测试组，运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|<Box\\b|<Stack\\b|<Typography\\b|<Chip\\b|<ToggleButton\\b|<ToggleButtonGroup\\b|<IconButton\\b|<Button\\b|<Tooltip\\b' web/src/components/workbench/WorkbenchZone.tsx; then exit 1; else exit 0; fi`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB004 pane search prompt。
 ```
