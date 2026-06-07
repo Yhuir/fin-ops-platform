@@ -700,6 +700,7 @@
 | 2026-06-07 | `P106-phase-6-settings-closeout` | `refactor-ui` | `ad8b3d40` | pushed |
 | 2026-06-07 | `MG-P106-phase-6-settings` | `refactor-ui` | `2a30a7b0` | pushed |
 | 2026-06-07 | `P107-phase-7-mui-containment-discovery` | `refactor-ui` | `f135e4bd` | pushed |
+| 2026-06-07 | `P108-phase-7-month-picker-characterization-tests` | `refactor-ui` | `eb6049ec` | pushed |
 | 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `refactor-ui` | `4a958ce8` | pushed |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `refactor-ui` | `1c872bfe` | pushed |
 | 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `refactor-ui` | `379d24cd` | pushed |

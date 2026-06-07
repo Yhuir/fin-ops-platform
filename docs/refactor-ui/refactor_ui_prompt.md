@@ -6014,6 +6014,7 @@ Scope: MonthPicker/date compat characterization tests only.
   - `cd web && npx vitest run MonthPicker.test.tsx`: expected-fail；4 behavior tests passed, 1 source-level contract failed。
   - Expected failure files: `src/components/MonthPicker.tsx`, `src/app/MuiDatePickerCompatProvider.tsx`。
   - `git diff --check`: passed。
+- Commit: `eb6049ec test: characterize month picker containment`, pushed to `origin/refactor-ui`。
 - Next prompt generated: `P109-phase-7-month-picker-and-date-compat`。
 
 ### P109-phase-7-month-picker-and-date-compat
