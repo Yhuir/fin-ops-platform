@@ -5309,6 +5309,7 @@ Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels 
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `git diff --check`: passed。
   - `git status --short --branch`: passed；only P094 page/style files changed before docs。
+- Commit: `47a2d993 feat: migrate etc tickets shell and lists`, pushed to `origin/refactor-ui`。
 - Next prompt generated: `P095-phase-6-etc-tickets-upload-and-source-panels`。
 
 ### P095-phase-6-etc-tickets-upload-and-source-panels
