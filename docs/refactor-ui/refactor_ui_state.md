@@ -773,3 +773,4 @@
 | 2026-06-07 | `P086-phase-6-turnover-ledger-characterization-tests` | `refactor-ui` | `e8b462a7` | pushed |
 | 2026-06-07 | `P087-phase-6-turnover-ledger-page-shell-tabs-summary` | `refactor-ui` | `e9a464b5` | pushed |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `refactor-ui` | `db426030` | pushed |
+| 2026-06-07 | `P114-phase-8-full-verification` | `refactor-ui` | `48053007` | pushed |
