@@ -17423,11 +17423,139 @@ body.column-layout-dragging {
 }
 
 .etc-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-start;
   padding: 12px;
   background: #f9fbfe;
+  border: 1px solid #dbe3ef;
   border-radius: 8px;
+}
+
+.etc-page-action-link,
+.etc-primary-action,
+.etc-secondary-action,
+.etc-icon-action,
+.etc-status-segmented__button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.etc-page-action-link,
+.etc-secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  color: #1d4ed8;
+  text-decoration: none;
+  background: #ffffff;
+  border-color: #bfdbfe;
+}
+
+.etc-page-action-link:hover,
+.etc-page-action-link:focus-visible,
+.etc-secondary-action:hover,
+.etc-secondary-action:focus-visible {
+  color: #1e40af;
+  background: #eff6ff;
+  border-color: #93c5fd;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.etc-primary-action {
+  min-height: 36px;
+  padding: 0 14px;
+  color: #ffffff;
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.etc-primary-action:hover,
+.etc-primary-action:focus-visible {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.etc-primary-action:disabled,
+.etc-secondary-action:disabled,
+.etc-icon-action:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  box-shadow: none;
+}
+
+.etc-status-segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.etc-status-segmented__button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: #1d4ed8;
+  background: transparent;
+  border-radius: 0;
+}
+
+.etc-status-segmented__button + .etc-status-segmented__button {
+  border-left: 1px solid #bfdbfe;
+}
+
+.etc-status-segmented__button:hover,
+.etc-status-segmented__button:focus-visible {
+  outline: none;
+  background: #eff6ff;
+}
+
+.etc-status-segmented__button[data-active="true"] {
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.etc-filter-field {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  color: #52677a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.etc-filter-field input {
+  min-height: 36px;
+  padding: 0 10px;
+  color: #102033;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: #ffffff;
+  border: 1px solid #d5deea;
+  border-radius: 6px;
+}
+
+.etc-filter-field input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 .etc-layout {
@@ -17467,6 +17595,9 @@ body.column-layout-dragging {
 .etc-batch-list {
   display: grid;
   gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
 .etc-reconciliation-task-list {
@@ -17477,6 +17608,10 @@ body.column-layout-dragging {
 }
 
 .etc-reconciliation-task-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
   border: 1px solid #dbe3ef;
   border-radius: 8px;
   background: #f9fbfe;
@@ -17484,6 +17619,10 @@ body.column-layout-dragging {
 }
 
 .etc-batch-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
   border: 1px solid #dbe3ef;
   border-radius: 8px;
   background: #ffffff;
@@ -17499,6 +17638,8 @@ body.column-layout-dragging {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  color: #172033;
+  font-size: 13px;
 }
 
 .etc-batch-fields {
@@ -17509,9 +17650,159 @@ body.column-layout-dragging {
   font-size: 12px;
 }
 
-.etc-batch-row .MuiListItemButton-root {
-  align-items: flex-start;
+.etc-list,
+.etc-source-file-list {
+  display: grid;
   gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.etc-list-eyebrow {
+  margin: 0;
+  color: #52677a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.etc-list-row-button {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 12px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.etc-list-row-button:hover,
+.etc-list-row-button:focus-visible,
+.etc-list-row-button[data-selected="true"] {
+  outline: none;
+  background: #eff6ff;
+}
+
+.etc-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 38px;
+  min-height: 38px;
+  color: #64748b;
+  background: transparent;
+  border-left-color: #e2e8f0;
+  border-radius: 0;
+}
+
+.etc-icon-action:hover,
+.etc-icon-action:focus-visible {
+  color: #1d4ed8;
+  background: #eff6ff;
+  outline: none;
+}
+
+.etc-icon-action--danger {
+  color: #b91c1c;
+}
+
+.etc-icon-action--danger:hover,
+.etc-icon-action--danger:focus-visible {
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.etc-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.etc-panel-heading__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.etc-panel-heading h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.etc-count-tag,
+.etc-status-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+}
+
+.etc-status-tag--success {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.etc-status-tag--warning {
+  color: #b45309;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.etc-status-tag--error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.etc-source-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+}
+
+.etc-source-file-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.etc-source-file-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.etc-source-file-title strong {
+  color: #172033;
+  font-size: 13px;
+}
+
+.etc-source-file-id {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .etc-detail-metrics {

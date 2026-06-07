@@ -5270,7 +5270,7 @@ Scope: `/etc-tickets` characterization tests only.
 ### P094-phase-6-etc-tickets-shell-filters-lists
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels only。
 
@@ -5289,6 +5289,50 @@ Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels 
 
 - Single slice: yes，only page shell/status/filter/list panel surfaces。
 - Runtime implementation limited: yes，upload/workspace tables/detail tables/dialogs/OA feedback remain later slices。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract remains expected-fail until all ETC runtime slices clear MUI。
+
+#### Execution Notes
+
+- Runtime implementation changed: yes，only `web/src/pages/EtcTicketManagementPage.tsx` and `web/src/app/styles.css`。
+- Test implementation changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Migrated ETC top import link, status segmented controls, filters, submit action, batch/task list panels and row delete actions to lucide icons, native buttons/inputs/lists and `etc-*` classes。
+- Cleared page-level MUI icons, MUI `Paper`, and MUI `List`/`ListItem` wrappers；uploaded source-file list was converted to native `ul/li` only to satisfy the P094 scoped no-list grep without changing upload/delete behavior。
+- Preserved page heading, `导入发票`, `提交OA`, status button names, filter labels, batch/task list accessible names, selected row behavior, delete dialog triggers and disabled rules。
+- Verification:
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|unsubmitted mode shows batch list|submitted mode hides submit action|creates OA draft through the selected business batch"`: expected-fail；selected behavior tests passed and source-level contract failed as expected。
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: expected-fail；41 behavior tests passed and 1 source-level contract failed against remaining ETC MUI runtime。
+  - `if rg -n 'AddOutlinedIcon|ArrowForwardOutlinedIcon|DeleteOutlineOutlinedIcon|OpenInNewOutlinedIcon|RefreshOutlinedIcon|UndoOutlinedIcon|UploadFileOutlinedIcon|<ToggleButton\\b|<ToggleButtonGroup\\b|<List\\b|<ListItem\\b|<ListItemButton\\b|<ListItemText\\b|<Paper\\b|<TextField[^\\n]*(label="月份"|label="车牌"|label="信用卡任务")' web/src/pages/EtcTicketManagementPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P094 page/style files changed before docs。
+- Next prompt generated: `P095-phase-6-etc-tickets-upload-and-source-panels`。
+
+### P095-phase-6-etc-tickets-upload-and-source-panels
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/etc-tickets` upload/drop blocks, source-file context, and upload/source notices only。
+
+#### Prompt
+
+```text
+Prompt ID: P095-phase-6-etc-tickets-upload-and-source-panels
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/etc-tickets` upload/drop blocks, source-file context, and upload/source notices only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx 和 web/src/app/styles.css。只迁移 `EtcTicketManagementPage.tsx` 中 `UploadDropBox`、`ETC对账文件上传`、`ETC导入动作`、信用卡账单/补充凭证/票根网 TXT 上传块、source file context/issues/status notices and source upload lists 的 MUI Button/Stack/Typography/Chip/Tooltip/IconButton/Alert usages 到 native/project controls and `etc-*` classes；必要时只补 `web/src/app/styles.css` 中 upload/source classes。不得迁移 reconciliation detail table, manual review form, business batch detail/invoice tables, dialog contents, OA status/detection panels, API client、backend、read model、worker、domain event semantics 或关联台内部工作区。保留用户可见行为：file input labels `上传信用卡账单`/`上传补充凭证`/`上传票根网`, drag/drop upload behavior, accepted file types, disabled reasons, legacy non-TXT/PDF blocking notices, source issue visibility, delete source file action label and payload, fresh task source issue isolation。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|shows the reconciliation workspace with upload blocks|uploads ticket-root TXT files|uploads ticket-root TXT files by dropping|shows source file context|removes legacy ticket-root mode controls|disables ticket-root TXT upload"`，预期 source-level contract remains expected-fail but selected behavior tests pass；运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 41 behavior tests pass and 1 source-level contract remains expected-fail until later ETC slices；运行 scoped grep for upload/source slice `if rg -n 'etc-upload-drop-box[^\\n]*MuiButton|MuiButton-root|Mui-disabled|<Alert\\b|<Tooltip\\b|<IconButton\\b|<Stack[^\\n]*etc-upload|<Typography[^\\n]*(上传|legacy|source)|<Chip\\b' web/src/pages/EtcTicketManagementPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`，若 grep 过宽命中未迁移的 table/detail/OA surfaces，必须收窄到 upload/source classes and document why；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P096 reconciliation table prompt。
+```
+
+#### Review
+
+- Single slice: yes，only upload/drop/source panels and source notices。
+- Runtime implementation limited: yes，tables/manual review/detail/dialog/OA surfaces remain later slices。
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract remains expected-fail until all ETC runtime slices clear MUI。

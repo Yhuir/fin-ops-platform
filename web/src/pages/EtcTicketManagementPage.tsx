@@ -1,13 +1,15 @@
-import AddOutlinedIcon from "@mui/icons-material/AddOutlined";
-import ArrowForwardOutlinedIcon from "@mui/icons-material/ArrowForwardOutlined";
-import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
-import ExpandLessOutlinedIcon from "@mui/icons-material/ExpandLessOutlined";
-import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
-import OpenInNewOutlinedIcon from "@mui/icons-material/OpenInNewOutlined";
-import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
-import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
-import UndoOutlinedIcon from "@mui/icons-material/UndoOutlined";
-import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
+import {
+  AlertTriangle,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+  UploadCloud,
+} from "lucide-react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -16,11 +18,6 @@ import Chip from "@mui/material/Chip";
 import Collapse from "@mui/material/Collapse";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemText from "@mui/material/ListItemText";
-import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -29,8 +26,6 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
@@ -412,7 +407,7 @@ function UploadBlock({ label, accept, disabled, helperText, disabledReason, mult
     <Button
       component="label"
       variant="outlined"
-      startIcon={<UploadFileOutlinedIcon />}
+      startIcon={<UploadCloud aria-hidden="true" size={16} />}
       disabled={disabled}
       aria-label={`上传${label}`}
       aria-disabled={disabled ? "true" : undefined}
@@ -1287,8 +1282,8 @@ export default function EtcTicketManagementPage() {
     }
   }, []);
 
-  const handleStatusChange = (_event: MouseEvent<HTMLElement>, nextStatus: EtcBatchStatus | null) => {
-    if (!nextStatus || nextStatus === activeStatus) {
+  const handleStatusChange = (nextStatus: EtcBatchStatus) => {
+    if (nextStatus === activeStatus) {
       return;
     }
     setActiveStatus(nextStatus);
@@ -1823,7 +1818,7 @@ export default function EtcTicketManagementPage() {
                 type="button"
                 size="small"
                 variant="outlined"
-                startIcon={<OpenInNewOutlinedIcon />}
+                startIcon={<ExternalLink aria-hidden="true" size={16} />}
                 onClick={() => openOaDraftUrl(batch.oaDraftUrl)}
               >
                 打开草稿
@@ -1833,7 +1828,7 @@ export default function EtcTicketManagementPage() {
               type="button"
               size="small"
               variant="outlined"
-              startIcon={<RefreshOutlinedIcon />}
+              startIcon={<RefreshCw aria-hidden="true" size={16} />}
               disabled={oaActionLoading}
               onClick={() => void handleRefreshBusinessBatchOaStatus(batch)}
             >
@@ -1845,7 +1840,7 @@ export default function EtcTicketManagementPage() {
                 size="small"
                 variant="outlined"
                 color="warning"
-                startIcon={<ReportProblemOutlinedIcon />}
+                startIcon={<AlertTriangle aria-hidden="true" size={16} />}
                 onClick={() => setManualOaPanelOpen((current) => !current)}
               >
                 异常处理
@@ -1965,7 +1960,7 @@ export default function EtcTicketManagementPage() {
                   openSupplementUploadDialog(card);
                 }}
               >
-                <UploadFileOutlinedIcon fontSize="small" />
+                <UploadCloud aria-hidden="true" size={16} />
               </IconButton>
             </span>
           </Tooltip>
@@ -2059,236 +2054,203 @@ export default function EtcTicketManagementPage() {
   );
 
   return (
-    <Box data-testid="etc-ticket-management-page">
+    <div data-testid="etc-ticket-management-page">
       <PageScaffold
         className="etc-page"
         title="ETC票据"
         actions={
-          <Button
-            component={RouterLink}
-            to="/imports/etc-invoices"
-            variant="outlined"
-            endIcon={<ArrowForwardOutlinedIcon />}
-          >
+          <RouterLink className="etc-page-action-link" to="/imports/etc-invoices">
             导入发票
-          </Button>
+            <ArrowRight aria-hidden="true" size={16} />
+          </RouterLink>
         }
       >
         <Stack spacing={2}>
           {actionError ? <StatePanel tone="error">{actionError}</StatePanel> : null}
 
-          <Paper className="etc-filter-bar" variant="outlined" aria-label="ETC筛选">
-            <ToggleButtonGroup
-              color="primary"
-              size="small"
-              exclusive
-              value={activeStatus}
-              onChange={handleStatusChange}
-              aria-label="ETC批次状态"
-            >
-              <ToggleButton value="unsubmitted">
-                未提交 {counts.unsubmitted}
-              </ToggleButton>
-              <ToggleButton value="submitted">
-                已提交 {counts.submitted}
-              </ToggleButton>
-            </ToggleButtonGroup>
-            <TextField
-              label="月份"
-              size="small"
-              type="month"
-              value={month}
-              InputLabelProps={{ shrink: true }}
-              onChange={(event) => setMonth(event.target.value)}
-            />
-            <TextField
-              label="车牌"
-              size="small"
-              value={plate}
-              placeholder="云ADA0381"
-              onChange={(event) => setPlate(event.target.value)}
-            />
-            <TextField
-              label="关键词"
-              size="small"
-              value={keyword}
-              placeholder="批次号/OA/发票号"
-              onChange={(event) => setKeyword(event.target.value)}
-            />
-            {activeStatus === "unsubmitted" ? (
-              <Button
+          <div className="etc-filter-bar" aria-label="ETC筛选">
+            <div className="etc-status-segmented" role="group" aria-label="ETC批次状态">
+              <button
                 type="button"
-                variant="contained"
+                className="etc-status-segmented__button"
+                aria-pressed={activeStatus === "unsubmitted"}
+                data-active={activeStatus === "unsubmitted" ? "true" : undefined}
+                onClick={() => handleStatusChange("unsubmitted")}
+              >
+                未提交 {counts.unsubmitted}
+              </button>
+              <button
+                type="button"
+                className="etc-status-segmented__button"
+                aria-pressed={activeStatus === "submitted"}
+                data-active={activeStatus === "submitted" ? "true" : undefined}
+                onClick={() => handleStatusChange("submitted")}
+              >
+                已提交 {counts.submitted}
+              </button>
+            </div>
+            <label className="etc-filter-field">
+              <span>月份</span>
+              <input
+                type="month"
+                value={month}
+                onChange={(event) => setMonth(event.target.value)}
+              />
+            </label>
+            <label className="etc-filter-field">
+              <span>车牌</span>
+              <input
+                value={plate}
+                placeholder="云ADA0381"
+                onChange={(event) => setPlate(event.target.value)}
+              />
+            </label>
+            <label className="etc-filter-field">
+              <span>关键词</span>
+              <input
+                value={keyword}
+                placeholder="批次号/OA/发票号"
+                onChange={(event) => setKeyword(event.target.value)}
+              />
+            </label>
+            {activeStatus === "unsubmitted" ? (
+              <button
+                type="button"
+                className="etc-primary-action"
                 disabled={!canSubmitCurrentBatch || draftCreating}
                 onClick={() => setCreateDialogOpen(true)}
               >
                 提交OA
-              </Button>
+              </button>
             ) : null}
-          </Paper>
+          </div>
 
           <Box className="etc-layout">
-            <Paper className="etc-batch-list-panel" variant="outlined" component="section" aria-label="ETC批次列表区">
-              <Stack className="etc-panel-heading" direction="row" alignItems="center" spacing={1.5}>
-                <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Typography component="h2" variant="h6" fontWeight={800}>
-                    批次列表
-                  </Typography>
-                  <Chip label={`${visibleBatches.length} 批`} size="small" variant="outlined" />
-                </Stack>
+            <section className="etc-batch-list-panel" aria-label="ETC批次列表区">
+              <div className="etc-panel-heading">
+                <div className="etc-panel-heading__title">
+                  <h2>批次列表</h2>
+                  <span className="etc-count-tag">{visibleBatches.length} 批</span>
+                </div>
                 {activeStatus === "unsubmitted" ? (
-                  <Button
+                  <button
                     type="button"
-                    size="small"
-                    variant="contained"
-                    startIcon={<AddOutlinedIcon />}
+                    className="etc-secondary-action"
                     disabled={taskActionLoading}
                     onClick={handleCreateReconciliationTask}
                   >
+                    <Plus aria-hidden="true" size={16} />
                     新建批次
-                  </Button>
+                  </button>
                 ) : null}
-              </Stack>
+              </div>
               {activeStatus === "unsubmitted" ? (
-                <Box className="etc-reconciliation-task-list" aria-label="ETC对账任务列表">
-                  <Typography variant="caption" color="text.secondary" fontWeight={800}>
-                    对账任务
-                  </Typography>
+                <div className="etc-reconciliation-task-list" role="region" aria-label="ETC对账任务列表">
+                  <p className="etc-list-eyebrow">对账任务</p>
                   {taskLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
                   {!taskLoading && reconciliationTasks.length === 0 ? (
                     <StatePanel tone="empty" compact>暂无任务。</StatePanel>
                   ) : null}
-                  <List disablePadding aria-label="ETC对账任务">
+                  <ul className="etc-list" aria-label="ETC对账任务">
                     {reconciliationTasks.map((task) => {
                       const deletable = canDeleteTask(task);
                       const taskTitle = formatTaskTitle(task);
                       return (
-                        <ListItem
+                        <li
                           key={task.taskId}
                           className="etc-reconciliation-task-row"
                           data-testid={`etc-reconciliation-task-row-${task.taskId}`}
-                          disablePadding
-                          secondaryAction={
-                            <Tooltip title={deletable ? "删除任务" : deleteTaskDisabledReason(task)}>
-                              <span>
-                                <IconButton
-                                  edge="end"
-                                  size="small"
-                                  color="error"
-                                  aria-label={deletable ? `删除任务 ${taskTitle}` : deleteTaskDisabledReason(task)}
-                                  disabled={!deletable || deleteSubmitting}
-                                  onClick={(event) => openDeleteTaskDialog(task, event)}
-                                >
-                                  <DeleteOutlineOutlinedIcon fontSize="small" />
-                                </IconButton>
-                              </span>
-                            </Tooltip>
-                          }
                         >
-                          <ListItemButton
+                          <button
+                            type="button"
+                            className="etc-list-row-button"
                             aria-label={`查看对账任务 ${taskTitle}`}
-                            selected={selectedTaskId === task.taskId}
+                            aria-current={selectedTaskId === task.taskId ? "true" : undefined}
+                            data-selected={selectedTaskId === task.taskId ? "true" : undefined}
                             onClick={() => setSelectedTaskId(task.taskId)}
                           >
-                            <ListItemText
-                              primaryTypographyProps={{ component: "div" }}
-                              secondaryTypographyProps={{ component: "div" }}
-                              primary={
-                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                  <Typography component="strong" fontWeight={800}>
-                                    {formatShortDateRange(task.periodStart, task.periodEnd)}
-                                  </Typography>
-                                  <Chip label={reconciliationStatusLabel(task.status)} size="small" variant="outlined" />
-                                </Stack>
-                              }
-                              secondary={
-                                <Box className="etc-batch-fields">
-                                  <span>{taskTitle}</span>
-                                  <span>{taskCountText(task)}</span>
-                                  <span>{task.vehiclePlates.join("、") || "未记录车牌"}</span>
-                                </Box>
-                              }
-                            />
-                          </ListItemButton>
-                        </ListItem>
+                            <span className="etc-row-title">
+                              <strong>{formatShortDateRange(task.periodStart, task.periodEnd)}</strong>
+                              <span className="etc-status-tag">{reconciliationStatusLabel(task.status)}</span>
+                            </span>
+                            <span className="etc-batch-fields">
+                              <span>{taskTitle}</span>
+                              <span>{taskCountText(task)}</span>
+                              <span>{task.vehiclePlates.join("、") || "未记录车牌"}</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="etc-icon-action etc-icon-action--danger"
+                            aria-label={deletable ? `删除任务 ${taskTitle}` : deleteTaskDisabledReason(task)}
+                            title={deletable ? "删除任务" : deleteTaskDisabledReason(task)}
+                            disabled={!deletable || deleteSubmitting}
+                            onClick={(event) => openDeleteTaskDialog(task, event)}
+                          >
+                            <Trash2 aria-hidden="true" size={16} />
+                          </button>
+                        </li>
                       );
                     })}
-                  </List>
-                </Box>
+                  </ul>
+                </div>
               ) : null}
               {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
               {!loading && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
-              <List className="etc-batch-list" aria-label="ETC批次列表" disablePadding>
+              <ul className="etc-batch-list" aria-label="ETC批次列表">
                 {visibleBatches.map((batch) => {
                   const deletable = canDeleteBatch(batch);
                   const batchTitle = batch.externalBatchId || batch.etcBatchId;
                   const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
                   return (
-                    <ListItem
+                    <li
                       key={batch.id}
                       className={`etc-batch-row ${batch.status}`}
                       data-testid={`etc-batch-row-${batch.id}`}
-                      disablePadding
-                      secondaryAction={
-                        <Tooltip title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}>
-                          <span>
-                            <IconButton
-                              edge="end"
-                              size="small"
-                              color="error"
-                              aria-label={deletable ? `删除批次 ${batchTitle}` : deleteBatchDisabledReason(batch)}
-                              disabled={!deletable || deleteSubmitting}
-                              onClick={(event) => openDeleteBatchDialog(batch, event)}
-                            >
-                              <DeleteOutlineOutlinedIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      }
                     >
-                      <ListItemButton
+                      <button
+                        type="button"
+                        className="etc-list-row-button"
                         aria-label={`查看ETC批次 ${batchTitle}`}
-                        selected={selectedBatchId === batch.id}
+                        aria-current={selectedBatchId === batch.id ? "true" : undefined}
+                        data-selected={selectedBatchId === batch.id ? "true" : undefined}
                         onClick={() => {
                           setBatchDetail(null);
                           setSelectedBatchId(batch.id);
                         }}
                       >
-                        <ListItemText
-                          primaryTypographyProps={{ component: "div" }}
-                          secondaryTypographyProps={{ component: "div" }}
-                          primary={
-                            <Stack className="etc-row-title" direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                              <Typography component="strong" fontWeight={800}>
-                                {formatShortDateRange(batch.passageStartDate, batch.passageEndDate)}
-                              </Typography>
-                              <Chip
-                                label={businessBatch ? businessBatchStatusLabel(businessBatch.status) : batchStatusLabel(batch.status)}
-                                size="small"
-                                color={businessBatch ? businessBatchTone(businessBatch.status) : (batch.status === "submitted" ? "success" : "primary")}
-                                variant="outlined"
-                              />
-                            </Stack>
-                          }
-                          secondary={
-                            <Box className="etc-batch-fields">
-                              <span>{batchTitle}</span>
-                              <span>{batch.displayCountText || taskCountText({ etcInvoiceCount: batch.etcInvoiceCount, supplementCount: batch.supplementCount })}</span>
-                              <span>{batch.invoiceCount} 张 / {formatMoney(batch.totalAmount)} 元</span>
-                              {businessBatch?.importAttempts.length ? <span>导入记录 {businessBatch.importAttempts.length} 次</span> : <span>{batch.plateCount} 个车牌</span>}
-                              {batch.status === "submitted" && batchOaLabel(batch) ? <span>{batchOaLabel(batch)}</span> : null}
-                            </Box>
-                          }
-                        />
-                      </ListItemButton>
-                    </ListItem>
+                        <span className="etc-row-title">
+                          <strong>{formatShortDateRange(batch.passageStartDate, batch.passageEndDate)}</strong>
+                          <span className={`etc-status-tag etc-status-tag--${businessBatch ? businessBatchTone(businessBatch.status) : (batch.status === "submitted" ? "success" : "primary")}`}>
+                            {businessBatch ? businessBatchStatusLabel(businessBatch.status) : batchStatusLabel(batch.status)}
+                          </span>
+                        </span>
+                        <span className="etc-batch-fields">
+                          <span>{batchTitle}</span>
+                          <span>{batch.displayCountText || taskCountText({ etcInvoiceCount: batch.etcInvoiceCount, supplementCount: batch.supplementCount })}</span>
+                          <span>{batch.invoiceCount} 张 / {formatMoney(batch.totalAmount)} 元</span>
+                          {businessBatch?.importAttempts.length ? <span>导入记录 {businessBatch.importAttempts.length} 次</span> : <span>{batch.plateCount} 个车牌</span>}
+                          {batch.status === "submitted" && batchOaLabel(batch) ? <span>{batchOaLabel(batch)}</span> : null}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="etc-icon-action etc-icon-action--danger"
+                        aria-label={deletable ? `删除批次 ${batchTitle}` : deleteBatchDisabledReason(batch)}
+                        title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}
+                        disabled={!deletable || deleteSubmitting}
+                        onClick={(event) => openDeleteBatchDialog(batch, event)}
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                      </button>
+                    </li>
                   );
                 })}
-              </List>
-            </Paper>
+              </ul>
+            </section>
 
             <Stack className="etc-right-column" spacing={2}>
-              <Paper className="etc-reconciliation-workspace" variant="outlined" component="section" aria-label="ETC对账工作区">
+              <section className="etc-reconciliation-workspace" aria-label="ETC对账工作区">
                 <Stack spacing={2}>
                   <Stack className="etc-detail-heading" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} spacing={1.5}>
                     <Box>
@@ -2318,7 +2280,7 @@ export default function EtcTicketManagementPage() {
                         variant="outlined"
                         aria-expanded={taskPanelExpanded}
                         aria-controls="etc-reconciliation-task-content"
-                        startIcon={taskPanelExpanded ? <ExpandLessOutlinedIcon /> : <ExpandMoreOutlinedIcon />}
+                        startIcon={taskPanelExpanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
                         onClick={() => setTaskPanelExpanded((current) => !current)}
                       >
                         {taskPanelExpanded ? "折叠任务" : "展开任务"}
@@ -2377,60 +2339,48 @@ export default function EtcTicketManagementPage() {
                           {selectedTask.sourceFiles.length === 0 ? (
                             <StatePanel tone="empty" compact>暂无文件。</StatePanel>
                           ) : (
-                            <List disablePadding aria-label="已上传文件列表">
+                            <ul className="etc-source-file-list" aria-label="已上传文件列表">
                               {selectedTask.sourceFiles.map((sourceFile) => {
                                 const sourceSummary = ticketRootSourceSummaryBySourceFileId.get(sourceFile.fileId);
                                 return (
-                                  <ListItem
+                                  <li
                                     key={sourceFile.fileId}
-                                    disablePadding
-                                    secondaryAction={
-                                      <Tooltip title={taskIsMutable ? "删除源文件" : "已确认/已导入任务不能删除源文件"}>
-                                        <span>
-                                          <IconButton
-                                            edge="end"
-                                            size="small"
-                                            color="error"
-                                            aria-label={taskIsMutable ? `删除源文件 ${sourceFile.originalName}` : "已确认/已导入任务不能删除源文件"}
-                                            disabled={!taskIsMutable || taskActionLoading || deleteSubmitting}
-                                            onClick={(event) => openDeleteSourceFileDialog(sourceFile, event)}
-                                          >
-                                            <DeleteOutlineOutlinedIcon fontSize="small" />
-                                          </IconButton>
-                                        </span>
-                                      </Tooltip>
-                                    }
+                                    className="etc-source-file-row"
                                   >
-                                    <ListItemText
-                                      primaryTypographyProps={{ component: "div" }}
-                                      secondaryTypographyProps={{ component: "div" }}
-                                      primary={
-                                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                          <Typography component="span" fontWeight={800}>
-                                            {sourceFile.originalName || sourceFile.fileId}
-                                          </Typography>
-                                          <Chip label={sourceKindLabel(sourceFile.sourceKind)} size="small" variant="outlined" />
-                                          {sourceSummary ? (
-                                            <>
-                                              <Chip label={`${sourceSummary.plateLabel} / 已解析 ${sourceSummary.parsedCount} 条`} size="small" variant="outlined" />
-                                              <Chip label={`金额合计 ${sourceSummary.totalAmount}`} size="small" variant="outlined" />
-                                              <Chip label={`日期 ${sourceSummary.dateRange}`} size="small" variant="outlined" />
-                                            </>
-                                          ) : null}
-                                          {sourceFile.hasBlockingIssue ? <Chip label="blocking" size="small" color="error" /> : null}
-                                        </Stack>
-                                      }
-                                      secondary={sourceFile.fileId}
-                                    />
-                                  </ListItem>
+                                    <div className="etc-source-file-main">
+                                      <div className="etc-source-file-title">
+                                        <strong>{sourceFile.originalName || sourceFile.fileId}</strong>
+                                        <Chip label={sourceKindLabel(sourceFile.sourceKind)} size="small" variant="outlined" />
+                                        {sourceSummary ? (
+                                          <>
+                                            <Chip label={`${sourceSummary.plateLabel} / 已解析 ${sourceSummary.parsedCount} 条`} size="small" variant="outlined" />
+                                            <Chip label={`金额合计 ${sourceSummary.totalAmount}`} size="small" variant="outlined" />
+                                            <Chip label={`日期 ${sourceSummary.dateRange}`} size="small" variant="outlined" />
+                                          </>
+                                        ) : null}
+                                        {sourceFile.hasBlockingIssue ? <Chip label="blocking" size="small" color="error" /> : null}
+                                      </div>
+                                      <span className="etc-source-file-id">{sourceFile.fileId}</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="etc-icon-action etc-icon-action--danger"
+                                      aria-label={taskIsMutable ? `删除源文件 ${sourceFile.originalName}` : "已确认/已导入任务不能删除源文件"}
+                                      title={taskIsMutable ? "删除源文件" : "已确认/已导入任务不能删除源文件"}
+                                      disabled={!taskIsMutable || taskActionLoading || deleteSubmitting}
+                                      onClick={(event) => openDeleteSourceFileDialog(sourceFile, event)}
+                                    >
+                                      <Trash2 aria-hidden="true" size={16} />
+                                    </button>
+                                  </li>
                                 );
                               })}
-                            </List>
+                            </ul>
                           )}
                         </Stack>
                       </Box>
 
-                      <Paper className="etc-manual-review-panel" variant="outlined" component="section" aria-label="人工核对处理">
+                      <section className="etc-manual-review-panel" aria-label="人工核对处理">
                         <Stack spacing={1.5}>
                           <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "stretch", md: "center" }}>
                             <Box className="etc-manual-review-card">
@@ -2528,7 +2478,7 @@ export default function EtcTicketManagementPage() {
                             </Button>
                           </Stack>
                         </Stack>
-                      </Paper>
+                      </section>
 
                       {selectedTask.parseIssues.length > 0 ? (
                         <Stack spacing={1}>
@@ -2600,7 +2550,7 @@ export default function EtcTicketManagementPage() {
                                 type="button"
                                 size="small"
                                 variant="outlined"
-                                startIcon={<RefreshOutlinedIcon />}
+                                startIcon={<RefreshCw aria-hidden="true" size={16} />}
                                 disabled={!selectedTask || taskActionLoading}
                                 onClick={handleRefreshReconciliationMatches}
                               >
@@ -2717,7 +2667,7 @@ export default function EtcTicketManagementPage() {
                               size="small"
                               variant="outlined"
                               color="warning"
-                              startIcon={<DeleteOutlineOutlinedIcon />}
+                              startIcon={<Trash2 aria-hidden="true" size={16} />}
                               disabled={removeImportedInvoicesSubmitting || taskActionLoading}
                               onClick={() => setRemoveImportedInvoicesDialogOpen(true)}
                             >
@@ -2749,9 +2699,9 @@ export default function EtcTicketManagementPage() {
                     </Box>
                   </Collapse>
                 </Stack>
-              </Paper>
+              </section>
 
-              <Paper className="etc-batch-detail-panel" variant="outlined" component="section" aria-label="ETC批次详情">
+              <section className="etc-batch-detail-panel" aria-label="ETC批次详情">
                 <Stack spacing={2}>
                   <Stack className="etc-detail-heading" direction="row" alignItems="center" justifyContent="space-between" spacing={1.5}>
                     <Box>
@@ -2767,7 +2717,7 @@ export default function EtcTicketManagementPage() {
                       variant="outlined"
                       aria-expanded={batchDetailPanelExpanded}
                       aria-controls="etc-batch-detail-content"
-                      startIcon={batchDetailPanelExpanded ? <ExpandLessOutlinedIcon /> : <ExpandMoreOutlinedIcon />}
+                      startIcon={batchDetailPanelExpanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
                       onClick={() => setBatchDetailPanelExpanded((current) => !current)}
                     >
                         {batchDetailPanelExpanded ? "折叠详情" : "展开详情"}
@@ -2803,7 +2753,7 @@ export default function EtcTicketManagementPage() {
                         type="button"
                         variant="outlined"
                         color="warning"
-                        startIcon={<UndoOutlinedIcon />}
+                        startIcon={<RotateCcw aria-hidden="true" size={16} />}
                         disabled={!canRevokeCurrentBatch}
                         onClick={() => setRevokeDialogOpen(true)}
                       >
@@ -2879,7 +2829,7 @@ export default function EtcTicketManagementPage() {
                     </Box>
                   </Collapse>
                 </Stack>
-              </Paper>
+              </section>
             </Stack>
           </Box>
         </Stack>
@@ -2915,7 +2865,7 @@ export default function EtcTicketManagementPage() {
               <Button
                 component="label"
                 variant="outlined"
-                startIcon={<UploadFileOutlinedIcon />}
+                startIcon={<UploadCloud aria-hidden="true" size={16} />}
                 disabled={supplementUploadSubmitting}
               >
                 {supplementUploadFiles.length > 0 ? supplementUploadFiles.map((file) => file.name).join("、") : "选择补充凭证文件"}
@@ -3059,7 +3009,7 @@ export default function EtcTicketManagementPage() {
                   <Button
                     type="button"
                     variant="outlined"
-                    startIcon={<OpenInNewOutlinedIcon />}
+                    startIcon={<ExternalLink aria-hidden="true" size={16} />}
                     onClick={handleOpenCurrentDraft}
                   >
                     打开草稿
@@ -3068,7 +3018,7 @@ export default function EtcTicketManagementPage() {
                 <Button
                   type="button"
                   variant="outlined"
-                  startIcon={<RefreshOutlinedIcon />}
+                  startIcon={<RefreshCw aria-hidden="true" size={16} />}
                   disabled={oaActionLoading}
                   onClick={() => void handleRefreshBusinessBatchOaStatus()}
                 >
@@ -3099,6 +3049,6 @@ export default function EtcTicketManagementPage() {
           )}
         </AppDialog>
       </PageScaffold>
-    </Box>
+    </div>
   );
 }
