@@ -130,3 +130,44 @@ Scope: `/batch-accounting` page shell, refresh action, status switch and year/se
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。只迁移 `BatchAccountingPage.tsx` 的页面头部刷新按钮、`批量账务状态` 状态切换、`流水年份`、`OA年份`、`搜索OA内容` 和 `清空搜索` 控件到项目/Tailwind/native controls；必要时只补 `web/src/app/styles.css` 中的 `batch-accounting-*` shell/filter classes。不得迁移银行流水列表、金额 summary、差额说明、OA table、OA checkbox、AmountMismatchWarning tooltip、withdraw dialog、Snackbar/Alert 反馈、API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：`刷新` disabled while loading、`未提交`/`已提交` exclusive `aria-pressed`、bucket switch clears selected bank/OA rows and difference note、year/search labels and values、OA search filtering and `清空搜索` button。运行 `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|filters right side OA rows|clears difference note when switching submitted and unsubmitted buckets|keeps selected bank and OA rows"`，预期 source-level contract 仍 expected-fail 但 selected behavior tests must pass；运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`，预期 12 behavior tests pass and source-level contract remains expected-fail until P082-P084；运行 `cd web && npm run build`；运行 scoped grep：`if rg -n 'RefreshOutlinedIcon|SearchOutlinedIcon|ClearOutlinedIcon|ToggleButton|ToggleButtonGroup|InputAdornment|label="流水年份"|label="OA年份"|label="搜索OA内容"' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P082 bank list and summary prompt。
 ```
+
+## P081 Execution Notes
+
+- Status: verified with expected source-level failure.
+- Runtime implementation changed: yes, only `web/src/pages/BatchAccountingPage.tsx`.
+- CSS changed: yes, only `web/src/app/styles.css` `batch-accounting-*` shell/filter classes.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Migrated header `刷新` action from MUI Button/MUI icon to project native button with lucide `RefreshCw`.
+- Migrated `批量账务状态` from MUI ToggleButtonGroup/ToggleButton to project native segmented buttons with `aria-pressed`.
+- Migrated `流水年份`, `OA年份`, `搜索OA内容` and `清空搜索` from MUI TextField/InputAdornment/IconButton/MUI icons to native labelled controls with project CSS and lucide `Search`/`X`.
+- Preserved selected behavior for refresh disabled state, bucket switching, OA year selection cache, OA search filtering and clear button.
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|filters right side OA rows|clears difference note when switching submitted and unsubmitted buckets|keeps selected bank and OA rows"`: expected-fail; selected behavior tests passed and source-level contract failed as expected.
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: expected-fail; 12 behavior tests passed and 1 source-level contract failed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n 'RefreshOutlinedIcon|SearchOutlinedIcon|ClearOutlinedIcon|ToggleButton|ToggleButtonGroup|InputAdornment|label="流水年份"|label="OA年份"|label="搜索OA内容"' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P081 page/style files changed before docs.
+
+## Current Expected Failures After P081
+
+The source-level contract still fails for:
+
+- `forbiddenMuiImports`: `src/pages/BatchAccountingPage.tsx` still imports `@mui/*` for bank/summary/OA table/dialog/feedback surfaces.
+- `forbiddenLegacySurfaces`: current runtime still contains remaining MUI table, dialog, snackbar, chip, tooltip/icon and TextField surfaces.
+- `missingPrimitiveTargets`: current runtime still lacks project OA table, withdraw dialog and mutation feedback/toast targets.
+
+P081 cleared the bank panel/list/region primitive target and the scoped page shell/filter residues. P082 should reduce the expected failure by migrating the bank list, amount summary, mismatch note and amount mismatch warning.
+
+## P082 Prompt Draft
+
+```text
+Prompt ID: P082-phase-6-batch-accounting-bank-list-and-summary
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/batch-accounting` bank row region/list, amount summary, mismatch note field and submitted amount-mismatch warning only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。只迁移 `BatchAccountingPage.tsx` 中 `批量账务流水` region/list rows, bank row selected styling, bank row date/direction/account tags, amount summary tags (`银行流水金额`/`已选 OA`/`已选 OA 金额`/`差额`/`金额不一致`), `差额说明` field, and `查看金额不一致差额说明` warning affordance 到项目/Tailwind/native controls；必要时只补 `web/src/app/styles.css` 中的 `batch-accounting-*` bank/summary/warning classes。不得迁移 OA table、OA checkbox、ExpandableText、withdraw dialog、Snackbar/Alert 反馈、API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：bank region aria-label `批量账务流水`, copy `对方户名精确匹配批量账务集中处理`, bank row accessible name and `aria-pressed`, selecting bank clears OA selection and difference note, amount summary text/format, mismatch note required/trim behavior, submitted mismatch `金额不一致` and hover/focus/click access to bank amount/OA amount/delta/note. 运行 `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|updates selected totals|submits mismatched|clears difference note when switching bank rows|renders submitted bucket"`，预期 source-level contract 仍 expected-fail 但 selected behavior tests must pass；运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`，预期 12 behavior tests pass and source-level contract remains expected-fail until P083-P084；运行 `cd web && npm run build`；运行 scoped grep：`if rg -n 'WarningAmberRoundedIcon|Tooltip|IconButton|<TextField[^\\n]*(label="差额说明")|银行流水金额.*<Chip|已选 OA.*<Chip|差额.*<Chip' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P083 OA table prompt。
+```

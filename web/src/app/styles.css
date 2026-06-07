@@ -3197,6 +3197,188 @@ textarea {
   }
 }
 
+.batch-accounting-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-2);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.batch-accounting-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fp-space-1);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 0 var(--fp-space-3);
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.batch-accounting-button--secondary {
+  color: var(--fp-primary-hover);
+}
+
+.batch-accounting-button:hover:not(:disabled),
+.batch-accounting-button:focus-visible {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  outline: none;
+}
+
+.batch-accounting-button:focus-visible,
+.batch-accounting-segment__button:focus-visible,
+.batch-accounting-field input:focus-visible,
+.batch-accounting-search__clear:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.batch-accounting-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.batch-accounting-segment {
+  display: inline-flex;
+  min-height: 34px;
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.batch-accounting-segment__button {
+  min-height: 32px;
+  border: 0;
+  border-right: 1px solid var(--fp-border);
+  background: transparent;
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  padding: 0 var(--fp-space-3);
+}
+
+.batch-accounting-segment__button:last-child {
+  border-right: 0;
+}
+
+.batch-accounting-segment__button:hover,
+.batch-accounting-segment__button:focus-visible {
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  outline: none;
+}
+
+.batch-accounting-segment__button--active,
+.batch-accounting-segment__button[aria-pressed="true"] {
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+}
+
+.batch-accounting-field {
+  display: grid;
+  min-width: 150px;
+  gap: 3px;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+}
+
+.batch-accounting-field--year {
+  min-width: 128px;
+}
+
+.batch-accounting-field--search {
+  min-width: min(280px, 100%);
+}
+
+.batch-accounting-field input {
+  min-height: 34px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font: inherit;
+  font-size: var(--fp-text-body);
+  font-weight: 650;
+  outline: none;
+  padding: 0 var(--fp-space-3);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.batch-accounting-field input:hover {
+  border-color: var(--fp-border-strong);
+}
+
+.batch-accounting-field input:focus-visible {
+  border-color: var(--fp-primary);
+  outline: none;
+}
+
+.batch-accounting-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 34px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-muted);
+  padding: 0 var(--fp-space-2);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.batch-accounting-search:focus-within {
+  border-color: var(--fp-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.batch-accounting-search input {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 var(--fp-space-1);
+}
+
+.batch-accounting-search input:hover,
+.batch-accounting-search input:focus-visible {
+  border: 0;
+  box-shadow: none;
+}
+
+.batch-accounting-search__clear {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--fp-radius-sm);
+  background: transparent;
+  color: var(--fp-text-muted);
+  cursor: pointer;
+}
+
+.batch-accounting-search__clear:hover,
+.batch-accounting-search__clear:focus-visible {
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  outline: none;
+}
+
 .no-oa-bank-batches-actions,
 .no-oa-bank-batches-filter {
   display: flex;

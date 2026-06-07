@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
-import ClearOutlinedIcon from "@mui/icons-material/ClearOutlined";
-import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
-import SearchOutlinedIcon from "@mui/icons-material/SearchOutlined";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import { RefreshCw, Search, X } from "lucide-react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -14,7 +12,6 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
-import InputAdornment from "@mui/material/InputAdornment";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
@@ -25,8 +22,6 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
@@ -122,6 +117,10 @@ function oaSearchText(row: BatchAccountingOaRow) {
 
 function mutationEventDetail(result: { affectedMonths?: string[] }) {
   return { affectedMonths: result.affectedMonths ?? [] };
+}
+
+function cx(...values: Array<string | false | null | undefined>) {
+  return values.filter(Boolean).join(" ");
 }
 
 function ExpandableText({ text }: { text: string }) {
@@ -319,8 +318,8 @@ export default function BatchAccountingPage() {
     return () => controller.abort();
   }, [loadData]);
 
-  const handleBucketChange = (_event: MouseEvent<HTMLElement>, nextBucket: BatchAccountingBucket | null) => {
-    if (!nextBucket) {
+  const handleBucketChange = (nextBucket: BatchAccountingBucket) => {
+    if (nextBucket === bucket) {
       return;
     }
     setBucket(nextBucket);
@@ -406,31 +405,37 @@ export default function BatchAccountingPage() {
     <PageScaffold
       title="日常报销批量账务管理"
       actions={(
-        <Button
+        <button
+          className="batch-accounting-button batch-accounting-button--secondary"
           disabled={loading}
           onClick={() => loadData()}
-          startIcon={<RefreshOutlinedIcon />}
-          variant="outlined"
+          type="button"
         >
+          <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
           刷新
-        </Button>
+        </button>
       )}
     >
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
-        <Stack alignItems={{ xs: "stretch", md: "center" }} direction={{ xs: "column", md: "row" }} spacing={1.5}>
-          <ToggleButtonGroup
-            aria-label="批量账务状态"
-            color="primary"
-            exclusive
-            onChange={handleBucketChange}
-            size="small"
-            value={bucket}
+      <div aria-label="批量账务筛选" className="batch-accounting-filter" role="region">
+        <div aria-label="批量账务状态" className="batch-accounting-segment" role="group">
+          <button
+            aria-pressed={bucket === "unsubmitted"}
+            className={cx("batch-accounting-segment__button", bucket === "unsubmitted" && "batch-accounting-segment__button--active")}
+            onClick={() => handleBucketChange("unsubmitted")}
+            type="button"
           >
-            <ToggleButton value="unsubmitted">未提交 {payload.summary.unsubmittedCount}</ToggleButton>
-            <ToggleButton value="submitted">已提交 {payload.summary.submittedCount}</ToggleButton>
-          </ToggleButtonGroup>
-        </Stack>
-      </Paper>
+            未提交 {payload.summary.unsubmittedCount}
+          </button>
+          <button
+            aria-pressed={bucket === "submitted"}
+            className={cx("batch-accounting-segment__button", bucket === "submitted" && "batch-accounting-segment__button--active")}
+            onClick={() => handleBucketChange("submitted")}
+            type="button"
+          >
+            已提交 {payload.summary.submittedCount}
+          </button>
+        </div>
+      </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
 
@@ -448,16 +453,17 @@ export default function BatchAccountingPage() {
               <Typography fontWeight={900}>批量账务流水</Typography>
               <Typography color="text.secondary" variant="caption">对方户名精确匹配批量账务集中处理</Typography>
             </Box>
-            <TextField
-              InputLabelProps={{ shrink: true }}
-              inputProps={{ min: 2000, max: 2100 }}
-              label="流水年份"
-              onChange={(event) => setBankYear(event.target.value)}
-              size="small"
-              sx={{ width: { xs: "100%", sm: 128 } }}
-              type="number"
-              value={bankYear}
-            />
+            <label className="batch-accounting-field batch-accounting-field--year" htmlFor="batch-accounting-bank-year">
+              <span>流水年份</span>
+              <input
+                id="batch-accounting-bank-year"
+                max={2100}
+                min={2000}
+                onChange={(event) => setBankYear(event.target.value)}
+                type="number"
+                value={bankYear}
+              />
+            </label>
           </Stack>
           <Divider />
           {loading ? (
@@ -538,38 +544,40 @@ export default function BatchAccountingPage() {
                   value={differenceNote}
                 />
               ) : null}
-              <TextField
-                InputLabelProps={{ shrink: true }}
-                inputProps={{ min: 2000, max: 2100 }}
-                label="OA年份"
-                onChange={(event) => setOaYear(event.target.value)}
-                size="small"
-                sx={{ width: { xs: "100%", lg: 128 } }}
-                type="number"
-                value={oaYear}
-              />
-              <TextField
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchOutlinedIcon fontSize="small" />
-                    </InputAdornment>
-                  ),
-                  endAdornment: oaSearchQuery ? (
-                    <InputAdornment position="end">
-                      <IconButton aria-label="清空搜索" edge="end" onClick={() => setOaSearchQuery("")} size="small">
-                        <ClearOutlinedIcon fontSize="small" />
-                      </IconButton>
-                    </InputAdornment>
-                  ) : undefined,
-                }}
-                label="搜索OA内容"
-                onChange={(event) => setOaSearchQuery(event.target.value)}
-                placeholder="申请人、项目、金额、事由"
-                size="small"
-                sx={{ minWidth: { xs: "100%", lg: 280 } }}
-                value={oaSearchQuery}
-              />
+              <label className="batch-accounting-field batch-accounting-field--year" htmlFor="batch-accounting-oa-year">
+                <span>OA年份</span>
+                <input
+                  id="batch-accounting-oa-year"
+                  max={2100}
+                  min={2000}
+                  onChange={(event) => setOaYear(event.target.value)}
+                  type="number"
+                  value={oaYear}
+                />
+              </label>
+              <div className="batch-accounting-field batch-accounting-field--search">
+                <label htmlFor="batch-accounting-oa-search">搜索OA内容</label>
+                <div className="batch-accounting-search">
+                  <Search aria-hidden="true" size={15} strokeWidth={2.2} />
+                  <input
+                    id="batch-accounting-oa-search"
+                    onChange={(event) => setOaSearchQuery(event.target.value)}
+                    placeholder="申请人、项目、金额、事由"
+                    type="search"
+                    value={oaSearchQuery}
+                  />
+                  {oaSearchQuery ? (
+                    <button
+                      aria-label="清空搜索"
+                      className="batch-accounting-search__clear"
+                      onClick={() => setOaSearchQuery("")}
+                      type="button"
+                    >
+                      <X aria-hidden="true" size={14} strokeWidth={2.4} />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             </Stack>
             {bucket === "unsubmitted" ? (
               <Button disabled={!canSubmit} onClick={handleSubmit} variant="contained">
