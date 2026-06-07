@@ -1,13 +1,4 @@
 import { memo } from "react";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
 
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
@@ -154,153 +145,147 @@ function WorkbenchZone({
       data-testid={`zone-${zoneId}`}
     >
       <header className={`zone-header ${tone}`}>
-        <Box className="zone-title-block">
-          <Typography className="zone-title" component="div">
+        <div className="zone-title-block">
+          <div className="zone-title">
             {title}
-          </Typography>
+          </div>
           {meta ? (
-            <Typography className="zone-meta" component="div">
+            <div className="zone-meta">
               {meta}
-            </Typography>
+            </div>
           ) : null}
           {shouldShowSelectionToolbar ? (
-            <Stack className="zone-selection-toolbar" direction="row">
-              <Stack className="zone-selection-summary" direction="row">
-                <Chip className="zone-selection-pill" label={`已选 ${selectionSummary?.total ?? 0}`} size="small" variant="outlined" />
-                <Chip className="zone-selection-pill" label={`OA ${selectionSummary?.oa ?? 0} / ${selectionSummary?.amounts.oa ?? "0.00"}`} size="small" variant="outlined" />
-                <Chip className="zone-selection-pill" label={`流水 ${selectionSummary?.bank ?? 0} / ${selectionSummary?.amounts.bank ?? "0.00"}`} size="small" variant="outlined" />
-                <Chip className="zone-selection-pill" label={`发票 ${selectionSummary?.invoice ?? 0} / ${selectionSummary?.amounts.invoice ?? "0.00"}`} size="small" variant="outlined" />
-              </Stack>
-              <Stack className="zone-selection-actions" direction="row">
-                <Button
+            <div className="zone-selection-toolbar">
+              <div className="zone-selection-summary">
+                <span className="zone-selection-pill">{`已选 ${selectionSummary?.total ?? 0}`}</span>
+                <span className="zone-selection-pill">{`OA ${selectionSummary?.oa ?? 0} / ${selectionSummary?.amounts.oa ?? "0.00"}`}</span>
+                <span className="zone-selection-pill">{`流水 ${selectionSummary?.bank ?? 0} / ${selectionSummary?.amounts.bank ?? "0.00"}`}</span>
+                <span className="zone-selection-pill">{`发票 ${selectionSummary?.invoice ?? 0} / ${selectionSummary?.amounts.invoice ?? "0.00"}`}</span>
+              </div>
+              <div className="zone-selection-actions">
+                <button
                   className="zone-selection-btn"
-                  size="small"
-                  variant="outlined"
+                  type="button"
                   onClick={onClearSelection}
                 >
                   清空选择
-                </Button>
-                <Button
+                </button>
+                <button
                   className="zone-selection-btn primary"
                   disabled={primarySelectionActionDisabled}
-                  size="small"
-                  variant="contained"
+                  type="button"
                   onClick={onPrimarySelectionAction}
                 >
                   {primarySelectionActionLabel}
-                </Button>
+                </button>
                 {secondarySelectionActionLabel ? (
-                  <Button
+                  <button
                     className="zone-selection-btn warning"
                     disabled={secondarySelectionActionDisabled}
-                    size="small"
-                    variant="outlined"
+                    type="button"
                     onClick={onSecondarySelectionAction}
                   >
                     {secondarySelectionActionLabel}
-                  </Button>
+                  </button>
                 ) : null}
                 {tertiarySelectionActionLabel ? (
-                  <Button
+                  <button
                     className="zone-selection-btn"
                     disabled={tertiarySelectionActionDisabled}
-                    size="small"
-                    variant="outlined"
+                    type="button"
                     onClick={onTertiarySelectionAction}
                   >
                     {tertiarySelectionActionLabel}
-                  </Button>
+                  </button>
                 ) : null}
-              </Stack>
-            </Stack>
+              </div>
+            </div>
           ) : null}
-        </Box>
-        <Stack className="zone-actions" direction="row">
+        </div>
+        <div className="zone-actions">
           {auxiliaryHeaderActions?.length ? (
-            <Stack className="zone-aux-action-group" direction="row">
+            <div className="zone-aux-action-group">
               {auxiliaryHeaderActions.map((action) => (
-                <Button
+                <button
                   key={action.label}
                   className={`zone-toggle zone-aux-action${action.tone === "danger" ? " danger" : ""}`}
-                  size="small"
-                  variant="outlined"
+                  type="button"
                   onClick={action.onClick}
                 >
                   {action.label}
-                </Button>
+                </button>
               ))}
-            </Stack>
+            </div>
           ) : null}
-          <ToggleButtonGroup
+          <div
+            aria-label={`${title}栏显示切换`}
             className="zone-toggle-group"
-            size="small"
-            value={activePaneIds}
+            role="group"
           >
             {panes.map((pane, index) => {
               const active = widths[index] > 0.0001;
               return (
-                <ToggleButton
+                <button
                   key={pane.id}
                   aria-pressed={active}
                   className={`zone-toggle${active ? " active" : ""}`}
                   disabled={active && visibleCount === 1}
-                  value={pane.id}
+                  type="button"
                   onClick={() => togglePane(index)}
                 >
                   {pane.title}
-                </ToggleButton>
+                </button>
               );
             })}
-          </ToggleButtonGroup>
-          <Tooltip title={expandLabel}>
-            <IconButton
-              aria-label={expandLabel}
-              className={`zone-expand-icon-btn${isExpanded ? " active" : ""}`}
-              size="small"
-              onClick={onToggleExpand}
-            >
-              {isExpanded ? (
-                <svg aria-hidden="true" className="zone-expand-icon" viewBox="0 0 20 20">
-                  <path
-                    d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.8"
-                  />
-                  <path
-                    d="M3 7h4V3M17 7h-4V3M3 13h4v4M17 13h-4v4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.8"
-                  />
-                </svg>
-              ) : (
-                <svg aria-hidden="true" className="zone-expand-icon" viewBox="0 0 20 20">
-                  <path
-                    d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.8"
-                  />
-                  <path
-                    d="M7 7 3 3M13 7l4-4M13 13l4 4M7 13l-4 4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.8"
-                  />
-                </svg>
-              )}
-            </IconButton>
-          </Tooltip>
-        </Stack>
+          </div>
+          <button
+            aria-label={expandLabel}
+            className={`zone-expand-icon-btn${isExpanded ? " active" : ""}`}
+            title={expandLabel}
+            type="button"
+            onClick={onToggleExpand}
+          >
+            {isExpanded ? (
+              <svg aria-hidden="true" className="zone-expand-icon" viewBox="0 0 20 20">
+                <path
+                  d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                />
+                <path
+                  d="M3 7h4V3M17 7h-4V3M3 13h4v4M17 13h-4v4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                />
+              </svg>
+            ) : (
+              <svg aria-hidden="true" className="zone-expand-icon" viewBox="0 0 20 20">
+                <path
+                  d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                />
+                <path
+                  d="M7 7 3 3M13 7l4-4M13 13l4 4M7 13l-4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                />
+              </svg>
+            )}
+          </button>
+        </div>
       </header>
       <ResizableTriPane
         columnLayouts={columnLayouts}
@@ -335,15 +320,14 @@ function WorkbenchZone({
             已加载 {groups?.length ?? 0} / {pageInfo.total}
           </span>
           {pageInfo.hasMore ? (
-            <Button
+            <button
               className="zone-load-more-btn"
               disabled={loadingMore}
-              size="small"
-              variant="outlined"
+              type="button"
               onClick={onLoadMore}
             >
               {loadingMore ? "加载中" : "加载更多"}
-            </Button>
+            </button>
           ) : null}
         </div>
       ) : null}

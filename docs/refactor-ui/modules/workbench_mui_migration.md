@@ -39,7 +39,7 @@ rg -n "^import .*@mui|from \"@mui|from '@mui|@mui/|Mui[A-Z]|\\.Mui" web/src/page
 
 | File | MUI dependency | Migration target | Risk |
 | --- | --- | --- | --- |
-| `web/src/components/workbench/WorkbenchZone.tsx` | `Box`, `Button`, `Chip`, `IconButton`, `Stack`, `ToggleButton`, `ToggleButtonGroup`, `Tooltip`, `Typography` | HeroUI/project buttons, tags, tooltip, semantic button group, stable CSS selectors | high |
+| `web/src/components/workbench/WorkbenchZone.tsx` | migrated in `P-WB003` | Semantic `div`/`span`/`button` with existing project class hooks | resolved |
 | `web/src/components/workbench/WorkbenchPaneSearch.tsx` | `ClearIcon`, `SearchIcon`, `Grow`, `IconButton`, `InputAdornment`, `TextField` | lucide icons + HeroUI/project input/button/tooltip/search primitive | medium |
 | `web/src/components/workbench/WorkbenchRecordCard.tsx` | `WarningAmberRoundedIcon`, `IconButton`, `Tooltip`, `& .MuiSvgIcon-root` selectors | lucide warning/info icons + HeroUI/project tooltip/icon button classes | medium |
 
@@ -95,7 +95,7 @@ These must remain until runtime/test references are removed, then be audited in 
 
 | Hits | File |
 | --- | --- |
-| 9 | `web/src/components/workbench/WorkbenchZone.tsx` |
+| 0 | `web/src/components/workbench/WorkbenchZone.tsx` after `P-WB003` |
 | 6 | `web/src/components/workbench/WorkbenchPaneSearch.tsx` |
 | 5 | `web/src/components/workbench/WorkbenchRecordCard.tsx` |
 | 0 | all other `web/src/components/workbench/*.tsx` files in the baseline count |
@@ -175,6 +175,48 @@ git diff --check
 ```
 
 Results: targeted tests passed; 2 files / 36 tests and 8 files / 118 tests. Non-workbench runtime MUI scan and diff check passed.
+
+## P-WB003 Zone Header Controls
+
+- Prompt ID: `P-WB003-zone-header-controls`
+- Phase: `wb_phase_2_zone_header_controls`
+- Type: `extraction/refactor`
+- Runtime changed:
+  - `web/src/components/workbench/WorkbenchZone.tsx`
+- Test changed:
+  - `web/src/test/WorkbenchZone.test.tsx` source target contract now expects remaining MUI targets to be `WorkbenchPaneSearch.tsx` and `WorkbenchRecordCard.tsx`.
+- CSS changed: no.
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Result
+
+`WorkbenchZone.tsx` no longer imports or renders MUI components. It preserves existing class hooks and behavior for:
+
+- zone title/meta;
+- selection summary/action toolbar;
+- auxiliary header actions;
+- pane toggle group;
+- expand icon button;
+- page footer load-more button;
+- `ResizableTriPane` props and tri-pane behavior.
+
+Remaining direct runtime MUI targets are now:
+
+- `web/src/components/workbench/WorkbenchPaneSearch.tsx`
+- `web/src/components/workbench/WorkbenchRecordCard.tsx`
+
+### Verification
+
+```bash
+if rg -n '@mui/|Mui[A-Z]|<Box\b|<Stack\b|<Typography\b|<Chip\b|<ToggleButton\b|<ToggleButtonGroup\b|<IconButton\b|<Button\b|<Tooltip\b' web/src/components/workbench/WorkbenchZone.tsx; then exit 1; else exit 0; fi
+cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx
+cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx
+cd web && npm run build
+git diff --check
+```
+
+Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
 
 ## Recommended Micro-JIT Queue
 

@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `wb_phase_1_characterization`
-- Status: `completed`
+- Phase: `wb_phase_2_zone_header_controls`
+- Status: `implemented`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P-WB002-characterization-tests`
-- Current MG ID: `MG-WB002-characterization`
+- Current Prompt ID: `P-WB003-zone-header-controls`
+- Current MG ID: `MG-WB003-zone-header-controls`
 
 ## Global Invariants
 
@@ -30,7 +30,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `wb_phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | 专项 state/prompt/module 文档已创建，MUI/CSS/test/dependency 基线已记录；MG-WB001 已 push |
 | `wb_phase_1_characterization` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | WorkbenchZone/PaneSearch/RecordCard 行为 characterization tests 已补，MG-WB002 已 push |
-| `wb_phase_2_zone_header_controls` | `pending` | pending | pending | pending | 迁移 `WorkbenchZone.tsx` 的 MUI controls |
+| `wb_phase_2_zone_header_controls` | `implemented` | 2026-06-07 | pending | `passed` | `WorkbenchZone.tsx` 已迁出 MUI；等待 MG push |
 | `wb_phase_3_pane_search` | `pending` | pending | pending | pending | 迁移 `WorkbenchPaneSearch.tsx` |
 | `wb_phase_4_record_card_actions` | `pending` | pending | pending | pending | 迁移 `WorkbenchRecordCard.tsx` |
 | `wb_phase_5_css_containment_cleanup` | `pending` | pending | pending | pending | 清理 workbench `.Mui*` CSS |
@@ -47,7 +47,9 @@
 | `MG-WB001-baseline` | `wb_phase_0_baseline` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB002-characterization-tests` | `wb_phase_1_characterization` | `characterization tests` | `verified` | Zone toolbar/toggle/search、RecordCard warning/action bubbling、source target contract 已覆盖 |
 | `MG-WB002-characterization` | `wb_phase_1_characterization` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
-| `P-WB003-zone-header-controls` | `wb_phase_2_zone_header_controls` | `extraction/refactor` | `drafted` | MG-WB002 push 后执行 |
+| `P-WB003-zone-header-controls` | `wb_phase_2_zone_header_controls` | `extraction/refactor` | `verified` | `WorkbenchZone.tsx` MUI imports/JSX 已清理 |
+| `MG-WB003-zone-header-controls` | `wb_phase_2_zone_header_controls` | `cumulative MG` | `pending` | 等待精确 stage、commit、push |
+| `P-WB004-pane-search` | `wb_phase_3_pane_search` | `extraction/refactor` | `drafted` | MG-WB003 push 后执行 |
 
 ## Verification Log
 
@@ -63,6 +65,11 @@
 | 2026-06-07 | `P-WB002-characterization-tests` | non-workbench runtime MUI scan | passed | 无 `@mui/*` import 命中 |
 | 2026-06-07 | `P-WB002-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-WB002-characterization` | `git add web/src/test/WorkbenchZone.test.tsx web/src/test/WorkbenchColumns.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `2820549c` pushed to `origin/refactor-ui` |
+| 2026-06-07 | `P-WB003-zone-header-controls` | scoped `WorkbenchZone.tsx` no-MUI grep | passed | No `@mui/*`, `Mui[A-Z]` or MUI JSX symbols remain in `WorkbenchZone.tsx` |
+| 2026-06-07 | `P-WB003-zone-header-controls` | `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx` | passed | 2 files / 36 tests passed |
+| 2026-06-07 | `P-WB003-zone-header-controls` | `cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx` | passed | 8 files / 118 tests passed |
+| 2026-06-07 | `P-WB003-zone-header-controls` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P-WB003-zone-header-controls` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 
@@ -73,4 +80,4 @@
 
 ## Next Action
 
-从远端最新 `refactor-ui` 继续执行 `P-WB003-zone-header-controls`。该 prompt 只迁移 `WorkbenchZone.tsx` 的 MUI controls，不处理 PaneSearch、RecordCard、CSS cleanup、test provider 或依赖。
+执行 `MG-WB003-zone-header-controls`：检查 scope、untracked files、diff、测试和文档状态；只精确 stage `WorkbenchZone.tsx`、`WorkbenchZone.test.tsx` 和专项文档；commit 并 push 到 `refactor-ui`。push 后继续执行 `P-WB004-pane-search`。
