@@ -127,4 +127,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-015-oa-pending-payments-premium-visual` | `80e9a2d3` | pushed to `origin/main` | OA pending payments premium visual polish verified; PV-016 prompt generated. |
 | 2026-06-08 | `PV-016-output-invoice-collections-discovery` | `51bc31fb` | pushed to `origin/main` | Output invoice collections premium discovery verified; PV-017 prompt generated. |
 | 2026-06-08 | `PV-016-push-log-update` | `b94f089a` | pushed to `origin/main` | Recorded PV-016 push status after push. |
-| 2026-06-08 | `PV-017-output-invoice-collections-premium-visual` | pending | pending | Output invoice collections premium visual polish verified; PV-018 prompt generated. |
+| 2026-06-08 | `PV-017-output-invoice-collections-premium-visual` | `81729836` | pushed to `origin/main` | Output invoice collections premium visual polish verified; PV-018 prompt generated. |
