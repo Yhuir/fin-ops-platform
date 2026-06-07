@@ -347,7 +347,7 @@
 ### MG-WB004-pane-search
 
 - Phase: `wb_phase_3_pane_search`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push `WorkbenchPaneSearch.tsx` MUI migration 和专项文档更新。
 
@@ -364,6 +364,29 @@
 - CSS/dependencies cleanup deferred: yes。
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `web/src/components/workbench/WorkbenchPaneSearch.tsx`
+  - `web/src/test/WorkbenchZone.test.tsx`
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `36253433 refactor: migrate workbench pane search from mui`
+- Push: `origin/refactor-ui`
+- RecordCard/CSS/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - scoped `WorkbenchPaneSearch.tsx` no-MUI grep。
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchPaneFilter.test.ts WorkbenchSelection.test.tsx`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `git commit -m "refactor: migrate workbench pane search from mui"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 

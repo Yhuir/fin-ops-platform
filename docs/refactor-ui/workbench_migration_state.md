@@ -5,7 +5,7 @@
 ## Current Phase
 
 - Phase: `wb_phase_3_pane_search`
-- Status: `implemented`
+- Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P-WB004-pane-search`
@@ -31,7 +31,7 @@
 | `wb_phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | 专项 state/prompt/module 文档已创建，MUI/CSS/test/dependency 基线已记录；MG-WB001 已 push |
 | `wb_phase_1_characterization` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | WorkbenchZone/PaneSearch/RecordCard 行为 characterization tests 已补，MG-WB002 已 push |
 | `wb_phase_2_zone_header_controls` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchZone.tsx` 已迁出 MUI；MG-WB003 已 push |
-| `wb_phase_3_pane_search` | `implemented` | 2026-06-07 | pending | `passed` | `WorkbenchPaneSearch.tsx` 已迁出 MUI；等待 MG push |
+| `wb_phase_3_pane_search` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchPaneSearch.tsx` 已迁出 MUI；MG-WB004 已 push |
 | `wb_phase_4_record_card_actions` | `pending` | pending | pending | pending | 迁移 `WorkbenchRecordCard.tsx` |
 | `wb_phase_5_css_containment_cleanup` | `pending` | pending | pending | pending | 清理 workbench `.Mui*` CSS |
 | `wb_phase_6_test_provider_cleanup` | `pending` | pending | pending | pending | 移除 `legacyWorkbenchMuiProvider` |
@@ -50,7 +50,7 @@
 | `P-WB003-zone-header-controls` | `wb_phase_2_zone_header_controls` | `extraction/refactor` | `verified` | `WorkbenchZone.tsx` MUI imports/JSX 已清理 |
 | `MG-WB003-zone-header-controls` | `wb_phase_2_zone_header_controls` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB004-pane-search` | `wb_phase_3_pane_search` | `extraction/refactor` | `verified` | `WorkbenchPaneSearch.tsx` MUI imports/JSX 已清理 |
-| `MG-WB004-pane-search` | `wb_phase_3_pane_search` | `cumulative MG` | `pending` | 等待精确 stage、commit、push |
+| `MG-WB004-pane-search` | `wb_phase_3_pane_search` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB005-record-card-actions` | `wb_phase_4_record_card_actions` | `extraction/refactor` | `drafted` | MG-WB004 push 后执行 |
 
 ## Verification Log
@@ -77,6 +77,7 @@
 | 2026-06-07 | `P-WB004-pane-search` | `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchPaneFilter.test.ts WorkbenchSelection.test.tsx` | passed | 3 files / 73 tests passed |
 | 2026-06-07 | `P-WB004-pane-search` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P-WB004-pane-search` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-WB004-pane-search` | `git add web/src/components/workbench/WorkbenchPaneSearch.tsx web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `36253433` pushed to `origin/refactor-ui` |
 
 ## Push Log
 
@@ -85,7 +86,8 @@
 | 2026-06-07 | `MG-WB001-baseline` | `1b2ef143` | `origin/refactor-ui` | baseline docs pushed |
 | 2026-06-07 | `MG-WB002-characterization` | `2820549c` | `origin/refactor-ui` | characterization tests pushed |
 | 2026-06-07 | `MG-WB003-zone-header-controls` | `048aeaf4` | `origin/refactor-ui` | workbench zone controls migrated |
+| 2026-06-07 | `MG-WB004-pane-search` | `36253433` | `origin/refactor-ui` | workbench pane search migrated |
 
 ## Next Action
 
-执行 `MG-WB004-pane-search`：检查 scope、untracked files、diff、测试和文档状态；只精确 stage `WorkbenchPaneSearch.tsx`、`WorkbenchZone.test.tsx` 和专项文档；commit 并 push 到 `refactor-ui`。push 后继续执行 `P-WB005-record-card-actions`。
+从远端最新 `refactor-ui` 继续执行 `P-WB005-record-card-actions`。该 prompt 只迁移 `WorkbenchRecordCard.tsx` 的 warning tooltip/icon buttons，不处理 CSS cleanup、test provider 或依赖。
