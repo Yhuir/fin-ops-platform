@@ -17450,6 +17450,24 @@ body.column-layout-dragging {
   gap: 8px;
 }
 
+.etc-page-content,
+.etc-reconciliation-workspace-content,
+.etc-reconciliation-task-content,
+.etc-dialog-stack {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.etc-section-actions,
+.etc-oa-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .etc-filter-bar {
   display: flex;
   align-items: center;
@@ -17465,6 +17483,7 @@ body.column-layout-dragging {
 .etc-page-action-link,
 .etc-primary-action,
 .etc-secondary-action,
+.etc-danger-action,
 .etc-icon-action,
 .etc-status-segmented__button {
   border: 1px solid transparent;
@@ -17502,10 +17521,14 @@ body.column-layout-dragging {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
-.etc-primary-action {
+.etc-primary-action,
+.etc-danger-action {
   min-height: 36px;
   padding: 0 14px;
   color: #ffffff;
+}
+
+.etc-primary-action {
   background: #2563eb;
   border-color: #2563eb;
 }
@@ -17518,8 +17541,22 @@ body.column-layout-dragging {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 
+.etc-danger-action {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.etc-danger-action:hover,
+.etc-danger-action:focus-visible {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18);
+}
+
 .etc-primary-action:disabled,
 .etc-secondary-action:disabled,
+.etc-danger-action:disabled,
 .etc-icon-action:disabled {
   color: #94a3b8;
   cursor: not-allowed;
@@ -17957,8 +17994,26 @@ body.column-layout-dragging {
   min-width: 0;
 }
 
-.etc-oa-status-panel .MuiButton-root {
-  white-space: nowrap;
+.etc-oa-status-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.etc-oa-status-header strong {
+  display: block;
+  color: #172033;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.etc-oa-status-header p {
+  margin: 4px 0 0;
+  color: #52677a;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .etc-oa-manual-panel {
@@ -17966,6 +18021,116 @@ body.column-layout-dragging {
   gap: 10px;
   padding-top: 10px;
   border-top: 1px solid #dbe3ef;
+}
+
+.etc-dialog-detail-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.etc-dialog-detail-list p,
+.etc-supplement-upload-target p {
+  margin: 0;
+  color: #243b53;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.etc-dialog-warning {
+  color: #b45309 !important;
+  font-weight: 750;
+}
+
+.etc-dialog-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #243b53;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.etc-dialog-field textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid #c9d6e5;
+  border-radius: 7px;
+  color: #172033;
+  background: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.etc-dialog-field textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.etc-dialog-field textarea:disabled {
+  color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.etc-supplement-upload-target {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f9fbfe;
+}
+
+.etc-supplement-upload-target span {
+  color: #52677a;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.etc-supplement-upload-target strong {
+  color: #172033;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.etc-file-picker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  color: #1d4ed8;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.etc-file-picker:hover,
+.etc-file-picker:focus-within {
+  color: #1e40af;
+  background: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.etc-file-picker--disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  box-shadow: none;
 }
 
 .etc-import-attempt-list {

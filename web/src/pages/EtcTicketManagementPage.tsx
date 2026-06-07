@@ -10,16 +10,6 @@ import {
   Trash2,
   UploadCloud,
 } from "lucide-react";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Collapse from "@mui/material/Collapse";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
@@ -1791,87 +1781,75 @@ export default function EtcTicketManagementPage() {
   };
 
   const renderOaStatusPanel = (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => (
-    <Box className="etc-oa-status-panel" component="section" aria-label="OA草稿与检测状态">
-      <Stack spacing={1.25}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }} justifyContent="space-between">
-          <Box>
-            <Typography fontWeight={800}>OA草稿已创建，等待提交确认。</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {batch.oaDetectionReason || batch.oaDetectionError || "后台持续检测流程状态。"}
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {batch.oaDraftUrl ? (
-              <Button
-                type="button"
-                size="small"
-                variant="outlined"
-                startIcon={<ExternalLink aria-hidden="true" size={16} />}
-                onClick={() => openOaDraftUrl(batch.oaDraftUrl)}
-              >
-                打开草稿
-              </Button>
-            ) : null}
-            <Button
+    <section className="etc-oa-status-panel" aria-label="OA草稿与检测状态">
+      <div className="etc-oa-status-header">
+        <div>
+          <strong>OA草稿已创建，等待提交确认。</strong>
+          <p>{batch.oaDetectionReason || batch.oaDetectionError || "后台持续检测流程状态。"}</p>
+        </div>
+        <div className="etc-oa-status-actions">
+          {batch.oaDraftUrl ? (
+            <button
               type="button"
-              size="small"
-              variant="outlined"
-              startIcon={<RefreshCw aria-hidden="true" size={16} />}
-              disabled={oaActionLoading}
-              onClick={() => void handleRefreshBusinessBatchOaStatus(batch)}
+              className="etc-secondary-action"
+              onClick={() => openOaDraftUrl(batch.oaDraftUrl)}
             >
-              刷新检测
-            </Button>
-            {isManualOaFallbackStatus(batch.status) ? (
-              <Button
-                type="button"
-                size="small"
-                variant="outlined"
-                color="warning"
-                startIcon={<AlertTriangle aria-hidden="true" size={16} />}
-                onClick={() => setManualOaPanelOpen((current) => !current)}
-              >
-                异常处理
-              </Button>
-            ) : null}
-          </Stack>
-        </Stack>
-        {isManualOaFallbackStatus(batch.status) && manualOaPanelOpen ? (
-          <Box className="etc-oa-manual-panel">
-            <TextField
-              label="人工处理原因"
-              size="small"
+              <ExternalLink aria-hidden="true" size={16} />
+              打开草稿
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="etc-secondary-action"
+            disabled={oaActionLoading}
+            onClick={() => void handleRefreshBusinessBatchOaStatus(batch)}
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+            刷新检测
+          </button>
+          {isManualOaFallbackStatus(batch.status) ? (
+            <button
+              type="button"
+              className="etc-secondary-action etc-secondary-action--warning"
+              onClick={() => setManualOaPanelOpen((current) => !current)}
+            >
+              <AlertTriangle aria-hidden="true" size={16} />
+              异常处理
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {isManualOaFallbackStatus(batch.status) && manualOaPanelOpen ? (
+        <div className="etc-oa-manual-panel">
+          <label className="etc-dialog-field">
+            <span>人工处理原因</span>
+            <textarea
               value={manualOaReason}
               onChange={(event) => setManualOaReason(event.target.value)}
-              multiline
-              minRows={2}
-              fullWidth
               required
             />
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Button
-                type="button"
-                variant="contained"
-                size="small"
-                disabled={oaActionLoading || !manualOaReason.trim()}
-                onClick={() => void handleManualBusinessBatchOaStatus("submitted", batch)}
-              >
-                我已提交 OA
-              </Button>
-              <Button
-                type="button"
-                variant="outlined"
-                size="small"
-                disabled={oaActionLoading || !manualOaReason.trim()}
-                onClick={() => void handleManualBusinessBatchOaStatus("not_submitted", batch)}
-              >
-                未提交 OA
-              </Button>
-            </Stack>
-          </Box>
-        ) : null}
-      </Stack>
-    </Box>
+          </label>
+          <div className="etc-oa-status-actions">
+            <button
+              type="button"
+              className="etc-primary-action"
+              disabled={oaActionLoading || !manualOaReason.trim()}
+              onClick={() => void handleManualBusinessBatchOaStatus("submitted", batch)}
+            >
+              我已提交 OA
+            </button>
+            <button
+              type="button"
+              className="etc-secondary-action"
+              disabled={oaActionLoading || !manualOaReason.trim()}
+              onClick={() => void handleManualBusinessBatchOaStatus("not_submitted", batch)}
+            >
+              未提交 OA
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 
   const renderCardDateCell = (card: EtcCreditCardItem | null) => {
@@ -2030,7 +2008,7 @@ export default function EtcTicketManagementPage() {
           </RouterLink>
         }
       >
-        <Stack spacing={2}>
+        <div className="etc-page-content">
           {actionError ? <StatePanel tone="error">{actionError}</StatePanel> : null}
 
           <div className="etc-filter-bar" aria-label="ETC筛选">
@@ -2090,7 +2068,7 @@ export default function EtcTicketManagementPage() {
             ) : null}
           </div>
 
-          <Box className="etc-layout">
+          <div className="etc-layout">
             <section className="etc-batch-list-panel" aria-label="ETC批次列表区">
               <div className="etc-panel-heading">
                 <div className="etc-panel-heading__title">
@@ -2214,51 +2192,47 @@ export default function EtcTicketManagementPage() {
               </ul>
             </section>
 
-            <Stack className="etc-right-column" spacing={2}>
+            <div className="etc-right-column">
               <section className="etc-reconciliation-workspace" aria-label="ETC对账工作区">
-                <Stack spacing={2}>
-                  <Stack className="etc-detail-heading" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} spacing={1.5}>
-                    <Box>
-                      <Typography component="h2" variant="h6" fontWeight={800}>
-                        对账任务
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        {selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧任务，或新建批次。"}
-                      </Typography>
-                    </Box>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <div className="etc-reconciliation-workspace-content">
+                  <div className="etc-detail-heading">
+                    <div>
+                      <h2>对账任务</h2>
+                      <p>{selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧任务，或新建批次。"}</p>
+                    </div>
+                    <div className="etc-section-actions">
                       {selectedTask && selectedTask.status === "ready_for_import" ? (
-                        <Button type="button" variant="outlined" disabled={taskActionLoading} onClick={handleReopenReconciliationTask}>
+                        <button type="button" className="etc-secondary-action" disabled={taskActionLoading} onClick={handleReopenReconciliationTask}>
                           重新打开
-                        </Button>
+                        </button>
                       ) : null}
-                      <Button
+                      <button
                         type="button"
-                        variant="contained"
+                        className="etc-primary-action"
                         disabled={!selectedTask || !canConfirmSelectedTask || taskActionLoading}
                         onClick={handleConfirmReconciliationTask}
                       >
                         确认对账
-                      </Button>
-                      <Button
+                      </button>
+                      <button
                         type="button"
-                        variant="outlined"
+                        className="etc-secondary-action"
                         aria-expanded={taskPanelExpanded}
                         aria-controls="etc-reconciliation-task-content"
-                        startIcon={taskPanelExpanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
                         onClick={() => setTaskPanelExpanded((current) => !current)}
                       >
+                        {taskPanelExpanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
                         {taskPanelExpanded ? "折叠任务" : "展开任务"}
-                      </Button>
-                    </Stack>
-                  </Stack>
+                      </button>
+                    </div>
+                  </div>
 
-                  <Collapse in={taskPanelExpanded} timeout="auto" unmountOnExit>
-                    <Box id="etc-reconciliation-task-content">
+                  {taskPanelExpanded ? (
+                    <div id="etc-reconciliation-task-content">
                       {selectedTask ? (
-                        <Stack spacing={2}>
-                          <Box className="etc-upload-blocks" aria-label="ETC对账文件上传">
-                            <Box className="etc-upload-drop-grid" aria-label="ETC导入动作">
+                        <div className="etc-reconciliation-task-content">
+                          <div className="etc-upload-blocks" aria-label="ETC对账文件上传">
+                            <div className="etc-upload-drop-grid" aria-label="ETC导入动作">
                               <UploadBlock
                                 label="信用卡账单"
                                 accept=".pdf,application/pdf"
@@ -2275,25 +2249,25 @@ export default function EtcTicketManagementPage() {
                                 disabledReason={hasLegacyNonTxtTicketRootSource ? "已有非 TXT 来源，删除后可导入。" : undefined}
                                 onFiles={handleUploadTicketRootFiles}
                               />
-                            </Box>
-                          </Box>
+                            </div>
+                          </div>
 
-                          <Box className="etc-reconciliation-metrics" aria-label="本次确认预览">
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">金额</Typography>
-                          <Typography fontWeight={800}>{formatMoney(selectedReconciliationSummary.oaTotalAmount)}</Typography>
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">范围</Typography>
-                          <Typography fontWeight={800}>{formatDateRange(selectedReconciliationSummary.periodStart, selectedReconciliationSummary.periodEnd)}</Typography>
-                        </Box>
-                        <Box>
-                          <Typography variant="caption" color="text.secondary">数量</Typography>
-                          <Typography fontWeight={800}>{taskCountText(selectedReconciliationSummary)}</Typography>
-                        </Box>
-                      </Box>
+                          <div className="etc-reconciliation-metrics" aria-label="本次确认预览">
+                            <div>
+                              <span>金额</span>
+                              <strong>{formatMoney(selectedReconciliationSummary.oaTotalAmount)}</strong>
+                            </div>
+                            <div>
+                              <span>范围</span>
+                              <strong>{formatDateRange(selectedReconciliationSummary.periodStart, selectedReconciliationSummary.periodEnd)}</strong>
+                            </div>
+                            <div>
+                              <span>数量</span>
+                              <strong>{taskCountText(selectedReconciliationSummary)}</strong>
+                            </div>
+                          </div>
 
-                      <Box component="section" aria-label="已上传文件">
+                      <section aria-label="已上传文件">
                         <div className="etc-source-file-section">
                           <div className="etc-source-file-heading">
                             <h3>上传文件</h3>
@@ -2341,7 +2315,7 @@ export default function EtcTicketManagementPage() {
                             </ul>
                           )}
                         </div>
-                      </Box>
+                      </section>
 
                       <section className="etc-manual-review-panel" aria-label="人工核对处理">
                         <div className="etc-manual-review-grid">
@@ -2445,7 +2419,7 @@ export default function EtcTicketManagementPage() {
                         </div>
                       ) : null}
 
-                      <Box
+                      <div
                         className="etc-reconciliation-table-block"
                         style={{ "--etc-reconciliation-row-height": "32px" } as CSSProperties}
                       >
@@ -2570,7 +2544,7 @@ export default function EtcTicketManagementPage() {
                             </tbody>
                           </table>
                         </div>
-                      </Box>
+                      </div>
                       {selectedTaskBusinessBatch && isOaDetectionStatus(selectedTaskBusinessBatch.status)
                         ? renderOaStatusPanel(selectedTaskBusinessBatch)
                         : null}
@@ -2613,13 +2587,13 @@ export default function EtcTicketManagementPage() {
                         )}
                       </section>
                       ) : null}
-                    </Stack>
+                    </div>
                   ) : (
                     <StatePanel tone="empty">暂无任务。</StatePanel>
                   )}
-                    </Box>
-                  </Collapse>
-                </Stack>
+                    </div>
+                  ) : null}
+                </div>
               </section>
 
               <section className="etc-batch-detail-panel" aria-label="ETC批次详情">
@@ -2640,7 +2614,7 @@ export default function EtcTicketManagementPage() {
                       {batchDetailPanelExpanded ? "折叠详情" : "展开详情"}
                     </button>
                   </div>
-                  <Collapse in={batchDetailPanelExpanded} timeout="auto" unmountOnExit>
+                  {batchDetailPanelExpanded ? (
                     <div id="etc-batch-detail-content">
                       {!selectedBatch ? (
                         <StatePanel tone="empty">选择左侧批次。</StatePanel>
@@ -2736,12 +2710,12 @@ export default function EtcTicketManagementPage() {
                         </div>
                       )}
                     </div>
-                  </Collapse>
+                  ) : null}
                 </div>
               </section>
-            </Stack>
-          </Box>
-        </Stack>
+            </div>
+          </div>
+        </div>
 
         <AppDialog
           open={Boolean(supplementUploadCard)}
@@ -2750,56 +2724,53 @@ export default function EtcTicketManagementPage() {
           onClose={closeSupplementUploadDialog}
           actions={
             <>
-              <Button type="button" onClick={closeSupplementUploadDialog} disabled={supplementUploadSubmitting}>取消</Button>
-              <Button
+              <button type="button" className="etc-secondary-action" onClick={closeSupplementUploadDialog} disabled={supplementUploadSubmitting}>取消</button>
+              <button
                 type="button"
-                variant="contained"
+                className="etc-primary-action"
                 onClick={() => void handleUploadSupplementForCard()}
                 disabled={supplementUploadSubmitting || supplementUploadFiles.length === 0}
               >
                 {supplementUploadSubmitting ? "正在上传..." : "上传并覆盖"}
-              </Button>
+              </button>
             </>
           }
         >
           {supplementUploadCard ? (
-            <Stack spacing={1.5}>
-              <Box className="etc-supplement-upload-target">
-                <Typography variant="caption" color="text.secondary">信用卡项</Typography>
-                <Typography fontWeight={800}>
-                  {supplementUploadCard.transactionDate} / {formatMoney(supplementUploadCard.settlementAmount)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">{supplementUploadCard.description || "-"}</Typography>
-              </Box>
-              <Button
-                component="label"
-                variant="outlined"
-                startIcon={<UploadCloud aria-hidden="true" size={16} />}
-                disabled={supplementUploadSubmitting}
+            <div className="etc-dialog-stack">
+              <div className="etc-supplement-upload-target">
+                <span>信用卡项</span>
+                <strong>{supplementUploadCard.transactionDate} / {formatMoney(supplementUploadCard.settlementAmount)}</strong>
+                <p>{supplementUploadCard.description || "-"}</p>
+              </div>
+              <label
+                className={`etc-file-picker${supplementUploadSubmitting ? " etc-file-picker--disabled" : ""}`}
               >
+                <UploadCloud aria-hidden="true" size={16} />
                 {supplementUploadFiles.length > 0 ? supplementUploadFiles.map((file) => file.name).join("、") : "选择补充凭证文件"}
                 <input
                   aria-label="选择补充凭证文件"
                   hidden
                   type="file"
                   accept=".pdf,.jpg,.jpeg,image/jpeg,application/pdf"
+                  disabled={supplementUploadSubmitting}
                   onChange={(event) => {
                     setSupplementUploadFiles(Array.from(event.target.files ?? []));
                     event.target.value = "";
                   }}
                 />
-              </Button>
-              <TextField
-                label="差异说明"
-                size="small"
-                value={supplementUploadNote}
-                onChange={(event) => setSupplementUploadNote(event.target.value)}
-                placeholder="金额不一致、金额无法识别或业务特殊情况时必填"
-                disabled={supplementUploadSubmitting}
-                multiline
-                minRows={2}
-              />
-            </Stack>
+              </label>
+              <label className="etc-dialog-field">
+                <span>差异说明</span>
+                <textarea
+                  value={supplementUploadNote}
+                  onChange={(event) => setSupplementUploadNote(event.target.value)}
+                  placeholder="金额不一致、金额无法识别或业务特殊情况时必填"
+                  disabled={supplementUploadSubmitting}
+                  rows={3}
+                />
+              </label>
+            </div>
           ) : null}
         </AppDialog>
 
@@ -2818,39 +2789,37 @@ export default function EtcTicketManagementPage() {
           }}
           actions={
             <>
-              <Button type="button" onClick={() => setDeleteTarget(null)} disabled={deleteSubmitting}>取消</Button>
-              <Button type="button" variant="contained" color="error" onClick={handleDeleteConfirmed} disabled={deleteSubmitting}>
+              <button type="button" className="etc-secondary-action" onClick={() => setDeleteTarget(null)} disabled={deleteSubmitting}>取消</button>
+              <button type="button" className="etc-danger-action" onClick={handleDeleteConfirmed} disabled={deleteSubmitting}>
                 {deleteSubmitting ? "正在删除..." : "确认删除"}
-              </Button>
+              </button>
             </>
           }
         >
           {deleteTarget?.kind === "task" ? (
-            <Stack spacing={1}>
-              <Typography>任务：{formatTaskTitle(deleteTarget.item)}</Typography>
-              <Typography>期间：{formatDateRange(deleteTarget.item.periodStart, deleteTarget.item.periodEnd)}</Typography>
-              <Typography>数量：{taskCountText(deleteTarget.item)}</Typography>
+            <div className="etc-dialog-detail-list">
+              <p>任务：{formatTaskTitle(deleteTarget.item)}</p>
+              <p>期间：{formatDateRange(deleteTarget.item.periodStart, deleteTarget.item.periodEnd)}</p>
+              <p>数量：{taskCountText(deleteTarget.item)}</p>
               {deleteTarget.item.status === "imported" || deleteTarget.item.hasImportedInvoices ? (
-                <Typography color="warning.main">
-                  将一并删除已导入发票；如需恢复，需重新确认并导入 ZIP。
-                </Typography>
+                <p className="etc-dialog-warning">将一并删除已导入发票；如需恢复，需重新确认并导入 ZIP。</p>
               ) : null}
-              <Typography>版本：v{deleteTarget.item.version}</Typography>
-            </Stack>
+              <p>版本：v{deleteTarget.item.version}</p>
+            </div>
           ) : deleteTarget?.kind === "sourceFile" ? (
-            <Stack spacing={1}>
-              <Typography>文件：{deleteTarget.item.originalName || deleteTarget.item.fileId}</Typography>
-              <Typography>类型：{sourceKindLabel(deleteTarget.item.sourceKind)}</Typography>
-              <Typography>任务：{formatTaskTitle(deleteTarget.task)}</Typography>
-              <Typography>版本：v{deleteTarget.task.version}</Typography>
-            </Stack>
+            <div className="etc-dialog-detail-list">
+              <p>文件：{deleteTarget.item.originalName || deleteTarget.item.fileId}</p>
+              <p>类型：{sourceKindLabel(deleteTarget.item.sourceKind)}</p>
+              <p>任务：{formatTaskTitle(deleteTarget.task)}</p>
+              <p>版本：v{deleteTarget.task.version}</p>
+            </div>
           ) : deleteTarget?.kind === "batch" ? (
-            <Stack spacing={1}>
-              <Typography>批次：{deleteTarget.item.externalBatchId || deleteTarget.item.etcBatchId}</Typography>
-              <Typography>通行期间：{formatDateRange(deleteTarget.item.passageStartDate, deleteTarget.item.passageEndDate)}</Typography>
-              <Typography>数量：{deleteTarget.item.displayCountText || taskCountText({ etcInvoiceCount: deleteTarget.item.etcInvoiceCount, supplementCount: deleteTarget.item.supplementCount })}</Typography>
-              <Typography>金额：{formatMoney(deleteTarget.item.totalAmount)} 元</Typography>
-            </Stack>
+            <div className="etc-dialog-detail-list">
+              <p>批次：{deleteTarget.item.externalBatchId || deleteTarget.item.etcBatchId}</p>
+              <p>通行期间：{formatDateRange(deleteTarget.item.passageStartDate, deleteTarget.item.passageEndDate)}</p>
+              <p>数量：{deleteTarget.item.displayCountText || taskCountText({ etcInvoiceCount: deleteTarget.item.etcInvoiceCount, supplementCount: deleteTarget.item.supplementCount })}</p>
+              <p>金额：{formatMoney(deleteTarget.item.totalAmount)} 元</p>
+            </div>
           ) : null}
         </AppDialog>
 
@@ -2865,32 +2834,32 @@ export default function EtcTicketManagementPage() {
           }}
           actions={
             <>
-              <Button
+              <button
                 type="button"
+                className="etc-secondary-action"
                 onClick={() => setRemoveImportedInvoicesDialogOpen(false)}
                 disabled={removeImportedInvoicesSubmitting}
               >
                 取消
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                variant="contained"
-                color="warning"
+                className="etc-secondary-action etc-secondary-action--warning"
                 onClick={() => void handleRemoveImportedInvoices()}
                 disabled={removeImportedInvoicesSubmitting}
               >
                 {removeImportedInvoicesSubmitting ? "正在移除..." : "确认移除"}
-              </Button>
+              </button>
             </>
           }
         >
           {selectedTask ? (
-            <Stack spacing={1}>
-              <Typography>任务：{formatTaskTitle(selectedTask)}</Typography>
-              <Typography>期间：{formatDateRange(selectedTask.periodStart, selectedTask.periodEnd)}</Typography>
-              <Typography>已导入：{importedInvoiceCount} 张</Typography>
-              <Typography>版本：v{selectedTask.version}</Typography>
-            </Stack>
+            <div className="etc-dialog-detail-list">
+              <p>任务：{formatTaskTitle(selectedTask)}</p>
+              <p>期间：{formatDateRange(selectedTask.periodStart, selectedTask.periodEnd)}</p>
+              <p>已导入：{importedInvoiceCount} 张</p>
+              <p>版本：v{selectedTask.version}</p>
+            </div>
           ) : null}
         </AppDialog>
 
@@ -2901,8 +2870,8 @@ export default function EtcTicketManagementPage() {
           onClose={() => setRevokeDialogOpen(false)}
           actions={
             <>
-              <Button type="button" onClick={() => setRevokeDialogOpen(false)}>取消</Button>
-              <Button type="button" variant="contained" color="warning" onClick={handleRevoke}>确认撤销</Button>
+              <button type="button" className="etc-secondary-action" onClick={() => setRevokeDialogOpen(false)}>取消</button>
+              <button type="button" className="etc-secondary-action etc-secondary-action--warning" onClick={handleRevoke}>确认撤销</button>
             </>
           }
         />
@@ -2915,46 +2884,46 @@ export default function EtcTicketManagementPage() {
             draftResult ? (
               <>
                 {draftResult.oaDraftUrl ? (
-                  <Button
+                  <button
                     type="button"
-                    variant="outlined"
-                    startIcon={<ExternalLink aria-hidden="true" size={16} />}
+                    className="etc-secondary-action"
                     onClick={handleOpenCurrentDraft}
                   >
+                    <ExternalLink aria-hidden="true" size={16} />
                     打开草稿
-                  </Button>
+                  </button>
                 ) : null}
-                <Button
+                <button
                   type="button"
-                  variant="outlined"
-                  startIcon={<RefreshCw aria-hidden="true" size={16} />}
+                  className="etc-secondary-action"
                   disabled={oaActionLoading}
                   onClick={() => void handleRefreshBusinessBatchOaStatus()}
                 >
+                  <RefreshCw aria-hidden="true" size={16} />
                   刷新检测
-                </Button>
-                <Button type="button" onClick={() => setCreateDialogOpen(false)}>关闭</Button>
+                </button>
+                <button type="button" className="etc-secondary-action" onClick={() => setCreateDialogOpen(false)}>关闭</button>
               </>
             ) : (
               <>
-                <Button type="button" onClick={() => setCreateDialogOpen(false)}>取消</Button>
-                <Button type="button" variant="contained" onClick={handleCreateDraft} disabled={draftCreating}>
+                <button type="button" className="etc-secondary-action" onClick={() => setCreateDialogOpen(false)}>取消</button>
+                <button type="button" className="etc-primary-action" onClick={handleCreateDraft} disabled={draftCreating}>
                   {draftCreating ? "正在创建..." : "创建草稿"}
-                </Button>
+                </button>
               </>
             )
           }
         >
           {draftResult ? (
-            <Stack spacing={1}>
-              <Typography>OA草稿已创建，等待提交确认。</Typography>
-              <Typography>批次：{draftResult.etcBatchId}</Typography>
-            </Stack>
+            <div className="etc-dialog-detail-list">
+              <p>OA草稿已创建，等待提交确认。</p>
+              <p>批次：{draftResult.etcBatchId}</p>
+            </div>
           ) : (
-            <Stack spacing={1}>
-              <Typography>{currentOaDraftDescription}</Typography>
-              <Typography>批次：{currentOaDraftBatchLabel || "-"}</Typography>
-            </Stack>
+            <div className="etc-dialog-detail-list">
+              <p>{currentOaDraftDescription}</p>
+              <p>批次：{currentOaDraftBatchLabel || "-"}</p>
+            </div>
           )}
         </AppDialog>
       </PageScaffold>

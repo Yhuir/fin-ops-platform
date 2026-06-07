@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout`
-- Current MG ID: `MG-P091-phase-6-turnover-ledger`
+- Current Prompt ID: `MG-P098-phase-6-etc-tickets`
+- Current MG ID: `MG-P098-phase-6-etc-tickets`
 
 ## Global Invariants
 
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches and BatchAccounting MG verified；next TurnoverLedger discovery |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches、BatchAccounting and ETC tickets slices verified；next ETC merge gate |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 ETC tickets dialogs/OA/feedback closeout prompt generated after P097 detail/invoice tables migration。
-- Files touched in P097:
+- Scope: phase 6 ETC tickets cumulative merge gate after P098 dialogs/OA/feedback closeout。
+- Files touched in P098:
   - `web/src/pages/EtcTicketManagementPage.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_etc_tickets.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P097 selected/full ETC page tests expected-failed only on source-level no-MUI/project primitive contract；41 behavior tests passed；detail/invoice grep and build passed。
-- Failures: none beyond expected P097 source-level contract failure against remaining ETC MUI runtime.
-- Next action: 执行 `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout`。
+- Verification run: P098 full ETC page tests passed；ETC API/OA navigation tests passed；page no-MUI grep、ETC-scoped CSS grep、build and diff check passed。
+- Failures: none.
+- Next action: 执行 `MG-P098-phase-6-etc-tickets`。
 
 ## Prompt Lifecycle
 
@@ -95,7 +95,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | P097 ETC detail/invoice tables verified；next dialogs/OA/feedback closeout |
+| page batches | `in_progress` | `MG-P098-phase-6-etc-tickets` | P098 ETC dialogs/OA/feedback closeout verified；next ETC merge gate |
 
 ## Verification Log
 
@@ -153,6 +153,13 @@
 | 2026-06-07 | `P097-phase-6-etc-tickets-detail-and-invoice-tables` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P097-phase-6-etc-tickets-detail-and-invoice-tables` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P097-phase-6-etc-tickets-detail-and-invoice-tables` | `git status --short --branch` | passed | Only P097 page/style files changed before docs |
+| 2026-06-07 | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | `if rg -n '@mui/\|Mui[A-Z]\|<(Alert\|Box\|Button\|Checkbox\|Chip\|Collapse\|Divider\|IconButton\|List\|ListItem\|ListItemButton\|ListItemText\|Paper\|Stack\|Table\|TableBody\|TableCell\|TableContainer\|TableHead\|TableRow\|TextField\|ToggleButton\|ToggleButtonGroup\|Tooltip\|Typography)\\b\|AddOutlinedIcon\|ArrowForwardOutlinedIcon\|DeleteOutlineOutlinedIcon\|ExpandLessOutlinedIcon\|ExpandMoreOutlinedIcon\|OpenInNewOutlinedIcon\|RefreshOutlinedIcon\|ReportProblemOutlinedIcon\|UndoOutlinedIcon\|UploadFileOutlinedIcon' web/src/pages/EtcTicketManagementPage.tsx; then exit 1; else exit 0; fi` | passed | Page source no-MUI contract passed |
+| 2026-06-07 | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | `if rg -n 'etc-[^\\n]*Mui\|Mui[^\\n]*etc-' web/src/app/styles.css; then exit 1; else exit 0; fi` | passed | ETC-scoped CSS MUI residues cleared; frozen/global non-ETC MUI selectors intentionally not in scope |
+| 2026-06-07 | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | `cd web && npx vitest run EtcTicketManagementPage.test.tsx` | passed | 42 tests passed |
+| 2026-06-07 | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | `cd web && npx vitest run EtcApi.test.ts EtcOaNavigation.test.ts` | passed | 17 tests passed |
+| 2026-06-07 | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout` | `git status --short --branch` | passed | Only P098 page/style files changed before docs |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|renders grouped\|expands Jia Xiaohua\|confirms a manual zero-difference\|blocks cross-group selection\|shows bank-detail tags"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining drawer/dialog/feedback targets |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |

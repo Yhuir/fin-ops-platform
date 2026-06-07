@@ -315,3 +315,32 @@ Scope: `/etc-tickets` dialog contents, OA status/detection panel, page feedback,
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx 和 web/src/app/styles.css。迁移剩余 MUI surfaces：dialog action/content buttons and fields, supplement upload dialog content, delete/source/revoke/create/manual OA dialogs, `renderOaStatusPanel`, page feedback/status Alert surfaces, remaining Collapse/Box/Stack/Typography/Button/IconButton/Tooltip/TextField imports and MUI CSS selectors。允许只为修正 source-level no-MUI contract false positive 更新 `web/src/test/EtcTicketManagementPage.test.tsx`，但不得放宽实际 MUI 禁止项。不得修改 API client、mock response shape、backend、read model、worker、domain event semantics、OA URL construction 或关联台内部工作区。保留用户可见行为：all dialogs remain modal dialogs with same names, supplement file upload and difference note payload, delete/revoke/create OA/manual OA action labels and disabled/loading states, OA draft open/refresh/manual fallback actions, submitted/unsubmitted feedback, stale/source status messages, and all previous ETC page behavior. 运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期全部通过；运行 `cd web && npx vitest run EtcApi.test.ts EtcOaNavigation.test.ts`；运行 no-MUI grep `if rg -n '@mui/|Mui[A-Z]|<(Alert|Box|Button|Checkbox|Chip|Collapse|Divider|IconButton|List|ListItem|ListItemButton|ListItemText|Paper|Stack|Table|TableBody|TableCell|TableContainer|TableHead|TableRow|TextField|ToggleButton|ToggleButtonGroup|Tooltip|Typography)\\b|AddOutlinedIcon|ArrowForwardOutlinedIcon|DeleteOutlineOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|OpenInNewOutlinedIcon|RefreshOutlinedIcon|ReportProblemOutlinedIcon|UndoOutlinedIcon|UploadFileOutlinedIcon' web/src/pages/EtcTicketManagementPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 `MG-P098-phase-6-etc-tickets` cumulative merge gate prompt。
 ```
+
+## P098 Execution Notes
+
+- Runtime implementation changed: yes, only `web/src/pages/EtcTicketManagementPage.tsx` and `web/src/app/styles.css`.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Migrated remaining ETC dialog action/content controls, supplement upload file picker and difference note, delete/remove/revoke/create OA dialog contents, OA status/manual fallback panel, remaining page layout wrappers and ETC-scoped CSS selectors to native/project classes.
+- Preserved dialog names and modal form factor, supplement upload aria-label and payload inputs, delete/revoke/create/manual OA action labels, loading/disabled states, OA draft open/refresh actions and previous ETC page behavior.
+- The original draft no-MUI grep included `web/src/app/styles.css`; execution used a page-level no-MUI grep plus an ETC-scoped CSS grep because global styles still contain frozen workbench and historical non-ETC MUI selectors.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|<(Alert|Box|Button|Checkbox|Chip|Collapse|Divider|IconButton|List|ListItem|ListItemButton|ListItemText|Paper|Stack|Table|TableBody|TableCell|TableContainer|TableHead|TableRow|TextField|ToggleButton|ToggleButtonGroup|Tooltip|Typography)\\b|AddOutlinedIcon|ArrowForwardOutlinedIcon|DeleteOutlineOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|OpenInNewOutlinedIcon|RefreshOutlinedIcon|ReportProblemOutlinedIcon|UndoOutlinedIcon|UploadFileOutlinedIcon' web/src/pages/EtcTicketManagementPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `if rg -n 'etc-[^\\n]*Mui|Mui[^\\n]*etc-' web/src/app/styles.css; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: passed; 42 tests passed.
+  - `cd web && npx vitest run EtcApi.test.ts EtcOaNavigation.test.ts`: passed; 17 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P098 page/style files changed before docs.
+
+## MG-P098 Prompt Draft
+
+```text
+Prompt ID: MG-P098-phase-6-etc-tickets
+Phase: phase_6_page_batches
+Type: cumulative merge gate
+Scope: `/etc-tickets` P092-P098 migration closeout only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/test/EtcApi.test.ts、web/src/test/EtcOaNavigation.test.ts 和 web/src/app/styles.css。确认当前分支是 refactor-ui，检查 untracked files、diff 和 scope。只允许 ETC 页面、ETC 样式和 refactor-ui 文档进入 MG。不得修改 API client、mock response shape、backend、read model、worker、domain event semantics、OA URL construction 或关联台内部工作区。运行 ETC 页面/API/navigation tests、common/table/HeroUI smoke tests、build、page no-MUI grep、ETC-scoped CSS grep、git diff --check 和 git status。若全部通过，精确 git add 本 MG 文件，commit/push 到 origin/refactor-ui，更新 state/prompt/module docs，把 `MG-P098-phase-6-etc-tickets` 标记为 verified，并生成下一个 phase_6 模块 discovery prompt。
+```

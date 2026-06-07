@@ -5449,7 +5449,7 @@ Scope: `/etc-tickets` business batch detail, imported invoice section, import at
 ### P098-phase-6-etc-tickets-dialogs-oa-feedback-closeout
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor + contract closeout`
 - Scope: `/etc-tickets` dialog contents, OA status/detection panel, page feedback, remaining layout wrappers, and source-level contract closeout only。
 
@@ -5471,6 +5471,51 @@ Scope: `/etc-tickets` dialog contents, OA status/detection panel, page feedback,
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected outcome: ETC source-level contract and behavior tests pass, and remaining page MUI imports/selectors are cleared。
+
+#### Execution Notes
+
+- Runtime implementation changed: yes，only `web/src/pages/EtcTicketManagementPage.tsx` and `web/src/app/styles.css`。
+- Test implementation changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Migrated remaining ETC dialog action/content controls, supplement upload picker and difference note, delete/remove/revoke/create OA dialog contents, OA status/manual fallback panel, remaining layout wrappers and ETC-scoped CSS selectors to native/project classes。
+- Preserved modal dialog form factor, supplement upload aria-label and payload fields, delete/revoke/create/manual OA action labels, loading/disabled states and OA draft open/refresh actions。
+- Draft grep was over-broad because `web/src/app/styles.css` still has frozen workbench and historical non-ETC MUI selectors；execution used page no-MUI grep plus ETC-scoped CSS grep。
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|<(Alert|Box|Button|Checkbox|Chip|Collapse|Divider|IconButton|List|ListItem|ListItemButton|ListItemText|Paper|Stack|Table|TableBody|TableCell|TableContainer|TableHead|TableRow|TextField|ToggleButton|ToggleButtonGroup|Tooltip|Typography)\\b|AddOutlinedIcon|ArrowForwardOutlinedIcon|DeleteOutlineOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|OpenInNewOutlinedIcon|RefreshOutlinedIcon|ReportProblemOutlinedIcon|UndoOutlinedIcon|UploadFileOutlinedIcon' web/src/pages/EtcTicketManagementPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `if rg -n 'etc-[^\\n]*Mui|Mui[^\\n]*etc-' web/src/app/styles.css; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: passed；42 tests passed。
+  - `cd web && npx vitest run EtcApi.test.ts EtcOaNavigation.test.ts`: passed；17 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P098 page/style files changed before docs。
+- Next prompt generated: `MG-P098-phase-6-etc-tickets`。
+
+### MG-P098-phase-6-etc-tickets
+
+- Phase: `phase_6_page_batches`
+- Status: `mg_reviewed`
+- Type: `cumulative merge gate`
+- Scope: `/etc-tickets` P092-P098 migration closeout only。
+
+#### Prompt
+
+```text
+Prompt ID: MG-P098-phase-6-etc-tickets
+Phase: phase_6_page_batches
+Type: cumulative merge gate
+Scope: `/etc-tickets` P092-P098 migration closeout only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/test/EtcApi.test.ts、web/src/test/EtcOaNavigation.test.ts 和 web/src/app/styles.css。确认当前分支是 refactor-ui，检查 untracked files、diff 和 scope。只允许 ETC 页面、ETC 样式和 refactor-ui 文档进入 MG。不得修改 API client、mock response shape、backend、read model、worker、domain event semantics、OA URL construction 或关联台内部工作区。运行 ETC 页面/API/navigation tests、common/table/HeroUI smoke tests、build、page no-MUI grep、ETC-scoped CSS grep、git diff --check 和 git status。若全部通过，精确 git add 本 MG 文件，commit/push 到 origin/refactor-ui，更新 state/prompt/module docs，把 `MG-P098-phase-6-etc-tickets` 标记为 verified，并生成下一个 phase_6 模块 discovery prompt。
+```
+
+#### Review
+
+- MG boundary: yes，covers only ETC P092-P098 closeout。
+- Scope check required: yes，must include only ETC page/style/docs files。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Exact staging required: yes，no `git add .` or `git add -A`。
 
 ### MG Prompt Template
 
