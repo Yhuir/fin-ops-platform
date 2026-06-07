@@ -4002,6 +4002,348 @@ textarea {
   gap: var(--fp-space-2);
 }
 
+.turnover-ledger-table-wrap {
+  max-height: 640px;
+  overflow: auto;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.turnover-ledger-table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+}
+
+.turnover-ledger-table th,
+.turnover-ledger-table td {
+  border-bottom: 1px solid var(--fp-border-subtle);
+  padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
+  text-align: left;
+  vertical-align: top;
+}
+
+.turnover-ledger-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--fp-table-header-bg);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 900;
+}
+
+.turnover-sticky-left-header,
+.turnover-sticky-left-cell {
+  position: sticky;
+  left: 0;
+  width: 176px;
+  min-width: 176px;
+  border-right: 1px solid var(--fp-border);
+}
+
+.turnover-sticky-left-header {
+  z-index: 5 !important;
+  background: var(--fp-table-header-bg) !important;
+}
+
+.turnover-sticky-left-cell {
+  z-index: 2;
+  background: #d8e8f8;
+}
+
+.turnover-group-start-row > td {
+  border-top: 3px solid #9fb3c8;
+}
+
+.turnover-group-start-row:first-child > td {
+  border-top-width: 1px;
+  border-top-color: var(--fp-border);
+}
+
+.turnover-summary-row > td {
+  background: #d8e8f8;
+}
+
+.turnover-row-income > td {
+  background: #eef8f0;
+}
+
+.turnover-row-expense > td {
+  background: #fff5eb;
+}
+
+.turnover-row-neutral > td {
+  background: #f3f5fb;
+}
+
+.turnover-ledger-table__check {
+  width: 52px;
+  text-align: center !important;
+}
+
+.turnover-ledger-table__occurred,
+.turnover-ledger-table__settled {
+  width: 150px;
+}
+
+.turnover-ledger-table__remark,
+.turnover-ledger-table__paid {
+  width: 118px;
+}
+
+.turnover-ledger-table__interest {
+  width: 122px;
+}
+
+.turnover-ledger-table__days {
+  width: 76px;
+}
+
+.turnover-ledger-table__interest-due {
+  width: 92px;
+}
+
+.turnover-ledger-table__note {
+  width: 126px;
+}
+
+.turnover-ledger-table__action {
+  width: 68px;
+}
+
+.turnover-ledger-table__empty {
+  height: 128px;
+  color: var(--fp-text-muted);
+  font-weight: 800;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+.turnover-ledger-balance-block,
+.turnover-ledger-balance-block__content,
+.turnover-ledger-balance-line,
+.turnover-ledger-balance-stack,
+.turnover-ledger-amount-stack,
+.turnover-ledger-cell-stack,
+.turnover-ledger-interest-cell {
+  display: grid;
+  gap: var(--fp-space-1);
+  min-width: 0;
+}
+
+.turnover-ledger-balance-block__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--fp-space-2);
+  width: 100%;
+}
+
+.turnover-ledger-balance-block__content {
+  gap: var(--fp-space-2);
+}
+
+.turnover-ledger-balance-block__name {
+  color: var(--fp-text-primary);
+  font-weight: 900;
+  line-height: var(--fp-leading-tight);
+  word-break: break-word;
+}
+
+.turnover-ledger-expand-button,
+.turnover-ledger-expand-button-placeholder {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.turnover-ledger-expand-button {
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+  font-size: var(--fp-text-body);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.turnover-ledger-expand-button:hover,
+.turnover-ledger-expand-button:focus-visible,
+.turnover-ledger-table-button:hover:not(:disabled),
+.turnover-ledger-table-button:focus-visible {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  outline: none;
+}
+
+.turnover-ledger-expand-button:focus-visible,
+.turnover-ledger-table-button:focus-visible,
+.turnover-ledger-checkbox:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.turnover-ledger-chip {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 22px;
+  align-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-xs);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 800;
+  line-height: 1.1;
+  padding: 0 var(--fp-space-2);
+  white-space: nowrap;
+}
+
+.turnover-ledger-chip--compact {
+  min-height: 20px;
+  padding: 0 5px;
+}
+
+.turnover-ledger-chip--outline {
+  background: var(--fp-surface);
+}
+
+.turnover-ledger-chip--filled {
+  background: var(--fp-surface-muted);
+}
+
+.turnover-ledger-chip--family {
+  color: var(--fp-text-primary);
+}
+
+.turnover-ledger-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.turnover-ledger-balance-line--repayment {
+  color: var(--fp-warning);
+}
+
+.turnover-ledger-balance-line--collection {
+  color: var(--fp-success);
+}
+
+.turnover-ledger-balance-line--closed {
+  color: var(--fp-text-secondary);
+}
+
+.turnover-ledger-balance-line__label {
+  font-size: var(--fp-text-caption);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.turnover-ledger-balance-line__amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.turnover-ledger-balance-stack .turnover-ledger-balance-line + .turnover-ledger-balance-line {
+  border-top: 1px solid rgba(25, 88, 145, 0.22);
+  padding-top: var(--fp-space-1);
+}
+
+.turnover-amount-income,
+.turnover-amount-expense,
+.turnover-amount-neutral,
+.turnover-amount-empty {
+  display: inline-flex;
+  min-width: 78px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  border-radius: var(--fp-radius-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+  padding: 2px 6px;
+}
+
+.turnover-amount-income {
+  background: rgba(46, 125, 50, 0.14);
+  color: var(--fp-success);
+}
+
+.turnover-amount-expense {
+  background: rgba(239, 108, 0, 0.15);
+  color: var(--fp-warning);
+}
+
+.turnover-amount-neutral,
+.turnover-amount-empty {
+  background: rgba(117, 117, 117, 0.1);
+  color: var(--fp-text-primary);
+}
+
+.turnover-amount-empty {
+  justify-content: center;
+  color: var(--fp-text-secondary);
+}
+
+.turnover-ledger-direction-tag {
+  border-radius: var(--fp-radius-xs);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+  padding: 1px 4px;
+}
+
+.turnover-ledger-direction-tag--income {
+  background: rgba(46, 125, 50, 0.16);
+}
+
+.turnover-ledger-direction-tag--expense {
+  background: rgba(239, 108, 0, 0.18);
+}
+
+.turnover-ledger-interest-cell__amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+}
+
+.turnover-ledger-interest-cell__rate {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  line-height: var(--fp-leading-tight);
+}
+
+.turnover-ledger-table-button {
+  min-height: 28px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-primary-hover);
+  cursor: pointer;
+  font-size: var(--fp-text-caption);
+  font-weight: 850;
+  padding: 0 var(--fp-space-2);
+}
+
+.turnover-ledger-table-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.turnover-ledger-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--fp-primary);
+}
+
 @media (max-width: 1100px) {
   .turnover-ledger-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,21 +1,4 @@
 import { useState, type MutableRefObject } from "react";
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Chip from "@mui/material/Chip";
-import Divider from "@mui/material/Divider";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Typography from "@mui/material/Typography";
 
 import type {
   TurnoverLedgerDirection,
@@ -23,21 +6,6 @@ import type {
   TurnoverLedgerGroupedRow,
 } from "../../features/turnoverLedger/types";
 
-const SUMMARY_ROW_BACKGROUND = "#d8e8f8";
-
-const AMOUNT_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
-  income: "rgba(46, 125, 50, 0.14)",
-  expense: "rgba(239, 108, 0, 0.15)",
-  neutral: "rgba(117, 117, 117, 0.10)",
-};
-
-const LEFT_COLUMN_WIDTH = 176;
-const LEFT_HEADER_BACKGROUND = "#f5f7fa";
-const FLOW_ROW_BACKGROUND: Record<"income" | "expense" | "neutral", string> = {
-  income: "#eef8f0",
-  expense: "#fff5eb",
-  neutral: "#f3f5fb",
-};
 type RuntimeGroupedRow = TurnoverLedgerGroupedRow & {
   rowKind?: "summary" | "lot" | string;
   lotId?: string;
@@ -180,21 +148,21 @@ function isFilledAmount(value: string | null | undefined) {
 function BalanceLine({
   label,
   amount,
-  color,
+  tone,
 }: {
   label: string;
   amount: string;
-  color: string;
+  tone: "repayment" | "collection" | "closed";
 }) {
   return (
-    <Stack spacing={0.15} sx={{ color }}>
-      <Typography variant="caption" fontWeight={800} sx={{ lineHeight: 1.2 }}>
+    <span className={`turnover-ledger-balance-line turnover-ledger-balance-line--${tone}`}>
+      <span className="turnover-ledger-balance-line__label">
         {label}：
-      </Typography>
-      <Typography variant="body2" fontWeight={900} sx={{ lineHeight: 1.25 }}>
+      </span>
+      <span className="turnover-ledger-balance-line__amount">
         {formatMoney(amount)}
-      </Typography>
-    </Stack>
+      </span>
+    </span>
   );
 }
 
@@ -203,37 +171,37 @@ function BalanceLines({ group }: { group: TurnoverLedgerGroup }) {
   const repaymentAmount = compatibleGroup.pendingRepaymentAmount;
   const collectionAmount = compatibleGroup.pendingCollectionAmount;
   const closedAmount = compatibleGroup.closedAmount;
-  const lines: Array<{ label: string; amount: string; color: string }> = [];
+  const lines: Array<{ label: string; amount: string; tone: "repayment" | "collection" | "closed" }> = [];
 
   if (group.pendingDirection === "mixed") {
     if (isFilledAmount(repaymentAmount) || isFilledAmount(collectionAmount)) {
       if (isFilledAmount(repaymentAmount)) {
-        lines.push({ label: "待还款合计", amount: repaymentAmount, color: "warning.dark" });
+        lines.push({ label: "待还款合计", amount: repaymentAmount, tone: "repayment" });
       }
       if (isFilledAmount(collectionAmount)) {
-        lines.push({ label: "待收款合计", amount: collectionAmount, color: "success.dark" });
+        lines.push({ label: "待收款合计", amount: collectionAmount, tone: "collection" });
       }
       return <BalanceLineStack lines={lines} />;
     }
-    return <BalanceLine label="混合余额合计" amount={group.pendingAmount} color="warning.dark" />;
+    return <BalanceLine label="混合余额合计" amount={group.pendingAmount} tone="repayment" />;
   }
 
   if (group.pendingDirection === "collection") {
-    return <BalanceLine label="待收款合计" amount={collectionAmount ?? group.pendingAmount} color="success.dark" />;
+    return <BalanceLine label="待收款合计" amount={collectionAmount ?? group.pendingAmount} tone="collection" />;
   }
   if (group.pendingDirection === "repayment") {
-    return <BalanceLine label="待还款合计" amount={repaymentAmount ?? group.pendingAmount} color="warning.dark" />;
+    return <BalanceLine label="待还款合计" amount={repaymentAmount ?? group.pendingAmount} tone="repayment" />;
   }
-  return <BalanceLine label="已闭合合计" amount={closedAmount ?? group.pendingAmount} color="text.secondary" />;
+  return <BalanceLine label="已闭合合计" amount={closedAmount ?? group.pendingAmount} tone="closed" />;
 }
 
-function BalanceLineStack({ lines }: { lines: Array<{ label: string; amount: string; color: string }> }) {
+function BalanceLineStack({ lines }: { lines: Array<{ label: string; amount: string; tone: "repayment" | "collection" | "closed" }> }) {
   return (
-    <Stack spacing={0.6} divider={<Divider flexItem sx={{ borderColor: "rgba(25, 88, 145, 0.22)" }} />}>
+    <span className="turnover-ledger-balance-stack">
       {lines.map((line) => (
-        <BalanceLine key={line.label} label={line.label} amount={line.amount} color={line.color} />
+        <BalanceLine key={line.label} label={line.label} amount={line.amount} tone={line.tone} />
       ))}
-    </Stack>
+    </span>
   );
 }
 
@@ -257,97 +225,53 @@ function AmountBlock({
   const tone = directionKey(direction);
   const directionTag = tone === "income" ? "收" : tone === "expense" ? "支" : "";
   return (
-    <Stack spacing={0.5} alignItems="flex-start">
-      <Box
+    <span className="turnover-ledger-amount-stack">
+      <span
         data-testid={testId}
         className={`turnover-amount-${tone}`}
         aria-label={directionTag ? `${directionTag} ${formatMoney(amount)}` : formatMoney(amount)}
-        sx={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 0.5,
-          minWidth: 78,
-          px: 0.75,
-          py: 0.25,
-          borderRadius: 0.75,
-          fontWeight: 800,
-          backgroundColor: AMOUNT_BACKGROUND[tone],
-          color: tone === "income" ? "success.dark" : tone === "expense" ? "warning.dark" : "text.primary",
-        }}
       >
         {directionTag ? (
-          <Box
-            component="span"
-            sx={{
-              px: 0.5,
-              py: 0.1,
-              borderRadius: 0.5,
-              fontSize: 11,
-              lineHeight: 1.2,
-              fontWeight: 900,
-              backgroundColor: tone === "income" ? "rgba(46, 125, 50, 0.16)" : "rgba(239, 108, 0, 0.18)",
-            }}
-          >
+          <span className={`turnover-ledger-direction-tag turnover-ledger-direction-tag--${tone}`}>
             {directionTag}
-          </Box>
+          </span>
         ) : null}
-        <Box component="span">{formatMoney(amount)}</Box>
-      </Box>
-      {showDate ? <Chip size="small" variant="outlined" label={formatNullable(date)} sx={{ height: 22 }} /> : null}
+        <span>{formatMoney(amount)}</span>
+      </span>
+      {showDate ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{formatNullable(date)}</span> : null}
       {categoryLabels.length > 0 ? (
-        <Stack direction="row" spacing={0.35} useFlexGap flexWrap="wrap">
+        <span className="turnover-ledger-chip-row">
           {categoryLabels.map((label) => (
-            <Chip
-              key={label}
-              size="small"
-              variant="outlined"
-              label={label}
-              sx={{ height: 20, "& .MuiChip-label": { px: 0.6, fontSize: 11 } }}
-            />
+            <span className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--compact" key={label}>
+              {label}
+            </span>
           ))}
-        </Stack>
+        </span>
       ) : null}
       {bankAccountLabels.length > 0 ? (
-        <Stack direction="row" spacing={0.35} useFlexGap flexWrap="wrap">
+        <span className="turnover-ledger-chip-row">
           {bankAccountLabels.map((label) => (
-            <Chip
-              key={label}
-              size="small"
-              variant="filled"
-              label={label}
-              sx={{ height: 20, "& .MuiChip-label": { px: 0.6, fontSize: 11 } }}
-            />
+            <span className="turnover-ledger-chip turnover-ledger-chip--filled turnover-ledger-chip--compact" key={label}>
+              {label}
+            </span>
           ))}
-        </Stack>
+        </span>
       ) : null}
-    </Stack>
+    </span>
   );
 }
 
 function EmptyAmountBlock({ testId }: { testId: string }) {
   return (
-    <Stack spacing={0.5} alignItems="flex-start">
-      <Box
+    <span className="turnover-ledger-amount-stack">
+      <span
         data-testid={testId}
         className="turnover-amount-empty"
-        sx={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minWidth: 78,
-          px: 0.75,
-          py: 0.25,
-          borderRadius: 0.75,
-          fontWeight: 800,
-          backgroundColor: AMOUNT_BACKGROUND.neutral,
-          color: "text.secondary",
-        }}
       >
         -
-      </Box>
-      <Chip size="small" variant="outlined" label="-" />
-    </Stack>
+      </span>
+      <span className="turnover-ledger-chip turnover-ledger-chip--outline">-</span>
+    </span>
   );
 }
 
@@ -364,29 +288,31 @@ function BalanceBlock({
 }) {
   const labelName = group.counterpartyName || "未命名对方";
   return (
-    <Stack spacing={0.75} alignItems="flex-start">
-      <Stack direction="row" spacing={0.75} alignItems="flex-start" sx={{ width: "100%" }}>
+    <span className="turnover-ledger-balance-block">
+      <span className="turnover-ledger-balance-block__row">
         {canExpand ? (
-          <IconButton
-            size="small"
+          <button
+            className="turnover-ledger-expand-button"
             onClick={onToggle}
             aria-label={`${expanded ? "收起" : "展开"} ${labelName} 流水明细`}
-            sx={{ mt: -0.25, flex: "0 0 auto" }}
+            type="button"
           >
-            {expanded ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
-          </IconButton>
+            <span aria-hidden="true">{expanded ? "v" : ">"}</span>
+          </button>
         ) : (
-          <Box sx={{ width: 32, flex: "0 0 auto" }} />
+          <span className="turnover-ledger-expand-button-placeholder" />
         )}
-        <Stack spacing={0.75} sx={{ minWidth: 0 }}>
-          <Typography variant="body2" fontWeight={900} sx={{ wordBreak: "break-word" }}>
+        <span className="turnover-ledger-balance-block__content">
+          <span className="turnover-ledger-balance-block__name">
             {group.counterpartyName || "-"}
-          </Typography>
-          <Chip size="small" label={group.familyLabel || group.family || "-"} sx={{ alignSelf: "flex-start" }} />
+          </span>
+          <span className="turnover-ledger-chip turnover-ledger-chip--filled turnover-ledger-chip--family">
+            {group.familyLabel || group.family || "-"}
+          </span>
           <BalanceLines group={group} />
-        </Stack>
-      </Stack>
-    </Stack>
+        </span>
+      </span>
+    </span>
   );
 }
 
@@ -415,8 +341,8 @@ function RowCells({
       };
   return (
     <>
-      <TableCell>
-        <Stack spacing={0.75} alignItems="flex-start">
+      <td>
+        <span className="turnover-ledger-cell-stack">
           {isFlow && !hasBorrowAmount ? (
             <EmptyAmountBlock testId={`amount-empty-${row.relationId}-borrow`} />
           ) : (
@@ -429,9 +355,9 @@ function RowCells({
               {...(hasBorrowAmount ? metadata : {})}
             />
           )}
-        </Stack>
-      </TableCell>
-      <TableCell>
+        </span>
+      </td>
+      <td>
         {isFlow && !hasRepaymentAmount ? (
           <EmptyAmountBlock testId={`amount-empty-${row.relationId}-repayment`} />
         ) : (
@@ -444,40 +370,42 @@ function RowCells({
             {...(hasRepaymentAmount ? metadata : {})}
           />
         )}
-      </TableCell>
-      <TableCell>{formatNullable(isFlow ? row.repaymentRemark : "")}</TableCell>
-      <TableCell>
-        <Stack spacing={0.5}>
-          <Typography variant="body2" fontWeight={800}>
+      </td>
+      <td>{formatNullable(isFlow ? row.repaymentRemark : "")}</td>
+      <td>
+        <span className="turnover-ledger-interest-cell">
+          <span className="turnover-ledger-interest-cell__amount">
             {formatMoney(row.interestPaidAmount)}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
+          </span>
+          <span className="turnover-ledger-interest-cell__rate">
             {rateText(row)}
-          </Typography>
-        </Stack>
-      </TableCell>
-      <TableCell>{formatNullable(row.loanDays)}</TableCell>
-      <TableCell>{row.accruedInterest ? formatMoney(row.accruedInterest) : "-"}</TableCell>
-      <TableCell>
-        <Stack spacing={0.5} alignItems="flex-start">
-          <Typography variant="body2">{formatNullable(row.interestPaidDate)}</Typography>
-          <Chip size="small" variant="outlined" label={formatNullable(row.interestPaymentMethod)} />
-        </Stack>
-      </TableCell>
-      <TableCell>{formatNullable(row.note)}</TableCell>
-      <TableCell>
+          </span>
+        </span>
+      </td>
+      <td>{formatNullable(row.loanDays)}</td>
+      <td>{row.accruedInterest ? formatMoney(row.accruedInterest) : "-"}</td>
+      <td>
+        <span className="turnover-ledger-cell-stack">
+          <span>{formatNullable(row.interestPaidDate)}</span>
+          <span className="turnover-ledger-chip turnover-ledger-chip--outline">
+            {formatNullable(row.interestPaymentMethod)}
+          </span>
+        </span>
+      </td>
+      <td>{formatNullable(row.note)}</td>
+      <td>
         {isFlow ? (
-          <Button
-            size="small"
-            variant="outlined"
+          <button
+            className="turnover-ledger-table-button"
             disabled={actionsDisabled}
             onClick={() => onEdit(row)}
             aria-label={`编辑流水 ${flowDisplayId(row)}`}
+            type="button"
           >
             编辑
-          </Button>
+          </button>
         ) : null}
-      </TableCell>
+      </td>
     </>
   );
 }
@@ -502,52 +430,39 @@ export default function TurnoverLedgerGroupedTable({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const hasRows = groups.some((group) => resolveRows(group).summaryRow !== null);
   return (
-    <TableContainer ref={tableWrapRef} component={Paper} variant="outlined" sx={{ maxHeight: 640, overflow: "auto", borderRadius: 1 }}>
-      <Table stickyHeader size="small" aria-label="往来款左右双栏台账" sx={{ minWidth: 1080, tableLayout: "fixed" }}>
-        <TableHead>
-          <TableRow>
-            <TableCell
-              className="turnover-sticky-left-header"
-              sx={{
-                width: LEFT_COLUMN_WIDTH,
-                minWidth: LEFT_COLUMN_WIDTH,
-                fontWeight: 900,
-                left: 0,
-                position: "sticky",
-                zIndex: 5,
-                backgroundColor: LEFT_HEADER_BACKGROUND,
-                borderRight: "1px solid",
-                borderRightColor: "divider",
-              }}
-            >
+    <div className="turnover-ledger-table-wrap" ref={tableWrapRef}>
+      <table className="turnover-ledger-table" aria-label="往来款左右双栏台账">
+        <thead>
+          <tr>
+            <th className="turnover-sticky-left-header" scope="col">
               对方户名
-            </TableCell>
-            <TableCell sx={{ width: 52, fontWeight: 900 }} padding="checkbox">选择</TableCell>
-            <TableCell sx={{ width: 150, fontWeight: 900 }}>往来发生</TableCell>
-            <TableCell sx={{ width: 150, fontWeight: 900 }}>结清发生</TableCell>
-            <TableCell sx={{ width: 118, fontWeight: 900 }}>还款备注</TableCell>
-            <TableCell sx={{ width: 122, fontWeight: 900 }}>利息额 / 年息或月息</TableCell>
-            <TableCell sx={{ width: 76, fontWeight: 900 }}>借款天数</TableCell>
-            <TableCell sx={{ width: 92, fontWeight: 900 }}>应还利息</TableCell>
-            <TableCell sx={{ width: 118, fontWeight: 900 }}>还利息日期 / 方式</TableCell>
-            <TableCell sx={{ width: 126, fontWeight: 900 }}>备注</TableCell>
-            <TableCell sx={{ width: 68, fontWeight: 900 }}>操作</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+            </th>
+            <th className="turnover-ledger-table__check" scope="col">选择</th>
+            <th className="turnover-ledger-table__occurred" scope="col">往来发生</th>
+            <th className="turnover-ledger-table__settled" scope="col">结清发生</th>
+            <th className="turnover-ledger-table__remark" scope="col">还款备注</th>
+            <th className="turnover-ledger-table__interest" scope="col">利息额 / 年息或月息</th>
+            <th className="turnover-ledger-table__days" scope="col">借款天数</th>
+            <th className="turnover-ledger-table__interest-due" scope="col">应还利息</th>
+            <th className="turnover-ledger-table__paid" scope="col">还利息日期 / 方式</th>
+            <th className="turnover-ledger-table__note" scope="col">备注</th>
+            <th className="turnover-ledger-table__action" scope="col">操作</th>
+          </tr>
+        </thead>
+        <tbody>
           {loading ? (
-            <TableRow>
-              <TableCell colSpan={11} align="center" sx={{ py: 8 }}>
+            <tr>
+              <td className="turnover-ledger-table__empty" colSpan={11}>
                 正在加载往来款台账
-              </TableCell>
-            </TableRow>
+              </td>
+            </tr>
           ) : null}
           {!loading && !hasRows ? (
-            <TableRow>
-              <TableCell colSpan={11} align="center" sx={{ py: 8 }}>
+            <tr>
+              <td className="turnover-ledger-table__empty" colSpan={11}>
                 暂无往来款台账
-              </TableCell>
-            </TableRow>
+              </td>
+            </tr>
           ) : null}
           {!loading
             ? groups.flatMap((group, groupIndex) => {
@@ -565,33 +480,15 @@ export default function TurnoverLedgerGroupedTable({
                   }));
                 };
                 const summary = (
-                  <TableRow
+                  <tr
                     key={`${group.groupId}:summary:${summaryRow.relationId}`}
                     data-testid={`turnover-row-${summaryRow.relationId}`}
                     className="turnover-summary-row turnover-group-start-row"
-                    sx={{
-                      backgroundColor: SUMMARY_ROW_BACKGROUND,
-                      "& > td": {
-                        verticalAlign: "top",
-                        borderTop: groupIndex === 0 ? "1px solid" : "3px solid",
-                        borderTopColor: groupIndex === 0 ? "divider" : "#9fb3c8",
-                      },
-                    }}
                   >
-                    <TableCell
+                    <td
                       data-testid={`turnover-group-cell-${group.groupId}`}
                       rowSpan={rowSpan}
                       className="turnover-sticky-left-cell"
-                      sx={{
-                        position: "sticky",
-                        left: 0,
-                        zIndex: 4,
-                        width: LEFT_COLUMN_WIDTH,
-                        minWidth: LEFT_COLUMN_WIDTH,
-                        backgroundColor: SUMMARY_ROW_BACKGROUND,
-                        borderRight: "1px solid",
-                        borderRightColor: "divider",
-                      }}
                     >
                       <BalanceBlock
                         group={group}
@@ -599,52 +496,50 @@ export default function TurnoverLedgerGroupedTable({
                         canExpand={flowRows.length > 0}
                         onToggle={toggleGroup}
                       />
-                    </TableCell>
-                    <TableCell padding="checkbox" />
+                    </td>
+                    <td className="turnover-ledger-table__check" />
                     <RowCells
                       row={{ ...summaryRow, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel }}
                       rowKind="summary"
                       onEdit={onEdit}
                       actionsDisabled={actionsDisabled}
                     />
-                  </TableRow>
+                  </tr>
                 );
                 const flows = visibleFlowRows.map((row, index) => {
                   const rowTone = flowDirectionKey(row);
                   const rowId = runtimeRow(row).sourceBankRowId || runtimeRow(row).flowId || String(index);
                   const checked = selectedFlowRowIds.has(rowId);
                   return (
-                    <TableRow
+                    <tr
                       key={`${group.groupId}:flow:${rowId}`}
                       data-testid={`turnover-flow-row-${row.relationId}-${index}`}
                       className={`turnover-row-${rowTone} turnover-flow-row`}
-                      sx={{
-                        backgroundColor: FLOW_ROW_BACKGROUND[rowTone],
-                        "& td": { verticalAlign: "top" },
-                      }}
                     >
-                      <TableCell padding="checkbox">
-                        <Checkbox
+                      <td className="turnover-ledger-table__check">
+                        <input
+                          className="turnover-ledger-checkbox"
                           checked={checked}
                           disabled={actionsDisabled}
                           onChange={() => onToggleFlowSelection?.(group, row)}
-                          inputProps={{ "aria-label": `选择流水 ${rowId}` }}
+                          aria-label={`选择流水 ${rowId}`}
+                          type="checkbox"
                         />
-                      </TableCell>
+                      </td>
                       <RowCells
                         row={{ ...row, counterpartyName: group.counterpartyName, familyLabel: group.familyLabel }}
                         rowKind="flow"
                         onEdit={onEdit}
                         actionsDisabled={actionsDisabled}
                       />
-                    </TableRow>
+                    </tr>
                   );
                 });
                 return [summary, ...flows];
               })
             : null}
-        </TableBody>
-      </Table>
-    </TableContainer>
+        </tbody>
+      </table>
+    </div>
   );
 }

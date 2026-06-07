@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P088-phase-6-turnover-ledger-grouped-table`
+- Current Prompt ID: `P089-phase-6-turnover-ledger-tag-and-closure-drawers`
 - Current MG ID: `MG-P084-phase-6-batch-accounting`
 
 ## Global Invariants
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 turnover ledger grouped table prompt generated after P087 page shell/tabs/summary migration。
-- Files touched in P087:
-  - `web/src/pages/TurnoverLedgerPage.tsx`
+- Scope: phase 6 turnover ledger tag and closure drawers prompt generated after P088 grouped table migration。
+- Files touched in P088:
+  - `web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_turnover_ledger.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P087 selected tests expected-fail with selected behavior tests passed；full `TurnoverLedgerPage.test.tsx` expected-fail with 11 behavior tests passed and 1 source-level primitive contract failure；build passed；scoped grep passed；diff/status passed。
-- Failures: expected source-level contract now remains for grouped table, drawers, export dialog and feedback targets.
-- Next action: 执行 `P088-phase-6-turnover-ledger-grouped-table`。
+- Verification run: P088 selected tests expected-fail with selected behavior tests passed；full `TurnoverLedgerPage.test.tsx` expected-fail with 11 behavior tests passed and 1 source-level primitive contract failure；build passed；scoped grep passed；diff/status passed。
+- Failures: expected source-level contract now remains for page drawer/feedback surfaces, extra drawer and export dialog targets.
+- Next action: 执行 `P089-phase-6-turnover-ledger-tag-and-closure-drawers`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +95,17 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P088-phase-6-turnover-ledger-grouped-table` | TurnoverLedger P087 page shell/tabs/summary verified；next grouped table |
+| page batches | `in_progress` | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | TurnoverLedger P088 grouped table verified；next tag and closure drawers |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|renders grouped\|expands Jia Xiaohua\|confirms a manual zero-difference\|blocks cross-group selection\|shows bank-detail tags"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining drawer/dialog/feedback targets |
+| 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
+| 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `if rg -n '@mui/\|Mui[A-Z]\|KeyboardArrowDownIcon\|KeyboardArrowRightIcon\|<Table\|TableHead\|TableBody\|TableRow\|TableCell\|TableContainer\|<Checkbox\|<Chip\|<IconButton\|<Button\|<Paper\|<Stack\|<Typography' web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx; then exit 1; else exit 0; fi` | passed | Grouped table MUI residues cleared |
+| 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P087-phase-6-turnover-ledger-page-shell-tabs-summary` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|renders grouped\|opens tag selection drawer\|reloads on category updates"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining table/drawer/dialog/feedback targets |
 | 2026-06-07 | `P087-phase-6-turnover-ledger-page-shell-tabs-summary` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P087-phase-6-turnover-ledger-page-shell-tabs-summary` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |

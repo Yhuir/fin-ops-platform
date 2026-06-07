@@ -140,3 +140,31 @@ Scope: `/turnover-ledger` grouped ledger table only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx、web/src/test/TurnoverLedgerPage.test.tsx 和 web/src/app/styles.css。只迁移 `TurnoverLedgerGroupedTable.tsx` 的 MUI table/container/row/cell/checkbox/chip/icon/button/typography/layout surfaces 到 native/project table controls and `turnover-ledger-*`/existing `turnover-*` classes；必要时只补 `web/src/app/styles.css` 中 grouped table classes。不得迁移 `TurnoverLedgerPage.tsx` drawers, `TurnoverLedgerExtraDrawer.tsx`, `TurnoverLedgerExportDialog.tsx`, feedback/Snackbar, API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：table accessible name `往来款左右双栏台账`, sticky left group/header classes, no status column, grouped summary rows, expandable flow rows, real flow rows instead of lot rows, checkbox labels and disabled states, edit button labels, amount tone classes, loading/empty rows and high-density alignment。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|renders grouped|expands Jia Xiaohua|confirms a manual zero-difference|blocks cross-group selection|shows bank-detail tags"`，预期 source-level contract remains expected-fail but selected behavior tests must pass；运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 11 behavior tests pass and source-level contract remains expected-fail until P089-P091；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|KeyboardArrowDownIcon|KeyboardArrowRightIcon|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|<IconButton|<Button|<Paper|<Stack|<Typography' web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P089 tag and closure drawers prompt。
 ```
+
+## P088 Execution Notes
+
+- Status: verified with expected source-level failure.
+- Runtime implementation changed: yes, only `web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx`.
+- CSS changed: yes, only `web/src/app/styles.css` grouped table classes.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Migrated grouped table from MUI table/container/row/cell/checkbox/chip/icon/button/typography/layout surfaces to native table controls and project classes.
+- Preserved table accessible name, sticky left classes, group summary rows, flow rows, checkbox labels, edit button labels, amount tone classes, loading/empty text and behavior tests.
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|renders grouped|expands Jia Xiaohua|confirms a manual zero-difference|blocks cross-group selection|shows bank-detail tags"`: expected-fail; selected behavior tests passed and source-level contract failed as expected.
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: expected-fail; 11 behavior tests passed and 1 source-level contract failed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|KeyboardArrowDownIcon|KeyboardArrowRightIcon|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|<IconButton|<Button|<Paper|<Stack|<Typography' web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+
+## P089 Prompt Draft
+
+```text
+Prompt ID: P089-phase-6-turnover-ledger-tag-and-closure-drawers
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/turnover-ledger` page-owned tag settings right drawer and closure right drawer only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/common/AppDrawer.tsx、web/src/test/TurnoverLedgerPage.test.tsx 和 web/src/app/styles.css。只迁移 `TurnoverLedgerPage.tsx` 内 page-owned drawers：`外部往来款标签设置` right drawer and `确认外部往来闭环` right drawer，以及这些 drawer 内部的 MUI layout/buttons/checkbox chips/close icon/alerts 到 `AppDrawer`、native/project controls and `turnover-ledger-*` classes。不得迁移 `TurnoverLedgerExtraDrawer.tsx`, `TurnoverLedgerExportDialog.tsx`, page feedback/Snackbar, API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：old right drawers remain right drawers, dialog role/name, close buttons, tag checkbox labels and selected state, `全选`/`清空`/`保存` disabled rules and save payload, inactive tag warning text, closure selected rows preview, income/expense totals, delta test id `turnover-closure-delta`, cancel/confirm buttons, confirm disabled when delta is non-zero, closure POST payload and domain events。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|opens tag selection drawer|confirms a manual zero-difference|confirms closure when cash direction crosses|blocks cross-group selection"`，预期 source-level contract remains expected-fail but selected behavior tests must pass；运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 11 behavior tests pass and source-level contract remains expected-fail until P090-P091；运行 scoped grep `if rg -n '<Drawer|<IconButton|CloseIcon|FormControlLabel|<Checkbox|<Button|<Alert|<Box|<Stack|<Typography' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P090 extra drawer prompt。
+```

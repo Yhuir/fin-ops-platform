@@ -4969,7 +4969,7 @@ Scope: `/turnover-ledger` page shell actions, family tabs and summary cards only
 ### P088-phase-6-turnover-ledger-grouped-table
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/turnover-ledger` grouped ledger table only.
 
@@ -4991,6 +4991,45 @@ Scope: `/turnover-ledger` grouped ledger table only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract remains expected-fail until drawer/dialog/feedback slices clear remaining surfaces。
+
+#### Execution Notes
+
+- Implemented: `TurnoverLedgerGroupedTable.tsx` migrated from MUI table/container/row/cell/checkbox/chip/icon/button/typography/layout surfaces to native table controls and project classes。
+- Runtime implementation changed: yes，only `web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx`。
+- CSS changed: yes，only `web/src/app/styles.css` grouped table classes。
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|renders grouped|expands Jia Xiaohua|confirms a manual zero-difference|blocks cross-group selection|shows bank-detail tags"`: expected-fail；selected behavior tests passed，source-level contract failed as expected。
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: expected-fail；11 behavior tests passed，1 source-level contract failed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|Mui[A-Z]|KeyboardArrowDownIcon|KeyboardArrowRightIcon|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|<IconButton|<Button|<Paper|<Stack|<Typography' web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+- Next prompt generated: `P089-phase-6-turnover-ledger-tag-and-closure-drawers`.
+
+### P089-phase-6-turnover-ledger-tag-and-closure-drawers
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/turnover-ledger` page-owned tag settings right drawer and closure right drawer only.
+
+#### Prompt
+
+```text
+Prompt ID: P089-phase-6-turnover-ledger-tag-and-closure-drawers
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/turnover-ledger` page-owned tag settings right drawer and closure right drawer only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/common/AppDrawer.tsx、web/src/test/TurnoverLedgerPage.test.tsx 和 web/src/app/styles.css。只迁移 `TurnoverLedgerPage.tsx` 内 page-owned drawers：`外部往来款标签设置` right drawer and `确认外部往来闭环` right drawer，以及这些 drawer 内部的 MUI layout/buttons/checkbox chips/close icon/alerts 到 `AppDrawer`、native/project controls and `turnover-ledger-*` classes。不得迁移 `TurnoverLedgerExtraDrawer.tsx`, `TurnoverLedgerExportDialog.tsx`, page feedback/Snackbar, API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：old right drawers remain right drawers, dialog role/name, close buttons, tag checkbox labels and selected state, `全选`/`清空`/`保存` disabled rules and save payload, inactive tag warning text, closure selected rows preview, income/expense totals, delta test id `turnover-closure-delta`, cancel/confirm buttons, confirm disabled when delta is non-zero, closure POST payload and domain events。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|opens tag selection drawer|confirms a manual zero-difference|confirms closure when cash direction crosses|blocks cross-group selection"`，预期 source-level contract remains expected-fail but selected behavior tests must pass；运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 11 behavior tests pass and source-level contract remains expected-fail until P090-P091；运行 scoped grep `if rg -n '<Drawer|<IconButton|CloseIcon|FormControlLabel|<Checkbox|<Button|<Alert|<Box|<Stack|<Typography' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P090 extra drawer prompt。
+```
+
+#### Review
+
+- Single slice: yes，only page-owned tag settings and closure right drawers。
+- Runtime implementation limited: yes，does not touch extra drawer component, export dialog, page feedback, API or backend。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract remains expected-fail until extra drawer, export dialog and feedback slices clear remaining surfaces。
 
 ### MG Prompt Template
 
