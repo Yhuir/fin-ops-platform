@@ -3221,6 +3221,49 @@ Scope: `/input-invoice-usage` only: InputInvoiceUsage page, input invoice usage 
 - Module doc allowed: yes，input invoice usage has high-risk table, filters and multiple drawers。
 - Next prompt: P054 characterization tests only after P053 is implemented and verified。
 
+#### Execution Notes
+
+- Created `docs/refactor-ui/modules/phase_6_input_invoice_usage.md` as the module fact source for `/input-invoice-usage`.
+- Recorded scope, non-goals, user-visible entrypoints, current MUI inventory, dense main table contract, shared filter menu contract, detail/export/payment-rules/OA-reverse right drawer contracts, loading/empty/error/stale/permission states, existing tests, API boundaries, migration slices and risks.
+- Confirmed `InputInvoiceUsageFilterMenu` is not currently mounted by `/input-invoice-usage`; it is a shared component consumed by `OaPendingPaymentsTable`, so migration must preserve prop compatibility without adding new page filters.
+- Did not modify runtime implementation, tests, backend, API contracts, read models, workers, mocks or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_input_invoice_usage.md`: passed。
+  - `rg -n "P053-phase-6-input-invoice-usage-discovery|Current MUI Inventory|User-visible Entrypoints|P054-phase-6-input-invoice-usage-characterization-tests" docs/refactor-ui/modules/phase_6_input_invoice_usage.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed。
+
+### P054-phase-6-input-invoice-usage-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: 只更新 input invoice usage tests，锁定 `/input-invoice-usage` 非 MUI/project primitive contract；不改实现。
+
+#### Prompt
+
+```text
+Prompt ID: P054-phase-6-input-invoice-usage-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: 只更新 input invoice usage tests，锁定 `/input-invoice-usage` 非 MUI/project primitive contract；不改实现。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/*.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx。只修改 `web/src/test/InputInvoiceUsagePage.test.tsx` 和 `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`：把当前 `dense MUI Table layout without DataGrid`、`.MuiDataGrid-root`、`.MuiChip-root` 等 MUI wording/class assertions 改成行为和 project primitive assertions；新增 source-level contracts，锁定 page shell/toolbar/search/loading、main dense table、ExpandableCellText、shared filter menu、detail/export/payment-rules/OA-reverse right drawers 未来均不再依赖 `@mui/*`、`Mui[A-Z]`、`TablePagination`、`TextField`、`Drawer`、`Dialog`、`Menu`、`Chip` 等旧 MUI surface；新增或保留行为断言确保旧右侧抽屉仍是右侧抽屉，`进项发票使用情况表`、`进项发票使用情况导出样例`、`Sheet4 支付状态规则`、`反提 OA 候选发票清单` 表格语义保留，`筛选 支付状态` menu、`关闭详情抽屉`、`关闭进项发票使用情况导出`、`关闭支付状态规则抽屉`、`关闭以发票反提 OA 工作流` 标签保留。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P055 page shell toolbar prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Runtime implementation untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level no-MUI contract should fail until P055-P060/P061 implement migration。
+- Next prompt: P055 page shell/toolbar only after P054 is implemented and verified/expected-fail documented。
+
 ### MG Prompt Template
 
 ```text
