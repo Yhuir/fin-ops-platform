@@ -113,4 +113,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-006-import-pages-discovery` | current commit | pushed to `origin/main` | Import pages premium discovery and PV-007 prompt generated with the current commit. |
 | 2026-06-08 | `PV-007-import-pages-premium-visual` | current commit | pushed to `origin/main` | Import pages premium visual polish verified and pushed with the current commit. |
 | 2026-06-08 | `PV-008-cost-statistics-discovery` | `44dd84de` | pushed to `origin/main` | Cost Statistics premium discovery and PV-009 prompt generated. |
-| 2026-06-08 | `PV-009-cost-statistics-premium-visual` | current commit | pending push | Cost Statistics premium visual polish verified; PV-010 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-009-cost-statistics-premium-visual` | `8a77149f` | pushed to `origin/main` | Cost Statistics premium visual polish verified; PV-010 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
