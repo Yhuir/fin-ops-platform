@@ -4051,7 +4051,7 @@ Scope: `OutputInvoiceCollectionsTable.tsx` grouped dense table only, plus necess
 ### P070-phase-6-output-invoice-collections-simple-drawers
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `OutputInvoiceCollectionDetailDrawer.tsx`, `CollectionStatusRulesDrawer.tsx` and `ReceiptSettingsDrawer.tsx` only, plus necessary styles/tests. Do not migrate status reminder, red relation, receipt history or receipt preview drawers.
 
@@ -4075,6 +4075,52 @@ Scope: `OutputInvoiceCollectionDetailDrawer.tsx`, `CollectionStatusRulesDrawer.t
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，P071-P072 source failures can remain, but these three simple drawer sources must clear。
 - Next prompt: P071 status reminder and red relation workflow drawers only after P070 implementation is verified/expected-fail documented.
+
+#### Execution Notes
+
+- Migrated detail, collection status rules and receipt settings drawers from MUI Drawer/components to `AppDrawer`, `StatePanel`, native controls and project classes.
+- Preserved right-side drawer shape, close labels, loading labels, detail unavailable/empty text, rules table columns, version/read-only tags, settings labels/options/buttons and uppercase prefix transform.
+- Added output invoice collection drawer/detail/rules/settings styles in `web/src/app/styles.css`.
+- Did not modify page shell/table/filter/expandable, status reminder/red relation/receipt history/receipt preview drawers, mock/API/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|TextField|MenuItem|TableCell|TableRow|TableHead|TableBody|Chip|IconButton|DialogTitle|DialogContent|DialogActions' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx web/src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|opens the three right-side workflow drawers|closes lifecycle actions"`: expected-fail，selected behavior tests passed；remaining source-level failure lists only four workflow/lifecycle drawer files。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail，5 behavior tests passed and 1 source-level contract failed，limited to four drawer files。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P070 implementation files changed before docs。
+
+### P071-phase-6-output-invoice-collections-workflow-drawers
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `CollectionStatusReminderDrawer.tsx` and `RedInvoiceRelationDrawer.tsx` only, plus necessary styles/tests. Do not migrate receipt history or receipt preview drawers.
+
+#### Prompt
+
+```text
+Prompt ID: P071-phase-6-output-invoice-collections-workflow-drawers
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `CollectionStatusReminderDrawer.tsx` and `RedInvoiceRelationDrawer.tsx` only, plus necessary styles/tests. Do not migrate receipt history or receipt preview drawers.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/common/AppDrawer.tsx、web/src/components/common/StatePanel.tsx、web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx、web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除这两个 workflow 抽屉的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Button`、`Divider`、`Drawer`、`FormControlLabel`、`IconButton`、`MenuItem`、`Radio`、`RadioGroup`、`Stack`、`TextField` 和 `Typography`。使用 `AppDrawer` 保持右侧抽屉形态，使用 project/native fields, selects, textarea, radio inputs, buttons and StatePanel error。必须保留 `aria-label`/accessible name：`收款状态和提醒`、`红蓝票关系`；保留关闭 labels `关闭收款状态抽屉`、`关闭红蓝票关系抽屉`；保留字段 labels `手动状态`、`预计收款日期`、`状态备注`、`提醒时间`、`提醒备注`、`搜索关联发票`、`关联发票候选`、`关系类型`、`确认依据`；保留 buttons `撤销手动状态`、`取消提醒`、`取消`、`保存`、`撤销人工关系 <invoiceNo>`、`确认关系`；保留 status submit payload、reminder submit payload、clear/cancel reminder calls、candidate search/filter, radio candidate labels, relation type options `红字发票`/`蓝字发票`, evidence validation, confirm/revoke payloads and disabled/submitting behavior。不得修改 page shell/table/filter/expandable, simple drawers, receipt history/receipt preview drawers, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|closes lifecycle actions"`，P072 receipt source failures 可以继续 expected-fail，但 these two workflow drawer files must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for receipt history/receipt preview drawers；运行 `cd web && npm run build`；运行 workflow drawer MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|TextField|MenuItem|FormControlLabel|RadioGroup|Radio|IconButton|DialogTitle|DialogContent|DialogActions' web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P072 receipt history and preview prompt。
+```
+
+#### Review
+
+- Single slice: yes，two workflow drawers only。
+- Right-side drawer shape preserved via AppDrawer: required。
+- Receipt lifecycle/history/preview untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，P072 receipt drawer source failures can remain, but these two workflow drawer sources must clear。
+- Next prompt: P072 receipt history and receipt preview only after P071 implementation is verified/expected-fail documented.
 
 ### MG Prompt Template
 

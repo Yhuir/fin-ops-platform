@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P070-phase-6-output-invoice-collections-simple-drawers`
+- Current Prompt ID: `P071-phase-6-output-invoice-collections-workflow-drawers`
 - Current MG ID: `MG-P064-phase-6-oa-pending-payments`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments MG verified and pushed；OutputInvoiceCollections P069 verified as expected-fail，next P070 simple drawers |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments MG verified and pushed；OutputInvoiceCollections P070 verified as expected-fail，next P071 workflow drawers |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,16 +54,18 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 output invoice collections simple drawers prompt generated after P069 grouped table migration。
-- Files touched in P069:
-  - `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx`
+- Scope: phase 6 output invoice collections workflow drawers prompt generated after P070 simple drawer migration。
+- Files touched in P070:
+  - `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx`
+  - `web/src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx`
+  - `web/src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`
-- Verification run: P069 table grep passed；focused and full module tests are expected-fail only because drawer files still have scoped MUI residue；table/platform smoke, build and diff check passed。
-- Failures: expected source-level MUI contract failure remains only for seven drawer files。
-- Next action: 执行 `P070-phase-6-output-invoice-collections-simple-drawers`。
+- Verification run: P070 simple drawer grep passed；focused and full module tests are expected-fail only because four workflow/lifecycle drawer files still have scoped MUI residue；build and diff check passed。
+- Failures: expected source-level MUI contract failure remains only for `CollectionStatusReminderDrawer.tsx`、`RedInvoiceRelationDrawer.tsx`、`ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx`。
+- Next action: 执行 `P071-phase-6-output-invoice-collections-workflow-drawers`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +97,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P070-phase-6-output-invoice-collections-simple-drawers` | OutputInvoiceCollections P069 verified as expected-fail；next simple drawers |
+| page batches | `in_progress` | `P071-phase-6-output-invoice-collections-workflow-drawers` | OutputInvoiceCollections P070 verified as expected-fail；next workflow drawers |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P070-phase-6-output-invoice-collections-simple-drawers` | `if rg -n '@mui/\|Mui[A-Z]\|CloseOutlinedIcon\|CircularProgress\|TextField\|MenuItem\|TableCell\|TableRow\|TableHead\|TableBody\|Chip\|IconButton\|DialogTitle\|DialogContent\|DialogActions' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx web/src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx; then exit 1; else exit 0; fi` | passed | Detail, rules and settings drawers have no scoped MUI residue |
+| 2026-06-07 | `P070-phase-6-output-invoice-collections-simple-drawers` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives\|opens the three right-side workflow drawers\|closes lifecycle actions"` | expected-fail | Selected behavior tests passed; remaining source-level failure lists only four workflow/lifecycle drawer files |
+| 2026-06-07 | `P070-phase-6-output-invoice-collections-simple-drawers` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | expected-fail | 5 behavior tests passed; 1 source-level contract failed, limited to four drawer files |
+| 2026-06-07 | `P070-phase-6-output-invoice-collections-simple-drawers` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P070-phase-6-output-invoice-collections-simple-drawers` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P070-phase-6-output-invoice-collections-simple-drawers` | `git status --short --branch` | passed | Only P070 implementation files changed before docs |
 | 2026-06-07 | `P069-phase-6-output-invoice-collections-grouped-table` | `if rg -n '@mui/\|Mui[A-Z]\|TablePagination\|SortOutlinedIcon\|TableCell\|TableRow\|TableHead\|TableBody\|Chip\|IconButton\|SxProps\|Theme' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx; then exit 1; else exit 0; fi` | passed | Grouped table has no scoped MUI/table/tag/action/pagination residue |
 | 2026-06-07 | `P069-phase-6-output-invoice-collections-grouped-table` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives\|adds sidebar route\|opens the three right-side workflow drawers"` | expected-fail | Selected behavior tests passed; remaining source-level failure lists only seven drawer files |
 | 2026-06-07 | `P069-phase-6-output-invoice-collections-grouped-table` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | expected-fail | 5 behavior tests passed; 1 source-level contract failed, limited to drawer residue |

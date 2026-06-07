@@ -1,16 +1,8 @@
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import MenuItem from "@mui/material/MenuItem";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
 import type { OutputInvoiceReceiptSettingsResponse } from "../../features/outputInvoiceCollections/types";
+import AppDrawer from "../common/AppDrawer";
+import StatePanel from "../common/StatePanel";
 
 type ReceiptSettingsDrawerProps = {
   open: boolean;
@@ -75,55 +67,58 @@ export default function ReceiptSettingsDrawer({
   };
 
   return (
-    <Drawer
-      anchor="right"
-      open={open}
+    <AppDrawer
+      className="output-invoice-collection-drawer"
+      closeLabel="关闭收据编号设置"
+      footer={(
+        <div className="output-invoice-collection-drawer__footer-actions">
+          <button
+            className="output-invoice-collection-drawer__button"
+            disabled={submitting}
+            onClick={onClose}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--primary"
+            disabled={loading || submitting || !prefix.trim()}
+            onClick={handleSave}
+            type="button"
+          >
+            保存收据编号设置
+          </button>
+        </div>
+      )}
       onClose={onClose}
-      PaperProps={{
-        "aria-label": open ? "收据编号设置" : undefined,
-        sx: { width: { xs: "100%", sm: 480 }, maxWidth: "100vw" },
-      }}
+      open={open}
+      subtitle="正式收据编号规则"
+      title="收据编号设置"
+      width={480}
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
-          <div>
-            <Typography component="h2" variant="h6" fontWeight={900}>收据编号设置</Typography>
-            <Typography variant="caption" color="text.secondary">正式收据编号规则</Typography>
-          </div>
-          <IconButton aria-label="关闭收据编号设置" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ p: 2.5 }}>
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          <TextField
-            label="编号前缀"
-            size="small"
-            value={prefix}
+      <div className="output-invoice-collection-drawer__body">
+        {error ? <StatePanel compact tone="error">{error}</StatePanel> : null}
+        <label className="output-invoice-collection-drawer__field">
+          <span>编号前缀</span>
+          <input
             disabled={loading || submitting}
             onChange={(event) => setPrefix(event.target.value.toUpperCase())}
+            value={prefix}
           />
-          <TextField
-            select
-            label="重置周期"
-            size="small"
-            value={resetPeriod}
+        </label>
+        <label className="output-invoice-collection-drawer__field">
+          <span>重置周期</span>
+          <select
             disabled={loading || submitting}
             onChange={(event) => setResetPeriod(event.target.value)}
+            value={resetPeriod}
           >
-            <MenuItem value="monthly">每月重置</MenuItem>
-            <MenuItem value="yearly">每年重置</MenuItem>
-            <MenuItem value="none">不按日期重置</MenuItem>
-          </TextField>
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
-            <Button onClick={onClose} disabled={submitting}>取消</Button>
-            <Button variant="contained" onClick={handleSave} disabled={loading || submitting || !prefix.trim()}>
-              保存收据编号设置
-            </Button>
-          </Stack>
-        </Stack>
-      </Stack>
-    </Drawer>
+            <option value="monthly">每月重置</option>
+            <option value="yearly">每年重置</option>
+            <option value="none">不按日期重置</option>
+          </select>
+        </label>
+      </div>
+    </AppDrawer>
   );
 }
