@@ -4928,7 +4928,7 @@ Scope: `/turnover-ledger` source-level and behavior guardrails only.
 ### P087-phase-6-turnover-ledger-page-shell-tabs-summary
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/turnover-ledger` page shell actions, family tabs and summary cards only.
 
@@ -4950,6 +4950,46 @@ Scope: `/turnover-ledger` page shell actions, family tabs and summary cards only
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract remains expected-fail until later slices clear table/drawer/dialog/feedback surfaces。
+
+#### Execution Notes
+
+- Implemented: page outer container, page action buttons, family tabs and summary cards migrated to native/project controls and `turnover-ledger-*` classes。
+- Runtime implementation changed: yes，only `web/src/pages/TurnoverLedgerPage.tsx`。
+- CSS changed: yes，only `web/src/app/styles.css` `turnover-ledger-*` shell/tabs/summary classes。
+- Scoped grep correction: excluded bare `<Box` during execution because P087 explicitly excludes tag/closure drawer internals that still use MUI `Box` for later slices。
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|renders grouped|opens tag selection drawer|reloads on category updates"`: expected-fail；selected behavior tests passed，source-level contract failed as expected。
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: expected-fail；11 behavior tests passed，1 source-level contract failed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n 'DownloadOutlinedIcon|<Tabs|<Tab|label="全部"|label="个人往来"|label="公司往来"|label="银行往来"|label="业务往来"' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+- Next prompt generated: `P088-phase-6-turnover-ledger-grouped-table`.
+
+### P088-phase-6-turnover-ledger-grouped-table
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/turnover-ledger` grouped ledger table only.
+
+#### Prompt
+
+```text
+Prompt ID: P088-phase-6-turnover-ledger-grouped-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/turnover-ledger` grouped ledger table only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx、web/src/test/TurnoverLedgerPage.test.tsx 和 web/src/app/styles.css。只迁移 `TurnoverLedgerGroupedTable.tsx` 的 MUI table/container/row/cell/checkbox/chip/icon/button/typography/layout surfaces 到 native/project table controls and `turnover-ledger-*`/existing `turnover-*` classes；必要时只补 `web/src/app/styles.css` 中 grouped table classes。不得迁移 `TurnoverLedgerPage.tsx` drawers, `TurnoverLedgerExtraDrawer.tsx`, `TurnoverLedgerExportDialog.tsx`, feedback/Snackbar, API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：table accessible name `往来款左右双栏台账`, sticky left group/header classes, no status column, grouped summary rows, expandable flow rows, real flow rows instead of lot rows, checkbox labels and disabled states, edit button labels, amount tone classes, loading/empty rows and high-density alignment。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|renders grouped|expands Jia Xiaohua|confirms a manual zero-difference|blocks cross-group selection|shows bank-detail tags"`，预期 source-level contract remains expected-fail but selected behavior tests must pass；运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 11 behavior tests pass and source-level contract remains expected-fail until P089-P091；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|KeyboardArrowDownIcon|KeyboardArrowRightIcon|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|<IconButton|<Button|<Paper|<Stack|<Typography' web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P089 tag and closure drawers prompt。
+```
+
+#### Review
+
+- Single slice: yes，grouped table only。
+- Runtime implementation limited: yes，no page drawers, export dialog, feedback, API or backend changes。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract remains expected-fail until drawer/dialog/feedback slices clear remaining surfaces。
 
 ### MG Prompt Template
 

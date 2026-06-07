@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from "react";
-import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
+import { Download } from "lucide-react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -131,22 +131,22 @@ function SummaryCard({
   testId: string;
 }) {
   return (
-    <Paper data-testid={testId} variant="outlined" sx={{ p: 1.25, minHeight: 112, borderRadius: 1 }}>
-      <Typography variant="body2" color="text.secondary" fontWeight={800}>
+    <div className="turnover-ledger-summary-card" data-testid={testId}>
+      <span className="turnover-ledger-summary-card__label">
         {label}
-      </Typography>
-      <Typography variant="h6" fontWeight={900} sx={{ mt: 0.5 }}>
+      </span>
+      <span className="turnover-ledger-summary-card__value">
         {value}
-      </Typography>
-      <Stack spacing={0.25} sx={{ mt: 0.75 }}>
+      </span>
+      <span className="turnover-ledger-summary-card__breakdown">
         {breakdown.map((item) => (
-          <Stack key={item.label} direction="row" justifyContent="space-between" spacing={1}>
-            <Typography variant="caption" color="text.secondary">{item.label}</Typography>
-            <Typography variant="caption" fontWeight={800}>{item.value}</Typography>
-          </Stack>
+          <span className="turnover-ledger-summary-card__breakdown-row" key={item.label}>
+            <span>{item.label}</span>
+            <span>{item.value}</span>
+          </span>
         ))}
-      </Stack>
-    </Paper>
+      </span>
+    </div>
   );
 }
 
@@ -635,13 +635,18 @@ export default function TurnoverLedgerPage() {
   };
 
   return (
-    <Box data-testid="turnover-ledger-page">
+    <div className="turnover-ledger-page" data-testid="turnover-ledger-page">
       <PageScaffold
         title="外部往来款管理"
         actions={(
-          <Button disabled={tagLoading} onClick={() => setTagDrawerOpen(true)} variant="outlined">
+          <button
+            className="turnover-ledger-button"
+            disabled={tagLoading}
+            onClick={() => setTagDrawerOpen(true)}
+            type="button"
+          >
             外部往来款标签设置
-          </Button>
+          </button>
         )}
       >
         {!canMutateData ? (
@@ -659,16 +664,7 @@ export default function TurnoverLedgerPage() {
           </Alert>
         ) : null}
 
-        <Stack
-          direction="row"
-          spacing={1.5}
-          useFlexGap
-          flexWrap="wrap"
-          sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" },
-          }}
-        >
+        <div className="turnover-ledger-summary-grid">
           <SummaryCard
             label="当前待还款金额"
             value={formatMoney(summary.pendingRepaymentAmount)}
@@ -693,30 +689,41 @@ export default function TurnoverLedgerPage() {
             breakdown={summaryBreakdown("collectedAmount")}
             testId="turnover-summary-collected"
           />
-        </Stack>
+        </div>
 
-        <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack spacing={1.5} sx={{ p: 1.5 }}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between">
-              <Tabs value={family} onChange={handleFamilyChange} aria-label="往来款账单范围" variant="scrollable" allowScrollButtonsMobile>
+        <section className="turnover-ledger-table-panel">
+          <div className="turnover-ledger-table-panel__inner">
+            <div className="turnover-ledger-table-panel__toolbar">
+              <div aria-label="往来款账单范围" className="turnover-ledger-tabs" role="tablist">
                 {FAMILY_TABS.map((tab) => (
-                  <Tab key={tab.value} value={tab.value} label={tab.label} />
+                  <button
+                    aria-selected={family === tab.value}
+                    className={`turnover-ledger-tabs__tab${family === tab.value ? " turnover-ledger-tabs__tab--active" : ""}`}
+                    key={tab.value}
+                    onClick={(event) => handleFamilyChange(event, tab.value)}
+                    role="tab"
+                    type="button"
+                  >
+                    {tab.label}
+                  </button>
                 ))}
-              </Tabs>
-              <Stack direction="row" spacing={1}>
-                <Button
+              </div>
+              <div className="turnover-ledger-actions">
+                <button
+                  className="turnover-ledger-button"
                   disabled={!canMutateData || ledgerActionsDisabled || selectedClosureRows.length !== 2}
                   onClick={() => setClosureDrawerOpen(true)}
-                  variant="outlined"
+                  type="button"
                 >
                   确认闭环
-                </Button>
-                <Button variant="contained" startIcon={<DownloadOutlinedIcon />} onClick={handleOpenExport}>
+                </button>
+                <button className="turnover-ledger-button turnover-ledger-button--primary" onClick={handleOpenExport} type="button">
+                  <Download aria-hidden="true" size={16} strokeWidth={2.2} />
                   下载表格
-                </Button>
-              </Stack>
-            </Stack>
-            <Divider />
+                </button>
+              </div>
+            </div>
+            <div className="turnover-ledger-table-panel__divider" />
             <TurnoverLedgerGroupedTable
               groups={groups}
               loading={loading}
@@ -726,8 +733,8 @@ export default function TurnoverLedgerPage() {
               tableWrapRef={tableWrapRef}
               actionsDisabled={ledgerActionsDisabled}
             />
-          </Stack>
-        </Paper>
+          </div>
+        </section>
       </PageScaffold>
 
       <Drawer
@@ -938,6 +945,6 @@ export default function TurnoverLedgerPage() {
           </Alert>
         ) : undefined}
       </Snackbar>
-    </Box>
+    </div>
   );
 }
