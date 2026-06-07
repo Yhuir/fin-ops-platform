@@ -74,7 +74,7 @@ Result: no output. Non-workbench runtime remains no-MUI at the start of thisä¸“é
 
 ### Package Dependency Baseline
 
-`web/package.json` still lists:
+`web/package.json` no longer lists these MUI/Emotion direct dependencies after `P-WB008`:
 
 - `@emotion/react`
 - `@emotion/styled`
@@ -83,7 +83,7 @@ Result: no output. Non-workbench runtime remains no-MUI at the start of thisä¸“é
 - `@mui/x-data-grid`
 - `@mui/x-date-pickers`
 
-These must remain until runtime/test references are removed, then be audited in `wb_phase_7_dependency_cleanup`. `@mui/x-data-grid` appears unused at runtime but remains in dependency baseline and lockfile until final dependency cleanup.
+`web/package-lock.json` was updated by `npm uninstall`; source and package scans now expect no `@mui/*` or `@emotion/*` entries.
 
 ## Workbench Component Inventory
 
@@ -373,6 +373,46 @@ git diff --check
 
 Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
 
+## P-WB008 Dependency Cleanup
+
+- Prompt ID: `P-WB008-dependency-cleanup`
+- Phase: `wb_phase_7_dependency_cleanup`
+- Type: `extraction/refactor`
+- Runtime changed: no.
+- CSS changed: no.
+- Test changed: no.
+- Dependencies changed:
+  - `web/package.json`
+  - `web/package-lock.json`
+- Backend/API/read model/worker changed: no.
+
+### Result
+
+Removed direct MUI/Emotion dependencies after source scans confirmed no real imports remain:
+
+- `@emotion/react`
+- `@emotion/styled`
+- `@mui/icons-material`
+- `@mui/material`
+- `@mui/x-data-grid`
+- `@mui/x-date-pickers`
+
+`npm uninstall` removed 53 packages. `npm ls` for the removed packages returns `(empty)`, which is the expected absent result. npm audit still reports 9 vulnerabilities; these were not addressed because this slice only removes MUI/Emotion dependencies.
+
+### Verification
+
+```bash
+if rg -n "from ['\"]@mui/|import\s+[^;]*@mui/|from ['\"]@emotion/|import\s+[^;]*@emotion/|@mui/x-|@mui/material|@mui/icons-material" web/src web/vite.config.ts --glob '!**/*.test.ts' --glob '!**/*.test.tsx'; then exit 1; else exit 0; fi
+npm uninstall @emotion/react @emotion/styled @mui/icons-material @mui/material @mui/x-data-grid @mui/x-date-pickers
+npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled
+rg -n '"@emotion/|"@mui/' web/package.json web/package-lock.json
+cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx
+cd web && npm run build
+git diff --check
+```
+
+Results: source/package scans, targeted tests, build and diff check passed. `npm ls` exits 1 with `(empty)`, expected because removed packages are absent.
+
 ## Recommended Micro-JIT Queue
 
 1. `P-WB002-characterization-tests`
@@ -389,7 +429,7 @@ Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warn
 6. `P-WB007-test-provider-cleanup`
    - Remove `legacyWorkbenchMuiProvider` and update render helpers/tests. Completed.
 7. `P-WB008-dependency-cleanup`
-   - Remove MUI/Emotion deps after no references remain.
+   - Remove MUI/Emotion deps after no references remain. Completed.
 8. `P-WB009-full-verification`
    - Run workbench tests, non-workbench regressions, no-MUI scans, build and smoke.
 9. `P-WB010-closeout`

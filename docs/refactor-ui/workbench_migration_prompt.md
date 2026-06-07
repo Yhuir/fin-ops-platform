@@ -642,12 +642,12 @@
   - `git commit -m "test: remove workbench legacy mui provider"`
   - `git push origin refactor-ui`
 
-## Next Prompt
+## Prompt History
 
 ### P-WB008-dependency-cleanup
 
 - Phase: `wb_phase_7_dependency_cleanup`
-- Status: `drafted`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只在确认无剩余 runtime/test import 后移除 MUI/Emotion dependencies 和 lockfile entries；不改 runtime UI、CSS、backend/API/read model/worker。
 
@@ -655,4 +655,69 @@
 
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/platform_stack_migration.md、web/package.json、web/package-lock.json、web/vite.config.ts 和 web/src/test/MuiContainment.test.ts。先运行 source scan 确认无真实 MUI imports：`if rg -n "from ['\\\"]@mui/|import\\s+[^;]*@mui/|@mui/x-|@mui/material|@mui/icons-material|@emotion/" web/src web/vite.config.ts; then exit 1; else exit 0; fi`。如果无剩余引用，只修改 web/package.json 和 web/package-lock.json，移除 `@emotion/react`、`@emotion/styled`、`@mui/icons-material`、`@mui/material`、`@mui/x-data-grid`、`@mui/x-date-pickers`。使用 npm install/package-lock 规范命令更新 lockfile，不手写 lockfile。不得修改 runtime UI、CSS、backend/API/read model/worker。运行 `cd web && npm install` 或等效 lockfile 更新命令，运行 `cd web && npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled` 预期不再作为 direct dependency，运行 `cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB009 full verification prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime UI/CSS untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Lockfile updated by npm: yes。
+- Dependency removal guarded by source scan: yes。
+
+#### Execution Notes
+
+- Real source import scan found no MUI/Emotion imports outside negative assertion strings.
+- Ran `npm uninstall @emotion/react @emotion/styled @mui/icons-material @mui/material @mui/x-data-grid @mui/x-date-pickers` in `web/`, removing 53 packages and updating `package.json`/`package-lock.json`.
+- `npm ls` for the removed packages returns `(empty)` with exit code 1, expected because the packages are absent.
+- `package.json` and `package-lock.json` no longer contain `@mui/*` or `@emotion/*` package entries.
+- npm audit still reports 9 vulnerabilities; not addressed because this prompt only removes MUI/Emotion dependencies.
+- Runtime UI/CSS/backend/API/read model/worker changed: no.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - real source import scan for MUI/Emotion: passed。
+  - `npm uninstall @emotion/react @emotion/styled @mui/icons-material @mui/material @mui/x-data-grid @mui/x-date-pickers`: passed。
+  - `npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled`: `(empty)`; expected absent result。
+  - `rg -n '"@emotion/|"@mui/' web/package.json web/package-lock.json`: no output。
+  - `cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`: passed，7 files / 69 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### MG-WB008-dependency-cleanup
+
+- Phase: `wb_phase_7_dependency_cleanup`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push MUI/Emotion dependency cleanup、lockfile cleanup 和专项文档更新。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- web/package.json web/package-lock.json docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB008 scope。只允许精确 git add web/package.json web/package-lock.json docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 chore: remove workbench mui dependencies。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB008 和 wb_phase_7_dependency_cleanup 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- Runtime UI/CSS cleanup completed earlier and not touched here: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+- Verification before commit specified: yes。
+
+## Next Prompt
+
+### P-WB009-full-verification
+
+- Phase: `wb_phase_8_full_verification`
+- Status: `drafted`
+- Type: `cumulative verification`
+- Scope: 对关联台 MUI migration 做全量验证，不做功能实现；如发现失败，按 systematic debugging 处理后再进入 closeout。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/workbench_migration_master_goal_prompt.md、docs/refactor-ui/test_migration_strategy.md、PRODUCT.md、DESIGN.md、web/package.json 和 web/src/test/MuiContainment.test.ts。只执行验证和必要的测试断言补强，不做新 UI 功能。运行 full no-MUI scans：`if rg -n "from ['\\\"]@mui/|import\\s+[^;]*@mui/|from ['\\\"]@emotion/|import\\s+[^;]*@emotion/|@mui/x-|@mui/material|@mui/icons-material" web/src web/vite.config.ts --glob "!**/*.test.ts" --glob "!**/*.test.tsx"; then exit 1; else exit 0; fi`、`if rg -n "\\.Mui|Mui[A-Z]" web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi`、`if rg -n '"@emotion/|"@mui/' web/package.json web/package-lock.json; then exit 1; else exit 0; fi`。运行 workbench full test suite：`cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx WorkbenchApi.test.ts WorkbenchApiRuntimePath.test.ts`。运行 non-workbench containment regressions：`cd web && npx vitest run AutoTagRulesDrawer.test.tsx BankDetailsPage.test.tsx`。运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，并生成 P-WB010 closeout prompt。
 ```
