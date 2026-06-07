@@ -552,3 +552,4 @@
 | 2026-06-07 | `P081-phase-6-batch-accounting-page-shell-filters` | `refactor-ui` | `64aa7da3` | pushed |
 | 2026-06-07 | `P082-phase-6-batch-accounting-bank-list-and-summary` | `refactor-ui` | `7dd51d20` | pushed |
 | 2026-06-07 | `P083-phase-6-batch-accounting-oa-table` | `refactor-ui` | `1ae9068d` | pushed |
+| 2026-06-07 | `P084-phase-6-batch-accounting-overlays-feedback` | `refactor-ui` | `ef41572f` | pushed |

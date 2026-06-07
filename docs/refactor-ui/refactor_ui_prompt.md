@@ -4805,6 +4805,7 @@ Scope: `/batch-accounting` withdraw dialog, mutation feedback, remaining action 
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed。
   - `git diff --check`: passed。
+- Commit: `ef41572f feat: migrate batch accounting overlays`, pushed to `origin/refactor-ui`.
 - Next prompt generated: `MG-P084-phase-6-batch-accounting`.
 
 ### MG-P084-phase-6-batch-accounting
