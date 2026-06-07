@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P092-phase-6-etc-tickets-discovery`
+- Current Prompt ID: `P093-phase-6-etc-tickets-characterization-tests`
 - Current MG ID: `MG-P091-phase-6-turnover-ledger`
 
 ## Global Invariants
@@ -54,14 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 ETC tickets discovery prompt generated after TurnoverLedger cumulative MG。
-- Files touched in MG-P091:
-  - `docs/refactor-ui/modules/phase_6_turnover_ledger.md`
+- Scope: phase 6 ETC tickets characterization prompt generated after P092 discovery。
+- Files touched in P092:
+  - `docs/refactor-ui/modules/phase_6_etc_tickets.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: MG-P091 TurnoverLedger API/UI tests passed；table/common/HeroUI platform regression passed；build passed；corrected no-MUI grep passed；diff/status passed。
-- Failures: none for MG-P091.
-- Next action: 执行 `P092-phase-6-etc-tickets-discovery`。
+- Verification run: P092 discovery doc generated；required discovery terms pending verification command。
+- Failures: none for P092.
+- Next action: 执行 `P093-phase-6-etc-tickets-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -93,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P092-phase-6-etc-tickets-discovery` | TurnoverLedger MG verified；next ETC ticket management discovery |
+| page batches | `in_progress` | `P093-phase-6-etc-tickets-characterization-tests` | P092 ETC discovery implemented；next characterization tests |
 
 ## Verification Log
 
@@ -120,6 +120,10 @@
 | 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `git status --short --branch` | passed | Clean before MG docs update |
+| 2026-06-07 | `P092-phase-6-etc-tickets-discovery` | `test -f docs/refactor-ui/modules/phase_6_etc_tickets.md` | passed | ETC tickets module discovery doc exists |
+| 2026-06-07 | `P092-phase-6-etc-tickets-discovery` | `rg -n "P092-phase-6-etc-tickets-discovery\|Current MUI Inventory\|User-visible Entrypoints\|Recommended Micro-JIT Queue\|P093-phase-6-etc-tickets-characterization-tests" docs/refactor-ui/modules/phase_6_etc_tickets.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Discovery terms and next prompt recorded |
+| 2026-06-07 | `P092-phase-6-etc-tickets-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P092-phase-6-etc-tickets-discovery` | `git status --short --branch` | passed | Only P092 docs changed |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|renders grouped\|expands Jia Xiaohua\|confirms a manual zero-difference\|blocks cross-group selection\|shows bank-detail tags"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining drawer/dialog/feedback targets |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |

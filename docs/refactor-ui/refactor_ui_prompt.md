@@ -5187,7 +5187,7 @@ Scope: TurnoverLedger P085-P091 only.
 ### P092-phase-6-etc-tickets-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: `/etc-tickets` ETC ticket management discovery only。
 
@@ -5209,6 +5209,47 @@ Scope: `/etc-tickets` ETC ticket management discovery only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Next prompt: P093 characterization tests only after P092 discovery doc and grep pass。
+
+#### Execution Notes
+
+- Discovery doc created: `docs/refactor-ui/modules/phase_6_etc_tickets.md`。
+- Runtime implementation changed: no。
+- Test implementation changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Recorded current MUI inventory, user-visible entrypoints, existing test coverage, table layout risks, migration risks, recommended Micro-JIT queue and P093 prompt。
+- Verification:
+  - `test -f docs/refactor-ui/modules/phase_6_etc_tickets.md`: passed。
+  - `rg -n "P092-phase-6-etc-tickets-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P093-phase-6-etc-tickets-characterization-tests" docs/refactor-ui/modules/phase_6_etc_tickets.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P092 docs changed。
+- Next prompt generated: `P093-phase-6-etc-tickets-characterization-tests`。
+
+### P093-phase-6-etc-tickets-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: `/etc-tickets` characterization tests only。
+
+#### Prompt
+
+```text
+Prompt ID: P093-phase-6-etc-tickets-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/etc-tickets` characterization tests only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/test/EtcApi.test.ts、web/src/test/EtcOaNavigation.test.ts 和 web/src/features/etc/types.ts。只修改 `web/src/test/EtcTicketManagementPage.test.tsx`，新增 source-level no-MUI/project primitive contract 和必要的用户可见 form-factor characterization assertions。不得修改 runtime code、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。测试必须覆盖：page shell heading/actions, status segmented controls, batch/task list accessible names, upload/drop controls, reconciliation workspace/table accessible names, dialogs remain dialogs, OA detection actions, feedback/status surfaces, and existing table alignment expectations。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 source-level contract against current MUI runtime is expected-fail while existing/new behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P094 shell/filters/lists prompt。
+```
+
+#### Review
+
+- Single slice: yes，ETC characterization tests only。
+- Runtime implementation limited: yes，no runtime/API/backend changes。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract fails until ETC runtime slices clear MUI。
 
 ### MG Prompt Template
 

@@ -1,0 +1,171 @@
+# Phase 6 ETC Tickets UI Migration
+
+本文档记录 `/etc-tickets` 的 UI 平台迁移切片。目标是把 ETC 票据管理迁到 HeroUI/Tailwind/project primitives，同时保持用户使用感、业务流程、API contract、后台任务和关联台内部工作区不变。
+
+## P092 Discovery
+
+- Prompt ID: `P092-phase-6-etc-tickets-discovery`
+- Route: `/etc-tickets`
+- Page: `web/src/pages/EtcTicketManagementPage.tsx`
+- Tests:
+  - `web/src/test/EtcTicketManagementPage.test.tsx`
+  - `web/src/test/EtcApi.test.ts`
+  - `web/src/test/EtcOaNavigation.test.ts`
+- API/client facts:
+  - `web/src/features/etc/api.ts`
+  - `web/src/features/etc/types.ts`
+  - `web/src/features/etc/oaNavigation.ts`
+- Non-goals:
+  - 不修改 ETC API client contract、mock response shape、backend、read model、worker、background job semantics。
+  - 不修改 OA 草稿 URL 构造、domain event names/payloads、导入任务 job 语义。
+  - 不修改 `ReconciliationWorkbenchPage` 或 `web/src/components/workbench/*`。
+
+## Current MUI Inventory
+
+`EtcTicketManagementPage.tsx` 仍直接引入大量 MUI：
+
+- Icons: `AddOutlinedIcon`, `ArrowForwardOutlinedIcon`, `DeleteOutlineOutlinedIcon`, `ExpandLessOutlinedIcon`, `ExpandMoreOutlinedIcon`, `OpenInNewOutlinedIcon`, `RefreshOutlinedIcon`, `ReportProblemOutlinedIcon`, `UndoOutlinedIcon`, `UploadFileOutlinedIcon`.
+- Feedback/status: `Alert`.
+- Layout/surface: `Box`, `Paper`, `Stack`, `Divider`, `Typography`, `Collapse`.
+- Actions/inputs: `Button`, `IconButton`, `Checkbox`, `TextField`, `ToggleButton`, `ToggleButtonGroup`.
+- Lists: `List`, `ListItem`, `ListItemButton`, `ListItemText`.
+- Tables: `Table`, `TableBody`, `TableCell`, `TableContainer`, `TableHead`, `TableRow`.
+- Display helpers: `Chip`, `Tooltip`.
+
+The page already uses project primitives in some places:
+
+- `PageScaffold`
+- `StatePanel`
+- `AppDialog`
+- `usePageScrollSession`
+- `useBackgroundJobProgress`
+
+## User-visible Entrypoints
+
+The migration must preserve these visible entrypoints and accessible names:
+
+- Page heading: `ETC票据`.
+- Status segmented controls: `未提交 2`, `已提交 1`.
+- Primary page action: `提交OA`.
+- Batch/task lists:
+  - `ETC批次列表`
+  - `ETC批次列表区`
+  - `ETC对账任务列表`
+  - `ETC对账任务`
+- Upload areas:
+  - `ETC对账文件上传`
+  - `ETC导入动作`
+  - `上传票根网`
+  - batch-level upload blocks under ticket-root import area.
+- Reconciliation workspace:
+  - `ETC对账工作区`
+  - `人工核对处理`
+  - `ETC双侧核对明细`
+  - row selection controls: all, paired-only, clear.
+  - action: `接受推荐票根`.
+- Business batch detail:
+  - `ETC批次详情`
+  - `批次指标`
+  - `车牌汇总`
+  - invoice detail tables rendered by `renderEtcInvoiceTable`.
+- Task imported invoices:
+  - `已导入ETC发票`
+  - action: `移除发票`.
+- Dialogs:
+  - `删除批次`
+  - `删除任务`
+  - `删除源文件`
+  - `移除发票`
+  - `上传补充凭证`
+  - `撤销OA提交`
+  - `创建OA草稿`
+  - `OA自动检测`
+- OA actions:
+  - `打开草稿`
+  - `刷新检测`
+  - `撤销草稿`
+  - `确认已提交OA`
+  - `未提交OA`
+
+## Existing Test Coverage
+
+`EtcTicketManagementPage.test.tsx` currently has broad behavior coverage:
+
+- Background job completion refreshes business batch and reconciliation task lists.
+- Unsubmitted/submitted mode switching and whole-batch OA submit action.
+- Deleting unsubmitted batches, stale business batches, imported reconciliation tasks, source files and idempotent not-found cleanup.
+- Reconciliation workspace upload blocks, ticket-root TXT uploads, drag/drop, legacy PDF/TXT source handling and source issue display.
+- Paired reconciliation table rendering, one-line long descriptions, local row selection, confirmation metrics and selected-card submit payload.
+- Imported task invoice display, OA draft creation/detection workflow, delete imported task flow.
+- Suggested ticket manual reconciliation and batch invoice details.
+- Submitted mode hiding submit action and showing OA information.
+- Native table coverage already exists for batch invoice details: “renders batch invoice details with a native table instead of DataGrid”.
+
+Current gaps for migration:
+
+- No source-level no-MUI/project primitive contract for `EtcTicketManagementPage.tsx`.
+- Existing assertions still tolerate many MUI surfaces because the page is legacy MUI.
+- Need explicit coverage that old UI form factor remains stable:
+  - status mode remains segmented control equivalent.
+  - batch/task list remains list, not card-only replacement.
+  - reconciliation detail remains table.
+  - existing dialogs remain dialogs, not drawers.
+  - upload blocks remain upload/drop controls with file input semantics.
+  - OA automatic detection dialog keeps action availability.
+
+## Table Layout Risks
+
+- ETC page has multiple dense financial tables:
+  - invoice detail table via `renderEtcInvoiceTable`
+  - `ETC双侧核对明细`
+  - imported invoice table
+  - reconciliation card/evidence comparison rows
+- Amount/date columns must keep table layout system rules:
+  - money right aligned and tabular nums.
+  - date/time split remains compact and scannable.
+  - long descriptions remain one-line collapsed until expanded.
+  - checkbox/selection column has fixed width and does not shift table layout.
+  - explicit linked/suggested pair rows remain visually distinct without introducing new status chips that tests removed.
+
+## Migration Risks
+
+- File is large and mixed: upload controls, lists, tables, dialogs and OA status panels are in one page. Do not migrate all in one implementation prompt.
+- Several dialogs already use `AppDialog` but still contain MUI buttons/Stack/Typography/TextField. Dialog shell should remain dialog.
+- Existing tests use CSS selectors such as `.etc-upload-drop-grid`, `.etc-reconciliation-table-block`, `.etc-reconciliation-table-row`, `.etc-reconciliation-divider`. Preserve or deliberately migrate tests with equivalent behavior selectors only after characterization.
+- Existing tests query role/name for many buttons. Keep button labels stable.
+- Do not change OA draft submission/detection payloads or URL construction.
+- Do not remove idempotent stale-row cleanup behavior.
+
+## Recommended Micro-JIT Queue
+
+1. `P093-phase-6-etc-tickets-characterization-tests`
+   - Add source-level no-MUI/project primitive contract and form-factor characterization assertions.
+   - Expected source-level contract fails against current MUI runtime; behavior tests must pass.
+2. `P094-phase-6-etc-tickets-shell-filters-lists`
+   - Migrate icons, page shell local layout, status segmented controls, filter/list panels and batch/task list items.
+   - Do not touch reconciliation workspace tables or dialogs.
+3. `P095-phase-6-etc-tickets-upload-and-source-panels`
+   - Migrate upload blocks, source file list, ticket-root TXT upload controls and source issue/status notices.
+   - Preserve file input labels, drag/drop behavior and upload payloads.
+4. `P096-phase-6-etc-tickets-reconciliation-table`
+   - Migrate `ETC双侧核对明细`, row selection controls, expandable descriptions and reconciliation metrics.
+   - Keep table accessible name, row data test ids and selection payloads.
+5. `P097-phase-6-etc-tickets-detail-and-invoice-tables`
+   - Migrate business batch detail, imported invoice section, `renderEtcInvoiceTable`, metrics and import attempts.
+   - Preserve native table test intent and amount/date alignment.
+6. `P098-phase-6-etc-tickets-dialogs-oa-feedback`
+   - Migrate remaining dialog content controls, OA status/detection panels, feedback/status Alert surfaces and final MUI cleanup.
+   - Source-level contract must pass.
+7. `MG-P098-phase-6-etc-tickets`
+   - Run ETC page/API/navigation tests, table/common/HeroUI platform regressions, build, no-MUI grep and docs state check.
+
+## P093 Prompt Draft
+
+```text
+Prompt ID: P093-phase-6-etc-tickets-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/etc-tickets` characterization tests only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/test/EtcApi.test.ts、web/src/test/EtcOaNavigation.test.ts 和 web/src/features/etc/types.ts。只修改 `web/src/test/EtcTicketManagementPage.test.tsx`，新增 source-level no-MUI/project primitive contract 和必要的用户可见 form-factor characterization assertions。不得修改 runtime code、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。测试必须覆盖：page shell heading/actions, status segmented controls, batch/task list accessible names, upload/drop controls, reconciliation workspace/table accessible names, dialogs remain dialogs, OA detection actions, feedback/status surfaces, and existing table alignment expectations。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 source-level contract against current MUI runtime is expected-fail while existing/new behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P094 shell/filters/lists prompt。
+```
