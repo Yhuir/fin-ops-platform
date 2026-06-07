@@ -676,6 +676,7 @@
 | 2026-06-07 | `P101-phase-6-settings-shell-navigation` | `refactor-ui` | `7e615ac6` | pushed |
 | 2026-06-07 | `P102-phase-6-settings-projects-and-bank-accounts` | `refactor-ui` | `ea55bc7a` | pushed |
 | 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | `refactor-ui` | `140ed386` | pushed |
+| 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | `refactor-ui` | `c43685b9` | pushed |
 | 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `refactor-ui` | `4a958ce8` | pushed |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `refactor-ui` | `1c872bfe` | pushed |
 | 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `refactor-ui` | `379d24cd` | pushed |
