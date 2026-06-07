@@ -1,26 +1,6 @@
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import MenuItem from "@mui/material/MenuItem";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 
+import AppDrawer from "../common/AppDrawer";
 import type {
   CreateInputInvoiceUsageOaReverseBatchRequest,
   InputInvoiceUsageOaReverseBatch,
@@ -115,6 +95,8 @@ export default function OaReverseWorkspaceDrawer({
   const [manualReason, setManualReason] = useState("");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [targetApplicantCode, setTargetApplicantCode] = useState<string | null>(null);
+  const [targetApplicantMenuOpen, setTargetApplicantMenuOpen] = useState(false);
+  const targetApplicantLabelId = useId();
   const request = useMemo(
     () => ({ sourceFilters, selectedInvoiceIds, targetApplicantCode }),
     [sourceFilters, selectedInvoiceIds, targetApplicantCode],
@@ -132,6 +114,7 @@ export default function OaReverseWorkspaceDrawer({
       setManualReason("");
       setSelectedCandidateIds([]);
       setTargetApplicantCode(null);
+      setTargetApplicantMenuOpen(false);
       return undefined;
     }
 
@@ -277,250 +260,266 @@ export default function OaReverseWorkspaceDrawer({
   };
 
   return (
-    <Drawer
-      anchor="right"
-      open={open}
-      variant="persistent"
+    <AppDrawer
+      className="input-invoice-usage-oa-drawer"
+      closeLabel="关闭以发票反提 OA 工作流"
       onClose={onClose}
-      transitionDuration={{ enter: 180, exit: 140 }}
-      PaperProps={{
-        "aria-label": open ? "以发票反提 OA 工作流" : undefined,
-        role: "presentation",
-        sx: { width: { xs: "100%", sm: "min(920px, 58vw)" }, maxWidth: "100vw" },
-      }}
+      open={open}
+      subtitle="候选数、合计、拒绝原因和目标申请人均以后端返回为准"
+      title="以发票反提 OA"
+      modal={false}
+      width="min(920px, 100vw)"
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
-          <Box>
-            <Typography component="h2" variant="h6" fontWeight={900}>以发票反提 OA</Typography>
-            <Typography variant="caption" color="text.secondary">
-              候选数、合计、拒绝原因和目标申请人均以后端返回为准
-            </Typography>
-          </Box>
-          <IconButton aria-label="关闭以发票反提 OA 工作流" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 2.5 }}>
-          {loading ? (
-            <Stack direction="row" alignItems="center" spacing={1.25}>
-              <CircularProgress aria-label="正在加载反提 OA 预览" size={22} />
-              <Typography variant="body2" color="text.secondary">正在读取后端预览</Typography>
-            </Stack>
-          ) : null}
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          {feedback ? <Alert severity="success">{feedback}</Alert> : null}
-          {preview ? (
-            <>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
-                <SummaryMetric label="候选发票数" value={String(preview.invoiceCount)} />
-                <SummaryMetric label="候选价税合计" value={preview.totalWithTax} />
-              </Box>
-              {targetApplicants.length > 0 ? (
-                <TextField
-                  select
-                  size="small"
-                  label="目标 OA 申请人"
-                  value={selectedTargetApplicantCode}
-                  onChange={(event) => setTargetApplicantCode(event.target.value)}
+      <div aria-label="以发票反提 OA 工作流" className="input-invoice-usage-drawer-body">
+        {loading ? (
+          <div className="input-invoice-usage-drawer-loading">
+            <span aria-label="正在加载反提 OA 预览" className="input-invoice-usage-drawer-spinner" role="progressbar" />
+            <span>正在读取后端预览</span>
+          </div>
+        ) : null}
+        {error ? (
+          <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--error" role="alert">
+            {error}
+          </div>
+        ) : null}
+        {feedback ? (
+          <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--success" role="status">
+            {feedback}
+          </div>
+        ) : null}
+        {preview ? (
+          <>
+            <div className="input-invoice-usage-oa-metrics">
+              <SummaryMetric label="候选发票数" value={String(preview.invoiceCount)} />
+              <SummaryMetric label="候选价税合计" value={preview.totalWithTax} />
+            </div>
+            {targetApplicants.length > 0 ? (
+              <div className="input-invoice-usage-rules-field input-invoice-usage-oa-target">
+                <span id={targetApplicantLabelId}>目标 OA 申请人</span>
+                <button
+                  aria-expanded={targetApplicantMenuOpen}
+                  aria-haspopup="listbox"
+                  aria-labelledby={targetApplicantLabelId}
+                  className="input-invoice-usage-oa-select"
+                  onClick={() => setTargetApplicantMenuOpen((current) => !current)}
+                  type="button"
                 >
-                  {targetApplicants.map((applicant) => (
-                    <MenuItem key={applicant.code} value={applicant.code}>
-                      {applicant.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              ) : null}
-              {preview.warnings && preview.warnings.length > 0 ? (
-                <Stack spacing={1}>
-                  {preview.warnings.map((warning) => <Alert key={warning} severity="info">{warning}</Alert>)}
-                </Stack>
-              ) : null}
-              {!preview.canCreateDraft ? (
-                <Alert severity="info">
-                  {preview.unavailableReason || preview.nextAction || "后端当前未允许创建 OA 草稿。"}
-                </Alert>
-              ) : null}
-              <Section title="目标 OA 分组">
-                {preview.groups.length === 0 ? <Typography variant="body2" color="text.secondary">暂无可提交分组。</Typography> : null}
-                <Stack spacing={1}>
-                  {preview.groups.map((group) => (
-                    <Paper key={group.targetApplicantCode || group.targetApplicantName} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
-                        <Typography variant="subtitle2" fontWeight={900}>{group.targetApplicantName}</Typography>
-                        {group.targetApplicantCode ? <Chip size="small" variant="outlined" label={group.targetApplicantCode} /> : null}
-                        <Chip size="small" label={`${group.invoiceCount} 张`} />
-                        <Chip size="small" color="primary" variant="outlined" label={group.totalWithTax} />
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Stack>
-              </Section>
-              <Section title="不可提交原因">
-                {rejected.length === 0 ? <Typography variant="body2" color="text.secondary">当前预览未返回不可提交发票。</Typography> : null}
-                <Stack spacing={1}>
-                  {rejected.map((item) => (
-                    <Alert key={item.invoiceId} severity="warning">
-                      <Stack spacing={0.25}>
-                        <Typography variant="body2" fontWeight={800}>{item.invoiceNumber || item.invoiceId}</Typography>
-                        <Typography variant="body2">{item.reason}</Typography>
-                      </Stack>
-                    </Alert>
-                  ))}
-                </Stack>
-              </Section>
-              <Section title="候选发票清单">
-                {candidateInvoices.length > 0 ? (
-                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                    <Button size="small" onClick={() => setSelectedCandidateIds(candidateInvoices.map((invoice) => invoice.invoiceId))}>全选候选</Button>
-                    <Button size="small" onClick={() => setSelectedCandidateIds([])}>清空选择</Button>
-                    <Chip size="small" variant="outlined" label={`已选 ${selectedCandidateIds.length} 张`} />
-                  </Stack>
-                ) : null}
-                <TableContainer component={Paper} variant="outlined">
-                  <Table size="small" aria-label="反提 OA 候选发票清单">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell padding="checkbox">选择</TableCell>
-                        <TableCell>发票号码</TableCell>
-                        <TableCell>销方</TableCell>
-                        <TableCell>开票日期</TableCell>
-                        <TableCell align="right">价税合计</TableCell>
-                        <TableCell>状态</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {candidateInvoices.map((invoice) => (
-                        <TableRow key={invoice.invoiceId}>
-                          <TableCell padding="checkbox">
-                            <Checkbox
-                              size="small"
-                              checked={selectedCandidateIdSet.has(invoice.invoiceId)}
-                              inputProps={{ "aria-label": `选择候选发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}` }}
-                              onChange={(event) => {
-                                setSelectedCandidateIds((current) => {
-                                  const next = new Set(current);
-                                  if (event.target.checked) {
-                                    next.add(invoice.invoiceId);
-                                  } else {
-                                    next.delete(invoice.invoiceId);
-                                  }
-                                  return candidateInvoices
-                                    .map((candidate) => candidate.invoiceId)
-                                    .filter((invoiceId) => next.has(invoiceId));
-                                });
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</TableCell>
-                          <TableCell>{invoice.sellerName || "-"}</TableCell>
-                          <TableCell>{invoice.issueDate || "-"}</TableCell>
-                          <TableCell align="right">{invoice.totalWithTax || "-"}</TableCell>
-                          <TableCell>{invoice.paymentStatusLabel || "候选"}</TableCell>
-                        </TableRow>
-                      ))}
-                      {candidateInvoices.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={6}>当前预览未返回候选发票。</TableCell>
-                        </TableRow>
-                      ) : null}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Section>
-              <Section title="批次与 OA 草稿">
-                {batch ? <BatchStatusPanel batch={batch} /> : <Typography variant="body2" color="text.secondary">尚未创建本地批次。</Typography>}
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  {canCreateBatch ? (
-                    <Button
-                      variant="contained"
-                      disabled={Boolean(actionLoading)}
-                      onClick={handleCreateBatch}
-                    >
-                      {actionLoading === "createBatch" ? "创建批次中..." : "创建本地批次"}
-                    </Button>
-                  ) : null}
-                  {canCreateDraft ? (
-                    <Button
-                      variant="contained"
-                      disabled={Boolean(actionLoading)}
-                      onClick={handleCreateDraft}
-                    >
-                      {actionLoading === "createDraft" ? "创建草稿中..." : "创建 OA 草稿"}
-                    </Button>
-                  ) : null}
-                  {batch?.oaDraftUrl ? (
-                    <Button
-                      variant="outlined"
-                      component="a"
-                      href={batch.oaDraftUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      打开 OA 草稿
-                    </Button>
-                  ) : null}
-                  {canRefreshStatus ? (
-                    <Button
-                      variant="outlined"
-                      disabled={Boolean(actionLoading)}
-                      onClick={handleRefreshStatus}
-                    >
-                      {actionLoading === "refreshStatus" ? "刷新中..." : "刷新 OA 状态"}
-                    </Button>
-                  ) : null}
-                </Stack>
-                {canRevoke ? (
-                  <Stack spacing={1}>
-                    <TextField
-                      label="撤销原因"
-                      size="small"
-                      value={revokeReason}
-                      onChange={(event) => setRevokeReason(event.target.value)}
-                    />
-                    <Button
-                      variant="outlined"
-                      color="warning"
-                      disabled={Boolean(actionLoading) || !revokeReason.trim()}
-                      onClick={handleRevokeDraft}
-                    >
-                      {actionLoading === "revokeDraft" ? "撤销中..." : "撤销本地草稿绑定"}
-                    </Button>
-                  </Stack>
-                ) : null}
-                {canManualFallback ? (
-                  <Stack spacing={1}>
-                    <TextField
-                      label="人工处理原因"
-                      size="small"
-                      value={manualReason}
-                      onChange={(event) => setManualReason(event.target.value)}
-                    />
-                    <Stack direction="row" spacing={1}>
-                      <Button
-                        variant="outlined"
-                        disabled={Boolean(actionLoading) || !manualReason.trim()}
-                        onClick={() => handleManualStatus("submitted")}
+                  {targetApplicants.find((applicant) => applicant.code === selectedTargetApplicantCode)?.name
+                    ?? preview.targetApplicantName
+                    ?? "请选择"}
+                </button>
+                {targetApplicantMenuOpen ? (
+                  <div aria-labelledby={targetApplicantLabelId} className="input-invoice-usage-oa-options" role="listbox">
+                    {targetApplicants.map((applicant) => (
+                      <button
+                        aria-selected={applicant.code === selectedTargetApplicantCode}
+                        className="input-invoice-usage-oa-option"
+                        key={applicant.code}
+                        onClick={() => {
+                          setTargetApplicantCode(applicant.code);
+                          setTargetApplicantMenuOpen(false);
+                        }}
+                        role="option"
+                        type="button"
                       >
-                        标记已进入 OA
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        disabled={Boolean(actionLoading) || !manualReason.trim()}
-                        onClick={() => handleManualStatus("not_submitted")}
-                      >
-                        标记未进入 OA
-                      </Button>
-                    </Stack>
-                  </Stack>
+                        {applicant.name}
+                      </button>
+                    ))}
+                  </div>
                 ) : null}
-              </Section>
-            </>
-          ) : null}
-        </Stack>
-      </Stack>
-    </Drawer>
+              </div>
+            ) : null}
+            {preview.warnings && preview.warnings.length > 0 ? (
+              <div className="input-invoice-usage-oa-stack">
+                {preview.warnings.map((warning) => (
+                  <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info" key={warning}>
+                    {warning}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {!preview.canCreateDraft ? (
+              <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info">
+                {preview.unavailableReason || preview.nextAction || "后端当前未允许创建 OA 草稿。"}
+              </div>
+            ) : null}
+            <Section title="目标 OA 分组">
+              {preview.groups.length === 0 ? <p className="input-invoice-usage-rules-empty">暂无可提交分组。</p> : null}
+              <div className="input-invoice-usage-oa-stack">
+                {preview.groups.map((group) => (
+                  <article className="input-invoice-usage-oa-group" key={group.targetApplicantCode || group.targetApplicantName}>
+                    <strong>{group.targetApplicantName}</strong>
+                    {group.targetApplicantCode ? <span className="input-invoice-usage-rules-tag">{group.targetApplicantCode}</span> : null}
+                    <span className="input-invoice-usage-rules-tag">{group.invoiceCount} 张</span>
+                    <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{group.totalWithTax}</span>
+                  </article>
+                ))}
+              </div>
+            </Section>
+            <Section title="不可提交原因">
+              {rejected.length === 0 ? <p className="input-invoice-usage-rules-empty">当前预览未返回不可提交发票。</p> : null}
+              <div className="input-invoice-usage-oa-stack">
+                {rejected.map((item) => (
+                  <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--warning" key={item.invoiceId}>
+                    <strong>{item.invoiceNumber || item.invoiceId}</strong>
+                    <span>{item.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </Section>
+            <Section title="候选发票清单">
+              {candidateInvoices.length > 0 ? (
+                <div className="input-invoice-usage-oa-actions">
+                  <button
+                    className="input-invoice-usage-button"
+                    onClick={() => setSelectedCandidateIds(candidateInvoices.map((invoice) => invoice.invoiceId))}
+                    type="button"
+                  >
+                    全选候选
+                  </button>
+                  <button className="input-invoice-usage-button" onClick={() => setSelectedCandidateIds([])} type="button">
+                    清空选择
+                  </button>
+                  <span className="input-invoice-usage-rules-tag">已选 {selectedCandidateIds.length} 张</span>
+                </div>
+              ) : null}
+              <div className="input-invoice-usage-rules-table-shell">
+                <table aria-label="反提 OA 候选发票清单" className="input-invoice-usage-oa-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">选择</th>
+                      <th scope="col">发票号码</th>
+                      <th scope="col">销方</th>
+                      <th scope="col">开票日期</th>
+                      <th scope="col">价税合计</th>
+                      <th scope="col">状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {candidateInvoices.map((invoice) => (
+                      <tr key={invoice.invoiceId}>
+                        <td className="input-invoice-usage-oa-table__select">
+                          <input
+                            aria-label={`选择候选发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}`}
+                            checked={selectedCandidateIdSet.has(invoice.invoiceId)}
+                            onChange={(event) => {
+                              setSelectedCandidateIds((current) => {
+                                const next = new Set(current);
+                                if (event.target.checked) {
+                                  next.add(invoice.invoiceId);
+                                } else {
+                                  next.delete(invoice.invoiceId);
+                                }
+                                return candidateInvoices
+                                  .map((candidate) => candidate.invoiceId)
+                                  .filter((invoiceId) => next.has(invoiceId));
+                              });
+                            }}
+                            type="checkbox"
+                          />
+                        </td>
+                        <td>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</td>
+                        <td>{invoice.sellerName || "-"}</td>
+                        <td>{invoice.issueDate || "-"}</td>
+                        <td className="input-invoice-usage-oa-table__amount">{invoice.totalWithTax || "-"}</td>
+                        <td>{invoice.paymentStatusLabel || "候选"}</td>
+                      </tr>
+                    ))}
+                    {candidateInvoices.length === 0 ? (
+                      <tr>
+                        <td colSpan={6}>当前预览未返回候选发票。</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+            <Section title="批次与 OA 草稿">
+              {batch ? <BatchStatusPanel batch={batch} /> : <p className="input-invoice-usage-rules-empty">尚未创建本地批次。</p>}
+              <div className="input-invoice-usage-oa-actions">
+                {canCreateBatch ? (
+                  <button
+                    className="input-invoice-usage-button input-invoice-usage-button--primary"
+                    disabled={Boolean(actionLoading)}
+                    onClick={handleCreateBatch}
+                    type="button"
+                  >
+                    {actionLoading === "createBatch" ? "创建批次中..." : "创建本地批次"}
+                  </button>
+                ) : null}
+                {canCreateDraft ? (
+                  <button
+                    className="input-invoice-usage-button input-invoice-usage-button--primary"
+                    disabled={Boolean(actionLoading)}
+                    onClick={handleCreateDraft}
+                    type="button"
+                  >
+                    {actionLoading === "createDraft" ? "创建草稿中..." : "创建 OA 草稿"}
+                  </button>
+                ) : null}
+                {batch?.oaDraftUrl ? (
+                  <a className="input-invoice-usage-button" href={batch.oaDraftUrl} rel="noreferrer" target="_blank">
+                    打开 OA 草稿
+                  </a>
+                ) : null}
+                {canRefreshStatus ? (
+                  <button
+                    className="input-invoice-usage-button"
+                    disabled={Boolean(actionLoading)}
+                    onClick={handleRefreshStatus}
+                    type="button"
+                  >
+                    {actionLoading === "refreshStatus" ? "刷新中..." : "刷新 OA 状态"}
+                  </button>
+                ) : null}
+              </div>
+              {canRevoke ? (
+                <div className="input-invoice-usage-oa-form">
+                  <label className="input-invoice-usage-rules-field">
+                    <span>撤销原因</span>
+                    <input onChange={(event) => setRevokeReason(event.target.value)} value={revokeReason} />
+                  </label>
+                  <button
+                    className="input-invoice-usage-button"
+                    disabled={Boolean(actionLoading) || !revokeReason.trim()}
+                    onClick={handleRevokeDraft}
+                    type="button"
+                  >
+                    {actionLoading === "revokeDraft" ? "撤销中..." : "撤销本地草稿绑定"}
+                  </button>
+                </div>
+              ) : null}
+              {canManualFallback ? (
+                <div className="input-invoice-usage-oa-form">
+                  <label className="input-invoice-usage-rules-field">
+                    <span>人工处理原因</span>
+                    <input onChange={(event) => setManualReason(event.target.value)} value={manualReason} />
+                  </label>
+                  <div className="input-invoice-usage-oa-actions">
+                    <button
+                      className="input-invoice-usage-button"
+                      disabled={Boolean(actionLoading) || !manualReason.trim()}
+                      onClick={() => handleManualStatus("submitted")}
+                      type="button"
+                    >
+                      标记已进入 OA
+                    </button>
+                    <button
+                      className="input-invoice-usage-button"
+                      disabled={Boolean(actionLoading) || !manualReason.trim()}
+                      onClick={() => handleManualStatus("not_submitted")}
+                      type="button"
+                    >
+                      标记未进入 OA
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </Section>
+          </>
+        ) : null}
+      </div>
+    </AppDrawer>
   );
 }
 
@@ -592,39 +591,35 @@ function createIdempotencyKey(prefix: string) {
 
 function SummaryMetric({ label, value }: { label: string; value: string }) {
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-      <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
-      <Typography variant="h6" fontWeight={900}>{value}</Typography>
-    </Paper>
+    <article className="input-invoice-usage-oa-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
   );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Stack spacing={1}>
-      <Typography variant="subtitle2" fontWeight={900}>{title}</Typography>
+    <section className="input-invoice-usage-rules-section">
+      <h3>{title}</h3>
       {children}
-    </Stack>
+    </section>
   );
 }
 
 function BatchStatusPanel({ batch }: { batch: InputInvoiceUsageOaReverseBatch }) {
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-      <Stack spacing={1}>
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
-          <Typography variant="subtitle2" fontWeight={900}>{batch.batchId}</Typography>
-          <Chip size="small" label={`版本 ${batch.version}`} variant="outlined" />
-          <Chip size="small" label={batch.status || "未知状态"} />
-          {batch.idempotentReplay ? <Chip size="small" label="幂等重放" variant="outlined" /> : null}
-        </Stack>
-        <Typography variant="body2" color="text.secondary">
-          合计 {batch.totalWithTax || "-"}，目标申请人 {batch.targetApplicantName || batch.targetApplicantCode || "-"}
-        </Typography>
-        {batch.oaDraftId ? <Typography variant="body2">OA 草稿 ID：{batch.oaDraftId}</Typography> : null}
-        {batch.oaDetectionStatus ? <Typography variant="body2">OA 检测状态：{batch.oaDetectionStatus}</Typography> : null}
-        {batch.nextRunAt ? <Typography variant="body2">下次检测：{batch.nextRunAt}</Typography> : null}
-      </Stack>
-    </Paper>
+    <article className="input-invoice-usage-oa-batch">
+      <div className="input-invoice-usage-oa-group">
+        <strong>{batch.batchId}</strong>
+        <span className="input-invoice-usage-rules-tag">版本 {batch.version}</span>
+        <span className="input-invoice-usage-rules-tag">{batch.status || "未知状态"}</span>
+        {batch.idempotentReplay ? <span className="input-invoice-usage-rules-tag">幂等重放</span> : null}
+      </div>
+      <p>合计 {batch.totalWithTax || "-"}，目标申请人 {batch.targetApplicantName || batch.targetApplicantCode || "-"}</p>
+      {batch.oaDraftId ? <p>OA 草稿 ID：{batch.oaDraftId}</p> : null}
+      {batch.oaDetectionStatus ? <p>OA 检测状态：{batch.oaDetectionStatus}</p> : null}
+      {batch.nextRunAt ? <p>下次检测：{batch.nextRunAt}</p> : null}
+    </article>
   );
 }

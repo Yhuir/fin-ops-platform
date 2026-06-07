@@ -505,3 +505,41 @@ Scope: `OaReverseWorkspaceDrawer.tsx` only, plus necessary styles/tests. This is
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、web/src/components/common/AppDrawer.tsx、web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx、web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 OA reverse workspace drawer 的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Box`、`Button`、`Checkbox`、`Chip`、`CircularProgress`、`Divider`、`Drawer`、`IconButton`、`MenuItem`、`Paper`、`Stack`、`Table*`、`TextField`、`Typography`。使用 `AppDrawer`、project/native status messages/loading/metrics/sections/tags/table/checkbox/select/inputs/buttons/links。必须保留 right drawer accessible label `以发票反提 OA 工作流`、close label `关闭以发票反提 OA 工作流`、title `以发票反提 OA`、subtitle text meaning、loading progress label `正在加载反提 OA 预览` and text `正在读取后端预览`、backend-only preview totals/groups/rejections/warnings/unavailable reason, target applicant select label `目标 OA 申请人`, candidate controls `全选候选`/`清空选择`/`已选 <n> 张`, table `反提 OA 候选发票清单`, candidate checkbox labels `选择候选发票 <display no>`, empty candidate row `当前预览未返回候选发票。`, batch section `批次与 OA 草稿`, batch status fields, action buttons `创建本地批次`、`创建 OA 草稿`、`打开 OA 草稿`、`刷新 OA 状态`、`撤销本地草稿绑定`、`标记已进入 OA`、`标记未进入 OA`, reason labels `撤销原因` and `人工处理原因`, versioned/idempotent request payload behavior and manual fallback visibility。不得修改 page shell、main table、filter menu、detail/export/payment-rules drawers、input invoice usage API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "OA reverse drawer|workflow primitive targets|parent state can keep|opening and closing workflow drawers"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，now all input invoice usage source-level no-MUI contract failures must clear；运行 `cd web && npm run build`；运行 OA reverse MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|@mui/material/Drawer|TextField|TableCell|TableRow|TableHead|TableBody|Checkbox|Chip|MenuItem' web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx; then exit 1; else exit 0; fi`；运行 full input invoice usage residue grep：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi`。运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 InputInvoiceUsage cumulative MG prompt。
 ```
+
+## Execution Update: P060 OA Reverse Workspace Drawer
+
+- Status: verified.
+- Files changed:
+  - `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`
+  - `web/src/components/common/AppDrawer.tsx`
+  - `web/src/app/styles.css`
+- Runtime implementation changed: OA reverse workflow right drawer only, plus an optional persistent mode on `AppDrawer` to preserve the old workflow drawer behavior.
+- Page shell/main table/filter menu/detail/export/payment-rules drawers changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - Replaced OA reverse MUI Drawer/table/form/selection/tag/status/action components with `AppDrawer`, native/project metrics, sections, tags, candidate table, checkbox inputs, target applicant listbox, reason inputs, buttons and link.
+  - Added `AppDrawer modal={false}` persistent mode with default `modal=true` unchanged for existing drawers. This preserves the old persistent drawer behavior where the user can switch between workflow drawers by clicking the page-level action while the OA drawer is open.
+  - Preserved backend-driven preview totals/groups/rejections/warnings/unavailable reason, target applicant preview refresh, candidate selection, create batch/draft, refresh status, revoke binding, manual fallback and versioned/idempotent payload behavior.
+  - Added OA reverse drawer styles in `web/src/app/styles.css`.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|@mui/material/Drawer|TextField|TableCell|TableRow|TableHead|TableBody|Checkbox|Chip|MenuItem' web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx; then exit 1; else exit 0; fi`: passed.
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "OA reverse drawer|workflow primitive targets|parent state can keep|opening and closing workflow drawers"`: passed, 6 tests passed.
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: passed, 21 tests passed.
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 12 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+
+## Current Expected Failures After P060
+
+None in `/input-invoice-usage`: page shell, main table, filter menu, detail/export/payment-rules/OA reverse drawers now satisfy the source-level no-MUI contracts and module behavior tests pass.
+
+## MG-P060 Prompt Draft
+
+```text
+Prompt ID: MG-P060-phase-6-input-invoice-usage
+Scope: completed `/input-invoice-usage` page batch P053-P060.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/module_inventory.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/*、web/src/components/common/AppDrawer.tsx、web/src/app/styles.css 和当前 git status。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff scope、测试结果和文档状态。确认已通过：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi`、`cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`、`cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build`、`git diff --check`。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_input_invoice_usage.md web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx web/src/components/common/AppDrawer.tsx web/src/app/styles.css`；如果当前 diff 还包含本模块此前未提交的 P060 scope 文件，必须逐个精确列出；禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: complete input invoice usage ui migration` 或更准确的 InputInvoiceUsage module message。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
+```

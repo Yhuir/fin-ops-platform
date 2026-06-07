@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer`
+- Current Prompt ID: `MG-P060-phase-6-input-invoice-usage`
 - Current MG ID: `MG-P052-phase-6-pending-invoices`
 
 ## Global Invariants
@@ -19,7 +19,7 @@
 | API contract untouched | yes | 未修改 AppHealth API client contract 或 backend |
 | Read model / worker untouched | yes | 未修改 read model、worker 或 queue |
 | Reconciliation workbench internals frozen | yes | 当前未改 `ReconciliationWorkbenchPage` 或 `web/src/components/workbench/*` |
-| Non-workbench MUI additions | none | InputInvoiceUsage page/table/filter/detail/export/payment-rules surfaces now have no scoped MUI; P060 will clear OA reverse drawer |
+| Non-workbench MUI additions | none | InputInvoiceUsage page/table/filter/detail/export/payment-rules/OA-reverse surfaces now have no scoped MUI |
 | User-visible actions preserved | documented | `baseline_inventory.md`、`module_inventory.md` 已要求逐页检查 |
 | Behavior equivalence | documented | 旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗 |
 | HeroUI MCP active | yes | 当前会话已调用 HeroUI MCP quick start、theming、Table/Drawer/Modal docs |
@@ -54,16 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 input invoice usage OA reverse workspace drawer prompt generated after P059 payment rules drawer migration。
+- Scope: phase 6 input invoice usage cumulative MG prompt generated after P060 OA reverse workspace drawer migration。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
-  - `web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx`
+  - `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`
+  - `web/src/components/common/AppDrawer.tsx`
   - `web/src/app/styles.css`
-- Verification run: P059 scoped grep passed, payment rules focused tests expected-fail with only OA reverse source residue, full module tests expected-fail with only OA reverse source residue, build passed。
-- Failures: expected source-level no-MUI failures remain for unimplemented OA reverse migration。
-- Next action: 执行 `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer`。
+- Verification run: P060 scoped/full input invoice usage grep passed, focused OA/workflow tests passed, full module tests passed, common/HeroUI smoke tests passed, build passed。
+- Failures: none in input invoice usage module tests。
+- Next action: 执行 `MG-P060-phase-6-input-invoice-usage`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +96,20 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | InputInvoiceUsage P059 payment rules drawer verified as expected-fail；next OA reverse workspace drawer |
+| page batches | `in_progress` | `MG-P060-phase-6-input-invoice-usage` | InputInvoiceUsage P060 verified；next cumulative MG |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `if rg -n '@mui/\|Mui[A-Z]\|CloseOutlinedIcon\|CircularProgress\|@mui/material/Drawer\|TextField\|TableCell\|TableRow\|TableHead\|TableBody\|Checkbox\|Chip\|MenuItem' web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx; then exit 1; else exit 0; fi` | passed | OA reverse drawer has no scoped MUI residue |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `if rg -n '@mui/\|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi` | passed | InputInvoiceUsage page and components have no scoped MUI residue |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "OA reverse drawer\|workflow primitive targets\|parent state can keep\|opening and closing workflow drawers"` | passed | 6 tests passed |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx` | passed | 21 tests passed |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 12 tests passed |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `git status --short --branch` | passed | Only P060 OA drawer, AppDrawer persistent mode, styles, and docs files changed |
 | 2026-06-07 | `P059-phase-6-input-invoice-usage-payment-rules-drawer` | `if rg -n '@mui/\|Mui[A-Z]\|CloseOutlinedIcon\|CircularProgress\|@mui/material/Drawer\|TextField\|TableCell\|TableRow\|TableHead\|TableBody\|Chip' web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx; then exit 1; else exit 0; fi` | passed | Payment rules drawer has no scoped MUI residue |
 | 2026-06-07 | `P059-phase-6-input-invoice-usage-payment-rules-drawer` | `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "payment status rules\|workflow primitive targets"` | expected-fail | Payment rules behavior passed; only intended OA-reverse source-level failure remains |
 | 2026-06-07 | `P059-phase-6-input-invoice-usage-payment-rules-drawer` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx` | expected-fail | 19 passed, 2 intended source-level failures; payment rules drawer cleared from failure lists |

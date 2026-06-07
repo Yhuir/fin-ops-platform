@@ -3543,6 +3543,51 @@ Scope: `OaReverseWorkspaceDrawer.tsx` only, plus necessary styles/tests. This is
 - Expected failure allowed: no，after P060 the input invoice usage source-level no-MUI contracts should pass.
 - Next prompt: InputInvoiceUsage cumulative MG after P060 implementation is verified.
 
+#### Execution Notes
+
+- Migrated `OaReverseWorkspaceDrawer.tsx` from MUI Drawer/table/form/selection/tag/status/action components to `AppDrawer` plus native/project markup.
+- Added optional `AppDrawer modal={false}` persistent mode with default `modal=true` unchanged. This was required to preserve the old OA workflow drawer behavior where page-level workflow buttons remain reachable while the right drawer is open.
+- Preserved backend-driven preview totals/groups/rejections/warnings/unavailable reason, target applicant preview refresh, candidate selection, create batch/draft, refresh status, revoke binding, manual fallback and versioned/idempotent payload behavior.
+- Added OA reverse drawer metrics, group, action, candidate table, target applicant option, form and batch styles in `web/src/app/styles.css`.
+- Did not modify page shell, main table, filter menu, detail/export/payment-rules drawers, API/mock/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|@mui/material/Drawer|TextField|TableCell|TableRow|TableHead|TableBody|Checkbox|Chip|MenuItem' web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx; then exit 1; else exit 0; fi`: passed。
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "OA reverse drawer|workflow primitive targets|parent state can keep|opening and closing workflow drawers"`: passed, 6 tests passed。
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: passed, 21 tests passed。
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 12 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### MG-P060-phase-6-input-invoice-usage
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `cumulative_mg`
+- Scope: completed `/input-invoice-usage` page batch P053-P060.
+
+#### Prompt
+
+```text
+Prompt ID: MG-P060-phase-6-input-invoice-usage
+Scope: completed `/input-invoice-usage` page batch P053-P060.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/module_inventory.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/*、web/src/components/common/AppDrawer.tsx、web/src/app/styles.css 和当前 git status。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff scope、测试结果和文档状态。确认已通过：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi`、`cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`、`cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build`、`git diff --check`。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_input_invoice_usage.md web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx web/src/components/common/AppDrawer.tsx web/src/app/styles.css`；如果当前 diff 还包含本模块此前未提交的 P060 scope 文件，必须逐个精确列出；禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: complete input invoice usage ui migration` 或更准确的 InputInvoiceUsage module message。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
+```
+
+#### Review
+
+- Current branch must be `refactor-ui`.
+- Scope is cumulative for the completed InputInvoiceUsage module slice; current unstaged P060 diff must be exact-staged only.
+- Backend/API/read model/worker untouched: required.
+- Workbench internals frozen: required.
+- Verification is available and passing: source grep, focused workflow tests, full module tests, common/HeroUI smoke tests, build and diff check.
+- After MG push, generate the next Micro-JIT prompt from `refactor-ui` branch.
+
 ### MG Prompt Template
 
 ```text

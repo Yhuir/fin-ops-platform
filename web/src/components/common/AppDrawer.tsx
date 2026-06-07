@@ -9,6 +9,7 @@ type AppDrawerProps = {
   children: ReactNode;
   closeLabel?: string;
   footer?: ReactNode;
+  modal?: boolean;
   width?: number | string;
   onClose: () => void;
 };
@@ -25,6 +26,7 @@ export default function AppDrawer({
   children,
   closeLabel,
   footer,
+  modal = true,
   width = 420,
   onClose,
 }: AppDrawerProps) {
@@ -32,6 +34,32 @@ export default function AppDrawer({
   const drawerStyle: AppDrawerStyle = {
     "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
+
+  if (!modal) {
+    if (!open) {
+      return null;
+    }
+
+    return (
+      <aside className="finance-drawer__content finance-drawer__content--persistent" data-placement="right">
+        <section className={`finance-drawer${className ? ` ${className}` : ""}`} role="presentation" style={drawerStyle}>
+          <header className="finance-drawer__header">
+            <div className="finance-drawer__heading">
+              <h2 className="finance-drawer__title" id={titleId}>
+                {title}
+              </h2>
+              {subtitle ? <div className="finance-drawer__subtitle">{subtitle}</div> : null}
+            </div>
+            <Button aria-label={closeLabel ?? "关闭抽屉"} isIconOnly onPress={onClose} size="sm" variant="tertiary">
+              <span aria-hidden="true">×</span>
+            </Button>
+          </header>
+          <div className="finance-drawer__body">{children}</div>
+          {footer ? <footer className="finance-drawer__footer">{footer}</footer> : null}
+        </section>
+      </aside>
+    );
+  }
 
   return (
     <Drawer.Backdrop
