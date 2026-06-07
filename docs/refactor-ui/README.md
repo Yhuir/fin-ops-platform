@@ -135,3 +135,21 @@ phase 只有在该阶段所有必要 prompt 和 MG 都 verified 后才能进入�
 - 依赖升级阶段必须明确 React 19 兼容风险和回滚方式。
 - 关联台冻结规则必须在 shell 迁移、样式清理和 MUI containment 阶段重复检查。
 - UI 变化较大的切片必须做浏览器 smoke 或截图验证，至少覆盖桌面、紧凑屏、OA embedded 和关联台 wrapper。
+
+## Closeout 状态
+
+截至 `2026-06-07`，`phase_0_baseline` 到 `phase_9_closeout` 已完成并通过验证。非关联台 runtime 已迁移到 React 19 + HeroUI v3 + Tailwind CSS v4/project primitives；MUI 仅保留在冻结的关联台内部工作区和测试专用 legacy helper/provider 边界内。
+
+最终验证事实源见：
+
+- `refactor_ui_state.md`
+- `refactor_ui_prompt.md`
+- `modules/phase_8_full_verification.md`
+
+已知剩余风险：
+
+- P114/P115 未执行浏览器人工视觉 smoke；自动化测试覆盖了主要路由和交互，但桌面/紧凑屏/OA embedded 的人工视觉验收仍建议作为后续 QA。
+- Vite build 仍报告当前单包 chunk size warning，代码拆分不属于本次 UI 平台迁移范围。
+- HeroUI/Tailwind CSS build 仍报告生成选择器 minifier warning。
+- Import page tests 中仍有 React Aria `<Focusable> child must be focusable` warning，建议作为后续 accessibility cleanup 切片。
+- 冻结关联台内部工作区仍可使用 MUI；如要迁移关联台内部，必须另起专项计划。

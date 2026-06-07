@@ -4,7 +4,7 @@
 
 ## Current Phase
 
-- Phase: `phase_8_full_verification`
+- Phase: `phase_9_closeout`
 - Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
@@ -39,7 +39,7 @@
 | `phase_6_page_batches` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches、BatchAccounting、TurnoverLedger、ETC tickets and Settings MG verified |
 | `phase_7_mui_containment` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P113 verified；non-workbench runtime no-MUI contract passed；frozen workbench legacy isolated |
 | `phase_8_full_verification` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P114 full verification passed: source contract, full Vitest, build, diff check |
-| `phase_9_closeout` | `in_progress` | 2026-06-07 |  | `pending` | Next: closeout docs, final risk register, push status |
+| `phase_9_closeout` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P115 closeout completed; final docs/status/risk register updated |
 
 ## Status Values
 
@@ -54,20 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 9 closeout generated after P114 full verification。
-- Files touched in P114:
-  - `web/src/components/settings/SettingsAccessAccountsSection.tsx`
-  - `web/src/components/settings/SettingsBankAccountsSection.tsx`
-  - `web/src/test/NoOaBankBatchPage.test.tsx`
-  - `web/src/test/SessionGate.test.tsx`
-  - `web/src/test/WorkbenchExceptionModal.test.tsx`
-  - `web/src/test/WorkbenchSelection.test.tsx`
-  - `docs/refactor-ui/modules/phase_8_full_verification.md`
+- Scope: phase 9 closeout after P114 full verification。
+- Files touched in P115:
+  - `docs/refactor-ui/README.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: final non-workbench runtime MUI grep, full `cd web && npx vitest run` (613 tests), `cd web && npm run build`, `git diff --check` passed。
-- Failures: initial P114 full runs exposed stale tests and one React 19 event pooling/currentTarget issue; all were fixed and reverified.
-- Next action: 执行 `P115-phase-9-closeout`。
+- Verification run: final non-workbench runtime MUI grep, closeout smoke tests, `cd web && npm run build`, `git diff --check` passed。
+- Failures: none.
+- Next action: optional PR/review; browser/manual visual QA remains a documented residual risk.
 
 ## Prompt Lifecycle
 
@@ -102,12 +96,17 @@
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
 | mui containment | `verified` | `MG-P113-phase-7-mui-containment` | Phase 7 completed; MUI limited to frozen workbench internals and test-only legacy provider/helper |
 | full verification | `verified` | `P114-phase-8-full-verification` | Source greps, full Vitest, build and diff check passed; residual warnings documented |
-| closeout | `in_progress` | `P115-phase-9-closeout` | Final docs/status/push closeout |
+| closeout | `verified` | `P115-phase-9-closeout` | Final docs/status/risk register completed |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P115-phase-9-closeout` | `git status --short --branch` | passed | Clean on `refactor-ui...origin/refactor-ui` before closeout docs update |
+| 2026-06-07 | `P115-phase-9-closeout` | final non-workbench runtime MUI grep chain | passed | No non-workbench runtime MUI imports/providers/theme, DataGrid or date-picker residue |
+| 2026-06-07 | `P115-phase-9-closeout` | `cd web && npx vitest run MuiContainment.test.ts DesignTokens.test.ts TableLayoutTokens.test.ts TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx SessionGate.test.tsx` | passed | 7 files / 29 tests passed |
+| 2026-06-07 | `P115-phase-9-closeout` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P115-phase-9-closeout` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P114-phase-8-full-verification` | final non-workbench runtime MUI grep chain | passed | No non-workbench runtime MUI imports/providers/theme, DataGrid or date-picker residue |
 | 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npx vitest run` | passed | 63 files / 613 tests passed after targeted fixes |
 | 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npx vitest run WorkbenchSelection.test.tsx -t "workbench settings can manage allowed app accounts\|bank account settings can edit names"` | passed | Verified native Settings inputs and React 19 currentTarget fix |

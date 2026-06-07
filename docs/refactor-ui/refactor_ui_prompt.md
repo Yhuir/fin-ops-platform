@@ -6350,7 +6350,7 @@ Scope: full frontend verification and smoke inventory only.
 ### P115-phase-9-closeout
 
 - Phase: `phase_9_closeout`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `closeout`
 - Scope: final UI migration documentation/status/push closeout only。
 
@@ -6373,6 +6373,31 @@ Scope: final UI migration documentation/status/push closeout only.
 - Workbench internals frozen: required。
 - Exact staging required: yes。
 - Verification is intentionally smaller than P114 full suite but includes source contract, core token/table/smoke tests and build。
+
+#### Execution Notes
+
+- Updated `docs/refactor-ui/README.md` with closeout status and residual risks.
+- Updated `docs/refactor-ui/refactor_ui_state.md` to mark `phase_9_closeout` completed/passed and closeout module verified.
+- Confirmed `DESIGN.md`, `PRODUCT.md`, platform stack docs, table layout system, test migration strategy, phase 8 verification doc and MUI containment facts are present.
+- Did not migrate new pages or change backend/API/read model/worker/permissions/business state machines.
+- Did not change frozen workbench internals.
+- Remaining risks documented:
+  - browser/manual visual smoke not executed in P114/P115;
+  - Vite chunk size warning;
+  - HeroUI/Tailwind CSS minifier selector warning;
+  - React Aria Focusable warning in import page tests;
+  - frozen workbench internal MUI deferred to a future workbench-specific plan.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `git status --short --branch`
+  - final non-workbench runtime MUI grep chain
+  - `cd web && npx vitest run MuiContainment.test.ts DesignTokens.test.ts TableLayoutTokens.test.ts TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx SessionGate.test.tsx`
+  - `cd web && npm run build`
+  - `git diff --check`
+- Next prompt generated: none. UI migration workflow is closed out on `refactor-ui`; next step is optional review/PR/manual browser QA.
 
 ### MG Prompt Template
 
