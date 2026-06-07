@@ -5884,7 +5884,7 @@ Scope: `/settings` closeout for `settingsDesign.ts` only.
 ### MG-P106-phase-6-settings
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `cumulative merge gate`
 - Scope: `/settings` P099-P106 migration only。
 
@@ -5906,6 +5906,51 @@ Scope: `/settings` P099-P106 migration only.
 - Workbench internals frozen: required。
 - Exact staging required: yes。
 - Expected outcome: Settings module committed, pushed and ready to move to next Phase 6 module。
+
+#### Execution Notes
+
+- Scope verified:
+  - Settings P099 discovery through P106 closeout.
+  - No backend/API/read model/worker changes.
+  - No workbench internals changes.
+- Verification:
+  - `git status --short --branch`: clean before MG docs update。
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: passed；13 tests passed。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed；15 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - Scoped Settings no-MUI grep: passed。
+  - Runtime settingsDesign/settingsTokens/settingsTheme/settingsButtonSx/settingsDataGridSx/settingsSectionSx reference grep excluding tests: passed。
+  - `git diff --check`: passed。
+- Result:
+  - Settings module is ready to leave Phase 6。
+  - Next prompt generated: `P107-phase-7-mui-containment-discovery`。
+
+### P107-phase-7-mui-containment-discovery
+
+- Phase: `phase_7_mui_containment`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: MUI containment discovery only。
+
+#### Prompt
+
+```text
+Prompt ID: P107-phase-7-mui-containment-discovery
+Phase: phase_7_mui_containment
+Type: discovery/planning
+Scope: MUI containment discovery only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/baseline_inventory.md、docs/refactor-ui/platform_stack_migration.md、docs/refactor-ui/test_migration_strategy.md、DESIGN.md、PRODUCT.md、web/package.json、web/src/app/App.tsx、web/src/app/MuiProviders.tsx、web/src/app/MuiDatePickerCompatProvider.tsx、web/src/app/muiTheme.ts、web/src/components/MonthPicker.tsx、web/src/hooks/useMuiDataGridPageSession.ts、web/src/app/styles.css、web/src/test/renderHelpers.tsx、web/src/test/MonthPicker.test.tsx、web/src/test/useMuiDataGridPageSession.test.tsx 和当前 MUI grep inventory。只做 discovery/planning，不改 runtime code、tests、CSS、依赖、后端、API、read model、worker 或关联台内部工作区。生成 `docs/refactor-ui/modules/phase_7_mui_containment.md`，记录当前所有 MUI 命中并分类为：允许的冻结关联台内部工作区、必须迁移的非关联台 runtime、必须替换/隔离的测试 harness、只用于负向 contract 的测试字符串、全局 CSS 中允许/禁止的 MUI selector、可删除的 MUI DataGrid session hook、MonthPicker/date compat 迁移边界。必须明确后续 Micro-JIT 队列，至少包含 MonthPicker/date compat、MuiProviders/test harness、DataGrid session cleanup、global CSS containment、final no-MUI contract 和 MG。不得把关联台内部工作区纳入视觉迁移。验证命令：`test -f docs/refactor-ui/modules/phase_7_mui_containment.md`；`rg -n "P107-phase-7-mui-containment-discovery|Current MUI Inventory|Allowed Workbench Legacy|Non-workbench Runtime Targets|Recommended Micro-JIT Queue|P108-phase-7" docs/refactor-ui/modules/phase_7_mui_containment.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；`git diff --check`；`git status --short --branch`。更新 state/prompt docs。
+```
+
+#### Review
+
+- Single slice: yes，discovery/planning only。
+- Runtime code untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Docs on demand: yes，Phase 7 containment needs a reusable inventory and allowed-list。
+- Expected outcome: phase 7 inventory doc created and P108 generated just-in-time。
 
 ### MG Prompt Template
 

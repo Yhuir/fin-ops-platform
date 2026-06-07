@@ -4,11 +4,11 @@
 
 ## Current Phase
 
-- Phase: `phase_6_page_batches`
+- Phase: `phase_7_mui_containment`
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P106-phase-6-settings`
+- Current Prompt ID: `P107-phase-7-mui-containment-discovery`
 - Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
@@ -36,8 +36,8 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches、BatchAccounting、TurnoverLedger and ETC tickets MG verified；next Settings discovery |
-| `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
+| `phase_6_page_batches` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches、BatchAccounting、TurnoverLedger、ETC tickets and Settings MG verified |
+| `phase_7_mui_containment` | `in_progress` | 2026-06-07 |  | `pending` | Next: MUI containment discovery |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
 
@@ -54,16 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 Settings cumulative merge gate generated after P106 Settings closeout。
-- Files touched in P106:
-  - `web/src/components/settings/settingsDesign.ts`
-  - `web/src/test/SettingsPage.test.tsx`
+- Scope: phase 7 MUI containment discovery generated after MG-P106 Settings verification。
+- Files touched in MG-P106:
   - `docs/refactor-ui/modules/phase_6_settings.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Settings runtime settingsDesign reference grep passed；Settings scoped no-MUI grep passed；Settings page/table tests passed；build passed；diff check passed。
+- Verification run: Settings page/table tests passed；table/common/HeroUI smoke passed；build passed；Settings scoped no-MUI grep passed；runtime settingsDesign reference grep passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `MG-P106-phase-6-settings`。
+- Next action: 执行 `P107-phase-7-mui-containment-discovery`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +93,20 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P106-phase-6-settings` | P106 Settings closeout verified；next run Settings cumulative MG |
+| page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
+| mui containment | `in_progress` | `P107-phase-7-mui-containment-discovery` | Discovery/planning only; classify remaining MUI into allowed workbench legacy, non-workbench runtime targets, test harness and CSS containment |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P106-phase-6-settings` | `git status --short --branch` | passed | Clean before MG docs update |
+| 2026-06-07 | `MG-P106-phase-6-settings` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | passed | 13 tests passed |
+| 2026-06-07 | `MG-P106-phase-6-settings` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `MG-P106-phase-6-settings` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `MG-P106-phase-6-settings` | scoped Settings no-MUI grep | passed | `SettingsPage.tsx` and `web/src/components/settings` have no scoped MUI residue |
+| 2026-06-07 | `MG-P106-phase-6-settings` | runtime settingsDesign reference grep excluding tests | passed | No runtime Settings MUI bridge references remain |
+| 2026-06-07 | `MG-P106-phase-6-settings` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P106-phase-6-settings-closeout` | runtime settingsDesign reference grep excluding tests | passed | No runtime `settingsDesign` / `settingsTokens` / settings MUI bridge references remain |
 | 2026-06-07 | `P106-phase-6-settings-closeout` | scoped Settings no-MUI grep | passed | `SettingsPage.tsx` and `web/src/components/settings` have no scoped MUI residue |
 | 2026-06-07 | `P106-phase-6-settings-closeout` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | passed | 13 tests passed |
