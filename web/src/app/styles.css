@@ -13237,7 +13237,8 @@ body.column-layout-dragging {
 }
 
 .settings-field input,
-.settings-table-input {
+.settings-table-input,
+.settings-select-control {
   width: 100%;
   min-height: 36px;
   padding: 6px 10px;
@@ -13245,19 +13246,21 @@ body.column-layout-dragging {
   color: var(--fp-text-primary);
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
-  font: inherit;
   font-size: 14px;
+  font: inherit;
 }
 
 .settings-field input:focus,
-.settings-table-input:focus {
+.settings-table-input:focus,
+.settings-select-control:focus {
   border-color: var(--fp-primary);
   outline: 2px solid color-mix(in srgb, var(--fp-primary) 20%, transparent);
   outline-offset: 0;
 }
 
 .settings-field input:disabled,
-.settings-table-input:disabled {
+.settings-table-input:disabled,
+.settings-select-control:disabled {
   background: var(--fp-surface-muted);
   color: var(--fp-text-muted);
   cursor: not-allowed;
@@ -13385,6 +13388,216 @@ body.column-layout-dragging {
 .settings-icon-button:disabled {
   color: var(--fp-text-muted);
   cursor: not-allowed;
+}
+
+.settings-table-select {
+  min-width: 180px;
+}
+
+.settings-access-admin-note {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--fp-primary-soft);
+  color: var(--fp-text-primary);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+}
+
+.settings-access-admin-note strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-access-admin-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-access-admin-list span {
+  padding: 4px 8px;
+  background: var(--fp-surface);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-access-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.settings-pending-tags-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.settings-pending-group-list {
+  display: grid;
+  align-self: start;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  overflow: hidden;
+}
+
+.settings-pending-group-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  border: 0;
+  border-bottom: 1px solid var(--fp-border);
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-pending-group-button:last-child {
+  border-bottom: 0;
+}
+
+.settings-pending-group-button:hover {
+  background: var(--fp-surface-muted);
+}
+
+.settings-pending-group-button[aria-pressed="true"] {
+  background: var(--fp-primary-soft);
+  box-shadow: inset 3px 0 0 var(--fp-primary);
+}
+
+.settings-pending-group-button strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.settings-pending-group-button small {
+  display: block;
+  margin-top: 4px;
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+}
+
+.settings-pending-group-button em {
+  min-width: 24px;
+  color: var(--fp-primary);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  text-align: right;
+}
+
+.settings-pending-tag-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+}
+
+.settings-pending-tag-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.settings-menu-trigger-wrap {
+  position: relative;
+}
+
+.settings-menu-trigger-wrap .settings-secondary-button {
+  gap: 8px;
+}
+
+.settings-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--fp-surface);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  box-shadow: var(--fp-shadow-popover);
+}
+
+.settings-menu button {
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--fp-text-primary);
+  border: 0;
+  border-radius: var(--fp-radius-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-menu button:hover,
+.settings-menu button:focus-visible {
+  background: var(--fp-surface-muted);
+  outline: none;
+}
+
+.settings-selected-tags {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-selected-tags p {
+  margin: 0;
+  color: var(--fp-text-secondary);
+  font-size: 14px;
+}
+
+.settings-selected-tag-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+}
+
+.settings-selected-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--fp-tag-height-table);
+  padding: 0 8px;
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-primary);
+  border-radius: var(--fp-tag-radius-table);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-selected-tag--error {
+  background: var(--fp-danger-soft);
+  color: var(--fp-danger);
+  border: 1px solid var(--fp-danger);
+}
+
+.settings-selected-tag-path {
+  color: var(--fp-text-secondary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.settings-selected-tag-path--error {
+  color: var(--fp-danger);
+}
+
+@media (min-width: 768px) {
+  .settings-pending-tags-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
 }
 
 @media (min-width: 768px) {
@@ -13625,40 +13838,6 @@ body.column-layout-dragging {
   accent-color: #0f4c81;
 }
 
-.settings-access-admin-note {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid #e7edf5;
-  border-radius: 8px;
-  background: #f8fbff;
-}
-
-.settings-access-admin-note.MuiAlert-root {
-  display: flex;
-}
-
-.settings-access-admin-note .MuiAlert-message {
-  display: grid;
-  gap: 8px;
-  width: 100%;
-}
-
-.settings-access-admin-note strong {
-  color: #102a43;
-  font-size: 13px;
-}
-
-.settings-access-admin-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.settings-access-form {
-  margin-top: 2px;
-}
-
 .settings-bank-mapping-list {
   display: grid;
   gap: 12px;
@@ -13673,10 +13852,6 @@ body.column-layout-dragging {
   border: 1px solid #e7edf5;
   border-radius: 8px;
   background: #ffffff;
-}
-
-.settings-select-control {
-  min-width: 180px;
 }
 
 .data-reset-warning {

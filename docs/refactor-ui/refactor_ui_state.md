@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P103-phase-6-settings-access-and-pending-tags`
+- Current Prompt ID: `P104-phase-6-settings-oa-rules-and-data-reset`
 - Current MG ID: `MG-P098-phase-6-etc-tickets`
 
 ## Global Invariants
@@ -54,17 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 Settings access accounts and pending invoice tag sections generated after P102 project/bank migration。
-- Files touched in P102:
-  - `web/src/components/settings/SettingsProjectsSection.tsx`
-  - `web/src/components/settings/SettingsBankAccountsSection.tsx`
+- Scope: phase 6 Settings OA rules and data reset generated after P103 access/pending tag migration。
+- Files touched in P103:
+  - `web/src/components/settings/SettingsAccessAccountsSection.tsx`
+  - `web/src/components/settings/SettingsPendingInvoiceTagsSection.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_settings.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Settings projects/bank scoped MUI/DataGrid grep passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for remaining access/pending/OA/data reset/manual table/settingsDesign files；build passed；diff check passed。
+- Verification run: Settings access/pending scoped MUI grep passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for remaining OA/data reset/manual table/settingsDesign files；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P103-phase-6-settings-access-and-pending-tags`。
+- Next action: 执行 `P104-phase-6-settings-oa-rules-and-data-reset`。
 
 ## Prompt Lifecycle
 
@@ -96,12 +96,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P103-phase-6-settings-access-and-pending-tags` | P102 Settings project/bank sections verified；next migrate access and pending invoice tag sections |
+| page batches | `in_progress` | `P104-phase-6-settings-oa-rules-and-data-reset` | P103 Settings access/pending sections verified；next migrate OA rules and data reset |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | scoped access/pending no-MUI grep | passed | `SettingsAccessAccountsSection.tsx` and `SettingsPendingInvoiceTagsSection.tsx` have no scoped MUI residue |
+| 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives\|manages pending invoice tag mappings\|keeps invalid historical pending invoice mappings\|keeps read-only settings users"` | expected-fail | Selected behavior tests passed；source-level contract failed only for OA/data reset/manual table/settingsDesign files |
+| 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level contract failed for remaining Settings MUI runtime |
+| 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | access scoped CSS MUI grep | passed | Obsolete access `.MuiAlert` selectors removed |
+| 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P102-phase-6-settings-projects-and-bank-accounts` | scoped projects/bank no-MUI/DataGrid grep | passed | `SettingsProjectsSection.tsx` and `SettingsBankAccountsSection.tsx` have no scoped MUI/DataGrid residue |
 | 2026-06-07 | `P102-phase-6-settings-projects-and-bank-accounts` | `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives\|renders as a tree-and-panel page\|switches the content panel\|keeps read-only settings users"` | expected-fail | Selected behavior tests passed；source-level contract failed only for later Settings section/dialog/table/settingsDesign files |
 | 2026-06-07 | `P102-phase-6-settings-projects-and-bank-accounts` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level contract failed for remaining Settings MUI runtime |

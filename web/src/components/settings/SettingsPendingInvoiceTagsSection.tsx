@@ -1,22 +1,6 @@
-import AddIcon from "@mui/icons-material/Add";
-import RemoveIcon from "@mui/icons-material/Remove";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import IconButton from "@mui/material/IconButton";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemText from "@mui/material/ListItemText";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import { Plus, X } from "lucide-react";
 import { useState } from "react";
 
-import { settingsTokens } from "./settingsDesign";
 import type { SettingsPendingInvoiceTagsSectionProps } from "./types";
 
 const GROUP_LABELS: Record<SettingsPendingInvoiceTagsSectionProps["activeGroup"], string> = {
@@ -41,7 +25,7 @@ export default function SettingsPendingInvoiceTagsSection({
   onSelectGroup,
 }: SettingsPendingInvoiceTagsSectionProps) {
   const [selectedTagCode, setSelectedTagCode] = useState("");
-  const [existingTagAnchor, setExistingTagAnchor] = useState<HTMLElement | null>(null);
+  const [isExistingTagMenuOpen, setIsExistingTagMenuOpen] = useState(false);
   const activeTags = groups[activeGroup];
   const activeTagSet = new Set(activeTags);
   const tagsByCode = new Map(tags.map((tag) => [tag.code, tag]));
@@ -69,100 +53,120 @@ export default function SettingsPendingInvoiceTagsSection({
   });
   const availableTags = tags.filter((tag) => tag.status === "active" && !activeTagSet.has(tag.code));
 
+  function addExistingTag(code: string) {
+    onAddExistingTag(code);
+    setSelectedTagCode("");
+    setIsExistingTagMenuOpen(false);
+  }
+
   return (
-    <Box
-      component="section"
+    <section
       aria-labelledby="settings-section-pending-invoice-tags-title"
+      className="settings-section-panel"
       id="settings-section-pending-invoice-tags"
       role="region"
-      sx={{ mb: 4 }}
     >
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
-        <Typography id="settings-section-pending-invoice-tags-title" component="h3" variant="h6" sx={{ color: settingsTokens.textPrimary, fontWeight: 400, fontSize: "16px" }}>
-          待找发票筛选
-        </Typography>
-      </Stack>
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "240px 1fr" }, gap: 2 }}>
-        <List aria-label="待找发票筛选分组" dense disablePadding sx={{ border: "1px solid", borderColor: settingsTokens.borderSubtle }}>
-          {(Object.keys(GROUP_LABELS) as Array<keyof typeof GROUP_LABELS>).map((group) => (
-            <ListItem key={group} disablePadding>
-              <ListItemButton selected={activeGroup === group} onClick={() => onSelectGroup(group)}>
-                <ListItemText primary={GROUP_LABELS[group]} secondary={GROUP_DESCRIPTIONS[group]} />
-                <Chip label={groups[group].length} size="small" variant="outlined" />
-              </ListItemButton>
-            </ListItem>
-          ))}
-        </List>
+      <header className="settings-section-header">
+        <h3 id="settings-section-pending-invoice-tags-title">待找发票筛选</h3>
+      </header>
+      <div className="settings-section-body">
+        <div className="settings-pending-tags-layout">
+          <div className="settings-pending-group-list" aria-label="待找发票筛选分组">
+            {(Object.keys(GROUP_LABELS) as Array<keyof typeof GROUP_LABELS>).map((group) => (
+              <button
+                key={group}
+                aria-pressed={activeGroup === group}
+                className="settings-pending-group-button"
+                type="button"
+                onClick={() => onSelectGroup(group)}
+              >
+                <span>
+                  <strong>{GROUP_LABELS[group]}</strong>
+                  <small>{GROUP_DESCRIPTIONS[group]}</small>
+                </span>
+                <em>{groups[group].length}</em>
+              </button>
+            ))}
+          </div>
 
-        <Stack spacing={2} sx={{ border: "1px solid", borderColor: settingsTokens.borderSubtle, p: 2 }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "stretch", md: "center" }}>
-            <TextField
-              select
-              label="已有标签"
-              size="small"
-              value={selectedTagCode}
-              disabled={controlsDisabled}
-              onChange={(event) => setSelectedTagCode(event.target.value)}
-              sx={{ minWidth: 220 }}
-            >
-              {availableTags.map((tag) => (
-                <MenuItem key={tag.code} value={tag.code}>{tag.label}</MenuItem>
-              ))}
-            </TextField>
-            <Button
-              aria-label="选择现有标签"
-              startIcon={<AddIcon />}
-              variant="outlined"
-              disabled={controlsDisabled || availableTags.length === 0}
-              onClick={(event) => {
-                if (selectedTagCode) {
-                  onAddExistingTag(selectedTagCode);
-                  setSelectedTagCode("");
-                  return;
-                }
-                setExistingTagAnchor(event.currentTarget);
-              }}
-            >
-              选择现有标签
-            </Button>
-            <Menu
-              anchorEl={existingTagAnchor}
-              open={Boolean(existingTagAnchor)}
-              onClose={() => setExistingTagAnchor(null)}
-            >
-              {availableTags.map((tag) => (
-                <MenuItem
-                  key={tag.code}
+          <div className="settings-pending-tag-panel">
+            <div className="settings-pending-tag-toolbar">
+              <label className="settings-field">
+                <span>已有标签</span>
+                <select
+                  className="settings-select-control"
+                  disabled={controlsDisabled}
+                  value={selectedTagCode}
+                  onChange={(event) => setSelectedTagCode(event.currentTarget.value)}
+                >
+                  <option value="">选择标签</option>
+                  {availableTags.map((tag) => (
+                    <option key={tag.code} value={tag.code}>{tag.label}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="settings-menu-trigger-wrap">
+                <button
+                  aria-expanded={isExistingTagMenuOpen}
+                  aria-haspopup="menu"
+                  className="settings-secondary-button"
+                  disabled={controlsDisabled || availableTags.length === 0}
+                  type="button"
                   onClick={() => {
-                    onAddExistingTag(tag.code);
-                    setSelectedTagCode("");
-                    setExistingTagAnchor(null);
+                    if (selectedTagCode) {
+                      addExistingTag(selectedTagCode);
+                      return;
+                    }
+                    setIsExistingTagMenuOpen((current) => !current);
                   }}
                 >
-                  {tag.label}
-                </MenuItem>
+                  <Plus aria-hidden="true" size={16} />
+                  选择现有标签
+                </button>
+                {isExistingTagMenuOpen ? (
+                  <div className="settings-menu" role="menu" aria-label="可选自动标签">
+                    {availableTags.map((tag) => (
+                      <button
+                        key={tag.code}
+                        role="menuitem"
+                        type="button"
+                        onClick={() => addExistingTag(tag.code)}
+                      >
+                        {tag.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="settings-selected-tags">
+              {activeDefinitions.length === 0 ? (
+                <p>当前分组未选择自动标签。</p>
+              ) : activeDefinitions.map((tag) => (
+                <div className="settings-selected-tag-row" key={tag.code}>
+                  <span className={`settings-selected-tag ${tag.issueLabel ? "settings-selected-tag--error" : ""}`}>
+                    {tag.label}
+                  </span>
+                  <span className={`settings-selected-tag-path ${tag.issueLabel ? "settings-selected-tag-path--error" : ""}`}>
+                    {tag.issueLabel ?? tag.path.join(" / ")}
+                  </span>
+                  <button
+                    aria-label={`${tag.label} 移除`}
+                    className="settings-icon-button"
+                    disabled={controlsDisabled}
+                    title="移除标签"
+                    type="button"
+                    onClick={() => onRemoveTag(tag.code)}
+                  >
+                    <X aria-hidden="true" size={16} />
+                  </button>
+                </div>
               ))}
-            </Menu>
-          </Stack>
-          <Stack spacing={1}>
-            {activeDefinitions.length === 0 ? (
-              <Typography color="text.secondary" variant="body2">当前分组未选择自动标签。</Typography>
-            ) : activeDefinitions.map((tag) => (
-              <Stack key={tag.code} direction="row" spacing={1} alignItems="center">
-                <Chip color={tag.issueLabel ? "error" : "default"} label={tag.label} variant={tag.issueLabel ? "outlined" : "filled"} />
-                <Typography variant="body2" color={tag.issueLabel ? "error" : "text.secondary"} sx={{ flex: 1 }}>
-                  {tag.issueLabel ?? tag.path.join(" / ")}
-                </Typography>
-                <Tooltip title="移除标签">
-                  <IconButton aria-label={`${tag.label} 移除`} disabled={controlsDisabled} onClick={() => onRemoveTag(tag.code)}>
-                    <RemoveIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              </Stack>
-            ))}
-          </Stack>
-        </Stack>
-      </Box>
-    </Box>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }

@@ -1,20 +1,12 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import FormControl from "@mui/material/FormControl";
-import IconButton from "@mui/material/IconButton";
-import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import DeleteIcon from "@mui/icons-material/DeleteOutlined";
-import { DataGrid } from "@mui/x-data-grid";
-import type { GridColDef, GridRowModel } from "@mui/x-data-grid";
+import { Trash2 } from "lucide-react";
 
 import type { WorkbenchAccessRole } from "../../features/workbench/types";
-import { settingsButtonSx, settingsDataGridSx, settingsSectionSx, settingsTokens } from "./settingsDesign";
 import type { SettingsAccessAccountsSectionProps } from "./types";
+
+const ACCESS_ROLE_OPTIONS: Array<{ value: WorkbenchAccessRole; label: string }> = [
+  { value: "full_access", label: "所有操作均可" },
+  { value: "read_export_only", label: "只可看和只可导出" },
+];
 
 export default function SettingsAccessAccountsSection({
   controlsDisabled,
@@ -29,181 +21,128 @@ export default function SettingsAccessAccountsSection({
   onUpdateManagedAccessAccount,
   onDeleteManagedAccessAccount,
 }: SettingsAccessAccountsSectionProps) {
-  const processRowUpdate = (newRow: GridRowModel) => {
-    onUpdateManagedAccessAccount(newRow.id as string, (current) => ({
-      ...current,
-      username: newRow.username,
-      role: newRow.role as WorkbenchAccessRole,
-    }));
-    return newRow;
-  };
-
-  const columns: GridColDef[] = [
-    { field: "username", headerName: "账户", flex: 1, minWidth: 150, editable: !controlsDisabled },
-    {
-      field: "role",
-      headerName: "权限级别",
-      flex: 1,
-      minWidth: 200,
-      type: "singleSelect",
-      valueOptions: [
-        { value: "full_access", label: "所有操作均可" },
-        { value: "read_export_only", label: "只可看和只可导出" },
-      ],
-      editable: !controlsDisabled,
-    },
-    {
-      field: "actions",
-      headerName: "操作",
-      width: 80,
-      sortable: false,
-      renderCell: (params) => (
-        <IconButton
-          color="error"
-          size="small"
-          disabled={controlsDisabled}
-          onClick={() => onDeleteManagedAccessAccount(params.row.id as string)}
-        >
-          <DeleteIcon fontSize="small" />
-        </IconButton>
-      ),
-    },
-  ];
-
   return (
-    <Box
-      component="section"
+    <section
       aria-labelledby="settings-section-access-accounts-title"
+      className="settings-section-panel"
       id="settings-section-access-accounts"
       role="region"
-      sx={[settingsSectionSx, { mb: 4 }]}
     >
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        sx={{
-          borderBottom: `1px solid ${settingsTokens.borderSubtle}`,
-          px: { xs: 2, md: 3 },
-          py: 2,
-        }}
-      >
-        <Typography
-          id="settings-section-access-accounts-title"
-          component="h3"
-          variant="subtitle1"
-          sx={{ color: settingsTokens.textPrimary, fontWeight: 400 }}
-        >
-          访问账户管理
-        </Typography>
-      </Stack>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 3, px: { xs: 2, md: 3 }, py: 3 }}>
-        <Alert
-          severity="info"
-          sx={{
-            bgcolor: settingsTokens.selected,
-            color: settingsTokens.textPrimary,
-            border: `1px solid ${settingsTokens.borderSubtle}`,
-            borderRadius: "4px",
-            "& .MuiAlert-icon": { color: settingsTokens.primary },
-          }}
-        >
-          <Typography component="strong" variant="body2" sx={{ fontWeight: 600, display: "block", mb: 1 }}>
-            权限管理员
-          </Typography>
-          <Stack direction="row" flexWrap="wrap" gap={1}>
+      <header className="settings-section-header">
+        <h3 id="settings-section-access-accounts-title">访问账户管理</h3>
+      </header>
+      <div className="settings-section-body">
+        <div className="settings-access-admin-note" role="status">
+          <strong>权限管理员</strong>
+          <div className="settings-access-admin-list">
             {adminUsernames.map((username) => (
-              <Box
-                key={username}
-                component="span"
-                sx={{
-                  px: 1,
-                  py: 0.5,
-                  bgcolor: settingsTokens.page,
-                  color: settingsTokens.textPrimary,
-                  border: `1px solid ${settingsTokens.borderSubtle}`,
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                }}
-              >
-                {username}
-              </Box>
+              <span key={username}>{username}</span>
             ))}
-          </Stack>
-        </Alert>
+          </div>
+        </div>
 
-        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-          <TextField
-            label="新增访问账户"
-            size="small"
-            value={accessUsernameDraft}
-            disabled={controlsDisabled}
-            onChange={(event) => onChangeAccessUsernameDraft(event.currentTarget.value)}
-            sx={{
-              minWidth: { xs: "100%", sm: 220 },
-              "& .MuiOutlinedInput-root": { borderRadius: "4px" },
-              "& .MuiOutlinedInput-root.Mui-focused fieldset": { borderColor: settingsTokens.primary },
-            }}
-          />
-          <FormControl size="small" disabled={controlsDisabled} sx={{ minWidth: { xs: "100%", sm: 220 } }}>
-            <InputLabel id="settings-new-access-role-label">新增账户权限</InputLabel>
-            <Select
-              native
-              labelId="settings-new-access-role-label"
-              label="新增账户权限"
-              inputProps={{ "aria-label": "新增账户权限" }}
+        <div className="settings-access-form">
+          <label className="settings-field">
+            <span>新增访问账户</span>
+            <input
+              disabled={controlsDisabled}
+              type="text"
+              value={accessUsernameDraft}
+              onChange={(event) => onChangeAccessUsernameDraft(event.currentTarget.value)}
+            />
+          </label>
+          <label className="settings-field">
+            <span>新增账户权限</span>
+            <select
+              aria-label="新增账户权限"
+              className="settings-select-control"
+              disabled={controlsDisabled}
               value={accessRoleDraft}
-              onChange={(event) => onChangeAccessRoleDraft(event.target.value as WorkbenchAccessRole)}
-              sx={{
-                borderRadius: "4px",
-                "&.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: settingsTokens.primary },
-              }}
+              onChange={(event) => onChangeAccessRoleDraft(event.currentTarget.value as WorkbenchAccessRole)}
             >
-              <option value="full_access">所有操作均可</option>
-              <option value="read_export_only">只可看和只可导出</option>
-            </Select>
-          </FormControl>
-          <Button
-            type="button"
-            variant="contained"
+              {ACCESS_ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="settings-primary-button"
             disabled={!canAddAccessAccount || controlsDisabled}
+            type="button"
             onClick={onAddAccessAccount}
-            sx={settingsButtonSx}
           >
             新增账户
-          </Button>
-        </Stack>
+          </button>
+        </div>
 
-        <Box sx={{ width: "100%", bgcolor: settingsTokens.page }}>
-          {managedAccessAccounts.length === 0 ? (
-            <Alert
-              severity="info"
-              sx={{
-                bgcolor: settingsTokens.layer01,
-                color: settingsTokens.textPrimary,
-                border: `1px solid ${settingsTokens.borderSubtle}`,
-                borderRadius: "4px",
-                "& .MuiAlert-icon": { color: settingsTokens.primary },
-              }}
-            >
-              当前没有单独配置的可访问 OA 账户。
-            </Alert>
-          ) : (
-            <DataGrid
-              rows={managedAccessAccounts}
-              columns={columns}
-              rowHeight={48}
-              columnHeaderHeight={48}
-              hideFooter
-              autoHeight
-              disableColumnMenu
-              processRowUpdate={processRowUpdate}
-              sx={settingsDataGridSx}
-            />
-          )}
-        </Box>
-      </Box>
-    </Box>
+        {managedAccessAccounts.length === 0 ? (
+          <div className="settings-inline-alert settings-inline-alert--info" role="status">
+            当前没有单独配置的可访问 OA 账户。
+          </div>
+        ) : (
+          <div className="settings-native-table-shell">
+            <table className="settings-native-table" aria-label="访问账户">
+              <thead>
+                <tr>
+                  <th scope="col">账户</th>
+                  <th scope="col">权限级别</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {managedAccessAccounts.map((account) => (
+                  <tr key={account.id}>
+                    <td>
+                      <input
+                        aria-label={`${account.username} 账户`}
+                        className="settings-table-input"
+                        disabled={controlsDisabled}
+                        type="text"
+                        value={account.username}
+                        onChange={(event) =>
+                          onUpdateManagedAccessAccount(account.id, (current) => ({
+                            ...current,
+                            username: event.currentTarget.value,
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        aria-label={`${account.username} 权限级别`}
+                        className="settings-select-control settings-table-select"
+                        disabled={controlsDisabled}
+                        value={account.role}
+                        onChange={(event) =>
+                          onUpdateManagedAccessAccount(account.id, (current) => ({
+                            ...current,
+                            role: event.currentTarget.value as WorkbenchAccessRole,
+                          }))
+                        }
+                      >
+                        {ACCESS_ROLE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button
+                        aria-label={`${account.username} 删除`}
+                        className="settings-icon-button settings-icon-button--danger"
+                        disabled={controlsDisabled}
+                        type="button"
+                        onClick={() => onDeleteManagedAccessAccount(account.id)}
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
