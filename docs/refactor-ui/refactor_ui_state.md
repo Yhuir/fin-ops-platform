@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P057-phase-6-input-invoice-usage-filter-menu`
+- Current Prompt ID: `P058-phase-6-input-invoice-usage-detail-and-export-drawers`
 - Current MG ID: `MG-P052-phase-6-pending-invoices`
 
 ## Global Invariants
@@ -19,7 +19,7 @@
 | API contract untouched | yes | 未修改 AppHealth API client contract 或 backend |
 | Read model / worker untouched | yes | 未修改 read model、worker 或 queue |
 | Reconciliation workbench internals frozen | yes | 当前未改 `ReconciliationWorkbenchPage` 或 `web/src/components/workbench/*` |
-| Non-workbench MUI additions | none | InputInvoiceUsage page shell/main table/expandable cell now have no scoped MUI; P057 will clear shared filter menu |
+| Non-workbench MUI additions | none | InputInvoiceUsage page/table/filter surfaces now have no scoped MUI; P058 will clear detail/export drawers |
 | User-visible actions preserved | documented | `baseline_inventory.md`、`module_inventory.md` 已要求逐页检查 |
 | Behavior equivalence | documented | 旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗 |
 | HeroUI MCP active | yes | 当前会话已调用 HeroUI MCP quick start、theming、Table/Drawer/Modal docs |
@@ -54,17 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 input invoice usage shared filter menu prompt generated after P056 main table migration。
+- Scope: phase 6 input invoice usage detail/export drawers prompt generated after P057 filter menu migration。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
-  - `web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx`
-  - `web/src/components/inputInvoiceUsage/ExpandableCellText.tsx`
+  - `web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx`
   - `web/src/app/styles.css`
-- Verification run: P056 focused tests expected-fail, full module tests expected-fail, table grep passed, common/table/platform regressions passed, build passed。
-- Failures: expected source-level no-MUI failures remain for unimplemented filter/drawer migration。
-- Next action: 执行 `P057-phase-6-input-invoice-usage-filter-menu`。
+- Verification run: P057 focused tests expected-fail, full module tests expected-fail, filter menu grep passed, build passed。
+- Failures: expected source-level no-MUI failures remain for unimplemented drawer migration。
+- Next action: 执行 `P058-phase-6-input-invoice-usage-detail-and-export-drawers`。
 
 ## Prompt Lifecycle
 
@@ -96,12 +95,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P057-phase-6-input-invoice-usage-filter-menu` | InputInvoiceUsage P056 table verified as expected-fail；next shared filter menu |
+| page batches | `in_progress` | `P058-phase-6-input-invoice-usage-detail-and-export-drawers` | InputInvoiceUsage P057 filter menu verified as expected-fail；next detail/export drawers |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P057-phase-6-input-invoice-usage-filter-menu` | `if rg -n '@mui/\|Mui[A-Z]\|FilterListOutlinedIcon\|ArrowDownwardOutlinedIcon\|ArrowUpwardOutlinedIcon\|MenuItem\|ListItemText\|Checkbox\|Radio' web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx; then exit 1; else exit 0; fi` | passed | Filter menu has no scoped MUI residue |
+| 2026-06-07 | `P057-phase-6-input-invoice-usage-filter-menu` | `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "InputInvoiceUsageFilterMenu\|workflow primitive targets"` | expected-fail | Filter menu behavior passed; only intended drawer source-level failure remains |
+| 2026-06-07 | `P057-phase-6-input-invoice-usage-filter-menu` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx` | expected-fail | 19 passed, 2 intended source-level failures; filter menu cleared from failure lists |
+| 2026-06-07 | `P057-phase-6-input-invoice-usage-filter-menu` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P057-phase-6-input-invoice-usage-filter-menu` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P057-phase-6-input-invoice-usage-filter-menu` | `git status --short --branch` | passed | Only P057 filter-menu/styles/docs files changed |
 | 2026-06-07 | `P056-phase-6-input-invoice-usage-main-table-and-expandable-cell` | `if rg -n '@mui/\|Mui[A-Z]\|TablePagination\|InfoOutlinedIcon\|ExpandLessOutlinedIcon\|ExpandMoreOutlinedIcon' web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx web/src/components/inputInvoiceUsage/ExpandableCellText.tsx; then exit 1; else exit 0; fi` | passed | Table and expandable cell have no scoped MUI residue |
 | 2026-06-07 | `P056-phase-6-input-invoice-usage-main-table-and-expandable-cell` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives\|adds sidebar route"` | expected-fail | Main table behavior passed; only intended filter/drawer source-level failure remains |
 | 2026-06-07 | `P056-phase-6-input-invoice-usage-main-table-and-expandable-cell` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx` | expected-fail | 19 passed, 2 intended source-level failures; table and expandable cell cleared from failure lists |
