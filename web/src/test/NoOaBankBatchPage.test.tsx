@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -215,6 +217,14 @@ const feeDetailPayload = {
   ],
 };
 
+const noOaBankBatchSourceFiles = [
+  "src/pages/NoOaBankBatchPage.tsx",
+] as const;
+
+function readWebSource(path: string) {
+  return readFileSync(resolve(path), "utf8");
+}
+
 function renderPage() {
   return render(
     <MuiProviders>
@@ -287,6 +297,53 @@ afterEach(() => {
 });
 
 describe("NoOaBankBatchPage", () => {
+  test("targets project primitives for page shell, rails, transaction table, overlays, and feedback", () => {
+    const sourceByPath = Object.fromEntries(noOaBankBatchSourceFiles.map((path) => [path, readWebSource(path)]));
+    const forbiddenMuiImports = noOaBankBatchSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
+    });
+    const forbiddenMuiSelectors = noOaBankBatchSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /\.Mui[A-Z][A-Za-z-]*/.test(source) ? [path] : [];
+    });
+    const forbiddenLegacySurfaces = noOaBankBatchSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton/.test(source)
+        ? [path]
+        : [];
+    });
+    const pageSource = sourceByPath["src/pages/NoOaBankBatchPage.tsx"];
+    const missingPrimitiveTargets = [
+      pageSource.includes("PageScaffold") ? null : "NoOaBankBatchPage.tsx should keep PageScaffold",
+      pageSource.includes("StatePanel") ? null : "NoOaBankBatchPage.tsx should keep StatePanel for loading/empty/error states",
+      /AppDrawer|no-oa-bank-batch.*drawer|no-oa-bank-batches.*drawer/.test(pageSource)
+        ? null
+        : "Tag management should use AppDrawer or a project drawer class",
+      /AppDialog|no-oa-bank-batch.*dialog|no-oa-bank-batches.*dialog/.test(pageSource)
+        ? null
+        : "Withdraw confirmation should use AppDialog or a project dialog class",
+      /finance-table|no-oa-bank-batch.*table|no-oa-bank-batches.*table/.test(pageSource)
+        ? null
+        : "Transaction details should use a project dense table class",
+      /no-oa-bank-batch.*rail|no-oa-bank-batches.*rail/.test(pageSource)
+        ? null
+        : "Main and child label rails should use project rail classes",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      forbiddenLegacySurfaces,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      forbiddenLegacySurfaces: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
   test("renders tag management and the three-column main/sub/transaction layout", async () => {
     installFetchMock();
     renderPage();

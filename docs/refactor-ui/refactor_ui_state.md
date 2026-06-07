@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P074-phase-6-no-oa-bank-batches-characterization-tests`
+- Current Prompt ID: `P075-phase-6-no-oa-bank-batches-page-shell-filters`
 - Current MG ID: `MG-P072-phase-6-output-invoice-collections`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；NoOaBankBatches P073 discovery verified，next P074 tests |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；NoOaBankBatches P074 verified as expected-fail，next P075 page shell/filter |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,14 +54,15 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 no-OA bank batches characterization test prompt generated after P073 discovery。
-- Files touched in P073:
-  - `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
+- Scope: phase 6 no-OA bank batches page shell/filter migration prompt generated after P074 characterization tests。
+- Files touched in P074:
+  - `web/src/test/NoOaBankBatchPage.test.tsx`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P073 doc existence and key-term rg passed；diff/status clean for doc-only slice。
-- Failures: none in P073 scope。
-- Next action: 执行 `P074-phase-6-no-oa-bank-batches-characterization-tests`。
+  - `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
+- Verification run: full `NoOaBankBatchPage.test.tsx` expected-fail with 19 behavior tests passing and 1 source-level contract failure against current MUI runtime；diff/status passed。
+- Failures: expected source-level contract failure remains for `NoOaBankBatchPage.tsx` MUI imports/surfaces and missing project rail/table/drawer/dialog targets。
+- Next action: 执行 `P075-phase-6-no-oa-bank-batches-page-shell-filters`。
 
 ## Prompt Lifecycle
 
@@ -93,12 +94,15 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P074-phase-6-no-oa-bank-batches-characterization-tests` | NoOaBankBatches P073 discovery verified；next characterization tests |
+| page batches | `in_progress` | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | NoOaBankBatches P074 verified as expected-fail；next page shell/filter |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx` | expected-fail | 19 behavior tests passed; 1 source-level contract failed against current MUI runtime |
+| 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `git status --short --branch` | passed | Only P074 test file changed before docs |
 | 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `test -f docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md` | passed | Module discovery doc exists |
 | 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `rg -n "P073-phase-6-no-oa-bank-batches-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P074-phase-6-no-oa-bank-batches-characterization-tests" docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Discovery terms and next prompt recorded |
 | 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `git diff --check` | passed | 无 whitespace error |

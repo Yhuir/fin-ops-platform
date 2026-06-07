@@ -127,3 +127,39 @@ Scope: `/no-oa-bank-batches` tests only. Do not modify runtime implementation.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/features/noOaBankBatches/api.ts、web/src/features/noOaBankBatches/types.ts、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/test/NoOaBankBatchApi.test.ts。只修改 `web/src/test/NoOaBankBatchPage.test.tsx`：新增或调整 characterization tests，锁定 `/no-oa-bank-batches` 的 project primitive 目标和旧行为。新增 source-level contract，未来 runtime 不得依赖 `@mui/*`、`Mui[A-Z]`、`RefreshOutlinedIcon`、`CloseIcon`、`ToggleButton`、`TextField`、`TableCell`、`TableRow`、`TableHead`、`TableBody`、`Drawer`、`DialogTitle`、`DialogContent`、`DialogActions`、`Snackbar`、`Chip`、`IconButton`；要求页面继续使用 `PageScaffold`、`StatePanel`，后续 drawer/dialog 使用 project primitives 或 native equivalents。行为断言必须继续覆盖 route/sidebar、heading、description/top actions、status buttons `未提交`/`已提交`/`历史`、fields `月份`/`银行账户`、main/sub rail region names and keyboard activation、transaction region/table labels, selection guard, selected-row submit payload, internal-transfer submit payload, tag drawer open/refetch/save payload/live update, withdraw dialog reason payload, snackbar messages, read model stale retry and keep-alive pause。不得修改页面实现、API client、mock data shape、backend、read model、worker 或关联台内部工作区。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx`，实现未迁移前 source-level contract expected-fail 可接受，但 existing behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P075 page shell filters prompt。
 ```
+
+## P074 Execution Notes
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/test/NoOaBankBatchPage.test.tsx`
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - Added a source-level contract for `NoOaBankBatchPage.tsx`.
+  - The contract forbids direct MUI imports/selectors and legacy MUI surfaces such as `RefreshOutlinedIcon`, `ToggleButton`, `TextField`, MUI table cells, `Drawer`, `DialogTitle`, `Snackbar`, `Chip` and `IconButton`.
+  - The contract requires `PageScaffold`, `StatePanel`, project drawer/dialog/table/rail classes or primitives.
+- Verification:
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: expected-fail; 19 existing behavior tests passed and 1 source-level contract failed against current MUI runtime.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P074 test file changed before docs.
+
+## Current Expected Failures After P074
+
+- `src/pages/NoOaBankBatchPage.tsx` still imports MUI and MUI icons.
+- Page shell/filter still uses `RefreshOutlinedIcon`, MUI `Button`, `ToggleButtonGroup`, `ToggleButton`, `TextField`, `Box`, `Stack` and `Typography`; P075 owns this slice.
+- `LabelRail` still uses MUI `Paper`, `List`, `ListItemButton`, `Divider`, `Box`, `Stack`, `Typography` and `.Mui-selected` selectors; P076 owns this slice.
+- Transaction region still uses MUI `Paper`, `Stack`, `Alert`, `Button`, `Table*`, `Checkbox`, `Chip`, `Typography`; P077 owns this slice.
+- Tag drawer, withdraw dialog and snackbar still use MUI `Drawer`, `Dialog*`, `Snackbar`, `FormControlLabel`, `Checkbox`, `IconButton`, `CloseIcon`, `Alert`, `Button`, `TextField`; P078 owns this slice.
+
+## P075 Prompt Draft
+
+```text
+Prompt ID: P075-phase-6-no-oa-bank-batches-page-shell-filters
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/no-oa-bank-batches` page shell actions and filter region only. Do not migrate label rails, transaction region, tag drawer, withdraw dialog or snackbar.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/NoOaBankBatchPage.tsx`、必要 `web/src/app/styles.css` 和必要测试 expectation：迁移 page shell actions and filter region，包括 top actions `免OA流水标签管理`/`刷新`、region `批次筛选`、status segmented buttons `未提交 <count>`/`已提交 <count>`/`历史 <count>`、fields `月份`/`银行账户`、unsubmitted `提交批次` and selected count `已选 <n> 条`。移除本 slice 的 `RefreshOutlinedIcon`、MUI `ToggleButtonGroup`、`ToggleButton` and filter `TextField` usages，使用 lucide refresh icon, project/native buttons, native segmented controls and native month/text inputs with project classes。必须保留 PageScaffold title/description/actions, tag drawer open/refetch trigger, refresh loading disabled behavior, status bucket state reset/clearSelection behavior, labels and aria pressed/current selected semantics, month/account query behavior, selected-row submit button disabled/mutating behavior and selected count text。不得修改 `LabelRail` implementation, transaction region/table/cards, tag drawer, withdraw dialog, snackbar, API client, mock data shape, backend, read model, worker or reconciliation workbench internals。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|main and child label rails"`，source-level contract expected-fail can remain but selected behavior tests must pass；运行完整 `cd web && npx vitest run NoOaBankBatchPage.test.tsx` expected-fail only for remaining source-level contract；运行 `cd web && npm run build`；运行 page-shell/filter grep：`if rg -n 'RefreshOutlinedIcon|ToggleButton|ToggleButtonGroup|<TextField[^\\n]*(label=\"月份\"|label=\"银行账户\")' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P076 label rails prompt。
+```
