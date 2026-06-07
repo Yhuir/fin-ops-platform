@@ -40,7 +40,7 @@ Last updated: 2026-06-08
 | 8 | `PV-008-cost-statistics-discovery` | verified | `/cost-statistics` discovery。 |
 | 9 | `PV-009-cost-statistics-premium-visual` | verified | 成本统计 premium visual slice。 |
 | 10 | `PV-010-pending-invoices-discovery` | verified | `/pending-invoices` discovery。 |
-| 11 | `PV-011-pending-invoices-premium-visual` | pending | 待找发票 premium visual slice。 |
+| 11 | `PV-011-pending-invoices-premium-visual` | verified | 待找发票 premium visual slice。 |
 | 12 | `PV-012-input-invoice-usage-discovery` | pending | `/input-invoice-usage` discovery。 |
 | 13 | `PV-013-input-invoice-usage-premium-visual` | pending | 进项发票使用 premium visual slice。 |
 | 14 | `PV-014-oa-pending-payments-discovery` | pending | `/oa-pending-payments` discovery。 |
@@ -62,7 +62,7 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-011-pending-invoices-premium-visual`
+`PV-012-input-invoice-usage-discovery`
 
 ### Scope
 
@@ -70,25 +70,22 @@ Last updated: 2026-06-08
 - `docs/refactor-ui/premium_visual_prompt.md`
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/modules/phase_6_pending_invoices.md`
-- `web/src/pages/PendingInvoicesPage.tsx`
-- `web/src/components/pendingInvoices/*`
-- `web/src/app/styles.css`
-- `web/src/test/PendingInvoicesPage.test.tsx`
+- `docs/refactor-ui/module_inventory.md`
+- `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
+- `web/src/pages/InputInvoiceUsagePage.tsx`
+- `web/src/components/inputInvoiceUsage/*`
+- `web/src/test/*InputInvoiceUsage*`
 
 ### Verification
 
-Required for PV-011:
+Required for PV-012:
 
-- `cd web && npx vitest run PendingInvoicesPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- Browser smoke for `/pending-invoices` where practical.
+- `git status --short --branch`
 
-PV-011 is a runtime visual/interactions slice. It must preserve PendingInvoices behavior and only polish the current project primitive implementation.
+PV-012 is discovery-only. It must read the input invoice usage code/tests and generate the next single implementation prompt without changing runtime code unless a tiny characterization-only test gap is clearly justified.
 
 ## Execution Rules
 
@@ -119,3 +116,5 @@ Each implementation slice must:
 | 2026-06-08 | `PV-009-cost-statistics-premium-visual` | `8a77149f` | pushed to `origin/main` | Cost Statistics premium visual polish verified; PV-010 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-009-push-log-update` | `70e7ddd8` | pushed to `origin/main` | Recorded PV-009 push status after push. |
 | 2026-06-08 | `PV-010-pending-invoices-discovery` | `ac6861d8` | pushed to `origin/main` | Pending invoices premium discovery and PV-011 prompt generated. |
+| 2026-06-08 | `PV-010-push-log-update` | `12e88ee9` | pushed to `origin/main` | Recorded PV-010 push status after push. |
+| 2026-06-08 | `PV-011-pending-invoices-premium-visual` | current commit | pending push | Pending invoices premium visual polish verified; PV-012 prompt generated. |

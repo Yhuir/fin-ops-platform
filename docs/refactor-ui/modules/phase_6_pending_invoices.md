@@ -228,6 +228,42 @@ Non-scope for PV-011:
 - Do not convert the main four-zone table into cards or a generic `FinanceTable` if that loses the existing four-zone header geometry.
 - Do not change workbench internals or backend code.
 
+## PV-011 Premium Visual Implementation
+
+Prompt ID: `PV-011-pending-invoices-premium-visual`
+
+Implemented on `main`:
+
+- Tightened pending invoices page padding, table shell height, pagination height and right drawer body density.
+- Kept the main `待找发票四区表` as a four-zone native project table and preserved bank/status/invoice/OA sticky group headers.
+- Refined the table frame with compact radius, lighter zone header washes and stable row-cell hover transitions.
+- Added motion-token hover/press/focus feedback for direction buttons, toolbar/status filter buttons, status menu items, pagination buttons, sort buttons, inline detail buttons, row action trigger/items and drawer footer buttons through shared `.pending-invoices-button` rules.
+- Reduced right drawer internals: metric grid gap, metric padding, panel title/description padding, filter panel padding, picker pagination padding and manual dialog grid gap.
+- Added missing token aliases used by the pending invoices CSS: `--fp-text-caption`, `--fp-text-tertiary`, `--fp-text-disabled` and `--fp-accent-strong`.
+- Added a `PendingInvoicesPage.test.tsx` CSS contract test locking compact premium page/table/drawer/manual dialog treatment and motion-token usage.
+
+Preserved behavior:
+
+- Route, direction switching, status filter, rules settings, export, search, refresh, pagination, main four-zone table, row action menu, right drawers, OA `打印选择` dialog, `手工补录发票` dialog, API calls, domain events, loading/error/empty/read-model states and permission behavior were not changed.
+
+Verification:
+
+- `cd web && npx vitest run PendingInvoicesPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- forbidden keepalive/snapshot/scroll-session grep
+- non-workbench runtime MUI import grep
+- Browser smoke at `http://127.0.0.1:4173/pending-invoices`
+
+Browser smoke result:
+
+- Direction buttons, toolbar actions, four group headers and export right drawer rendered.
+- Top-level horizontal overflow is `0`.
+- Table frame radius is `6px 6px 0px 0px`; export drawer body padding is `16px`.
+- The live backend response for this smoke returned 0 rows, so row action menu interaction is covered by `PendingInvoicesPage.test.tsx`.
+- Screenshot: `/tmp/pending-invoices-premium-smoke.png`.
+
 ## Migration Slices
 
 1. `P047-phase-6-pending-invoices-characterization-tests`

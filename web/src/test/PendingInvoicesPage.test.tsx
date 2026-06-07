@@ -593,6 +593,21 @@ describe("Pending invoices page", () => {
     });
   });
 
+  test("locks compact premium table, drawer, and motion styling contracts", () => {
+    const css = readWebSource("src/app/styles.css");
+
+    expect(css).toMatch(/\.pending-invoices-page\s*{[^}]*padding:\s*var\(--fp-space-4\) var\(--fp-space-5\)/s);
+    expect(css).toMatch(/\.pending-invoices-button,\s*\.pending-invoice-status-filter-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:\s*var\(--fp-radius-sm\) var\(--fp-radius-sm\) 0 0/s);
+    expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*max-height:\s*calc\(100vh - 176px\);[^}]*min-height:\s*292px/s);
+    expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*transition:\s*background-color var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.pending-invoices-sort-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-row-menu-trigger,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.pending-invoice-drawer__body\s*{[^}]*padding:\s*var\(--fp-space-4\)/s);
+    expect(css).toMatch(/\.pending-invoice-metric-grid\s*{[^}]*gap:\s*var\(--fp-space-2\)/s);
+    expect(css).toMatch(/\.pending-invoice-manual-dialog\s*{[^}]*gap:\s*var\(--fp-space-3\)/s);
+  });
+
   test("renders project four-zone table contract and summarizes multiple relations", async () => {
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");

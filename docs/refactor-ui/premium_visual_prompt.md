@@ -582,7 +582,7 @@ Notes:
 
 - Code tests were not run for PV-010 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-011-pending-invoices-premium-visual
 
 `PV-011-pending-invoices-premium-visual`
 
@@ -611,3 +611,61 @@ Notes:
 - 如 dev server 可用，浏览器 smoke `/pending-invoices`：确认 heading、direction segment、toolbar、status filter、main table、row action menu、relation/rules/export drawers、OA print dialog/manual invoice dialog 能显示/打开/关闭，无明显重叠或顶层横向溢出。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_pending_invoices.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Tightened pending invoices page padding, pagination height, table shell height and right drawer body density.
+- Refined the four-zone table frame with compact radius, lighter zone header washes and stable row-cell hover transitions.
+- Added motion-token hover/press/focus feedback for direction buttons, toolbar/status filter buttons, status menu items, pagination buttons, sort buttons, inline detail buttons, row action trigger/items and shared drawer footer buttons.
+- Reduced right drawer internals: metric grid gap, metric padding, panel title/description padding, filter panel padding, picker pagination padding and manual dialog grid gap.
+- Added missing token aliases used by existing pending invoices CSS: `--fp-text-caption`, `--fp-text-tertiary`, `--fp-text-disabled` and `--fp-accent-strong`.
+- Added CSS contract coverage in `PendingInvoicesPage.test.tsx` for compact premium page/table/drawer/manual dialog treatment and motion-token usage.
+- Preserved all PendingInvoices behavior: route, direction switching, status filter, rules settings, export, search, refresh, pagination, main four-zone table, row action menu, right drawers, OA print dialog, manual invoice dialog, API calls and domain events.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run PendingInvoicesPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke for `/pending-invoices`
+
+Browser smoke result:
+
+- Direction buttons, toolbar actions, four group headers and export right drawer rendered.
+- Top-level horizontal overflow: `0`.
+- Table frame radius: `6px 6px 0px 0px`; export drawer body padding: `16px`.
+- Live backend returned 0 rows for the smoke, so row action menu interaction is covered by `PendingInvoicesPage.test.tsx`.
+- Screenshot: `/tmp/pending-invoices-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-012-input-invoice-usage-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_input_invoice_usage.md`、`web/src/pages/InputInvoiceUsagePage.tsx`、`web/src/components/inputInvoiceUsage/*`、相关 `InputInvoiceUsage` tests 和当前 `git status`。本切片只做进项发票使用情况 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_6_input_invoice_usage.md` 追加 premium visual discovery；如果现有文档不足，补齐旧入口清单和下一条 prompt。
+- 清点 `/input-invoice-usage` 的旧页面入口：筛选/search、表格、详情抽屉、反向 OA 工作区、规则抽屉、导出抽屉、行操作、loading/empty/error/stale/permission 状态。
+- 标明哪些元素必须功能等价保留：旧表格仍为表格，旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗，旧按钮/行操作仍在原信息层级。
+- 列出表格列角色和排版要求：金额/数量右对齐、tabular nums、状态/tag 稳定高度、长发票/项目/供应商/OA 文本截断或换行规则、行 hover 不改变行高。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
+- 生成下一条唯一 prompt：`PV-013-input-invoice-usage-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`，精确 staging，commit 并 push 到 `origin/main`。

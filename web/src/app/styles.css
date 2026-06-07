@@ -17,6 +17,7 @@
   --fp-primary-soft: #e8f0ff;
   --fp-accent: var(--fp-primary);
   --fp-accent-hover: var(--fp-primary-hover);
+  --fp-accent-strong: var(--fp-primary-hover);
   --fp-accent-soft: var(--fp-primary-soft);
   --fp-info: #2563eb;
   --fp-success: #16803c;
@@ -34,7 +35,10 @@
   --fp-text-title: 16px;
   --fp-text-body: 14px;
   --fp-text-label: 12px;
+  --fp-text-caption: 11px;
   --fp-text-data: 13px;
+  --fp-text-tertiary: #94a3b8;
+  --fp-text-disabled: #94a3b8;
 
   --fp-space-1: 4px;
   --fp-space-2: 8px;
@@ -5644,7 +5648,7 @@ textarea {
 
 .pending-invoices-page {
   min-height: 100%;
-  padding: var(--fp-space-5) var(--fp-space-6);
+  padding: var(--fp-space-4) var(--fp-space-5);
   background: var(--fp-page);
 }
 
@@ -5679,6 +5683,10 @@ textarea {
   font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .pending-invoices-direction-button:last-child {
@@ -5695,6 +5703,10 @@ textarea {
 .pending-invoices-direction-button[aria-pressed="true"] {
   background: var(--fp-accent-soft);
   color: var(--fp-accent);
+}
+
+.pending-invoices-direction-button:active {
+  transform: translateY(1px);
 }
 
 .pending-invoices-toolbar {
@@ -5743,6 +5755,12 @@ textarea {
   font-weight: 750;
   line-height: 1;
   white-space: nowrap;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .pending-invoices-button:hover:not(:disabled),
@@ -5767,6 +5785,11 @@ textarea {
   color: #ffffff;
 }
 
+.pending-invoices-button:active:not(:disabled),
+.pending-invoice-status-filter-button:active {
+  transform: translateY(1px);
+}
+
 .pending-invoices-button:disabled {
   border-color: var(--fp-border);
   background: var(--fp-surface-muted);
@@ -5784,6 +5807,9 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .pending-invoices-search:focus-visible {
@@ -5827,6 +5853,9 @@ textarea {
   font-size: var(--fp-text-label);
   font-weight: 700;
   text-align: left;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .pending-invoice-status-filter-menu-item:hover,
@@ -5874,7 +5903,7 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: var(--fp-space-3);
-  min-height: 44px;
+  min-height: 40px;
   padding: var(--fp-space-2) var(--fp-space-3);
   border: 1px solid var(--fp-border);
   border-top: 0;
@@ -5899,6 +5928,9 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-label);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .pending-invoices-pagination-range {
@@ -5924,6 +5956,11 @@ textarea {
   cursor: pointer;
   font-size: var(--fp-text-label);
   font-weight: 750;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .pending-invoices-pagination-actions button:hover:not(:disabled),
@@ -5939,14 +5976,20 @@ textarea {
   cursor: default;
 }
 
+.pending-invoices-pagination-actions button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .pending-invoices-table-frame {
   border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm) var(--fp-radius-sm) 0 0;
   background: var(--fp-surface);
+  overflow: hidden;
 }
 
 .pending-invoices-table-shell {
-  max-height: calc(100vh - 185px);
-  min-height: 322px;
+  max-height: calc(100vh - 176px);
+  min-height: 292px;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -6013,19 +6056,19 @@ textarea {
 }
 
 .pending-invoices-table-group-header--bank {
-  background: #edf5ff;
+  background: color-mix(in srgb, var(--fp-primary-soft) 68%, var(--fp-surface));
 }
 
 .pending-invoices-table-group-header--status {
-  background: #fff7e6;
+  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
 }
 
 .pending-invoices-table-group-header--invoice {
-  background: #eefaf3;
+  background: color-mix(in srgb, var(--fp-success-soft) 72%, var(--fp-surface));
 }
 
 .pending-invoices-table-group-header--oa {
-  background: #f4f4f5;
+  background: var(--fp-surface-muted);
 }
 
 .pending-invoices-table-sub-header {
@@ -6039,19 +6082,19 @@ textarea {
 }
 
 .pending-invoices-table-sub-header--bank {
-  background: #f6faff;
+  background: color-mix(in srgb, var(--fp-primary-soft) 38%, var(--fp-surface));
 }
 
 .pending-invoices-table-sub-header--status {
-  background: #fffaf0;
+  background: color-mix(in srgb, var(--fp-warning-soft) 42%, var(--fp-surface));
 }
 
 .pending-invoices-table-sub-header--invoice {
-  background: #f7fcf9;
+  background: color-mix(in srgb, var(--fp-success-soft) 42%, var(--fp-surface));
 }
 
 .pending-invoices-table-sub-header--oa {
-  background: #fafafa;
+  background: var(--fp-surface-raised);
 }
 
 .pending-invoices-table-cell {
@@ -6062,6 +6105,7 @@ textarea {
   line-height: 1.3;
   overflow-wrap: anywhere;
   vertical-align: top;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .pending-invoices-table-cell--left-border {
@@ -6103,6 +6147,9 @@ textarea {
   cursor: pointer;
   font: inherit;
   font-weight: inherit;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .pending-invoices-sort-button:hover,
@@ -6115,6 +6162,10 @@ textarea {
   color: var(--fp-text-tertiary);
   font-size: 10px;
   line-height: 1;
+}
+
+.pending-invoices-sort-button:active {
+  transform: translateY(1px);
 }
 
 .pending-invoices-status-filter-cell {
@@ -6229,6 +6280,11 @@ textarea {
   font-size: 11px;
   font-weight: 750;
   line-height: 1;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .pending-invoices-icon-button,
@@ -6259,6 +6315,12 @@ textarea {
   background: var(--fp-surface-muted);
   color: var(--fp-text-disabled);
   cursor: default;
+}
+
+.pending-invoices-icon-button:active,
+.pending-invoices-row-menu-trigger:active,
+.pending-invoices-inline-action:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .pending-invoices-inline-row {
@@ -6301,6 +6363,9 @@ textarea {
   font-weight: 700;
   text-align: left;
   white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .pending-invoices-row-menu-item:hover:not(:disabled),
@@ -6323,12 +6388,12 @@ textarea {
 .pending-invoice-detail-body {
   display: grid;
   align-content: start;
-  gap: var(--fp-space-4);
+  gap: var(--fp-space-3);
   min-height: 0;
 }
 
 .pending-invoice-drawer__body {
-  padding: var(--fp-space-5);
+  padding: var(--fp-space-4);
 }
 
 .pending-invoice-drawer-actions {
@@ -6342,8 +6407,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--fp-space-2);
-  min-height: 36px;
-  padding: var(--fp-space-3) var(--fp-space-4);
+  min-height: 34px;
+  padding: var(--fp-space-2) var(--fp-space-3);
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface-muted);
@@ -6398,7 +6463,7 @@ textarea {
 .pending-invoice-metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--fp-space-3);
+  gap: var(--fp-space-2);
 }
 
 .pending-invoice-metric,
@@ -6411,7 +6476,7 @@ textarea {
 .pending-invoice-metric {
   display: grid;
   gap: 4px;
-  padding: var(--fp-space-3);
+  padding: 10px var(--fp-space-3);
 }
 
 .pending-invoice-metric__label,
@@ -6436,7 +6501,7 @@ textarea {
 
 .pending-invoice-panel__title {
   margin: 0;
-  padding: var(--fp-space-4) var(--fp-space-4) 0;
+  padding: var(--fp-space-3) var(--fp-space-3) 0;
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
   font-weight: 900;
@@ -6445,15 +6510,15 @@ textarea {
 
 .pending-invoice-panel__description {
   margin: 0;
-  padding: var(--fp-space-2) var(--fp-space-4) var(--fp-space-4);
+  padding: var(--fp-space-1) var(--fp-space-3) var(--fp-space-3);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-body);
 }
 
 .pending-invoice-list {
   display: grid;
-  gap: var(--fp-space-3);
-  padding: var(--fp-space-4);
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3);
 }
 
 .pending-invoice-list__item {
@@ -6514,8 +6579,8 @@ textarea {
 .pending-invoice-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--fp-space-4);
-  padding: var(--fp-space-4);
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-3);
 }
 
 .pending-invoice-field {
@@ -6537,7 +6602,7 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   align-items: end;
   gap: var(--fp-space-3);
-  padding: var(--fp-space-4);
+  padding: var(--fp-space-3);
 }
 
 .pending-invoice-form-field {
@@ -6562,6 +6627,9 @@ textarea {
   font: inherit;
   font-size: var(--fp-text-body);
   font-weight: 650;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .pending-invoice-form-field textarea {
@@ -6627,7 +6695,7 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: var(--fp-space-3);
-  padding: var(--fp-space-3) var(--fp-space-4);
+  padding: var(--fp-space-2) var(--fp-space-3);
   border-top: 1px solid var(--fp-border);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-body);
@@ -6655,7 +6723,7 @@ textarea {
 
 .pending-invoice-manual-dialog {
   display: grid;
-  gap: var(--fp-space-4);
+  gap: var(--fp-space-3);
 }
 
 .pending-invoice-manual-dialog .pending-invoice-panel__description {
