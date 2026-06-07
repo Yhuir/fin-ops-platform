@@ -285,6 +285,13 @@ function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
 
+function cssRule(source: string, selector: string) {
+  const normalizedSelector = selector.replace(/\\n/g, "\n");
+  const escapedSelector = normalizedSelector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "m"));
+  return match?.[1] ?? "";
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -326,6 +333,35 @@ describe("OA pending payments page", () => {
       forbiddenLegacySurfaces: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("keeps premium compact table and interaction CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const button = cssRule(styles, ".oa-pending-payments-button");
+    const fieldControls = cssRule(styles, ".oa-pending-payments-field input,\\n.oa-pending-payments-field select");
+    const tableShell = cssRule(styles, ".oa-pending-payments-table-shell");
+    const loading = cssRule(styles, ".oa-pending-payments-loading__bar,\\n.oa-pending-payments-loading__panel");
+    const detailButton = cssRule(styles, ".oa-pending-payments-detail-button");
+    const sortButton = cssRule(styles, ".oa-pending-payments-sort-button");
+    const paginationButton = cssRule(styles, ".oa-pending-payments-pagination-actions button");
+    const groupOa = cssRule(styles, ".oa-pending-payments-table-group-header--oa");
+    const groupStatus = cssRule(styles, ".oa-pending-payments-table-group-header--status");
+    const groupBank = cssRule(styles, ".oa-pending-payments-table-group-header--bank");
+    const groupInvoice = cssRule(styles, ".oa-pending-payments-table-group-header--invoice");
+
+    expect(button).toContain("var(--motion-fast)");
+    expect(button).toContain("var(--ease-out-quart)");
+    expect(fieldControls).toContain("var(--motion-fast)");
+    expect(tableShell).toContain("min-height: 320px");
+    expect(tableShell).toContain("max-height: calc(100vh - 214px)");
+    expect(loading).toContain("border-radius: var(--fp-radius-sm)");
+    expect(detailButton).toContain("var(--motion-fast)");
+    expect(sortButton).toContain("var(--motion-fast)");
+    expect(paginationButton).toContain("var(--motion-fast)");
+    expect(groupOa).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(groupStatus).toContain("color-mix(in srgb, var(--fp-warning-soft)");
+    expect(groupBank).toContain("color-mix(in srgb, var(--fp-primary-soft)");
+    expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
   });
 
   test("adds sidebar route and renders compact grouped project table from OA perspective", async () => {

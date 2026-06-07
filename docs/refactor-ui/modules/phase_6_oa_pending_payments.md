@@ -114,6 +114,43 @@ Recommended PV-015 CSS contract coverage:
 - Motion-token use for `oa-pending-payments-button`, field controls, sort/detail buttons and pagination buttons.
 - Token-based group header background treatment for `OA情况`, `支付状态`, `支出流水`, `发票情况`.
 
+## PV-015 Premium Visual Implementation
+
+Prompt ID: `PV-015-oa-pending-payments-premium-visual`
+
+Status: verified.
+
+Implementation summary:
+
+- Replaced hard-coded OA pending payments group header and sub-header washes with Ledger Calm token-based `color-mix` treatments.
+- Tightened table viewport sizing, loading skeleton radius and alert radius to match the premium finance table direction used by bank details and input invoice usage.
+- Added motion-token hover/press/focus feedback for page action buttons, query fields, detail icon buttons, sort button and pagination buttons.
+- Kept the 10-column grouped table, shared filter menu, sort button, detail buttons, detail right drawer and expense rules right drawer behavior unchanged.
+
+Tests added or updated:
+
+- `web/src/test/OaPendingPaymentsPage.test.tsx`
+  - Added `keeps premium compact table and interaction CSS contracts`.
+  - Covers compact table viewport, loading radius, token-based group colors and motion-token usage across buttons/fields/pagination.
+
+Verification:
+
+- `cd web && npx vitest run OaPendingPaymentsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`: passed, 16 tests.
+- `cd web && npx tsc -b --pretty false`: passed.
+- `cd web && npm run build`: passed with existing HeroUI/Tailwind CSS minify warnings.
+- Browser smoke for `/oa-pending-payments` using system Chrome and mocked API:
+  - Main table rendered with 1 data row.
+  - Group headers rendered: `OA情况`, `支付状态`, `支出流水`, `发票情况`.
+  - Shared filter menu trigger opened and closed.
+  - Detail right drawer opened for `OA详情`.
+  - Expense rules right drawer opened with `待找发票规则设置`.
+  - Top-level body overflow: `0`; page root overflow: `0`.
+  - Screenshot: `/tmp/oa-pending-payments-premium-smoke.png`.
+
+Remaining risk:
+
+- Browser smoke used mocked API data. Full backend business-flow validation remains covered by existing component/API tests and is outside this visual slice.
+
 ## Current MUI Inventory
 
 | File | Current MUI usage | Target |

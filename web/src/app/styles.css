@@ -1410,7 +1410,7 @@ textarea {
   font-weight: 800;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
   white-space: nowrap;
 }
 
@@ -1424,6 +1424,10 @@ textarea {
 
 .oa-pending-payments-button:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.oa-pending-payments-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .oa-pending-payments-button--primary {
@@ -1483,7 +1487,7 @@ textarea {
   font-weight: 600;
   outline: none;
   padding: 0 var(--fp-space-3);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .oa-pending-payments-field select {
@@ -1503,7 +1507,7 @@ textarea {
 
 .oa-pending-payments-alert {
   border: 1px solid color-mix(in srgb, var(--fp-danger) 32%, var(--fp-border));
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-danger-soft);
   color: var(--fp-danger);
   font-size: var(--fp-text-body);
@@ -1521,7 +1525,7 @@ textarea {
   display: block;
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: linear-gradient(90deg, var(--fp-surface-muted), var(--fp-surface), var(--fp-surface-muted));
   background-size: 240% 100%;
   animation: input-invoice-usage-loading 1.2s ease-in-out infinite;
@@ -1543,8 +1547,8 @@ textarea {
 }
 
 .oa-pending-payments-table-shell {
-  min-height: 360px;
-  max-height: calc(100vh - 280px);
+  min-height: 320px;
+  max-height: calc(100vh - 214px);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -1618,19 +1622,19 @@ textarea {
 }
 
 .oa-pending-payments-table-group-header--oa {
-  background: #f3f4f6;
+  background: color-mix(in srgb, var(--fp-surface-muted) 64%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-group-header--status {
-  background: #fff7e6;
+  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-group-header--bank {
-  background: #edf5ff;
+  background: color-mix(in srgb, var(--fp-primary-soft) 64%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-group-header--invoice {
-  background: #eefaf3;
+  background: color-mix(in srgb, var(--fp-success-soft) 64%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-sub-header {
@@ -1644,19 +1648,19 @@ textarea {
 }
 
 .oa-pending-payments-table-sub-header--oa {
-  background: #fafafa;
+  background: color-mix(in srgb, var(--fp-surface-muted) 34%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-sub-header--status {
-  background: #fffaf0;
+  background: color-mix(in srgb, var(--fp-warning-soft) 44%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-sub-header--bank {
-  background: #f6faff;
+  background: color-mix(in srgb, var(--fp-primary-soft) 42%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-sub-header--invoice {
-  background: #f7fcf9;
+  background: color-mix(in srgb, var(--fp-success-soft) 42%, var(--fp-surface));
 }
 
 .oa-pending-payments-table-cell {
@@ -1689,7 +1693,7 @@ textarea {
 }
 
 .oa-pending-payments-table-row:hover .oa-pending-payments-table-cell {
-  background: var(--fp-surface-muted);
+  background: color-mix(in srgb, var(--fp-primary-soft) 42%, transparent);
 }
 
 .oa-pending-payments-table-state-cell {
@@ -1771,6 +1775,7 @@ textarea {
   font-weight: 750;
   line-height: 1.2;
   padding: 0 var(--fp-space-2);
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
 
 .oa-pending-payments-detail-button {
@@ -1785,6 +1790,7 @@ textarea {
   background: transparent;
   color: var(--fp-text-secondary);
   cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .oa-pending-payments-detail-button:hover:not(:disabled),
@@ -1798,6 +1804,10 @@ textarea {
 .oa-pending-payments-detail-button:disabled {
   color: var(--fp-text-disabled);
   cursor: default;
+}
+
+.oa-pending-payments-detail-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .oa-pending-payments-sort-button {
@@ -1814,12 +1824,17 @@ textarea {
   font-weight: 850;
   padding: 0;
   text-align: left;
+  transition: color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .oa-pending-payments-sort-button:hover,
 .oa-pending-payments-sort-button:focus-visible {
   color: var(--fp-accent);
   outline: none;
+}
+
+.oa-pending-payments-sort-button:active {
+  transform: translateY(1px);
 }
 
 .oa-pending-payments-pagination {
@@ -1849,6 +1864,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   padding: 4px 26px 4px 8px;
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .oa-pending-payments-pagination-range {
@@ -1875,6 +1891,7 @@ textarea {
   font-size: var(--fp-text-label);
   font-weight: 750;
   padding: 0 var(--fp-space-3);
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .oa-pending-payments-pagination-actions button:hover:not(:disabled),
@@ -1888,6 +1905,10 @@ textarea {
 .oa-pending-payments-pagination-actions button:disabled {
   color: var(--fp-text-disabled);
   cursor: default;
+}
+
+.oa-pending-payments-pagination-actions button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .output-invoice-collections-page {

@@ -799,7 +799,7 @@ Notes:
 
 - Code tests were not run for PV-014 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-015-oa-pending-payments-premium-visual
 
 `PV-015-oa-pending-payments-premium-visual`
 
@@ -827,3 +827,61 @@ Notes:
 - 如 dev server 可用，浏览器 smoke `/oa-pending-payments`：确认 heading、query toolbar、main grouped table、shared filter menu trigger、detail drawer and expense rules drawer can display/open/close without obvious overlap or top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Replaced OA pending payments hard-coded table group/sub-header washes with Ledger Calm token-based `color-mix` treatments.
+- Tightened table viewport sizing, loading skeleton radius and alert radius.
+- Added motion-token hover/press/focus feedback for page action buttons, query fields, detail icon buttons, sort button and pagination buttons.
+- Added CSS contract coverage in `OaPendingPaymentsPage.test.tsx` for compact table treatment, token-based group colors and motion-token usage.
+- Preserved all OA pending payments behavior: route, header actions, query controls, main grouped table, shared `InputInvoiceUsageFilterMenu`, sort behavior, detail buttons, detail right drawer, expense rules right drawer, loading/error/empty states and API/workflow behavior.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run OaPendingPaymentsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke for `/oa-pending-payments` with system Chrome and mocked API at `http://127.0.0.1:4180/oa-pending-payments`
+
+Browser smoke result:
+
+- Main table rendered with 1 data row.
+- Group headers rendered: `OA情况`, `支付状态`, `支出流水`, `发票情况`.
+- Shared filter menu trigger opened and closed.
+- Detail right drawer opened for `OA详情`.
+- Expense rules right drawer opened with `待找发票规则设置`.
+- Top-level body overflow: `0`; page root overflow: `0`.
+- Screenshot: `/tmp/oa-pending-payments-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-016-output-invoice-collections-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`web/src/pages/OutputInvoiceCollectionsPage.tsx`、`web/src/components/outputInvoiceCollections/*`、相关 `OutputInvoiceCollections` tests 和当前 `git status`。本切片只做销项发票收款 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 新建或更新 `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`，并从 `docs/refactor-ui/module_inventory.md` 链接（如未链接）。
+- 清点 `/output-invoice-collections` 的用户可见入口：页面 header actions、筛选/search、summary、主表、菜单/Popover、行操作、详情/回款/红票/预览/设置/历史右侧抽屉、loading/empty/error/stale/permission 状态。
+- 标明哪些元素必须功能等价保留：旧表格仍为表格，旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗，旧按钮/行操作仍在原信息层级。
+- 列出表格列角色和排版要求：金额/税额/收款金额右对齐、tabular nums、状态/tag 稳定高度，长客户/发票/项目/流水文本截断或换行，行 hover 不改变行高。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
+- 生成下一条唯一 prompt：`PV-017-output-invoice-collections-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和相关模块文档，精确 staging，commit 并 push 到 `origin/main`。
