@@ -14,17 +14,9 @@ import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
-import Chip from "@mui/material/Chip";
 import Collapse from "@mui/material/Collapse";
-import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
@@ -1982,64 +1974,48 @@ export default function EtcTicketManagementPage() {
       tableKey,
     }: { ariaLabel: string; emptyText: string; loadingText: string; tableKey: string },
   ) => (
-    <TableContainer ref={invoiceTableWrapRef} className="etc-invoice-table-container">
-      <Table
+    <div ref={invoiceTableWrapRef} className="etc-invoice-table-container">
+      <table
         key={tableKey}
         aria-label={ariaLabel}
-        size="small"
-        stickyHeader
-        sx={{
-          tableLayout: "fixed",
-          width: "100%",
-          "& .MuiTableCell-root": {
-            borderColor: "#e2e8f0",
-            color: "#243b53",
-            overflowWrap: "anywhere",
-          },
-          "& .MuiTableCell-head": {
-            backgroundColor: "#f4f7fb",
-            fontWeight: 800,
-          },
-        }}
+        className="etc-invoice-table"
       >
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ width: "17%" }}>发票号码</TableCell>
-            <TableCell sx={{ width: "12%" }}>开票日期</TableCell>
-            <TableCell sx={{ width: "15%" }}>通行日期</TableCell>
-            <TableCell sx={{ width: "12%" }}>车牌</TableCell>
-            <TableCell sx={{ width: "18%" }}>销方</TableCell>
-            <TableCell sx={{ width: "9%" }} align="right">金额</TableCell>
-            <TableCell sx={{ width: "8%" }} align="right">税额</TableCell>
-            <TableCell sx={{ width: "9%" }}>附件状态</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+        <thead>
+          <tr>
+            <th className="etc-invoice-number-column">发票号码</th>
+            <th className="etc-invoice-issue-column">开票日期</th>
+            <th className="etc-invoice-passage-column">通行日期</th>
+            <th className="etc-invoice-plate-column">车牌</th>
+            <th className="etc-invoice-seller-column">销方</th>
+            <th className="etc-invoice-money-column">金额</th>
+            <th className="etc-invoice-tax-column">税额</th>
+            <th className="etc-invoice-attachment-column">附件状态</th>
+          </tr>
+        </thead>
+        <tbody>
           {rows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={8} align="center">
-                <Typography color="text.secondary" variant="body2">
-                  {loadingText || emptyText}
-                </Typography>
-              </TableCell>
-            </TableRow>
+            <tr>
+              <td colSpan={8} className="etc-invoice-table-empty">
+                {loadingText || emptyText}
+              </td>
+            </tr>
           ) : (
             rows.map((invoice) => (
-              <TableRow key={invoice.id}>
-                <TableCell>{invoice.invoiceNumber}</TableCell>
-                <TableCell>{invoice.issueDate}</TableCell>
-                <TableCell>{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</TableCell>
-                <TableCell>{invoice.plateNumber || "-"}</TableCell>
-                <TableCell>{invoice.sellerName || "-"}</TableCell>
-                <TableCell align="right">{formatMoney(invoice.totalAmount)}</TableCell>
-                <TableCell align="right">{formatMoney(invoice.taxAmount)}</TableCell>
-                <TableCell>{attachmentLabel(invoice)}</TableCell>
-              </TableRow>
+              <tr key={invoice.id}>
+                <td>{invoice.invoiceNumber}</td>
+                <td>{invoice.issueDate}</td>
+                <td>{formatDateRange(invoice.passageStartDate, invoice.passageEndDate)}</td>
+                <td>{invoice.plateNumber || "-"}</td>
+                <td>{invoice.sellerName || "-"}</td>
+                <td className="etc-invoice-money-cell">{formatMoney(invoice.totalAmount)}</td>
+                <td className="etc-invoice-money-cell">{formatMoney(invoice.taxAmount)}</td>
+                <td>{attachmentLabel(invoice)}</td>
+              </tr>
             ))
           )}
-        </TableBody>
-      </Table>
-    </TableContainer>
+        </tbody>
+      </table>
+    </div>
   );
 
   return (
@@ -2599,31 +2575,27 @@ export default function EtcTicketManagementPage() {
                         ? renderOaStatusPanel(selectedTaskBusinessBatch)
                         : null}
                       {showTaskImportedInvoices ? (
-                      <Box component="section" className="etc-task-imported-invoices" aria-label="已导入ETC发票">
-                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                          <Typography component="h3" variant="subtitle1" fontWeight={800}>
-                            已导入发票
-                          </Typography>
+                      <section className="etc-task-imported-invoices" aria-label="已导入ETC发票">
+                        <div className="etc-section-heading">
+                          <h3>已导入发票</h3>
                           {importedInvoiceCount > 0 ? (
-                            <Chip label={`${importedInvoiceCount} 张`} size="small" variant="outlined" />
+                            <span className="etc-count-tag">{importedInvoiceCount} 张</span>
                           ) : null}
                           {Number(importedInvoiceAmount) > 0 ? (
-                            <Chip label={`合计 ${importedInvoiceAmount}`} size="small" color="success" variant="outlined" />
+                            <span className="etc-status-tag etc-status-tag--success">合计 {importedInvoiceAmount}</span>
                           ) : null}
                           {canRemoveImportedInvoices ? (
-                            <Button
+                            <button
                               type="button"
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              startIcon={<Trash2 aria-hidden="true" size={16} />}
+                              className="etc-secondary-action etc-secondary-action--warning"
                               disabled={removeImportedInvoicesSubmitting || taskActionLoading}
                               onClick={() => setRemoveImportedInvoicesDialogOpen(true)}
                             >
+                              <Trash2 aria-hidden="true" size={16} />
                               移除发票
-                            </Button>
+                            </button>
                           ) : null}
-                        </Stack>
+                        </div>
                         {!selectedTaskImportBatchId ? (
                           <StatePanel tone="info" compact>确认后导入 ZIP。</StatePanel>
                         ) : taskImportDetailError ? (
@@ -2639,7 +2611,7 @@ export default function EtcTicketManagementPage() {
                             },
                           )
                         )}
-                      </Box>
+                      </section>
                       ) : null}
                     </Stack>
                   ) : (
@@ -2651,98 +2623,86 @@ export default function EtcTicketManagementPage() {
               </section>
 
               <section className="etc-batch-detail-panel" aria-label="ETC批次详情">
-                <Stack spacing={2}>
-                  <Stack className="etc-detail-heading" direction="row" alignItems="center" justifyContent="space-between" spacing={1.5}>
-                    <Box>
-                      <Typography component="h2" variant="h6" fontWeight={800}>
-                        批次详情
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        {selectedBatch ? selectedBatch.externalBatchId || selectedBatch.etcBatchId : "选择左侧批次。"}
-                      </Typography>
-                    </Box>
-                    <Button
+                <div className="etc-batch-detail-content">
+                  <div className="etc-detail-heading">
+                    <div>
+                      <h2>批次详情</h2>
+                      <p>{selectedBatch ? selectedBatch.externalBatchId || selectedBatch.etcBatchId : "选择左侧批次。"}</p>
+                    </div>
+                    <button
                       type="button"
-                      variant="outlined"
+                      className="etc-secondary-action"
                       aria-expanded={batchDetailPanelExpanded}
                       aria-controls="etc-batch-detail-content"
-                      startIcon={batchDetailPanelExpanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
                       onClick={() => setBatchDetailPanelExpanded((current) => !current)}
                     >
-                        {batchDetailPanelExpanded ? "折叠详情" : "展开详情"}
-                    </Button>
-                  </Stack>
+                      {batchDetailPanelExpanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
+                      {batchDetailPanelExpanded ? "折叠详情" : "展开详情"}
+                    </button>
+                  </div>
                   <Collapse in={batchDetailPanelExpanded} timeout="auto" unmountOnExit>
-                    <Box id="etc-batch-detail-content">
+                    <div id="etc-batch-detail-content">
                       {!selectedBatch ? (
                         <StatePanel tone="empty">选择左侧批次。</StatePanel>
                       ) : (
-                        <Stack spacing={2}>
-                  <Stack className="etc-detail-heading" direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} spacing={1.5}>
-                    <Box>
-                      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                        <Typography component="h2" variant="h6" fontWeight={800}>
-                          {selectedBatch.externalBatchId || selectedBatch.etcBatchId}
-                        </Typography>
-                        <Chip
-                          label={selectedBusinessBatch ? businessBatchStatusLabel(selectedBusinessBatch.status) : batchStatusLabel(selectedBatch.status)}
-                          size="small"
-                          color={selectedBusinessBatch ? businessBatchTone(selectedBusinessBatch.status) : (selectedBatch.status === "submitted" ? "success" : "primary")}
-                          variant="outlined"
-                        />
-                      </Stack>
+                        <div className="etc-batch-detail-content">
+                  <div className="etc-detail-heading">
+                    <div>
+                      <div className="etc-detail-title-line">
+                        <h2>{selectedBatch.externalBatchId || selectedBatch.etcBatchId}</h2>
+                        <span className={`etc-status-tag etc-status-tag--${selectedBusinessBatch ? businessBatchTone(selectedBusinessBatch.status) : (selectedBatch.status === "submitted" ? "success" : "primary")}`}>
+                          {selectedBusinessBatch ? businessBatchStatusLabel(selectedBusinessBatch.status) : batchStatusLabel(selectedBatch.status)}
+                        </span>
+                      </div>
                       {selectedBatch.status === "submitted" && batchOaLabel(selectedBatch) ? (
-                        <Typography color="text.secondary" variant="body2" fontWeight={700} sx={{ mt: 0.75 }}>
-                          {batchOaLabel(selectedBatch)}
-                        </Typography>
+                        <p>{batchOaLabel(selectedBatch)}</p>
                       ) : null}
-                    </Box>
+                    </div>
                     {activeStatus === "submitted" ? (
-                      <Button
+                      <button
                         type="button"
-                        variant="outlined"
-                        color="warning"
-                        startIcon={<RotateCcw aria-hidden="true" size={16} />}
+                        className="etc-secondary-action etc-secondary-action--warning"
                         disabled={!canRevokeCurrentBatch}
                         onClick={() => setRevokeDialogOpen(true)}
                       >
+                        <RotateCcw aria-hidden="true" size={16} />
                         撤销提交状态
-                      </Button>
+                      </button>
                     ) : null}
-                  </Stack>
+                  </div>
 
                   {selectedBusinessBatch && isOaDetectionStatus(selectedBusinessBatch.status) ? renderOaStatusPanel(selectedBusinessBatch) : null}
 
-                  <Box className="etc-detail-metrics" aria-label="批次指标">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">总金额</Typography>
-                      <Typography fontWeight={800}>{formatMoney(selectedBatch.totalAmount)}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">发票数</Typography>
-                      <Typography fontWeight={800}>{selectedBatch.invoiceCount} 张</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">开票日期</Typography>
-                      <Typography fontWeight={800}>{formatDateRange(selectedBatch.issueStartDate, selectedBatch.issueEndDate)}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">通行日期</Typography>
-                      <Typography fontWeight={800}>{formatDateRange(selectedBatch.passageStartDate, selectedBatch.passageEndDate)}</Typography>
-                    </Box>
-                  </Box>
+                  <div className="etc-detail-metrics" aria-label="批次指标">
+                    <div>
+                      <span>总金额</span>
+                      <strong>{formatMoney(selectedBatch.totalAmount)}</strong>
+                    </div>
+                    <div>
+                      <span>发票数</span>
+                      <strong>{selectedBatch.invoiceCount} 张</strong>
+                    </div>
+                    <div>
+                      <span>开票日期</span>
+                      <strong>{formatDateRange(selectedBatch.issueStartDate, selectedBatch.issueEndDate)}</strong>
+                    </div>
+                    <div>
+                      <span>通行日期</span>
+                      <strong>{formatDateRange(selectedBatch.passageStartDate, selectedBatch.passageEndDate)}</strong>
+                    </div>
+                  </div>
 
-                  <Box className="etc-plate-summary" aria-label="车牌汇总">
+                  <div className="etc-plate-summary" aria-label="车牌汇总">
                     {selectedBatch.plateSummary.map((item) => (
-                      <Box key={item.plateNumber} className="etc-plate-summary-item">
-                        <Typography fontWeight={800}>{item.plateNumber || "未记录车牌"}</Typography>
-                        <Typography color="text.secondary" variant="body2">{item.invoiceCount} 张</Typography>
-                        <Typography fontWeight={800}>{formatMoney(item.totalAmount)}</Typography>
-                      </Box>
+                      <div key={item.plateNumber} className="etc-plate-summary-item">
+                        <strong>{item.plateNumber || "未记录车牌"}</strong>
+                        <span>{item.invoiceCount} 张</span>
+                        <strong>{formatMoney(item.totalAmount)}</strong>
+                      </div>
                     ))}
-                  </Box>
+                  </div>
 
-                  <Divider />
+                  <hr className="etc-section-separator" />
 
                           {detailLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
                           {renderEtcInvoiceTable(
@@ -2755,29 +2715,29 @@ export default function EtcTicketManagementPage() {
                             },
                           )}
                           {selectedBusinessBatch?.importAttempts.length ? (
-                            <Box component="section" className="etc-import-attempts" aria-label="导入记录">
-                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                <Typography component="h3" variant="subtitle1" fontWeight={800}>导入记录</Typography>
-                                <Chip label={`${selectedBusinessBatch.importAttempts.length} 次`} size="small" variant="outlined" />
-                              </Stack>
-                              <Box className="etc-import-attempt-list">
+                            <section className="etc-import-attempts" aria-label="导入记录">
+                              <div className="etc-section-heading">
+                                <h3>导入记录</h3>
+                                <span className="etc-count-tag">{selectedBusinessBatch.importAttempts.length} 次</span>
+                              </div>
+                              <div className="etc-import-attempt-list">
                                 {selectedBusinessBatch.importAttempts.map((attempt, index) => (
-                                  <Box key={attempt.attemptId || `${attempt.importBatchId}-${index}`} className="etc-import-attempt-row">
-                                    <Typography fontWeight={800}>{attempt.importBatchId || `第 ${index + 1} 次导入`}</Typography>
-                                    <Typography variant="body2" color="text.secondary">
+                                  <div key={attempt.attemptId || `${attempt.importBatchId}-${index}`} className="etc-import-attempt-row">
+                                    <strong>{attempt.importBatchId || `第 ${index + 1} 次导入`}</strong>
+                                    <span>
                                       导入 {attempt.imported}，重复 {attempt.duplicatesSkipped}，补齐 {attempt.attachmentsCompleted}，失败 {attempt.failed}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary">{splitDateTimeParts(attempt.createdAt).date}</Typography>
-                                  </Box>
+                                    </span>
+                                    <span>{splitDateTimeParts(attempt.createdAt).date}</span>
+                                  </div>
                                 ))}
-                              </Box>
-                            </Box>
+                              </div>
+                            </section>
                           ) : null}
-                        </Stack>
+                        </div>
                       )}
-                    </Box>
+                    </div>
                   </Collapse>
-                </Stack>
+                </div>
               </section>
             </Stack>
           </Box>

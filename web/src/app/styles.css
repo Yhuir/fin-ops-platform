@@ -17422,6 +17422,34 @@ body.column-layout-dragging {
   gap: 12px;
 }
 
+.etc-detail-heading {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.etc-detail-heading h2,
+.etc-section-heading h3 {
+  margin: 0;
+  color: #172033;
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.etc-detail-heading p {
+  margin: 5px 0 0;
+  color: #52677a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.etc-detail-title-line,
+.etc-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .etc-filter-bar {
   display: flex;
   align-items: center;
@@ -17870,6 +17898,12 @@ body.column-layout-dragging {
   gap: 10px;
 }
 
+.etc-batch-detail-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
 .etc-reconciliation-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -17883,6 +17917,22 @@ body.column-layout-dragging {
   border-radius: 8px;
   padding: 10px;
   background: #f9fbfe;
+}
+
+.etc-detail-metrics span,
+.etc-plate-summary-item span,
+.etc-import-attempt-row span {
+  color: #52677a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.etc-detail-metrics strong,
+.etc-plate-summary-item strong,
+.etc-import-attempt-row strong {
+  color: #172033;
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .etc-plate-summary {
@@ -17933,7 +17983,8 @@ body.column-layout-dragging {
   background: #ffffff;
 }
 
-.etc-import-attempt-row .MuiTypography-root {
+.etc-import-attempt-row strong,
+.etc-import-attempt-row span {
   overflow-wrap: anywhere;
 }
 
@@ -18108,25 +18159,6 @@ body.column-layout-dragging {
   background: #fef3c7;
 }
 
-.etc-invoice-grid .MuiDataGrid-root {
-  color: #243b53;
-  background: #ffffff;
-  min-width: 0;
-}
-
-.etc-invoice-grid .MuiDataGrid-columnHeaders {
-  background: #f4f7fb;
-}
-
-.etc-invoice-grid .MuiDataGrid-columnHeaderTitle {
-  color: #243b53;
-  font-weight: 800;
-}
-
-.etc-invoice-grid .MuiDataGrid-cell {
-  border-color: #e2e8f0;
-}
-
 .etc-invoice-table-container {
   width: 100%;
   max-height: 460px;
@@ -18134,6 +18166,85 @@ body.column-layout-dragging {
   border: 1px solid #d5dde8;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.etc-invoice-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.etc-invoice-table th,
+.etc-invoice-table td {
+  padding: 7px 8px;
+  color: #243b53;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.etc-invoice-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: #172033;
+  font-weight: 850;
+  text-align: left;
+  background: #f4f7fb;
+}
+
+.etc-invoice-number-column {
+  width: 17%;
+}
+
+.etc-invoice-issue-column {
+  width: 12%;
+}
+
+.etc-invoice-passage-column {
+  width: 15%;
+}
+
+.etc-invoice-plate-column {
+  width: 12%;
+}
+
+.etc-invoice-seller-column {
+  width: 18%;
+}
+
+.etc-invoice-money-column {
+  width: 9%;
+  text-align: right;
+}
+
+.etc-invoice-tax-column {
+  width: 8%;
+  text-align: right;
+}
+
+.etc-invoice-attachment-column {
+  width: 9%;
+}
+
+.etc-invoice-money-cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.etc-invoice-table-empty {
+  height: 68px;
+  color: #64748b;
+  text-align: center;
+}
+
+.etc-section-separator {
+  width: 100%;
+  height: 1px;
+  margin: 0;
+  background: #e2e8f0;
+  border: 0;
 }
 
 .etc-reconciliation-table-block {
