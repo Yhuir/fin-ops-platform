@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P110-phase-7-datagrid-session-cleanup`
+- Current Prompt ID: `P111-phase-7-test-provider-containment`
 - Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
@@ -54,18 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: phase 7 MUI DataGrid session cleanup generated after P109 MonthPicker/date compat migration。
-- Files touched in P109:
-  - `web/src/components/MonthPicker.tsx`
-  - `web/src/app/MuiDatePickerCompatProvider.tsx`
-  - `web/src/app/App.tsx`
-  - `web/src/test/MonthPicker.test.tsx`
+- Scope: phase 7 test provider containment generated after P110 DataGrid session cleanup。
+- Files touched in P110:
+  - `web/src/hooks/useMuiDataGridPageSession.ts`
+  - `web/src/test/useMuiDataGridPageSession.test.tsx`
+  - `web/src/app/muiTheme.ts`
   - `docs/refactor-ui/modules/phase_7_mui_containment.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: MonthPicker tests passed；App/common/HeroUI smoke passed；MonthPicker/date compat scoped no-MUI grep passed；build passed；diff check passed。
+- Verification run: FinanceTable session/table alignment tests passed；runtime MUI DataGrid session grep passed；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P110-phase-7-datagrid-session-cleanup`。
+- Next action: 执行 `P111-phase-7-test-provider-containment`。
 
 ## Prompt Lifecycle
 
@@ -98,12 +97,18 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `in_progress` | `P110-phase-7-datagrid-session-cleanup` | P109 MonthPicker/date compat verified；next remove obsolete MUI DataGrid session hook |
+| mui containment | `in_progress` | `P111-phase-7-test-provider-containment` | P110 DataGrid session cleanup verified；next isolate test MUI provider usage |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | reference grep before deletion | passed | No runtime page references to the obsolete MUI DataGrid session hook |
+| 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | `cd web && npx vitest run useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts` | passed | 7 tests passed |
+| 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | runtime MUI DataGrid session grep excluding tests | passed | No runtime `useMuiDataGridPageSession` / `@mui/x-data-grid` references remain |
+| 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | full reference grep | passed | Only a negative test string remains in `BankDetailsPage.test.tsx` |
+| 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | `cd web && npx vitest run MonthPicker.test.tsx` | passed | 5 tests passed |
 | 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 26 tests passed |
 | 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | scoped MonthPicker/date compat no-MUI grep | passed | `MuiDatePickerCompatProvider.tsx` deleted；`MonthPicker.tsx` and `App.tsx` have no date compat residue |

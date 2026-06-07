@@ -1,12 +1,10 @@
 import { createTheme } from "@mui/material/styles";
 import type { zhCN as coreZhCN } from "@mui/material/locale";
 import { zhCN } from "@mui/material/locale";
-import { zhCN as dataGridZhCN } from "@mui/x-data-grid/locales";
 import { zhCN as datePickersZhCN } from "@mui/x-date-pickers/locales";
 
-const localeLayers: [typeof coreZhCN, typeof dataGridZhCN, typeof datePickersZhCN] = [
+const localeLayers: [typeof coreZhCN, typeof datePickersZhCN] = [
   zhCN,
-  dataGridZhCN,
   datePickersZhCN,
 ];
 

@@ -240,3 +240,33 @@ Scope: obsolete MUI DataGrid session hook cleanup only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/hooks/useMuiDataGridPageSession.ts、web/src/test/useMuiDataGridPageSession.test.tsx、web/src/hooks/useFinanceTableSession.ts、web/src/test/useFinanceTableSession.test.tsx 和当前 `rg -n "useMuiDataGridPageSession|useMuiDataGridScrollSession|MuiDataGridPageSession|@mui/x-data-grid" web/src` 结果。只处理 MUI DataGrid session cleanup：如果 runtime references 只剩该 hook/test，则删除 `useMuiDataGridPageSession.ts` 和 `useMuiDataGridPageSession.test.tsx`；确认 `useFinanceTableSession` 仍覆盖 native table session persistence；如发现 runtime 页面仍引用 MUI DataGrid session，停止删除并生成更小迁移 prompt。不得修改页面 UI、backend、API、read model、worker 或关联台内部工作区。运行 reference grep，运行 `cd web && npx vitest run useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts`，运行 `if rg -n 'useMuiDataGridPageSession|useMuiDataGridScrollSession|MuiDataGridPageSession|@mui/x-data-grid' web/src --glob '!**/*.test.tsx' --glob '!**/*.test.ts'; then exit 1; else exit 0; fi`，运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P111 test provider containment prompt。
 ```
+
+## P110 Execution Notes
+
+- Prompt ID: `P110-phase-7-datagrid-session-cleanup`
+- Status: `verified`
+- Runtime implementation changed:
+  - Deleted obsolete `web/src/hooks/useMuiDataGridPageSession.ts`.
+  - Removed MUI DataGrid locale layer from `web/src/app/muiTheme.ts`.
+- Test implementation changed:
+  - Deleted obsolete `web/src/test/useMuiDataGridPageSession.test.tsx`.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - Reference grep showed no runtime page references to the MUI DataGrid session hook before deletion.
+  - `cd web && npx vitest run useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts`: passed; 7 tests passed.
+  - Runtime `useMuiDataGridPageSession|useMuiDataGridScrollSession|MuiDataGridPageSession|@mui/x-data-grid` grep excluding tests: passed.
+  - Full reference grep only finds a negative test string in `BankDetailsPage.test.tsx`.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+
+## P111 Prompt Draft
+
+```text
+Prompt ID: P111-phase-7-test-provider-containment
+Phase: phase_7_mui_containment
+Type: extraction/refactor
+Scope: non-workbench test provider containment only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/renderHelpers.tsx、web/src/app/MuiProviders.tsx、web/src/app/muiTheme.ts、web/src/test/CommonMuiComponents.test.tsx、web/src/test/SettingsOaManualSearchImportTable.test.tsx、web/src/test/MonthPicker.test.tsx、web/src/test/WorkbenchExceptionModal.test.tsx 和当前 `rg -n "import MuiProviders|<MuiProviders|MuiProviders" web/src/test` 结果。只处理测试 provider containment：新增或调整 project test provider helper，使非关联台 tests 不再默认 import/wrap `MuiProviders`；如冻结 workbench tests still need MUI provider, expose an explicitly named legacy helper or keep direct `MuiProviders` only in workbench test scope and document it。不得修改 runtime UI、backend、API、read model、worker 或关联台内部工作区。运行 targeted tests for changed harness users（至少 `cd web && npx vitest run CommonMuiComponents.test.tsx MonthPicker.test.tsx SettingsOaManualSearchImportTable.test.tsx WorkbenchExceptionModal.test.tsx`）；运行 provider grep to prove non-workbench test provider no longer defaults to MUI and only workbench legacy remains；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P112 global CSS containment prompt。
+```
