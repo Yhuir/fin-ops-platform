@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P052-phase-6-pending-invoices`
-- Current MG ID: `MG-P045-phase-6-bank-details`
+- Current Prompt ID: `P053-phase-6-input-invoice-usage-discovery`
+- Current MG ID: `MG-P052-phase-6-pending-invoices`
 
 ## Global Invariants
 
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices P052 invoice picker/manual dialog migration verified；next MG-P052 cumulative gate |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices MG-P052 verified and pushed；next P053 input invoice usage discovery |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,14 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 pending invoices cumulative merge gate generated after P047-P052 migration slices。
+- Scope: phase 6 input invoice usage discovery prompt generated after PendingInvoices MG-P052。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_pending_invoices.md`
-- Verification run: `cd web && npx vitest run PendingInvoicesPage.test.tsx` passed with 15 tests；pending invoice page/components source-level project primitive contract now passes fully。
-- Failures: none in PendingInvoicesPage test after P052。
-- Next action: 执行 `MG-P052-phase-6-pending-invoices`。
+- Verification run: `git push origin refactor-ui` passed for commit `369e480c feat: complete pending invoices ui migration`。
+- Failures: none for PendingInvoicesPage test after P052。
+- Next action: 执行 `P053-phase-6-input-invoice-usage-discovery`。
 
 ## Prompt Lifecycle
 
@@ -93,12 +93,13 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P052-phase-6-pending-invoices` | PendingInvoices P052 verified；next cumulative MG for the pending invoices module |
+| page batches | `in_progress` | `P053-phase-6-input-invoice-usage-discovery` | PendingInvoices MG-P052 pushed；next input invoice usage discovery |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P052-phase-6-pending-invoices` | `git push origin refactor-ui` | passed | Commit `369e480c feat: complete pending invoices ui migration` pushed |
 | 2026-06-07 | `P052-phase-6-pending-invoices-invoice-picker-and-manual-dialog` | `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "opens invoice picker from status column\|manual invoice action still previews before confirm\|targets project primitives"` | passed | 3 focused tests passed |
 | 2026-06-07 | `P052-phase-6-pending-invoices-invoice-picker-and-manual-dialog` | `cd web && npx vitest run PendingInvoicesPage.test.tsx` | passed | 15 tests passed; source-level project primitive contract fully passed |
 | 2026-06-07 | `P052-phase-6-pending-invoices-invoice-picker-and-manual-dialog` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |

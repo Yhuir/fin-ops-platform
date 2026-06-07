@@ -3151,7 +3151,7 @@ Scope: Final pending invoices UI migration slice: `web/src/components/pendingInv
 ### MG-P052-phase-6-pending-invoices
 
 - Phase: `phase_6_page_batches`
-- Status: `mg_reviewed`
+- Status: `mg_verified`
 - Type: `cumulative MG`
 - Scope: PendingInvoices module P046-P052 only: pending invoices module docs/state/prompt docs, PendingInvoices page/table/drawer/dialog components, `AppDrawer` subtitle compatibility extension, PendingInvoices tests and required styles. Do not include backend, API contracts, read models, workers, reconciliation workbench internals, unrelated page modules or unrelated generated files.
 
@@ -3174,6 +3174,52 @@ Scope: PendingInvoices module P046-P052 only. Confirm all pending invoice migrat
 - Workbench internals frozen: required。
 - Verification required before push: yes，PendingInvoices target tests, common/table/platform regressions, build, scoped MUI/DataGrid residue grep and diff check。
 - Push target: `origin refactor-ui`。
+
+#### Execution Notes
+
+- Exact staged files for the final P052/MG commit:
+  - `docs/refactor-ui/refactor_ui_state.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/modules/phase_6_pending_invoices.md`
+  - `web/src/app/styles.css`
+  - `web/src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx`
+  - `web/src/components/pendingInvoices/ManualInvoiceDialog.tsx`
+- Commit: `369e480c feat: complete pending invoices ui migration`。
+- Push: `origin/refactor-ui` updated from `22a204fa` to `369e480c`。
+
+#### Verification
+
+- Status: mg_verified。
+- Commands:
+  - `git diff --cached --name-only`: confirmed exact staged files before commit。
+  - `git push origin refactor-ui`: passed。
+
+### P053-phase-6-input-invoice-usage-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/input-invoice-usage` module only. Discovery/planning for input invoice usage UI migration; do not modify runtime implementation or tests except docs/state/prompt/module doc required for discovery.
+
+#### Prompt
+
+```text
+Prompt ID: P053-phase-6-input-invoice-usage-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/input-invoice-usage` only: InputInvoiceUsage page, input invoice usage components/features/tests and UI migration documentation. Do not modify backend, API contracts, read models, workers, mocks, reconciliation workbench internals, or unrelated page modules.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/*、web/src/features/inputInvoiceUsage/api.ts、web/src/features/inputInvoiceUsage/types.ts、web/src/test/InputInvoiceUsagePage.test.tsx、web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx 和当前 git status。梳理 `/input-invoice-usage` 的旧 UI 入口、MUI/DataGrid/session hook inventory、主表/筛选菜单/搜索/详情右侧抽屉/导出右侧抽屉/规则右侧抽屉/OA 反查 workspace drawer/loading empty error stale permission 状态、现有测试覆盖、API/read model 风险和迁移切片风险。不得修改实现、测试、后端、API、read model、worker、mock 或关联台。若 discovery 需要跨后续切片复用，创建 `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`；更新 `docs/refactor-ui/refactor_ui_state.md`、`docs/refactor-ui/refactor_ui_prompt.md` 和模块文档，生成下一条 P054 characterization tests prompt。验证命令：`test -f docs/refactor-ui/modules/phase_6_input_invoice_usage.md`；`rg -n "P053-phase-6-input-invoice-usage-discovery|Current MUI Inventory|User-visible Entrypoints|P054-phase-6-input-invoice-usage-characterization-tests" docs/refactor-ui/modules/phase_6_input_invoice_usage.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；`git diff --check`；`git status --short --branch`。
+```
+
+#### Review
+
+- Single slice: yes，discovery/planning only。
+- Runtime implementation untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Module doc allowed: yes，input invoice usage has high-risk table, filters and multiple drawers。
+- Next prompt: P054 characterization tests only after P053 is implemented and verified。
 
 ### MG Prompt Template
 
