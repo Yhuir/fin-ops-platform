@@ -47,16 +47,12 @@ rg -n "^import .*@mui|from \"@mui|from '@mui|@mui/|Mui[A-Z]|\\.Mui" web/src/page
 
 ### Workbench CSS MUI Selectors
 
-Current `web/src/app/styles.css` workbench MUI selectors include:
+`web/src/app/styles.css` workbench `.Mui*` selectors were removed in `P-WB006`. Current migration status:
 
-- Zone title: `.zone-title.MuiTypography-root`
-- Selection pill: `.zone-selection-pill.MuiChip-root`, `.zone-selection-pill .MuiChip-label`
-- Selection buttons: `.zone-selection-btn.MuiButton-root`, hover/primary/warning/disabled variants
-- Pane toggle: `.zone-toggle.MuiToggleButton-root`, selected/hover/disabled variants
-- Expand icon button: `.zone-expand-icon-btn.MuiIconButton-root`
-- Pane search field: `.pane-search-field .MuiOutlinedInput-root`, `.MuiOutlinedInput-notchedOutline`, `.MuiInputAdornment-root`, `.MuiInputBase-input`
-
-These selectors are migration targets in `wb_phase_5_css_containment_cleanup`.
+- Zone title, selection pills/buttons, pane toggles and expand icon buttons now use stable project selectors.
+- Pane search field now uses native `.pane-search-input-wrap`、`.pane-search-input-icon`、`.pane-search-field`、`.pane-search-clear-btn` styles.
+- Record warning tooltip/icon buttons now use `.record-warning-tooltip-wrap`、`.record-warning-icon-btn`、`.record-warning-icon`、`.bank-amount-mismatch-tooltip`.
+- CSS grep `rg -n "\\.Mui|Mui[A-Z]" web/src/app/styles.css web/src/components/workbench` is expected to have no output.
 
 ### Test-only MUI Boundary
 
@@ -282,7 +278,6 @@ Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warn
 
 Direct runtime MUI targets in `web/src/components/workbench/*.tsx` are now zero. Remaining workbench MUI cleanup is limited to:
 
-- workbench `.Mui*` selectors in `web/src/app/styles.css`;
 - test-only `legacyWorkbenchMuiProvider` and related render helpers;
 - package dependencies after no references remain.
 
@@ -292,6 +287,45 @@ Direct runtime MUI targets in `web/src/components/workbench/*.tsx` are now zero.
 if rg -n '@mui/|Mui[A-Z]|WarningAmberRoundedIcon|<IconButton\b|<Tooltip\b|sx=|MuiSvgIcon' web/src/components/workbench/WorkbenchRecordCard.tsx; then exit 1; else exit 0; fi
 cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx
 cd web && npm run build
+```
+
+Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
+## P-WB006 CSS Containment Cleanup
+
+- Prompt ID: `P-WB006-css-containment-cleanup`
+- Phase: `wb_phase_5_css_containment_cleanup`
+- Type: `extraction/refactor`
+- Runtime changed: no.
+- CSS changed:
+  - `web/src/app/styles.css`
+- Test changed:
+  - `web/src/test/WorkbenchZone.test.tsx` source contract now asserts no `.Mui`/`Mui[A-Z]` hooks remain in `styles.css`.
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Result
+
+Workbench CSS no longer depends on MUI-generated classes. The migrated styles preserve:
+
+- zone title, selection pill/button density and hover/focus/disabled states;
+- pane toggle active/disabled/hover states;
+- expand icon button size and state colors;
+- native pane search input sizing, icon, clear button and focus ring;
+- record warning icon button and tooltip positioning.
+
+Remaining workbench MUI cleanup is limited to:
+
+- test-only `legacyWorkbenchMuiProvider` and related render helpers;
+- package dependencies after no references remain.
+
+### Verification
+
+```bash
+if rg -n '\.Mui|Mui[A-Z]' web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi
+cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx
+cd web && npm run build
+git diff --check
 ```
 
 Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
@@ -308,7 +342,7 @@ Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warn
 4. `P-WB005-record-card-actions`
    - Migrate `WorkbenchRecordCard.tsx`. Completed.
 5. `P-WB006-css-containment-cleanup`
-   - Remove workbench `.Mui*` selectors from `styles.css`.
+   - Remove workbench `.Mui*` selectors from `styles.css`. Completed.
 6. `P-WB007-test-provider-cleanup`
    - Remove `legacyWorkbenchMuiProvider` and update render helpers/tests.
 7. `P-WB008-dependency-cleanup`

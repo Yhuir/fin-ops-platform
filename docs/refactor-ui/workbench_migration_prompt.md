@@ -473,12 +473,12 @@
   - `git commit -m "refactor: migrate workbench record card actions from mui"`
   - `git push origin refactor-ui`
 
-## Next Prompt
+## Prompt History
 
 ### P-WB006-css-containment-cleanup
 
 - Phase: `wb_phase_5_css_containment_cleanup`
-- Status: `drafted`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只清理 workbench 相关 `.Mui*` CSS selectors，并补齐 P-WB003/P-WB004/P-WB005 迁移后的 project class styles；不改 runtime behavior、test provider、dependencies 或后端。
 
@@ -486,4 +486,64 @@
 
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、DESIGN.md、docs/refactor-ui/table_layout_system.md、web/src/app/styles.css、web/src/components/workbench/WorkbenchZone.tsx、WorkbenchPaneSearch.tsx、WorkbenchRecordCard.tsx、web/src/test/WorkbenchZone.test.tsx 和 web/src/test/WorkbenchColumns.test.tsx。只修改 web/src/app/styles.css 和必要的 source-level CSS contract tests：把 workbench `.Mui*` selectors 改为稳定 project selectors，覆盖 `.zone-title`、`.zone-selection-pill`、`.zone-selection-btn`、`.zone-toggle`、`.zone-expand-icon-btn`、`.pane-search-field`、`.pane-search-input-wrap`、`.pane-search-input-icon`、`.pane-search-clear-btn`、`.record-warning-tooltip-wrap`、`.record-warning-icon-btn`、`.record-warning-icon`、`.bank-amount-mismatch-tooltip`。保留密度、字号、间距、颜色、hover/focus/disabled/selected 状态和搜索框/警示 tooltip 的视觉位置；不得修改 backend/API/read model/worker，不得删除 legacy test provider，不得改 package dependencies。运行 CSS scoped grep `if rg -n '\\.Mui|Mui[A-Z]' web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi`，运行 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB007 test provider cleanup prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime behavior untouched: yes，只改 CSS 和 source-level CSS contract test。
+- Backend/API/read model/worker untouched: yes。
+- Test provider/dependencies cleanup deferred: yes。
+- User-visible behavior protected: yes，P-WB002/P-WB005 tests cover controls and warning interactions; P-WB006 preserves class hooks and visual states.
+
+#### Execution Notes
+
+- `web/src/app/styles.css` removed workbench `.Mui*` selectors for zone title, selection pills/buttons, pane toggles, expand button and pane search field.
+- Added stable project selector styles for native buttons, active/disabled/focus/hover states, native pane search input wrapper/icon/clear button and record warning tooltip/icon buttons.
+- `WorkbenchZone.test.tsx` source contract now asserts `web/src/app/styles.css` has no `.Mui`/`Mui[A-Z]` hooks.
+- Runtime/dependencies/backend/API/read model/worker changed: no.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `if rg -n '\\.Mui|Mui[A-Z]' web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`: passed，3 files / 57 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### MG-WB006-css-containment-cleanup
+
+- Phase: `wb_phase_5_css_containment_cleanup`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push workbench `.Mui*` CSS cleanup、project class styles 和专项文档更新。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- web/src/app/styles.css web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB006 scope。只允许精确 git add web/src/app/styles.css web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 refactor: remove workbench mui css hooks。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB006 和 wb_phase_5_css_containment_cleanup 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- Runtime behavior/dependencies cleanup deferred: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+- Verification before commit specified: yes。
+
+## Next Prompt
+
+### P-WB007-test-provider-cleanup
+
+- Phase: `wb_phase_6_test_provider_cleanup`
+- Status: `drafted`
+- Type: `extraction/refactor`
+- Scope: 只移除 workbench test-only legacy MUI provider 和相关测试包装；不改 runtime UI、CSS、dependencies 或后端。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/legacyWorkbenchMuiProvider.tsx、web/src/test/workbenchRenderHelpers.tsx、web/src/test/WorkbenchExceptionModal.test.tsx、web/src/test/ProcessedExceptionsModal.test.tsx、web/src/test/OaBankExceptionModal.test.tsx 和所有引用 legacy provider 的测试。只清理测试 provider：删除或停用 LegacyWorkbenchMuiProvider，改用项目/HeroUI 测试包装或直接 render；移除测试中的 @mui/* provider imports；保留测试断言、弹窗/抽屉行为和 workbench render helper API。不得修改 runtime UI、styles.css、package dependencies、backend/API/read model/worker。运行 `rg -n '@mui/|LegacyWorkbenchMuiProvider|legacyWorkbenchMuiProvider' web/src/test web/src/components/workbench web/src/pages/ReconciliationWorkbenchPage.tsx` 检查剩余 test-only 引用，运行 workbench modal/helper tests 和 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB008 dependency cleanup prompt。
 ```

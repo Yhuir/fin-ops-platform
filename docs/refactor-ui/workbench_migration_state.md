@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `wb_phase_4_record_card_actions`
-- Status: `completed`
+- Phase: `wb_phase_5_css_containment_cleanup`
+- Status: `implemented`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P-WB005-record-card-actions`
-- Current MG ID: `MG-WB005-record-card-actions`
+- Current Prompt ID: `P-WB006-css-containment-cleanup`
+- Current MG ID: `MG-WB006-css-containment-cleanup`
 
 ## Global Invariants
 
@@ -21,7 +21,7 @@
 | App Shell untouched | yes | 本专项只处理关联台内部工作区残留 MUI |
 | Tri-pane core preserved | yes | `ResizableTriPane.tsx`、`CandidateGroupGrid.tsx` 当前无 MUI，专项规则要求不重写 |
 | User-visible workbench behavior preserved | yes | `P-WB002` characterization tests 已覆盖 toolbar/search/record warning/action bubbling；后续仍需全量验证 |
-| Prompt generated just-in-time | yes | 当前只执行 `P-WB005`；下一条只生成 `P-WB006` |
+| Prompt generated just-in-time | yes | 当前只执行 `P-WB006`；下一条只生成 `P-WB007` |
 | Exact staging only | required | MG 明确禁止 `git add .` 和 `git add -A` |
 
 ## Phase Table
@@ -33,7 +33,7 @@
 | `wb_phase_2_zone_header_controls` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchZone.tsx` 已迁出 MUI；MG-WB003 已 push |
 | `wb_phase_3_pane_search` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchPaneSearch.tsx` 已迁出 MUI；MG-WB004 已 push |
 | `wb_phase_4_record_card_actions` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchRecordCard.tsx` 已迁出 MUI；MG-WB005 已 push |
-| `wb_phase_5_css_containment_cleanup` | `pending` | pending | pending | pending | 清理 workbench `.Mui*` CSS |
+| `wb_phase_5_css_containment_cleanup` | `implemented` | 2026-06-07 | pending MG | `passed` | workbench `.Mui*` CSS 已清理；等待 MG-WB006 |
 | `wb_phase_6_test_provider_cleanup` | `pending` | pending | pending | pending | 移除 `legacyWorkbenchMuiProvider` |
 | `wb_phase_7_dependency_cleanup` | `pending` | pending | pending | pending | 移除无用途 MUI/Emotion 依赖 |
 | `wb_phase_8_full_verification` | `pending` | pending | pending | pending | 工作台专项测试、非关联台回归、build、smoke |
@@ -53,7 +53,9 @@
 | `MG-WB004-pane-search` | `wb_phase_3_pane_search` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB005-record-card-actions` | `wb_phase_4_record_card_actions` | `extraction/refactor` | `verified` | `WorkbenchRecordCard.tsx` MUI imports/JSX 已清理 |
 | `MG-WB005-record-card-actions` | `wb_phase_4_record_card_actions` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
-| `P-WB006-css-containment-cleanup` | `wb_phase_5_css_containment_cleanup` | `extraction/refactor` | `drafted` | MG-WB005 push 后执行 |
+| `P-WB006-css-containment-cleanup` | `wb_phase_5_css_containment_cleanup` | `extraction/refactor` | `verified` | workbench `.Mui*` CSS selectors 已清理，迁移后 project class styles 已补齐 |
+| `MG-WB006-css-containment-cleanup` | `wb_phase_5_css_containment_cleanup` | `cumulative MG` | `pending` | 检查 scope、diff、测试、文档后精确 stage/commit/push |
+| `P-WB007-test-provider-cleanup` | `wb_phase_6_test_provider_cleanup` | `extraction/refactor` | `drafted` | MG-WB006 push 后执行 |
 
 ## Verification Log
 
@@ -86,6 +88,10 @@
 | 2026-06-07 | `P-WB005-record-card-actions` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P-WB005-record-card-actions` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-WB005-record-card-actions` | `git add web/src/components/workbench/WorkbenchRecordCard.tsx web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `d3edb0aa` pushed to `origin/refactor-ui` |
+| 2026-06-07 | `P-WB006-css-containment-cleanup` | `if rg -n '\\.Mui|Mui[A-Z]' web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi` | passed | workbench CSS and runtime component files have no MUI style hooks |
+| 2026-06-07 | `P-WB006-css-containment-cleanup` | `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx` | passed | 3 files / 57 tests passed |
+| 2026-06-07 | `P-WB006-css-containment-cleanup` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P-WB006-css-containment-cleanup` | `git diff --check` | passed | 无 whitespace error |
 
 ## Push Log
 
@@ -99,4 +105,4 @@
 
 ## Next Action
 
-从远端最新 `refactor-ui` 继续执行 `P-WB006-css-containment-cleanup`。该 prompt 只清理 workbench `.Mui*` CSS selectors 和迁移后的 project class styles，不处理 legacy test provider 或依赖。
+执行 `MG-WB006-css-containment-cleanup`：检查 scope、untracked files、diff、测试和文档状态，只精确 stage `P-WB006` 相关文件，commit/push 后再进入 `P-WB007-test-provider-cleanup`。

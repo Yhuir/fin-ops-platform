@@ -277,9 +277,12 @@ describe("WorkbenchZone", () => {
       const source = readFileSync(resolve(sourceRoot, path), "utf8");
       return /from ["']@mui\/|import\s+[^;]*@mui\/|Mui[A-Z]|\.Mui/.test(source) ? [path] : [];
     });
+    const workbenchStyles = readFileSync(resolve(sourceRoot, "app/styles.css"), "utf8");
+    const hasWorkbenchMuiStyleHooks = /\.Mui|Mui[A-Z]/.test(workbenchStyles);
 
     expect(runtimeOffenders).toEqual(runtimeTargets);
     expect(triPaneCoreFiles).toEqual([]);
+    expect(hasWorkbenchMuiStyleHooks).toBe(false);
   });
 
   test("shows batch accounting mismatch details from the paired bank amount warning", async () => {

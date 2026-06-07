@@ -9440,8 +9440,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   border-top: 1px solid #e8d2aa;
 }
 
-/* Frozen workbench legacy containment: these MUI selectors only support web/src/components/workbench/* during the UI platform migration. */
-.zone-title.MuiTypography-root {
+.zone-title {
   color: var(--ops-header-text);
   font-size: 14px;
   font-weight: 700;
@@ -9472,13 +9471,15 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   gap: 8px;
 }
 
-.zone-selection-pill.MuiChip-root {
+.zone-selection-pill {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
   height: 26px;
   min-width: 60px;
+  padding: 0 9px;
   border-color: color-mix(in srgb, var(--ops-brand) 28%, #d1d5db);
+  border: 1px solid color-mix(in srgb, var(--ops-brand) 28%, #d1d5db);
   border-radius: 6px;
   background: #ffffff;
   color: var(--ops-header-text);
@@ -9487,12 +9488,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   font-feature-settings: "tnum" 1;
 }
 
-.zone-selection-pill .MuiChip-label {
-  padding-right: 9px;
-  padding-left: 9px;
-}
-
-.zone-selection-btn.MuiButton-root {
+.zone-selection-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9515,38 +9511,38 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, opacity 150ms ease;
 }
 
-.zone-selection-btn.MuiButton-root:hover {
+.zone-selection-btn:hover:not(:disabled) {
   border-color: var(--ops-brand);
   background: var(--ops-brand-soft);
   color: var(--ops-brand-dark);
 }
 
-.zone-selection-btn.primary.MuiButton-root {
+.zone-selection-btn.primary {
   border-color: var(--ops-brand);
   background: var(--ops-brand);
   color: #ffffff;
   box-shadow: none;
 }
 
-.zone-selection-btn.primary.MuiButton-root:hover {
+.zone-selection-btn.primary:hover:not(:disabled) {
   border-color: var(--ops-brand-dark);
   background: var(--ops-brand-dark);
   color: #ffffff;
 }
 
-.zone-selection-btn.warning.MuiButton-root {
+.zone-selection-btn.warning {
   border-color: #e8bd78;
   background: #fff7e8;
   color: #7a4d16;
 }
 
-.zone-selection-btn.warning.MuiButton-root:hover {
+.zone-selection-btn.warning:hover:not(:disabled) {
   border-color: #d99a32;
   background: #ffefd0;
   color: #6b3f0f;
 }
 
-.zone-selection-btn.Mui-disabled {
+.zone-selection-btn:disabled {
   cursor: not-allowed;
   opacity: 0.48;
   box-shadow: none;
@@ -9602,7 +9598,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   border: 0;
 }
 
-.zone-toggle.MuiToggleButton-root {
+.zone-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9622,31 +9618,29 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
 }
 
-.zone-toggle.MuiToggleButton-root + .zone-toggle.MuiToggleButton-root {
+.zone-toggle + .zone-toggle {
   margin-left: 0;
 }
 
-.zone-toggle.MuiToggleButton-root.Mui-selected,
-.zone-toggle.MuiToggleButton-root.Mui-selected:hover,
-.zone-toggle.MuiToggleButton-root.active {
+.zone-toggle.active {
   border-color: var(--ops-brand);
   background: var(--ops-brand);
   color: #ffffff;
   box-shadow: none;
 }
 
-.zone-toggle.MuiToggleButton-root:not(.Mui-selected):hover {
+.zone-toggle:not(.active):hover:not(:disabled) {
   border-color: var(--ops-brand);
   background: var(--ops-brand-soft);
   color: var(--ops-brand-dark);
 }
 
-.zone-toggle.Mui-disabled {
+.zone-toggle:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.zone-expand-icon-btn.MuiIconButton-root {
+.zone-expand-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -9661,16 +9655,23 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   flex: 0 0 auto;
 }
 
-.zone-expand-icon-btn.MuiIconButton-root:hover {
+.zone-expand-icon-btn:hover {
   border-color: var(--ops-brand);
   background: var(--ops-brand-soft);
   color: var(--ops-brand-dark);
 }
 
-.zone-expand-icon-btn.MuiIconButton-root.active {
+.zone-expand-icon-btn.active {
   border-color: var(--ops-brand);
   background: var(--ops-brand-soft);
   color: var(--ops-brand-dark);
+}
+
+.zone-selection-btn:focus-visible,
+.zone-toggle:focus-visible,
+.zone-expand-icon-btn:focus-visible {
+  outline: 2px solid rgba(47, 128, 237, 0.42);
+  outline-offset: 2px;
 }
 
 .zone-expand-icon {
@@ -10599,6 +10600,76 @@ body.column-layout-dragging {
   max-width: 100%;
 }
 
+.record-warning-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: visible;
+  vertical-align: middle;
+}
+
+.record-warning-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #b7791f;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.record-warning-icon-btn:hover,
+.record-warning-icon-btn:focus-visible {
+  outline: none;
+  background: #fff3cd;
+  color: #8a4f00;
+  box-shadow: 0 0 0 2px rgba(217, 154, 50, 0.2);
+}
+
+.record-warning-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.bank-amount-mismatch-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 80;
+  display: grid;
+  min-width: 176px;
+  max-width: 260px;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #e8bd78;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #243b53;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.18);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  transform: translateX(-50%);
+}
+
+.bank-amount-mismatch-tooltip strong {
+  color: #7a4d16;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .money-cell-account {
   display: inline-flex;
   justify-content: center;
@@ -11175,54 +11246,57 @@ body.column-layout-dragging {
   box-shadow: none;
 }
 
-.pane-search-field {
+.pane-search-input-wrap {
+  position: relative;
   width: 100%;
+  height: 30px;
 }
 
-/* Frozen workbench legacy containment: WorkbenchPaneSearch still uses MUI TextField while the workbench internals are deferred. */
-.pane-search-field .MuiOutlinedInput-root {
+.pane-search-input-icon {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  width: 14px;
+  height: 14px;
+  color: #5d6d7e;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.pane-search-field {
+  box-sizing: border-box;
+  width: 100%;
   height: 30px;
+  padding: 5px 30px 5px 30px;
+  border: 1px solid #c9d6e5;
   border-radius: 8px;
   background: #f8fbff;
   color: #102a43;
   font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 12px;
   font-weight: 650;
+  line-height: 18px;
   transition: background-color 140ms ease, box-shadow 140ms ease;
 }
 
-.pane-search-field .MuiOutlinedInput-root:hover {
+.pane-search-field:hover {
+  border-color: #2f80ed;
   background: #ffffff;
 }
 
-.pane-search-field .MuiOutlinedInput-root.Mui-focused {
+.pane-search-field:focus {
+  outline: none;
+  border-color: #2f80ed;
   background: #ffffff;
   box-shadow: 0 0 0 3px rgba(47, 128, 237, 0.16);
 }
 
-.pane-search-field .MuiOutlinedInput-notchedOutline {
-  border-color: #c9d6e5;
-}
-
-.pane-search-field .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline,
-.pane-search-field .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
-  border-color: #2f80ed;
-}
-
-.pane-search-field .MuiInputAdornment-root {
-  color: #5d6d7e;
-}
-
-.pane-search-field .MuiInputBase-input {
-  padding: 5px 0;
-}
-
-.pane-search-field .MuiInputBase-input::placeholder {
+.pane-search-field::placeholder {
   color: #7b8794;
   opacity: 1;
 }
 
-.pane-search-field input[type="search"]::-webkit-search-cancel-button {
+.pane-search-field::-webkit-search-cancel-button {
   appearance: none;
   display: none;
 }
