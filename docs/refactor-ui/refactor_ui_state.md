@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P073-phase-6-no-oa-bank-batches-discovery`
+- Current Prompt ID: `P074-phase-6-no-oa-bank-batches-characterization-tests`
 - Current MG ID: `MG-P072-phase-6-output-invoice-collections`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；next NoOaBankBatches discovery |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；NoOaBankBatches P073 discovery verified，next P074 tests |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,18 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 no-OA bank batches discovery prompt generated after OutputInvoiceCollections cumulative MG。
-- Files touched in P072:
-  - `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`
-  - `web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`
-  - `web/src/app/styles.css`
+- Scope: phase 6 no-OA bank batches characterization test prompt generated after P073 discovery。
+- Files touched in P073:
+  - `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`
-- Verification run: MG-P072 reran full `OutputInvoiceCollectionsPage.test.tsx`、build、full module no-MUI grep、diff/status；all passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
-- Failures: none in P072 scope。
-- Prompt review correction: P072 draft grep used `Dialog\b|Drawer\b` and would incorrectly match approved project primitives `AppDialog`/`AppDrawer`; executed grep was narrowed to real MUI imports/usages and JSX `<Dialog>/<Drawer>` surfaces。
-- Next action: 执行 `P073-phase-6-no-oa-bank-batches-discovery`。
+- Verification run: P073 doc existence and key-term rg passed；diff/status clean for doc-only slice。
+- Failures: none in P073 scope。
+- Next action: 执行 `P074-phase-6-no-oa-bank-batches-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -97,12 +93,16 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P073-phase-6-no-oa-bank-batches-discovery` | OutputInvoiceCollections MG verified；next NoOaBankBatches discovery |
+| page batches | `in_progress` | `P074-phase-6-no-oa-bank-batches-characterization-tests` | NoOaBankBatches P073 discovery verified；next characterization tests |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `test -f docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md` | passed | Module discovery doc exists |
+| 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `rg -n "P073-phase-6-no-oa-bank-batches-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P074-phase-6-no-oa-bank-batches-characterization-tests" docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Discovery terms and next prompt recorded |
+| 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `git status --short --branch` | passed | Only P073 docs changed |
 | 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | passed | 6 tests passed |
 | 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `if rg -n '@mui/\|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi` | passed | OutputInvoiceCollections runtime scope has no direct MUI import/selector residue |

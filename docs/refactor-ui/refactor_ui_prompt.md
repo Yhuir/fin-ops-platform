@@ -4239,7 +4239,7 @@ Scope: OutputInvoiceCollections P066-P072 completed migration only.
 ### P073-phase-6-no-oa-bank-batches-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: `/no-oa-bank-batches` only. Do not modify runtime implementation.
 
@@ -4263,6 +4263,51 @@ Scope: `/no-oa-bank-batches` only. Do not modify runtime implementation.
 - Workbench internals frozen: required。
 - Docs on demand: yes，this module is high risk and has table, batch selection, right drawer, dialogs and API/read model interactions, so module doc is required。
 - Verification defined: module doc exists, key discovery terms recorded, diff/status clean for doc-only slice。
+
+#### Execution Notes
+
+- Created `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`.
+- Documented current MUI imports/usages, user-visible entrypoints, API/read model boundary, existing test coverage, migration slice plan, risks and next characterization prompt.
+- Runtime implementation changed: no.
+- Tests changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`: passed。
+  - `rg -n "P073-phase-6-no-oa-bank-batches-discovery|Current MUI Inventory|User-visible Entrypoints|P074-phase-6-no-oa-bank-batches-characterization-tests" docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P073 docs changed。
+
+### P074-phase-6-no-oa-bank-batches-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: `/no-oa-bank-batches` tests only. Do not modify runtime implementation.
+
+#### Prompt
+
+```text
+Prompt ID: P074-phase-6-no-oa-bank-batches-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/no-oa-bank-batches` tests only. Do not modify runtime implementation.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/features/noOaBankBatches/api.ts、web/src/features/noOaBankBatches/types.ts、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/test/NoOaBankBatchApi.test.ts。只修改 `web/src/test/NoOaBankBatchPage.test.tsx`：新增或调整 characterization tests，锁定 `/no-oa-bank-batches` 的 project primitive 目标和旧行为。新增 source-level contract，未来 runtime 不得依赖 `@mui/*`、`Mui[A-Z]`、`RefreshOutlinedIcon`、`CloseIcon`、`ToggleButton`、`TextField`、`TableCell`、`TableRow`、`TableHead`、`TableBody`、`Drawer`、`DialogTitle`、`DialogContent`、`DialogActions`、`Snackbar`、`Chip`、`IconButton`；要求页面继续使用 `PageScaffold`、`StatePanel`，后续 drawer/dialog 使用 project primitives 或 native equivalents。行为断言必须继续覆盖 route/sidebar、heading、description/top actions、status buttons `未提交`/`已提交`/`历史`、fields `月份`/`银行账户`、main/sub rail region names and keyboard activation、transaction region/table labels, selection guard, selected-row submit payload, internal-transfer submit payload, tag drawer open/refetch/save payload/live update, withdraw dialog reason payload, snackbar messages, read model stale retry and keep-alive pause。不得修改页面实现、API client、mock data shape、backend、read model、worker 或关联台内部工作区。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx`，实现未迁移前 source-level contract expected-fail 可接受，但 existing behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P075 page shell filters prompt。
+```
+
+#### Review
+
+- Single module boundary: yes，NoOaBankBatches tests only。
+- Runtime implementation untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract should fail before runtime migration, while existing behavior tests must keep passing。
+- Next prompt: P075 page shell/filter migration only after P074 tests are verified as expected-fail。
 
 ### MG Prompt Template
 
