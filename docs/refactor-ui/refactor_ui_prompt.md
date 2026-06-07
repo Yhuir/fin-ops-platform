@@ -4592,7 +4592,7 @@ Scope: `/batch-accounting` only. Do not modify runtime implementation or tests.
 ### P080-phase-6-batch-accounting-characterization-tests
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: `/batch-accounting` tests only. Do not modify runtime implementation.
 
@@ -4615,6 +4615,47 @@ Scope: `/batch-accounting` tests only. Do not modify runtime implementation.
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract should fail against current MUI runtime until P081-P084.
 - Next prompt: P081 page shell filters only after P080 behavior tests are preserved.
+
+#### Execution Notes
+
+- Added `web/src/test/BatchAccountingPage.test.tsx` source-level no-MUI/project primitive contract for `BatchAccountingPage.tsx`.
+- Added behavior coverage for loading/empty states and page-level API error fallback.
+- Preserved existing behavior coverage for heading, route/sidebar entry, refresh, status buttons, year fields, bank region, OA table labels, OA checkbox labels, search clear, amount summary, mismatch note, submit payload/event, withdraw payload, feedback messages and selection/note reset behavior.
+- Runtime implementation changed: no.
+- Backend/API/read model/worker and workbench internals changed: no.
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: expected-fail; 12 behavior tests passed and 1 source-level contract failed against current MUI runtime.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P080 test file changed before docs.
+- Next prompt generated: `P081-phase-6-batch-accounting-page-shell-filters`.
+
+### P081-phase-6-batch-accounting-page-shell-filters
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/batch-accounting` page shell, refresh action, status switch and year/search filters only.
+
+#### Prompt
+
+```text
+Prompt ID: P081-phase-6-batch-accounting-page-shell-filters
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/batch-accounting` page shell, refresh action, status switch and year/search filters only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。只迁移 `BatchAccountingPage.tsx` 的页面头部刷新按钮、`批量账务状态` 状态切换、`流水年份`、`OA年份`、`搜索OA内容` 和 `清空搜索` 控件到项目/Tailwind/native controls；必要时只补 `web/src/app/styles.css` 中的 `batch-accounting-*` shell/filter classes。不得迁移银行流水列表、金额 summary、差额说明、OA table、OA checkbox、AmountMismatchWarning tooltip、withdraw dialog、Snackbar/Alert 反馈、API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：`刷新` disabled while loading、`未提交`/`已提交` exclusive `aria-pressed`、bucket switch clears selected bank/OA rows and difference note、year/search labels and values、OA search filtering and `清空搜索` button。运行 `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|filters right side OA rows|clears difference note when switching submitted and unsubmitted buckets|keeps selected bank and OA rows"`，预期 source-level contract 仍 expected-fail 但 selected behavior tests must pass；运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`，预期 12 behavior tests pass and source-level contract remains expected-fail until P082-P084；运行 `cd web && npm run build`；运行 scoped grep：`if rg -n 'RefreshOutlinedIcon|SearchOutlinedIcon|ClearOutlinedIcon|ToggleButton|ToggleButtonGroup|InputAdornment|label="流水年份"|label="OA年份"|label="搜索OA内容"' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P082 bank list and summary prompt。
+```
+
+#### Review
+
+- Single slice: yes，page shell/filter only。
+- Runtime implementation limited: yes，only page shell/filter controls and necessary CSS classes。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Overlay/table/bank-list migration excluded: yes，reserved for P082-P084。
+- Expected failure allowed: yes，source-level contract remains expected-fail until remaining MUI surfaces are cleared。
+- Next prompt: P082 bank list and summary only after P081 scoped behavior and grep pass。
 
 ### MG Prompt Template
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -6,6 +8,10 @@ import MuiProviders from "../app/MuiProviders";
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import BatchAccountingPage from "../pages/BatchAccountingPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
+
+const batchAccountingSourceFiles = [
+  "src/pages/BatchAccountingPage.tsx",
+] as const;
 
 const unsubmittedPayload = {
   summary: {
@@ -138,6 +144,10 @@ const oa2025Rows = [
   },
 ];
 
+function readWebSource(path: string) {
+  return readFileSync(resolve(path), "utf8");
+}
+
 function renderPage() {
   return render(
     <MuiProviders>
@@ -189,6 +199,10 @@ function installFetchMock() {
   return fetchMock;
 }
 
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+}
+
 function lastSubmitBody(fetchMock: ReturnType<typeof installFetchMock>) {
   const submitCall = fetchMock.mock.calls.find(([input]) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -203,6 +217,53 @@ afterEach(() => {
 });
 
 describe("BatchAccountingPage", () => {
+  test("targets project primitives for page shell, bank panel, OA table, overlays, and feedback", () => {
+    const sourceByPath = Object.fromEntries(batchAccountingSourceFiles.map((path) => [path, readWebSource(path)]));
+    const forbiddenMuiImports = batchAccountingSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
+    });
+    const forbiddenMuiSelectors = batchAccountingSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /\.Mui[A-Z][A-Za-z-]*/.test(source) ? [path] : [];
+    });
+    const forbiddenLegacySurfaces = batchAccountingSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /ClearOutlinedIcon|RefreshOutlinedIcon|SearchOutlinedIcon|WarningAmberRoundedIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton|Tooltip/.test(source)
+        ? [path]
+        : [];
+    });
+    const pageSource = sourceByPath["src/pages/BatchAccountingPage.tsx"];
+    const missingPrimitiveTargets = [
+      pageSource.includes("PageScaffold") ? null : "BatchAccountingPage.tsx should keep PageScaffold",
+      pageSource.includes("StatePanel") ? null : "BatchAccountingPage.tsx should keep StatePanel for loading/empty/error states",
+      /FinanceTable|finance-table|batch-accounting.*table/.test(pageSource)
+        ? null
+        : "OA rows should use FinanceTable or a project/native table class",
+      /batch-accounting.*panel|batch-accounting.*list|batch-accounting.*region/.test(pageSource)
+        ? null
+        : "Bank rows and selection summary should use project panel/list/region classes",
+      /AppDialog|batch-accounting.*dialog/.test(pageSource)
+        ? null
+        : "Withdraw confirmation should use AppDialog or a project dialog class",
+      /batch-accounting.*toast|batch-accounting.*feedback|batch-accounting.*notice/.test(pageSource)
+        ? null
+        : "Mutation feedback should use a project feedback/toast class",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      forbiddenLegacySurfaces,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      forbiddenLegacySurfaces: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
   test("renders controls, bank list, and selectable OA table for unsubmitted rows", async () => {
     installFetchMock();
     renderPage();
@@ -227,6 +288,38 @@ describe("BatchAccountingPage", () => {
     expect(within(oaTable).getByText("品牌广告投放；市场活动项目")).toBeInTheDocument();
     expect(within(oaTable).getByText("700.00")).toBeInTheDocument();
     expect(within(oaTable).getByText("1月日常报销，包含广告素材制作和渠道投放费用")).toBeInTheDocument();
+  });
+
+  test("shows loading and empty states in the bank and OA regions", async () => {
+    let resolveFetch: (response: Response) => void = () => undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("正在加载流水")).toBeInTheDocument();
+    resolveFetch(jsonResponse({
+      summary: {
+        unsubmitted_count: 0,
+        submitted_count: 0,
+      },
+      bank_rows: [],
+      oa_rows: [],
+    }));
+
+    expect(await screen.findByText("当前年份暂无批量账务流水")).toBeInTheDocument();
+    expect(screen.getByText("暂无可关联 OA")).toBeInTheDocument();
+  });
+
+  test("shows the page error fallback when batch accounting data fails to load", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ message: "批量账务数据加载失败" }, 500));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("批量账务数据加载失败")).toBeInTheDocument();
   });
 
   test("updates selected totals, requires notes for mismatches, and submits matching OA rows without a note", async () => {
