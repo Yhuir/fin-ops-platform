@@ -306,3 +306,31 @@ Scope: global CSS MUI containment only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/app/styles.css、web/src/components/workbench/WorkbenchZone.tsx、web/src/components/workbench/WorkbenchPaneSearch.tsx、web/src/components/workbench/WorkbenchRecordCard.tsx 和当前 `rg -n "Mui|DataGrid|@mui" web/src/app/styles.css` 结果。只处理 `styles.css` 的 MUI selector containment：删除非关联台 legacy MUI DataGrid selectors；保留冻结 workbench 仍需要的 `.zone-*`、`.pane-search-field` 等 `.Mui*` selectors，但必须集中或明确标注为 frozen workbench legacy containment，不得新增非 workbench `.Mui*` selectors。不得修改 runtime component code、backend、API、read model、worker 或关联台内部工作区。运行 `rg -n "MuiDataGrid|DataGrid" web/src/app/styles.css`，必须无命中；运行 `rg -n "Mui|@mui" web/src/app/styles.css`，命中只能是标注过的 frozen workbench legacy containment；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P113 final no-MUI contract prompt。
 ```
+
+## P112 Execution Notes
+
+- Prompt ID: `P112-phase-7-global-css-containment`
+- Status: `verified`
+- Runtime component code changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- CSS changed:
+  - Removed global `.MuiDataGrid-*` selectors from `web/src/app/styles.css`.
+  - Marked remaining `.zone-*` and `.pane-search-field` `.Mui*` selectors as frozen workbench legacy containment.
+- Verification:
+  - `if rg -n "MuiDataGrid|DataGrid" web/src/app/styles.css; then exit 1; else exit 0; fi`: passed.
+  - `rg -n "Mui|@mui|Frozen workbench legacy containment" web/src/app/styles.css`: passed; remaining hits are documented workbench legacy selectors only.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts`: passed, 46 tests.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+
+## P113 Prompt Draft
+
+```text
+Prompt ID: P113-phase-7-final-no-mui-contract
+Phase: phase_7_mui_containment
+Type: characterization tests -> extraction/refactor
+Scope: final non-workbench no-MUI source contract and legacy provider cleanup only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/app/MuiProviders.tsx、web/src/app/muiTheme.ts、web/src/test/workbenchRenderHelpers.tsx、web/src/test/WorkbenchExceptionModal.test.tsx、web/src/app/styles.css、web/src/components/workbench/WorkbenchZone.tsx、web/src/components/workbench/WorkbenchPaneSearch.tsx、web/src/components/workbench/WorkbenchRecordCard.tsx 和当前 `rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!components/workbench/**"` 结果。添加或更新一个源代码合约测试，证明非关联台 runtime 无 `@mui/*`、`MuiProviders`、`muiTheme`、MUI X date/data-grid 或非 workbench `.Mui*` selector；允许列表只能包含冻结 workbench internals、明确命名的 test-only legacy provider/helper 和负向断言字符串。若 `web/src/app/MuiProviders.tsx` 与 `web/src/app/muiTheme.ts` 只被 workbench legacy tests 使用，则把 legacy provider 移到 `web/src/test` 下或内联到 test-only helper，并删除 app runtime provider/theme 文件；更新 `WorkbenchExceptionModal.test.tsx` 和 `workbenchRenderHelpers.tsx` 使用 test-only legacy provider。不得修改业务 runtime UI、backend、API、read model、worker 或关联台内部工作区。运行 final source contract test；运行 `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 final grep `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!components/workbench/**" --glob "!test/**"; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 MG-P113 phase 7 MUI containment prompt。
+```

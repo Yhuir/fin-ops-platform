@@ -7849,23 +7849,6 @@ textarea {
   white-space: nowrap;
 }
 
-.MuiDataGrid-root .MuiDataGrid-columnHeader,
-.MuiDataGrid-root .MuiDataGrid-cell {
-  justify-content: center !important;
-  text-align: center !important;
-  align-items: center;
-}
-
-.MuiDataGrid-root .MuiDataGrid-columnHeaderTitleContainer {
-  justify-content: center !important;
-}
-
-.MuiDataGrid-root .MuiDataGrid-columnHeaderTitle,
-.MuiDataGrid-root .MuiDataGrid-cellContent {
-  width: 100%;
-  text-align: center !important;
-}
-
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -9457,6 +9440,7 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   border-top: 1px solid #e8d2aa;
 }
 
+/* Frozen workbench legacy containment: these MUI selectors only support web/src/components/workbench/* during the UI platform migration. */
 .zone-title.MuiTypography-root {
   color: var(--ops-header-text);
   font-size: 14px;
@@ -11195,6 +11179,7 @@ body.column-layout-dragging {
   width: 100%;
 }
 
+/* Frozen workbench legacy containment: WorkbenchPaneSearch still uses MUI TextField while the workbench internals are deferred. */
 .pane-search-field .MuiOutlinedInput-root {
   height: 30px;
   border-radius: 8px;

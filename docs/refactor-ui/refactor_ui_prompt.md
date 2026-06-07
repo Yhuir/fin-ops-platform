@@ -6180,6 +6180,49 @@ Scope: global CSS MUI containment only.
 - Workbench internals frozen: required。
 - Expected source-level failure allowed: no，DataGrid selectors must be removed and remaining `.Mui*` CSS must be documented as frozen workbench legacy containment。
 
+#### Execution Notes
+
+- Removed global `.MuiDataGrid-*` selectors from `web/src/app/styles.css`.
+- Marked remaining workbench-owned `.zone-*` and `.pane-search-field` `.Mui*` selectors as frozen workbench legacy containment.
+- Runtime component code/backend/API/read model/worker/workbench internals unchanged.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `if rg -n "MuiDataGrid|DataGrid" web/src/app/styles.css; then exit 1; else exit 0; fi`
+  - `rg -n "Mui|@mui|Frozen workbench legacy containment" web/src/app/styles.css`
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts`
+  - `cd web && npm run build`
+  - `git diff --check`
+- Next prompt generated: `P113-phase-7-final-no-mui-contract`。
+
+### P113-phase-7-final-no-mui-contract
+
+- Phase: `phase_7_mui_containment`
+- Status: `approved_for_execution`
+- Type: `characterization tests -> extraction/refactor`
+- Scope: final non-workbench no-MUI source contract and legacy provider cleanup only。
+
+#### Prompt
+
+```text
+Prompt ID: P113-phase-7-final-no-mui-contract
+Phase: phase_7_mui_containment
+Type: characterization tests -> extraction/refactor
+Scope: final non-workbench no-MUI source contract and legacy provider cleanup only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/app/MuiProviders.tsx、web/src/app/muiTheme.ts、web/src/test/workbenchRenderHelpers.tsx、web/src/test/WorkbenchExceptionModal.test.tsx、web/src/app/styles.css、web/src/components/workbench/WorkbenchZone.tsx、web/src/components/workbench/WorkbenchPaneSearch.tsx、web/src/components/workbench/WorkbenchRecordCard.tsx 和当前 `rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!components/workbench/**"` 结果。添加或更新一个源代码合约测试，证明非关联台 runtime 无 `@mui/*`、`MuiProviders`、`muiTheme`、MUI X date/data-grid 或非 workbench `.Mui*` selector；允许列表只能包含冻结 workbench internals、明确命名的 test-only legacy provider/helper 和负向断言字符串。若 `web/src/app/MuiProviders.tsx` 与 `web/src/app/muiTheme.ts` 只被 workbench legacy tests 使用，则把 legacy provider 移到 `web/src/test` 下或内联到 test-only helper，并删除 app runtime provider/theme 文件；更新 `WorkbenchExceptionModal.test.tsx` 和 `workbenchRenderHelpers.tsx` 使用 test-only legacy provider。不得修改业务 runtime UI、backend、API、read model、worker 或关联台内部工作区。运行 final source contract test；运行 `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 final grep `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!components/workbench/**" --glob "!test/**"; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 MG-P113 phase 7 MUI containment prompt。
+```
+
+#### Review
+
+- Single slice: yes，final source contract and test-only legacy provider cleanup only。
+- Business runtime UI untouched except deleting unused app-level legacy MUI provider/theme if only tests use it。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected source-level failure allowed: no，final contract and grep must pass after cleanup。
+
 ### MG Prompt Template
 
 ```text

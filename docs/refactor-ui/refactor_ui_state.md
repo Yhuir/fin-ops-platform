@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P112-phase-7-global-css-containment`
+- Current Prompt ID: `P113-phase-7-final-no-mui-contract`
 - Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
@@ -54,18 +54,15 @@
 
 ## Active Checkpoint
 
-- Scope: phase 7 global CSS containment generated after P111 test provider containment。
-- Files touched in P111:
-  - `web/src/test/renderHelpers.tsx`
-  - `web/src/test/workbenchRenderHelpers.tsx`
-  - non-workbench test files that previously wrapped `MuiProviders`
-  - frozen workbench tests updated to use explicit `workbenchRenderHelpers`
+- Scope: phase 7 final no-MUI contract generated after P112 global CSS containment。
+- Files touched in P112:
+  - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_7_mui_containment.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P111 targeted provider tests passed；extra non-workbench page tests passed；workbench helper regression tests passed；provider grep passed with only explicit workbench legacy hits；build passed；diff check passed。
+- Verification run: DataGrid CSS grep passed；remaining CSS MUI hits are documented workbench legacy selectors；table/common/workbench targeted tests passed；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P112-phase-7-global-css-containment`。
+- Next action: 执行 `P113-phase-7-final-no-mui-contract`。
 
 ## Prompt Lifecycle
 
@@ -98,12 +95,17 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `in_progress` | `P112-phase-7-global-css-containment` | P111 test provider containment verified；next remove non-workbench global CSS MUI selectors |
+| mui containment | `in_progress` | `P113-phase-7-final-no-mui-contract` | P112 global CSS containment verified；next final non-workbench no-MUI contract and legacy provider cleanup |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P112-phase-7-global-css-containment` | `if rg -n "MuiDataGrid\|DataGrid" web/src/app/styles.css; then exit 1; else exit 0; fi` | passed | Non-workbench DataGrid CSS selectors removed |
+| 2026-06-07 | `P112-phase-7-global-css-containment` | `rg -n "Mui\|@mui\|Frozen workbench legacy containment" web/src/app/styles.css` | passed | Remaining CSS MUI hits are documented frozen workbench legacy selectors |
+| 2026-06-07 | `P112-phase-7-global-css-containment` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts` | passed | 46 tests passed |
+| 2026-06-07 | `P112-phase-7-global-css-containment` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P112-phase-7-global-css-containment` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P111-phase-7-test-provider-containment` | `cd web && npx vitest run CommonMuiComponents.test.tsx MonthPicker.test.tsx SettingsOaManualSearchImportTable.test.tsx WorkbenchExceptionModal.test.tsx` | passed | 27 tests passed |
 | 2026-06-07 | `P111-phase-7-test-provider-containment` | `cd web && npx vitest run BatchAccountingPage.test.tsx NoOaBankBatchPage.test.tsx TurnoverLedgerPage.test.tsx BankDetailsPage.test.tsx CostStatisticsPage.test.tsx AutoTagRulesDrawer.test.tsx` | passed | 112 non-workbench page/drawer regression tests passed |
 | 2026-06-07 | `P111-phase-7-test-provider-containment` | `cd web && npx vitest run WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx` | passed | 58 frozen workbench helper regression tests passed |
