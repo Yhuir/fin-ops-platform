@@ -3450,6 +3450,276 @@ textarea {
   color: var(--fp-text-muted);
 }
 
+.no-oa-bank-batches-transactions {
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-surface);
+}
+
+.no-oa-bank-batches-transactions__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-3);
+}
+
+.no-oa-bank-batches-transactions__heading {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.no-oa-bank-batches-transactions__title {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-title);
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.no-oa-bank-batches-transactions__hint,
+.no-oa-bank-batches-transactions__account {
+  margin: 0;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.no-oa-bank-batches-transactions__account {
+  flex: 0 0 auto;
+  font-weight: 850;
+}
+
+.no-oa-bank-batches-transactions__list {
+  display: grid;
+  max-height: 68vh;
+  overflow: auto;
+  border-top: 1px solid var(--fp-border);
+}
+
+.no-oa-bank-batches-batch {
+  border-bottom: 1px solid var(--fp-border);
+  background: var(--fp-surface);
+}
+
+.no-oa-bank-batches-batch:last-child {
+  border-bottom: 0;
+}
+
+.no-oa-bank-batches-batch--selected {
+  background: color-mix(in srgb, var(--fp-primary) 4%, var(--fp-surface));
+}
+
+.no-oa-bank-batches-batch__body {
+  display: grid;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3);
+}
+
+.no-oa-bank-batches-batch__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+}
+
+.no-oa-bank-batches-batch__summary {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.no-oa-bank-batches-batch__title-row,
+.no-oa-bank-batches-batch__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.no-oa-bank-batches-batch__title {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.no-oa-bank-batches-batch__meta,
+.no-oa-bank-batches-batch__audit {
+  margin: 0;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.no-oa-bank-batches-button--compact {
+  min-height: 30px;
+  padding: 0 var(--fp-space-2);
+}
+
+.no-oa-bank-batches-status,
+.no-oa-bank-batches-tag {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-xs);
+  background: var(--fp-bg-muted);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 850;
+  line-height: 1.1;
+  padding: 0 var(--fp-space-2);
+  white-space: nowrap;
+}
+
+.no-oa-bank-batches-status--primary {
+  border-color: color-mix(in srgb, var(--fp-primary) 24%, var(--fp-border));
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+}
+
+.no-oa-bank-batches-status--success {
+  border-color: color-mix(in srgb, var(--fp-success) 28%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-success) 10%, var(--fp-surface));
+  color: var(--fp-success);
+}
+
+.no-oa-bank-batches-status--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 30%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning) 12%, var(--fp-surface));
+  color: var(--fp-warning);
+}
+
+.no-oa-bank-batches-status--error {
+  border-color: color-mix(in srgb, var(--fp-danger) 28%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-danger) 10%, var(--fp-surface));
+  color: var(--fp-danger);
+}
+
+.no-oa-bank-batches-notice {
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  font-size: var(--fp-text-body);
+  font-weight: 750;
+  line-height: 1.4;
+  padding: var(--fp-space-2) var(--fp-space-3);
+}
+
+.no-oa-bank-batches-notice--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 30%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning) 10%, var(--fp-surface));
+  color: var(--fp-warning);
+}
+
+.no-oa-bank-batches-notice--error {
+  border-color: color-mix(in srgb, var(--fp-danger) 28%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-danger) 8%, var(--fp-surface));
+  color: var(--fp-danger);
+}
+
+.no-oa-bank-batches-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.no-oa-bank-batches-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--fp-text-body);
+}
+
+.no-oa-bank-batches-table th,
+.no-oa-bank-batches-table td {
+  border-bottom: 1px solid var(--fp-border);
+  color: var(--fp-text-primary);
+  padding: var(--fp-space-2) var(--fp-space-3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.no-oa-bank-batches-table th {
+  background: var(--fp-bg-muted);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.no-oa-bank-batches-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.no-oa-bank-batches-table__check {
+  width: 42px;
+  text-align: center;
+}
+
+.no-oa-bank-batches-table .no-oa-bank-batches-table__amount {
+  text-align: right;
+}
+
+.no-oa-bank-batches-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--fp-primary);
+  cursor: pointer;
+}
+
+.no-oa-bank-batches-amount-cell,
+.no-oa-bank-batches-summary-cell {
+  display: grid;
+  gap: 3px;
+}
+
+.no-oa-bank-batches-amount-cell {
+  justify-items: end;
+}
+
+.no-oa-bank-batches-amount-cell__main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+}
+
+.no-oa-bank-batches-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.no-oa-bank-batches-tag--direction {
+  min-width: 28px;
+}
+
+.no-oa-bank-batches-tag--bank {
+  background: transparent;
+  color: var(--fp-text-secondary);
+  font-weight: 800;
+}
+
+.no-oa-bank-batches-summary-cell span:first-child {
+  color: var(--fp-text-primary);
+  font-weight: 750;
+}
+
+.no-oa-bank-batches-summary-cell span:last-child {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 700;
+}
+
 @media (max-width: 960px) {
   .no-oa-bank-batches-actions,
   .no-oa-bank-batches-filter,
@@ -3461,6 +3731,16 @@ textarea {
 
   .no-oa-bank-batches-segment__button {
     flex: 1 1 0;
+  }
+
+  .no-oa-bank-batches-transactions__header,
+  .no-oa-bank-batches-batch__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .no-oa-bank-batches-transactions__list {
+    max-height: none;
   }
 }
 

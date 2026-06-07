@@ -5,7 +5,6 @@ import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Checkbox from "@mui/material/Checkbox";
-import Chip from "@mui/material/Chip";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -17,12 +16,6 @@ import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import CloseIcon from "@mui/icons-material/Close";
@@ -171,9 +164,13 @@ function statusBucketFor(batch: NoOaBankBatch): NoOaBankBatchStatusBucket {
   return "unsubmitted";
 }
 
-function BatchStatusChip({ status }: { status: string }) {
+function BatchStatusTag({ status }: { status: string }) {
   const meta = STATUS_META[status as NoOaBankBatchStatus] ?? { label: status, color: "default" as const };
-  return <Chip color={meta.color} label={meta.label} size="small" />;
+  return (
+    <span className={cx("no-oa-bank-batches-status", `no-oa-bank-batches-status--${meta.color}`)}>
+      {meta.label}
+    </span>
+  );
 }
 
 function mutationEventDetail(result: { affectedMonths?: string[] }) {
@@ -928,30 +925,23 @@ export default function NoOaBankBatchPage() {
           title="子标签"
         />
 
-        <Paper aria-label="流水" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack
-            alignItems={{ xs: "stretch", md: "flex-start" }}
-            direction={{ xs: "column", md: "row" }}
-            justifyContent="space-between"
-            spacing={1}
-            sx={{ px: 1.5, py: 1.25 }}
-          >
-            <Stack spacing={0.25}>
-              <Typography fontWeight={900}>
+        <section aria-label="流水" className="no-oa-bank-batches-transactions" role="region">
+          <header className="no-oa-bank-batches-transactions__header">
+            <div className="no-oa-bank-batches-transactions__heading">
+              <h2 className="no-oa-bank-batches-transactions__title">
                 {selectedPrimaryLabel && selectedSubKey ? `${selectedPrimaryLabel} / ${selectedSubKey}` : "流水"}
-              </Typography>
-              <Typography color="text.secondary" variant="caption">
+              </h2>
+              <p className="no-oa-bank-batches-transactions__hint">
                 {bucketWorkHint(bucket)}
-              </Typography>
-            </Stack>
+              </p>
+            </div>
             {selectedAccountForSubmit ? (
-              <Typography color="text.secondary" variant="caption" sx={{ fontWeight: 800 }}>
+              <span className="no-oa-bank-batches-transactions__account">
                 当前选择账户：{selectedAccountForSubmit}
-              </Typography>
+              </span>
             ) : null}
-          </Stack>
-          <Divider />
-          <Stack divider={<Divider flexItem />} sx={{ maxHeight: { lg: "68vh" }, overflow: "auto" }}>
+          </header>
+          <div className="no-oa-bank-batches-transactions__list">
             {loading ? <StatePanel compact tone="loading" title="流水加载中" /> : null}
             {!loading && visibleBatches.length === 0 ? <StatePanel compact tone="empty" title="当前标签下暂无流水" /> : null}
             {!loading ? visibleBatches.map((batch) => {
@@ -970,132 +960,171 @@ export default function NoOaBankBatchPage() {
                 batch.withdrawnAt ? `撤回时间：${batch.withdrawnAt}` : "",
               ].filter(Boolean);
               return (
-                <Box
-                  component="section"
+                <section
+                  className={cx(
+                    "no-oa-bank-batches-batch",
+                    selected && "no-oa-bank-batches-batch--selected",
+                  )}
                   key={batch.batchId}
-                  sx={{
-                    px: 1.5,
-                    py: 1.25,
-                    bgcolor: selected ? "rgba(23, 105, 170, 0.04)" : "background.paper",
-                  }}
                 >
-                  <Stack spacing={1}>
-                    <Stack
-                      alignItems={{ xs: "stretch", md: "center" }}
-                      direction={{ xs: "column", md: "row" }}
-                      justifyContent="space-between"
-                      spacing={1}
-                    >
-                      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-                        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-                          <Typography fontWeight={900}>{accountLabel(batch)}</Typography>
-                          <BatchStatusChip status={batch.status} />
-                        </Stack>
-                        <Typography color="text.secondary" variant="body2">
+                  <div className="no-oa-bank-batches-batch__body">
+                    <div className="no-oa-bank-batches-batch__header">
+                      <div className="no-oa-bank-batches-batch__summary">
+                        <div className="no-oa-bank-batches-batch__title-row">
+                          <h3 className="no-oa-bank-batches-batch__title">{accountLabel(batch)}</h3>
+                          <BatchStatusTag status={batch.status} />
+                        </div>
+                        <p className="no-oa-bank-batches-batch__meta">
                           {batch.rowCount} 条 · 合计 {formatMoney(batch.totalAmount)}
-                        </Typography>
-                      </Stack>
-                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                        </p>
+                      </div>
+                      <div className="no-oa-bank-batches-batch__actions">
                         {!selected ? (
-                          <Button
+                          <button
                             aria-label={`查看${accountLabel(batch)}流水`}
+                            className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
                             onClick={() => setSelectedBatchId(batch.batchId)}
-                            size="small"
-                            variant="outlined"
+                            type="button"
                           >
                             查看流水
-                          </Button>
+                          </button>
                         ) : null}
                         {selected && rowSelectionEnabled ? (
                           <>
-                            <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, true)} size="small">全选</Button>
-                            <Button disabled={rows.length === 0 || mutating} onClick={() => setRegionSelection(rows, false)} size="small">清空</Button>
+                            <button
+                              className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+                              disabled={rows.length === 0 || mutating}
+                              onClick={() => setRegionSelection(rows, true)}
+                              type="button"
+                            >
+                              全选
+                            </button>
+                            <button
+                              className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+                              disabled={rows.length === 0 || mutating}
+                              onClick={() => setRegionSelection(rows, false)}
+                              type="button"
+                            >
+                              清空
+                            </button>
                           </>
                         ) : null}
                         {internalTransferSubmitEnabled ? (
-                          <Button disabled={mutating} onClick={() => handleSubmitBatch(batch)} size="small" variant="contained">提交内部往来批次</Button>
+                          <button
+                            className="no-oa-bank-batches-button no-oa-bank-batches-button--compact no-oa-bank-batches-button--primary"
+                            disabled={mutating}
+                            onClick={() => handleSubmitBatch(batch)}
+                            type="button"
+                          >
+                            提交内部往来批次
+                          </button>
                         ) : null}
                         {bucket === "submitted" && canWithdraw(batch) ? (
-                          <Button disabled={mutating} onClick={() => setWithdrawTarget(batch)} size="small" variant="outlined">撤回批次</Button>
+                          <button
+                            className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+                            disabled={mutating}
+                            onClick={() => setWithdrawTarget(batch)}
+                            type="button"
+                          >
+                            撤回批次
+                          </button>
                         ) : null}
-                      </Stack>
-                    </Stack>
+                      </div>
+                    </div>
                     {blockingReason ? (
-                      <Alert severity={batch.status === "conflict" ? "error" : "warning"} sx={{ py: 0 }}>
+                      <div
+                        className={cx(
+                          "no-oa-bank-batches-notice",
+                          batch.status === "conflict" ? "no-oa-bank-batches-notice--error" : "no-oa-bank-batches-notice--warning",
+                        )}
+                        role="alert"
+                      >
                         {blockingReason}
-                      </Alert>
+                      </div>
                     ) : null}
                     {auditItems.length > 0 ? (
-                      <Typography color="text.secondary" variant="caption">
+                      <p className="no-oa-bank-batches-batch__audit">
                         {auditItems.join(" · ")}
-                      </Typography>
+                      </p>
                     ) : null}
-                    {selected && detailErrors[batch.batchId] ? <Alert severity="error">{detailErrors[batch.batchId]}</Alert> : null}
+                    {selected && detailErrors[batch.batchId] ? (
+                      <div className="no-oa-bank-batches-notice no-oa-bank-batches-notice--error" role="alert">
+                        {detailErrors[batch.batchId]}
+                      </div>
+                    ) : null}
                     {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
                     {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
                     {selected && rows.length > 0 ? (
-                      <TableContainer ref={detailTableWrapRef}>
-                        <Table size="small" aria-label={`${accountLabel(batch)}流水`}>
-                          <TableHead>
-                            <TableRow>
+                      <div className="no-oa-bank-batches-table-wrap" ref={detailTableWrapRef}>
+                        <table className="no-oa-bank-batches-table" aria-label={`${accountLabel(batch)}流水`}>
+                          <thead>
+                            <tr>
                               {rowSelectionEnabled ? (
-                                <TableCell padding="checkbox">
-                                  <Checkbox
+                                <th className="no-oa-bank-batches-table__check" scope="col">
+                                  <input
+                                    aria-label={`${accountLabel(batch)}全选`}
                                     checked={regionChecked}
-                                    inputProps={{ "aria-label": `${accountLabel(batch)}全选` }}
+                                    className="no-oa-bank-batches-checkbox"
                                     onChange={(event) => setRegionSelection(rows, event.target.checked)}
+                                    type="checkbox"
                                   />
-                                </TableCell>
+                                </th>
                               ) : null}
-                              <TableCell>交易时间</TableCell>
-                              <TableCell>对方户名</TableCell>
-                              <TableCell align="right">金额</TableCell>
-                              <TableCell>摘要/用途/备注</TableCell>
-                              <TableCell>分类来源</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
+                              <th scope="col">交易时间</th>
+                              <th scope="col">对方户名</th>
+                              <th className="no-oa-bank-batches-table__amount" scope="col">金额</th>
+                              <th scope="col">摘要/用途/备注</th>
+                              <th scope="col">分类来源</th>
+                            </tr>
+                          </thead>
+                          <tbody>
                             {rows.map((row) => (
-                              <TableRow key={row.transactionId}>
+                              <tr key={row.transactionId}>
                                 {rowSelectionEnabled ? (
-                                  <TableCell padding="checkbox">
-                                    <Checkbox
+                                  <td className="no-oa-bank-batches-table__check">
+                                    <input
+                                      aria-label={`选择流水 ${row.transactionId}`}
                                       checked={selectedTransactionIds.has(row.transactionId)}
-                                      inputProps={{ "aria-label": `选择流水 ${row.transactionId}` }}
+                                      className="no-oa-bank-batches-checkbox"
                                       onChange={(event) => toggleTransaction(row, event.target.checked)}
+                                      type="checkbox"
                                     />
-                                  </TableCell>
+                                  </td>
                                 ) : null}
-                                <TableCell>{row.tradeTime || "-"}</TableCell>
-                                <TableCell>{row.counterpartyName || "-"}</TableCell>
-                                <TableCell align="right">
-                                  <Stack alignItems="flex-end" spacing={0.25}>
-                                    <Stack alignItems="center" direction="row" justifyContent="flex-end" spacing={0.75}>
-                                      <Chip label={directionTagLabel(row)} size="small" />
-                                      <Typography variant="body2">{formatMoney(row.amount)}</Typography>
-                                    </Stack>
-                                    <Chip label={bankTagLabel(row)} size="small" variant="outlined" />
-                                  </Stack>
-                                </TableCell>
-                                <TableCell>
-                                  <Stack spacing={0.25}>
-                                    <Typography variant="body2">{row.summary || "-"}</Typography>
-                                    <Typography color="text.secondary" variant="caption">{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</Typography>
-                                  </Stack>
-                                </TableCell>
-                                <TableCell>{sourceLabel(row.categorySource)}</TableCell>
-                              </TableRow>
+                                <td>{row.tradeTime || "-"}</td>
+                                <td>{row.counterpartyName || "-"}</td>
+                                <td className="no-oa-bank-batches-table__amount">
+                                  <div className="no-oa-bank-batches-amount-cell">
+                                    <div className="no-oa-bank-batches-amount-cell__main">
+                                      <span className="no-oa-bank-batches-tag no-oa-bank-batches-tag--direction">
+                                        {directionTagLabel(row)}
+                                      </span>
+                                      <span className="no-oa-bank-batches-amount">{formatMoney(row.amount)}</span>
+                                    </div>
+                                    <span className="no-oa-bank-batches-tag no-oa-bank-batches-tag--bank">
+                                      {bankTagLabel(row)}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="no-oa-bank-batches-summary-cell">
+                                    <span>{row.summary || "-"}</span>
+                                    <span>{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</span>
+                                  </div>
+                                </td>
+                                <td>{sourceLabel(row.categorySource)}</td>
+                              </tr>
                             ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
+                          </tbody>
+                        </table>
+                      </div>
                     ) : null}
-                  </Stack>
-                </Box>
+                  </div>
+                </section>
               );
             }) : null}
-          </Stack>
-        </Paper>
+          </div>
+        </section>
       </Box>
 
       <Drawer

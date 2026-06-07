@@ -251,3 +251,44 @@ Scope: transaction region in `NoOaBankBatchPage.tsx` only: region `流水`, batc
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：迁移 `流水` region、batch cards and detail table，移除该 slice 的 MUI `Paper`、`Stack`、`Divider`、`Alert`、`Button`、`Box`、`TableContainer`、`Table`、`TableHead`、`TableBody`、`TableRow`、`TableCell`、`Checkbox`、`Chip`、`Typography` 用法，使用 native/project section, card, alert/status, buttons, dense table classes, native checkboxes and project tags。必须保留 region `流水`、标题 fallback `流水`、selected label title `<主标签> / <子标签>`、bucket hint copy、`当前选择账户：...`、loading/empty/detail loading/detail empty/error states、batch account/status/row count/total amount/audit items/blocking reason、按钮 `查看流水`/`全选`/`清空`/`提交内部往来批次`/`撤回批次` 的位置、accessible labels and disabled/mutating behavior、selected batch highlighting、detail table aria-label `<账户>流水`、headers `交易时间`/`对方户名`/`金额`/`摘要/用途/备注`/`分类来源`、select-all aria label `<账户>全选`、row checkbox aria label `选择流水 <transactionId>`、single-account selection guard, `setRegionSelection`, `toggleTransaction`, `handleSubmitBatch`, `setWithdrawTarget`, amount right alignment, direction/bank tags and source labels。不得修改 page shell/filter controls, `LabelRail`, tag drawer, withdraw dialog, snackbar, API client, mock data shape, backend, read model, worker or reconciliation workbench internals。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|selects transactions|submits selected transaction|submits internal transfer|withdraw"`，source-level contract expected-fail can remain for overlays but transaction behavior tests must pass；运行完整 `cd web && npx vitest run NoOaBankBatchPage.test.tsx` expected-fail only for remaining overlay/source-level contract；运行 `cd web && npm run build`；运行 transaction grep：`if rg -n 'TableContainer|<Table\\b|TableHead|TableBody|TableRow|TableCell|<Checkbox\\b|<Chip\\b|BatchStatusChip' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P078 overlays feedback prompt。
 ```
+
+## P077 Execution Notes
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/pages/NoOaBankBatchPage.tsx`
+  - `web/src/app/styles.css`
+- Behavior preserved:
+  - Region `流水`, label title fallback, bucket hint, selected account copy and selected batch highlighting are unchanged.
+  - Loading/empty/detail loading/detail empty/error states remain visible in the same workflow positions.
+  - Batch actions `查看流水`/`全选`/`清空`/`提交内部往来批次`/`撤回批次` keep their accessible labels, disabled/mutating behavior and handlers.
+  - Detail table keeps aria-label `<账户>流水`, headers, row and region checkbox accessible labels, single-account selection guard, amount right alignment, direction/bank tags and source labels.
+- Implementation:
+  - Replaced transaction-region MUI `Paper`, `Stack`, `Divider`, `Alert`, `Button`, batch `Box`, `Table*`, row `Checkbox`, `Chip` and `Typography` usage with native/project section, card, notice, button, dense table, native checkbox and project tag classes.
+  - Did not modify page shell/filter controls, `LabelRail`, tag drawer, withdraw dialog, snackbar, API client, backend, read model, worker or workbench internals.
+  - Corrected the P077 residue grep to scope only the transaction region because P078 still owns drawer `<Checkbox>` usage.
+- Verification:
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|selects transactions|submits selected transaction|submits internal transfer|withdraw"`: expected-fail; 6 transaction/withdraw behavior tests passed and 1 source-level contract failed.
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: expected-fail; 19 behavior tests passed and 1 source-level contract failed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `sed -n '930,1096p' web/src/pages/NoOaBankBatchPage.tsx | if rg -n 'TableContainer|<Table\\b|TableHead|TableBody|TableRow|TableCell|<Checkbox\\b|<Chip\\b|BatchStatusChip'; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P077 implementation files changed before docs.
+
+## Current Expected Failures After P077
+
+- `src/pages/NoOaBankBatchPage.tsx` still imports MUI because tag drawer, withdraw dialog, snackbar and remaining page layout wrapper remain MUI.
+- Source-level contract still fails on forbidden MUI imports/legacy surfaces and missing project drawer/dialog targets.
+- Transaction table target is satisfied by `no-oa-bank-batches-table`.
+- Tag drawer, withdraw dialog and snackbar remain P078.
+
+## P078 Prompt Draft
+
+```text
+Prompt ID: P078-phase-6-no-oa-bank-batches-overlays-feedback
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: final `/no-oa-bank-batches` UI migration slice: tag-management right drawer, withdraw dialog, snackbar/feedback, remaining MUI page wrapper/layout imports in `NoOaBankBatchPage.tsx`, plus necessary styles/tests. This is the final runtime cleanup before MG-P078.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：迁移标签管理右侧抽屉、撤回确认弹窗、snackbar/feedback 和剩余页面 MUI wrapper/layout，移除 `NoOaBankBatchPage.tsx` 所有 `@mui/*` imports and MUI legacy surfaces (`Alert`, `Box`, `Button`, `Checkbox`, `Dialog*`, `Divider`, `Drawer`, `FormControlLabel`, `IconButton`, `Paper`, `Snackbar`, `Stack`, `TextField`, `Typography`, `CloseIcon`)。使用 `AppDrawer`/`AppDialog` 或 project/native equivalents、native form controls、project buttons/notices/classes and lucide close icon as needed。必须保留 tag drawer 右侧抽屉形态、dialog accessible shape、labels `免OA流水标签管理`/`关闭免OA流水标签管理`/`全选`/`清空`/`保存`、版本显示、inactive selected warning、group checkbox indeterminate semantics、child checkbox labels, tag drawer open/refetch/save payload/live update behavior, withdraw warning copy、撤回原因 field、取消/确认撤回 disabled/mutating behavior and payload, snackbar messages and close behavior, top-level page error/loading/empty behavior, current page shell/filter/rail/transaction behavior。不得修改 API client、mock data shape、backend、read model、worker or reconciliation workbench internals。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx` 必须全部通过；运行 `cd web && npx vitest run NoOaBankBatchApi.test.ts`；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 MG-P078 cumulative merge gate prompt。
+```
