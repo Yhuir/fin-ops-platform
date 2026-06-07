@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P047-phase-6-pending-invoices-characterization-tests`
+- Current Prompt ID: `P048-phase-6-pending-invoices-page-shell-toolbar`
 - Current MG ID: `MG-P045-phase-6-bank-details`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | TaxOffset MG-P027 verified and pushed；AppHealth P028 discovery verified，next P029 characterization tests |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices P047 characterization tests verified as expected-fail；next P048 page shell/toolbar migration |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,15 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 pending invoices characterization tests prompt generated after discovery。
+- Scope: phase 6 pending invoices page shell/toolbar migration prompt generated after characterization tests。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `docs/refactor-ui/modules/phase_6_bank_details.md`
   - `docs/refactor-ui/modules/phase_6_pending_invoices.md`
-- Verification run: P046 discovery doc exists and next P047 prompt drafted。
-- Failures: none。
-- Next action: 执行 `P047-phase-6-pending-invoices-characterization-tests`。
+- Verification run: `cd web && npx vitest run PendingInvoicesPage.test.tsx` expected-fail with 14 passed and 1 failure；failure is the new source-level project primitive contract against current pending invoice MUI runtime。
+- Failures: expected until P048-P052 remove pending invoice MUI imports and add required project primitives。
+- Next action: 执行 `P048-phase-6-pending-invoices-page-shell-toolbar`。
 
 ## Prompt Lifecycle
 
@@ -94,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P047-phase-6-pending-invoices-characterization-tests` | PendingInvoices P046 discovery verified；next P047 characterization tests |
+| page batches | `in_progress` | `P048-phase-6-pending-invoices-page-shell-toolbar` | PendingInvoices P047 characterization tests verified as expected-fail；next P048 page shell/toolbar migration |
 
 ## Verification Log
 
@@ -287,6 +286,9 @@
 | 2026-06-07 | `MG-P045-phase-6-bank-details` | `git push origin refactor-ui` | passed | Commit `9a0b74ea` pushed |
 | 2026-06-07 | `P046-phase-6-pending-invoices-discovery` | `test -f docs/refactor-ui/modules/phase_6_pending_invoices.md` | passed | PendingInvoices module discovery doc exists |
 | 2026-06-07 | `P046-phase-6-pending-invoices-discovery` | `rg -n "P046-phase-6-pending-invoices-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P047-phase-6-pending-invoices-characterization-tests" docs/refactor-ui/modules/phase_6_pending_invoices.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | PendingInvoices inventory and next prompt recorded |
+| 2026-06-07 | `P047-phase-6-pending-invoices-characterization-tests` | `cd web && npx vitest run PendingInvoicesPage.test.tsx` | expected-fail | 14 passed, 1 expected failure. Failure lists 9 pending invoice files still importing `@mui/*` and missing PageScaffold/PageToolbar/FinanceTable/AppDrawer/AppDialog targets |
+| 2026-06-07 | `P047-phase-6-pending-invoices-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P047-phase-6-pending-invoices-characterization-tests` | `git status --short --branch` | passed | P047 test and docs changed |
 
 ## Push Log
 

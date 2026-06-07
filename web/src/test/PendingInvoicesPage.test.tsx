@@ -1,9 +1,28 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
+
+const pendingInvoicesSourceFiles = [
+  "src/pages/PendingInvoicesPage.tsx",
+  "src/components/pendingInvoices/PendingInvoicesTable.tsx",
+  "src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx",
+  "src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx",
+  "src/components/pendingInvoices/PendingInvoiceRelationDrawer.tsx",
+  "src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx",
+  "src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx",
+  "src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx",
+  "src/components/pendingInvoices/ManualInvoiceDialog.tsx",
+] as const;
+
+function readWebSource(path: string) {
+  return readFileSync(resolve(path), "utf8");
+}
 
 function upgradedRows() {
   return [
@@ -549,7 +568,32 @@ afterEach(() => {
 });
 
 describe("Pending invoices page", () => {
-  test("renders upgraded four-zone MUI table without DataGrid and summarizes multiple relations", async () => {
+  test("targets project primitives for page shell, tables, drawers, and dialogs", () => {
+    const forbiddenMuiImports = pendingInvoicesSourceFiles.flatMap((path) => {
+      const source = readWebSource(path);
+      const hasMuiImport = /from ["']@mui\/|import\s+[^;]*@mui\//.test(source);
+      return hasMuiImport ? [path] : [];
+    });
+    const sourceByPath = Object.fromEntries(pendingInvoicesSourceFiles.map((path) => [path, readWebSource(path)]));
+    const missingPrimitiveTargets = [
+      sourceByPath["src/pages/PendingInvoicesPage.tsx"].includes("PageScaffold") ? null : "PendingInvoicesPage.tsx should use PageScaffold or equivalent project shell",
+      sourceByPath["src/pages/PendingInvoicesPage.tsx"].includes("PageToolbar") ? null : "PendingInvoicesPage.tsx should use PageToolbar or equivalent project toolbar",
+      sourceByPath["src/components/pendingInvoices/PendingInvoicesTable.tsx"].includes("FinanceTable") ? null : "PendingInvoicesTable.tsx should use FinanceTable or the project table primitive",
+      sourceByPath["src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx"].includes("AppDrawer") ? null : "PendingInvoiceDrawerFrame.tsx should use AppDrawer for right drawer shape",
+      sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should use AppDialog for OA print dialog",
+      sourceByPath["src/components/pendingInvoices/ManualInvoiceDialog.tsx"].includes("AppDialog") ? null : "ManualInvoiceDialog.tsx should use AppDialog",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
+  test("renders project four-zone table contract and summarizes multiple relations", async () => {
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
 
@@ -687,6 +731,8 @@ describe("Pending invoices page", () => {
     await user.click(within(relationRow).getByRole("button", { name: "分期供应商 发票获取操作" }));
     await user.click(await screen.findByRole("menuitem", { name: "查看支付明细" }));
     expect(await screen.findByText("关系与支付明细")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭关系明细抽屉" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "历史支付流水" })).toBeInTheDocument();
     expect(await screen.findByText("已付合计")).toBeInTheDocument();
     expect(screen.getByText("1,500.00")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭关系明细抽屉" }));
@@ -732,6 +778,7 @@ describe("Pending invoices page", () => {
     await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
     expect(await screen.findByRole("heading", { name: "导出预览" })).toBeInTheDocument();
     expect(screen.getByText("预计导出 128 行")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "导出样例" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "下载导出" }));
     expect(await screen.findByText("已生成 pending-invoices.xlsx")).toBeInTheDocument();
   }, 45_000);
@@ -978,6 +1025,7 @@ describe("Pending invoices page", () => {
     await user.click(await screen.findByRole("menuitem", { name: "选择发票" }));
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "发票候选" })).toBeInTheDocument();
     expect(await screen.findByText("DIG-CAND-001")).toBeInTheDocument();
     await user.type(screen.getByLabelText("销方"), "云南开票供应商");
     await user.click(screen.getByRole("button", { name: "搜索" }));

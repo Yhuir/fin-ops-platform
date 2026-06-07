@@ -2872,7 +2872,7 @@ Scope: `/pending-invoices` only: PendingInvoices page, pending invoice component
 ### P047-phase-6-pending-invoices-characterization-tests
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: 只更新 pending invoices tests，锁定 `/pending-invoices` 非 MUI/project primitive contract；不改实现。
 
@@ -2895,6 +2895,50 @@ Scope: 只更新 pending invoices tests，锁定 `/pending-invoices` 非 MUI/pro
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，implementation still uses MUI before P048-P052。
 - Next prompt: P048 page shell toolbar refactor only after P047 implemented and verified/expected-fail documented。
+
+#### Execution Notes
+
+- Updated `web/src/test/PendingInvoicesPage.test.tsx` only.
+- Renamed the old “upgraded four-zone MUI table without DataGrid” wording to a project four-zone table contract.
+- Added source-level contract coverage for pending invoice page shell, main table, shared drawer frame, rules/relation/detail/export/invoice-picker drawers, OA print dialog and manual invoice dialog.
+- Added behavior assertions for `历史支付流水`, `发票候选` and `导出样例` table semantics, while preserving `打印选择` and `手工补录发票` dialog expectations already covered by existing tests.
+- Did not modify runtime implementation, mocks, backend, API, read model, worker or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx`: expected-fail with 14 passed and 1 failure. The only failure is the new project primitive source contract listing 9 current pending invoice files with `@mui/*` imports and missing PageScaffold/PageToolbar/FinanceTable/AppDrawer/AppDialog targets。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed。
+
+### P048-phase-6-pending-invoices-page-shell-toolbar
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: 只迁移 PendingInvoices page shell、direction segmented control、status filter menu、toolbar actions/search/loading 和 pagination；不迁移 `PendingInvoicesTable` internals、drawer frame、drawers、rules drawer、invoice picker 或 manual invoice dialog。
+
+#### Prompt
+
+```text
+Prompt ID: P048-phase-6-pending-invoices-page-shell-toolbar
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/pending-invoices` page shell/toolbar/pagination only. Do not migrate `PendingInvoicesTable` internals or any pending invoice drawer/dialog component.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/PendingInvoicesPage.tsx、web/src/test/PendingInvoicesPage.test.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/PendingInvoicesPage.tsx`、必要 `web/src/app/styles.css` 和必要的 `web/src/test/PendingInvoicesPage.test.tsx` expectation：移除 page shell/toolbar/status menu/pagination/search/loading 的 MUI imports/usages，包括 `KeyboardArrowDownOutlinedIcon`、`Box`、`Button`、`LinearProgress`、`Menu`、`MenuItem`、`Stack`、`TablePagination`、`TextField`、`ToggleButton`、`ToggleButtonGroup`、`Typography` 以及 `.MuiButton-endIcon`、`.MuiToggleButton-root` sx selector。使用 PageScaffold/PageToolbar、native/project buttons、project menu/listbox/popover、native search input、project pagination/loading/status markup 或 HeroUI primitives，保留旧 `data-testid="pending-invoices-page"`、route/sidebar link、direction counts/buttons `全部 <n>`/`支出 <n>`/`收入 <n>`、status menu trigger `筛选发票获取状态：<label>` 和 options、search `搜索流水`、refresh `刷新`、rules/export buttons、non-fresh read model disables export、loading `待找发票加载中`、server page/pageSize/total behavior and pagination labels。不得修改 pending invoices API/mock/read model/worker/backend/关联台；不得改 `web/src/components/pendingInvoices/*`，除非测试证明 page-only migration needs a prop-compatible no-op adjustment and the prompt must record why。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract|shows income rule-group filters|keeps row status actions available|targets project primitives"`；运行完整 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，P049-P052 table/drawer/dialog source contract failures 可以继续 expected-fail，但 P048 page shell/toolbar/pagination targets and page-level MUI import failure must clear；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|MuiButton-endIcon|MuiToggleButton-root|KeyboardArrowDownOutlinedIcon|TablePagination|ToggleButton|ToggleButtonGroup' web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P049 four-zone table prompt。
+```
+
+#### Review
+
+- Single slice: yes，page shell/toolbar/pagination only。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Existing table/drawer/dialog components untouched: required for P048 scope control。
+- User-visible entrypoints preserved: required，direction buttons, status filter, rules/export/search/refresh and pagination labels must remain。
+- Expected failure allowed: yes，P049-P052 source contracts can continue failing after P048, but page shell/toolbar failures must clear。
+- Next prompt: P049 four-zone table migration only after P048 implementation is verified/expected-fail documented。
 
 ### MG Prompt Template
 
