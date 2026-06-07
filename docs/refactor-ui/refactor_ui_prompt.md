@@ -4362,6 +4362,7 @@ Scope: `/no-oa-bank-batches` page shell actions and filter region only. Do not m
 - Replaced filter `TextField` controls for `月份` and `银行账户` with labeled native inputs.
 - Preserved tag drawer open/refetch trigger, refresh disabled behavior, bucket reset/clearSelection behavior, selected-row submit disabled logic and selected count text.
 - Did not modify `LabelRail`, transaction region/table/cards, tag drawer, withdraw dialog, snackbar, API client, backend, read model, worker or workbench internals.
+- Committed and pushed `1c872bfe feat: migrate no oa bank batch filters` to `origin/refactor-ui`.
 
 #### Verification
 

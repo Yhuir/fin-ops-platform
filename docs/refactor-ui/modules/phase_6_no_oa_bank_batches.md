@@ -188,6 +188,7 @@ Scope: `/no-oa-bank-batches` page shell actions and filter region only. Do not m
   - `if rg -n 'RefreshOutlinedIcon|ToggleButton|ToggleButtonGroup|<TextField[^\\n]*(label="月份"|label="银行账户")' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P075 implementation files changed before docs.
+- Commit: `1c872bfe feat: migrate no oa bank batch filters`, pushed to `origin/refactor-ui`.
 
 ## Current Expected Failures After P075
 
