@@ -58,18 +58,57 @@ Notes:
 - Code tests were not run for PV-000 because the slice is docs-only and does not change runtime code.
 - New master/state docs contain forbidden keepalive/snapshot terms only as explicit prohibition rules.
 
-## Next Prompt Draft
-
-`PV-001-shared-premium-foundation`
-
-读取 `premium_visual_master_state.md`、`premium_visual_prompt.md`、`interaction_smoothness.md`、`DESIGN.md`、`web/src/app/styles.css`、`web/src/components/common/*`、`web/src/components/shell/*`、`web/src/components/common/FinanceTable.tsx` 和相关 tests。只实现 shared premium foundation：motion CSS tokens、reduced motion fallback、按钮/菜单/表格/抽屉基础交互过渡规则、no route-blocking animation guard tests。不得迁移任何业务页面，不得改后端/API/read model/worker/关联台内部工作区。运行 targeted tests、type check、build、forbidden grep、diff check，更新状态和 prompt 日志，MG 后精确 commit/push 到 `origin/main`。
-
-## Current Prompt: PV-001-shared-premium-foundation
+## Completed Prompt: PV-001-shared-premium-foundation
 
 ### Status
 
-planned
+verified
 
 ### Prompt
 
 读取 `premium_visual_master_state.md`、`premium_visual_prompt.md`、`interaction_smoothness.md`、`DESIGN.md`、`web/src/app/styles.css`、`web/src/components/common/*`、`web/src/components/shell/*`、`web/src/components/common/FinanceTable.tsx` 和相关 tests。只实现 shared premium foundation：motion CSS tokens、reduced motion fallback、按钮/菜单/表格/抽屉基础交互过渡规则、no route-blocking animation guard tests。不得迁移任何业务页面，不得改后端/API/read model/worker/关联台内部工作区。运行 targeted tests、type check、build、forbidden grep、diff check，更新状态和 prompt 日志，MG 后精确 commit/push 到 `origin/main`。
+
+### Execution Notes
+
+- 在 `web/src/app/styles.css` 建立 `--motion-fast`、`--motion-base`、`--motion-slow`、`--ease-standard`、`--ease-out-quart`。
+- 将 motion tokens 暴露到 Tailwind v4 theme bridge。
+- 增加全局 `prefers-reduced-motion: reduce` fallback。
+- 将共享 dialog/drawer、FinanceTable row/tag、AppSidebar、project primary/secondary buttons 接入统一交互时序。
+- 增加 PageRouteHost guard，防止后续视觉动效把路由切换挂到 animation timer 或 exit transition。
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run DesignTokens.test.ts TableAlignmentStyles.test.ts AppSidebar.test.tsx PageRouteHost.test.tsx HeroUIPlatformSmoke.test.tsx`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+
+Notes:
+
+- `npm run build` 通过；仍有既有 HeroUI/Tailwind CSS minify warnings，未阻断构建，本切片未解决该历史 warning。
+
+## Next Prompt Draft
+
+`PV-002-tax-offset-discovery`
+
+读取 `premium_visual_master_state.md`、`premium_visual_prompt.md`、`interaction_smoothness.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/module_inventory.md`、`web/src/pages/TaxOffsetPage.tsx`、`web/src/components/tax/*`、相关 `web/src/test/*TaxOffset*` 测试和当前 `git status`。本切片只做税金抵扣 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 在 `docs/refactor-ui/module_inventory.md` 追加或更新 `tax-offset discovery`；如果矩阵过长，则新建 `docs/refactor-ui/modules/tax-offset.md` 并从 `module_inventory.md` 链接。
+- 清点旧页面用户可见入口：按钮、表格、筛选、月份选择、导入/确认、右侧抽屉、弹窗、loading/empty/error/stale/permission 状态。
+- 标明哪些元素必须功能等价保留，尤其旧右侧抽屉仍为右侧抽屉、旧弹窗仍为弹窗、旧表格仍为表格。
+- 列出表格列角色和排版要求：金额/税额右对齐、数字 tabular nums、状态/方向 tag 稳定高度宽度、行 hover 不改变行高。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
+- 生成下一条唯一 prompt：`PV-003-tax-offset-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`

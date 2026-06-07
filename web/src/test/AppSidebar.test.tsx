@@ -69,7 +69,8 @@ describe("AppSidebar shell contract", () => {
     expect(screen.getByText("财务运营平台")).toBeInTheDocument();
     expect(screen.getByText("财务业务")).toBeInTheDocument();
     expect(screen.getByText("关联台")).toBeInTheDocument();
-    expect(sidebarRule).toMatch(/--app-sidebar-motion:\s*260ms/);
+    expect(sidebarRule).toMatch(/--app-sidebar-motion:\s*var\(--motion-slow\) var\(--ease-out-quart\)/);
+    expect(sidebarRule).toMatch(/--app-sidebar-content-motion:\s*var\(--motion-base\) var\(--ease-out-quart\)/);
     expect(contentRule).toMatch(/transition:[^;]*var\(--app-sidebar-motion\)/);
     expect(brandTextRule).toMatch(/opacity[^;]*var\(--app-sidebar-motion\)/);
     expect(brandTextRule).toMatch(/transform[^;]*var\(--app-sidebar-motion\)/);

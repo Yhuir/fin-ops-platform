@@ -30,7 +30,7 @@ Last updated: 2026-06-08
 | Order | Slice | Status | Notes |
 | --- | --- | --- | --- |
 | 0 | `PV-000-premium-foundation-discovery` | verified | 建立主控 prompt、状态机、prompt 日志和 interaction_smoothness 规则。 |
-| 1 | `PV-001-shared-premium-foundation` | pending | motion tokens、基础交互样式、reduced motion、foundation tests。 |
+| 1 | `PV-001-shared-premium-foundation` | verified | motion tokens、基础交互样式、reduced motion、foundation tests。 |
 | 2 | `PV-002-tax-offset-discovery` | pending | `/tax-offset` 旧入口清单、表格/弹窗/抽屉矩阵、测试缺口。 |
 | 3 | `PV-003-tax-offset-premium-visual` | pending | 税金抵扣 premium visual slice。 |
 | 4 | `PV-004-app-health-discovery` | pending | `/operations/app-health` discovery。 |
@@ -62,16 +62,17 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-001-shared-premium-foundation`
+`PV-002-tax-offset-discovery`
 
 ### Scope
 
-- `docs/refactor-ui/master_prompt_premium.md`
-- `docs/refactor-ui/prompt_premium_bank_detail.md`
-- `docs/refactor-ui/bank_details_premium_sample.md`
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/interaction_smoothness.md`
+- `docs/refactor-ui/module_inventory.md`
+- `docs/refactor-ui/modules/tax-offset.md` if the discovery matrix is too large for `module_inventory.md`
+- `web/src/pages/TaxOffsetPage.tsx`
+- `web/src/components/tax/*`
+- related `web/src/test/*TaxOffset*` tests
 
 ### Verification
 
@@ -79,9 +80,10 @@ Required:
 
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
-- `rg` confirms premium docs exist and reference the correct baseline files.
+- `rg` no non-workbench runtime MUI imports.
+- targeted Tax Offset discovery test inventory, if tests exist.
 
-Code tests are not required for PV-000 because it is docs-only and does not change runtime code.
+PV-002 is discovery-only unless the characterization gap is small and safe to add without changing runtime behavior.
 
 ## Execution Rules
 
@@ -100,3 +102,5 @@ Each implementation slice must:
 | Date | Slice | Commit | Push | Notes |
 | --- | --- | --- | --- | --- |
 | 2026-06-08 | `PV-000-premium-foundation-discovery` | `2f26c79a` | pushed to `origin/main` | Docs foundation verified and pushed. |
+| 2026-06-08 | `PV-000-state-update` | `4e276a95` | pushed to `origin/main` | State advanced to PV-001 after push. |
+| 2026-06-08 | `PV-001-shared-premium-foundation` | current commit | pushed to `origin/main` | Shared motion foundation verified and pushed with the current commit. |

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { lazy, type ComponentType, type ReactNode, useEffect, useState } from "react";
@@ -36,6 +37,17 @@ afterEach(() => {
 });
 
 describe("PageRouteHost", () => {
+  test("does not gate route switching behind animation timers", () => {
+    const source = readFileSync("src/app/PageRouteHost.tsx", "utf8");
+
+    expect(source).not.toMatch(/\bsetTimeout\b/);
+    expect(source).not.toMatch(/\bsetInterval\b/);
+    expect(source).not.toMatch(/\brequestAnimationFrame\b/);
+    expect(source).not.toMatch(/\bstartTransition\b/);
+    expect(source).not.toMatch(/\bAnimatePresence\b/);
+    expect(source).not.toMatch(/transitionend/i);
+  });
+
   test("unmounts the previous page and mounts the next route immediately", async () => {
     const user = userEvent.setup();
     const mountCounts = { a: 0, b: 0 };

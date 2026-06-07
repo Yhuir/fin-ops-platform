@@ -51,6 +51,12 @@
   --fp-shadow-dialog: 0 18px 48px rgba(15, 23, 42, 0.18);
   --fp-shadow-drawer: -12px 0 30px rgba(15, 23, 42, 0.10);
 
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+
   --fp-table-row-height: 44px;
   --fp-table-row-height-complex: 60px;
   --fp-table-cell-padding-x: 10px;
@@ -123,6 +129,8 @@
   --shadow-fp-popover: var(--fp-shadow-popover);
   --shadow-fp-dialog: var(--fp-shadow-dialog);
   --shadow-fp-drawer: var(--fp-shadow-drawer);
+  --ease-fp-standard: var(--ease-standard);
+  --ease-fp-out-quart: var(--ease-out-quart);
 }
 
 * {
@@ -137,6 +145,17 @@ body,
 
 body {
   margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 button,
@@ -7545,6 +7564,9 @@ textarea {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
   box-shadow: var(--fp-shadow-dialog);
+  transition:
+    opacity var(--motion-slow) var(--ease-out-quart),
+    transform var(--motion-slow) var(--ease-out-quart);
 }
 
 .finance-dialog__header {
@@ -7609,6 +7631,9 @@ textarea {
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
   box-shadow: var(--fp-shadow-drawer);
+  transition:
+    opacity var(--motion-slow) var(--ease-out-quart),
+    transform var(--motion-slow) var(--ease-out-quart);
 }
 
 .finance-drawer__header {
@@ -7684,6 +7709,13 @@ textarea {
 
 .finance-table__row {
   min-height: var(--fp-table-row-height);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.finance-table__row:hover {
+  background: var(--fp-primary-soft);
 }
 
 .finance-table__column {
@@ -7826,6 +7858,10 @@ textarea {
   border-radius: var(--fp-tag-radius-table);
   font-size: var(--fp-text-label);
   font-weight: 800;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .finance-status-tag {
@@ -7833,6 +7869,10 @@ textarea {
   border-radius: var(--fp-tag-radius-table);
   font-size: var(--fp-text-label);
   font-weight: 800;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .finance-empty-value {
@@ -8067,8 +8107,8 @@ body.workbench-focus-mode .global-header {
   position: sticky;
   top: 0;
   z-index: 25;
-  --app-sidebar-motion: 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  --app-sidebar-content-motion: 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  --app-sidebar-motion: var(--motion-slow) var(--ease-out-quart);
+  --app-sidebar-content-motion: var(--motion-base) var(--ease-out-quart);
   flex: 0 0 232px;
   width: 232px;
   height: 100dvh;
@@ -8149,7 +8189,9 @@ body.workbench-focus-mode .global-header {
   background: transparent;
   color: #30343a;
   cursor: pointer;
-  transition: color 120ms ease, transform 120ms ease;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
 }
 
 .app-sidebar-toggle-icon {
@@ -8160,7 +8202,9 @@ body.workbench-focus-mode .global-header {
   justify-content: center;
   opacity: 0;
   transform: translateX(4px) scale(0.92);
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition:
+    opacity var(--motion-base) var(--ease-out-quart),
+    transform var(--motion-base) var(--ease-out-quart);
 }
 
 .app-sidebar-toggle[aria-expanded="true"] .app-sidebar-toggle-icon-expanded,
@@ -8562,7 +8606,10 @@ body.workbench-focus-mode .global-header {
   font-size: 15px;
   font-weight: 650;
   text-decoration: none;
-  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .app-sidebar-link:hover,
@@ -12868,10 +12915,10 @@ body.column-layout-dragging {
   font-weight: 700;
   cursor: pointer;
   transition:
-    transform 120ms ease,
-    box-shadow 120ms ease,
-    border-color 120ms ease,
-    background-color 120ms ease;
+    transform var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .primary-button {

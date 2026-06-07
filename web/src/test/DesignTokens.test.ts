@@ -50,4 +50,18 @@ describe("Ledger Calm design tokens", () => {
     expect(css).toMatch(/--radius-fp-sm:\s*var\(--fp-radius-sm\)/);
     expect(css).toMatch(/--shadow-fp-drawer:\s*var\(--fp-shadow-drawer\)/);
   });
+
+  test("defines shared motion tokens and reduced motion fallback", () => {
+    const css = source();
+
+    expect(css).toMatch(/--motion-fast:\s*120ms\b/);
+    expect(css).toMatch(/--motion-base:\s*180ms\b/);
+    expect(css).toMatch(/--motion-slow:\s*240ms\b/);
+    expect(css).toMatch(/--ease-standard:\s*cubic-bezier\(0\.2,\s*0,\s*0,\s*1\)/);
+    expect(css).toMatch(/--ease-out-quart:\s*cubic-bezier\(0\.25,\s*1,\s*0\.5,\s*1\)/);
+    expect(css).toMatch(/--ease-fp-standard:\s*var\(--ease-standard\)/);
+    expect(css).toMatch(/--ease-fp-out-quart:\s*var\(--ease-out-quart\)/);
+    expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+    expect(css).toMatch(/transition-duration:\s*1ms\s*!important/);
+  });
 });
