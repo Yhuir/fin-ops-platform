@@ -778,7 +778,7 @@
 ### MG-WB009-full-verification
 
 - Phase: `wb_phase_8_full_verification`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push full verification 文档记录。
 
@@ -795,6 +795,28 @@
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
 - Verification already completed before commit: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `b9eb8bb2 docs: record workbench full verification`
+- Push: `origin/refactor-ui`
+- Code/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - full no-MUI source/CSS/package scans。
+  - workbench full test suite。
+  - non-workbench containment regressions。
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `git commit -m "docs: record workbench full verification"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 
