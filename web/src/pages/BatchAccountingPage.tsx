@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
-import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
-import { RefreshCw, Search, X } from "lucide-react";
+import { AlertTriangle, RefreshCw, Search, X } from "lucide-react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -11,7 +10,6 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import Divider from "@mui/material/Divider";
-import IconButton from "@mui/material/IconButton";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
@@ -22,7 +20,6 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -154,47 +151,38 @@ function AmountMismatchWarning({
   note: string;
 }) {
   const [open, setOpen] = useState(false);
-  const showTooltip = () => setOpen(true);
-  const hideTooltip = (event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
+  const showMismatchDetails = () => setOpen(true);
+  const hideMismatchDetails = (event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
     if (event.type === "mouseleave" || event.type === "blur") {
       setOpen(false);
     }
   };
 
   return (
-    <Tooltip
-      arrow
-      describeChild
-      disableFocusListener
-      disableHoverListener
-      disableTouchListener
-      onClose={() => setOpen(false)}
-      open={open}
-      placement="top"
-      title={(
-        <Stack spacing={0.5}>
+    <span className="batch-accounting-mismatch-warning">
+      <button
+        aria-label="查看金额不一致差额说明"
+        aria-describedby={open ? "batch-accounting-mismatch-tooltip" : undefined}
+        className="batch-accounting-mismatch-warning__trigger"
+        onBlur={hideMismatchDetails}
+        onClick={showMismatchDetails}
+        onFocus={showMismatchDetails}
+        onMouseEnter={showMismatchDetails}
+        onMouseLeave={hideMismatchDetails}
+        onTouchStart={showMismatchDetails}
+        type="button"
+      >
+        <AlertTriangle aria-hidden="true" size={16} strokeWidth={2.3} />
+      </button>
+      {open ? (
+        <span className="batch-accounting-mismatch-warning__tooltip" id="batch-accounting-mismatch-tooltip" role="tooltip">
           <span>{`银行流水金额：${formatMoney(amountCheck.bankAmount)}`}</span>
           <span>{`OA合计：${formatMoney(amountCheck.oaAmount)}`}</span>
           <span>{`差额：${formatMoney(amountCheck.amountDelta)}`}</span>
           <span>{`差额说明：${note || "-"}`}</span>
-        </Stack>
-      )}
-    >
-      <IconButton
-        aria-label="查看金额不一致差额说明"
-        color="warning"
-        onBlur={hideTooltip}
-        onClick={showTooltip}
-        onFocus={showTooltip}
-        onMouseEnter={showTooltip}
-        onMouseLeave={hideTooltip}
-        onTouchStart={showTooltip}
-        size="small"
-        sx={{ height: 28, ml: -0.5, width: 28 }}
-      >
-        <WarningAmberRoundedIcon fontSize="small" />
-      </IconButton>
-    </Tooltip>
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -447,12 +435,12 @@ export default function BatchAccountingPage() {
           alignItems: "start",
         }}
       >
-        <Paper aria-label="批量账务流水" role="region" variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack alignItems={{ xs: "stretch", sm: "center" }} direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1.25} sx={{ px: 2, py: 1.5 }}>
-            <Box>
-              <Typography fontWeight={900}>批量账务流水</Typography>
-              <Typography color="text.secondary" variant="caption">对方户名精确匹配批量账务集中处理</Typography>
-            </Box>
+        <section aria-label="批量账务流水" className="batch-accounting-bank-panel" role="region">
+          <header className="batch-accounting-bank-panel__header">
+            <div>
+              <h2 className="batch-accounting-bank-panel__title">批量账务流水</h2>
+              <p className="batch-accounting-bank-panel__subtitle">对方户名精确匹配批量账务集中处理</p>
+            </div>
             <label className="batch-accounting-field batch-accounting-field--year" htmlFor="batch-accounting-bank-year">
               <span>流水年份</span>
               <input
@@ -464,85 +452,78 @@ export default function BatchAccountingPage() {
                 value={bankYear}
               />
             </label>
-          </Stack>
-          <Divider />
+          </header>
           {loading ? (
-            <Box sx={{ p: 2 }}>
+            <div className="batch-accounting-bank-panel__state">
               <StatePanel compact tone="loading" title="正在加载流水" />
-            </Box>
+            </div>
           ) : null}
           {!loading && payload.bankRows.length === 0 ? (
-            <Box sx={{ p: 2 }}>
+            <div className="batch-accounting-bank-panel__state">
               <StatePanel compact tone="empty" title="当前年份暂无批量账务流水" />
-            </Box>
+            </div>
           ) : null}
-          <Stack divider={<Divider flexItem />}>
+          <div className="batch-accounting-bank-list">
             {payload.bankRows.map((row) => {
               const selected = row.id === selectedBankRowId;
               return (
-                <Box
+                <button
                   aria-label={`批量账务集中处理 ${formatMoney(row.amount)} ${row.tradeTime} ${row.directionLabel || "支出"} ${accountLabel(row)}`}
                   aria-pressed={selected}
+                  className={cx("batch-accounting-bank-row", selected && "batch-accounting-bank-row--selected")}
                   key={row.id}
                   onClick={() => handleSelectBankRow(row)}
-                  role="button"
-                  sx={{
-                    bgcolor: selected ? "action.selected" : "background.paper",
-                    borderLeft: selected ? 4 : 0,
-                    borderColor: "primary.main",
-                    cursor: "pointer",
-                    px: 2,
-                    py: 1.5,
-                  }}
-                  tabIndex={0}
+                  type="button"
                 >
-                  <Stack spacing={1}>
-                    <Stack alignItems="baseline" direction="row" justifyContent="space-between" spacing={1}>
-                      <Typography fontWeight={900}>批量账务集中处理</Typography>
-                      <Typography fontWeight={900} sx={{ whiteSpace: "nowrap" }}>{formatMoney(row.amount)}</Typography>
-                    </Stack>
-                    <Stack direction="row" flexWrap="wrap" spacing={0.75} useFlexGap>
-                      <Chip label={row.tradeTime || "-"} size="small" variant="outlined" />
-                      <Chip color="warning" label={row.directionLabel || "支出"} size="small" />
-                      <Chip label={accountLabel(row)} size="small" variant="outlined" />
-                    </Stack>
-                  </Stack>
-                </Box>
+                  <span className="batch-accounting-bank-row__main">
+                    <span className="batch-accounting-bank-row__title">批量账务集中处理</span>
+                    <span className="batch-accounting-bank-row__amount">{formatMoney(row.amount)}</span>
+                  </span>
+                  <span className="batch-accounting-bank-row__tags">
+                    <span className="batch-accounting-tag batch-accounting-tag--meta">{row.tradeTime || "-"}</span>
+                    <span className="batch-accounting-tag batch-accounting-tag--direction">{row.directionLabel || "支出"}</span>
+                    <span className="batch-accounting-tag batch-accounting-tag--meta">{accountLabel(row)}</span>
+                  </span>
+                </button>
               );
             })}
-          </Stack>
-        </Paper>
+          </div>
+        </section>
 
         <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
           <Stack alignItems={{ xs: "stretch", xl: "center" }} direction={{ xs: "column", xl: "row" }} justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
             <Stack direction={{ xs: "column", lg: "row" }} spacing={1.25} sx={{ minWidth: 0 }}>
-              <Stack direction="row" flexWrap="wrap" spacing={1} useFlexGap>
-                <Stack alignItems="center" direction="row" spacing={0.5}>
-                  <Chip label={`银行流水金额 ${formatCents(bankAmountCents)}`} />
+              <div className="batch-accounting-summary">
+                <span className="batch-accounting-summary-tag">{`银行流水金额 ${formatCents(bankAmountCents)}`}</span>
+                <span className="batch-accounting-summary__warning-slot">
                   {submittedAmountMismatch && selectedRelationAmountCheck ? (
                     <AmountMismatchWarning
                       amountCheck={selectedRelationAmountCheck}
                       note={selectedRelation?.note ?? ""}
                     />
                   ) : null}
-                </Stack>
-                <Chip label={`已选 OA ${selectedOaRows.length} 项`} />
-                <Chip label={`已选 OA 金额 ${formatCents(selectedOaTotalCents)}`} />
-                <Chip color={differenceCents === 0 ? "success" : "warning"} label={`差额 ${formatCents(differenceCents)}`} />
+                </span>
+                <span className="batch-accounting-summary-tag">{`已选 OA ${selectedOaRows.length} 项`}</span>
+                <span className="batch-accounting-summary-tag">{`已选 OA 金额 ${formatCents(selectedOaTotalCents)}`}</span>
+                <span className={cx("batch-accounting-summary-tag", differenceCents === 0 ? "batch-accounting-summary-tag--success" : "batch-accounting-summary-tag--warning")}>
+                  {`差额 ${formatCents(differenceCents)}`}
+                </span>
                 {submittedAmountMismatch ? (
-                  <Chip color="warning" label="金额不一致" />
+                  <span className="batch-accounting-summary-tag batch-accounting-summary-tag--warning">金额不一致</span>
                 ) : null}
-              </Stack>
+              </div>
               {isAmountMismatch ? (
-                <TextField
-                  helperText="金额不一致时必须填写，提交后视为人工差额闭环。"
-                  inputProps={{ "aria-required": true }}
-                  label="差额说明"
-                  onChange={(event) => setDifferenceNote(event.target.value)}
-                  size="small"
-                  sx={{ minWidth: { xs: "100%", lg: 260 } }}
-                  value={differenceNote}
-                />
+                <div className="batch-accounting-field batch-accounting-field--note">
+                  <label htmlFor="batch-accounting-difference-note">差额说明</label>
+                  <input
+                    aria-describedby="batch-accounting-difference-note-help"
+                    aria-required="true"
+                    id="batch-accounting-difference-note"
+                    onChange={(event) => setDifferenceNote(event.target.value)}
+                    value={differenceNote}
+                  />
+                  <small id="batch-accounting-difference-note-help">金额不一致时必须填写，提交后视为人工差额闭环。</small>
+                </div>
               ) : null}
               <label className="batch-accounting-field batch-accounting-field--year" htmlFor="batch-accounting-oa-year">
                 <span>OA年份</span>

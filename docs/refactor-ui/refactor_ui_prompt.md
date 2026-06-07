@@ -4679,7 +4679,7 @@ Scope: `/batch-accounting` page shell, refresh action, status switch and year/se
 ### P082-phase-6-batch-accounting-bank-list-and-summary
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/batch-accounting` bank row region/list, amount summary, mismatch note field and submitted amount-mismatch warning only.
 
@@ -4703,6 +4703,52 @@ Scope: `/batch-accounting` bank row region/list, amount summary, mismatch note f
 - OA table/dialog/feedback migration excluded: yes，reserved for P083-P084。
 - Expected failure allowed: yes，source-level contract remains expected-fail until remaining MUI surfaces are cleared。
 - Next prompt: P083 OA table only after P082 scoped behavior and grep pass。
+
+#### Execution Notes
+
+- Replaced `批量账务流水` region/list rows with project native panel/list/tag classes.
+- Replaced amount summary chips and `差额说明` field with project native summary tags and labelled input.
+- Replaced submitted amount mismatch warning with native warning button, tooltip container and lucide `AlertTriangle`.
+- Added `web/src/app/styles.css` `batch-accounting-*` bank/list/summary/warning classes.
+- Preserved bank row accessible names, `aria-pressed`, bank selection reset, amount summary text/format, mismatch note trim requirement, submitted mismatch `金额不一致`, and hover/focus/click access to mismatch details.
+- Did not migrate OA table, withdraw dialog, snackbar/alert feedback, API client, backend, read model, worker or workbench internals.
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|updates selected totals|submits mismatched|clears difference note when switching bank rows|renders submitted bucket"`: expected-fail; selected behavior tests passed and source-level contract failed as expected.
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: expected-fail; 12 behavior tests passed and 1 source-level contract failed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n 'WarningAmberRoundedIcon|Tooltip|IconButton|<TextField[^\\n]*(label="差额说明")|银行流水金额.*<Chip|已选 OA.*<Chip|差额.*<Chip' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P082 page/style files changed before docs.
+- Current expected source-level failure now lists remaining OA table, withdraw dialog and mutation feedback/toast targets.
+- Next prompt generated: `P083-phase-6-batch-accounting-oa-table`.
+
+### P083-phase-6-batch-accounting-oa-table
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/batch-accounting` OA/relation table, native checkbox selection, ExpandableText and table empty states only.
+
+#### Prompt
+
+```text
+Prompt ID: P083-phase-6-batch-accounting-oa-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/batch-accounting` OA/relation table, native checkbox selection, ExpandableText and table empty states only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。只迁移 `BatchAccountingPage.tsx` 中 `可关联OA项`/`已关联OA项` table, table header/body/row/cell, OA row checkbox, applicant/date cell, project/reason `ExpandableText`, amount cell, and OA empty states 到项目/Tailwind/native table controls；必要时只补 `web/src/app/styles.css` 中的 `batch-accounting-*` OA table/expandable text/checkbox classes。不得迁移 withdraw dialog、Snackbar/Alert 反馈、submit/withdraw action buttons outside the table panel、API client、mock data、backend、read model、worker 或关联台内部工作区。保留用户可见行为：table aria-label switches between `可关联OA项` and `已关联OA项`, unsubmitted bucket shows checkbox labels `选择 <申请人> <申请时间>`, submitted bucket is read-only and hides checkbox column, applicant/apply time/project/amount/reason text remains visible, project/reason expand/collapse remains available for long text, amount column remains right-aligned/tabular, empty text `暂无可关联 OA`/`暂无已关联 OA` remains in table area, OA search filtering still works, selected OA rows and submit payload remain stable. 运行 `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|filters right side OA rows|keeps selected bank and OA rows|renders submitted bucket|shows loading and empty states"`，预期 source-level contract 仍 expected-fail 但 selected behavior tests must pass；运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`，预期 12 behavior tests pass and source-level contract remains expected-fail until P084；运行 `cd web && npm run build`；运行 scoped grep：`if rg -n '<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|MuiTable|MuiCheckbox|MuiChip' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P084 overlays feedback prompt。
+```
+
+#### Review
+
+- Single slice: yes，OA table only。
+- Runtime implementation limited: yes，only OA/relation table, checkbox, ExpandableText, amount cell and empty states with necessary CSS。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Withdraw dialog and feedback migration excluded: yes，reserved for P084。
+- Expected failure allowed: yes，source-level contract remains expected-fail until remaining overlay/feedback surfaces are cleared。
+- Next prompt: P084 overlays feedback only after P083 scoped behavior and grep pass。
 
 ### MG Prompt Template
 

@@ -3379,6 +3379,201 @@ textarea {
   outline: none;
 }
 
+.batch-accounting-bank-panel {
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.batch-accounting-bank-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3);
+}
+
+.batch-accounting-bank-panel__title {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-title-sm);
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.batch-accounting-bank-panel__subtitle {
+  margin: 2px 0 0;
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-caption);
+  line-height: var(--fp-leading-tight);
+}
+
+.batch-accounting-bank-panel__state {
+  border-top: 1px solid var(--fp-border-subtle);
+  padding: var(--fp-space-3);
+}
+
+.batch-accounting-bank-list {
+  border-top: 1px solid var(--fp-border-subtle);
+}
+
+.batch-accounting-bank-row {
+  display: grid;
+  width: 100%;
+  gap: var(--fp-space-2);
+  border: 0;
+  border-left: 4px solid transparent;
+  border-bottom: 1px solid var(--fp-border-subtle);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  padding: var(--fp-space-3);
+  text-align: left;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.batch-accounting-bank-row:last-child {
+  border-bottom: 0;
+}
+
+.batch-accounting-bank-row:hover,
+.batch-accounting-bank-row:focus-visible {
+  background: var(--fp-primary-soft);
+  outline: none;
+}
+
+.batch-accounting-bank-row:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--fp-primary) 35%, transparent);
+}
+
+.batch-accounting-bank-row--selected,
+.batch-accounting-bank-row[aria-pressed="true"] {
+  border-left-color: var(--fp-primary);
+  background: color-mix(in srgb, var(--fp-primary-soft) 72%, var(--fp-surface));
+}
+
+.batch-accounting-bank-row__main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--fp-space-2);
+}
+
+.batch-accounting-bank-row__title,
+.batch-accounting-bank-row__amount {
+  font-size: var(--fp-text-body);
+  font-weight: 900;
+  line-height: var(--fp-leading-tight);
+}
+
+.batch-accounting-bank-row__amount {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.batch-accounting-bank-row__tags,
+.batch-accounting-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fp-space-1);
+}
+
+.batch-accounting-tag,
+.batch-accounting-summary-tag {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-xs);
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 800;
+  line-height: 1.1;
+  padding: 0 var(--fp-space-2);
+  white-space: nowrap;
+}
+
+.batch-accounting-tag--direction,
+.batch-accounting-summary-tag--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 38%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning) 12%, var(--fp-surface));
+  color: var(--fp-warning);
+}
+
+.batch-accounting-summary-tag--success {
+  border-color: color-mix(in srgb, var(--fp-success) 42%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-success) 12%, var(--fp-surface));
+  color: var(--fp-success);
+}
+
+.batch-accounting-summary__warning-slot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.batch-accounting-field--note {
+  min-width: min(280px, 100%);
+}
+
+.batch-accounting-field--note small {
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-caption);
+  font-weight: 650;
+  line-height: var(--fp-leading-tight);
+}
+
+.batch-accounting-mismatch-warning {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.batch-accounting-mismatch-warning__trigger {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--fp-warning) 45%, var(--fp-border));
+  border-radius: var(--fp-radius-sm);
+  background: color-mix(in srgb, var(--fp-warning) 12%, var(--fp-surface));
+  color: var(--fp-warning);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.batch-accounting-mismatch-warning__trigger:hover,
+.batch-accounting-mismatch-warning__trigger:focus-visible {
+  border-color: var(--fp-warning);
+  background: color-mix(in srgb, var(--fp-warning) 18%, var(--fp-surface));
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-warning) 18%, transparent);
+}
+
+.batch-accounting-mismatch-warning__tooltip {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + var(--fp-space-2));
+  display: grid;
+  min-width: 220px;
+  gap: 2px;
+  border: 1px solid var(--fp-border-strong);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  box-shadow: var(--fp-shadow-popover);
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-caption);
+  font-weight: 700;
+  line-height: var(--fp-leading-normal);
+  padding: var(--fp-space-2);
+}
+
 .no-oa-bank-batches-actions,
 .no-oa-bank-batches-filter {
   display: flex;
