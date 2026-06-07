@@ -3629,6 +3629,48 @@ Scope: `/oa-pending-payments` discovery only. Do not modify implementation or te
 - Module doc likely warranted because this module has table/filter/status/API risk and may require multiple prompts.
 - Next prompt: P062 characterization tests only after P061 discovery is verified.
 
+#### Execution Notes
+
+- Created `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`.
+- Recorded current files, MUI inventory, user-visible entrypoints, API/read model boundary, existing test coverage, slice plan and risks.
+- Implementation/tests/backend/API/read model/worker/workbench unchanged.
+- Next prompt generated: `P062-phase-6-oa-pending-payments-characterization-tests`.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_oa_pending_payments.md`: passed。
+  - `rg -n "P061-phase-6-oa-pending-payments-discovery|Current MUI Inventory|User-visible Entrypoints|P062-phase-6-oa-pending-payments-characterization-tests" docs/refactor-ui/modules/phase_6_oa_pending_payments.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P061/P062 docs files changed。
+
+### P062-phase-6-oa-pending-payments-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: `/oa-pending-payments` tests only. Do not modify runtime implementation.
+
+#### Prompt
+
+```text
+Prompt ID: P062-phase-6-oa-pending-payments-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/oa-pending-payments` tests only. Do not modify runtime implementation.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_oa_pending_payments.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/OaPendingPaymentsPage.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx、web/src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx 和 web/src/test/OaPendingPaymentsPage.test.tsx。只修改 `web/src/test/OaPendingPaymentsPage.test.tsx`：把 “compact grouped MUI table” wording 和 MUI/DataGrid/class-based expectations 改成 behavior/project primitive assertions；新增 source-level contracts，锁定 `OaPendingPaymentsPage.tsx` 和 `OaPendingPaymentsTable.tsx` 未来不再依赖 `@mui/*`、`Mui[A-Z]`、`TablePagination`、`TextField`、`Skeleton`、`Chip`、`IconButton`、`TableCell`、`TableRow`、`TableHead`、`TableBody`；新增或保留行为断言确保 route/sidebar、page heading、query controls、refresh/rules buttons、group headers、10 leaf columns、shared `InputInvoiceUsageFilterMenu` trigger `筛选 OA申请人`、sort button `交易时间 排序`、detail right drawer labels、rules drawer endpoint `direction=expense`、empty state and refreshing detail unavailable state保留。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P063 page shell toolbar prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Expected failure allowed: yes，runtime still imports MUI until P063/P064.
+- Must not modify implementation/mock/API/backend/read model/worker/workbench.
+- Source-level contracts should fail on current page/table and guide P063/P064.
+- Next prompt: P063 page shell toolbar only after P062 is verified/expected-fail documented.
+
 ### MG Prompt Template
 
 ```text

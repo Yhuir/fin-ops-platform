@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P061-phase-6-oa-pending-payments-discovery`
+- Current Prompt ID: `P062-phase-6-oa-pending-payments-characterization-tests`
 - Current MG ID: `MG-P060-phase-6-input-invoice-usage`
 
 ## Global Invariants
@@ -54,14 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 OA pending payments discovery prompt generated after InputInvoiceUsage MG push。
+- Scope: phase 6 OA pending payments characterization prompt generated after P061 discovery。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
-- Verification run: MG-P060 pushed commit `21c79cea feat: complete input invoice usage ui migration` to `origin/refactor-ui`。
-- Failures: none in input invoice usage module tests。
-- Next action: 执行 `P061-phase-6-oa-pending-payments-discovery`。
+  - `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`
+- Verification run: P061 module doc exists, discovery/P062 prompt markers found, diff check passed。
+- Failures: none; discovery only。
+- Next action: 执行 `P062-phase-6-oa-pending-payments-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -93,12 +93,16 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P061-phase-6-oa-pending-payments-discovery` | InputInvoiceUsage MG verified and pushed；next OA pending payments discovery |
+| page batches | `in_progress` | `P062-phase-6-oa-pending-payments-characterization-tests` | OaPendingPayments P061 discovery verified；next characterization tests |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P061-phase-6-oa-pending-payments-discovery` | `test -f docs/refactor-ui/modules/phase_6_oa_pending_payments.md` | passed | OA pending payments module discovery doc exists |
+| 2026-06-07 | `P061-phase-6-oa-pending-payments-discovery` | `rg -n "P061-phase-6-oa-pending-payments-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P062-phase-6-oa-pending-payments-characterization-tests" docs/refactor-ui/modules/phase_6_oa_pending_payments.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | OA pending payments discovery and next prompt recorded |
+| 2026-06-07 | `P061-phase-6-oa-pending-payments-discovery` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P061-phase-6-oa-pending-payments-discovery` | `git status --short --branch` | passed | Only P061/P062 docs files changed |
 | 2026-06-07 | `MG-P060-phase-6-input-invoice-usage` | `git push origin refactor-ui` | passed | Commit `21c79cea feat: complete input invoice usage ui migration` pushed |
 | 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `if rg -n '@mui/\|Mui[A-Z]\|CloseOutlinedIcon\|CircularProgress\|@mui/material/Drawer\|TextField\|TableCell\|TableRow\|TableHead\|TableBody\|Checkbox\|Chip\|MenuItem' web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx; then exit 1; else exit 0; fi` | passed | OA reverse drawer has no scoped MUI residue |
 | 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `if rg -n '@mui/\|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi` | passed | InputInvoiceUsage page and components have no scoped MUI residue |
