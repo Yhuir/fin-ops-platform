@@ -5835,6 +5835,7 @@ Scope: `/settings` OA manual search/import table only.
   - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: expected-fail；13 behavior tests passed, source-level contract failed only for `src/components/settings/settingsDesign.ts`。
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `git diff --check`: passed。
+- Commit: `6648341e feat: migrate settings oa manual table`, pushed to `origin/refactor-ui`。
 - Next prompt generated: `P106-phase-6-settings-closeout`。
 
 ### P106-phase-6-settings-closeout
