@@ -3,6 +3,7 @@ import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } fr
 const paneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
 export type WorkbenchSelectionSummary = {
+  explicitTotal: number;
   total: number;
   oa: number;
   bank: number;
@@ -92,11 +93,11 @@ export function buildWorkbenchSelectionContext({
     includedRows,
     includedRowIds: includedRows.map((row) => row.id),
     relatedRowIdSet,
-    summary: summarizeWorkbenchRows(includedRows),
+    summary: summarizeWorkbenchRows(includedRows, explicitRowIdSet.size),
   };
 }
 
-export function summarizeWorkbenchRows(rows: WorkbenchRecord[]): WorkbenchSelectionSummary {
+export function summarizeWorkbenchRows(rows: WorkbenchRecord[], explicitTotal = rows.length): WorkbenchSelectionSummary {
   const byType = {
     oa: rows.filter((row) => row.recordType === "oa"),
     bank: rows.filter((row) => row.recordType === "bank"),
@@ -104,6 +105,7 @@ export function summarizeWorkbenchRows(rows: WorkbenchRecord[]): WorkbenchSelect
   };
 
   return {
+    explicitTotal,
     total: rows.length,
     oa: byType.oa.length,
     bank: byType.bank.length,

@@ -1,4 +1,4 @@
-import { Button, Drawer, Separator, Tooltip } from "@heroui/react";
+import { Drawer, Separator, Tooltip } from "@heroui/react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -52,24 +52,14 @@ export default function AppSidebar({
           ) : null}
         </div>
         {!isCompact ? (
-          <Tooltip delay={250}>
-            <Tooltip.Trigger>
-              <Button
-                isIconOnly
-                aria-label={expanded ? "折叠菜单" : "展开菜单"}
-                className="app-sidebar-toggle"
-                size="sm"
-                variant="tertiary"
-                onPress={onToggleExpanded}
-              >
-                {expanded ? <ChevronLeft aria-hidden="true" size={16} strokeWidth={2.2} /> : <ChevronRight aria-hidden="true" size={16} strokeWidth={2.2} />}
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content placement="right" showArrow>
-              <Tooltip.Arrow />
-              {expanded ? "折叠菜单" : "展开菜单"}
-            </Tooltip.Content>
-          </Tooltip>
+          <button
+            aria-label={expanded ? "折叠菜单" : "展开菜单"}
+            className="app-sidebar-toggle"
+            type="button"
+            onClick={onToggleExpanded}
+          >
+            {expanded ? <ChevronLeft aria-hidden="true" size={18} strokeWidth={2.2} /> : <ChevronRight aria-hidden="true" size={18} strokeWidth={2.2} />}
+          </button>
         ) : null}
       </div>
 

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 type WorkbenchPaneSearchProps = {
   paneTitle: string;
@@ -22,7 +22,9 @@ function WorkbenchPaneSearch({
   onToggle,
 }: WorkbenchPaneSearchProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({});
   const normalizedDraftValue = draftValue.trim();
   const normalizedAppliedValue = appliedValue.trim();
   const hasAppliedValue = normalizedAppliedValue.length > 0;
@@ -33,13 +35,44 @@ function WorkbenchPaneSearch({
       ? `搜索 ${paneTitle}，当前关键词 ${normalizedAppliedValue}`
       : `搜索 ${paneTitle}`;
 
+  const syncPopoverPosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) {
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    const popoverWidth = Math.min(244, Math.max(180, window.innerWidth - 24));
+    const left = Math.max(12, Math.min(rect.right - popoverWidth, window.innerWidth - popoverWidth - 12));
+    const top = Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 52));
+    setPopoverStyle({
+      "--pane-search-popover-left": `${left}px`,
+      "--pane-search-popover-top": `${top}px`,
+      "--pane-search-popover-width": `${popoverWidth}px`,
+    } as CSSProperties);
+  }, []);
+
   useEffect(() => {
     if (!open) {
       return;
     }
+    syncPopoverPosition();
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, [open]);
+  }, [open, syncPopoverPosition]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handleViewportChange = () => syncPopoverPosition();
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [open, syncPopoverPosition]);
 
   useEffect(() => {
     if (!open) {
@@ -62,7 +95,7 @@ function WorkbenchPaneSearch({
   return (
     <div ref={rootRef} className={`pane-search${open ? " open" : ""}${hasAppliedValue ? " has-applied" : ""}`}>
       {open ? (
-        <div className={`pane-search-popover${hasAppliedValue ? " active" : ""}`}>
+        <div className={`pane-search-popover${hasAppliedValue ? " active" : ""}`} style={popoverStyle}>
           <div className="pane-search-input-wrap">
             <svg aria-hidden="true" className="pane-search-input-icon" viewBox="0 0 20 20">
               <circle cx="9" cy="9" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -93,10 +126,14 @@ function WorkbenchPaneSearch({
         </div>
       ) : null}
       <button
+        ref={buttonRef}
         aria-label={buttonAriaLabel}
         className={`pane-tool-btn pane-search-toggle-btn fixed${open || hasAppliedValue ? " active" : ""}${showAppliedSummary ? " summary" : ""}`}
         type="button"
-        onClick={onToggle}
+        onClick={() => {
+          syncPopoverPosition();
+          onToggle();
+        }}
       >
         {showAppliedSummary ? (
           <span className="pane-search-summary">{normalizedAppliedValue}</span>

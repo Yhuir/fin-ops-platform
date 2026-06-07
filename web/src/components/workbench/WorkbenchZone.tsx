@@ -36,6 +36,7 @@ type WorkbenchZoneProps = {
   canMutateData: boolean;
   highlightedRowId?: string | null;
   selectionSummary?: {
+    explicitTotal?: number;
     total: number;
     oa: number;
     bank: number;
@@ -136,6 +137,8 @@ function WorkbenchZone({
   const { widths, visibleIndices, visibleCount, togglePane, startDrag } = useResizablePanes();
   const expandLabel = `${isExpanded ? "恢复" : "放大"} ${title}`;
   const shouldShowSelectionToolbar = Boolean(selectionSummary);
+  const explicitSelectionTotal = selectionSummary?.explicitTotal ?? selectionSummary?.total ?? 0;
+  const contextualSelectionTotal = Math.max(0, (selectionSummary?.total ?? 0) - explicitSelectionTotal);
   const activePaneIds = panes.filter((_, index) => widths[index] > 0.0001).map((pane) => pane.id);
 
   return (
@@ -157,7 +160,10 @@ function WorkbenchZone({
           {shouldShowSelectionToolbar ? (
             <div className="zone-selection-toolbar">
               <div className="zone-selection-summary">
-                <span className="zone-selection-pill">{`已选 ${selectionSummary?.total ?? 0}`}</span>
+                <span className="zone-selection-pill">{`已选 ${explicitSelectionTotal}`}</span>
+                {contextualSelectionTotal > 0 ? (
+                  <span className="zone-selection-pill zone-selection-pill-context">{`带入 ${contextualSelectionTotal}`}</span>
+                ) : null}
                 <span className="zone-selection-pill">{`OA ${selectionSummary?.oa ?? 0} / ${selectionSummary?.amounts.oa ?? "0.00"}`}</span>
                 <span className="zone-selection-pill">{`流水 ${selectionSummary?.bank ?? 0} / ${selectionSummary?.amounts.bank ?? "0.00"}`}</span>
                 <span className="zone-selection-pill">{`发票 ${selectionSummary?.invoice ?? 0} / ${selectionSummary?.amounts.invoice ?? "0.00"}`}</span>

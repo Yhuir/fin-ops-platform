@@ -120,6 +120,7 @@ describe("WorkbenchZone", () => {
         primarySelectionActionLabel="确认关联"
         secondarySelectionActionLabel="异常处理"
         selectionSummary={{
+          explicitTotal: 2,
           total: 3,
           oa: 1,
           bank: 1,
@@ -147,9 +148,10 @@ describe("WorkbenchZone", () => {
     );
 
     const zone = screen.getByTestId("zone-open");
-    const toolbar = within(zone).getByText("已选 3").closest(".zone-selection-toolbar");
+    const toolbar = within(zone).getByText("已选 2").closest(".zone-selection-toolbar");
 
     expect(toolbar).not.toBeNull();
+    expect(within(toolbar as HTMLElement).getByText("带入 1")).toBeInTheDocument();
     expect(within(toolbar as HTMLElement).getByText("OA 1 / 128,000.00")).toBeInTheDocument();
     expect(within(toolbar as HTMLElement).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
     expect(within(toolbar as HTMLElement).getByText("发票 1 / 144,640.00")).toBeInTheDocument();
@@ -261,6 +263,22 @@ describe("WorkbenchZone", () => {
     expect(summaryButton).toHaveTextContent("陈涛");
     await user.click(summaryButton);
     expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps pane search as a fixed icon control with an unclipped viewport popover", () => {
+    const workbenchStyles = readFileSync(resolve(__dirname, "../app/styles.css"), "utf8");
+    const searchRule = workbenchStyles.match(/\.pane-search\s*\{[^}]*\}/s)?.[0] ?? "";
+    const openSearchRule = workbenchStyles.match(/\.pane-search\.open\s*\{[^}]*\}/s)?.[0] ?? "";
+    const popoverRule = workbenchStyles.match(/\.pane-search-popover\s*\{[^}]*\}/s)?.[0] ?? "";
+    const toggleButtonRule = workbenchStyles.match(/\.pane-search-toggle-btn\.fixed\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(searchRule).toMatch(/width:\s*30px;/);
+    expect(searchRule).toMatch(/flex:\s*0 0 30px;/);
+    expect(openSearchRule).not.toMatch(/width:\s*236px;/);
+    expect(openSearchRule).not.toMatch(/flex-basis:\s*236px;/);
+    expect(toggleButtonRule).toMatch(/width:\s*30px;/);
+    expect(toggleButtonRule).toMatch(/flex:\s*0 0 30px;/);
+    expect(popoverRule).toMatch(/position:\s*fixed;/);
   });
 
   test("records current workbench MUI migration targets without broadening the tri-pane core scope", () => {

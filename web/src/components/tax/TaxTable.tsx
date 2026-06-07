@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { MutableRefObject } from "react";
 import type { ReactNode } from "react";
 import { Button, Checkbox } from "@heroui/react";
@@ -47,6 +47,8 @@ function TaxTableSearch({
   onClose: () => void;
   onToggle: () => void;
 }) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({});
   const normalizedValue = value.trim();
   const hasAppliedValue = normalizedValue.length > 0;
   const buttonAriaLabel = open
@@ -55,11 +57,28 @@ function TaxTableSearch({
       ? `搜索 ${paneTitle}，当前关键词 ${normalizedValue}`
       : `搜索 ${paneTitle}`;
 
+  const syncPopoverPosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) {
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    const popoverWidth = Math.min(244, Math.max(180, window.innerWidth - 24));
+    const left = Math.max(12, Math.min(rect.right - popoverWidth, window.innerWidth - popoverWidth - 12));
+    const top = Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 52));
+    setPopoverStyle({
+      "--pane-search-popover-left": `${left}px`,
+      "--pane-search-popover-top": `${top}px`,
+      "--pane-search-popover-width": `${popoverWidth}px`,
+    } as CSSProperties);
+  }, []);
+
   useEffect(() => {
     if (!open) {
       return undefined;
     }
 
+    syncPopoverPosition();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
@@ -67,12 +86,26 @@ function TaxTableSearch({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open]);
+  }, [onClose, open, syncPopoverPosition]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    const handleViewportChange = () => syncPopoverPosition();
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [open, syncPopoverPosition]);
 
   return (
     <div className={`pane-search${open ? " open" : ""}${hasAppliedValue ? " has-applied" : ""}`}>
       {open ? (
-        <div className={`pane-search-popover${hasAppliedValue ? " active" : ""}`}>
+        <div className={`pane-search-popover${hasAppliedValue ? " active" : ""}`} style={popoverStyle}>
           <input
             aria-label={`搜索 ${paneTitle}`}
             autoComplete="off"
@@ -95,10 +128,14 @@ function TaxTableSearch({
         </div>
       ) : null}
       <button
+        ref={buttonRef}
         aria-label={buttonAriaLabel}
         className={`pane-tool-btn pane-search-toggle-btn fixed${open || hasAppliedValue ? " active" : ""}${hasAppliedValue && !open ? " summary" : ""}`}
         type="button"
-        onClick={onToggle}
+        onClick={() => {
+          syncPopoverPosition();
+          onToggle();
+        }}
       >
         {hasAppliedValue && !open ? (
           <span className="pane-search-summary">{normalizedValue}</span>

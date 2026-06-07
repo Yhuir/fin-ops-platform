@@ -441,7 +441,8 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(openOaRow);
     await user.click(openBankRow);
 
-    expect(within(openZone).getByText("已选 3")).toBeInTheDocument();
+    expect(within(openZone).getByText("已选 2")).toBeInTheDocument();
+    expect(within(openZone).getByText("带入 1")).toBeInTheDocument();
     expect(within(openZone).getByText("OA 1 / 58,000.00")).toBeInTheDocument();
     expect(within(openZone).getByText("流水 1 / 58,000.00")).toBeInTheDocument();
     expect(within(openZone).getByText("发票 1 / 65,540.00")).toBeInTheDocument();

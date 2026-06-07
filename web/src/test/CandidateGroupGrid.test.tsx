@@ -1016,6 +1016,15 @@ describe("Workbench candidate grouping layout", () => {
     expect(groupScroll.scrollLeft).toBe(96);
   });
 
+  test("keeps the synchronized bottom scrollbar thin instead of rendering a large visual band", () => {
+    const footerRule = appStyles.match(/\.candidate-grid-footer\s*\{[^}]*\}/s)?.[0] ?? "";
+    const footerScrollRule = appStyles.match(/\.candidate-pane-footer-scroll\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(footerRule).toMatch(/height:\s*10px;/);
+    expect(footerRule).not.toContain("background: #fbfdff");
+    expect(footerScrollRule).toMatch(/height:\s*10px;/);
+  });
+
   test("toggles bank and invoice group sorting in open and paired zones", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
