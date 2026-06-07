@@ -4317,6 +4317,7 @@ Scope: `/no-oa-bank-batches` tests only. Do not modify runtime implementation.
 - Runtime implementation changed: no.
 - Backend/API/read model/worker changed: no.
 - Workbench internals changed: no.
+- Committed and pushed `4a958ce8 test: characterize no oa bank batch ui migration` to `origin/refactor-ui`.
 
 #### Verification
 

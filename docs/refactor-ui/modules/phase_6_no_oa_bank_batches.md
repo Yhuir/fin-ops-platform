@@ -144,6 +144,7 @@ Scope: `/no-oa-bank-batches` tests only. Do not modify runtime implementation.
   - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: expected-fail; 19 existing behavior tests passed and 1 source-level contract failed against current MUI runtime.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P074 test file changed before docs.
+- Commit: `4a958ce8 test: characterize no oa bank batch ui migration`, pushed to `origin/refactor-ui`.
 
 ## Current Expected Failures After P074
 
