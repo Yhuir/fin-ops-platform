@@ -7852,10 +7852,7 @@ textarea {
 .app-shell {
   min-height: 100vh;
   display: flex;
-  background:
-    radial-gradient(circle at top left, rgba(15, 76, 129, 0.08), transparent 28%),
-    radial-gradient(circle at top right, rgba(32, 106, 70, 0.08), transparent 30%),
-    #f3f6fb;
+  background: #f5f6f8;
 }
 
 .app-shell.embedded-shell {
@@ -7867,7 +7864,8 @@ textarea {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 100vh;
-  padding: 0 18px 18px 0;
+  padding: 0;
+  background: #f5f6f8;
 }
 
 .embedded-shell .app-shell-content {
@@ -7922,11 +7920,12 @@ textarea {
   position: sticky;
   top: 0;
   padding: 0;
-  border: 1px solid #d8e1eb;
-  border-radius: 24px 24px 0 0;
-  background: linear-gradient(180deg, #f9fbfe 0%, #f2f6fa 100%);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
-  color: #243b53;
+  border: 0;
+  border-bottom: 1px solid #e3e6eb;
+  border-radius: 0;
+  background: #f7f8fa;
+  box-shadow: none;
+  color: #1f2937;
   z-index: 20;
 }
 
@@ -7952,8 +7951,8 @@ body.workbench-focus-mode .global-header {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  min-height: 76px;
-  padding: 14px 18px;
+  min-height: 68px;
+  padding: 12px 24px;
 }
 
 .global-header-main {
@@ -7975,15 +7974,17 @@ body.workbench-focus-mode .global-header {
 .eyebrow {
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #486581;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #6b7280;
 }
 
 .global-title {
-  margin-top: 6px;
-  font-size: 22px;
+  margin-top: 4px;
+  font-size: 24px;
   font-weight: 800;
+  color: #171717;
+  letter-spacing: 0;
 }
 
 .global-status-indicator {
@@ -8083,10 +8084,10 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-paper {
   width: 100%;
   height: 100%;
-  border-right: 1px solid #d8e1eb;
-  background: #ffffff;
-  color: #243b53;
-  box-shadow: 10px 0 28px rgba(15, 23, 42, 0.07);
+  border-right: 1px solid #e1e4e8;
+  background: #f7f7f8;
+  color: #24272d;
+  box-shadow: none;
   overflow: hidden;
   transition: width 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -8116,13 +8117,13 @@ body.workbench-focus-mode .global-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 76px;
-  padding: 14px 14px 14px 18px;
+  min-height: 86px;
+  padding: 18px 14px 16px 20px;
 }
 
 .app-sidebar-brand.collapsed {
   justify-content: center;
-  padding: 14px 8px;
+  padding: 18px 8px 16px;
 }
 
 .app-sidebar-toggle {
@@ -8143,22 +8144,28 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-brand-identity {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
 .app-sidebar-brand-mark {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  color: #1f9d55;
+  border: 1px solid #e6edf4;
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 68% 74%, rgba(112, 98, 235, 0.36), transparent 34%),
+    radial-gradient(circle at 28% 20%, rgba(125, 211, 252, 0.46), transparent 42%),
+    #eef8ff;
+  color: #2563eb;
 }
 
 .app-sidebar-brand-mark:focus-visible {
-  outline: 2px solid #1769aa;
+  outline: 2px solid #2563eb;
   outline-offset: 3px;
 }
 
@@ -8171,15 +8178,15 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-sidebar-brand-status-icon {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   overflow: visible;
 }
 
 .app-sidebar-brand-status-percent {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   align-items: center;
   justify-content: center;
   border: 2px solid currentColor;
@@ -8394,18 +8401,18 @@ body.workbench-focus-mode .global-header {
 }
 
 .app-sidebar-eyebrow {
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.1;
-  color: #486581;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #171717;
 }
 
 .app-sidebar-title {
-  margin-top: 3px;
-  font-size: 16px;
-  font-weight: 800;
-  line-height: 1.2;
-  color: #243b53;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #71717a;
 }
 
 .app-sidebar-scroll {
@@ -8414,8 +8421,13 @@ body.workbench-focus-mode .global-header {
   flex-direction: column;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 10px 8px 14px;
+  padding: 12px 16px 18px;
   scrollbar-width: none;
+}
+
+.app-sidebar-content.collapsed .app-sidebar-scroll {
+  align-items: center;
+  padding: 12px 10px 18px;
 }
 
 .app-sidebar-scroll::-webkit-scrollbar {
@@ -8425,71 +8437,72 @@ body.workbench-focus-mode .global-header {
 .app-sidebar-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 0;
+  gap: 6px;
+  padding: 10px 0;
 }
 
 .app-sidebar-group + .app-sidebar-group {
-  border-top: 1px solid #eef2f7;
+  border-top: 1px solid #e8eaee;
 }
 
 .app-sidebar-group-title {
-  width: 216px;
+  width: 200px;
   margin: 0;
-  padding: 0 10px 5px;
-  font-size: 11px;
-  font-weight: 800;
+  padding: 0 4px 4px;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.2;
-  color: #6b7c93;
+  color: #8a8f98;
 }
 
 .app-sidebar-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .app-sidebar-item {
-  min-height: 40px;
+  min-height: 44px;
 }
 
 .app-sidebar-link {
   display: flex;
   min-width: 0;
-  min-height: 40px;
+  min-height: 44px;
   align-items: center;
   gap: 0;
-  padding: 0 10px;
+  padding: 0 12px;
   border-radius: 8px;
-  color: #243b53;
-  font-size: 13px;
-  font-weight: 700;
+  color: #2f3137;
+  font-size: 15px;
+  font-weight: 650;
   text-decoration: none;
-  transition: background 140ms ease, color 140ms ease;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
 .app-sidebar-link:hover,
 .app-sidebar-link:focus-visible {
-  background: #f2f7fb;
-  color: #0f4c81;
+  background: #eeeeef;
+  color: #171717;
   outline: none;
 }
 
 .app-sidebar-link.active,
 .app-sidebar-link.active:hover {
-  background: #eaf3fb;
-  color: #0f4c81;
+  background: #e9eaec;
+  color: #171717;
+  box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.02);
 }
 
 .app-sidebar-link-icon {
   display: inline-flex;
-  width: 40px;
-  min-width: 40px;
+  width: 36px;
+  min-width: 36px;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   color: inherit;
 }
 
@@ -8506,20 +8519,33 @@ body.workbench-focus-mode .global-header {
   text-overflow: ellipsis;
 }
 
+.app-sidebar-content.collapsed .app-sidebar-link {
+  width: 44px;
+  min-width: 44px;
+  justify-content: center;
+  padding: 0;
+}
+
+.app-sidebar-content.collapsed .app-sidebar-link-icon {
+  width: 44px;
+  min-width: 0;
+  justify-content: center;
+}
+
 .app-sidebar-separator {
   flex: 0 0 auto;
 }
 
 .app-sidebar-embedded-note {
-  width: 208px;
-  margin: 0 12px 14px;
+  width: 200px;
+  margin: 0 16px 16px;
   padding: 10px;
-  border: 1px solid #d8e1eb;
+  border: 1px solid #e1e4e8;
   border-radius: 8px;
-  background: #f9fbfe;
+  background: #ffffff;
   font-size: 12px;
   line-height: 1.45;
-  color: #486581;
+  color: #6b7280;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -8920,7 +8946,7 @@ body.workbench-page-mode .page-body.embedded {
 
 .page-stack {
   min-height: calc(100vh - 18px);
-  padding: 12px;
+  padding: 16px;
   display: grid;
   gap: 16px;
   align-content: start;
@@ -16002,17 +16028,18 @@ body.column-layout-dragging {
 .bank-details-page,
 .bank-balance-summary,
 .bank-details-layout {
-  --bank-bg: #f4f4f4;
+  --bank-bg: #f5f6f8;
   --bank-surface: #ffffff;
-  --bank-border: #d0d7de;
-  --bank-border-subtle: #e0e0e0;
-  --bank-text: #161616;
-  --bank-text-secondary: #525252;
-  --bank-blue: #0f62fe;
-  --bank-selected: #edf5ff;
-  --bank-hover: #e8e8e8;
-  --bank-success: #24a148;
-  --bank-danger: #da1e28;
+  --bank-surface-muted: #fafafa;
+  --bank-border: #e1e4e8;
+  --bank-border-subtle: #eceff3;
+  --bank-text: #171717;
+  --bank-text-secondary: #71717a;
+  --bank-blue: #2563eb;
+  --bank-selected: #eef4ff;
+  --bank-hover: #f0f1f3;
+  --bank-success: #2f7d46;
+  --bank-danger: #b42318;
 }
 
 .bank-auto-tag-drawer-paper {
@@ -16023,21 +16050,44 @@ body.column-layout-dragging {
 .bank-auto-tag-drawer {
   height: 100%;
   min-width: 0;
-  background: #dbe5f2;
+  background: #f5f6f8;
   color: var(--bank-text);
+}
+
+.bank-auto-tag-drawer-paper .finance-drawer__header {
+  border-bottom-color: #e1e4e8;
+  background: #ffffff;
+}
+
+.bank-auto-tag-drawer-paper .finance-drawer__body {
+  padding: 0;
+  background: #f5f6f8;
 }
 
 .bank-auto-tag-drawer-header {
   flex: 0 0 auto;
-  padding: 12px 16px;
-  background: #e7eef7;
+  padding: 10px 16px;
+  border-bottom: 1px solid #eceff3;
+  background: #ffffff;
+}
+
+.bank-auto-tag-version {
+  margin: 0;
+  color: #71717a;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
 .bank-auto-tag-drawer-toolbar {
   flex: 0 0 auto;
-  padding: 10px 16px;
-  border-bottom: 1px solid #b7c6d9;
-  background: #eef4fb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e1e4e8;
+  background: #fafafa;
 }
 
 .bank-auto-tag-rule-list {
@@ -16045,7 +16095,7 @@ body.column-layout-dragging {
   min-height: 0;
   overflow: auto;
   padding: 18px 20px 22px;
-  background: #dbe5f2;
+  background: #f5f6f8;
 }
 
 .bank-auto-tag-table-shell {
@@ -16053,7 +16103,7 @@ body.column-layout-dragging {
   min-height: 0;
   overflow: hidden;
   padding: 12px 12px 16px;
-  background: #dbe5f2;
+  background: #f5f6f8;
 }
 
 .bank-auto-tag-table-container {
@@ -16061,9 +16111,9 @@ body.column-layout-dragging {
   max-height: 100%;
   overflow-x: hidden !important;
   overflow-y: auto;
-  border-color: #9fb4cf;
+  border: 1px solid #dfe4ea;
   border-radius: 8px;
-  background: #dbe5f2;
+  background: #ffffff;
 }
 
 .bank-auto-tag-rule-table {
@@ -16116,11 +16166,11 @@ body.column-layout-dragging {
   position: sticky;
   top: 0;
   z-index: 1;
-  border-bottom: 1px solid #9fb4cf;
-  background: #e7eef7;
-  color: #1e293b;
+  border-bottom: 1px solid #dfe4ea;
+  background: #f2f4f7;
+  color: #5f6772;
   font-size: 0.72rem;
-  font-weight: 900;
+  font-weight: 820;
   line-height: 1.2;
   text-align: left;
 }
@@ -16128,41 +16178,41 @@ body.column-layout-dragging {
 .bank-auto-tag-rule-table .finance-table__cell {
   vertical-align: top;
   min-width: 0;
-  padding: 7px 4px;
-  border-bottom: 1px solid rgba(20, 31, 43, 0.22);
+  padding: 7px 5px;
+  border-bottom: 1px solid rgba(113, 128, 150, 0.16);
   font-size: 0.74rem;
   line-height: 1.25;
   white-space: normal;
 }
 
 .bank-auto-tag-system-row .finance-table__cell {
-  background: #f1f5f9;
+  background: #f8fafc;
   color: #475569;
   font-weight: 700;
 }
 
 .bank-auto-tag-rule-row.bank-auto-tag-group-blue .finance-table__cell {
-  background: #d6e8ff;
+  background: #eef5ff;
 }
 
 .bank-auto-tag-rule-row.bank-auto-tag-group-teal .finance-table__cell {
-  background: #c7eee8;
+  background: #edf8f6;
 }
 
 .bank-auto-tag-rule-row.bank-auto-tag-group-green .finance-table__cell {
-  background: #c9ead0;
+  background: #eff8f1;
 }
 
 .bank-auto-tag-rule-row.bank-auto-tag-group-amber .finance-table__cell {
-  background: #ffe2a8;
+  background: #fff7e8;
 }
 
 .bank-auto-tag-rule-row.bank-auto-tag-group-violet .finance-table__cell {
-  background: #ded8ff;
+  background: #f4f1ff;
 }
 
 .bank-auto-tag-rule-row.bank-auto-tag-group-rose .finance-table__cell {
-  background: #ffd1dc;
+  background: #fff1f4;
 }
 
 .bank-auto-tag-primary-cell {
@@ -16182,7 +16232,7 @@ body.column-layout-dragging {
   border: 0;
   border-bottom: 1px solid transparent;
   background: transparent;
-  color: #102033;
+  color: #171717;
   font: inherit;
   font-size: 0.78rem;
   outline: none;
@@ -16190,8 +16240,8 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-input:focus-visible {
-  border-bottom-color: rgba(15, 98, 254, 0.82);
-  background: rgba(255, 255, 255, 0.18);
+  border-bottom-color: rgba(37, 99, 235, 0.82);
+  background: rgba(255, 255, 255, 0.46);
 }
 
 .bank-auto-tag-input:disabled {
@@ -16221,10 +16271,10 @@ body.column-layout-dragging {
   justify-content: center;
   gap: 6px;
   min-height: 30px;
-  border: 1px solid #9fb4cf;
-  border-radius: 6px;
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
   background: #ffffff;
-  color: #1e3a5f;
+  color: #2f3742;
   cursor: pointer;
   font: inherit;
   font-size: 0.78rem;
@@ -16236,8 +16286,8 @@ body.column-layout-dragging {
 .bank-auto-tag-dialog-button:hover,
 .bank-auto-tag-tab:hover,
 .bank-auto-tag-icon-button:hover {
-  border-color: #0f62fe;
-  background: #edf5ff;
+  border-color: #b9c7e6;
+  background: #eef4ff;
 }
 
 .bank-auto-tag-action-button:focus-visible,
@@ -16262,8 +16312,8 @@ body.column-layout-dragging {
 
 .bank-auto-tag-action-primary,
 .bank-auto-tag-dialog-button-primary {
-  border-color: #0f62fe;
-  background: #0f62fe;
+  border-color: #2563eb;
+  background: #2563eb;
   color: #ffffff;
 }
 
@@ -16277,7 +16327,7 @@ body.column-layout-dragging {
   width: 30px;
   height: 30px;
   padding: 0;
-  color: #7f1d1d;
+  color: #9f1d1d;
 }
 
 .bank-auto-tag-field-menu-actions {
@@ -16287,17 +16337,17 @@ body.column-layout-dragging {
   display: flex;
   gap: 8px;
   padding: 8px;
-  border-bottom: 1px solid #c8d6e5;
-  background: #f4f8fc;
+  border-bottom: 1px solid #e1e4e8;
+  background: #f8fafc;
 }
 
 .bank-auto-tag-field-menu-actions button {
   min-width: 48px;
   min-height: 28px;
   border: 1px solid #94a3b8;
-  border-radius: 6px;
+  border-radius: 7px;
   background: #ffffff;
-  color: #1e3a8a;
+  color: #1d4ed8;
   cursor: pointer;
   font: inherit;
   font-size: 0.76rem;
@@ -16311,9 +16361,9 @@ body.column-layout-dragging {
   min-height: 30px;
   padding: 5px 4px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
-  color: #243b53;
+  color: #2f3742;
   cursor: pointer;
   font: inherit;
   font-size: 0.74rem;
@@ -16322,8 +16372,8 @@ body.column-layout-dragging {
 
 .bank-auto-tag-condition-field-button:hover,
 .bank-auto-tag-condition-field-button:focus-visible {
-  border-color: rgba(15, 98, 254, 0.72);
-  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(37, 99, 235, 0.42);
+  background: rgba(255, 255, 255, 0.46);
 }
 
 .bank-auto-tag-condition-preview {
@@ -16360,7 +16410,7 @@ body.column-layout-dragging {
   border: 0;
   border-bottom: 1px solid transparent;
   background: transparent;
-  color: #102033;
+  color: #171717;
   cursor: pointer;
   font: inherit;
   font-size: 0.78rem;
@@ -16400,10 +16450,10 @@ body.column-layout-dragging {
   min-width: 180px;
   max-height: 260px;
   overflow: auto;
-  border: 1px solid #9fb4cf;
-  border-radius: 6px;
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.14);
 }
 
 .bank-auto-tag-field-listbox {
@@ -16417,7 +16467,7 @@ body.column-layout-dragging {
   min-height: 30px;
   border: 0;
   background: #ffffff;
-  color: #1e293b;
+  color: #2f3742;
   cursor: pointer;
   font: inherit;
   font-size: 0.78rem;
@@ -16427,7 +16477,7 @@ body.column-layout-dragging {
 
 .bank-auto-tag-select-option:hover,
 .bank-auto-tag-select-option[aria-selected="true"] {
-  background: #edf5ff;
+  background: #eef4ff;
 }
 
 .bank-auto-tag-option-check {
@@ -16445,17 +16495,17 @@ body.column-layout-dragging {
 }
 
 .bank-auto-tag-tab.is-active {
-  border-color: #0f62fe;
-  background: #0f62fe;
+  border-color: #2563eb;
+  background: #2563eb;
   color: #ffffff;
 }
 
 .bank-auto-tag-alert,
 .bank-auto-tag-loading {
-  border: 1px solid #bfd3ee;
-  border-radius: 6px;
-  background: #f8fbff;
-  color: #1e293b;
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #2f3742;
   font-size: 0.82rem;
   font-weight: 700;
   padding: 8px 10px;
@@ -16502,7 +16552,7 @@ body.column-layout-dragging {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  border: 1px solid #9fb4cf;
+  border: 1px solid #d9dee5;
   border-radius: 8px;
   background: #fbfdff;
   padding: 10px 12px;
@@ -16536,11 +16586,16 @@ body.column-layout-dragging {
   width: 100%;
   min-height: 220px;
   resize: vertical;
-  border: 1px solid #bfd3ee;
+  border: 1px solid #d9dee5;
   border-radius: 8px;
-  color: #102033;
+  color: #171717;
   font: inherit;
   padding: 10px;
+}
+
+.bank-auto-tag-condition-textarea:focus-visible {
+  border-color: #2563eb;
+  outline: 2px solid rgba(37, 99, 235, 0.16);
 }
 
 @keyframes finance-spin {
@@ -16554,13 +16609,26 @@ body.column-layout-dragging {
   flex-direction: column;
   min-height: calc(100vh - 32px);
   min-width: 0;
-  background: #f4f4f4;
-  color: #161616;
+  background: var(--bank-bg);
+  color: var(--bank-text);
 }
 
 .bank-details-workbench {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.bank-details-error-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .bank-balance-summary {
@@ -16593,7 +16661,7 @@ body.column-layout-dragging {
 
 .bank-details-layout {
   display: grid;
-  grid-template-columns: minmax(196px, 224px) minmax(0, 1fr);
+  grid-template-columns: minmax(214px, 244px) minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
   flex: 1 1 auto;
@@ -16605,30 +16673,30 @@ body.column-layout-dragging {
 .bank-account-tree {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 10px;
+  padding: 14px;
   border: 1px solid var(--bank-border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--bank-surface);
   box-shadow: none;
 }
 
 .bank-account-summary {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
   margin-bottom: 2px;
-  padding: 4px 4px 10px;
+  padding: 2px 2px 14px;
   border-bottom: 1px solid var(--bank-border-subtle);
 }
 
 .bank-account-summary-label {
   color: var(--bank-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 750;
   line-height: 1.2;
 }
 
@@ -16649,14 +16717,14 @@ body.column-layout-dragging {
 .bank-account-node {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 12px;
+  align-items: stretch;
+  gap: 8px;
   width: 100%;
   margin: 0;
-  padding: 9px 10px;
+  padding: 10px 11px;
   border: 1px solid transparent;
-  border-radius: 4px;
-  background: var(--bank-surface);
+  border-radius: 8px;
+  background: transparent;
   color: var(--bank-text);
   text-align: left;
   cursor: pointer;
@@ -16672,7 +16740,7 @@ body.column-layout-dragging {
 }
 
 .bank-account-node.active {
-  border-color: var(--bank-border-subtle);
+  border-color: #d6deee;
   background: var(--bank-selected);
   box-shadow: inset 3px 0 0 var(--bank-blue);
 }
@@ -16701,7 +16769,7 @@ body.column-layout-dragging {
   padding: 2px 7px;
   border: 1px solid var(--bank-border-subtle);
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--bank-surface-muted);
   color: var(--bank-text-secondary);
   font-size: 11px;
   font-weight: 700;
@@ -16710,7 +16778,7 @@ body.column-layout-dragging {
 
 .bank-account-divider {
   display: block;
-  margin: 3px 10px;
+  margin: 3px 8px;
   border-top: 1px solid var(--bank-border-subtle);
 }
 
@@ -16718,9 +16786,9 @@ body.column-layout-dragging {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: #243b53;
+  color: var(--bank-text);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 760;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -16745,7 +16813,7 @@ body.column-layout-dragging {
 
 .bank-account-last4 {
   flex: 0 0 auto;
-  color: #64748b;
+  color: var(--bank-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   font-weight: 700;
@@ -16772,7 +16840,7 @@ body.column-layout-dragging {
 
 .bank-account-count-chip {
   flex: 0 0 auto;
-  background: #ffffff;
+  background: var(--bank-surface-muted);
 }
 
 .bank-account-title-count {
@@ -16781,7 +16849,7 @@ body.column-layout-dragging {
 }
 
 .bank-balance-value {
-  color: #0e6027;
+  color: var(--bank-success);
 }
 
 .bank-total-balance {
@@ -16820,12 +16888,12 @@ body.column-layout-dragging {
 .bank-transaction-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   min-height: 0;
-  padding: 10px 12px 12px;
+  padding: 14px;
   border: 1px solid var(--bank-border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--bank-surface);
   box-shadow: none;
 }
@@ -16838,11 +16906,11 @@ body.column-layout-dragging {
 
 .bank-transaction-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   min-width: 0;
-  min-height: 32px;
+  min-height: 38px;
 }
 
 .bank-transaction-title-row {
@@ -16857,9 +16925,9 @@ body.column-layout-dragging {
   margin: 0;
   overflow: hidden;
   color: var(--bank-text);
-  font-size: 14px;
-  font-weight: 850;
-  line-height: 1.4;
+  font-size: 18px;
+  font-weight: 820;
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -16867,8 +16935,9 @@ body.column-layout-dragging {
 .bank-header-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   justify-content: flex-end;
   min-width: 0;
 }
@@ -16915,9 +16984,10 @@ body.column-layout-dragging {
 }
 
 .bank-date-toolbar {
-  display: grid;
-  justify-items: end;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   flex: 0 0 auto;
   min-width: 0;
 }
@@ -16927,16 +16997,16 @@ body.column-layout-dragging {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid var(--bank-border-subtle);
-  border-radius: 4px;
-  background: #ffffff;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--bank-border);
+  border-radius: 8px;
+  background: var(--bank-surface-muted);
   border-color: var(--bank-border-subtle);
   color: var(--bank-text);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 760;
   line-height: 1;
   text-transform: none;
   white-space: nowrap;
@@ -16959,7 +17029,7 @@ body.column-layout-dragging {
   width: 260px;
   padding: 12px;
   border: 1px solid var(--bank-border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
 }
@@ -16970,14 +17040,14 @@ body.column-layout-dragging {
 }
 
 .bank-date-presets button {
-  min-width: 44px;
-  height: 24px;
-  padding: 0 8px;
+  min-width: 52px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--bank-border-subtle);
-  background: #ffffff;
+  background: var(--bank-surface-muted);
   color: var(--bank-text);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 760;
   text-transform: none;
   cursor: pointer;
 }
@@ -16987,11 +17057,11 @@ body.column-layout-dragging {
 }
 
 .bank-date-presets button:first-child {
-  border-radius: 4px 0 0 4px;
+  border-radius: 8px 0 0 8px;
 }
 
 .bank-date-presets button:last-child {
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 8px 8px 0;
 }
 
 .bank-date-presets button:hover,
@@ -17003,8 +17073,8 @@ body.column-layout-dragging {
 .bank-date-presets button.active,
 .bank-date-presets button[aria-pressed="true"] {
   border-color: var(--bank-blue);
-  background: var(--bank-selected);
-  color: var(--bank-blue);
+  background: #dbe7ff;
+  color: #1d4ed8;
   z-index: 1;
 }
 
@@ -17049,14 +17119,14 @@ body.column-layout-dragging {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--bank-border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--bank-surface);
 }
 
 .bank-category-filter-float {
   position: absolute;
   top: 50%;
-  right: 8px;
+  right: 10px;
   z-index: 18;
   transform: translateY(-50%);
 }
@@ -17070,10 +17140,10 @@ body.column-layout-dragging {
   height: 28px;
   padding: 0;
   border: 1px solid var(--bank-border);
-  border-radius: 5px;
-  background: #ffffff;
-  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.12);
-  color: #334e68;
+  border-radius: 7px;
+  background: var(--bank-surface-muted);
+  box-shadow: none;
+  color: var(--bank-text-secondary);
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
@@ -17137,7 +17207,7 @@ body.column-layout-dragging {
   min-height: 30px;
   padding: 4px 24px 4px 8px;
   border: 1px solid var(--bank-border-subtle);
-  border-radius: 4px;
+  border-radius: 7px;
   background: #ffffff;
   color: var(--bank-text);
   font-size: 12px;
@@ -17160,7 +17230,7 @@ body.column-layout-dragging {
   min-height: 30px;
   padding: 0 9px;
   border: 1px solid var(--bank-border-subtle);
-  border-radius: 4px;
+  border-radius: 7px;
   background: #ffffff;
   color: var(--bank-text);
   font-size: 12px;
@@ -17184,12 +17254,14 @@ body.column-layout-dragging {
   width: 100%;
   background: var(--bank-surface);
   color: var(--bank-text);
+  table-layout: fixed;
 }
 
 .bank-grid-toolbar {
   display: block;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--bank-border-subtle);
+  background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
 }
 
 .bank-grid-toolbar-content {
@@ -17210,16 +17282,16 @@ body.column-layout-dragging {
   width: min(640px, calc(100vw - 64px));
   overflow: visible;
   border: 1px solid var(--bank-border);
-  border-radius: 5px;
-  background: #fbfcfe;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.14);
 }
 
 .bank-category-filter-list {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   overflow: visible;
-  padding: 4px 5px 5px;
+  padding: 6px;
 }
 
 .bank-category-filter-actions {
@@ -17243,7 +17315,7 @@ body.column-layout-dragging {
   width: 100%;
   min-height: 16px;
   border: 0;
-  border-radius: 3px;
+  border-radius: 5px;
   background: transparent;
   color: var(--bank-text);
   padding: 0 4px;
@@ -17258,60 +17330,60 @@ body.column-layout-dragging {
 }
 
 .bank-category-filter-row[aria-current="true"] {
-  background: #edf5ff;
-  color: #0f4fc7;
-  outline: 1px solid rgba(15, 79, 199, 0.22);
+  background: #eaf2ff;
+  color: #1d4ed8;
+  outline: 1px solid rgba(37, 99, 235, 0.24);
   outline-offset: -1px;
 }
 
 .bank-category-filter-group {
-  --bank-category-group-bg: #f6f8fb;
-  --bank-category-group-hover: #edf3fb;
-  --bank-category-group-line: #cbd8e6;
+  --bank-category-group-bg: #f7f8fa;
+  --bank-category-group-hover: #eef4ff;
+  --bank-category-group-line: #cfd7e3;
   display: grid;
   align-content: start;
   min-width: 0;
   gap: 0;
   position: relative;
-  padding: 1px 2px 2px 4px;
-  border-radius: 4px;
+  padding: 2px 3px 3px 5px;
+  border-radius: 6px;
   background: var(--bank-category-group-bg);
 }
 
 .bank-category-filter-tone-0 {
-  --bank-category-group-bg: #f2f6fb;
-  --bank-category-group-hover: #e7f0fa;
-  --bank-category-group-line: #b8cbe1;
+  --bank-category-group-bg: #f3f7ff;
+  --bank-category-group-hover: #e7f0ff;
+  --bank-category-group-line: #b8c8e5;
 }
 
 .bank-category-filter-tone-1 {
-  --bank-category-group-bg: #f4f7ef;
-  --bank-category-group-hover: #eaf1df;
-  --bank-category-group-line: #bdcf9e;
+  --bank-category-group-bg: #f3f8f4;
+  --bank-category-group-hover: #e7f2e9;
+  --bank-category-group-line: #b9d2c0;
 }
 
 .bank-category-filter-tone-2 {
-  --bank-category-group-bg: #f7f3fb;
-  --bank-category-group-hover: #eee8f8;
-  --bank-category-group-line: #c8b8dd;
+  --bank-category-group-bg: #f6f4ff;
+  --bank-category-group-hover: #eeeaff;
+  --bank-category-group-line: #c8bfdf;
 }
 
 .bank-category-filter-tone-3 {
-  --bank-category-group-bg: #fff6ec;
-  --bank-category-group-hover: #f8ead6;
-  --bank-category-group-line: #d9bd8f;
+  --bank-category-group-bg: #fff7ed;
+  --bank-category-group-hover: #ffedd5;
+  --bank-category-group-line: #d7bf9c;
 }
 
 .bank-category-filter-tone-4 {
-  --bank-category-group-bg: #edf7f5;
-  --bank-category-group-hover: #e1f0ed;
-  --bank-category-group-line: #a7cec7;
+  --bank-category-group-bg: #eef8f6;
+  --bank-category-group-hover: #e2f1ee;
+  --bank-category-group-line: #abcfc9;
 }
 
 .bank-category-filter-tone-5 {
-  --bank-category-group-bg: #f9f2f4;
-  --bank-category-group-hover: #f2e6ea;
-  --bank-category-group-line: #d9b9c4;
+  --bank-category-group-bg: #fff2f5;
+  --bank-category-group-hover: #fbe6ec;
+  --bank-category-group-line: #d9bac4;
 }
 
 .bank-category-filter-hierarchy-group::before {
@@ -17326,7 +17398,7 @@ body.column-layout-dragging {
 
 .bank-category-filter-primary-row {
   background: transparent;
-  color: #243b53;
+  color: #2f3742;
   font-weight: 800;
 }
 
@@ -17344,7 +17416,7 @@ body.column-layout-dragging {
 .bank-category-filter-child-row {
   min-height: 15px;
   padding-left: 14px;
-  color: #334e68;
+  color: #4b5563;
 }
 
 .bank-category-filter-hierarchy-item {
@@ -17375,7 +17447,7 @@ body.column-layout-dragging {
 }
 
 .bank-category-filter-direct-child {
-  color: #243b53;
+  color: #374151;
 }
 
 .bank-category-filter-row-content {
@@ -17406,8 +17478,8 @@ body.column-layout-dragging {
   min-width: 13px;
   padding: 0 2px;
   border-radius: 999px;
-  background: #edf2f7;
-  color: #52606d;
+  background: rgba(255, 255, 255, 0.62);
+  color: #5f6772;
   font-size: 8px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -17468,10 +17540,10 @@ body.column-layout-dragging {
   min-width: 0;
   min-height: 28px;
   padding: 3px 8px;
-  border: 1px solid #f1c21b;
+  border: 1px solid #e5c653;
   border-radius: 999px;
   background: #fff8e1;
-  color: #8a6d00;
+  color: #7a5d00;
   cursor: pointer;
   font-size: 12px;
   font-weight: 750;
@@ -17504,9 +17576,9 @@ body.column-layout-dragging {
   max-height: min(320px, calc(100vh - 160px));
   overflow: hidden;
   border: 1px solid var(--bank-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.16);
 }
 
 .bank-category-confirmation-columns {
@@ -17526,7 +17598,7 @@ body.column-layout-dragging {
 .bank-category-confirmation-child-list,
 .bank-category-confirmation-third-list {
   overflow: auto;
-  padding: 5px;
+  padding: 6px;
 }
 
 .bank-category-confirmation-primary-item,
@@ -17537,7 +17609,7 @@ body.column-layout-dragging {
   width: 100%;
   min-height: 30px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: var(--bank-text);
   font-size: 12px;
@@ -17557,8 +17629,8 @@ body.column-layout-dragging {
 .bank-category-confirmation-primary-item:focus-visible,
 .bank-category-confirmation-child-item:focus-visible,
 .bank-category-confirmation-third-item:focus-visible {
-  background: var(--bank-selected);
-  color: var(--bank-blue);
+  background: #eef4ff;
+  color: #1d4ed8;
   outline: none;
 }
 
@@ -17574,7 +17646,7 @@ body.column-layout-dragging {
   justify-content: flex-end;
   padding: 8px 10px;
   border-top: 1px solid var(--bank-border-subtle);
-  background: #ffffff;
+  background: #fafafa;
 }
 
 .bank-category-confirmation-primary-item span,
@@ -17595,7 +17667,7 @@ body.column-layout-dragging {
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid var(--bank-border-subtle);
-  border-radius: 4px;
+  border-radius: 7px;
   background: #ffffff;
   color: var(--bank-text);
   font-size: 12px;
@@ -17604,8 +17676,8 @@ body.column-layout-dragging {
 }
 
 .bank-category-confirmation-save {
-  border-color: var(--bank-blue);
-  background: var(--bank-blue);
+  border-color: #2563eb;
+  background: #2563eb;
   color: #ffffff;
 }
 
@@ -17626,7 +17698,7 @@ body.column-layout-dragging {
 
 .bank-grid-toolbar-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex: 1 1 auto;
   align-items: center;
   flex-wrap: nowrap;
@@ -17653,16 +17725,16 @@ body.column-layout-dragging {
 }
 
 .bank-grid-toolbar-actions .bank-export-button {
-  min-width: 52px;
-  min-height: 28px;
-  padding-inline: 9px;
-  border: 1px solid var(--bank-border);
-  border-radius: 4px;
-  background: #ffffff;
+  min-width: 58px;
+  min-height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 8px;
+  background: var(--bank-surface-muted);
   border-color: var(--bank-border);
   color: var(--bank-text);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 760;
   cursor: pointer;
 }
 
@@ -17681,7 +17753,7 @@ body.column-layout-dragging {
   min-width: 140px;
   padding: 4px;
   border: 1px solid var(--bank-border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
 }
@@ -17690,7 +17762,7 @@ body.column-layout-dragging {
   min-height: 30px;
   padding: 0 9px;
   border: 0;
-  border-radius: 3px;
+  border-radius: 6px;
   background: transparent;
   color: var(--bank-text);
   font-size: 12px;
@@ -17705,36 +17777,45 @@ body.column-layout-dragging {
 }
 
 .bank-grid-search-field {
-  flex: 0 1 440px;
-  width: min(440px, 100%);
-  min-height: 40px;
+  flex: 0 1 360px;
+  width: min(360px, 100%);
+  min-height: 32px;
   min-width: 0;
-  padding: 6px 10px;
+  padding: 5px 11px;
   border: 1px solid var(--bank-border-subtle);
-  border-radius: 4px;
-  background: #ffffff;
+  border-radius: 8px;
+  background: var(--bank-surface);
   color: var(--bank-text);
   font-size: 12px;
 }
 
 .bank-grid-search-field:focus-visible {
   border-color: var(--bank-blue);
-  outline: none;
+  outline: 2px solid rgba(37, 99, 235, 0.16);
+  outline-offset: 0;
 }
 
 .bank-transaction-table .finance-table__column {
-  border-bottom: 1px solid var(--bank-border);
-  background: #e8eef6;
-  color: var(--bank-text);
-  font-size: 12px;
-  font-weight: 700;
+  border-bottom: 1px solid #dde3eb;
+  background: #f2f4f7;
+  color: #606772;
+  font-size: 11px;
+  font-weight: 800;
   line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.bank-transaction-table .finance-table__column.bank-col-type,
+.bank-transaction-table .finance-table__column.bank-col-amount,
+.bank-transaction-table .finance-table__column.bank-col-balance {
+  text-align: center;
 }
 
 .bank-transaction-table .finance-table__cell {
-  padding: 8px 7px;
+  padding: 8px 9px;
   border-bottom-color: var(--bank-border-subtle);
-  border-right: 1px solid rgba(113, 128, 150, 0.18);
+  border-right: 1px solid rgba(113, 128, 150, 0.12);
   color: var(--bank-text);
   font-size: 12.5px;
   line-height: 1.25;
@@ -17750,6 +17831,7 @@ body.column-layout-dragging {
 
 .bank-transaction-state-row .finance-table__cell {
   min-height: 220px;
+  background: #ffffff;
   color: var(--bank-text-secondary);
 }
 
@@ -17767,7 +17849,7 @@ body.column-layout-dragging {
 .bank-amount-cell {
   display: grid;
   align-content: center;
-  gap: 4px;
+  gap: 5px;
   height: 100%;
   min-height: 100%;
   min-width: 0;
@@ -17777,7 +17859,7 @@ body.column-layout-dragging {
 .bank-counterparty-name {
   display: block;
   overflow: visible;
-  color: #161616;
+  color: var(--bank-text);
   line-height: 1.15;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -17799,7 +17881,8 @@ body.column-layout-dragging {
 .bank-table-text-cell {
   display: block;
   overflow-wrap: anywhere;
-  line-height: 1.2;
+  color: #3f4652;
+  line-height: 1.25;
   white-space: normal;
 }
 
@@ -17808,28 +17891,28 @@ body.column-layout-dragging {
 }
 
 .bank-transaction-grid .bank-grid-row-odd {
-  background: #f7f8fa;
+  background: #fbfcfd;
 }
 
 .bank-transaction-grid .bank-grid-row-even:hover,
 .bank-transaction-grid .bank-grid-row-odd:hover {
-  background: var(--bank-hover);
+  background: #f3f7ff;
 }
 
 .bank-col-counterparty {
-  width: 24%;
+  width: 25%;
 }
 
 .bank-col-type {
-  width: 58px;
+  width: 72px;
 }
 
 .bank-col-amount {
-  width: 112px;
+  width: 132px;
 }
 
 .bank-col-balance {
-  width: 88px;
+  width: 104px;
 }
 
 .bank-col-purpose {
@@ -17838,12 +17921,12 @@ body.column-layout-dragging {
 }
 
 .bank-col-summary {
-  width: 14%;
+  width: 13%;
   vertical-align: top;
 }
 
 .bank-col-note {
-  width: 15%;
+  width: 13%;
   vertical-align: top;
 }
 
@@ -17893,17 +17976,17 @@ body.column-layout-dragging {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  min-width: 30px;
+  min-width: 42px;
   min-height: 24px;
-  width: auto;
-  height: auto;
-  padding: 2px 10px;
+  width: 42px;
+  height: 24px;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid transparent;
-  background: #defbe6;
+  background: #e9f8ee;
   color: var(--bank-success);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1;
 }
 
@@ -17917,10 +18000,10 @@ body.column-layout-dragging {
 
 .bank-amount-line {
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: stretch;
+  gap: 8px;
   width: 100%;
 }
 
@@ -17931,10 +18014,18 @@ body.column-layout-dragging {
 .bank-amount-value,
 .bank-balance-value {
   min-width: 0;
-  text-align: center;
+  text-align: right;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   font-weight: 800;
+}
+
+.bank-amount-value {
+  color: #1f2937;
+}
+
+.bank-amount-cell .bank-source-chip {
+  justify-self: end;
 }
 
 .bank-details-page .bank-trade-time-chip {
@@ -17944,11 +18035,11 @@ body.column-layout-dragging {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
-  min-height: 24px;
+  min-height: 22px;
   height: auto;
   border-color: var(--bank-border-subtle);
   color: var(--bank-text-secondary);
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .bank-details-page .bank-trade-time-chip-full .bank-chip-label {
@@ -17980,10 +18071,10 @@ body.column-layout-dragging {
   flex: 0 0 auto;
   min-width: 0;
   max-width: 100%;
-  min-height: 24px;
+  min-height: 22px;
   height: auto;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
 }
 
@@ -18020,17 +18111,17 @@ body.column-layout-dragging {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
-  min-height: 24px;
+  min-height: 22px;
   height: auto;
   border-color: var(--bank-border-subtle);
   color: var(--bank-text-secondary);
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .bank-details-page .direction-tag.expense,
 .bank-details-page .direction-tag.outflow {
   border-color: #ffd7d9;
-  background: #fff1f1;
+  background: #fff3f1;
   color: var(--bank-danger);
 }
 
@@ -18077,7 +18168,7 @@ body.column-layout-dragging {
   max-width: 100%;
   min-height: 28px;
   height: auto;
-  border: 1px solid currentColor;
+  border: 1px solid color-mix(in srgb, currentColor 46%, transparent);
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
@@ -18130,7 +18221,7 @@ body.column-layout-dragging {
 
 .bank-category-tag.category-tone-empty {
   border-color: #d0d7de;
-  background: #ffffff;
+  background: #f8fafc;
   color: #334155;
 }
 
@@ -18178,17 +18269,18 @@ body.column-layout-dragging {
   max-width: 360px;
   min-width: 280px;
   padding: 10px 12px;
-  border-radius: 5px;
-  background: #161616;
-  color: #ffffff;
-  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.24);
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #171717;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.16);
   transform: translateY(-50%);
 }
 
 .bank-internal-transfer-tooltip-title {
   display: block;
   margin-bottom: 8px;
-  color: #ffffff;
+  color: #171717;
   font-weight: 800;
   line-height: 1.25;
 }
@@ -18201,14 +18293,14 @@ body.column-layout-dragging {
 }
 
 .bank-internal-transfer-tooltip-label {
-  color: rgba(255, 255, 255, 0.72);
+  color: #71717a;
   font-weight: 700;
   line-height: 1.35;
   white-space: nowrap;
 }
 
 .bank-internal-transfer-tooltip-value {
-  color: #ffffff;
+  color: #2f3742;
   font-weight: 700;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -18227,10 +18319,11 @@ body.column-layout-dragging {
   min-width: 180px;
   max-width: 260px;
   padding: 10px 12px;
-  border-radius: 5px;
-  background: #161616;
-  color: #ffffff;
-  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.24);
+  border: 1px solid #d9dee5;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #171717;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.16);
   transform: translateX(-50%);
 }
 
@@ -18242,7 +18335,7 @@ body.column-layout-dragging {
 .bank-category-hierarchy-title {
   display: block;
   margin-bottom: 8px;
-  color: #ffffff;
+  color: #171717;
   font-weight: 800;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -18261,7 +18354,7 @@ body.column-layout-dragging {
 }
 
 .bank-category-hierarchy-branch {
-  color: rgba(255, 255, 255, 0.72);
+  color: #71717a;
   font-size: 12px;
   font-weight: 800;
   line-height: 1.4;
@@ -18269,7 +18362,7 @@ body.column-layout-dragging {
 }
 
 .bank-category-hierarchy-node {
-  color: #ffffff;
+  color: #2f3742;
   font-weight: 700;
   line-height: 1.4;
   overflow-wrap: anywhere;

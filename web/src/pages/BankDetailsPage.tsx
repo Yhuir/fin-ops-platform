@@ -2067,7 +2067,11 @@ export default function BankDetailsPage() {
   return (
     <div className="bank-details-page" data-testid="bank-details-page">
       <div className="bank-details-workbench">
-        {error ? <StatePanel tone="error">{error}</StatePanel> : null}
+        {error ? (
+          <div className="bank-details-error-live" role="alert" aria-live="polite">
+            {error}
+          </div>
+        ) : null}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
         {rulesFeedback ? <StatePanel tone="success" compact>{rulesFeedback}</StatePanel> : null}
         {!loading && !readModelNeedsRefresh && accountsData.accounts.length === 0 ? (

@@ -6454,6 +6454,314 @@ Scope: closeout verification gap only.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and Vite chunk-size warning.
   - headless Chrome smoke at `http://127.0.0.1:4173/`: rendered App Shell/sidebar/workbench; one resource `404`; no JS runtime crash captured.
 
+### P117-bank-details-premium-sample-spec
+
+- Phase: `phase_10_visual_premium_sample`
+- Status: `verified`
+- Type: `design/spec`
+- Scope: BankDetails premium HeroUI/Tailwind sample design specification only. No runtime UI changes.
+
+#### Prompt
+
+```text
+Prompt ID: P117-bank-details-premium-sample-spec
+Phase: phase_10_visual_premium_sample
+Type: design/spec
+Scope: BankDetails premium sample specification only.
+
+读取 PRODUCT.md、DESIGN.md、docs/refactor-ui/modules/phase_6_bank_details.md、web/src/pages/BankDetailsPage.tsx、web/src/features/bankDetails/AutoTagRulesDrawer.tsx、web/src/features/bankDetails/BankCategoryTag.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/test/AutoTagRulesDrawer.test.tsx 和 web/src/app/styles.css 中 BankDetails/App Shell 相关样式。根据用户确认的方向编写 `docs/refactor-ui/bank_details_premium_sample.md`：高级浅色金融风、银行明细页面 + App Shell 局部视觉升级、不新增摘要区、不做大 card、高密度表格、所有功能保留。不得修改 runtime UI、backend、API contract、read model、worker、权限语义或业务状态机。生成下一条 P118 App Shell local surface prompt。运行 `test -f docs/refactor-ui/bank_details_premium_sample.md`、关键术语 grep、`git diff --check`、`git status --short --branch`。
+```
+
+#### Review
+
+- Single slice: yes，spec only。
+- Runtime UI changes: no。
+- Backend/API/read model/worker untouched: required。
+- Function preservation explicit: yes。
+- User visual direction captured: yes，light banking console, no large cards, high-density table。
+
+#### Execution Notes
+
+- Added `docs/refactor-ui/bank_details_premium_sample.md`。
+- Captured the accepted visual direction:
+  - Light Banking Console。
+  - BankDetails page plus App Shell local visual upgrade。
+  - No summary metrics, no large cards。
+  - High-density transaction table remains。
+  - All existing BankDetails functions and table behavior remain。
+- Historical `phase_6_bank_details.md` remains the detailed functional inventory source.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/bank_details_premium_sample.md`
+  - `rg -n "Light Banking Console|No large cards|高密度|所有功能|P118 App Shell Local Surface|MG-P121" docs/refactor-ui/bank_details_premium_sample.md`
+  - `git diff --check`
+- Next prompt generated: `P118-bank-details-app-shell-local-surface`。
+
+### P118-bank-details-app-shell-local-surface
+
+- Phase: `phase_10_visual_premium_sample`
+- Status: `verified`
+- Type: `visual refactor`
+- Scope: App Shell local visual surface for the BankDetails premium sample. Preserve navigation structure and route behavior.
+
+#### Prompt
+
+```text
+Prompt ID: P118-bank-details-app-shell-local-surface
+Phase: phase_10_visual_premium_sample
+Type: visual refactor
+Scope: App Shell local visual surface only.
+
+读取 docs/refactor-ui/bank_details_premium_sample.md、DESIGN.md、PRODUCT.md、web/src/components/shell/AppSidebar.tsx、web/src/components/shell/sidebarItems.ts、web/src/app/styles.css、web/src/test/App.test.tsx、web/src/test/AppStatusIndicator.test.tsx 和当前 git status。只做 App Shell 局部视觉升级：浅色金融 sidebar、active nav、page body 背景、sidebar spacing 和边界层级。不得删除、隐藏、重排导航入口；不得修改 route、page registry、permissions、backend、API、read model、worker 或业务状态机；不得触碰 BankDetails page internals，本 prompt 只为样板页建立外壳视觉。避免大 card、深色主题、装饰阴影和新增依赖。运行 `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx`、`cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions|renders accounts as a list and transactions in the bank transaction table"`、`cd web && npm run build`、runtime no-MUI grep、`git diff --check`、`git status --short --branch`。更新 refactor_ui_state.md、refactor_ui_prompt.md 和 bank_details_premium_sample.md，生成 P119 BankDetails layout/toolbar prompt。
+```
+
+#### Review
+
+- Single slice: yes，App Shell local visual surface only。
+- BankDetails internals untouched: required。
+- Route/navigation behavior preserved: required。
+- Backend/API/read model/worker untouched: required。
+- Verification defined: App shell tests, BankDetails smoke tests, build, no-MUI grep, diff check。
+
+#### Execution Notes
+
+- Updated only `web/src/app/styles.css` for App Shell local visual surface.
+- Replaced the previous decorative gradient shell background with a restrained light-gray banking workspace.
+- Flattened the global header and sidebar surface: thinner borders, no decorative sidebar shadow, no large rounded header shell.
+- Upgraded the sidebar toward the approved light banking style:
+  - larger brand mark with a subtle pale finance-app treatment;
+  - calmer app title hierarchy;
+  - clearer active nav state;
+  - more consistent nav item rhythm;
+  - collapsed sidebar-specific spacing so icon-only mode remains stable.
+- Adjusted page stack padding from `12px` to `16px` to give the sample surface a cleaner breathing room without changing page routing or BankDetails internals.
+- Did not change route definitions, sidebar item order, permissions, backend, API, read model, worker, BankDetails page internals or table logic.
+- Browser smoke at `/bank-details` rendered the shell, nav, account rail, toolbar and transaction table. One resource 404 remains consistent with previous smoke runs; no JS runtime crash was captured.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx`: passed, 2 files / 16 tests。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions|renders accounts as a list and transactions in the bank transaction table"`: passed, 2 selected tests。
+  - runtime no-MUI grep: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and Vite chunk-size warning。
+  - Headless Chrome smoke at `http://127.0.0.1:4173/bank-details`: rendered App Shell/sidebar/account rail/toolbar/transaction table; one resource 404; no JS runtime crash captured。
+- Next prompt generated: `P119-bank-details-layout-toolbar`。
+
+### P119-bank-details-layout-toolbar
+
+- Phase: `phase_10_visual_premium_sample`
+- Status: `verified`
+- Type: `visual refactor`
+- Scope: BankDetails page layout, account rail, title toolbar, date controls, export/search controls. No table row behavior changes.
+
+#### Prompt
+
+```text
+Prompt ID: P119-bank-details-layout-toolbar
+Phase: phase_10_visual_premium_sample
+Type: visual refactor
+Scope: BankDetails layout and toolbar only.
+
+读取 docs/refactor-ui/bank_details_premium_sample.md、docs/refactor-ui/modules/phase_6_bank_details.md、DESIGN.md、PRODUCT.md、web/src/pages/BankDetailsPage.tsx、web/src/app/styles.css、web/src/test/BankDetailsPage.test.tsx 和当前 git status。只优化银行明细页面外层布局和工具栏视觉：账户 rail、交易面板、当前视图标题、自动标签规则按钮、日期快捷筛选、日期范围按钮、导出菜单触发、搜索框、标签筛选按钮周边布局。必须保持：不新增摘要区、不做大 card、不改变表格 headers/row rendering/pagination/type cell/category popovers/AutoTagRulesDrawer，不改 backend/API/read model/worker/权限语义/业务状态机。保留所有现有按钮、筛选、导出、分页入口和 accessible labels。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions|renders accounts as a list and transactions in the bank transaction table|selecting account and filters request accounts and transactions with the same date range|exports all banks or the selected account with the current filters"`；运行 `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 runtime no-MUI grep、`cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 refactor_ui_state.md、refactor_ui_prompt.md 和 bank_details_premium_sample.md，生成 P120 BankDetails table premium treatment prompt。
+```
+
+#### Review
+
+- Single slice: yes，BankDetails layout/toolbar only。
+- Table row behavior untouched: required。
+- No large cards or summary metrics: required。
+- Backend/API/read model/worker untouched: required。
+- Verification defined: targeted BankDetails behavior tests, shell/platform smoke, build, no-MUI grep, diff check。
+
+#### Execution Notes
+
+- Updated only BankDetails-related CSS in `web/src/app/styles.css` after P118 shell surface work.
+- Moved the BankDetails page tokens to a cleaner Light Banking Console palette:
+  - cooler page background;
+  - softer borders;
+  - restrained blue selected state;
+  - tabular green/red finance semantics preserved.
+- Upgraded the account rail without changing the `银行账户` list, `全部流水` entry, account buttons, counts, balances or `aria-current` semantics.
+- Upgraded the transaction panel header and toolbar:
+  - clearer `全部流水` title hierarchy;
+  - unified `自动标签规则`, date preset, date range, export and search control heights/radii;
+  - lighter segmented date preset treatment;
+  - cleaner export menu and search field.
+- Kept the transaction table headers, row rendering, pagination behavior, row type popovers, category popover behavior and AutoTagRulesDrawer untouched.
+- Headless Chrome smoke at `/bank-details` confirmed App Shell, sidebar, BankDetails page, account rail, transaction panel, toolbar, search and transaction table render; computed BankDetails surface radii are `8px` and page background is `rgb(245, 246, 248)`.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions|renders accounts as a list and transactions in the bank transaction table|selecting account and filters request accounts and transactions with the same date range|exports all banks or the selected account with the current filters"`: passed, 4 selected tests。
+  - `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 3 files / 26 tests。
+  - runtime no-MUI grep: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and Vite chunk-size warning。
+  - `git diff --check`: passed。
+  - Headless Chrome smoke at `http://127.0.0.1:4173/bank-details`: rendered App Shell/sidebar/BankDetails/account rail/transaction panel/toolbar/search/table; no JS runtime errors captured。
+- Next prompt generated: `P120-bank-details-table-premium-treatment`。
+
+### P120-bank-details-table-premium-treatment
+
+- Phase: `phase_10_visual_premium_sample`
+- Status: `verified`
+- Type: `visual refactor`
+- Scope: BankDetails transaction table premium treatment only. No toolbar/account rail/drawer/popup behavior changes.
+
+#### Prompt
+
+```text
+Prompt ID: P120-bank-details-table-premium-treatment
+Phase: phase_10_visual_premium_sample
+Type: visual refactor
+Scope: BankDetails transaction table premium treatment only.
+
+读取 docs/refactor-ui/bank_details_premium_sample.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md、web/src/pages/BankDetailsPage.tsx、web/src/app/styles.css、web/src/test/BankDetailsPage.test.tsx 和当前 git status。只优化银行明细交易表格视觉系统：表头、行密度、row divider、hover、金额列、余额列、收入/支出 direction tag、来源银行/账户 tag、交易时间 chip、empty/loading rows、分页 surface。必须保持：高密度表格、accessible name `交易流水`、现有 7 个可见表头、无新增可见 `交易时间` 列、无新增 `操作` 列、分页在表格滚动区外、TypeCell 分类行为和 CategoryFilter/AutoTagRulesDrawer 不变。不得修改 JSX 行为结构，除非 CSS 无法满足对齐且必须用最小 className 补充；不得改 backend/API/read model/worker/权限语义/业务状态机。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "uses Chinese labels for table pagination and exposes keyword search|keeps pagination outside the table scroll area|uses a dense three-column grouped category filter layout|shows read-only auto category and keeps manual category controls out of bank details|renders accounts as a list and transactions in the bank transaction table"`；运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions|selecting account and filters request accounts and transactions with the same date range|exports all banks or the selected account with the current filters"`；运行 runtime no-MUI grep、`cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 refactor_ui_state.md、refactor_ui_prompt.md 和 bank_details_premium_sample.md，生成 P121 BankDetails popovers and drawer polish prompt。
+```
+
+#### Review
+
+- Single slice: yes，BankDetails table visual system only。
+- Toolbar/account rail untouched: required。
+- Overlay behavior untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Existing table function preservation: required。
+- Verification defined: table/pagination/category source tests, BankDetails behavior tests, build, no-MUI grep, diff check。
+
+#### Execution Notes
+
+- Updated `web/src/app/styles.css` BankDetails table styles only for the transaction table premium treatment:
+  - lighter table header background and typography;
+  - cleaner row divider and hover surface;
+  - fixed-width income/expense direction tags;
+  - stable amount grid with numeric values right aligned;
+  - calmer trade-time, source and relation chips;
+  - table-layout fixed and adjusted column widths for high-density scanning.
+- Applied two BankDetails sample chrome fixes requested after P119:
+  - `AppShell` no longer renders the global background progress/error stack on `/bank-details`, so `后台进度连接失败` does not push the sample page down.
+  - BankDetails page errors are kept as an `aria-live` alert but visually hidden, so `Failed to fetch` does not consume the page header area.
+  - Collapsed sidebar links/icons are constrained to a centered `44px` target inside the `72px` rail.
+- Did not add summary cards, did not add table columns, did not change table headers, pagination behavior, TypeCell, category popover behavior, AutoTagRulesDrawer, backend, API, read model, worker or permission semantics.
+- Browser smoke confirmed:
+  - `.app-shell-progress-stack` count is `0` on `/bank-details`;
+  - visible `Failed to fetch` count is `0`;
+  - visible `后台进度连接失败` count is `0`;
+  - BankDetails page top is `0`;
+  - collapsed sidebar, first collapsed link and first icon all center at `x=36` in the `72px` sidebar.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run BankDetailsPage.test.tsx -t "uses Chinese labels for table pagination and exposes keyword search|keeps pagination outside the table scroll area|uses a dense three-column grouped category filter layout|shows read-only auto category and keeps manual category controls out of bank details|renders accounts as a list and transactions in the bank transaction table"`: passed, 5 selected tests。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions|selecting account and filters request accounts and transactions with the same date range|exports all banks or the selected account with the current filters"`: passed, 3 selected tests。
+  - `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 4 files / 28 tests。
+  - runtime no-MUI grep: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and Vite chunk-size warning。
+  - `git diff --check`: passed。
+  - Headless Chrome smoke at `http://127.0.0.1:4173/bank-details`: passed; top error bars absent, page top `0`, table rendered, no JS runtime errors captured。
+- Next prompt generated: `P121-bank-details-popovers-drawer-polish`。
+
+### P121-bank-details-popovers-drawer-polish
+
+- Phase: `phase_10_visual_premium_sample`
+- Status: `verified`
+- Type: `visual refactor`
+- Scope: BankDetails category filter popover, row type popover, internal transfer tooltip and AutoTagRulesDrawer visual polish only.
+
+#### Prompt
+
+```text
+Prompt ID: P121-bank-details-popovers-drawer-polish
+Phase: phase_10_visual_premium_sample
+Type: visual refactor
+Scope: BankDetails popovers, internal transfer tooltip and AutoTagRulesDrawer visual polish only.
+
+读取 docs/refactor-ui/bank_details_premium_sample.md、docs/refactor-ui/modules/phase_6_bank_details.md、DESIGN.md、PRODUCT.md、web/src/pages/BankDetailsPage.tsx、web/src/features/bankDetails/AutoTagRulesDrawer.tsx、web/src/features/bankDetails/BankCategoryTag.tsx、web/src/app/styles.css、web/src/test/BankDetailsPage.test.tsx、web/src/test/AutoTagRulesDrawer.test.tsx 和当前 git status。只优化视觉：标签筛选 popover、行内分类确认 popover、内部往来 tooltip、BankCategoryTag tooltip 和自动标签规则右侧抽屉/内部表格/dialog 视觉。必须保持：标签筛选仍是 popover/menu，行内分类仍是 popover/menu，自动标签规则仍是右侧抽屉，条件编辑和停用确认仍是 dialog；点击、Escape、外部点击、staged choice、保存/取消/保存中、撤销、新增标签、重新应用规则、保存 payload 均不变。不得改 backend/API/read model/worker/权限语义/业务状态机。运行 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`；运行 `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 runtime no-MUI grep、`cd web && npm run build`、headless Chrome `/bank-details` smoke、`git diff --check`、`git status --short --branch`。更新 refactor_ui_state.md、refactor_ui_prompt.md 和 bank_details_premium_sample.md，生成 MG-P121 BankDetails premium sample prompt。
+```
+
+#### Review
+
+- Single slice: yes，BankDetails overlays/drawer visual polish only。
+- Overlay shapes preserved: required。
+- Payload behavior preserved: required。
+- Backend/API/read model/worker untouched: required。
+- Verification defined: BankDetails + AutoTagRulesDrawer full tests, platform smoke, build, no-MUI grep, browser smoke, diff check。
+
+#### Execution Notes
+
+- Updated `web/src/app/styles.css` only for BankDetails overlay/drawer visual polish.
+- Category filter popover stayed a dense three-column popover/menu and kept its `银行明细标签筛选` role/label contract; visual treatment was refined to a white surface, lighter border, cleaner group tones, stronger active state and softer shadow.
+- Row type confirmation popover stayed an inline popover/menu with staged choice, `取消`, `保存`, `保存中` and Escape behavior intact; visual treatment now uses the Light Banking Console surface, radius and action styling.
+- Internal transfer tooltip and BankCategoryTag hierarchy tooltip stayed tooltips; both were moved to a lighter bordered surface with readable finance text hierarchy while retaining the tested grid structure.
+- AutoTagRulesDrawer stayed a right drawer at `80vw`; its internal table, tabs, action buttons, listboxes, alerts, archived rows and dialog controls were visually aligned to the sample's light banking style.
+- No backend, API, read model, worker, permission, payload, save/reapply/archive/restore, category confirmation, drawer placement or dialog semantics changed.
+- Browser smoke confirmed `/bank-details` renders, top error bars remain absent, the automatic tag rules drawer opens, and the drawer/table surface uses the new light visual treatment.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`: passed, 2 files / 52 tests。
+  - `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 3 files / 26 tests。
+  - runtime no-MUI grep: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and Vite chunk-size warning。
+  - `git diff --check`: passed。
+  - Headless Chrome smoke at `http://127.0.0.1:4173/bank-details`: passed; BankDetails/table rendered, top error bars absent, AutoTagRulesDrawer opened, no JS runtime errors captured。
+- Next prompt generated: `MG-P121-bank-details-premium-sample`。
+
+### MG-P121-bank-details-premium-sample
+
+- Phase: `phase_10_visual_premium_sample`
+- Status: `mg_verified`
+- Type: `cumulative MG`
+- Scope: BankDetails premium sample P117-P121 only.
+
+#### Prompt
+
+```text
+Prompt ID: MG-P121-bank-details-premium-sample
+Phase: phase_10_visual_premium_sample
+Type: cumulative MG
+Scope: BankDetails premium visual sample P117-P121.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/bank_details_premium_sample.md、docs/refactor-ui/modules/phase_6_bank_details.md 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 scope 只包含 BankDetails premium sample 文件：web/src/app/App.tsx、web/src/pages/BankDetailsPage.tsx、web/src/app/styles.css、docs/refactor-ui/bank_details_premium_sample.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/refactor_ui_state.md。确认无后端/API/read model/worker/权限语义改动。运行 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`；运行 `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx TableAlignmentStyles.test.ts`；运行 runtime no-MUI grep；运行 `cd web && npm run build`；运行 headless Chrome `/bank-details` smoke；运行 `git diff --check` 和 `git status --short --branch`。检查 untracked files，禁止 `git add .` 和 `git add -A`，只允许精确 `git add` 上述文件。MG 通过后提交，建议 commit message: `style: polish bank details premium sample`，push 到 `origin/refactor-ui`。完成后更新 refactor_ui_state.md、refactor_ui_prompt.md 和 bank_details_premium_sample.md，标记 MG verified。
+```
+
+#### Review
+
+- MG scope: BankDetails premium sample only。
+- Exact staging required: yes。
+- Backend/API/read model/worker untouched: required。
+- Full BankDetails/drawer tests required: yes。
+- Platform smoke/build/no-MUI/browser smoke required: yes。
+
+#### Execution Notes
+
+- Scope check passed: current diff/untracked files were limited to `web/src/app/App.tsx`, `web/src/pages/BankDetailsPage.tsx`, `web/src/app/styles.css`, `docs/refactor-ui/bank_details_premium_sample.md`, `docs/refactor-ui/refactor_ui_prompt.md` and `docs/refactor-ui/refactor_ui_state.md`.
+- No backend, API contract, read model, worker, permission, business state machine or reconciliation workbench files were changed.
+- Exact staging was used for only the MG scope files; `git add .` and `git add -A` were not used.
+- Commit message: `style: polish bank details premium sample`.
+- Push target: `origin/refactor-ui`.
+
+#### Verification
+
+- Status: mg_verified。
+- Commands:
+  - `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`: passed, 2 files / 52 tests。
+  - `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx TableAlignmentStyles.test.ts`: passed, 5 files / 31 tests。
+  - runtime no-MUI grep: passed, no non-workbench runtime MUI imports detected。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and Vite chunk-size warning。
+  - headless Chrome smoke at `http://127.0.0.1:4173/bank-details`: passed; BankDetails page/table rendered, top error bars absent, AutoTagRulesDrawer opened, no JS runtime errors captured。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: clean after exact stage/commit/push completion。
+
 ### MG Prompt Template
 
 ```text

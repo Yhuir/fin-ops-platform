@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `phase_9_closeout`
+- Phase: `phase_10_visual_premium_sample`
 - Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P116-phase-9-post-closeout-audit-fix`
-- Current MG ID: `MG-P113-phase-7-mui-containment`
+- Current Prompt ID: `MG-P121-bank-details-premium-sample`
+- Current MG ID: `MG-P121-bank-details-premium-sample`
 
 ## Global Invariants
 
@@ -21,6 +21,7 @@
 | Reconciliation workbench structure preserved | yes | 关联台内部工作区已迁出 MUI runtime，但三栏工作区结构和交互保持原业务体感 |
 | MUI/Emotion runtime residue | none | 当前全 app runtime/package no-MUI scans are required by P116 |
 | User-visible actions preserved | documented | `baseline_inventory.md`、`module_inventory.md` 已要求逐页检查 |
+| BankDetails premium sample function preservation | required | `docs/refactor-ui/bank_details_premium_sample.md` lists all BankDetails actions, filters, table behavior and drawer/dialog flows that must remain |
 | Behavior equivalence | documented | 旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗 |
 | HeroUI MCP active | yes | 当前会话已调用 HeroUI MCP quick start、theming、Table/Drawer/Modal docs |
 | Module docs on demand | documented | 只有需要跨切片复用的 discovery、旧入口对照、风险或测试策略才新建专项 md |
@@ -40,6 +41,7 @@
 | `phase_7_mui_containment` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P113 verified；non-workbench runtime no-MUI contract passed |
 | `phase_8_full_verification` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P114 full verification passed: source contract, full Vitest, build, diff check |
 | `phase_9_closeout` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P116 post-closeout audit/fix completed; full suite, build, no-MUI scans and browser smoke recorded |
+| `phase_10_visual_premium_sample` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P118-P121 and MG-P121 verified; BankDetails premium sample pushed to `origin/refactor-ui` |
 
 ## Status Values
 
@@ -54,24 +56,36 @@
 
 ## Active Checkpoint
 
-- Scope: P116 post-closeout audit/fix after codebase inspection found one App test waiting gap and stale current fact-source wording。
-- Files touched in P115:
-  - `docs/refactor-ui/README.md`
+- Scope: P118 App Shell local visual surface, P119 BankDetails layout/toolbar, P120 BankDetails table premium treatment, P121 BankDetails popovers/drawer polish and MG-P121 premium sample merge gate completed。
+- Files touched in P117:
+  - `docs/refactor-ui/bank_details_premium_sample.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Files touched in P116:
-  - `web/src/test/App.test.tsx`
-  - `DESIGN.md`
-  - `docs/dev/codebase-development.md`
-  - `docs/app-architecture/pages.md`
-  - `docs/refactor-ui/README.md`
-  - `docs/refactor-ui/platform_stack_migration.md`
-  - `docs/refactor-ui/modules/phase_8_full_verification.md`
+- Files touched in P118:
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/bank_details_premium_sample.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P116 targeted App test, runtime/package no-MUI scans, platform smoke, full frontend suite, build and headless Chrome smoke passed or recorded as noted。
-- Failures: none blocking。
-- Next action: optional review/PR; remaining warnings are recorded residual risks rather than UI migration blockers.
+- Files touched in P119:
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/bank_details_premium_sample.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+- Files touched in P120:
+  - `web/src/app/App.tsx`
+  - `web/src/pages/BankDetailsPage.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/bank_details_premium_sample.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+- Files touched in P121:
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/bank_details_premium_sample.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+- Verification run: App shell tests, AppStatusIndicator tests, BankDetails table tests, BankDetails behavior tests, AutoTagRulesDrawer tests, platform smoke tests, table alignment tests, runtime no-MUI grep, build, diff check, headless Chrome `/bank-details` smoke。
+- Failures: none。
+- Next action: BankDetails premium sample is closed; wait for next user-selected premium page or visual iteration。
 
 ## Prompt Lifecycle
 
@@ -108,11 +122,45 @@
 | full verification | `verified` | `P114-phase-8-full-verification` | Source greps, full Vitest, build and diff check passed; residual warnings documented |
 | workbench MUI migration | `verified` | `P-WB010-closeout` | Workbench runtime, CSS hooks, test provider and MUI/Emotion dependencies removed |
 | closeout | `verified` | `P116-phase-9-post-closeout-audit-fix` | Post-closeout audit/fix completed; full suite/browser smoke/docs facts updated |
+| bank details premium sample | `verified` | `MG-P121-bank-details-premium-sample` | P118-P121 and MG-P121 verified; premium sample pushed |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P121-bank-details-premium-sample` | `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` | passed | 2 files / 52 tests passed |
+| 2026-06-07 | `MG-P121-bank-details-premium-sample` | `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx TableAlignmentStyles.test.ts` | passed | 5 files / 31 tests passed |
+| 2026-06-07 | `MG-P121-bank-details-premium-sample` | runtime no-MUI grep | passed | No non-workbench runtime MUI imports detected |
+| 2026-06-07 | `MG-P121-bank-details-premium-sample` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk-size warning |
+| 2026-06-07 | `MG-P121-bank-details-premium-sample` | headless Chrome smoke at `/bank-details` | passed | BankDetails/table rendered, top error bars absent, AutoTagRulesDrawer opened, no JS runtime errors captured |
+| 2026-06-07 | `MG-P121-bank-details-premium-sample` | `git diff --check` | passed | No whitespace errors |
+| 2026-06-07 | `P121-bank-details-popovers-drawer-polish` | `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` | passed | 2 files / 52 tests passed |
+| 2026-06-07 | `P121-bank-details-popovers-drawer-polish` | `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 3 files / 26 tests passed |
+| 2026-06-07 | `P121-bank-details-popovers-drawer-polish` | runtime no-MUI grep | passed | No runtime MUI/Emotion residue introduced |
+| 2026-06-07 | `P121-bank-details-popovers-drawer-polish` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk-size warning |
+| 2026-06-07 | `P121-bank-details-popovers-drawer-polish` | `git diff --check` | passed | No whitespace errors |
+| 2026-06-07 | `P121-bank-details-popovers-drawer-polish` | headless Chrome smoke at `/bank-details` | passed | BankDetails/table rendered, top error bars absent, AutoTagRulesDrawer opened, no JS runtime errors captured |
+| 2026-06-07 | `P120-bank-details-table-premium-treatment` | `cd web && npx vitest run BankDetailsPage.test.tsx -t "uses Chinese labels for table pagination and exposes keyword search\|keeps pagination outside the table scroll area\|uses a dense three-column grouped category filter layout\|shows read-only auto category and keeps manual category controls out of bank details\|renders accounts as a list and transactions in the bank transaction table"` | passed | 5 selected table/pagination/category tests passed |
+| 2026-06-07 | `P120-bank-details-table-premium-treatment` | `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions\|selecting account and filters request accounts and transactions with the same date range\|exports all banks or the selected account with the current filters"` | passed | 3 selected BankDetails behavior tests passed |
+| 2026-06-07 | `P120-bank-details-table-premium-treatment` | `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 4 files / 28 tests passed |
+| 2026-06-07 | `P120-bank-details-table-premium-treatment` | runtime no-MUI grep | passed | No runtime MUI/Emotion residue introduced |
+| 2026-06-07 | `P120-bank-details-table-premium-treatment` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk-size warning |
+| 2026-06-07 | `P120-bank-details-table-premium-treatment` | `git diff --check` | passed | No whitespace errors |
+| 2026-06-07 | `P120-bank-details-table-premium-treatment` | headless Chrome smoke at `/bank-details` | passed | Top error bars absent, page top is 0, collapsed sidebar icons centered, transaction table rendered, no JS runtime errors captured |
+| 2026-06-07 | `P119-bank-details-layout-toolbar` | `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions\|renders accounts as a list and transactions in the bank transaction table\|selecting account and filters request accounts and transactions with the same date range\|exports all banks or the selected account with the current filters"` | passed | 4 selected BankDetails behavior tests passed |
+| 2026-06-07 | `P119-bank-details-layout-toolbar` | `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 3 files / 26 tests passed |
+| 2026-06-07 | `P119-bank-details-layout-toolbar` | runtime no-MUI grep | passed | No runtime MUI/Emotion residue introduced |
+| 2026-06-07 | `P119-bank-details-layout-toolbar` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk-size warning |
+| 2026-06-07 | `P119-bank-details-layout-toolbar` | `git diff --check` | passed | No whitespace errors |
+| 2026-06-07 | `P119-bank-details-layout-toolbar` | headless Chrome smoke at `/bank-details` | passed | Shell/sidebar/BankDetails/account rail/transaction panel/toolbar/search/table rendered; no JS runtime errors captured |
+| 2026-06-07 | `P118-bank-details-app-shell-local-surface` | `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx` | passed | 2 files / 16 tests passed |
+| 2026-06-07 | `P118-bank-details-app-shell-local-surface` | `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts by default and its transactions\|renders accounts as a list and transactions in the bank transaction table"` | passed | 2 selected BankDetails smoke tests passed |
+| 2026-06-07 | `P118-bank-details-app-shell-local-surface` | runtime no-MUI grep | passed | No runtime MUI/Emotion residue introduced |
+| 2026-06-07 | `P118-bank-details-app-shell-local-surface` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk-size warning |
+| 2026-06-07 | `P118-bank-details-app-shell-local-surface` | headless Chrome smoke at `/bank-details` | passed with note | Shell/sidebar/account rail/toolbar/table rendered; one resource 404 captured; no JS runtime crash captured |
+| 2026-06-07 | `P117-bank-details-premium-sample-spec` | `test -f docs/refactor-ui/bank_details_premium_sample.md` | passed | Premium sample spec exists |
+| 2026-06-07 | `P117-bank-details-premium-sample-spec` | `rg -n "Light Banking Console\|No large cards\|高密度\|所有功能\|P118 App Shell Local Surface\|MG-P121" docs/refactor-ui/bank_details_premium_sample.md` | passed | Direction, constraints and implementation queue recorded |
+| 2026-06-07 | `P117-bank-details-premium-sample-spec` | `git diff --check` | passed | No whitespace errors |
 | 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | `cd web && npx vitest run App.test.tsx -t "keeps global status independent while warning when OA data is incomplete"` | passed | 1 selected App shell OA warning test passed after waiting for async page warning |
 | 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | runtime no-MUI grep | passed | No runtime source MUI/Emotion imports, providers, theme, `.Mui` or `useMui` residue |
 | 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | package no-MUI grep | passed | No package/lockfile `@mui/*` or `@emotion/*` entries |

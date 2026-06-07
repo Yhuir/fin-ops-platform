@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Alert } from "@heroui/react";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter, useLocation } from "react-router-dom";
 
 import SessionGate from "../components/auth/SessionGate";
 import AppSidebar from "../components/shell/AppSidebar";
@@ -70,6 +70,7 @@ function useShellMediaQuery(query: string) {
 }
 
 function AppShell() {
+  const location = useLocation();
   const {
     primaryJob,
     extraCount,
@@ -86,6 +87,8 @@ function AppShell() {
   const defaultExpanded = !embedded;
   const [sidebarExpanded, setSidebarExpanded] = useState(() => readPersistedSidebarState(storageKey, defaultExpanded));
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isBankDetailsRoute = location.pathname === "/bank-details";
+  const showProgressStack = !isBankDetailsRoute && (connectionFailed || primaryJob || operationError);
 
   useEffect(() => {
     setSidebarExpanded(readPersistedSidebarState(storageKey, defaultExpanded));
@@ -112,7 +115,7 @@ function AppShell() {
   } as CSSProperties;
 
   return (
-    <div className={`app-shell${embedded ? " embedded-shell" : ""}`} style={shellStyle}>
+    <div className={`app-shell${embedded ? " embedded-shell" : ""}${isBankDetailsRoute ? " app-shell--bank-details" : ""}`} style={shellStyle}>
       <AppSidebar
         embedded={embedded}
         isCompact={isCompact}
@@ -127,7 +130,7 @@ function AppShell() {
           isCompact={isCompact}
           onOpenMobileSidebar={() => setMobileOpen(true)}
         />
-        {connectionFailed || primaryJob || operationError ? (
+        {showProgressStack ? (
           <div className="app-shell-progress-stack">
             {connectionFailed ? (
               <BackgroundProgressBlock kind="connection_error" />
