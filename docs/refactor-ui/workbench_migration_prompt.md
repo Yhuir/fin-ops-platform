@@ -303,12 +303,12 @@
   - `git commit -m "refactor: migrate workbench zone controls from mui"`
   - `git push origin refactor-ui`
 
-## Next Prompt
+## Prompt History
 
 ### P-WB004-pane-search
 
 - Phase: `wb_phase_3_pane_search`
-- Status: `drafted`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只迁移 `web/src/components/workbench/WorkbenchPaneSearch.tsx`，不改 WorkbenchRecordCard、CSS cleanup、test provider、dependencies 或后端。
 
@@ -316,4 +316,66 @@
 
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/workbench/WorkbenchPaneSearch.tsx、web/src/components/workbench/CandidateGroupGrid.tsx、web/src/test/WorkbenchZone.test.tsx、web/src/test/WorkbenchPaneFilter.test.ts 和 web/src/test/WorkbenchSelection.test.tsx。只迁移 WorkbenchPaneSearch.tsx：移除 ClearIcon、SearchIcon、Grow、IconButton、InputAdornment、TextField 的 MUI imports 和 JSX；使用 lucide-react Search/X 或现有 inline SVG、原生 input/button 和 project classes 替代。保留 open/focus/select、outside mousedown close、onChange/onClear/onToggle/onClose、searchbox aria-label、clear button aria-label、applied summary button label/text、existing class hooks。不得迁移 WorkbenchRecordCard.tsx，不得清理 styles.css 的 .Mui selectors，不得修改 backend/API/read model/worker。运行 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchPaneFilter.test.ts WorkbenchSelection.test.tsx`，运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|<Grow\\b|<TextField\\b|<InputAdornment\\b|<IconButton\\b|ClearIcon|SearchIcon' web/src/components/workbench/WorkbenchPaneSearch.tsx; then exit 1; else exit 0; fi`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB005 record card actions prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- RecordCard untouched: yes。
+- CSS cleanup deferred: yes。
+- Dependencies untouched: yes。
+- User-visible behavior protected: yes，P-WB002/P-WB004 tests cover focus、clear、outside close and summary state.
+
+#### Execution Notes
+
+- `WorkbenchPaneSearch.tsx` removed MUI imports and JSX for ClearIcon/SearchIcon/Grow/IconButton/InputAdornment/TextField.
+- The open search popover now uses project DOM: inline SVG search icon, native `input type="search"` and native clear button.
+- Preserved `inputRef` focus/select behavior, outside mousedown close, `onChange`, `onClear`, `onToggle`, `onClose`, searchbox aria-label, clear button aria-label and applied summary text.
+- `WorkbenchZone.test.tsx` source target contract now expects the only remaining direct runtime MUI target to be `WorkbenchRecordCard.tsx`.
+- Runtime/CSS/dependencies/backend/API/read model/worker changed: no, except `WorkbenchPaneSearch.tsx` runtime UI component.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - scoped `WorkbenchPaneSearch.tsx` no-MUI grep: passed。
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchPaneFilter.test.ts WorkbenchSelection.test.tsx`: passed，3 files / 73 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### MG-WB004-pane-search
+
+- Phase: `wb_phase_3_pane_search`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push `WorkbenchPaneSearch.tsx` MUI migration 和专项文档更新。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- web/src/components/workbench/WorkbenchPaneSearch.tsx web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB004 scope。只允许精确 git add web/src/components/workbench/WorkbenchPaneSearch.tsx web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 refactor: migrate workbench pane search from mui。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB004 和 wb_phase_3_pane_search 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- RecordCard untouched: yes。
+- CSS/dependencies cleanup deferred: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+
+## Next Prompt
+
+### P-WB005-record-card-actions
+
+- Phase: `wb_phase_4_record_card_actions`
+- Status: `drafted`
+- Type: `extraction/refactor`
+- Scope: 只迁移 `web/src/components/workbench/WorkbenchRecordCard.tsx` 的 MUI warning tooltip/icon buttons，不改 CSS cleanup、test provider、dependencies 或后端。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/workbench/WorkbenchRecordCard.tsx、web/src/components/workbench/RowActions.tsx、web/src/test/WorkbenchColumns.test.tsx、web/src/test/WorkbenchZone.test.tsx 和 web/src/test/CandidateGroupGrid.test.tsx。只迁移 WorkbenchRecordCard.tsx：移除 WarningAmberRoundedIcon、IconButton、Tooltip imports 和 `& .MuiSvgIcon-root` sx selectors；使用 native button + project classes + inline SVG warning icon 或 lucide AlertTriangle 替代 `BankAmountMismatchWarning` 和 `ReconciliationDecisionWarningIcon`。保留 aria-label、click/focus/hover/touch open behavior、stopPropagation、tooltip text、warning title、amount formatting、row selection/action bubbling behavior。不得迁移 RowActions，不得清理 styles.css 的 .Mui selectors，不得修改 backend/API/read model/worker。运行 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`，运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|WarningAmberRoundedIcon|<IconButton\\b|<Tooltip\\b|sx=|MuiSvgIcon' web/src/components/workbench/WorkbenchRecordCard.tsx; then exit 1; else exit 0; fi`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB006 CSS containment cleanup prompt。
 ```

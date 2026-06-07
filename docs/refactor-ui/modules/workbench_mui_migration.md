@@ -40,7 +40,7 @@ rg -n "^import .*@mui|from \"@mui|from '@mui|@mui/|Mui[A-Z]|\\.Mui" web/src/page
 | File | MUI dependency | Migration target | Risk |
 | --- | --- | --- | --- |
 | `web/src/components/workbench/WorkbenchZone.tsx` | migrated in `P-WB003` | Semantic `div`/`span`/`button` with existing project class hooks | resolved |
-| `web/src/components/workbench/WorkbenchPaneSearch.tsx` | `ClearIcon`, `SearchIcon`, `Grow`, `IconButton`, `InputAdornment`, `TextField` | lucide icons + HeroUI/project input/button/tooltip/search primitive | medium |
+| `web/src/components/workbench/WorkbenchPaneSearch.tsx` | migrated in `P-WB004` | Native search input/button with existing project class hooks | resolved |
 | `web/src/components/workbench/WorkbenchRecordCard.tsx` | `WarningAmberRoundedIcon`, `IconButton`, `Tooltip`, `& .MuiSvgIcon-root` selectors | lucide warning/info icons + HeroUI/project tooltip/icon button classes | medium |
 
 `web/src/pages/ReconciliationWorkbenchPage.tsx` 当前没有直接 MUI import。
@@ -96,7 +96,7 @@ These must remain until runtime/test references are removed, then be audited in 
 | Hits | File |
 | --- | --- |
 | 0 | `web/src/components/workbench/WorkbenchZone.tsx` after `P-WB003` |
-| 6 | `web/src/components/workbench/WorkbenchPaneSearch.tsx` |
+| 0 | `web/src/components/workbench/WorkbenchPaneSearch.tsx` after `P-WB004` |
 | 5 | `web/src/components/workbench/WorkbenchRecordCard.tsx` |
 | 0 | all other `web/src/components/workbench/*.tsx` files in the baseline count |
 
@@ -212,6 +212,45 @@ Remaining direct runtime MUI targets are now:
 if rg -n '@mui/|Mui[A-Z]|<Box\b|<Stack\b|<Typography\b|<Chip\b|<ToggleButton\b|<ToggleButtonGroup\b|<IconButton\b|<Button\b|<Tooltip\b' web/src/components/workbench/WorkbenchZone.tsx; then exit 1; else exit 0; fi
 cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx
 cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx
+cd web && npm run build
+git diff --check
+```
+
+Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
+## P-WB004 Pane Search
+
+- Prompt ID: `P-WB004-pane-search`
+- Phase: `wb_phase_3_pane_search`
+- Type: `extraction/refactor`
+- Runtime changed:
+  - `web/src/components/workbench/WorkbenchPaneSearch.tsx`
+- Test changed:
+  - `web/src/test/WorkbenchZone.test.tsx` source target contract now expects only `WorkbenchRecordCard.tsx` to remain as a direct runtime MUI target.
+- CSS changed: no.
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Result
+
+`WorkbenchPaneSearch.tsx` no longer imports or renders MUI components. It preserves:
+
+- open/focus/select behavior;
+- outside mousedown close;
+- `onChange`, `onClear`, `onToggle`, `onClose`;
+- searchbox and clear button accessible labels;
+- applied summary button text/label;
+- existing `pane-search*` class hooks.
+
+Remaining direct runtime MUI target:
+
+- `web/src/components/workbench/WorkbenchRecordCard.tsx`
+
+### Verification
+
+```bash
+if rg -n '@mui/|Mui[A-Z]|<Grow\b|<TextField\b|<InputAdornment\b|<IconButton\b|ClearIcon|SearchIcon' web/src/components/workbench/WorkbenchPaneSearch.tsx; then exit 1; else exit 0; fi
+cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchPaneFilter.test.ts WorkbenchSelection.test.tsx
 cd web && npm run build
 git diff --check
 ```

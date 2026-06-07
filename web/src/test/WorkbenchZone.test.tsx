@@ -266,7 +266,6 @@ describe("WorkbenchZone", () => {
   test("records current workbench MUI migration targets without broadening the tri-pane core scope", () => {
     const sourceRoot = resolve(__dirname, "..");
     const runtimeTargets = [
-      "components/workbench/WorkbenchPaneSearch.tsx",
       "components/workbench/WorkbenchRecordCard.tsx",
     ];
     const runtimeOffenders = runtimeTargets.flatMap((path) => {
