@@ -31,6 +31,67 @@
 | API/types | `web/src/features/outputInvoiceCollections/api.ts`, `types.ts` | Rows, filter options, details, status rules, receipt history/preview/settings and lifecycle write routes. No migration prompt may change these contracts. |
 | Tests | `web/src/test/OutputInvoiceCollectionsPage.test.tsx` | Route/sidebar, grouped table, filter/sort/pagination, read-model refreshing, route remount cleanup, all workflow drawers and lifecycle writes. |
 
+## PV-016 Premium Visual Discovery
+
+- Prompt ID: `PV-016-output-invoice-collections-discovery`
+- Type: premium visual discovery
+- Status: verified
+- Scope: `/output-invoice-collections` only.
+- Implementation changed: no.
+- Tests changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Current Implementation Status On `main`
+
+- Page shell, toolbar actions, query controls, summary metrics, loading/error/empty states and drawer wiring already use project/native primitives.
+- The main table is a project-owned grouped native table, not a card layout and not MUI DataGrid.
+- The filter menu and expandable text controls are project-owned components.
+- Right-side workflows already use `AppDrawer`; receipt history keeps internal `AppDialog` confirmation flows for void/reissue.
+- Scoped runtime source has no `@mui/*` imports outside the frozen workbench boundary.
+
+### User-visible Entrypoint Matrix
+
+| Area | Preserve exactly |
+| --- | --- |
+| Route/sidebar | `/output-invoice-collections`, sidebar label `销项发票收款情况`, page heading `销项发票收款情况`. |
+| Header actions | `收款状态规则`, admin-only `收据编号设置`, `刷新`; keep button locations and disabled/loading behavior. |
+| Query controls | `关键字`, `查询`, `月份`, quick `收款状态`; Enter in keyword submits. |
+| Summary metrics | `销项发票数`, `待收款金额`, `已收金额`, `待出收据数`; values remain formatted and tabular. |
+| Main table | Table accessible name `销项发票收款情况表`; keep grouped dense table, not cards. |
+| Filter menu | `筛选 <field>` triggers, asc/desc sorting, enum/text/money/date operators, clear/apply behavior. |
+| Sorting | Header sort buttons such as `发票号码 排序`; preserve backend `sort_field` and `sort_direction`. |
+| Expandable cells | Long invoice business, collection status reason, bank counterparty and bank summary text keep expand/collapse controls. |
+| Row detail actions | `查看发票 <no> 详情` and `查看流水 <counterparty> 详情` open the detail right drawer. |
+| Row workflow actions | `状态/提醒`, `红蓝票`, `已出收据`, `待出收据` remain in their table cells and open the same workflows. |
+| Right drawers | `收款状态规则`, `销项发票收款情况详情`, `收款状态和提醒`, `红蓝票关系`, `已出收据历史`, `待出收据预览`, `收据编号设置`. |
+| Internal dialogs | Receipt void/reissue confirmations stay dialogs inside the receipt history workflow. |
+| States | Loading label `销项发票收款情况加载中`, empty state `当前条件下暂无记录。`, table empty row `当前条件下没有销项发票收款记录。`, backend error text, read-model refreshing/stale behavior and admin permission gating. |
+
+### Table Content Roles
+
+| Group | Columns | Premium layout requirement |
+| --- | --- | --- |
+| `销项发票` | `发票号码`, `购方`, `价税合计`, `税额/税率`, `业务/货物劳务` | Invoice number and buyer identity stack stay compact; issue date uses a stable tag; amount/tax columns right-align with tabular nums; long business text clamps/expands without changing row rhythm unexpectedly. |
+| `收款状态` | `收款状态` | Status tag, status reason, collected/pending amounts and `状态/提醒` action remain vertically aligned; tag height and action placement stay stable across statuses. |
+| `收入流水` | `付款方/日期`, `收款金额`, `银行/摘要` | Counterparty/date and bank summary stay readable in dense rows; collected amount right-aligns with tabular nums; detail action remains beside bank identity. |
+| `收据` | `收据情况` | Receipt tags and `已出收据` / `待出收据` actions stay in the receipt zone and do not wrap into neighboring columns. |
+
+### PV-017 Premium Opportunities
+
+- Replace hard-coded output-invoice group/sub-header washes with `DESIGN.md` token-based `color-mix(...)` treatments.
+- Keep the table viewport compact and stable; avoid large card treatment and avoid large vertical gaps.
+- Add motion-token feedback to output-invoice page buttons, query fields, filter menu trigger/items/apply, expandable controls, sort/table row actions, pagination controls and output-specific drawer buttons where scoped CSS exists.
+- Tighten loading skeleton, alert, summary metric and drawer inner surfaces to match the bank details premium sample without changing information hierarchy.
+- Add a CSS contract test in `OutputInvoiceCollectionsPage.test.tsx` that locks compact table treatment, token colors and motion-token usage.
+
+### Non-scope For PV-017
+
+- Do not change backend routes, API params, write payloads, read model freshness, permission semantics or worker behavior.
+- Do not change route/sidebar labels, action count, row workflow mapping, drawer/dialog type or table column count.
+- Do not create a dashboard of big cards; the main experience remains a dense finance table.
+- Do not touch the frozen reconciliation workbench internals.
+
 ## Current MUI Inventory
 
 | File | Current MUI usage | Target |

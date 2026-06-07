@@ -862,7 +862,13 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-016-output-invoice-collections-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-016-output-invoice-collections-discovery`
 
@@ -885,3 +891,54 @@ Notes:
 - `git status --short --branch`
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和相关模块文档，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Updated `docs/refactor-ui/modules/phase_6_output_invoice_collections.md` with premium visual discovery for `/output-invoice-collections`.
+- Linked the output invoice collections queue item in `docs/refactor-ui/module_inventory.md`.
+- Confirmed current implementation on `main` already uses project/native page shell, grouped native table, project filter menu, project expandable cell control, `AppDrawer` workflows and `AppDialog` receipt confirmations.
+- Preserved the original route, header actions, query controls, summary metrics, grouped table, filter/sort/expand controls, row detail/workflow actions, right drawers, internal receipt dialogs and all loading/empty/error/read-model/permission states as mandatory PV-017 constraints.
+- No runtime code or tests changed because PV-016 is discovery-only and existing `OutputInvoiceCollectionsPage.test.tsx` has strong characterization coverage.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-016 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-017-output-invoice-collections-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_output_invoice_collections.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/OutputInvoiceCollectionsPage.tsx`、`web/src/components/outputInvoiceCollections/*`、`web/src/app/styles.css`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` 和当前 `git status`。本切片只做 `/output-invoice-collections` premium visual implementation，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+实现要求：
+
+- 保留现有大布局和所有功能：route/sidebar、page heading、description、`收款状态规则`、admin-only `收据编号设置`、`刷新`、`关键字`、`查询`、`月份`、quick `收款状态`、summary metrics、main grouped table、filter menu、sort、expandable cells、pagination、row detail actions、row workflow actions、all right drawers、receipt void/reissue dialogs、loading/empty/error/read-model/permission states。
+- 不做大 card 设计，不制造大留白；页面仍是紧凑的财务运营表格界面。
+- 主表继续是 `aria-label="销项发票收款情况表"` 的 grouped native table，group headers 保持 `销项发票` / `收款状态` / `收入流水` / `收据`，保留 10 个 leaf columns。
+- 金额、税额、收款金额右对齐并保持 tabular nums；状态/tag/action 高度稳定；长客户、发票、业务、流水文本必须截断或展开，不得撑乱行高；row hover 不改变行高。
+- 将 output-invoice table group/sub-header 的 hard-coded hex/rgba 背景替换为 `DESIGN.md` token-based `color-mix(...)` treatment。
+- 使用 `docs/refactor-ui/interaction_smoothness.md` 的 motion tokens 给 output-invoice page buttons、query inputs/selects、filter trigger/items/fields/apply、expandable controls、sort/table action buttons、pagination buttons 和 output-specific drawer controls 增加 hover/press/focus feedback。
+- Tighten loading skeleton、alert、summary metrics、table viewport 和 drawer inner surfaces，使其接近银行明细 premium sample，但不改变信息层级或 workflow shape。
+- 尽量使用现有 HeroUI/project primitives；不新增依赖，不新增 MUI，不恢复 keepalive/snapshot/scroll-session。
+- 增加或更新 `OutputInvoiceCollectionsPage.test.tsx` 的 CSS contract：锁定 compact table viewport、token-based group colors、motion-token usage、no hard-coded output group washes。
+
+验证：
+
+- `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 浏览器 smoke `/output-invoice-collections`：确认 heading、query toolbar、summary metrics、grouped table、filter trigger、detail drawer、status/rules/receipt workflows can display/open/close without obvious overlap or top-level horizontal overflow。
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`，精确 staging，commit 并 push 到 `origin/main`。

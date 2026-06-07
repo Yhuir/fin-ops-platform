@@ -45,7 +45,7 @@ Last updated: 2026-06-08
 | 13 | `PV-013-input-invoice-usage-premium-visual` | verified | 进项发票使用 premium visual slice。 |
 | 14 | `PV-014-oa-pending-payments-discovery` | verified | `/oa-pending-payments` discovery。 |
 | 15 | `PV-015-oa-pending-payments-premium-visual` | verified | OA 待付款核对 premium visual slice。 |
-| 16 | `PV-016-output-invoice-collections-discovery` | pending | `/output-invoice-collections` discovery。 |
+| 16 | `PV-016-output-invoice-collections-discovery` | verified | `/output-invoice-collections` discovery。 |
 | 17 | `PV-017-output-invoice-collections-premium-visual` | pending | 销项发票收款 premium visual slice。 |
 | 18 | `PV-018-no-oa-bank-batches-discovery` | pending | `/no-oa-bank-batches` discovery。 |
 | 19 | `PV-019-no-oa-bank-batches-premium-visual` | pending | 免 OA 流水批量处理 premium visual slice。 |
@@ -62,28 +62,29 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-016-output-invoice-collections-discovery`
+`PV-017-output-invoice-collections-premium-visual`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/module_inventory.md`
 - `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`
 - `web/src/pages/OutputInvoiceCollectionsPage.tsx`
 - `web/src/components/outputInvoiceCollections/*`
-- related `OutputInvoiceCollections` tests
+- `web/src/app/styles.css`
+- `web/src/test/OutputInvoiceCollectionsPage.test.tsx`
 
 ### Verification
 
-Required for PV-016:
+Required for PV-017:
 
+- `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
-- `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
-- `rg` no non-workbench runtime MUI imports.
-- `git status --short --branch`
-
-PV-016 is discovery-only. It must not change runtime code unless a very small characterization test gap is found and can be filled without behavior change.
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke `/output-invoice-collections`: heading, query toolbar, summary metrics, grouped table, filter menu, detail drawer, status/rules/receipt workflows and no top-level horizontal overflow.
 
 ## Execution Rules
 
@@ -124,3 +125,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-014-oa-pending-payments-discovery` | `52831b5f` | pushed to `origin/main` | OA pending payments premium discovery and PV-015 prompt generated. |
 | 2026-06-08 | `PV-014-push-log-update` | `010e7412` | pushed to `origin/main` | Recorded PV-014 push status after push. |
 | 2026-06-08 | `PV-015-oa-pending-payments-premium-visual` | `80e9a2d3` | pushed to `origin/main` | OA pending payments premium visual polish verified; PV-016 prompt generated. |
+| 2026-06-08 | `PV-016-output-invoice-collections-discovery` | pending | pending | Output invoice collections premium discovery verified; PV-017 prompt generated. |
