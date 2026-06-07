@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P062-phase-6-oa-pending-payments-characterization-tests`
+- Current Prompt ID: `P063-phase-6-oa-pending-payments-page-shell-toolbar`
 - Current MG ID: `MG-P060-phase-6-input-invoice-usage`
 
 ## Global Invariants
@@ -54,14 +54,15 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 OA pending payments characterization prompt generated after P061 discovery。
+- Scope: phase 6 OA pending payments page shell prompt generated after P062 characterization tests。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`
-- Verification run: P061 module doc exists, discovery/P062 prompt markers found, diff check passed。
-- Failures: none; discovery only。
-- Next action: 执行 `P062-phase-6-oa-pending-payments-characterization-tests`。
+  - `web/src/test/OaPendingPaymentsPage.test.tsx`
+- Verification run: P062 full module test expected-fail with 5 behavior tests passed and one source-level contract failure; diff check passed。
+- Failures: expected source-level MUI contract failure remains for page shell and table runtime。
+- Next action: 执行 `P063-phase-6-oa-pending-payments-page-shell-toolbar`。
 
 ## Prompt Lifecycle
 
@@ -93,12 +94,15 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P062-phase-6-oa-pending-payments-characterization-tests` | OaPendingPayments P061 discovery verified；next characterization tests |
+| page batches | `in_progress` | `P063-phase-6-oa-pending-payments-page-shell-toolbar` | OaPendingPayments P062 verified as expected-fail；next page shell toolbar |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P062-phase-6-oa-pending-payments-characterization-tests` | `cd web && npx vitest run OaPendingPaymentsPage.test.tsx` | expected-fail | 5 behavior tests passed; 1 intended source-level failure lists page/table MUI residue |
+| 2026-06-07 | `P062-phase-6-oa-pending-payments-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P062-phase-6-oa-pending-payments-characterization-tests` | `git status --short --branch` | passed | Only P062 test and docs files changed |
 | 2026-06-07 | `P061-phase-6-oa-pending-payments-discovery` | `test -f docs/refactor-ui/modules/phase_6_oa_pending_payments.md` | passed | OA pending payments module discovery doc exists |
 | 2026-06-07 | `P061-phase-6-oa-pending-payments-discovery` | `rg -n "P061-phase-6-oa-pending-payments-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P062-phase-6-oa-pending-payments-characterization-tests" docs/refactor-ui/modules/phase_6_oa_pending_payments.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | OA pending payments discovery and next prompt recorded |
 | 2026-06-07 | `P061-phase-6-oa-pending-payments-discovery` | `git diff --check` | passed | 无 whitespace error |

@@ -3671,6 +3671,50 @@ Scope: `/oa-pending-payments` tests only. Do not modify runtime implementation.
 - Source-level contracts should fail on current page/table and guide P063/P064.
 - Next prompt: P063 page shell toolbar only after P062 is verified/expected-fail documented.
 
+#### Execution Notes
+
+- Updated `web/src/test/OaPendingPaymentsPage.test.tsx` only.
+- Renamed the main behavior test away from MUI wording.
+- Replaced the `.MuiDataGrid-root` absence assertion with the user-observable table role `OA待付款核对表格`.
+- Added source-level contracts for `OaPendingPaymentsPage.tsx` and `OaPendingPaymentsTable.tsx`.
+- Runtime implementation, mocks, backend/API/read model/worker and workbench internals unchanged.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`: expected-fail, 5 behavior tests passed and 1 source-level contract failed. Current failure lists page/table MUI imports, table `.MuiChip-label`, legacy table/form surfaces, and missing project table primitive/class.
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P062 test and docs files changed。
+
+### P063-phase-6-oa-pending-payments-page-shell-toolbar
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/oa-pending-payments` page shell/actions/query/loading/error only. Do not migrate `OaPendingPaymentsTable.tsx`.
+
+#### Prompt
+
+```text
+Prompt ID: P063-phase-6-oa-pending-payments-page-shell-toolbar
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/oa-pending-payments` page shell/actions/query/loading/error only. Do not migrate `OaPendingPaymentsTable.tsx`.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_oa_pending_payments.md、web/src/pages/OaPendingPaymentsPage.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx、web/src/test/OaPendingPaymentsPage.test.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/OaPendingPaymentsPage.tsx`、必要 `web/src/app/styles.css` 和必要测试 expectation：移除 page shell/actions/query/loading/error scope 的 MUI imports/usages，包括 `RefreshOutlinedIcon`、`TuneOutlinedIcon`、`Alert`、`Button`、`MenuItem`、`Skeleton`、`Stack`、`TextField`。使用 project/native toolbar controls、native text/month/date/select inputs、project loading skeleton/status message and lucide icons。必须保留 `data-testid="oa-pending-payments-page"`、heading `OA 待付款核对`、buttons `支出流水无需开票规则设置` and `刷新`、search label `全页面检索`、`查询` button、Enter submit、date labels `月份`/`交易开始`/`交易结束`、payment status label `支付状态` and old options `全部`/`未支付`/`已支付`/`合并支付`/`支付少了`/`支付多了`/`待核对`、refresh disabled while refreshing、error text `OA 待付款核对加载失败。`、loading label `OA待付款核对加载中`、empty state `当前条件下暂无记录。`、detail/rules drawer wiring and API query behavior。不得修改 `OaPendingPaymentsTable.tsx`、shared filter/detail/rules drawers、mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OaPendingPaymentsPage.test.tsx -t "targets project primitives|adds sidebar route|keeps pending invoice rules drawer|uses a standard empty state|shows neutral unavailable detail"`；运行完整 `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`，P064 table source contract failure 可以继续 expected-fail，但 `src/pages/OaPendingPaymentsPage.tsx` must disappear from source-level failure lists；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|TuneOutlinedIcon|Skeleton|TextField|MenuItem' web/src/pages/OaPendingPaymentsPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P064 grouped table prompt。
+```
+
+#### Review
+
+- Single slice: yes，page shell/query/loading/error only。
+- Table untouched: required。
+- Shared drawers untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，P064 table source failure can remain, but page source must clear。
+- Next prompt: P064 grouped table only after P063 implementation is verified/expected-fail documented.
+
 ### MG Prompt Template
 
 ```text

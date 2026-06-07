@@ -1,9 +1,17 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
+
+const oaPendingPaymentsSourceFiles = [
+  "src/pages/OaPendingPaymentsPage.tsx",
+  "src/components/oaPendingPayments/OaPendingPaymentsTable.tsx",
+] as const;
 
 const rowsPayload = {
   rows: [
@@ -273,12 +281,54 @@ function rulesRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetc
     .filter((url) => url.pathname === "/api/pending-invoices/rules");
 }
 
+function readWebSource(path: string) {
+  return readFileSync(resolve(path), "utf8");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("OA pending payments page", () => {
-  test("adds sidebar route and renders compact grouped MUI table from OA perspective", async () => {
+  test("targets project primitives for page shell and grouped table", () => {
+    const sourceByPath = Object.fromEntries(oaPendingPaymentsSourceFiles.map((path) => [path, readWebSource(path)]));
+    const forbiddenMuiImports = oaPendingPaymentsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
+    });
+    const forbiddenMuiSelectors = oaPendingPaymentsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /\.Mui[A-Z][A-Za-z-]*/.test(source) ? [path] : [];
+    });
+    const forbiddenLegacySurfaces = oaPendingPaymentsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /TablePagination|TextField|Skeleton|Chip|IconButton|TableCell|TableRow|TableHead|TableBody/.test(source) ? [path] : [];
+    });
+    const missingPrimitiveTargets = [
+      sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("PageScaffold") ? null : "OaPendingPaymentsPage.tsx should keep PageScaffold",
+      sourceByPath["src/pages/OaPendingPaymentsPage.tsx"].includes("StatePanel") ? null : "OaPendingPaymentsPage.tsx should keep project empty/error state primitives",
+      sourceByPath["src/components/oaPendingPayments/OaPendingPaymentsTable.tsx"].includes("InputInvoiceUsageFilterMenu")
+        ? null
+        : "OaPendingPaymentsTable.tsx should preserve shared InputInvoiceUsageFilterMenu contract",
+      /FinanceTable|oa-pending-payments-table/.test(sourceByPath["src/components/oaPendingPayments/OaPendingPaymentsTable.tsx"])
+        ? null
+        : "OaPendingPaymentsTable.tsx should use a project table primitive or project table class",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      forbiddenLegacySurfaces,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      forbiddenLegacySurfaces: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
+  test("adds sidebar route and renders compact grouped project table from OA perspective", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
 
@@ -293,7 +343,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(within(page).getByRole("heading", { name: "OA 待付款核对" })).toBeInTheDocument();
-    expect(document.querySelector(".MuiDataGrid-root")).not.toBeInTheDocument();
+    expect(within(page).getByRole("table", { name: "OA待付款核对表格" })).toBeInTheDocument();
 
     const groupHeader = within(page).getAllByRole("row")[0];
     for (const label of ["OA情况", "支付状态", "支出流水", "发票情况"]) {
