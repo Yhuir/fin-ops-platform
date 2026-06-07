@@ -32,7 +32,7 @@ Last updated: 2026-06-08
 | 0 | `PV-000-premium-foundation-discovery` | verified | 建立主控 prompt、状态机、prompt 日志和 interaction_smoothness 规则。 |
 | 1 | `PV-001-shared-premium-foundation` | verified | motion tokens、基础交互样式、reduced motion、foundation tests。 |
 | 2 | `PV-002-tax-offset-discovery` | verified | `/tax-offset` 旧入口清单、表格/弹窗/右侧工作区矩阵、测试缺口。 |
-| 3 | `PV-003-tax-offset-premium-visual` | pending | 税金抵扣 premium visual slice。 |
+| 3 | `PV-003-tax-offset-premium-visual` | verified | 税金抵扣 premium visual slice。 |
 | 4 | `PV-004-app-health-discovery` | pending | `/operations/app-health` discovery。 |
 | 5 | `PV-005-app-health-premium-visual` | pending | 系统状态 premium visual slice。 |
 | 6 | `PV-006-import-pages-discovery` | pending | `/imports/*` discovery。 |
@@ -62,18 +62,17 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-003-tax-offset-premium-visual`
+`PV-004-app-health-discovery`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
 - `docs/refactor-ui/module_inventory.md`
-- `docs/refactor-ui/modules/tax-offset.md`
-- `web/src/pages/TaxOffsetPage.tsx`
-- `web/src/components/tax/*`
-- `web/src/test/TaxOffsetPage.test.tsx`
-- tax-related CSS in `web/src/app/styles.css`
+- `web/src/pages/AppHealthOperationsPage.tsx`
+- `web/src/features/appHealth/*`
+- related `web/src/test/*AppHealth*` tests
+- `docs/refactor-ui/modules/app-health.md` if the discovery matrix is too large for `module_inventory.md`
 
 ### Verification
 
@@ -82,11 +81,9 @@ Required:
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- `cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
+- targeted App Health discovery test inventory, if tests exist.
 
-PV-003 is the implementation slice for tax offset visual polish. It must not change runtime data contracts.
+PV-004 is discovery-only unless a small pure characterization gap can be added without runtime behavior changes.
 
 ## Execution Rules
 
@@ -108,3 +105,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-000-state-update` | `4e276a95` | pushed to `origin/main` | State advanced to PV-001 after push. |
 | 2026-06-08 | `PV-001-shared-premium-foundation` | current commit | pushed to `origin/main` | Shared motion foundation verified and pushed with the current commit. |
 | 2026-06-08 | `PV-002-tax-offset-discovery` | current commit | pushed to `origin/main` | Tax Offset discovery and PV-003 prompt generated with the current commit. |
+| 2026-06-08 | `PV-003-tax-offset-premium-visual` | current commit | pushed to `origin/main` | Tax Offset premium visual polish verified and pushed with the current commit. |

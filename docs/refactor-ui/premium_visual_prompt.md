@@ -139,7 +139,13 @@ Notes:
 
 - Code tests were not run for PV-002 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-003-tax-offset-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-003-tax-offset-premium-visual`
 
@@ -166,3 +172,54 @@ Notes:
 - 如 dev server 可用，浏览器 smoke `/tax-offset`：确认无重叠、无大留白、表格可读、dialog/workspace 功能入口仍在。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/tax-offset.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Added scoped Tax Offset summary classes and compact premium metric strip styling.
+- Polished result panel, dual table headers, table tags, selected/locked/highlighted rows, right-side certified results workspace and certified import file-list surfaces.
+- Kept `FinanceTable`, `AppDialog`, `FileDropzone`, `MonthPicker`, `StatePanel`, `usePageSessionState`, route splitting and sidebar preload unchanged.
+- Did not change backend/API/read model/worker/workbench internals.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4173/tax-offset`
+
+Browser smoke result:
+
+- 2 finance grids, 5 summary metrics, 1 `已认证结果` complementary workspace, 1 `已认证发票导入` button.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/tax-offset-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-004-app-health-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`web/src/pages/AppHealthOperationsPage.tsx`、`web/src/features/appHealth/*`、相关 `web/src/test/*AppHealth*` 测试和当前 `git status`。本切片只做系统状态页 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 在 `docs/refactor-ui/module_inventory.md` 追加或更新 `app-health discovery`；如果矩阵过长，则新建 `docs/refactor-ui/modules/app-health.md` 并从 `module_inventory.md` 链接。
+- 清点旧页面用户可见入口：状态面板、刷新按钮、worker/read model/job 信息、表格/列表、loading/empty/error/stale 状态。
+- 标明哪些元素必须功能等价保留，尤其旧状态表仍为表格或状态列表，不改成大 card dashboard。
+- 列出表格/状态列表排版要求：状态 tag 稳定高度、时间/数量 tabular nums、错误文本截断或换行规则、刷新中不阻塞导航。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
+- 生成下一条唯一 prompt：`PV-005-app-health-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`

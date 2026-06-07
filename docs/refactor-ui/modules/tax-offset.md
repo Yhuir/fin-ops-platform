@@ -225,3 +225,49 @@ Last updated: 2026-06-08
   - read-only permission hides import/save,
   - no data snapshot restore.
 - `git diff --check`, forbidden keepalive grep and non-workbench MUI grep pass.
+
+## PV-003 Premium Visual Implementation
+
+- Prompt ID: `PV-003-tax-offset-premium-visual`
+- Type: implementation
+- Status: verified
+- Runtime changed: CSS-only visual/interaction polish plus tax summary class names.
+- Tests changed: yes, source/style contract in `TaxOffsetPage.test.tsx`.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Changes
+
+- Added scoped `tax-summary-strip` and `tax-summary-card` classes so Tax Offset metrics can be polished without affecting Cost Statistics `stat-card` usage.
+- Tightened the metrics into a compact five-column strip with tabular numeric values and tokenized success/warning treatments.
+- Converted `tax-result-panel` from a large rounded gradient card into a compact decision band with a Ledger Blue left rule and right-aligned result amount.
+- Lightened `tax-panel-header` and table tool buttons to match the premium finance surface while preserving search/sort/filter button names.
+- Stabilized tax tags with `--fp-tag-height-table`, tokenized radii, stable min widths and fast motion-token transitions.
+- Polished selected, locked and certified-highlighted table rows without changing row height.
+- Polished the right-side `已认证结果` complementary workspace as a compact working rail; it remains an attached right workspace, not an overlay drawer.
+- Tightened certified import modal file-list spacing without changing dropzone, preview table or queued job behavior.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run TaxOffsetPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- Forbidden legacy page-cache/snapshot grep over runtime and module docs.
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked `/api/*` at `http://127.0.0.1:4173/tax-offset`.
+
+Browser smoke evidence:
+
+- Grids: 2.
+- Metrics: 5.
+- `role="complementary"` / `已认证结果`: 1.
+- `已认证发票导入` button: 1.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/tax-offset-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` still emits existing HeroUI/Tailwind CSS minify warnings; build exits successfully.

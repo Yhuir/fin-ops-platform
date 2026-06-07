@@ -18,11 +18,11 @@ export default function TaxSummaryCards({ summary }: TaxSummaryCardsProps) {
   ] as const;
 
   return (
-    <div className="stats-row">
+    <div className="stats-row tax-summary-strip">
       {cards.map((card) => (
         <section
           key={card.label}
-          className={`stat-card${card.tone === "warn" ? " warn" : ""}${card.tone === "success" ? " success" : ""}`}
+          className={`stat-card tax-summary-card${card.tone === "warn" ? " warn" : ""}${card.tone === "success" ? " success" : ""}`}
         >
           <span>{card.label}</span>
           <strong>{card.value}</strong>

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
@@ -50,6 +51,19 @@ function expectProjectDialogContract(dialog: HTMLElement) {
 }
 
 describe("Tax offset workbench", () => {
+  test("keeps tax offset premium visual polish scoped to project primitives", () => {
+    const styles = readFileSync("src/app/styles.css", "utf8");
+    const summarySource = readFileSync("src/components/tax/TaxSummaryCards.tsx", "utf8");
+
+    expect(summarySource).toContain("tax-summary-strip");
+    expect(summarySource).toContain("tax-summary-card");
+    expect(styles).toMatch(/\.tax-summary-card\.stat-card\s*\{/);
+    expect(styles).toMatch(/\.tax-result-panel\s*\{[\s\S]*border-left:\s*3px solid var\(--fp-primary\)/);
+    expect(styles).toMatch(/\.tax-panel-header\s*\{[\s\S]*background:\s*var\(--fp-surface-muted\)/);
+    expect(styles).toMatch(/\.tax-certified-drawer\s*\{[\s\S]*border-radius:\s*var\(--fp-radius-md\)/);
+    expect(styles).toMatch(/\.tax-status-tag,[\s\S]*\.tax-date-tag,[\s\S]*\.tax-rate-tag\s*\{[\s\S]*height:\s*var\(--fp-tag-height-table\)/);
+  });
+
   test("clears the initial loading state when the active tax month request is aborted", async () => {
     window.history.pushState({}, "", "/tax-offset");
     const abortControllers: AbortController[] = [];
