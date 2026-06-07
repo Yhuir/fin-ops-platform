@@ -123,4 +123,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-013-push-log-update` | `03cc0882` | pushed to `origin/main` | Recorded PV-013 push status after push. |
 | 2026-06-08 | `PV-014-oa-pending-payments-discovery` | `52831b5f` | pushed to `origin/main` | OA pending payments premium discovery and PV-015 prompt generated. |
 | 2026-06-08 | `PV-014-push-log-update` | `010e7412` | pushed to `origin/main` | Recorded PV-014 push status after push. |
-| 2026-06-08 | `PV-015-oa-pending-payments-premium-visual` | pending commit | pending push | OA pending payments premium visual polish verified; PV-016 prompt generated. |
+| 2026-06-08 | `PV-015-oa-pending-payments-premium-visual` | `80e9a2d3` | pushed to `origin/main` | OA pending payments premium visual polish verified; PV-016 prompt generated. |
