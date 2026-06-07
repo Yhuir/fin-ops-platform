@@ -35,7 +35,7 @@ Last updated: 2026-06-08
 | 3 | `PV-003-tax-offset-premium-visual` | verified | 税金抵扣 premium visual slice。 |
 | 4 | `PV-004-app-health-discovery` | verified | `/operations/app-health` discovery。 |
 | 5 | `PV-005-app-health-premium-visual` | verified | 系统状态 premium visual slice。 |
-| 6 | `PV-006-import-pages-discovery` | pending | `/imports/*` discovery。 |
+| 6 | `PV-006-import-pages-discovery` | verified | `/imports/*` discovery。 |
 | 7 | `PV-007-import-pages-premium-visual` | pending | 导入页族 premium visual slice。 |
 | 8 | `PV-008-cost-statistics-discovery` | pending | `/cost-statistics` discovery。 |
 | 9 | `PV-009-cost-statistics-premium-visual` | pending | 成本统计 premium visual slice。 |
@@ -62,28 +62,31 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-006-import-pages-discovery`
+`PV-007-import-pages-premium-visual`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/module_inventory.md`
-- `docs/refactor-ui/modules/import-pages.md` if the discovery matrix is too large for `module_inventory.md`
+- `docs/refactor-ui/modules/phase_6_import_pages.md`
 - `web/src/components/imports/ImportWorkflowPage.tsx`
+- `web/src/app/styles.css`
+- `web/src/test/ImportCenterPage.test.tsx`
 - import route wrappers
-- related import tests
 
 ### Verification
 
 Required:
 
+- `cd web && npx vitest run ImportCenterPage.test.tsx useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- targeted import pages discovery test inventory, if tests exist.
+- Browser smoke for import routes where practical.
 
-PV-006 is discovery-only unless a small pure characterization gap can be added without runtime behavior changes.
+PV-007 is a runtime visual/interactions slice. It must preserve all import workflow behavior and only polish the current HeroUI/FinanceTable implementation.
 
 ## Execution Rules
 
@@ -108,3 +111,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-003-tax-offset-premium-visual` | current commit | pushed to `origin/main` | Tax Offset premium visual polish verified and pushed with the current commit. |
 | 2026-06-08 | `PV-004-app-health-discovery` | current commit | pushed to `origin/main` | AppHealth discovery and PV-005 prompt generated with the current commit. |
 | 2026-06-08 | `PV-005-app-health-premium-visual` | current commit | pushed to `origin/main` | AppHealth premium visual polish verified and pushed with the current commit. |
+| 2026-06-08 | `PV-006-import-pages-discovery` | current commit | pending push | Import pages premium discovery and PV-007 prompt generated with the current commit. |

@@ -314,7 +314,13 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-006-import-pages-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-006-import-pages-discovery`
 
@@ -329,9 +335,54 @@ Notes:
 - 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
 - 生成下一条唯一 prompt：`PV-007-import-pages-premium-visual`，但不要执行。
 
-验证：
+### Execution Notes
+
+- 更新 `docs/refactor-ui/modules/phase_6_import_pages.md`，把历史迁移记录补齐为当前 `main` 的 premium visual discovery。
+- 确认当前导入页族已经使用 HeroUI `Alert`、`Button`、`Chip`、`Tabs`，项目 `AppDialog`、`PageScaffold` 和 `FinanceTable`，不再需要重复执行 MUI-to-HeroUI 平台迁移。
+- 记录三条 standalone routes、上传区、文件列表、预览表、详情 tabs、ETC 任务选择、错误/进度/确认状态和银行账户冲突 dialog 的保留矩阵。
+- 记录 PV-007 的视觉机会：压缩空隙、去除普通面板阴影、增强 upload zone/file cards/audit counters/detail tabs 的 motion-token 交互质感。
+- 未改运行时代码，未新增测试，因为 PV-006 是 discovery-only 且 `ImportCenterPage.test.tsx` 已覆盖当前 primitive contract。
+
+### Verification
+
+Passed:
 
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-006 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-007-import-pages-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_import_pages.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/components/imports/ImportWorkflowPage.tsx`、`web/src/app/styles.css`、`web/src/test/ImportCenterPage.test.tsx`、三个 import route wrapper 和当前 `git status`。本切片只做 `/imports/bank-transactions`、`/imports/invoices`、`/imports/etc-invoices` premium visual implementation：保留现有 route、上传、drag/drop、文件选择、per-file select、ETC 任务选择、预览 API、确认 API、session persistence、错误处理、进度状态、银行账户冲突 dialog、所有 `FinanceTable` 表格和测试语义。禁止改后端/API/read model/worker/关联台内部工作区。
+
+实现要求：
+
+- 不做大 card 设计，不制造大留白；保持两栏导入工作流，但让文件区、预览区、审计计数和表格 shell 更紧凑、更像银行明细 premium sample 的浅色金融产品质感。
+- 继续使用 HeroUI 原生组件和项目 primitives；不要新增依赖，不新增 MUI。
+- `返回关联台`、上传区、select、file card、audit card、detail tabs、preview table shell 使用 `interaction_smoothness.md` motion tokens 做 hover/press/focus/active feedback；不得增加页面转场或阻塞路由。
+- 上传区仍是上传区，保持 `label` + hidden file input 结构、click upload、drag/drop、invalid file type rejection 和 disabled 状态。
+- file cards 保持文件名、大小、移除按钮和 per-file config；长文件名截断，不撑开 action toolbar。
+- 审计汇总保持小型辅助 counter，不做 dashboard metric cards；数字使用 tabular nums。
+- `导入预览结果`、`重复项明细`、`未导入项明细`、`ETC导入预览结果` 继续使用 `FinanceTable`，保留 accessible names、columns、minWidth、empty/loading rows 和可见数据。
+- `导入预览明细` 继续是 tabs，选中态清楚但不改变高度。
+- `银行账户冲突确认` 继续是 `AppDialog`，不改为 drawer 或 inline panel。
+- loading/error/confirm notices 保持 role 和文案，不放大成占屏提示。
+
+验证：
+
+- `cd web && npx vitest run ImportCenterPage.test.tsx useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 如 dev server 可用，浏览器 smoke 三条 route：确认 heading、上传区、清空/开始预览/确认导入、预览表区域存在，无明显重叠或顶层横向溢出；至少对一个 route 执行上传/预览后确认表格和 detail tabs 可见。
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_import_pages.md`，精确 staging，commit 并 push 到 `origin/main`。

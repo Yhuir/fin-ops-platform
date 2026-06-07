@@ -2,7 +2,7 @@
 
 本文档记录导入页族迁移 discovery。目标是逐步把 `/imports/*` 的共享导入工作流从 MUI/MUI X DataGrid 迁到 HeroUI/Tailwind/项目 primitives，同时保留上传、预览、确认、错误、进度、详情和 session restore 的用户体感。
 
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 
 ## Boundary
 
@@ -95,13 +95,77 @@ Wrappers have no MUI dependency; migration work is concentrated in `ImportWorkfl
 - ETC preview uses ETC API, skips generic preview and lists missing task items。
 - ETC confirm posts session/task ids and shows background job feedback。
 
-Current testing gaps for migration:
+Current premium testing gaps:
 
-- Tests do not yet assert import page shell/cards/notices are non-MUI project primitives。
-- Tests still rely on DataGrid columnheader semantics but do not lock `FinanceTable`/project table primitive contract。
-- Tests do not lock conflict confirmation dialog away from `.MuiDialog-root`。
-- Tests do not lock upload zone project classes or no MUI root classes。
-- Tests do not lock detail tabs as HeroUI/project tabs; they only rely on user-visible tab labels indirectly。
+- Tests already assert import page shell、upload zone、notices、audit cards、preview tables、detail tabs and conflict dialog use project/HeroUI primitives instead of MUI roots。
+- Tests already cover standalone route behavior、upload、preview、confirm、session persistence、pending navigation、ETC ready task gating、stale preview errors and background job feedback。
+- Tests do not yet lock premium visual rhythm: compact two-column import workspace、upload zone hover/active/focus transition、file card row density、audit count typography、preview table shell height and detail tab selected-state token usage。
+- Tests do not yet assert long file names remain readable without stretching the action toolbar。
+- Tests do not yet assert import workflow CSS uses motion tokens for local interactions。
+
+## PV-006 Premium Visual Discovery
+
+Prompt ID: `PV-006-import-pages-discovery`
+
+Current source files:
+
+- `web/src/components/imports/ImportWorkflowPage.tsx`
+- `web/src/pages/imports/ImportBankTransactionsPage.tsx`
+- `web/src/pages/imports/ImportInvoicesPage.tsx`
+- `web/src/pages/imports/ImportEtcInvoicesPage.tsx`
+- `web/src/test/ImportCenterPage.test.tsx`
+- `web/src/app/styles.css`
+
+Current implementation status on `main`:
+
+- Route wrappers are thin and stable; each wrapper only renders `ImportWorkflowPage` with the correct mode.
+- Runtime import page UI already uses HeroUI `Alert`、`Button`、`Chip`、`Tabs`, lucide icons, project `AppDialog`, `PageScaffold`, and `FinanceTable`.
+- Preview grids are already `FinanceTable` surfaces with accessible names `导入预览结果`、`重复项明细`、`未导入项明细` and `ETC导入预览结果`.
+- Conflict confirmation is already `AppDialog` with role `dialog` and title `银行账户冲突确认`.
+- File mapping controls are native select controls with project classes, preserving labels such as `对应账户 <file>`、`票据方向 <file>` and `ETC对账任务`.
+
+User-visible entrypoint matrix:
+
+| Area | Bank transactions | Invoices | ETC invoices | Must preserve |
+| --- | --- | --- | --- | --- |
+| Route | `/imports/bank-transactions` | `/imports/invoices` | `/imports/etc-invoices` | Standalone route, not dialog/drawer. |
+| Page title | `银行流水导入` | `发票导入` | `ETC发票导入` | Heading text and route identity. |
+| Header actions | `返回关联台`, `清空`, `开始预览`, `确认导入` | same | same | Same action hierarchy and disabled/loading behavior. |
+| Upload | `.xls/.xlsx` files | `.xls/.xlsx` files | `.zip` files | Click upload, drag/drop, invalid file rejection, disabled state. |
+| Per-file config | Bank account mapping select | Invoice direction select | ETC zip chip | Existing labels and validation. |
+| Task config | none | none | Ready ETC task select + unavailable task explanation | Cannot preview ETC zip without ready task. |
+| Feedback | success/error/confirm/warning notices | same | same plus task blockers | Role/status text remains visible and compact. |
+| Preview summary | Audit count grid | Audit count grid | Audit count grid + ETC result chips | Counts remain small support information, not large metric cards. |
+| Preview table | `导入预览结果` | `导入预览结果` | `ETC导入预览结果` | Table stays table, not card list. |
+| Detail tables | duplicate/unimported tabs | duplicate/unimported tabs | missing task notice/table | Tabs stay tabs; detail table names remain accessible. |
+| Confirmation | bank conflict dialog when needed | direct confirm | ETC confirm posts session/task | Existing API flow and background job feedback. |
+
+Table and preview layout requirements for PV-007:
+
+- Main preview table keeps 16 columns and `minWidth={1500}`; detail table keeps 10 columns and `minWidth={1240}`; ETC table keeps 5 columns and `minWidth={980}`.
+- File, account, reason and message cells are left-aligned with truncation.
+- Status, type, decision and direction cells use stable tag heights.
+- Counts, row numbers and amounts use tabular nums and right alignment through `FinanceTable` column roles.
+- Empty/loading rows preserve table frame and do not collapse preview height.
+- Long file names must truncate within file cards and table cells without shifting header actions.
+- Detail tabs selected state must be clear without changing tab height.
+
+Premium visual opportunities for PV-007:
+
+- Tighten `.import-workflow-content` and panel gaps to reduce empty air while keeping the two-column workflow.
+- Remove ordinary panel shadow and use border/background layers, matching Ledger Calm.
+- Add motion-token transitions to `返回关联台`, upload zone, native select controls, file cards, audit cards and detail tabs.
+- Make upload zone feel like a dense production upload target instead of a large blank drop area; keep the label and file input behavior unchanged.
+- Make file cards more row-like: stronger identity, compact metadata, stable remove button, long-name truncation.
+- Make audit count grid read as compact ledger counters, not dashboard metric cards.
+- Harmonize preview table shells with bank details/tax offset surfaces: muted header band, stable heights, no large whitespace.
+- Keep all work inside CSS and focused primitive polish unless a small class hook is necessary.
+
+Non-scope for PV-007:
+
+- Do not change import APIs, ETC APIs, draft context, health mutation blocking, file selection logic, preview payload mapping, session persistence, mock data, route wrappers, workbench internals or backend code.
+- Do not replace native file input behavior with a custom upload library.
+- Do not change preview table columns, accessible names, API payloads, confirm copy or error copy.
 
 ## Migration Slices
 
