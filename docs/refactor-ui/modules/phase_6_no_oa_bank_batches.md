@@ -274,6 +274,7 @@ Scope: transaction region in `NoOaBankBatchPage.tsx` only: region `流水`, batc
   - `sed -n '930,1096p' web/src/pages/NoOaBankBatchPage.tsx | if rg -n 'TableContainer|<Table\\b|TableHead|TableBody|TableRow|TableCell|<Checkbox\\b|<Chip\\b|BatchStatusChip'; then exit 1; else exit 0; fi`: passed.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P077 implementation files changed before docs.
+- Commit: `00e0ca44 feat: migrate no oa bank batch transactions`, pushed to `origin/refactor-ui`.
 
 ## Current Expected Failures After P077
 

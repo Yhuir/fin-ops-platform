@@ -4453,6 +4453,7 @@ Scope: transaction region in `NoOaBankBatchPage.tsx` only: region `流水`, batc
 - Preserved region `流水`, title/hint/account copy, loading/empty/detail states, batch actions, submit/withdraw handlers, table aria-labels, checkbox labels, single-account guard, amount alignment, tags and source labels.
 - Corrected the P077 residue grep to the transaction region because P078 still owns drawer `<Checkbox>` usage.
 - Did not modify tag drawer, withdraw dialog, snackbar, API client, backend, read model, worker or workbench internals.
+- Committed and pushed `00e0ca44 feat: migrate no oa bank batch transactions` to `origin/refactor-ui`.
 - Verification:
   - `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|selects transactions|submits selected transaction|submits internal transfer|withdraw"`: expected-fail; 6 transaction/withdraw behavior tests passed and 1 source-level contract failed.
   - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: expected-fail; 19 behavior tests passed and 1 source-level contract failed.
