@@ -341,3 +341,48 @@ Scope: `/input-invoice-usage` main dense table and expandable cell only: `InputI
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/table_layout_system.md、web/src/components/common/FinanceTable.tsx、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx、web/src/components/inputInvoiceUsage/ExpandableCellText.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 `InputInvoiceUsageTable.tsx` 和 `ExpandableCellText.tsx` 的 MUI imports/usages，包括 `InfoOutlinedIcon`、`ExpandLessOutlinedIcon`、`ExpandMoreOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Paper`、`Stack`、`Table*`、`TablePagination`、`Tooltip`、`Typography` 和 `.MuiChip-label`/`.MuiTablePagination-*` selectors。使用 `FinanceTable`/project dense table primitives 或 native project table shell、project tags/buttons/tooltips、lucide icons 和 project pagination。必须保留 `aria-label="进项发票使用情况表"`、四个列组 `进项发票`/`支付状态`/`OA`/`流水`、10 列 header、amount right alignment/tabular nums、payment status class or equivalent project class contract、date/status/application/bank direction tags with stable height、detail button labels `查看发票 <invoice> 详情` / `查看OA <applicant/id> 详情` / `查看流水 <counterparty/id> 详情`、long-text expand/collapse labels、empty row `当前条件下没有进项发票使用记录。`、server page/pageSize/total pagination labels `每页行数` and `<from>-<to> / <count>`。不得修改 page shell、filter menu、detail/export/payment-rules/OA-reverse drawers、input invoice usage API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|adds sidebar route"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P057-P060/P061 filter/drawer source contract failures 可以继续 expected-fail，但 `InputInvoiceUsageTable.tsx` and `ExpandableCellText.tsx` must disappear from the source-level failure list；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|Mui[A-Z]|TablePagination|InfoOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon' web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx web/src/components/inputInvoiceUsage/ExpandableCellText.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P057 filter menu prompt。
 ```
+
+## Execution Update: P056 Main Table And Expandable Cell
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx`
+  - `web/src/components/inputInvoiceUsage/ExpandableCellText.tsx`
+  - `web/src/app/styles.css`
+- Runtime implementation changed: main dense table, pagination and expandable cell only.
+- Page shell/filter menu/drawer components changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - Replaced MUI table/chip/button/tooltip/pagination stack with a native project dense table shell.
+  - Preserved table accessible name `进项发票使用情况表`, four column groups, 10-column header, detail buttons, payment status class contract, empty row and pagination labels.
+  - Replaced MUI expandable text controls with `lucide-react` chevrons and project/native buttons.
+  - Added input invoice usage table, tag, action, expandable text and pagination styles in `web/src/app/styles.css`.
+  - Corrected P055 page shell CSS to use existing `--fp-primary` tokens instead of undefined accent aliases.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|TablePagination|InfoOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon' web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx web/src/components/inputInvoiceUsage/ExpandableCellText.tsx; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|adds sidebar route"`: expected-fail. Main table behavior passed; source failure now lists only filter menu and drawers.
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: expected-fail, 19 passed and 2 source-level failures. `InputInvoiceUsageTable.tsx` and `ExpandableCellText.tsx` no longer appear in failure lists.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
+## Current Expected Failures After P056
+
+The two source-level failures are expected until P057-P060/P061 complete:
+
+- `src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx`: still imports MUI menu/check/radio/button/icons and `.MuiButton-startIcon`; P057 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx`: still imports MUI Drawer and status/layout components; P058 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx`: still imports MUI Drawer/table/status/action components; P058 owns this.
+- `src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx`: still imports MUI Drawer/table/form/tag/status/action components; P059 owns this.
+- `src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`: still imports MUI Drawer/table/form/selection/tag/status/action components; P060 owns this.
+
+## P057 Prompt Draft
+
+```text
+Prompt ID: P057-phase-6-input-invoice-usage-filter-menu
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: Shared `InputInvoiceUsageFilterMenu.tsx` only, plus necessary styles/tests. Preserve its external consumer `OaPendingPaymentsTable`; do not add new `/input-invoice-usage` table filter entrypoints.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/app/styles.css。只修改 `InputInvoiceUsageFilterMenu.tsx`、必要 `web/src/app/styles.css` 和必要测试 expectation：移除 filter menu 的 MUI imports/usages，包括 `ArrowDownwardOutlinedIcon`、`ArrowUpwardOutlinedIcon`、`FilterListOutlinedIcon`、`Button`、`Checkbox`、`Divider`、`ListItemIcon`、`ListItemText`、`Menu`、`MenuItem`、`Radio`、`Stack`、`Typography` 和 `.MuiButton-startIcon` selector。使用 project/native popover/menu、native checkbox/radio semantics and lucide icons。必须保持 prop contract for `OaPendingPaymentsTable`，保留 trigger label `筛选 <field label>`、menu accessible name `<field label>筛选与排序`、heading/subtitle text、`升序排序`、`降序排序`、`全选`、`清空`、`暂无可选项`、`该字段的输入控件由页面查询区提供`、`menuitemcheckbox` checked state、`menuitemradio` checked state、API-provided option labels/counts and no fabricated options。不得修改 page shell、main table、detail/export/payment-rules/OA-reverse drawers、input invoice usage API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "InputInvoiceUsageFilterMenu|workflow primitive targets"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P058-P060/P061 drawer source contract failures 可以继续 expected-fail，但 `InputInvoiceUsageFilterMenu.tsx` must disappear from the source-level failure lists；运行 `cd web && npm run build`；运行 filter menu MUI grep：`if rg -n '@mui/|Mui[A-Z]|FilterListOutlinedIcon|ArrowDownwardOutlinedIcon|ArrowUpwardOutlinedIcon|MenuItem|ListItemText|Checkbox|Radio' web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P058 detail/export drawers prompt。
+```

@@ -3355,6 +3355,55 @@ Scope: `/input-invoice-usage` main dense table and expandable cell only: `InputI
 - Expected failure allowed: yes，P057-P060/P061 source failures can remain, but table and expandable cell source must clear。
 - Next prompt: P057 shared filter menu only after P056 implementation is verified/expected-fail documented。
 
+#### Execution Notes
+
+- Migrated `InputInvoiceUsageTable.tsx` from MUI table/chip/button/tooltip/pagination components to a native project dense table shell.
+- Migrated `ExpandableCellText.tsx` from MUI icon button/tooltip/text layout to `lucide-react` chevrons and project/native buttons.
+- Preserved `进项发票使用情况表`, four table groups, 10-column header, amount formatting, payment status class contract, date/status tags, detail button labels, long-text expand/collapse labels, empty row and pagination labels.
+- Added input invoice usage table, tag, action, expandable text and pagination CSS.
+- Corrected P055 page shell CSS token names to use existing `--fp-primary` variables.
+- Did not modify page shell behavior, shared filter menu, detail/export/payment-rules/OA-reverse drawers, API/mock/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `if rg -n '@mui/|Mui[A-Z]|TablePagination|InfoOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon' web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx web/src/components/inputInvoiceUsage/ExpandableCellText.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|adds sidebar route"`: expected-fail. Main table behavior passed; source failure now lists only filter menu and drawers.
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: expected-fail, 19 passed and 2 source-level failures. `InputInvoiceUsageTable.tsx` and `ExpandableCellText.tsx` no longer appear in failure lists.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### P057-phase-6-input-invoice-usage-filter-menu
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: Shared `InputInvoiceUsageFilterMenu.tsx` only, plus necessary styles/tests. Preserve its external consumer `OaPendingPaymentsTable`; do not add new `/input-invoice-usage` table filter entrypoints.
+
+#### Prompt
+
+```text
+Prompt ID: P057-phase-6-input-invoice-usage-filter-menu
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: Shared `InputInvoiceUsageFilterMenu.tsx` only, plus necessary styles/tests. Preserve its external consumer `OaPendingPaymentsTable`; do not add new `/input-invoice-usage` table filter entrypoints.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/app/styles.css。只修改 `InputInvoiceUsageFilterMenu.tsx`、必要 `web/src/app/styles.css` 和必要测试 expectation：移除 filter menu 的 MUI imports/usages，包括 `ArrowDownwardOutlinedIcon`、`ArrowUpwardOutlinedIcon`、`FilterListOutlinedIcon`、`Button`、`Checkbox`、`Divider`、`ListItemIcon`、`ListItemText`、`Menu`、`MenuItem`、`Radio`、`Stack`、`Typography` 和 `.MuiButton-startIcon` selector。使用 project/native popover/menu、native checkbox/radio semantics and lucide icons。必须保持 prop contract for `OaPendingPaymentsTable`，保留 trigger label `筛选 <field label>`、menu accessible name `<field label>筛选与排序`、heading/subtitle text、`升序排序`、`降序排序`、`全选`、`清空`、`暂无可选项`、`该字段的输入控件由页面查询区提供`、`menuitemcheckbox` checked state、`menuitemradio` checked state、API-provided option labels/counts and no fabricated options。不得修改 page shell、main table、detail/export/payment-rules/OA-reverse drawers、input invoice usage API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "InputInvoiceUsageFilterMenu|workflow primitive targets"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P058-P060/P061 drawer source contract failures 可以继续 expected-fail，但 `InputInvoiceUsageFilterMenu.tsx` must disappear from the source-level failure lists；运行 `cd web && npm run build`；运行 filter menu MUI grep：`if rg -n '@mui/|Mui[A-Z]|FilterListOutlinedIcon|ArrowDownwardOutlinedIcon|ArrowUpwardOutlinedIcon|MenuItem|ListItemText|Checkbox|Radio' web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P058 detail/export drawers prompt。
+```
+
+#### Review
+
+- Single slice: yes，shared filter menu only。
+- External consumer preserved: required，`OaPendingPaymentsTable` prop contract must remain compatible。
+- Do not add page filters: required。
+- Drawers untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，P058-P060/P061 drawer source failures can remain, but filter menu source must clear。
+- Next prompt: P058 detail/export drawers only after P057 implementation is verified/expected-fail documented。
+
 ### MG Prompt Template
 
 ```text

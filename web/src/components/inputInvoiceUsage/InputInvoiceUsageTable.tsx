@@ -1,19 +1,4 @@
-import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import { Info } from "lucide-react";
 import type { MutableRefObject, ReactNode } from "react";
 
 import type {
@@ -35,55 +20,7 @@ type InputInvoiceUsageTableProps = {
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
-const groupHeaderSx = {
-  borderBottom: "1px solid",
-  borderColor: "divider",
-  color: "text.primary",
-  fontSize: "12px",
-  fontWeight: 800,
-  py: 0.75,
-  textAlign: "center",
-  whiteSpace: "nowrap",
-};
-
-const subHeaderSx = {
-  borderBottom: "1px solid",
-  borderColor: "divider",
-  color: "text.secondary",
-  fontSize: "11px",
-  fontWeight: 700,
-  lineHeight: 1.25,
-  py: 0.75,
-  whiteSpace: "nowrap",
-};
-
-const bigSeparatorSx = {
-  borderLeft: "1px solid",
-  borderLeftColor: "divider",
-};
-
-const smallSeparatorSx = {
-  borderLeft: "1px solid",
-  borderLeftColor: "rgba(148, 163, 184, 0.28)",
-};
-
-const bodyCellSx = {
-  verticalAlign: "top",
-  fontSize: "12px",
-  lineHeight: 1.35,
-  py: 0.8,
-  minWidth: 0,
-  overflowWrap: "anywhere",
-};
-
-const denseChipSx = {
-  height: 22,
-  maxWidth: "100%",
-  "& .MuiChip-label": {
-    fontSize: "11px",
-    px: 0.75,
-  },
-};
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
 
 function displayInvoiceNo(row: InputInvoiceUsageRow) {
   const invoice = row.invoice;
@@ -93,13 +30,13 @@ function displayInvoiceNo(row: InputInvoiceUsageRow) {
   if (invoice.digitalInvoiceNo) {
     return invoice.digitalInvoiceNo;
   }
-  return [invoice.invoiceCode, invoice.invoiceNo].filter(Boolean).join(" ") || "—";
+  return [invoice.invoiceCode, invoice.invoiceNo].filter(Boolean).join(" ") || "-";
 }
 
 function formatMoney(value: string) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   if (!Number.isFinite(parsed)) {
-    return value || "—";
+    return value || "-";
   }
   return parsed.toLocaleString("zh-CN", {
     minimumFractionDigits: 2,
@@ -114,37 +51,92 @@ function dateOnly(value: string) {
   return value.includes("T") ? value.split("T")[0] : value;
 }
 
+function classNames(...values: Array<string | false | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
+
 function HeaderCell({
   label,
   align,
-  sx,
+  separated,
+  strongSeparated,
+  emphasized,
 }: {
   label: ReactNode;
   align?: "left" | "right" | "center";
-  sx?: object | object[];
+  separated?: boolean;
+  strongSeparated?: boolean;
+  emphasized?: boolean;
 }) {
-  const sxList = Array.isArray(sx) ? [subHeaderSx, ...sx] : [subHeaderSx, sx];
   return (
-    <TableCell scope="col" align={align} sx={sxList}>
-      <Box
-        component="span"
-        sx={{
-          display: "inline-flex",
-          flexDirection: "column",
-          alignItems: align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start",
-          gap: 0.15,
-          minWidth: 0,
-          maxWidth: "100%",
-        }}
-      >
-        {label}
-      </Box>
-    </TableCell>
+    <th
+      className={classNames(
+        "input-invoice-usage-table-sub-header",
+        align && `input-invoice-usage-table-sub-header--${align}`,
+        separated && "input-invoice-usage-table-cell--separator",
+        strongSeparated && "input-invoice-usage-table-cell--strong-separator",
+        emphasized && "input-invoice-usage-table-cell--payment",
+      )}
+      scope="col"
+    >
+      <span className="input-invoice-usage-table-header-stack">{label}</span>
+    </th>
   );
 }
 
 function EmptyCell() {
-  return <Typography variant="caption" color="text.secondary">—</Typography>;
+  return <span className="input-invoice-usage-empty-value">-</span>;
+}
+
+function Tag({
+  children,
+  tone = "neutral",
+  className,
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "warning" | "info" | "success";
+  className?: string;
+}) {
+  return (
+    <span className={classNames("input-invoice-usage-tag", `input-invoice-usage-tag--${tone}`, className)}>
+      {children}
+    </span>
+  );
+}
+
+function DetailButton({
+  label,
+  children,
+  onClick,
+  iconOnly = false,
+}: {
+  label: string;
+  children?: ReactNode;
+  onClick: () => void;
+  iconOnly?: boolean;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className={classNames("input-invoice-usage-table-action", iconOnly && "input-invoice-usage-table-action--icon")}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      {iconOnly ? <Info aria-hidden="true" size={14} /> : children}
+    </button>
+  );
+}
+
+function displayedRange(page: number, pageSize: number, total: number) {
+  if (total <= 0) {
+    return "0-0 / 0";
+  }
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const from = (currentPage - 1) * pageSize + 1;
+  const to = Math.min(currentPage * pageSize, total);
+  return `${from}-${to} / ${total}`;
 }
 
 export default function InputInvoiceUsageTable({
@@ -159,76 +151,70 @@ export default function InputInvoiceUsageTable({
   onPageSizeChange,
   tableWrapRef,
 }: InputInvoiceUsageTableProps) {
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const canGoPrevious = page > 1;
+  const canGoNext = page < totalPages;
+
   return (
-    <Paper variant="outlined" sx={{ width: "100%", minWidth: 0, overflow: "hidden" }}>
-      <TableContainer ref={tableWrapRef} sx={{ width: "100%", overflowX: "hidden" }}>
-        <Table
-          aria-label="进项发票使用情况表"
-          size="small"
-          sx={{
-            width: "100%",
-            tableLayout: "fixed",
-            "& th, & td": {
-              boxSizing: "border-box",
-            },
-          }}
-        >
+    <div className="input-invoice-usage-table-frame">
+      <div ref={tableWrapRef} className="input-invoice-usage-table-shell">
+        <table aria-label="进项发票使用情况表" className="input-invoice-usage-table">
           <colgroup>
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "7%" }} />
-            <col style={{ width: "12%" }} />
+            <col className="input-invoice-usage-col-invoice-no" />
+            <col className="input-invoice-usage-col-seller" />
+            <col className="input-invoice-usage-col-invoice-amount" />
+            <col className="input-invoice-usage-col-business" />
+            <col className="input-invoice-usage-col-payment" />
+            <col className="input-invoice-usage-col-oa-applicant" />
+            <col className="input-invoice-usage-col-oa-project" />
+            <col className="input-invoice-usage-col-bank-name" />
+            <col className="input-invoice-usage-col-bank-amount" />
+            <col className="input-invoice-usage-col-bank-remark" />
           </colgroup>
-          <TableHead>
-            <TableRow>
-              <TableCell colSpan={4} scope="colgroup" sx={[groupHeaderSx, { bgcolor: "#f6fbf8" }]}>
+          <thead>
+            <tr>
+              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--invoice" colSpan={4} scope="colgroup">
                 进项发票
-              </TableCell>
-              <TableCell colSpan={1} scope="colgroup" sx={[groupHeaderSx, bigSeparatorSx, { bgcolor: "rgba(255, 193, 7, 0.16)" }]}>
+              </th>
+              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--payment input-invoice-usage-table-cell--strong-separator" colSpan={1} scope="colgroup">
                 支付状态
-              </TableCell>
-              <TableCell colSpan={2} scope="colgroup" sx={[groupHeaderSx, bigSeparatorSx, { bgcolor: "#f8fafc" }]}>
+              </th>
+              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--oa input-invoice-usage-table-cell--strong-separator" colSpan={2} scope="colgroup">
                 OA
-              </TableCell>
-              <TableCell colSpan={3} scope="colgroup" sx={[groupHeaderSx, bigSeparatorSx, { bgcolor: "#f5f9ff" }]}>
+              </th>
+              <th className="input-invoice-usage-table-group-header input-invoice-usage-table-group-header--bank input-invoice-usage-table-cell--strong-separator" colSpan={3} scope="colgroup">
                 流水
-              </TableCell>
-            </TableRow>
-            <TableRow>
+              </th>
+            </tr>
+            <tr>
               <HeaderCell label="发票号码" />
-              <HeaderCell label="销方" sx={smallSeparatorSx} />
+              <HeaderCell label="销方" separated />
               <HeaderCell
+                align="right"
                 label={(
                   <>
                     <span>价税合计</span>
                     <span>不含税/税率税额</span>
                   </>
                 )}
-                align="right"
-                sx={smallSeparatorSx}
+                separated
               />
-              <HeaderCell label="货物或应税劳务名称" sx={smallSeparatorSx} />
-              <HeaderCell label="支付状态" sx={[bigSeparatorSx, { bgcolor: "rgba(255, 193, 7, 0.12)" }]} />
-              <HeaderCell label="OA申请人" sx={bigSeparatorSx} />
-              <HeaderCell label="项目名称" sx={smallSeparatorSx} />
-              <HeaderCell label="对方户名" sx={bigSeparatorSx} />
-              <HeaderCell label="金额" align="right" sx={smallSeparatorSx} />
-              <HeaderCell label="摘要/备注" sx={smallSeparatorSx} />
-            </TableRow>
-          </TableHead>
-          <TableBody>
+              <HeaderCell label="货物或应税劳务名称" separated />
+              <HeaderCell label="支付状态" strongSeparated emphasized />
+              <HeaderCell label="OA申请人" strongSeparated />
+              <HeaderCell label="项目名称" separated />
+              <HeaderCell label="对方户名" strongSeparated />
+              <HeaderCell label="金额" align="right" separated />
+              <HeaderCell label="摘要/备注" separated />
+            </tr>
+          </thead>
+          <tbody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={10} align="center" sx={{ py: 6, color: "text.secondary" }}>
+              <tr>
+                <td className="input-invoice-usage-table-state-cell" colSpan={10}>
                   当前条件下没有进项发票使用记录。
-                </TableCell>
-              </TableRow>
+                </td>
+              </tr>
             ) : rows.map((row) => {
               const invoiceNo = displayInvoiceNo(row);
               const invoiceCellExpanded = expandedCells.has(`${row.id}:invoice-business`);
@@ -238,89 +224,69 @@ export default function InputInvoiceUsageTable({
               const bankRemarkCellExpanded = expandedCells.has(`${row.id}:bank-remark`);
               const oa = row.oa.primary;
               const bank = row.bank.primary;
+
               return (
-                <TableRow key={row.id} hover>
-                  <TableCell sx={bodyCellSx}>
-                    <Stack direction="row" spacing={0.25} alignItems="center" sx={{ minWidth: 0 }}>
-                      <Typography component="div" variant="body2" fontWeight={800} title={invoiceNo} sx={{ minWidth: 0, fontSize: "12px", lineHeight: 1.35 }}>
-                        {invoiceNo}
-                      </Typography>
-                      <Tooltip title="查看发票详情">
-                        <IconButton
-                          aria-label={`查看发票 ${invoiceNo} 详情`}
-                          size="small"
-                          onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
-                          sx={{ flexShrink: 0, p: 0.25 }}
-                        >
-                          <InfoOutlinedIcon fontSize="inherit" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.4, flexWrap: "wrap" }}>
-                      <Chip label={dateOnly(row.invoice.issueDate)} size="small" variant="outlined" sx={denseChipSx} />
-                    </Stack>
-                  </TableCell>
-                  <TableCell sx={[bodyCellSx, smallSeparatorSx]}>
-                    <Typography component="div" variant="body2" fontWeight={700} sx={{ fontSize: "12px", lineHeight: 1.35 }}>
-                      {row.invoice.sellerName || "—"}
-                    </Typography>
-                    <Typography component="div" variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere", fontSize: "11px", lineHeight: 1.3 }}>
-                      {row.invoice.sellerTaxNo || "—"}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="right" sx={[bodyCellSx, smallSeparatorSx]}>
-                    <Typography component="div" variant="body2" fontWeight={800} sx={{ fontSize: "12px", lineHeight: 1.35, fontVariantNumeric: "tabular-nums" }}>
-                      {formatMoney(row.invoice.totalWithTax)}
-                    </Typography>
-                    <Typography component="div" variant="caption" color="text.secondary" sx={{ fontSize: "11px", lineHeight: 1.3, fontVariantNumeric: "tabular-nums" }}>
-                      {`${formatMoney(row.invoice.amountWithoutTax)} ${row.invoice.taxRate || "—"} (${formatMoney(row.invoice.taxAmount)})`}
-                    </Typography>
-                  </TableCell>
-                  <TableCell sx={[bodyCellSx, smallSeparatorSx]}>
+                <tr className="input-invoice-usage-table-row" key={row.id}>
+                  <td className="input-invoice-usage-table-cell">
+                    <div className="input-invoice-usage-inline-row">
+                      <span className="input-invoice-usage-cell-primary" title={invoiceNo}>{invoiceNo}</span>
+                      <DetailButton
+                        iconOnly
+                        label={`查看发票 ${invoiceNo} 详情`}
+                        onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
+                      />
+                    </div>
+                    <div className="input-invoice-usage-tag-row">
+                      <Tag>{dateOnly(row.invoice.issueDate)}</Tag>
+                    </div>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
+                    <div className="input-invoice-usage-cell-primary">{row.invoice.sellerName || "-"}</div>
+                    <div className="input-invoice-usage-cell-secondary">{row.invoice.sellerTaxNo || "-"}</div>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator">
+                    <div className="input-invoice-usage-money-primary">{formatMoney(row.invoice.totalWithTax)}</div>
+                    <div className="input-invoice-usage-cell-secondary">
+                      {`${formatMoney(row.invoice.amountWithoutTax)} ${row.invoice.taxRate || "-"} (${formatMoney(row.invoice.taxAmount)})`}
+                    </div>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
                     <ExpandableCellText
                       text={row.invoice.taxableItemName}
                       expanded={invoiceCellExpanded}
                       onToggle={() => onToggleCellExpand(row.id, "invoice-business")}
                     />
-                  </TableCell>
-                  <TableCell
-                    className="input-invoice-usage-payment-cell"
-                    sx={[bodyCellSx, bigSeparatorSx, { bgcolor: "rgba(255, 193, 7, 0.14)" }]}
-                  >
-                    <Chip color="warning" label={row.paymentStatus.label || "待处理"} size="small" sx={denseChipSx} />
-                    <Box sx={{ mt: 0.45 }}>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--payment input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell">
+                    <Tag tone="warning">{row.paymentStatus.label || "待处理"}</Tag>
+                    <div className="input-invoice-usage-cell-block">
                       <ExpandableCellText
                         text={row.paymentStatus.reason}
                         expanded={paymentCellExpanded}
                         onToggle={() => onToggleCellExpand(row.id, "payment-status")}
                         threshold={22}
                       />
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={[bodyCellSx, bigSeparatorSx]}>
+                    </div>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator">
                     {oa ? (
                       <>
-                        <Typography component="div" variant="body2" fontWeight={800} sx={{ fontSize: "12px", lineHeight: 1.35 }}>
-                          {oa.applicant || "—"}
-                        </Typography>
-                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.45, flexWrap: "wrap" }}>
-                          <Chip label={oa.applicationType || "类型为空"} size="small" variant="outlined" sx={denseChipSx} />
+                        <div className="input-invoice-usage-cell-primary">{oa.applicant || "-"}</div>
+                        <div className="input-invoice-usage-tag-row">
+                          <Tag>{oa.applicationType || "类型为空"}</Tag>
                           {oa.detailAvailable ? (
-                            <Button
-                              size="small"
-                              variant="text"
-                              aria-label={`查看OA ${oa.applicant || oa.id} 详情`}
+                            <DetailButton
+                              label={`查看OA ${oa.applicant || oa.id} 详情`}
                               onClick={() => onOpenDetail({ kind: "oa", id: oa.id, rowId: row.id })}
-                              sx={{ minWidth: 0, px: 0.5, py: 0, fontSize: "11px" }}
                             >
                               详情
-                            </Button>
+                            </DetailButton>
                           ) : null}
-                        </Stack>
+                        </div>
                       </>
                     ) : <EmptyCell />}
-                  </TableCell>
-                  <TableCell sx={[bodyCellSx, smallSeparatorSx]}>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
                     {oa ? (
                       <ExpandableCellText
                         text={oa.projectName}
@@ -328,8 +294,8 @@ export default function InputInvoiceUsageTable({
                         onToggle={() => onToggleCellExpand(row.id, "oa-project")}
                       />
                     ) : <EmptyCell />}
-                  </TableCell>
-                  <TableCell sx={[bodyCellSx, bigSeparatorSx]}>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator">
                     {bank ? (
                       <>
                         <ExpandableCellText
@@ -337,44 +303,34 @@ export default function InputInvoiceUsageTable({
                           expanded={bankNameCellExpanded}
                           onToggle={() => onToggleCellExpand(row.id, "bank-name")}
                         />
-                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.45, flexWrap: "wrap" }}>
-                          <Chip label={bank.tradeTime || "交易日期为空"} size="small" variant="outlined" sx={denseChipSx} />
+                        <div className="input-invoice-usage-tag-row">
+                          <Tag>{bank.tradeTime || "交易日期为空"}</Tag>
                           {bank.detailAvailable ? (
-                            <Button
-                              size="small"
-                              variant="text"
-                              aria-label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
+                            <DetailButton
+                              label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
                               onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
-                              sx={{ minWidth: 0, px: 0.5, py: 0, fontSize: "11px" }}
                             >
                               详情
-                            </Button>
+                            </DetailButton>
                           ) : null}
-                        </Stack>
+                        </div>
                       </>
                     ) : <EmptyCell />}
-                  </TableCell>
-                  <TableCell align="right" sx={[bodyCellSx, smallSeparatorSx]}>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator">
                     {bank ? (
                       <>
-                        <Typography component="div" variant="body2" fontWeight={800} sx={{ fontSize: "12px", lineHeight: 1.35, fontVariantNumeric: "tabular-nums" }}>
-                          {formatMoney(bank.amount)}
-                        </Typography>
-                        <Chip
-                          label={`${bank.directionLabel || "收/支"} ${bank.bankName || "银行"} ${bank.accountLast4 || "----"}`}
-                          size="small"
-                          variant="outlined"
-                          sx={{ ...denseChipSx, mt: 0.45 }}
-                        />
+                        <div className="input-invoice-usage-money-primary">{formatMoney(bank.amount)}</div>
+                        <Tag className="input-invoice-usage-bank-tag">
+                          {`${bank.directionLabel || "收/支"} ${bank.bankName || "银行"} ${bank.accountLast4 || "----"}`}
+                        </Tag>
                       </>
                     ) : <EmptyCell />}
-                  </TableCell>
-                  <TableCell sx={[bodyCellSx, smallSeparatorSx]}>
+                  </td>
+                  <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--separator">
                     {bank ? (
                       <>
-                        <Typography component="div" variant="body2" fontWeight={700} sx={{ fontSize: "12px", lineHeight: 1.35 }}>
-                          {bank.summary || "—"}
-                        </Typography>
+                        <div className="input-invoice-usage-cell-primary">{bank.summary || "-"}</div>
                         <ExpandableCellText
                           text={bank.remark}
                           expanded={bankRemarkCellExpanded}
@@ -382,34 +338,35 @@ export default function InputInvoiceUsageTable({
                         />
                       </>
                     ) : <EmptyCell />}
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               );
             })}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      <TablePagination
-        component="div"
-        count={total}
-        page={Math.max(0, page - 1)}
-        rowsPerPage={pageSize}
-        rowsPerPageOptions={[20, 50, 100]}
-        labelRowsPerPage="每页行数"
-        labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
-        onPageChange={(_event, nextPage) => onPageChange(nextPage + 1)}
-        onRowsPerPageChange={(event) => onPageSizeChange(Number(event.target.value))}
-        sx={{
-          minHeight: 42,
-          ".MuiTablePagination-toolbar": {
-            minHeight: 42,
-            px: 1.5,
-          },
-          ".MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows": {
-            fontSize: "12px",
-          },
-        }}
-      />
-    </Paper>
+          </tbody>
+        </table>
+      </div>
+      <div className="input-invoice-usage-pagination">
+        <label className="input-invoice-usage-pagination-size">
+          <span>每页行数</span>
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          >
+            {PAGE_SIZE_OPTIONS.map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <span className="input-invoice-usage-pagination-range">{displayedRange(page, pageSize, total)}</span>
+        <div className="input-invoice-usage-pagination-actions">
+          <button disabled={!canGoPrevious} onClick={() => onPageChange(page - 1)} type="button">
+            上一页
+          </button>
+          <button disabled={!canGoNext} onClick={() => onPageChange(page + 1)} type="button">
+            下一页
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
