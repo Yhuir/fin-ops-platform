@@ -181,6 +181,7 @@ Scope: `/batch-accounting` bank row region/list, amount summary, mismatch note f
 - Test implementation changed: no.
 - Backend/API/read model/worker changed: no.
 - Workbench internals changed: no.
+- Commit: `7dd51d20 feat: migrate batch accounting bank summary`, pushed to `origin/refactor-ui`.
 - Migrated `批量账务流水` region/list rows from MUI Paper/Stack/Box/Typography/Chip to project native panel/list/tag classes.
 - Migrated amount summary chips and `差额说明` field from MUI Chip/TextField to project native tags/labelled input.
 - Migrated submitted amount mismatch warning from MUI Tooltip/IconButton/MUI warning icon to native warning button, tooltip container and lucide `AlertTriangle`.

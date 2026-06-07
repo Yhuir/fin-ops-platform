@@ -4712,6 +4712,7 @@ Scope: `/batch-accounting` bank row region/list, amount summary, mismatch note f
 - Added `web/src/app/styles.css` `batch-accounting-*` bank/list/summary/warning classes.
 - Preserved bank row accessible names, `aria-pressed`, bank selection reset, amount summary text/format, mismatch note trim requirement, submitted mismatch `金额不一致`, and hover/focus/click access to mismatch details.
 - Did not migrate OA table, withdraw dialog, snackbar/alert feedback, API client, backend, read model, worker or workbench internals.
+- Committed and pushed `7dd51d20 feat: migrate batch accounting bank summary` to `origin/refactor-ui`.
 - Verification:
   - `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|updates selected totals|submits mismatched|clears difference note when switching bank rows|renders submitted bucket"`: expected-fail; selected behavior tests passed and source-level contract failed as expected.
   - `cd web && npx vitest run BatchAccountingPage.test.tsx`: expected-fail; 12 behavior tests passed and 1 source-level contract failed.
