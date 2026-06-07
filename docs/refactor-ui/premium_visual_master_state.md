@@ -123,4 +123,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-010-push-log-update` | `12e88ee9` | pushed to `origin/main` | Recorded PV-010 push status after push. |
 | 2026-06-08 | `PV-011-pending-invoices-premium-visual` | `bcc292f1` | pushed to `origin/main` | Pending invoices premium visual polish verified; PV-012 prompt generated. |
 | 2026-06-08 | `PV-011-push-log-update` | `b467f9e2` | pushed to `origin/main` | Recorded PV-011 push status after push. |
-| 2026-06-08 | `PV-012-input-invoice-usage-discovery` | current commit | pending push | Input invoice usage premium discovery and PV-013 prompt generated. |
+| 2026-06-08 | `PV-012-input-invoice-usage-discovery` | `06b6f6e2` | pushed to `origin/main` | Input invoice usage premium discovery and PV-013 prompt generated. |
