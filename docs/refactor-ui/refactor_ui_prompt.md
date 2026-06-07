@@ -4963,6 +4963,7 @@ Scope: `/turnover-ledger` page shell actions, family tabs and summary cards only
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `if rg -n 'DownloadOutlinedIcon|<Tabs|<Tab|label="全部"|label="个人往来"|label="公司往来"|label="银行往来"|label="业务往来"' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi`: passed。
   - `git diff --check`: passed。
+- Commit: `e9a464b5 feat: migrate turnover ledger page shell`, pushed to `origin/refactor-ui`.
 - Next prompt generated: `P088-phase-6-turnover-ledger-grouped-table`.
 
 ### P088-phase-6-turnover-ledger-grouped-table

@@ -573,3 +573,4 @@
 | 2026-06-07 | `MG-P084-phase-6-batch-accounting` | `refactor-ui` | `5747bf90` | pushed |
 | 2026-06-07 | `P085-phase-6-turnover-ledger-discovery` | `refactor-ui` | `5747bf90` | pushed |
 | 2026-06-07 | `P086-phase-6-turnover-ledger-characterization-tests` | `refactor-ui` | `e8b462a7` | pushed |
+| 2026-06-07 | `P087-phase-6-turnover-ledger-page-shell-tabs-summary` | `refactor-ui` | `e9a464b5` | pushed |
