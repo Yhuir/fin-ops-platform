@@ -16,6 +16,7 @@
   - `rg -n "P085-phase-6-turnover-ledger-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P086-phase-6-turnover-ledger-characterization-tests" docs/refactor-ui/modules/phase_6_turnover_ledger.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P085/MG docs changed.
+- Commit: `5747bf90 docs: verify batch accounting mg and add turnover discovery`, pushed to `origin/refactor-ui`.
 - Next prompt generated: `P086-phase-6-turnover-ledger-characterization-tests`.
 
 ## Current MUI Inventory

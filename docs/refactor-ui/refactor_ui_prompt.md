@@ -4843,6 +4843,7 @@ Scope: `/batch-accounting` P080-P084 characterization and UI migration only.
   - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed。
   - `git diff --check`: passed。
   - `git status --short --branch`: passed；clean worktree before MG docs。
+- Commit: `5747bf90 docs: verify batch accounting mg and add turnover discovery`, pushed to `origin/refactor-ui`.
 - Next prompt generated: `P085-phase-6-turnover-ledger-discovery`.
 
 ### P085-phase-6-turnover-ledger-discovery
@@ -4883,6 +4884,7 @@ Scope: `/turnover-ledger` only.
   - `rg -n "P085-phase-6-turnover-ledger-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P086-phase-6-turnover-ledger-characterization-tests" docs/refactor-ui/modules/phase_6_turnover_ledger.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
   - `git diff --check`: passed。
   - `git status --short --branch`: passed；only P085/MG docs changed。
+- Commit: `5747bf90 docs: verify batch accounting mg and add turnover discovery`, pushed to `origin/refactor-ui`.
 - Next prompt generated: `P086-phase-6-turnover-ledger-characterization-tests`.
 
 ### P086-phase-6-turnover-ledger-characterization-tests
