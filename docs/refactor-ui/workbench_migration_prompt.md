@@ -515,7 +515,7 @@
 ### MG-WB006-css-containment-cleanup
 
 - Phase: `wb_phase_5_css_containment_cleanup`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push workbench `.Mui*` CSS cleanup、project class styles 和专项文档更新。
 
@@ -532,6 +532,29 @@
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
 - Verification before commit specified: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `web/src/app/styles.css`
+  - `web/src/test/WorkbenchZone.test.tsx`
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `25729aca refactor: remove workbench mui css hooks`
+- Push: `origin/refactor-ui`
+- Runtime/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `if rg -n '\\.Mui|Mui[A-Z]' web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi`
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `git commit -m "refactor: remove workbench mui css hooks"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 
