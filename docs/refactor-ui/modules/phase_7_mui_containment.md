@@ -228,6 +228,7 @@ Scope: MonthPicker/date compat implementation only.
   - `test ! -f web/src/app/MuiDatePickerCompatProvider.tsx` plus scoped no-MUI/date-compat grep for `MonthPicker.tsx` and `App.tsx`: passed.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
+- Commit: `f8799863 feat: migrate month picker containment`, pushed to `origin/refactor-ui`.
 
 ## P110 Prompt Draft
 
