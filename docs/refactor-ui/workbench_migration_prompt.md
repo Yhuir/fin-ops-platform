@@ -261,7 +261,7 @@
 ### MG-WB003-zone-header-controls
 
 - Phase: `wb_phase_2_zone_header_controls`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push `WorkbenchZone.tsx` MUI migration 和专项文档更新。
 
@@ -278,6 +278,30 @@
 - CSS/dependencies cleanup deferred: yes。
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `web/src/components/workbench/WorkbenchZone.tsx`
+  - `web/src/test/WorkbenchZone.test.tsx`
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `048aeaf4 refactor: migrate workbench zone controls from mui`
+- Push: `origin/refactor-ui`
+- PaneSearch/RecordCard/CSS/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - scoped `WorkbenchZone.tsx` no-MUI grep。
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx`
+  - `cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `git commit -m "refactor: migrate workbench zone controls from mui"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 
