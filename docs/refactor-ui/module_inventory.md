@@ -52,7 +52,7 @@ Last updated: 2026-06-08
 | 顺序 | 模块 | 路径 | 主要文件 | 风险 | 主要交互 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 税金抵扣 | `/tax-offset` | `TaxOffsetPage.tsx`, `components/tax/*` | medium | 月份选择、表格、认证导入弹窗、右侧认证结果工作区。Discovery: `docs/refactor-ui/modules/tax-offset.md`. |
-| 2 | 系统状态 | `/operations/app-health` | `AppHealthOperationsPage.tsx`, `features/appHealth/*` | medium | 状态面板、刷新、健康/worker 信息。 |
+| 2 | 系统状态 | `/operations/app-health` | `AppHealthOperationsPage.tsx`, `features/appHealth/*` | medium | 状态面板、刷新、健康/worker 信息。Discovery: `docs/refactor-ui/modules/app-health.md`. |
 | 3 | 导入页族 | `/imports/*` | `components/imports/ImportWorkflowPage.tsx`, import pages | high | 上传、预览表格、确认、进度、错误、详情预览。 |
 | 4 | 成本统计 | `/cost-statistics` | `CostStatisticsPage.tsx`, `components/cost-statistics/*` | high | DataGrid、月份/范围、详情弹窗、导出弹窗。 |
 | 5 | 银行明细 | `/bank-details` | `BankDetailsPage.tsx`, `features/bankDetails/*` | high | 表格、分页、日期筛选、导出菜单、自动标签规则右侧抽屉。 |

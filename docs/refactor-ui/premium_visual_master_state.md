@@ -33,7 +33,7 @@ Last updated: 2026-06-08
 | 1 | `PV-001-shared-premium-foundation` | verified | motion tokens、基础交互样式、reduced motion、foundation tests。 |
 | 2 | `PV-002-tax-offset-discovery` | verified | `/tax-offset` 旧入口清单、表格/弹窗/右侧工作区矩阵、测试缺口。 |
 | 3 | `PV-003-tax-offset-premium-visual` | verified | 税金抵扣 premium visual slice。 |
-| 4 | `PV-004-app-health-discovery` | pending | `/operations/app-health` discovery。 |
+| 4 | `PV-004-app-health-discovery` | verified | `/operations/app-health` discovery。 |
 | 5 | `PV-005-app-health-premium-visual` | pending | 系统状态 premium visual slice。 |
 | 6 | `PV-006-import-pages-discovery` | pending | `/imports/*` discovery。 |
 | 7 | `PV-007-import-pages-premium-visual` | pending | 导入页族 premium visual slice。 |
@@ -62,17 +62,18 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-004-app-health-discovery`
+`PV-005-app-health-premium-visual`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
 - `docs/refactor-ui/module_inventory.md`
+- `docs/refactor-ui/modules/app-health.md`
 - `web/src/pages/AppHealthOperationsPage.tsx`
 - `web/src/features/appHealth/*`
-- related `web/src/test/*AppHealth*` tests
-- `docs/refactor-ui/modules/app-health.md` if the discovery matrix is too large for `module_inventory.md`
+- `web/src/test/AppHealthOperationsPage.test.tsx`
+- app-health CSS in `web/src/app/styles.css`
 
 ### Verification
 
@@ -81,9 +82,11 @@ Required:
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- targeted App Health discovery test inventory, if tests exist.
+- `cd web && npx vitest run AppHealthOperationsPage.test.tsx AppHealthStatusContext.test.tsx AppHealthBroadcast.test.tsx AppHealthResolver.test.ts DesignTokens.test.ts TableAlignmentStyles.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 
-PV-004 is discovery-only unless a small pure characterization gap can be added without runtime behavior changes.
+PV-005 is the implementation slice for AppHealth visual polish. It must not change dashboard contracts, resolver or broadcast behavior.
 
 ## Execution Rules
 
@@ -106,3 +109,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-001-shared-premium-foundation` | current commit | pushed to `origin/main` | Shared motion foundation verified and pushed with the current commit. |
 | 2026-06-08 | `PV-002-tax-offset-discovery` | current commit | pushed to `origin/main` | Tax Offset discovery and PV-003 prompt generated with the current commit. |
 | 2026-06-08 | `PV-003-tax-offset-premium-visual` | current commit | pushed to `origin/main` | Tax Offset premium visual polish verified and pushed with the current commit. |
+| 2026-06-08 | `PV-004-app-health-discovery` | current commit | pushed to `origin/main` | AppHealth discovery and PV-005 prompt generated with the current commit. |

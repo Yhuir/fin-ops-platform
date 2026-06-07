@@ -202,7 +202,13 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-004-app-health-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-004-app-health-discovery`
 
@@ -223,3 +229,52 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+### Execution Notes
+
+- 新建 `docs/refactor-ui/modules/app-health.md`，记录 `/operations/app-health` 用户入口、API/state contract、数据/请求/后台表格矩阵、现有测试覆盖、PV-005 视觉要求和验收清单。
+- 更新 `docs/refactor-ui/module_inventory.md`，把系统状态队列项链接到专项 discovery 文档。
+- 确认本页已有 characterization coverage：管理员权限、dashboard tables、unknown metrics、刷新失败保留旧 dashboard、AppHealth status resolver 和 BroadcastChannel sync。
+- 未改运行时代码，未新增测试，因为 PV-004 是 discovery-only。
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-004 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-005-app-health-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/app-health.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/AppHealthOperationsPage.tsx`、`web/src/app/styles.css`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx`、`web/src/test/AppHealthResolver.test.ts` 和当前 `git status`。本切片只做 `/operations/app-health` premium visual implementation：保留现有刷新、权限、dashboard fetch、自动刷新、错误处理、所有状态表格和 AppHealth resolver/broadcast 行为，禁止改后端/API/read model/worker/关联台内部工作区。
+
+实现要求：
+
+- 不做大 card dashboard，不制造大留白；把系统状态页调整成紧凑、可信、可扫描的运维工作台。
+- 保持 `数据`、`请求`、`后台` 三个 section；保持 `银行流水来源`、`发票来源`、`OA来源`、`请求性能`、`Outbox 状态`、`RabbitMQ 队列`、`Read Model 刷新`、`Worker 心跳` 都是 table/grid。
+- 库存 summary 可以视觉升级，但保持小型辅助信息，不盖过表格。
+- 数字、延迟、秒数、时间使用 tabular nums；状态 tag 稳定高度。
+- 刷新按钮使用 motion tokens 做 hover/press/focus，刷新中仍不阻塞导航。
+- loading/error/permission notices 保持原 role 和文案，不放大成占屏提示。
+- 继续使用 HeroUI 原生组件和项目 primitives；不新增依赖，不新增 MUI。
+- 不触碰 `AppHealthStatusContext`、resolver、SSE、BroadcastChannel、API mapping。
+
+验证：
+
+- `cd web && npx vitest run AppHealthOperationsPage.test.tsx AppHealthStatusContext.test.tsx AppHealthBroadcast.test.tsx AppHealthResolver.test.ts DesignTokens.test.ts TableAlignmentStyles.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 如 dev server 可用，浏览器 smoke `/operations/app-health`：确认 heading、刷新按钮、三类 section、关键表格存在，无明显重叠或横向顶层溢出。
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/app-health.md`，精确 staging，commit 并 push 到 `origin/main`。
