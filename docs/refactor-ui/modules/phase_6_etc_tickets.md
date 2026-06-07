@@ -345,3 +345,19 @@ Scope: `/etc-tickets` P092-P098 migration closeout only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/test/EtcApi.test.ts、web/src/test/EtcOaNavigation.test.ts 和 web/src/app/styles.css。确认当前分支是 refactor-ui，检查 untracked files、diff 和 scope。只允许 ETC 页面、ETC 样式和 refactor-ui 文档进入 MG。不得修改 API client、mock response shape、backend、read model、worker、domain event semantics、OA URL construction 或关联台内部工作区。运行 ETC 页面/API/navigation tests、common/table/HeroUI smoke tests、build、page no-MUI grep、ETC-scoped CSS grep、git diff --check 和 git status。若全部通过，精确 git add 本 MG 文件，commit/push 到 origin/refactor-ui，更新 state/prompt/module docs，把 `MG-P098-phase-6-etc-tickets` 标记为 verified，并生成下一个 phase_6 模块 discovery prompt。
 ```
+
+## MG-P098 Execution Notes
+
+- Scope checked: ETC P092-P098 only.
+- Runtime changed during MG: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `git status --short --branch`: passed; clean on `refactor-ui...origin/refactor-ui`.
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx EtcApi.test.ts EtcOaNavigation.test.ts`: passed; 59 tests passed.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed; 15 tests passed.
+  - page no-MUI grep for `EtcTicketManagementPage.tsx`: passed.
+  - ETC-scoped CSS MUI grep for `web/src/app/styles.css`: passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; clean before MG docs update.

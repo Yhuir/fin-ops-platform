@@ -5495,7 +5495,7 @@ Scope: `/etc-tickets` dialog contents, OA status/detection panel, page feedback,
 ### MG-P098-phase-6-etc-tickets
 
 - Phase: `phase_6_page_batches`
-- Status: `mg_reviewed`
+- Status: `mg_verified`
 - Type: `cumulative merge gate`
 - Scope: `/etc-tickets` P092-P098 migration closeout only。
 
@@ -5517,6 +5517,49 @@ Scope: `/etc-tickets` P092-P098 migration closeout only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Exact staging required: yes，no `git add .` or `git add -A`。
+
+#### Execution Notes
+
+- Scope checked: yes，ETC P092-P098 only。
+- Runtime changed during MG: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Verification:
+  - `git status --short --branch`: passed；clean on `refactor-ui...origin/refactor-ui`。
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx EtcApi.test.ts EtcOaNavigation.test.ts`: passed；59 tests passed。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed；15 tests passed。
+  - page no-MUI grep for `EtcTicketManagementPage.tsx`: passed。
+  - ETC-scoped CSS MUI grep for `web/src/app/styles.css`: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；clean before MG docs update。
+- Next prompt generated: `P099-phase-6-settings-discovery`。
+
+### P099-phase-6-settings-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/settings` discovery only。
+
+#### Prompt
+
+```text
+Prompt ID: P099-phase-6-settings-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/settings` discovery only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/SettingsPage.tsx、web/src/components/settings/*、web/src/test/SettingsPage.test.tsx、web/src/test/SettingsOaManualSearchImportTable.test.tsx、web/src/features/settings/* 或实际 settings API/types 文件。只做 discovery/planning：生成 docs/refactor-ui/modules/phase_6_settings.md，记录当前 MUI inventory、用户可见入口、左侧设置导航、设置 section 矩阵、DataGrid/native table 风险、导入表格、弹窗/菜单/确认操作、loading/empty/error/permission 状态、现有测试覆盖、需要新增的 characterization tests、推荐 Micro-JIT 切片队列和 P100 prompt。不得修改 runtime code、tests、API client、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留原则：大布局和使用感不变，旧左侧设置导航仍为左侧导航，旧 DataGrid/table 仍保持表格形态，旧弹窗仍为弹窗，旧按钮/导入/删除/恢复/权限入口位置保持等价。运行 `test -f docs/refactor-ui/modules/phase_6_settings.md`、`rg -n "P099-phase-6-settings-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P100-phase-6-settings-characterization-tests" docs/refactor-ui/modules/phase_6_settings.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs。完成后提交并 push 到 `origin/refactor-ui`，再写入 Push Log。
+```
+
+#### Review
+
+- Single slice: yes，settings discovery only。
+- Runtime implementation untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- New module doc justified: yes，settings has multiple sections, DataGrid/table surfaces, destructive reset flows, permission surfaces and OA import workflow。
 
 ### MG Prompt Template
 
