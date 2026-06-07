@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P104-phase-6-settings-oa-rules-and-data-reset`
+- Current Prompt ID: `P105-phase-6-settings-oa-manual-search-import-table`
 - Current MG ID: `MG-P098-phase-6-etc-tickets`
 
 ## Global Invariants
@@ -54,17 +54,19 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 Settings OA rules and data reset generated after P103 access/pending tag migration。
-- Files touched in P103:
-  - `web/src/components/settings/SettingsAccessAccountsSection.tsx`
-  - `web/src/components/settings/SettingsPendingInvoiceTagsSection.tsx`
+- Scope: phase 6 Settings OA manual search/import table generated after P104 OA rules/data reset migration。
+- Files touched in P104:
+  - `web/src/components/settings/SettingsOaRetentionSection.tsx`
+  - `web/src/components/settings/SettingsOaInvoiceOffsetSection.tsx`
+  - `web/src/components/settings/SettingsDataResetSection.tsx`
+  - `web/src/components/settings/SettingsDataResetDialogs.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_settings.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Settings access/pending scoped MUI grep passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for remaining OA/data reset/manual table/settingsDesign files；build passed；diff check passed。
+- Verification run: Settings OA/data reset scoped MUI grep passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for OA manual table/settingsDesign；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P104-phase-6-settings-oa-rules-and-data-reset`。
+- Next action: 执行 `P105-phase-6-settings-oa-manual-search-import-table`。
 
 ## Prompt Lifecycle
 
@@ -96,12 +98,17 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P104-phase-6-settings-oa-rules-and-data-reset` | P103 Settings access/pending sections verified；next migrate OA rules and data reset |
+| page batches | `in_progress` | `P105-phase-6-settings-oa-manual-search-import-table` | P104 Settings OA rules/data reset verified；next migrate OA manual search/import table |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | scoped OA/data reset no-MUI grep | passed | OA retention, OA invoice offset, data reset section and dialogs have no scoped MUI residue |
+| 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives\|keeps data reset behind impact confirmation\|keeps read-only settings users"` | expected-fail | Selected behavior tests passed；source-level contract failed only for `OaManualSearchImportTable.tsx` and `settingsDesign.ts` |
+| 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level contract failed for remaining Settings MUI runtime |
+| 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | scoped access/pending no-MUI grep | passed | `SettingsAccessAccountsSection.tsx` and `SettingsPendingInvoiceTagsSection.tsx` have no scoped MUI residue |
 | 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives\|manages pending invoice tag mappings\|keeps invalid historical pending invoice mappings\|keeps read-only settings users"` | expected-fail | Selected behavior tests passed；source-level contract failed only for OA/data reset/manual table/settingsDesign files |
 | 2026-06-07 | `P103-phase-6-settings-access-and-pending-tags` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level contract failed for remaining Settings MUI runtime |

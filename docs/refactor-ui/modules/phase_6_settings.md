@@ -370,3 +370,36 @@ Scope: `/settings` OA retention/import, OA invoice offset, data reset section an
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/settings/SettingsOaRetentionSection.tsx、web/src/components/settings/SettingsOaInvoiceOffsetSection.tsx、web/src/components/settings/SettingsDataResetSection.tsx、web/src/components/settings/SettingsDataResetDialogs.tsx、web/src/components/settings/settingsDesign.ts、web/src/test/SettingsPage.test.tsx 和 web/src/app/styles.css。只迁移 OA 导入设置、冲账规则、高风险数据重置 section 和两个数据重置 modal dialogs：移除 MUI TextField/FormControl/FormGroup/FormLabel/FormControlLabel/Checkbox/Alert/Card/LinearProgress/Button/Dialog/DialogTitle/DialogContent/DialogActions/CircularProgress/Typography/Stack/Box 以及 settingsSectionSx/settingsTokens 在这些文件的使用，改为原生/project fieldset/checkbox/input/status/progress/dialog classes。不得迁移 OA manual search/import table、settingsDesign.ts closeout 或 settings API/data logic。不得修改 API client、mock response shape、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留用户可见行为：`OA导入设置` region、cutoff date、form type/status checkboxes、`冲账规则` region/applicant textarea、`高风险数据重置` region、三个数据重置 actions、progress text such as `正在清理 app 内部状态。 25%`、modal dialog `确认数据重置`、modal dialog `OA 密码复核`、password field `当前 OA 用户密码`、`继续`/`确认清理`/`取消` labels and disabled/loading states。运行 selected tests `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|keeps data reset behind impact confirmation|keeps read-only settings users"`，预期 behavior tests pass and source-level contract still fails for OA manual table/settingsDesign；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level contract fails only for OA manual table/settingsDesign；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|settingsSectionSx|settingsTokens|<(Alert|Box|Button|Card|Checkbox|CircularProgress|Dialog|DialogActions|DialogContent|DialogTitle|FormControl|FormControlLabel|FormGroup|FormLabel|LinearProgress|Stack|TextField|Typography)\\b' web/src/components/settings/SettingsOaRetentionSection.tsx web/src/components/settings/SettingsOaInvoiceOffsetSection.tsx web/src/components/settings/SettingsDataResetSection.tsx web/src/components/settings/SettingsDataResetDialogs.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P105 OA manual search/import table prompt。
 ```
+
+## P104 Execution Notes
+
+- Prompt ID: `P104-phase-6-settings-oa-rules-and-data-reset`
+- Status: `verified`
+- Runtime implementation changed:
+  - `SettingsOaRetentionSection.tsx` migrated from MUI TextField/FormControl/Checkbox/Alert/layout primitives to native fieldsets, checkboxes, date input and status panel; OA manual import table remains embedded for P105.
+  - `SettingsOaInvoiceOffsetSection.tsx` migrated from MUI TextField/Alert/layout primitives to native input and status panel.
+  - `SettingsDataResetSection.tsx` migrated from MUI Alert/Card/LinearProgress/Button/layout primitives to native risk/status panels, native cards, native progress and danger buttons.
+  - `SettingsDataResetDialogs.tsx` migrated from MUI Dialog/TextField/Button/layout primitives to project `AppDialog` with native password field and action buttons.
+  - `web/src/app/styles.css` adds OA import, checkbox, data reset, danger button and dialog content classes.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - Scoped grep for OA/data reset MUI residues: passed.
+  - `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|keeps data reset behind impact confirmation|keeps read-only settings users"`: expected-fail; selected behavior tests passed, source-level contract failed only for `OaManualSearchImportTable.tsx` and `settingsDesign.ts`.
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: expected-fail; 12 behavior tests passed, 1 source-level contract failed for remaining Settings MUI runtime.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+- Expected remaining source-level failure files:
+  - `OaManualSearchImportTable.tsx`
+  - `settingsDesign.ts`
+
+## P105 Prompt Draft
+
+```text
+Prompt ID: P105-phase-6-settings-oa-manual-search-import-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/settings` OA manual search/import table only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/settings/OaManualSearchImportTable.tsx、web/src/components/settings/settingsDesign.ts、web/src/test/SettingsOaManualSearchImportTable.test.tsx、web/src/test/SettingsPage.test.tsx 和 web/src/app/styles.css。只迁移 OA manual search/import table：移除 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell/TablePagination/Checkbox/Collapse/Alert/CircularProgress/Button/TextField/FormControl/FormLabel/FormGroup/FormControlLabel/Chip/Tooltip/IconButton/icons、settingsButtonSx/settingsTokens 在该文件的使用，改为原生/project filters、checkboxes、table、pagination、detail expansion、status、buttons and tags。不得迁移 settingsDesign.ts closeout 或 settings API/data logic。不得修改 API client、mock response shape、backend、read model、worker、权限语义、OA 手工导入语义、附件刷新语义、导入 payload 或关联台内部工作区。保留用户可见行为：heading `OA全量搜索导入`、filters `搜索关键字`/`开始日期`/`结束日期`、form type/status filter groups、`搜索`、`导入已选OA项`、`清空选择`、table `OA全量搜索导入结果`、row selection `选择 OA <row_id>`、current page selection `选择当前页可导入OA`、detail toggle `展开 OA <row_id> 明细`、refresh action `刷新 OA <row_id> 附件解析`、pagination、nested detail table、disabled non-importable rows、selected import payload and global shell status isolation。运行 `cd web && npx vitest run SettingsOaManualSearchImportTable.test.tsx`，必须通过；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level contract fails only for settingsDesign.ts；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|settingsButtonSx|settingsTokens|<(Alert|Box|Button|Checkbox|Chip|CircularProgress|Collapse|FormControl|FormControlLabel|FormGroup|FormLabel|IconButton|Table|TableBody|TableCell|TableContainer|TableHead|TablePagination|TableRow|TextField|Tooltip|Typography)\\b|ExpandMoreIcon|ExpandLessIcon|RefreshIcon' web/src/components/settings/OaManualSearchImportTable.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P106 settings closeout prompt。
+```

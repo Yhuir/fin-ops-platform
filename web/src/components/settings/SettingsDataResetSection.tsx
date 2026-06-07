@@ -1,12 +1,3 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Card from "@mui/material/Card";
-import LinearProgress from "@mui/material/LinearProgress";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
-
-import { settingsSectionSx, settingsTokens } from "./settingsDesign";
 import type { SettingsDataResetSectionProps } from "./types";
 
 export default function SettingsDataResetSection({
@@ -17,69 +8,31 @@ export default function SettingsDataResetSection({
   onOpenDataResetConfirm,
 }: SettingsDataResetSectionProps) {
   return (
-    <Box
-      component="section"
+    <section
       aria-labelledby="settings-section-data-reset-title"
+      className="settings-section-panel"
       id="settings-section-data-reset"
       role="region"
-      sx={[settingsSectionSx, { mb: 4 }]}
     >
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        sx={{
-          borderBottom: `1px solid ${settingsTokens.borderSubtle}`,
-          px: { xs: 2, md: 3 },
-          py: 2,
-        }}
-      >
-        <Typography
-          id="settings-section-data-reset-title"
-          component="h3"
-          variant="subtitle1"
-          sx={{ color: settingsTokens.textPrimary, fontWeight: 400 }}
-        >
-          数据重置
-        </Typography>
-      </Stack>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 3, px: { xs: 2, md: 3 }, py: 3 }}>
-        <Alert
-          severity="warning"
-          sx={{
-            bgcolor: "#fcf4d6",
-            color: settingsTokens.textPrimary,
-            border: `1px solid ${settingsTokens.warning}`,
-            borderRadius: "4px",
-            "& .MuiAlert-icon": { color: "#8a3800" },
-          }}
-        >
-          <Typography component="strong" variant="body2" sx={{ fontWeight: 600, display: "block", mb: 0.5 }}>
-            高风险操作
-          </Typography>
-          <Typography component="p" variant="body2" sx={{ color: settingsTokens.textPrimary }}>
+      <header className="settings-section-header">
+        <h3 id="settings-section-data-reset-title">数据重置</h3>
+      </header>
+      <div className="settings-section-body">
+        <div className="settings-inline-alert settings-inline-alert--warning" role="status">
+          <strong>高风险操作</strong>
+          <p>
             这些按钮只清理 app 内部数据，不允许触碰 `form_data_db.form_data`。每次执行前都需要二次确认和当前 OA 用户密码复核。
-          </Typography>
-        </Alert>
+          </p>
+        </div>
         {dataResetStatus ? (
-          <Alert
-            severity={dataResetStatus.tone === "error" ? "error" : "success"}
-            sx={{
-              bgcolor: dataResetStatus.tone === "error" ? "#fff1f1" : "#defbe6",
-              color: settingsTokens.textPrimary,
-              border: `1px solid ${
-                dataResetStatus.tone === "error" ? settingsTokens.error : settingsTokens.success
-              }`,
-              borderRadius: "4px",
-              "& .MuiAlert-icon": {
-                color: dataResetStatus.tone === "error" ? settingsTokens.error : settingsTokens.success,
-              },
-            }}
+          <div
+            className={`settings-inline-alert settings-inline-alert--${dataResetStatus.tone}`}
+            role={dataResetStatus.tone === "error" ? "alert" : "status"}
           >
             {dataResetStatus.message}
-          </Alert>
+          </div>
         ) : null}
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
+        <div className="settings-data-reset-grid">
           {actions.map((item) => {
             const progress = dataResetProgress?.action === item.action ? dataResetProgress : null;
             const isRunning = dataResetProgress !== null;
@@ -87,97 +40,39 @@ export default function SettingsDataResetSection({
               ? `${progress.message || "正在清理"} ${progress.percent}%`
               : item.label;
             return (
-              <Card
-                key={item.action}
-                component="article"
-                variant="outlined"
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
-                  bgcolor: settingsTokens.layer01,
-                  borderColor: settingsTokens.borderSubtle,
-                  borderRadius: "4px",
-                  boxShadow: "none",
-                  p: 3,
-                }}
-              >
-                <Box sx={{ flex: 1 }}>
-                  <Typography
-                    component="strong"
-                    variant="body2"
-                    sx={{ color: settingsTokens.textPrimary, fontWeight: 600, display: "block", mb: 1 }}
-                  >
-                    {item.title}
-                  </Typography>
-                  <Typography component="p" variant="body2" sx={{ color: settingsTokens.textSecondary, mb: 2 }}>
-                    {item.description}
-                  </Typography>
-                  <Box
-                    component="ul"
-                    sx={{
-                      borderTop: `1px solid ${settingsTokens.borderSubtle}`,
-                      color: settingsTokens.textSecondary,
-                      m: 0,
-                      pl: 2,
-                      pt: 2,
-                      "& li": { mb: 0.5 },
-                    }}
-                  >
-                    {item.impact.map((impactItem, idx) => (
-                      <Typography component="li" variant="body2" sx={{ color: settingsTokens.textSecondary }} key={idx}>
-                        {impactItem}
-                      </Typography>
+              <article className="settings-data-reset-card" key={item.action}>
+                <div className="settings-data-reset-card__body">
+                  <strong>{item.title}</strong>
+                  <p>{item.description}</p>
+                  <ul>
+                    {item.impact.map((impactItem) => (
+                      <li key={impactItem}>{impactItem}</li>
                     ))}
-                  </Box>
-                </Box>
-                <Box>
+                  </ul>
+                </div>
+                <div className="settings-data-reset-card__actions">
                   {progress ? (
-                    <LinearProgress
+                    <progress
                       aria-label={progressLabel}
-                      variant="determinate"
+                      className="settings-data-reset-progress"
+                      max={100}
                       value={progress.percent}
-                      sx={{
-                        bgcolor: settingsTokens.borderSubtle,
-                        borderRadius: "2px",
-                        height: 4,
-                        mb: 2,
-                        "& .MuiLinearProgress-bar": { bgcolor: settingsTokens.error },
-                      }}
                     />
                   ) : null}
-                  <Button
-                    color="error"
-                    size="small"
-                    type="button"
-                    variant="contained"
+                  <button
+                    className="settings-danger-button"
                     disabled={controlsDisabled || isRunning}
+                    type="button"
                     onClick={() => onOpenDataResetConfirm(item.action)}
-                    sx={{
-                      bgcolor: settingsTokens.error,
-                      borderRadius: 0,
-                      boxShadow: "none",
-                      color: settingsTokens.page,
-                      minHeight: 40,
-                      px: 2,
-                      "&:hover": {
-                        bgcolor: "#a2191f",
-                        boxShadow: "none",
-                      },
-                      "&.Mui-disabled": {
-                        bgcolor: settingsTokens.layer02,
-                        color: settingsTokens.textMuted,
-                      },
-                    }}
                   >
                     {progressLabel}
-                  </Button>
-                </Box>
-              </Card>
+                  </button>
+                </div>
+              </article>
             );
           })}
-        </Box>
-      </Box>
-    </Box>
+        </div>
+      </div>
+    </section>
   );
 }
