@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P060-phase-6-input-invoice-usage`
-- Current MG ID: `MG-P052-phase-6-pending-invoices`
+- Current Prompt ID: `P061-phase-6-oa-pending-payments-discovery`
+- Current MG ID: `MG-P060-phase-6-input-invoice-usage`
 
 ## Global Invariants
 
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices MG-P052 verified and pushed；next P053 input invoice usage discovery |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices and InputInvoiceUsage MG verified and pushed；next P061 OA pending payments discovery |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,17 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 input invoice usage cumulative MG prompt generated after P060 OA reverse workspace drawer migration。
+- Scope: phase 6 OA pending payments discovery prompt generated after InputInvoiceUsage MG push。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
-  - `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`
-  - `web/src/components/common/AppDrawer.tsx`
-  - `web/src/app/styles.css`
-- Verification run: P060 scoped/full input invoice usage grep passed, focused OA/workflow tests passed, full module tests passed, common/HeroUI smoke tests passed, build passed。
+- Verification run: MG-P060 pushed commit `21c79cea feat: complete input invoice usage ui migration` to `origin/refactor-ui`。
 - Failures: none in input invoice usage module tests。
-- Next action: 执行 `MG-P060-phase-6-input-invoice-usage`。
+- Next action: 执行 `P061-phase-6-oa-pending-payments-discovery`。
 
 ## Prompt Lifecycle
 
@@ -96,12 +93,13 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P060-phase-6-input-invoice-usage` | InputInvoiceUsage P060 verified；next cumulative MG |
+| page batches | `in_progress` | `P061-phase-6-oa-pending-payments-discovery` | InputInvoiceUsage MG verified and pushed；next OA pending payments discovery |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P060-phase-6-input-invoice-usage` | `git push origin refactor-ui` | passed | Commit `21c79cea feat: complete input invoice usage ui migration` pushed |
 | 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `if rg -n '@mui/\|Mui[A-Z]\|CloseOutlinedIcon\|CircularProgress\|@mui/material/Drawer\|TextField\|TableCell\|TableRow\|TableHead\|TableBody\|Checkbox\|Chip\|MenuItem' web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx; then exit 1; else exit 0; fi` | passed | OA reverse drawer has no scoped MUI residue |
 | 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `if rg -n '@mui/\|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi` | passed | InputInvoiceUsage page and components have no scoped MUI residue |
 | 2026-06-07 | `P060-phase-6-input-invoice-usage-oa-reverse-workspace-drawer` | `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "OA reverse drawer\|workflow primitive targets\|parent state can keep\|opening and closing workflow drawers"` | passed | 6 tests passed |

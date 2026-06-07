@@ -3588,6 +3588,47 @@ Scope: completed `/input-invoice-usage` page batch P053-P060.
 - Verification is available and passing: source grep, focused workflow tests, full module tests, common/HeroUI smoke tests, build and diff check.
 - After MG push, generate the next Micro-JIT prompt from `refactor-ui` branch.
 
+#### Execution Notes
+
+- Status: verified and pushed。
+- Commit: `21c79cea feat: complete input invoice usage ui migration`。
+- Push: `origin/refactor-ui` updated from `b076a4f3` to `21c79cea`。
+- Scope committed: P060 OA reverse workspace drawer, optional `AppDrawer modal={false}` persistent mode, OA drawer styles, and state/prompt/module docs.
+- Verification confirmed before push:
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: passed, 21 tests。
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 12 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### P061-phase-6-oa-pending-payments-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/oa-pending-payments` discovery only. Do not modify implementation or tests in this prompt.
+
+#### Prompt
+
+```text
+Prompt ID: P061-phase-6-oa-pending-payments-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/oa-pending-payments` discovery only. Do not modify implementation or tests in this prompt.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md、web/src/pages/OaPendingPaymentsPage.tsx、web/src/components/oaPendingPayments/*、web/src/features/oaPendingPayments/*、web/src/test/*OaPendingPayments*.test.tsx、web/src/test/OaPendingPaymentsPage.test.tsx（如果存在）和当前 git status。梳理 `/oa-pending-payments` 的旧 UI 入口、MUI/DataGrid/Table/session hook inventory、页面 shell/toolbar/filter/status/表格/异常反馈/loading empty error stale permission 状态、复用的 `InputInvoiceUsageFilterMenu` 合同、现有测试覆盖、API/read model 风险和迁移切片风险。不得修改实现、测试、后端、API、read model、worker、mock 或关联台。若 discovery 需要跨后续切片复用，创建 `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`；更新 `docs/refactor-ui/refactor_ui_state.md`、`docs/refactor-ui/refactor_ui_prompt.md` 和模块文档，生成下一条 P062 characterization tests prompt。验证命令：`test -f docs/refactor-ui/modules/phase_6_oa_pending_payments.md`；`rg -n "P061-phase-6-oa-pending-payments-discovery|Current MUI Inventory|User-visible Entrypoints|P062-phase-6-oa-pending-payments-characterization-tests" docs/refactor-ui/modules/phase_6_oa_pending_payments.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；`git diff --check`；`git status --short --branch`。
+```
+
+#### Review
+
+- Single slice: yes，discovery only。
+- No implementation/test changes: required。
+- Shared filter menu risk called out: required because `OaPendingPaymentsTable` already consumes `InputInvoiceUsageFilterMenu`。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Module doc likely warranted because this module has table/filter/status/API risk and may require multiple prompts.
+- Next prompt: P062 characterization tests only after P061 discovery is verified.
+
 ### MG Prompt Template
 
 ```text

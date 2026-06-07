@@ -543,3 +543,23 @@ Scope: completed `/input-invoice-usage` page batch P053-P060.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/module_inventory.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/*、web/src/components/common/AppDrawer.tsx、web/src/app/styles.css 和当前 git status。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff scope、测试结果和文档状态。确认已通过：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/InputInvoiceUsagePage.tsx web/src/components/inputInvoiceUsage; then exit 1; else exit 0; fi`、`cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`、`cd web && npx vitest run CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build`、`git diff --check`。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_input_invoice_usage.md web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx web/src/components/common/AppDrawer.tsx web/src/app/styles.css`；如果当前 diff 还包含本模块此前未提交的 P060 scope 文件，必须逐个精确列出；禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: complete input invoice usage ui migration` 或更准确的 InputInvoiceUsage module message。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
 ```
+
+## Execution Update: MG-P060 InputInvoiceUsage
+
+- Status: verified and pushed.
+- Commit: `21c79cea feat: complete input invoice usage ui migration`.
+- Push: `origin/refactor-ui` updated from `b076a4f3` to `21c79cea`.
+- Scope committed:
+  - `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`
+  - `web/src/components/common/AppDrawer.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+- Verification confirmed before push:
+  - InputInvoiceUsage scoped MUI residue grep passed.
+  - Full InputInvoiceUsage module tests passed, 21 tests.
+  - Common/HeroUI smoke tests passed, 12 tests.
+  - Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check` passed.
+- Next prompt: `P061-phase-6-oa-pending-payments-discovery`.
