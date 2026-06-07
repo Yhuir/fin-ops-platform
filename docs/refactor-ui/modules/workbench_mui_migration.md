@@ -413,6 +413,43 @@ git diff --check
 
 Results: source/package scans, targeted tests, build and diff check passed. `npm ls` exits 1 with `(empty)`, expected because removed packages are absent.
 
+## P-WB009 Full Verification
+
+- Prompt ID: `P-WB009-full-verification`
+- Phase: `wb_phase_8_full_verification`
+- Type: `cumulative verification`
+- Runtime changed: no.
+- CSS changed: no.
+- Tests changed: no.
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Result
+
+Full verification passed:
+
+- Runtime source and Vite config have no real MUI/Emotion imports.
+- Workbench runtime CSS and component files have no `.Mui`/`Mui[A-Z]` hooks.
+- `web/package.json` and `web/package-lock.json` have no `@mui/*` or `@emotion/*` entries.
+- Workbench full test suite passed.
+- Non-workbench containment regressions passed.
+- Production build passed.
+
+### Verification
+
+```bash
+if rg -n "from ['\"]@mui/|import\s+[^;]*@mui/|from ['\"]@emotion/|import\s+[^;]*@emotion/|@mui/x-|@mui/material|@mui/icons-material" web/src web/vite.config.ts --glob "!**/*.test.ts" --glob "!**/*.test.tsx"; then exit 1; else exit 0; fi
+if rg -n "\.Mui|Mui[A-Z]" web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi
+if rg -n '"@emotion/|"@mui/' web/package.json web/package-lock.json; then exit 1; else exit 0; fi
+cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx WorkbenchApi.test.ts WorkbenchApiRuntimePath.test.ts
+cd web && npx vitest run AutoTagRulesDrawer.test.tsx BankDetailsPage.test.tsx
+cd web && npm run build
+git diff --check
+git status --short --branch
+```
+
+Results: all passed. Workbench full suite: 12 files / 176 tests. Non-workbench regressions: 2 files / 52 tests. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
 ## Recommended Micro-JIT Queue
 
 1. `P-WB002-characterization-tests`
@@ -431,7 +468,7 @@ Results: source/package scans, targeted tests, build and diff check passed. `npm
 7. `P-WB008-dependency-cleanup`
    - Remove MUI/Emotion deps after no references remain. Completed.
 8. `P-WB009-full-verification`
-   - Run workbench tests, non-workbench regressions, no-MUI scans, build and smoke.
+   - Run workbench tests, non-workbench regressions, no-MUI scans, build and smoke. Completed.
 9. `P-WB010-closeout`
    - Final docs/state/prompt closeout and push log.
 

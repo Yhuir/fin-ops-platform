@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `wb_phase_7_dependency_cleanup`
-- Status: `completed`
+- Phase: `wb_phase_8_full_verification`
+- Status: `implemented`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P-WB008-dependency-cleanup`
-- Current MG ID: `MG-WB008-dependency-cleanup`
+- Current Prompt ID: `P-WB009-full-verification`
+- Current MG ID: `MG-WB009-full-verification`
 
 ## Global Invariants
 
@@ -21,7 +21,7 @@
 | App Shell untouched | yes | 本专项只处理关联台内部工作区残留 MUI |
 | Tri-pane core preserved | yes | `ResizableTriPane.tsx`、`CandidateGroupGrid.tsx` 当前无 MUI，专项规则要求不重写 |
 | User-visible workbench behavior preserved | yes | `P-WB002` characterization tests 已覆盖 toolbar/search/record warning/action bubbling；后续仍需全量验证 |
-| Prompt generated just-in-time | yes | 当前只执行 `P-WB008`；下一条只生成 `P-WB009` |
+| Prompt generated just-in-time | yes | 当前只执行 `P-WB009`；下一条只生成 `P-WB010` |
 | Exact staging only | required | MG 明确禁止 `git add .` 和 `git add -A` |
 
 ## Phase Table
@@ -36,7 +36,7 @@
 | `wb_phase_5_css_containment_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | workbench `.Mui*` CSS 已清理；MG-WB006 已 push |
 | `wb_phase_6_test_provider_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | test-only legacy MUI provider 已移除；MG-WB007 已 push |
 | `wb_phase_7_dependency_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MUI/Emotion direct dependencies 已移除；MG-WB008 已 push |
-| `wb_phase_8_full_verification` | `pending` | pending | pending | pending | 工作台专项测试、非关联台回归、build、smoke |
+| `wb_phase_8_full_verification` | `implemented` | 2026-06-07 | pending MG | `passed` | full no-MUI scans、workbench tests、non-workbench regressions、build 已通过；等待 MG-WB009 |
 | `wb_phase_9_closeout` | `pending` | pending | pending | pending | 最终 no-MUI contract、风险和 push log 收口 |
 
 ## Prompt Queue
@@ -59,7 +59,9 @@
 | `MG-WB007-test-provider-cleanup` | `wb_phase_6_test_provider_cleanup` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB008-dependency-cleanup` | `wb_phase_7_dependency_cleanup` | `extraction/refactor` | `verified` | MUI/Emotion direct dependencies and lockfile entries removed |
 | `MG-WB008-dependency-cleanup` | `wb_phase_7_dependency_cleanup` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
-| `P-WB009-full-verification` | `wb_phase_8_full_verification` | `cumulative verification` | `drafted` | MG-WB008 push 后执行 |
+| `P-WB009-full-verification` | `wb_phase_8_full_verification` | `cumulative verification` | `verified` | full no-MUI scans、workbench tests、non-workbench regressions and build passed |
+| `MG-WB009-full-verification` | `wb_phase_8_full_verification` | `cumulative MG` | `pending` | 检查 scope、diff、测试、文档后精确 stage/commit/push |
+| `P-WB010-closeout` | `wb_phase_9_closeout` | `closeout` | `drafted` | MG-WB009 push 后执行 |
 
 ## Verification Log
 
@@ -110,6 +112,12 @@
 | 2026-06-07 | `P-WB008-dependency-cleanup` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P-WB008-dependency-cleanup` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-WB008-dependency-cleanup` | `git add web/package.json web/package-lock.json docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `f59883c1` pushed to `origin/refactor-ui` |
+| 2026-06-07 | `P-WB009-full-verification` | full no-MUI source/CSS/package scans | passed | No runtime MUI/Emotion imports, no workbench MUI CSS hooks, no package/lockfile MUI/Emotion entries |
+| 2026-06-07 | `P-WB009-full-verification` | `cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx WorkbenchApi.test.ts WorkbenchApiRuntimePath.test.ts` | passed | 12 files / 176 tests passed |
+| 2026-06-07 | `P-WB009-full-verification` | `cd web && npx vitest run AutoTagRulesDrawer.test.tsx BankDetailsPage.test.tsx` | passed | 2 files / 52 tests passed |
+| 2026-06-07 | `P-WB009-full-verification` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P-WB009-full-verification` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P-WB009-full-verification` | `git status --short --branch` | passed | Clean before documentation update |
 
 ## Push Log
 
@@ -126,4 +134,4 @@
 
 ## Next Action
 
-从远端最新 `refactor-ui` 继续执行 `P-WB009-full-verification`。该 prompt 只执行全量验证和必要测试断言补强，不做新 UI 功能。
+执行 `MG-WB009-full-verification`：检查 scope、untracked files、diff、测试和文档状态，只精确 stage `P-WB009` 相关文档，commit/push 后再进入 `P-WB010-closeout`。

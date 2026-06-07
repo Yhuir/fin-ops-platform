@@ -733,12 +733,12 @@
   - `git commit -m "chore: remove workbench mui dependencies"`
   - `git push origin refactor-ui`
 
-## Next Prompt
+## Prompt History
 
 ### P-WB009-full-verification
 
 - Phase: `wb_phase_8_full_verification`
-- Status: `drafted`
+- Status: `verified`
 - Type: `cumulative verification`
 - Scope: 对关联台 MUI migration 做全量验证，不做功能实现；如发现失败，按 systematic debugging 处理后再进入 closeout。
 
@@ -746,4 +746,67 @@
 
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/workbench_migration_master_goal_prompt.md、docs/refactor-ui/test_migration_strategy.md、PRODUCT.md、DESIGN.md、web/package.json 和 web/src/test/MuiContainment.test.ts。只执行验证和必要的测试断言补强，不做新 UI 功能。运行 full no-MUI scans：`if rg -n "from ['\\\"]@mui/|import\\s+[^;]*@mui/|from ['\\\"]@emotion/|import\\s+[^;]*@emotion/|@mui/x-|@mui/material|@mui/icons-material" web/src web/vite.config.ts --glob "!**/*.test.ts" --glob "!**/*.test.tsx"; then exit 1; else exit 0; fi`、`if rg -n "\\.Mui|Mui[A-Z]" web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi`、`if rg -n '"@emotion/|"@mui/' web/package.json web/package-lock.json; then exit 1; else exit 0; fi`。运行 workbench full test suite：`cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx WorkbenchApi.test.ts WorkbenchApiRuntimePath.test.ts`。运行 non-workbench containment regressions：`cd web && npx vitest run AutoTagRulesDrawer.test.tsx BankDetailsPage.test.tsx`。运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，并生成 P-WB010 closeout prompt。
+```
+
+#### Review
+
+- Verification-only slice: yes。
+- Runtime UI/CSS/dependencies untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench and non-workbench regressions included: yes。
+- Closeout prompt generated JIT only after verification: yes。
+
+#### Execution Notes
+
+- Full no-MUI source/CSS/package scans passed.
+- Workbench full test suite passed.
+- Non-workbench containment regressions passed.
+- Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+- No implementation changes were made.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - full no-MUI source/CSS/package scans: passed。
+  - `cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx WorkbenchApi.test.ts WorkbenchApiRuntimePath.test.ts`: passed，12 files / 176 tests。
+  - `cd web && npx vitest run AutoTagRulesDrawer.test.tsx BankDetailsPage.test.tsx`: passed，2 files / 52 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: clean before documentation update。
+
+### MG-WB009-full-verification
+
+- Phase: `wb_phase_8_full_verification`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push full verification 文档记录。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB009 verification docs。只允许精确 git add docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 docs: record workbench full verification。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB009 和 wb_phase_8_full_verification 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- No code/dependency changes: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+- Verification already completed before commit: yes。
+
+## Next Prompt
+
+### P-WB010-closeout
+
+- Phase: `wb_phase_9_closeout`
+- Status: `drafted`
+- Type: `closeout`
+- Scope: 最终收口关联台 MUI migration 状态、风险和 push log；不做新代码实现。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/workbench_migration_master_goal_prompt.md、docs/refactor-ui/README.md、PRODUCT.md、DESIGN.md 和 web/package.json。确认 P-WB001 到 P-WB009 和对应 MG 均 verified/completed。运行最终 no-MUI scans、`cd web && npx vitest run MuiContainment.test.ts`、`cd web && npm run build`、`git status --short --branch`。更新 workbench_migration_state.md、workbench_migration_prompt.md、modules/workbench_mui_migration.md，把 wb_phase_9_closeout 标记为 implemented，记录最终剩余风险：HeroUI/Tailwind CSS minifier warnings、chunk size warning、npm audit 9 vulnerabilities。生成 MG-WB010 closeout prompt。不得修改 runtime UI、CSS、dependencies、backend/API/read model/worker。
 ```
