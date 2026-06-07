@@ -174,7 +174,7 @@
 ### MG-WB002-characterization
 
 - Phase: `wb_phase_1_characterization`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push 关联台 characterization tests 和专项文档更新。
 
@@ -192,6 +192,28 @@
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
 - Verification before commit specified: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `web/src/test/WorkbenchZone.test.tsx`
+  - `web/src/test/WorkbenchColumns.test.tsx`
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `2820549c test: characterize workbench mui migration`
+- Push: `origin/refactor-ui`
+- Runtime/CSS/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx`
+  - `cd web && npx vitest run WorkbenchSelection.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`
+  - `git diff --check`
+  - `git commit -m "test: characterize workbench mui migration"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 
