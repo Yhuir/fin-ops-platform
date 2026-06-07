@@ -22,7 +22,8 @@ describe("OA session gate", () => {
     render(<App />);
 
     expect(screen.getByText("正在验证 OA 会话...")).toBeInTheDocument();
-    expect(await screen.findByText("赵华")).toBeInTheDocument();
+    expect(await screen.findByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "关联台" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/session/me", expect.any(Object));
   });
 

@@ -96,12 +96,13 @@ export default function SettingsBankAccountsSection({
                         disabled={controlsDisabled}
                         type="text"
                         value={mapping.bankName}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const bankName = event.currentTarget.value.trim();
                           onUpdateMapping(mapping.id, (current) => ({
                             ...current,
-                            bankName: event.currentTarget.value.trim(),
-                          }))
-                        }
+                            bankName,
+                          }));
+                        }}
                       />
                     </td>
                     <td>
@@ -113,12 +114,13 @@ export default function SettingsBankAccountsSection({
                         maxLength={4}
                         type="text"
                         value={mapping.last4}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const last4 = normalizeLast4(event.currentTarget.value);
                           onUpdateMapping(mapping.id, (current) => ({
                             ...current,
-                            last4: normalizeLast4(event.currentTarget.value),
-                          }))
-                        }
+                            last4,
+                          }));
+                        }}
                       />
                     </td>
                     <td>
@@ -128,12 +130,13 @@ export default function SettingsBankAccountsSection({
                         disabled={controlsDisabled}
                         type="text"
                         value={mapping.shortName}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const shortName = event.currentTarget.value.trim();
                           onUpdateMapping(mapping.id, (current) => ({
                             ...current,
-                            shortName: event.currentTarget.value.trim(),
-                          }))
-                        }
+                            shortName,
+                          }));
+                        }}
                       />
                     </td>
                     <td>

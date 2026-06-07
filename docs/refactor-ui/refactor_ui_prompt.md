@@ -6293,7 +6293,7 @@ Scope: Phase 7 MUI containment through P113.
 ### P114-phase-8-full-verification
 
 - Phase: `phase_8_full_verification`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `verification`
 - Scope: full frontend verification and smoke inventory only。
 
@@ -6316,6 +6316,63 @@ Scope: full frontend verification and smoke inventory only.
 - Workbench internals frozen: required。
 - Verification scope broad enough for phase 8: yes。
 - If failures occur: must generate targeted fix prompt before closeout。
+
+#### Execution Notes
+
+- Ran broad verification after Phase 7 MUI containment.
+- Final non-workbench runtime source greps passed: no non-workbench MUI imports/providers/theme, MUI X DataGrid or MUI X date-picker residue.
+- Full frontend suite passed after targeted fixes: 63 files / 613 tests.
+- `cd web && npm run build` passed.
+- `git diff --check` passed.
+- P114 found and fixed:
+  - React 19 `event.currentTarget` updater issue in `SettingsBankAccountsSection` and `SettingsAccessAccountsSection` by capturing input/select values before updater callbacks.
+  - Stale MUI/DataGrid assertions in `WorkbenchSelection.test.tsx`, now aligned with native settings table/input semantics.
+  - Async preview assertion in `WorkbenchExceptionModal.test.tsx`, now waits for loaded preview content.
+  - No-OA keyboard test data mismatch, now verifies the visible `福利 / 过节费` path.
+  - SessionGate post-bootstrap assertion, now checks app shell/navigation instead of hidden user text.
+- Added `docs/refactor-ui/modules/phase_8_full_verification.md` for verification matrix, known warnings and residual risk.
+- Known warnings recorded: React Router v7 future flags, Node `--localstorage-file`, HeroUI/Tailwind CSS minifier selector warnings, Vite chunk-size warning, React Aria Focusable warnings in import page tests.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - final non-workbench runtime MUI grep chain
+  - `cd web && npx vitest run WorkbenchSelection.test.tsx -t "workbench settings can manage allowed app accounts|bank account settings can edit names"`
+  - `cd web && npx vitest run SettingsPage.test.tsx WorkbenchSelection.test.tsx`
+  - `cd web && npx vitest run WorkbenchExceptionModal.test.tsx`
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx SessionGate.test.tsx`
+  - `cd web && npx vitest run`
+  - `cd web && npm run build`
+  - `git diff --check`
+- Next prompt generated: `P115-phase-9-closeout`。
+
+### P115-phase-9-closeout
+
+- Phase: `phase_9_closeout`
+- Status: `approved_for_execution`
+- Type: `closeout`
+- Scope: final UI migration documentation/status/push closeout only。
+
+#### Prompt
+
+```text
+Prompt ID: P115-phase-9-closeout
+Phase: phase_9_closeout
+Type: closeout
+Scope: final UI migration documentation/status/push closeout only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/README.md、docs/refactor-ui/modules/phase_8_full_verification.md、docs/refactor-ui/platform_stack_migration.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md 和当前 git status/diff。不要再迁移新页面，不要改 backend/API/read model/worker/权限语义/业务状态机，不要改冻结关联台内部工作区。检查 phase 0-8 是否都有 completed/passed 或明确 deferred 记录；检查非关联台 MUI containment、HeroUI/Tailwind 栈、表格排版系统、DESIGN/PRODUCT、prompt/state 工作流和 residual warnings 是否都有事实源记录。整理 final closeout：更新 README 或 state/prompt 必要位置，标记 `phase_9_closeout` completed/passed，记录 remaining risks（浏览器人工视觉 smoke 未执行、chunk size warning、HeroUI/Tailwind CSS minifier warning、React Aria Focusable warning、冻结 workbench 内部 MUI deferred）。运行最终最小确认：`git status --short --branch`、final non-workbench runtime MUI grep chain、`cd web && npx vitest run MuiContainment.test.ts DesignTokens.test.ts TableLayoutTokens.test.ts TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx SessionGate.test.tsx`、`cd web && npm run build`、`git diff --check`。如果通过，精确 `git add` P114/P115 修改文件，commit，push 到 `origin/refactor-ui`，再更新 push log docs 并单独 commit/push。最终回复必须写明完成内容、验证命令、是否 push、下一步建议。
+```
+
+#### Review
+
+- Closeout only: yes。
+- No new migration work: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Exact staging required: yes。
+- Verification is intentionally smaller than P114 full suite but includes source contract, core token/table/smoke tests and build。
 
 ### MG Prompt Template
 

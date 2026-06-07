@@ -902,9 +902,13 @@ describe("Workbench row selection and detail modal", () => {
     await user.type(screen.getByLabelText("OA导入起始日期"), "2026-02-01");
     await user.click(screen.getByRole("checkbox", { name: "进行中" }));
     await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
-    expect(within(settingsPage).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
-    await user.clear(screen.getByLabelText("冲账申请人"));
-    await user.type(screen.getByLabelText("冲账申请人"), "周洁莹、李四");
+    await waitFor(() => {
+      expect(within(settingsPage).getByRole("region", { name: "冲账规则" })).toBeInTheDocument();
+    });
+    const oaInvoiceOffsetSection = within(settingsPage).getByRole("region", { name: "冲账规则" });
+    const applicantInput = within(oaInvoiceOffsetSection).getByRole("textbox");
+    await user.clear(applicantInput);
+    await user.type(applicantInput, "周洁莹、李四");
     await user.click(within(settingsTree).getByRole("treeitem", { name: /访问账户/ }));
     expect(within(settingsPage).getByRole("heading", { name: "访问账户管理" })).toBeInTheDocument();
 
@@ -983,35 +987,29 @@ describe("Workbench row selection and detail modal", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
+    await waitFor(() => {
+      expect(within(settingsPage).getByRole("tree", { name: "设置分类" })).toBeInTheDocument();
+    });
     const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
 
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
-    const bankNameCell = within(settingsPage).getByRole("gridcell", { name: "建设银行" });
-    await user.dblClick(bankNameCell);
-    const bankNameInput = within(bankNameCell).getByRole("textbox");
+    const bankMappingTable = within(settingsPage).getByRole("table", { name: "银行账户映射" });
+    const bankMappingRow = within(bankMappingTable).getByRole("row", { name: "建设银行 8826 建行" });
+    const [bankNameInput, last4Input, shortNameInput] = within(bankMappingRow).getAllByRole("textbox");
     await user.clear(bankNameInput);
     await user.type(bankNameInput, "中国建设银行股份有限公司");
-    await user.keyboard("{Enter}");
 
-    const shortNameCell = within(settingsPage).getByRole("gridcell", { name: "建行" });
-    await user.dblClick(shortNameCell);
-    const shortNameInput = within(shortNameCell).getByRole("textbox");
     await user.clear(shortNameInput);
     await user.type(shortNameInput, "建行");
-    await user.keyboard("{Enter}");
 
-    const last4Cell = within(settingsPage).getByRole("gridcell", { name: "8826" });
-    await user.dblClick(last4Cell);
-    const last4Input = within(last4Cell).getByRole("textbox");
     await user.clear(last4Input);
     await user.type(last4Input, "8826");
-    await user.keyboard("{Enter}");
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("gridcell", { name: "中国建设银行股份有限公司" })).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("gridcell", { name: "建行" })).toBeInTheDocument();
-    expect(within(settingsPage).getByRole("gridcell", { name: "8826" })).toBeInTheDocument();
+    expect(bankNameInput).toHaveValue("中国建设银行股份有限公司");
+    expect(shortNameInput).toHaveValue("建行");
+    expect(last4Input).toHaveValue("8826");
   });
 
   test("project status settings can sync, add, move, and delete local projects", async () => {

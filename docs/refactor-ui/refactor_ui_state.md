@@ -4,11 +4,11 @@
 
 ## Current Phase
 
-- Phase: `phase_7_mui_containment`
+- Phase: `phase_8_full_verification`
 - Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P114-phase-8-full-verification`
+- Current Prompt ID: `P115-phase-9-closeout`
 - Current MG ID: `MG-P113-phase-7-mui-containment`
 
 ## Global Invariants
@@ -38,8 +38,8 @@
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
 | `phase_6_page_batches` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches、BatchAccounting、TurnoverLedger、ETC tickets and Settings MG verified |
 | `phase_7_mui_containment` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P113 verified；non-workbench runtime no-MUI contract passed；frozen workbench legacy isolated |
-| `phase_8_full_verification` | `in_progress` | 2026-06-07 |  | `pending` | Next: full frontend verification and smoke inventory |
-| `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
+| `phase_8_full_verification` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P114 full verification passed: source contract, full Vitest, build, diff check |
+| `phase_9_closeout` | `in_progress` | 2026-06-07 |  | `pending` | Next: closeout docs, final risk register, push status |
 
 ## Status Values
 
@@ -54,14 +54,20 @@
 
 ## Active Checkpoint
 
-- Scope: phase 8 full verification generated after MG-P113 MUI containment。
-- Files touched in MG-P113:
-  - `docs/refactor-ui/modules/phase_7_mui_containment.md`
+- Scope: phase 9 closeout generated after P114 full verification。
+- Files touched in P114:
+  - `web/src/components/settings/SettingsAccessAccountsSection.tsx`
+  - `web/src/components/settings/SettingsBankAccountsSection.tsx`
+  - `web/src/test/NoOaBankBatchPage.test.tsx`
+  - `web/src/test/SessionGate.test.tsx`
+  - `web/src/test/WorkbenchExceptionModal.test.tsx`
+  - `web/src/test/WorkbenchSelection.test.tsx`
+  - `docs/refactor-ui/modules/phase_8_full_verification.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Phase 7 cumulative source contract, month/table/common/HeroUI, workbench legacy tests, final grep, build and diff check passed。
-- Failures: none.
-- Next action: 执行 `P114-phase-8-full-verification`。
+- Verification run: final non-workbench runtime MUI grep, full `cd web && npx vitest run` (613 tests), `cd web && npm run build`, `git diff --check` passed。
+- Failures: initial P114 full runs exposed stale tests and one React 19 event pooling/currentTarget issue; all were fixed and reverified.
+- Next action: 执行 `P115-phase-9-closeout`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +101,22 @@
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
 | mui containment | `verified` | `MG-P113-phase-7-mui-containment` | Phase 7 completed; MUI limited to frozen workbench internals and test-only legacy provider/helper |
-| full verification | `in_progress` | `P114-phase-8-full-verification` | Run full frontend verification, source greps and smoke inventory |
+| full verification | `verified` | `P114-phase-8-full-verification` | Source greps, full Vitest, build and diff check passed; residual warnings documented |
+| closeout | `in_progress` | `P115-phase-9-closeout` | Final docs/status/push closeout |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P114-phase-8-full-verification` | final non-workbench runtime MUI grep chain | passed | No non-workbench runtime MUI imports/providers/theme, DataGrid or date-picker residue |
+| 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npx vitest run` | passed | 63 files / 613 tests passed after targeted fixes |
+| 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npx vitest run WorkbenchSelection.test.tsx -t "workbench settings can manage allowed app accounts\|bank account settings can edit names"` | passed | Verified native Settings inputs and React 19 currentTarget fix |
+| 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npx vitest run SettingsPage.test.tsx WorkbenchSelection.test.tsx` | passed | 57 tests passed |
+| 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npx vitest run WorkbenchExceptionModal.test.tsx` | passed | 6 tests passed after async preview wait fix |
+| 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx SessionGate.test.tsx` | passed | 24 tests passed after stable keyboard/session assertions |
+| 2026-06-07 | `P114-phase-8-full-verification` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P114-phase-8-full-verification` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P114-phase-8-full-verification` | initial full `cd web && npx vitest run` attempts | expected-fail | Exposed stale MUI grid/test timing assertions and React 19 `event.currentTarget` updater bug; fixed before final full pass |
 | 2026-06-07 | `MG-P113-phase-7-mui-containment` | `git status --short --branch` | passed | Clean on `refactor-ui...origin/refactor-ui` before MG verification |
 | 2026-06-07 | `MG-P113-phase-7-mui-containment` | `cd web && npx vitest run MuiContainment.test.ts MonthPicker.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 23 tests passed |
 | 2026-06-07 | `MG-P113-phase-7-mui-containment` | `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CandidateGroupGrid.test.tsx WorkbenchColumnLayout.test.tsx` | passed | 64 tests passed |

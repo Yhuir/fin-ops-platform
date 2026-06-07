@@ -407,19 +407,19 @@ describe("NoOaBankBatchPage", () => {
     installFetchMock();
     renderPage();
 
-    const salaryMain = await screen.findByRole("button", { name: "人工成本 暂无" });
+    const welfareMain = await screen.findByRole("button", { name: "福利 1批 · 5条" });
     act(() => {
-      salaryMain.focus();
-      fireEvent.keyDown(salaryMain, { key: "Enter" });
+      welfareMain.focus();
+      fireEvent.keyDown(welfareMain, { key: "Enter" });
     });
 
-    const salaryChild = screen.getByRole("button", { name: "工资 暂无" });
+    const holidayChild = await screen.findByRole("button", { name: "过节费 1批 · 5条" });
     act(() => {
-      salaryChild.focus();
-      fireEvent.keyDown(salaryChild, { key: " " });
+      holidayChild.focus();
+      fireEvent.keyDown(holidayChild, { key: " " });
     });
 
-    expect(salaryChild).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(holidayChild).toHaveAttribute("aria-pressed", "true"));
   });
 
   test("saves drawer tag selection with main and child tag toggles", async () => {

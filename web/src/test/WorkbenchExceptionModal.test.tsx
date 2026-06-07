@@ -271,7 +271,7 @@ describe("WorkbenchExceptionModal", () => {
     renderModal({ rows: defaultRows });
 
     const dialog = await screen.findByRole("dialog", { name: "统一异常处理" });
-    expect(within(dialog).getByText("数据异常")).toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByText("数据异常")).toBeInTheDocument());
     expect(within(dialog).getByText("收入侧出现 OA 数据异常")).toBeInTheDocument();
     expect(within(dialog).getByText("收入侧不应混入 OA，请修正分类或选择范围。")).toBeInTheDocument();
     expect(within(dialog).getByRole("radio", { name: /修正分类后重判/ })).toBeInTheDocument();

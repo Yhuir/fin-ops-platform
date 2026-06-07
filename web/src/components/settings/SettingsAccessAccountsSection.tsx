@@ -99,12 +99,13 @@ export default function SettingsAccessAccountsSection({
                         disabled={controlsDisabled}
                         type="text"
                         value={account.username}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const username = event.currentTarget.value;
                           onUpdateManagedAccessAccount(account.id, (current) => ({
                             ...current,
-                            username: event.currentTarget.value,
-                          }))
-                        }
+                            username,
+                          }));
+                        }}
                       />
                     </td>
                     <td>
@@ -113,12 +114,13 @@ export default function SettingsAccessAccountsSection({
                         className="settings-select-control settings-table-select"
                         disabled={controlsDisabled}
                         value={account.role}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const role = event.currentTarget.value as WorkbenchAccessRole;
                           onUpdateManagedAccessAccount(account.id, (current) => ({
                             ...current,
-                            role: event.currentTarget.value as WorkbenchAccessRole,
-                          }))
-                        }
+                            role,
+                          }));
+                        }}
                       >
                         {ACCESS_ROLE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
