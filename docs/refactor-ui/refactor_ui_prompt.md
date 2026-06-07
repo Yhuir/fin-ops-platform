@@ -4545,6 +4545,7 @@ Scope: completed `/no-oa-bank-batches` UI migration slices P073-P078 only.
   - `if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; clean before MG docs update.
+- Committed and pushed `f5736c0c docs: record no oa bank batch merge gate` to `origin/refactor-ui`.
 - Next prompt generated: `P079-phase-6-batch-accounting-discovery`.
 
 ### P079-phase-6-batch-accounting-discovery
