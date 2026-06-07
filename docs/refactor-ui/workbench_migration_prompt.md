@@ -823,7 +823,7 @@
 ### P-WB010-closeout
 
 - Phase: `wb_phase_9_closeout`
-- Status: `drafted`
+- Status: `verified`
 - Type: `closeout`
 - Scope: 最终收口关联台 MUI migration 状态、风险和 push log；不做新代码实现。
 
@@ -832,3 +832,50 @@
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/workbench_migration_master_goal_prompt.md、docs/refactor-ui/README.md、PRODUCT.md、DESIGN.md 和 web/package.json。确认 P-WB001 到 P-WB009 和对应 MG 均 verified/completed。运行最终 no-MUI scans、`cd web && npx vitest run MuiContainment.test.ts`、`cd web && npm run build`、`git status --short --branch`。更新 workbench_migration_state.md、workbench_migration_prompt.md、modules/workbench_mui_migration.md，把 wb_phase_9_closeout 标记为 implemented，记录最终剩余风险：HeroUI/Tailwind CSS minifier warnings、chunk size warning、npm audit 9 vulnerabilities。生成 MG-WB010 closeout prompt。不得修改 runtime UI、CSS、dependencies、backend/API/read model/worker。
 ```
+
+#### Review
+
+- Closeout-only slice: yes。
+- Runtime UI/CSS/dependencies untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Final no-MUI checks included: yes。
+- Residual risks recorded: yes。
+
+#### Execution Notes
+
+- Final no-MUI source/CSS/package scans passed.
+- `MuiContainment.test.ts` passed.
+- Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+- Residual risks recorded in `workbench_migration_state.md`.
+- No implementation changes were made.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - final no-MUI source/CSS/package scans: passed。
+  - `cd web && npx vitest run MuiContainment.test.ts`: passed，1 file / 3 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: clean before documentation update。
+
+### MG-WB010-closeout
+
+- Phase: `wb_phase_9_closeout`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push closeout 文档记录，完成关联台 MUI migration。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB010 closeout docs。只允许精确 git add docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 docs: close out workbench mui migration。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB010 和 wb_phase_9_closeout 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- No code/dependency changes: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+- Final verification completed before commit: yes。

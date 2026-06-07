@@ -450,6 +450,47 @@ git status --short --branch
 
 Results: all passed. Workbench full suite: 12 files / 176 tests. Non-workbench regressions: 2 files / 52 tests. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
 
+## P-WB010 Closeout
+
+- Prompt ID: `P-WB010-closeout`
+- Phase: `wb_phase_9_closeout`
+- Type: `closeout`
+- Runtime changed: no.
+- CSS changed: no.
+- Tests changed: no.
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Final State
+
+关联台内部工作区 MUI migration 已达到目标状态：
+
+- `web/src/pages/ReconciliationWorkbenchPage.tsx` and `web/src/components/workbench/*` runtime code have no real MUI/Emotion imports.
+- `web/src/app/styles.css` and workbench component files have no `.Mui`/`Mui[A-Z]` hooks.
+- `web/src/test/legacyWorkbenchMuiProvider.tsx` has been removed.
+- `web/package.json` and `web/package-lock.json` have no `@mui/*` or `@emotion/*` entries.
+- Backend/API/read model/worker were not modified by this专项.
+
+### Residual Risks
+
+- Build passes with known HeroUI/Tailwind CSS minifier warnings around generated `:is()`/`:not(:is())` CSS.
+- Build passes with a Vite chunk size warning.
+- `npm uninstall` reported 9 npm audit vulnerabilities; these require separate dependency/security triage.
+
+### Final Verification
+
+```bash
+if rg -n "from ['\"]@mui/|import\s+[^;]*@mui/|from ['\"]@emotion/|import\s+[^;]*@emotion/|@mui/x-|@mui/material|@mui/icons-material" web/src web/vite.config.ts --glob '!**/*.test.ts' --glob '!**/*.test.tsx'; then exit 1; else exit 0; fi
+if rg -n "\.Mui|Mui[A-Z]" web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi
+if rg -n '"@emotion/|"@mui/' web/package.json web/package-lock.json; then exit 1; else exit 0; fi
+cd web && npx vitest run MuiContainment.test.ts
+cd web && npm run build
+git diff --check
+git status --short --branch
+```
+
+Results: all passed. Build warnings are recorded as residual risks above.
+
 ## Recommended Micro-JIT Queue
 
 1. `P-WB002-characterization-tests`
@@ -470,7 +511,7 @@ Results: all passed. Workbench full suite: 12 files / 176 tests. Non-workbench r
 8. `P-WB009-full-verification`
    - Run workbench tests, non-workbench regressions, no-MUI scans, build and smoke. Completed.
 9. `P-WB010-closeout`
-   - Final docs/state/prompt closeout and push log.
+   - Final docs/state/prompt closeout and push log. Completed.
 
 ## Risks
 
