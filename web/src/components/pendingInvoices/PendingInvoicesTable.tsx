@@ -1,27 +1,17 @@
-import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import MoreVertOutlinedIcon from "@mui/icons-material/MoreVertOutlined";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import IconButton from "@mui/material/IconButton";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import TableSortLabel from "@mui/material/TableSortLabel";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
-import type { SxProps, Theme } from "@mui/material/styles";
+import { Info, MoreVertical } from "lucide-react";
 import { useState, type MutableRefObject, type ReactNode } from "react";
 
+import {
+  AmountCell,
+  EmptyValue,
+  FinanceDirectionTag,
+  FinanceStatusTag,
+  type FinanceTone,
+} from "../common/FinanceTable";
 import type {
+  PendingInvoiceDirection,
   PendingInvoiceObjectDetailTarget,
   PendingInvoicePrimaryAction,
-  PendingInvoiceDirection,
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
@@ -47,9 +37,6 @@ type PendingInvoicesTableProps = {
   pendingActionRowIds?: Set<string>;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
-
-const GROUP_BORDER = "2px solid";
-const CELL_BORDER = "1px solid";
 
 function formatMoney(value: string) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
@@ -93,48 +80,48 @@ function tagPathLabel(row: PendingInvoiceRow["bankTransaction"]) {
     .join(" / ") || row.effectiveTagLabel || row.effectiveTagCode || "未标注";
 }
 
-function overflowText(expanded: boolean): Record<string, string | number> {
-  return expanded ? {
-    whiteSpace: "normal",
-    wordBreak: "break-word",
-  } : {
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical",
-    overflow: "hidden",
-    wordBreak: "break-word",
-  };
-}
-
-function chipColor(severity: PendingInvoiceStatusSeverity): "default" | "primary" | "success" | "warning" | "error" | "info" {
+function severityTone(severity: PendingInvoiceStatusSeverity): FinanceTone {
   switch (severity) {
     case "success":
       return "success";
     case "warning":
       return "warning";
     case "error":
-      return "error";
+      return "danger";
     case "info":
       return "info";
     default:
-      return "default";
+      return "neutral";
   }
 }
 
-function sortableLabel(
-  label: string,
-  field: PendingInvoiceSortField,
-  config: PendingInvoicesTableConfig,
-  onSortChange: (field: PendingInvoiceSortField) => void,
-) {
+function cx(...values: Array<string | false | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
+
+function SortButton({
+  label,
+  field,
+  config,
+  onSortChange,
+}: {
+  label: string;
+  field: PendingInvoiceSortField;
+  config: PendingInvoicesTableConfig;
+  onSortChange: (field: PendingInvoiceSortField) => void;
+}) {
+  const active = config.sortField === field;
+  const direction = active ? config.sortDirection : "asc";
   return (
-    <TableSortLabel
-      active={config.sortField === field}
-      direction={config.sortField === field ? config.sortDirection : "asc"}
+    <button
+      className="pending-invoices-sort-button"
+      data-sort-direction={active ? direction : undefined}
       onClick={() => onSortChange(field)}
+      type="button"
     >
-      {label}
-    </TableSortLabel>
+      <span>{label}</span>
+      <span aria-hidden="true" className="pending-invoices-sort-icon">{active ? (direction === "asc" ? "↑" : "↓") : "↕"}</span>
+    </button>
   );
 }
 
@@ -163,7 +150,7 @@ function RowActionMenu({
   onMarkIncomeStatus,
   disabled = false,
 }: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onMarkIncomeStatus"> & { row: PendingInvoiceRow; disabled?: boolean }) {
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
   const action = row.invoiceAcquisitionStatus.primaryAction;
   const prefix = row.bankTransaction.counterpartyName;
   const available = new Set(row.availableActions);
@@ -199,46 +186,47 @@ function RowActionMenu({
   if (menuItems.length === 0) {
     return null;
   }
-  const open = Boolean(anchorEl);
+
   return (
-    <>
-      <Tooltip title="发票获取操作">
-        <IconButton
-          size="small"
-          aria-label={`${prefix} 发票获取操作`}
-          aria-haspopup="menu"
-          aria-expanded={open ? "true" : undefined}
-          onClick={(event) => setAnchorEl(event.currentTarget)}
-          sx={{
-            width: 24,
-            height: 24,
-            justifySelf: "end",
-            color: "text.secondary",
-          }}
-        >
-          <MoreVertOutlinedIcon fontSize="inherit" />
-        </IconButton>
-      </Tooltip>
-      <Menu
-        anchorEl={anchorEl}
-        open={open}
-        onClose={() => setAnchorEl(null)}
-        MenuListProps={{ "aria-label": `${prefix} 发票获取操作菜单` }}
+    <div
+      className="pending-invoices-row-menu"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        aria-expanded={open ? "true" : undefined}
+        aria-haspopup="menu"
+        aria-label={`${prefix} 发票获取操作`}
+        className="pending-invoices-row-menu-trigger"
+        onClick={() => setOpen((current) => !current)}
+        title="发票获取操作"
+        type="button"
       >
-        {menuItems.map((item) => (
-          <MenuItem
-            key={item.key}
-            disabled={disabled}
-            onClick={() => {
-              setAnchorEl(null);
-              item.onClick();
-            }}
-          >
-            {item.label}
-          </MenuItem>
-        ))}
-      </Menu>
-    </>
+        <MoreVertical aria-hidden="true" size={15} strokeWidth={2.4} />
+      </button>
+      {open ? (
+        <div aria-label={`${prefix} 发票获取操作菜单`} className="pending-invoices-row-menu-content" role="menu">
+          {menuItems.map((item) => (
+            <button
+              className="pending-invoices-row-menu-item"
+              disabled={disabled}
+              key={item.key}
+              onClick={() => {
+                setOpen(false);
+                item.onClick();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -259,171 +247,116 @@ export default function PendingInvoicesTable({
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
   const invoiceGroupLabel = direction === "income" ? "销项发票" : direction === "all" ? "发票" : "进项发票";
   return (
-    <Box sx={{ border: CELL_BORDER, borderColor: "divider", bgcolor: "background.paper" }}>
-      <Box
-        ref={tableWrapRef}
-        data-testid="pending-invoices-table-shell"
-        sx={{
-          overflowX: "hidden",
-          overflowY: "auto",
-          maxHeight: { xs: "calc(100vh - 220px)", md: "calc(100vh - 185px)" },
-          minHeight: 322,
-          overscrollBehavior: "contain",
-        }}
-      >
-        <Table stickyHeader aria-label="待找发票四区表" size="small" sx={{ width: "100%", tableLayout: "fixed" }}>
+    <div className="pending-invoices-table-frame">
+      <div ref={tableWrapRef} className="pending-invoices-table-shell" data-testid="pending-invoices-table-shell">
+        <table aria-label="待找发票四区表" className="pending-invoices-table">
           <colgroup>
-            <col style={{ width: "16%" }} />
-            <col style={{ width: "13%" }} />
-            <col style={{ width: "15%" }} />
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "7%" }} />
-            <col style={{ width: "8%" }} />
-            <col style={{ width: "9%" }} />
+            <col className="pending-invoices-col-counterparty" />
+            <col className="pending-invoices-col-amount" />
+            <col className="pending-invoices-col-summary" />
+            <col className="pending-invoices-col-status" />
+            <col className="pending-invoices-col-invoice-no" />
+            <col className="pending-invoices-col-seller" />
+            <col className="pending-invoices-col-invoice-amount" />
+            <col className="pending-invoices-col-oa-applicant" />
+            <col className="pending-invoices-col-oa-project" />
           </colgroup>
-          <TableHead>
-            <TableRow>
-              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#edf5ff")}>{bankGroupLabel}</TableCell>
-              <TableCell scope="colgroup" sx={groupHeaderSx("#fff7e6", true)}>发票获取状态</TableCell>
-              <TableCell colSpan={3} scope="colgroup" sx={groupHeaderSx("#eefaf3", true)}>{invoiceGroupLabel}</TableCell>
-              <TableCell colSpan={2} scope="colgroup" sx={groupHeaderSx("#f4f4f5", true)}>OA</TableCell>
-            </TableRow>
-            <TableRow>
-              <TableCell scope="col" sx={subHeaderSx("#f6faff")}>
-                {sortableLabel("对方 / 时间", "counterparty_name", config, onSortChange)}
-              </TableCell>
-              <TableCell scope="col" align="right" sx={subHeaderSx("#f6faff")}>
-                {sortableLabel("金额 / 银行账户", "amount", config, onSortChange)}
-              </TableCell>
-              <TableCell scope="col" sx={subHeaderSx("#f6faff")}>摘要 / 凭证</TableCell>
-              <TableCell scope="col" sx={subHeaderSx("#fffaf0", true)}>
-                <Stack alignItems="center" justifyContent="center" sx={{ minWidth: 0 }}>
-                  {statusFilterControl}
-                </Stack>
-              </TableCell>
-              <TableCell scope="col" sx={subHeaderSx("#f7fcf9", true)}>
-                {sortableLabel("发票号码 / 开票日期", "trade_date", config, onSortChange)}
-              </TableCell>
-              <TableCell scope="col" sx={subHeaderSx("#f7fcf9")}>
-                {sortableLabel("销方 / 识别号", "seller_name", config, onSortChange)}
-              </TableCell>
-              <TableCell scope="col" align="right" sx={subHeaderSx("#f7fcf9")}>
-                {sortableLabel("金额 / 支付差额", "invoice_total", config, onSortChange)}
-              </TableCell>
-              <TableCell scope="col" sx={subHeaderSx("#fafafa", true)}>
-                {sortableLabel("申请人 / 类型", "oa_applicant", config, onSortChange)}
-              </TableCell>
-              <TableCell scope="col" sx={subHeaderSx("#fafafa")}>
-                {sortableLabel("项目 / 详情", "project_name", config, onSortChange)}
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
+          <thead>
+            <tr>
+              <th className="pending-invoices-table-group-header pending-invoices-table-group-header--bank" colSpan={3} scope="colgroup">{bankGroupLabel}</th>
+              <th className="pending-invoices-table-group-header pending-invoices-table-group-header--status pending-invoices-table-cell--left-border" scope="colgroup">发票获取状态</th>
+              <th className="pending-invoices-table-group-header pending-invoices-table-group-header--invoice pending-invoices-table-cell--left-border" colSpan={3} scope="colgroup">{invoiceGroupLabel}</th>
+              <th className="pending-invoices-table-group-header pending-invoices-table-group-header--oa pending-invoices-table-cell--left-border" colSpan={2} scope="colgroup">OA</th>
+            </tr>
+            <tr>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank" scope="col">
+                <SortButton config={config} field="counterparty_name" label="对方 / 时间" onSortChange={onSortChange} />
+              </th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank pending-invoices-table-cell--amount" scope="col">
+                <SortButton config={config} field="amount" label="金额 / 银行账户" onSortChange={onSortChange} />
+              </th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--bank" scope="col">摘要 / 凭证</th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--status pending-invoices-table-cell--left-border" scope="col">
+                <div className="pending-invoices-status-filter-cell">{statusFilterControl}</div>
+              </th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--left-border" scope="col">
+                <SortButton config={config} field="trade_date" label="发票号码 / 开票日期" onSortChange={onSortChange} />
+              </th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice" scope="col">
+                <SortButton config={config} field="seller_name" label="销方 / 识别号" onSortChange={onSortChange} />
+              </th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--invoice pending-invoices-table-cell--amount" scope="col">
+                <SortButton config={config} field="invoice_total" label="金额 / 支付差额" onSortChange={onSortChange} />
+              </th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa pending-invoices-table-cell--left-border" scope="col">
+                <SortButton config={config} field="oa_applicant" label="申请人 / 类型" onSortChange={onSortChange} />
+              </th>
+              <th className="pending-invoices-table-sub-header pending-invoices-table-sub-header--oa" scope="col">
+                <SortButton config={config} field="project_name" label="项目 / 详情" onSortChange={onSortChange} />
+              </th>
+            </tr>
+          </thead>
+          <tbody>
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} align="center" sx={{ py: 6, color: "text.secondary" }}>
+              <tr>
+                <td className="pending-invoices-table-state-cell" colSpan={9}>
                   当前条件下没有待找发票流水。
-                </TableCell>
-              </TableRow>
-            ) : rows.map((row) => renderRow({
-              row,
-              direction,
-              onOpenRelation,
-              onOpenInvoicePicker,
-              onOpenManualInvoice,
-              onOpenObjectDetail,
-              onMarkIncomeStatus,
-              actionPending: pendingActionRowIds?.has(row.id) ?? false,
-            }))}
-          </TableBody>
-        </Table>
-      </Box>
-    </Box>
+                </td>
+              </tr>
+            ) : rows.map((row) => (
+              <PendingInvoiceTableRow
+                actionPending={pendingActionRowIds?.has(row.id) ?? false}
+                direction={direction}
+                key={row.id}
+                onMarkIncomeStatus={onMarkIncomeStatus}
+                onOpenInvoicePicker={onOpenInvoicePicker}
+                onOpenManualInvoice={onOpenManualInvoice}
+                onOpenObjectDetail={onOpenObjectDetail}
+                onOpenRelation={onOpenRelation}
+                row={row}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
-function groupHeaderSx(bgcolor: string, leftBorder = false): SxProps<Theme> {
-  return {
-    bgcolor,
-    borderBottom: CELL_BORDER,
-    borderColor: "divider",
-    color: "text.primary",
-    fontWeight: 900,
-    position: "sticky",
-    top: 0,
-    zIndex: 4,
-    textAlign: "center",
-    ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
-  };
+function TextCell({ primary, secondary, title }: { primary: ReactNode; secondary?: ReactNode; title?: string }) {
+  return (
+    <span className="pending-invoices-cell-stack">
+      <span className="pending-invoices-cell-primary" title={title}>{primary}</span>
+      {secondary ? <span className="pending-invoices-cell-secondary">{secondary}</span> : null}
+    </span>
+  );
 }
 
-function subHeaderSx(bgcolor: string, leftBorder = false): SxProps<Theme> {
-  return {
-    bgcolor,
-    borderBottom: CELL_BORDER,
-    borderColor: "divider",
-    color: "text.secondary",
-    fontSize: 12,
-    fontWeight: 800,
-    lineHeight: 1.2,
-    position: "sticky",
-    top: 33,
-    zIndex: 3,
-    whiteSpace: "normal",
-    ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
-  };
+function DetailButton({
+  children,
+  disabled,
+  label,
+  onClick,
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className="pending-invoices-inline-action"
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
 }
 
-function dataCellSx(leftBorder = false): SxProps<Theme> {
-  return {
-    verticalAlign: "top",
-    px: 0.8,
-    py: 0.55,
-    fontSize: 12,
-    lineHeight: 1.3,
-    ...(leftBorder ? { borderLeft: GROUP_BORDER, borderLeftColor: "divider" } : {}),
-  };
-}
-
-function amountCellSx(): SxProps<Theme> {
-  return {
-    ...dataCellSx(),
-    pr: 1.35,
-  };
-}
-
-function summaryCellSx(): SxProps<Theme> {
-  return {
-    ...dataCellSx(),
-    pl: 1.35,
-  };
-}
-
-const denseChipSx: SxProps<Theme> = {
-  height: 20,
-  maxWidth: "100%",
-  "& .MuiChip-label": {
-    px: 0.6,
-    fontSize: 11,
-    lineHeight: 1.2,
-  },
-};
-
-const directionChipSx: SxProps<Theme> = {
-  height: 20,
-  maxWidth: "100%",
-  minWidth: 24,
-  fontWeight: 900,
-  "& .MuiChip-label": {
-    px: 0.6,
-    fontSize: 11,
-    lineHeight: 1.2,
-  },
-};
-
-function renderRow({
+function PendingInvoiceTableRow({
   row,
   direction,
   onOpenRelation,
@@ -439,185 +372,142 @@ function renderRow({
   const oaExtraCount = Math.max(0, row.oa.relationCount - 1);
   const oaDetailAvailable = canOpenOaDetail(row);
   const moneyDirection = rowMoneyDirection(row, direction);
+  const invoiceNumberLabel = primaryInvoice ? invoiceNumber(primaryInvoice) : "";
 
   return (
-    <TableRow key={row.id} hover>
-      <TableCell sx={dataCellSx()}>
-        <Stack spacing={0.4} sx={{ minWidth: 0 }}>
-          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
-            <Typography component="div" fontWeight={900} noWrap title={row.bankTransaction.counterpartyName} sx={{ fontSize: 12, lineHeight: 1.3 }}>
+    <tr className="pending-invoices-table-row">
+      <td className="pending-invoices-table-cell" data-column-role="identity">
+        <span className="pending-invoices-counterparty-cell">
+          <span className="pending-invoices-counterparty-row">
+            <span className="pending-invoices-counterparty-name" title={row.bankTransaction.counterpartyName}>
               {row.bankTransaction.counterpartyName}
-            </Typography>
-            <Tooltip title="流水详情">
-              <IconButton
-                size="small"
-                aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
-                onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
-                sx={{ width: 24, height: 24 }}
-              >
-                <InfoOutlinedIcon fontSize="inherit" />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-          <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>{row.bankTransaction.tradeTime || "-"}</Typography>
-          <Chip
-            size="small"
-            variant="outlined"
-            label={tagPathLabel(row.bankTransaction)}
-            sx={{ ...denseChipSx, alignSelf: "flex-start" }}
-          />
-        </Stack>
-      </TableCell>
-      <TableCell align="right" sx={amountCellSx()}>
-        <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
-          <Chip
-            size="small"
-            label={moneyDirection === "income" ? "收" : "支"}
-            color={moneyDirection === "income" ? "success" : "error"}
-            variant="outlined"
-            sx={directionChipSx}
-          />
-          <Typography component="div" fontWeight={900} sx={{ fontSize: 12, lineHeight: 1.3, fontVariantNumeric: "tabular-nums" }}>
-            {formatMoney(row.bankTransaction.amount)}
-          </Typography>
-        </Stack>
-        <Typography color="text.secondary" component="div" sx={{ mt: 0.3, fontSize: 11, lineHeight: 1.25 }}>
-          {bankAccountLabel(row.bankTransaction)}
-        </Typography>
-      </TableCell>
-      <TableCell sx={summaryCellSx()}>
-        <Stack spacing={0.35}>
-          <Typography sx={[overflowText(false), { fontSize: 12, lineHeight: 1.3 }]}>
-            {row.bankTransaction.summary || "-"}
-          </Typography>
-          <Typography color="text.secondary" sx={[overflowText(false), { fontSize: 11, lineHeight: 1.25 }]}>
-            {row.bankTransaction.remark || row.bankTransaction.voucherNo || "-"}
-          </Typography>
-        </Stack>
-      </TableCell>
-      <TableCell sx={dataCellSx(true)}>
-        <Box
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "24px minmax(0, 1fr) 24px",
-            alignItems: "center",
-            columnGap: 0.35,
-            minHeight: 24,
-          }}
-        >
-          <Box aria-hidden="true" />
-          <Chip
-            size="small"
-            color={chipColor(row.invoiceAcquisitionStatus.severity)}
-            variant={row.invoiceAcquisitionStatus.severity === "default" ? "outlined" : "filled"}
-            label={row.invoiceAcquisitionStatus.label}
-            sx={{ ...denseChipSx, justifySelf: "center" }}
-          />
+            </span>
+            <button
+              aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
+              className="pending-invoices-icon-button"
+              onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
+              title="流水详情"
+              type="button"
+            >
+              <Info aria-hidden="true" size={14} strokeWidth={2.3} />
+            </button>
+          </span>
+          <span className="pending-invoices-cell-secondary">{row.bankTransaction.tradeTime || "-"}</span>
+          <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
+            {tagPathLabel(row.bankTransaction)}
+          </span>
+        </span>
+      </td>
+      <td className="pending-invoices-table-cell pending-invoices-table-cell--amount" data-column-role="amount">
+        <AmountCell
+          account={bankAccountLabel(row.bankTransaction)}
+          amount={formatMoney(row.bankTransaction.amount)}
+          className="pending-invoices-amount-cell"
+          direction={<FinanceDirectionTag direction={moneyDirection}>{moneyDirection === "income" ? "收" : "支"}</FinanceDirectionTag>}
+        />
+      </td>
+      <td className="pending-invoices-table-cell pending-invoices-table-cell--summary" data-column-role="description">
+        <TextCell
+          primary={row.bankTransaction.summary || <EmptyValue />}
+          secondary={row.bankTransaction.remark || row.bankTransaction.voucherNo || <EmptyValue />}
+          title={row.bankTransaction.summary}
+        />
+      </td>
+      <td className="pending-invoices-table-cell pending-invoices-table-cell--status pending-invoices-table-cell--left-border" data-column-role="status">
+        <span className="pending-invoices-status-cell">
+          <span aria-hidden="true" />
+          <FinanceStatusTag tone={severityTone(row.invoiceAcquisitionStatus.severity)}>
+            {row.invoiceAcquisitionStatus.label}
+          </FinanceStatusTag>
           <RowActionMenu
-            row={row}
-            onOpenRelation={onOpenRelation}
+            disabled={actionPending}
+            onMarkIncomeStatus={onMarkIncomeStatus}
             onOpenInvoicePicker={onOpenInvoicePicker}
             onOpenManualInvoice={onOpenManualInvoice}
-            onMarkIncomeStatus={onMarkIncomeStatus}
-            disabled={actionPending}
+            onOpenRelation={onOpenRelation}
+            row={row}
           />
-        </Box>
-      </TableCell>
-      <TableCell sx={dataCellSx(true)}>
+        </span>
+      </td>
+      <td className="pending-invoices-table-cell pending-invoices-table-cell--left-border" data-column-role="identity">
         {primaryInvoice ? (
-          <Stack spacing={0.35} sx={{ minWidth: 0 }}>
-            <Typography fontWeight={900} noWrap title={invoiceNumber(primaryInvoice)} sx={{ fontSize: 12, lineHeight: 1.3 }}>
-              {invoiceNumber(primaryInvoice)}
-            </Typography>
-            <Stack direction="row" spacing={0.5} alignItems="center">
-              <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>{primaryInvoice.issueDate || "-"}</Typography>
-              <Button
-                size="small"
-                variant="text"
-                aria-label={`发票详情 ${invoiceNumber(primaryInvoice)}`}
-                onClick={() => onOpenObjectDetail({ kind: "invoice", id: primaryInvoice.id, rowId: row.id })}
-              >
-                详情
-              </Button>
-              {invoiceExtraCount > 0 ? (
-                <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${row.bankTransaction.counterpartyName} 查看全部发票关系`}>
-                  +{invoiceExtraCount}
-                </Button>
-              ) : null}
-            </Stack>
-          </Stack>
-        ) : (
-          <Typography color="text.secondary">-</Typography>
-        )}
-      </TableCell>
-      <TableCell sx={dataCellSx()}>
+          <TextCell
+            primary={invoiceNumberLabel}
+            secondary={(
+              <span className="pending-invoices-inline-row">
+                <span>{primaryInvoice.issueDate || "-"}</span>
+                <DetailButton
+                  label={`发票详情 ${invoiceNumberLabel}`}
+                  onClick={() => onOpenObjectDetail({ kind: "invoice", id: primaryInvoice.id, rowId: row.id })}
+                >
+                  详情
+                </DetailButton>
+                {invoiceExtraCount > 0 ? (
+                  <DetailButton label={`${row.bankTransaction.counterpartyName} 查看全部发票关系`} onClick={() => onOpenRelation(row)}>
+                    +{invoiceExtraCount}
+                  </DetailButton>
+                ) : null}
+              </span>
+            )}
+            title={invoiceNumberLabel}
+          />
+        ) : <EmptyValue />}
+      </td>
+      <td className="pending-invoices-table-cell" data-column-role="identity">
         {primaryInvoice ? (
-          <Stack spacing={0.35}>
-            <Typography fontWeight={800} sx={[overflowText(false), { fontSize: 12, lineHeight: 1.3 }]}>
-              {primaryInvoice.sellerName || "-"}
-            </Typography>
-            <Typography color="text.secondary" sx={[overflowText(false), { fontSize: 11, lineHeight: 1.25 }]}>
-              {primaryInvoice.sellerTaxNo || "-"}
-            </Typography>
-          </Stack>
-        ) : (
-          <Typography color="text.secondary">-</Typography>
-        )}
-      </TableCell>
-      <TableCell align="right" sx={dataCellSx()}>
+          <TextCell
+            primary={primaryInvoice.sellerName || <EmptyValue />}
+            secondary={primaryInvoice.sellerTaxNo || <EmptyValue />}
+            title={primaryInvoice.sellerName}
+          />
+        ) : <EmptyValue />}
+      </td>
+      <td className="pending-invoices-table-cell pending-invoices-table-cell--amount" data-column-role="amount">
         {primaryInvoice ? (
-          <Stack spacing={0.35}>
-            <Typography fontWeight={900} sx={{ fontSize: 12, lineHeight: 1.3, fontVariantNumeric: "tabular-nums" }}>
-              {formatMoney(primaryInvoice.totalWithTax)}
-            </Typography>
+          <span className="pending-invoices-money-stack">
+            <span className="pending-invoices-money-primary">{formatMoney(primaryInvoice.totalWithTax)}</span>
             {row.inputInvoices.paymentSummary ? (
               <>
-                <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</Typography>
-                <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount)}</Typography>
+                <span className="pending-invoices-cell-secondary">已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</span>
+                <span className="pending-invoices-cell-secondary">待付 {formatMoney(row.inputInvoices.paymentSummary.remainingAmount)}</span>
               </>
             ) : null}
-          </Stack>
-        ) : (
-          <Typography color="text.secondary">-</Typography>
-        )}
-      </TableCell>
-      <TableCell sx={dataCellSx(true)}>
+          </span>
+        ) : <EmptyValue />}
+      </td>
+      <td className="pending-invoices-table-cell pending-invoices-table-cell--left-border" data-column-role="identity">
         {primaryOa ? (
-          <Stack spacing={0.35} sx={{ minWidth: 0 }}>
-            <Typography fontWeight={900} noWrap title={primaryOa.applicant} sx={{ fontSize: 12, lineHeight: 1.3 }}>{primaryOa.applicant || "-"}</Typography>
-            <Typography color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.25 }}>{primaryOa.applicationType || "-"}</Typography>
-          </Stack>
-        ) : (
-          <Typography color="text.secondary">-</Typography>
-        )}
-      </TableCell>
-      <TableCell sx={dataCellSx()}>
+          <TextCell
+            primary={primaryOa.applicant || <EmptyValue />}
+            secondary={primaryOa.applicationType || <EmptyValue />}
+            title={primaryOa.applicant}
+          />
+        ) : <EmptyValue />}
+      </td>
+      <td className="pending-invoices-table-cell" data-column-role="description">
         {primaryOa ? (
-          <Stack spacing={0.35} alignItems="flex-start" sx={{ minWidth: 0 }}>
-            <Typography fontWeight={800} sx={[overflowText(false), { fontSize: 12, lineHeight: 1.3 }]}>
-              {primaryOa.projectName || "-"}
-            </Typography>
-            <Stack direction="row" spacing={0.5} alignItems="center">
-              <Button
-                size="small"
-                variant="text"
-                disabled={!oaDetailAvailable}
-                aria-label={`OA详情 ${primaryOa.applicant || primaryOa.id}`}
-                onClick={() => onOpenObjectDetail({ kind: "oa", id: primaryOa.id, rowId: row.id })}
-              >
-                详情
-              </Button>
-              {oaExtraCount > 0 ? (
-                <Button size="small" variant="outlined" onClick={() => onOpenRelation(row)} aria-label={`${row.bankTransaction.counterpartyName} 查看全部 OA 关系`}>
-                  +{oaExtraCount}
-                </Button>
-              ) : null}
-            </Stack>
-          </Stack>
-        ) : (
-          <Typography color="text.secondary">-</Typography>
-        )}
-      </TableCell>
-    </TableRow>
+          <TextCell
+            primary={primaryOa.projectName || <EmptyValue />}
+            secondary={(
+              <span className="pending-invoices-inline-row">
+                <DetailButton
+                  disabled={!oaDetailAvailable}
+                  label={`OA详情 ${primaryOa.applicant || primaryOa.id}`}
+                  onClick={() => onOpenObjectDetail({ kind: "oa", id: primaryOa.id, rowId: row.id })}
+                >
+                  详情
+                </DetailButton>
+                {oaExtraCount > 0 ? (
+                  <DetailButton label={`${row.bankTransaction.counterpartyName} 查看全部 OA 关系`} onClick={() => onOpenRelation(row)}>
+                    +{oaExtraCount}
+                  </DetailButton>
+                ) : null}
+              </span>
+            )}
+            title={primaryOa.projectName}
+          />
+        ) : <EmptyValue />}
+      </td>
+    </tr>
   );
 }

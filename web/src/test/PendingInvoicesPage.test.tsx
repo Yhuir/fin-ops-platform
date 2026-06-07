@@ -601,11 +601,16 @@ describe("Pending invoices page", () => {
     const page = await findPendingInvoicesPage();
     expect(within(page).queryByRole("grid")).not.toBeInTheDocument();
     expect(within(page).getByRole("table", { name: "待找发票四区表" })).toBeInTheDocument();
-    expect(within(page).getByTestId("pending-invoices-table-shell")).toHaveStyle({ overflowX: "hidden" });
-    expect(within(page).getByTestId("pending-invoices-table-shell")).toHaveStyle({ overflowY: "auto" });
+    expect(within(page).getByTestId("pending-invoices-table-shell")).toHaveClass("pending-invoices-table-shell");
+    expect(readWebSource("src/app/styles.css")).toMatch(
+      /\.pending-invoices-table-shell\s*{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s,
+    );
 
     expect(within(page).getByRole("columnheader", { name: "支出流水" })).toBeInTheDocument();
-    expect(within(page).getByRole("columnheader", { name: "支出流水" })).toHaveStyle({ position: "sticky", top: "0px" });
+    expect(within(page).getByRole("columnheader", { name: "支出流水" })).toHaveClass("pending-invoices-table-group-header");
+    expect(readWebSource("src/app/styles.css")).toMatch(
+      /\.pending-invoices-table-group-header\s*{[^}]*top:\s*0;/s,
+    );
     expect(within(page).getByRole("columnheader", { name: "发票获取状态" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "进项发票" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "OA" })).toBeInTheDocument();

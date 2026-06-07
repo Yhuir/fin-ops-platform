@@ -2961,7 +2961,7 @@ Scope: `/pending-invoices` page shell/toolbar/pagination only. Do not migrate `P
 ### P049-phase-6-pending-invoices-four-zone-table
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只迁移 `web/src/components/pendingInvoices/PendingInvoicesTable.tsx` 主四区表、排序 trigger、row action menu、tag/tooltip markup 和必要 table styles/tests；不迁移 shared drawer frame、rules/relation/detail/export/invoice-picker drawers 或 manual invoice dialog。
 
@@ -2986,6 +2986,54 @@ Scope: PendingInvoices main four-zone table only. Do not migrate drawer frame, d
 - User-visible table contract preserved: required，headers, row action menu, object detail buttons, loading/empty, sorting and amount/tag layout must remain。
 - Expected failure allowed: yes，P050-P052 drawer/dialog source contracts can remain after P049, but `PendingInvoicesTable.tsx` must clear。
 - Next prompt: P050 drawer frame and simple drawers only after P049 implementation is verified/expected-fail documented。
+
+#### Execution Notes
+
+- Replaced `PendingInvoicesTable.tsx` MUI table, MUI tags, MUI sort label, MUI tooltip/icons and MUI row action menu with a native/project four-zone table.
+- Kept accessible table name `待找发票四区表`, `pending-invoices-table-shell`, group headers, subheaders, empty row, row action menu labels, object detail buttons and dense four-zone row layout.
+- Used `AmountCell`, `FinanceDirectionTag`, `FinanceStatusTag`, `EmptyValue`, lucide icons and pending invoice CSS classes for amount/status/tag/action alignment.
+- Updated `PendingInvoicesPage.test.tsx` table CSS expectations to assert project CSS contracts instead of forcing inline/computed style.
+- Added pending invoice table CSS for sticky group headers, native table cells, column roles, amount alignment, row menu and inline actions.
+- Did not modify page shell, pending invoice API/mock/read model/worker/backend, reconciliation workbench internals or any pending invoice drawer/dialog component.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract|shows income rule-group filters|keeps row status actions available|targets project primitives"`: expected-fail. Main table behavior tests passed; the only failure is the source-level drawer/dialog contract for P050-P052。
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx`: expected-fail with 14 passed and 1 failure. The remaining failure lists only 7 drawer/dialog files: `PendingInvoiceDrawerFrame.tsx`, `PendingInvoiceRulesDrawer.tsx`, `PendingInvoiceRelationDrawer.tsx`, `PendingInvoiceInvoicePickerDrawer.tsx`, `PendingInvoiceDetailDrawer.tsx`, `PendingInvoiceExportDrawer.tsx`, `ManualInvoiceDialog.tsx`。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|MuiChip-label|SxProps|TableSortLabel|MoreVertOutlinedIcon|InfoOutlinedIcon' web/src/components/pendingInvoices/PendingInvoicesTable.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+
+### P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: 只迁移 pending invoice shared drawer frame、relation drawer、detail drawer、export drawer 和 detail flow 内的 OA print dialog；不迁移 rules drawer、invoice picker drawer 或 manual invoice dialog。
+
+#### Prompt
+
+```text
+Prompt ID: P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: PendingInvoices shared drawer frame plus simple drawers only: `PendingInvoiceDrawerFrame.tsx`, `PendingInvoiceRelationDrawer.tsx`, `PendingInvoiceDetailDrawer.tsx`, `PendingInvoiceExportDrawer.tsx`, necessary `web/src/app/styles.css` and necessary `PendingInvoicesPage.test.tsx` expectations. Do not migrate `PendingInvoiceRulesDrawer.tsx`, `PendingInvoiceInvoicePickerDrawer.tsx` or `ManualInvoiceDialog.tsx`.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/table_layout_system.md、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx、web/src/components/pendingInvoices/PendingInvoiceRelationDrawer.tsx、web/src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx、web/src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx、web/src/test/PendingInvoicesPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：用 `AppDrawer` 替换 shared MUI Drawer frame，保留右侧抽屉形态、title/subtitle/action/body 区域和 close labels；迁移 relation drawer，保留 `关系与支付明细`、metrics `已付合计`/`发票合计`/`待付金额`/`支付差额`、`选择发票` 和 `历史支付流水` table；迁移 detail drawer，保留 detail heading 如 `DIG-001`、发票字段、OA unavailable detail behavior，并用 `AppDialog` 保留 `打印选择` dialog 和 `打印下载`；迁移 export drawer，保留 `导出预览`、`预计导出 <n> 行`、`下载导出`、`已生成 pending-invoices.xlsx` 和 `导出样例` table。移除本 scope 内 MUI imports/usages，包括 MUI Drawer/Dialog/Alert/Button/CircularProgress/Paper/Stack/Table/Typography/Divider/IconButton 等。不得修改 pending invoice API/mock/read model/worker/backend/关联台；不得修改 rules drawer、invoice picker drawer 或 manual invoice dialog。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "opens relation, object detail, rules, and export drawers with loading callbacks|renders project four-zone table contract|targets project primitives"`；运行完整 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，P051-P052 rules/invoice-picker/manual-dialog source contract failures 可以继续 expected-fail，但 P050 scope files must disappear from the source-level failure list；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 P050 MUI grep：`if rg -n '@mui/' web/src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx web/src/components/pendingInvoices/PendingInvoiceRelationDrawer.tsx web/src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx web/src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P051 rules drawer prompt。
+```
+
+#### Review
+
+- Single slice: yes，shared frame plus relation/detail/export simple drawers only。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Rules drawer, invoice picker drawer and manual invoice dialog untouched: required for P050 scope control。
+- Overlay equivalence preserved: required，old right drawers remain right drawers and OA print remains a dialog。
+- Expected failure allowed: yes，P051-P052 source contracts can remain after P050, but P050 files must clear。
+- Next prompt: P051 rules drawer only after P050 implementation is verified/expected-fail documented。
 
 ### MG Prompt Template
 

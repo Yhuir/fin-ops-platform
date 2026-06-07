@@ -471,9 +471,389 @@ textarea {
   cursor: default;
 }
 
+.pending-invoices-table-frame {
+  border: 1px solid var(--fp-border);
+  background: var(--fp-surface);
+}
+
+.pending-invoices-table-shell {
+  max-height: calc(100vh - 185px);
+  min-height: 322px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pending-invoices-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+}
+
+.pending-invoices-col-counterparty {
+  width: 16%;
+}
+
+.pending-invoices-col-amount {
+  width: 13%;
+}
+
+.pending-invoices-col-summary {
+  width: 15%;
+}
+
+.pending-invoices-col-status {
+  width: 11%;
+}
+
+.pending-invoices-col-invoice-no,
+.pending-invoices-col-seller {
+  width: 10%;
+}
+
+.pending-invoices-col-invoice-amount {
+  width: 7%;
+}
+
+.pending-invoices-col-oa-applicant {
+  width: 8%;
+}
+
+.pending-invoices-col-oa-project {
+  width: 9%;
+}
+
+.pending-invoices-table-group-header,
+.pending-invoices-table-sub-header {
+  border-bottom: 1px solid var(--fp-border);
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-label);
+  line-height: 1.2;
+  position: sticky;
+  text-align: center;
+  z-index: 4;
+}
+
+.pending-invoices-table-group-header {
+  top: 0;
+  height: 33px;
+  font-weight: 900;
+}
+
+.pending-invoices-table-group-header--bank {
+  background: #edf5ff;
+}
+
+.pending-invoices-table-group-header--status {
+  background: #fff7e6;
+}
+
+.pending-invoices-table-group-header--invoice {
+  background: #eefaf3;
+}
+
+.pending-invoices-table-group-header--oa {
+  background: #f4f4f5;
+}
+
+.pending-invoices-table-sub-header {
+  top: 33px;
+  min-height: 36px;
+  padding: 6px 7px;
+  color: var(--fp-text-secondary);
+  font-weight: 800;
+  z-index: 3;
+  white-space: normal;
+}
+
+.pending-invoices-table-sub-header--bank {
+  background: #f6faff;
+}
+
+.pending-invoices-table-sub-header--status {
+  background: #fffaf0;
+}
+
+.pending-invoices-table-sub-header--invoice {
+  background: #f7fcf9;
+}
+
+.pending-invoices-table-sub-header--oa {
+  background: #fafafa;
+}
+
+.pending-invoices-table-cell {
+  padding: 6px 7px;
+  border-bottom: 1px solid var(--fp-border);
+  color: var(--fp-text-primary);
+  font-size: 12px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.pending-invoices-table-cell--left-border {
+  border-left: 2px solid var(--fp-border);
+}
+
+.pending-invoices-table-cell--amount,
+.pending-invoices-table-cell[data-column-role="amount"] {
+  padding-right: 10px;
+  text-align: right;
+}
+
+.pending-invoices-table-cell--status,
+.pending-invoices-table-cell[data-column-role="status"] {
+  text-align: center;
+}
+
+.pending-invoices-table-row:hover .pending-invoices-table-cell {
+  background: var(--fp-surface-muted);
+}
+
+.pending-invoices-table-state-cell {
+  padding: var(--fp-space-8);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+  text-align: center;
+}
+
+.pending-invoices-sort-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+}
+
+.pending-invoices-sort-button:hover,
+.pending-invoices-sort-button:focus-visible {
+  color: var(--fp-accent);
+  outline: none;
+}
+
+.pending-invoices-sort-icon {
+  color: var(--fp-text-tertiary);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.pending-invoices-status-filter-cell {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.pending-invoices-counterparty-cell,
+.pending-invoices-cell-stack,
+.pending-invoices-money-stack {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pending-invoices-counterparty-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pending-invoices-counterparty-name,
+.pending-invoices-cell-primary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fp-text-primary);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-invoices-cell-secondary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fp-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-invoices-tag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 20px;
+  width: fit-content;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-pill);
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-invoices-amount-cell {
+  align-items: end;
+}
+
+.pending-invoices-amount-cell [class~="finance-amount-cell__meta"] {
+  justify-content: flex-end;
+}
+
+.pending-invoices-amount-cell [class~="finance-direction-tag"] {
+  min-width: 24px;
+}
+
+.pending-invoices-money-primary {
+  color: var(--fp-text-primary);
+  font-size: 12px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.pending-invoices-status-cell {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  column-gap: 4px;
+  min-height: 24px;
+}
+
+.pending-invoices-status-cell .finance-status-tag {
+  justify-self: center;
+  max-width: 100%;
+}
+
+.pending-invoices-icon-button,
+.pending-invoices-row-menu-trigger,
+.pending-invoices-inline-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.pending-invoices-icon-button,
+.pending-invoices-row-menu-trigger {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+.pending-invoices-inline-action {
+  min-height: 24px;
+  padding: 0 7px;
+}
+
+.pending-invoices-icon-button:hover,
+.pending-invoices-row-menu-trigger:hover,
+.pending-invoices-inline-action:hover:not(:disabled),
+.pending-invoices-icon-button:focus-visible,
+.pending-invoices-row-menu-trigger:focus-visible,
+.pending-invoices-inline-action:focus-visible {
+  border-color: var(--fp-accent);
+  background: var(--fp-accent-soft);
+  color: var(--fp-accent);
+  outline: none;
+}
+
+.pending-invoices-inline-action:disabled {
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-disabled);
+  cursor: default;
+}
+
+.pending-invoices-inline-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pending-invoices-row-menu {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.pending-invoices-row-menu-content {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 55;
+  display: grid;
+  min-width: 112px;
+  padding: 4px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  box-shadow: var(--fp-shadow-popover);
+}
+
+.pending-invoices-row-menu-item {
+  min-height: 30px;
+  padding: 0 var(--fp-space-3);
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  font-size: var(--fp-text-label);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.pending-invoices-row-menu-item:hover:not(:disabled),
+.pending-invoices-row-menu-item:focus-visible {
+  background: var(--fp-accent-soft);
+  color: var(--fp-accent);
+  outline: none;
+}
+
+.pending-invoices-row-menu-item:disabled {
+  color: var(--fp-text-disabled);
+  cursor: default;
+}
+
 @media (max-width: 900px) {
   .pending-invoices-page {
     padding: var(--fp-space-4);
+  }
+
+  .pending-invoices-table-shell {
+    max-height: calc(100vh - 220px);
   }
 
   .pending-invoices-toolbar-actions,
