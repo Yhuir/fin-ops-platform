@@ -357,6 +357,7 @@ Scope: final non-workbench no-MUI source contract and legacy provider cleanup on
   - Corrected final grep `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!web/src/components/workbench/**" --glob "!web/src/test/**" --glob "!web/src/app/styles.css"; then exit 1; else exit 0; fi`: passed. `styles.css` is covered by `MuiContainment.test.ts` because it intentionally retains documented frozen workbench selectors.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
+- Commit: `fcdbb7b4 test: enforce mui containment boundary`, pushed to `origin/refactor-ui`.
 
 ## MG-P113 Prompt Draft
 
