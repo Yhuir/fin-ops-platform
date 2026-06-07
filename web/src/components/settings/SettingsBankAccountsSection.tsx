@@ -1,33 +1,10 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import DeleteIcon from "@mui/icons-material/DeleteOutlined";
-import { DataGrid } from "@mui/x-data-grid";
-import type { GridColDef, GridRowModel } from "@mui/x-data-grid";
+import { Trash2 } from "lucide-react";
 
-import type { BankAccountMapping } from "../../features/workbench/types";
-import {
-  useMuiDataGridPageSession,
-  useMuiDataGridScrollSession,
-} from "../../hooks/useMuiDataGridPageSession";
-import { settingsButtonSx, settingsDataGridSx, settingsTokens } from "./settingsDesign";
 import type { SettingsBankAccountsSectionProps } from "./types";
 
-const compactTextFieldSx = {
-  "& .MuiOutlinedInput-root.Mui-focused fieldset": { borderColor: settingsTokens.primary },
-};
-
-const carbonInfoAlertSx = {
-  bgcolor: settingsTokens.layer01,
-  color: settingsTokens.textPrimary,
-  border: `1px solid ${settingsTokens.borderSubtle}`,
-  borderRadius: "4px",
-  "& .MuiAlert-icon": { color: settingsTokens.primary },
-};
+function normalizeLast4(value: string) {
+  return value.replace(/\D/g, "").slice(0, 4);
+}
 
 export default function SettingsBankAccountsSection({
   controlsDisabled,
@@ -43,134 +20,140 @@ export default function SettingsBankAccountsSection({
   onUpdateMapping,
   onDeleteMapping,
 }: SettingsBankAccountsSectionProps) {
-  const gridSession = useMuiDataGridPageSession({
-    pageKey: "settings",
-    gridKey: "bank-account-mappings",
-    columnsVersion: "settings-bank-accounts-v1",
-  });
-  const gridScrollSession = useMuiDataGridScrollSession(gridSession);
-  const processRowUpdate = (newRow: GridRowModel<BankAccountMapping>) => {
-    const nextRow = {
-      ...newRow,
-      bankName: String(newRow.bankName ?? "").trim(),
-      last4: String(newRow.last4 ?? "").replace(/\D/g, "").slice(0, 4),
-      shortName: String(newRow.shortName ?? "").trim(),
-    };
-    onUpdateMapping(nextRow.id, (current) => ({
-      ...current,
-      bankName: nextRow.bankName,
-      last4: nextRow.last4,
-      shortName: nextRow.shortName,
-    }));
-    return nextRow;
-  };
-
-  const columns: GridColDef<BankAccountMapping>[] = [
-    { field: "bankName", headerName: "银行名称", flex: 1, minWidth: 220, editable: !controlsDisabled },
-    {
-      field: "last4",
-      headerName: "后四位",
-      width: 140,
-      editable: !controlsDisabled,
-      valueParser: (value) => String(value ?? "").replace(/\D/g, "").slice(0, 4),
-    },
-    { field: "shortName", headerName: "简称", flex: 0.8, minWidth: 160, editable: !controlsDisabled },
-    {
-      field: "actions",
-      headerName: "操作",
-      width: 80,
-      sortable: false,
-      filterable: false,
-      disableColumnMenu: true,
-      renderCell: (params) => (
-        <IconButton
-          color="error"
-          size="small"
-          aria-label={`${params.row.bankName} 删除`}
-          disabled={controlsDisabled}
-          onClick={() => onDeleteMapping(params.row.id)}
-        >
-          <DeleteIcon fontSize="small" />
-        </IconButton>
-      ),
-    },
-  ];
-
   return (
-    <Box
-      component="section"
+    <section
       aria-labelledby="settings-section-bank-accounts-title"
+      className="settings-section-panel"
       id="settings-section-bank-accounts"
       role="region"
-      sx={{ mb: 4 }}
     >
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
-        <Typography id="settings-section-bank-accounts-title" component="h3" variant="h6" sx={{ color: settingsTokens.textPrimary, fontWeight: 400, fontSize: "16px" }}>
-          银行账户映射
-        </Typography>
-      </Stack>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-          <TextField
-            label="银行名称"
-            size="small"
-            value={bankNameDraft}
-            disabled={controlsDisabled}
-            onChange={(event) => onChangeBankNameDraft(event.currentTarget.value)}
-            sx={compactTextFieldSx}
-          />
-          <TextField
-            label="银行卡后四位"
-            size="small"
-            slotProps={{ htmlInput: { maxLength: 4, inputMode: "numeric" } }}
-            value={last4Draft}
-            disabled={controlsDisabled}
-            onChange={(event) => onChangeLast4Draft(event.currentTarget.value.replace(/\D/g, ""))}
-            sx={compactTextFieldSx}
-          />
-          <TextField
-            label="简称"
-            size="small"
-            value={bankShortNameDraft}
-            disabled={controlsDisabled}
-            onChange={(event) => onChangeBankShortNameDraft(event.currentTarget.value)}
-            sx={compactTextFieldSx}
-          />
-          <Button
-            type="button"
-            variant="contained"
+      <header className="settings-section-header">
+        <h3 id="settings-section-bank-accounts-title">银行账户映射</h3>
+      </header>
+      <div className="settings-section-body">
+        <div className="settings-bank-mapping-form">
+          <label className="settings-field">
+            <span>银行名称</span>
+            <input
+              disabled={controlsDisabled}
+              type="text"
+              value={bankNameDraft}
+              onChange={(event) => onChangeBankNameDraft(event.currentTarget.value)}
+            />
+          </label>
+          <label className="settings-field">
+            <span>银行卡后四位</span>
+            <input
+              disabled={controlsDisabled}
+              inputMode="numeric"
+              maxLength={4}
+              type="text"
+              value={last4Draft}
+              onChange={(event) => onChangeLast4Draft(normalizeLast4(event.currentTarget.value))}
+            />
+          </label>
+          <label className="settings-field">
+            <span>简称</span>
+            <input
+              disabled={controlsDisabled}
+              type="text"
+              value={bankShortNameDraft}
+              onChange={(event) => onChangeBankShortNameDraft(event.currentTarget.value)}
+            />
+          </label>
+          <button
+            className="settings-primary-button"
             disabled={!canAddMapping || controlsDisabled}
+            type="button"
             onClick={onAddMapping}
-            sx={settingsButtonSx}
           >
             新增映射
-          </Button>
-        </Stack>
+          </button>
+        </div>
 
-        <Box sx={{ width: "100%", bgcolor: settingsTokens.page }}>
-          {mappings.length === 0 ? (
-            <Alert severity="info" sx={carbonInfoAlertSx}>
-              当前没有银行映射。
-            </Alert>
-          ) : (
-            <Box ref={gridScrollSession.rootRef} sx={{ display: "flex", flexDirection: "column", maxHeight: 420, minHeight: 260 }}>
-              <DataGrid
-                apiRef={gridScrollSession.apiRef}
-                rows={mappings}
-                columns={columns}
-                rowHeight={44}
-                columnHeaderHeight={44}
-                hideFooter
-                disableRowSelectionOnClick
-                processRowUpdate={processRowUpdate}
-                onProcessRowUpdateError={() => undefined}
-                initialState={gridScrollSession.initialState}
-                sx={settingsDataGridSx}
-              />
-            </Box>
-          )}
-        </Box>
-      </Box>
-    </Box>
+        {mappings.length === 0 ? (
+          <div className="settings-inline-alert settings-inline-alert--info" role="status">
+            当前没有银行映射。
+          </div>
+        ) : (
+          <div className="settings-native-table-shell settings-native-table-shell--scroll">
+            <table className="settings-native-table" aria-label="银行账户映射">
+              <thead>
+                <tr>
+                  <th scope="col">银行名称</th>
+                  <th scope="col">后四位</th>
+                  <th scope="col">简称</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mappings.map((mapping) => (
+                  <tr key={mapping.id}>
+                    <td>
+                      <input
+                        aria-label={`${mapping.bankName || mapping.last4} 银行名称`}
+                        className="settings-table-input"
+                        disabled={controlsDisabled}
+                        type="text"
+                        value={mapping.bankName}
+                        onChange={(event) =>
+                          onUpdateMapping(mapping.id, (current) => ({
+                            ...current,
+                            bankName: event.currentTarget.value.trim(),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        aria-label={`${mapping.bankName || mapping.last4} 后四位`}
+                        className="settings-table-input settings-table-input--code"
+                        disabled={controlsDisabled}
+                        inputMode="numeric"
+                        maxLength={4}
+                        type="text"
+                        value={mapping.last4}
+                        onChange={(event) =>
+                          onUpdateMapping(mapping.id, (current) => ({
+                            ...current,
+                            last4: normalizeLast4(event.currentTarget.value),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        aria-label={`${mapping.bankName || mapping.last4} 简称`}
+                        className="settings-table-input"
+                        disabled={controlsDisabled}
+                        type="text"
+                        value={mapping.shortName}
+                        onChange={(event) =>
+                          onUpdateMapping(mapping.id, (current) => ({
+                            ...current,
+                            shortName: event.currentTarget.value.trim(),
+                          }))
+                        }
+                      />
+                    </td>
+                    <td>
+                      <button
+                        aria-label={`${mapping.bankName} 删除`}
+                        className="settings-icon-button settings-icon-button--danger"
+                        disabled={controlsDisabled}
+                        type="button"
+                        onClick={() => onDeleteMapping(mapping.id)}
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

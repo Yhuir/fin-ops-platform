@@ -5669,7 +5669,7 @@ Scope: `/settings` page shell, save feedback, loading/error wrappers and left se
 ### P102-phase-6-settings-projects-and-bank-accounts
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/settings` project status and bank account mapping sections only。
 
@@ -5691,6 +5691,48 @@ Scope: `/settings` project status and bank account mapping sections only.
 - Workbench internals frozen: required。
 - Table form factor preserved: required，do not turn editable tables into card lists。
 - Expected source-level failure allowed: yes，later Settings sections/dialogs/table/settingsDesign still use MUI after P102。
+
+#### Execution Notes
+
+- Runtime implementation changed:
+  - `SettingsProjectsSection.tsx` moved from MUI DataGrid/TextField/Button/IconButton/Alert/icons to native forms, native tables and lucide action icons.
+  - `SettingsBankAccountsSection.tsx` moved from MUI DataGrid/session hooks/TextField/Button/IconButton/Alert to a native editable table preserving row inputs and delete actions.
+  - `web/src/app/styles.css` added Settings form/table/action/source-tag classes using existing `--fp-*` tokens.
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Verification:
+  - scoped projects/bank no-MUI/DataGrid grep: passed。
+  - `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|renders as a tree-and-panel page|switches the content panel|keeps read-only settings users"`: expected-fail；selected behavior tests passed, source-level contract failed only for later Settings section/dialog/table/settingsDesign files。
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: expected-fail；12 behavior tests passed, 1 source-level contract failed for remaining Settings MUI runtime。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+- Next prompt generated: `P103-phase-6-settings-access-and-pending-tags`。
+
+### P103-phase-6-settings-access-and-pending-tags
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/settings` access accounts and pending invoice tag sections only。
+
+#### Prompt
+
+```text
+Prompt ID: P103-phase-6-settings-access-and-pending-tags
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/settings` access accounts and pending invoice tag sections only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/settings/SettingsAccessAccountsSection.tsx、web/src/components/settings/SettingsPendingInvoiceTagsSection.tsx、web/src/components/settings/settingsDesign.ts、web/src/test/SettingsPage.test.tsx 和 web/src/app/styles.css。只迁移访问账户 section 和待找发票筛选 section：移除 MUI DataGrid、Select/Menu/MenuItem/List/ListItem/Button/TextField/Alert/Chip/Tooltip/IconButton/icons、settingsDataGridSx/settingsButtonSx/settingsSectionSx/settingsTokens 在这两个 section 的使用，改为原生/project table、select、menu/popover-like surface、tag、button、status classes。不得迁移 OA retention/import、OA invoice offset、data reset section/dialogs、OA manual search/import table 或 settings API/data logic。不得修改 API client、mock response shape、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留用户可见行为：`访问账户` region、管理员账号提示、新增账户用户名和 `新增账户权限` select、访问账户行内编辑/删除、`待找发票筛选` region、分组列表 `需要开票`/`流水代替发票`/`无需开票`、`选择现有标签` menu/popover trigger、active tags 可选、移除按钮、invalid historical mappings `标签不存在` / `标签已停用` 保持可见且继续阻止保存。运行 selected tests `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|manages pending invoice tag mappings|keeps invalid historical pending invoice mappings|keeps read-only settings users"`，预期 behavior tests pass and source-level contract still fails for later Settings sections；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level contract fails only for OA/data reset/manual table/settingsDesign；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|DataGrid|GridColDef|settingsDataGridSx|settingsButtonSx|settingsSectionSx|settingsTokens|DeleteOutlined|<(Alert|Box|Button|Chip|FormControl|IconButton|InputLabel|List|ListItem|ListItemButton|ListItemText|Menu|MenuItem|Select|Stack|TextField|Tooltip|Typography)\\b' web/src/components/settings/SettingsAccessAccountsSection.tsx web/src/components/settings/SettingsPendingInvoiceTagsSection.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P104 OA rules and data reset prompt。
+```
+
+#### Review
+
+- Single slice: yes，only Settings access accounts and pending invoice tag sections。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Menu/popover form factor preserved: required，`选择现有标签` must stay a trigger-driven selection surface。
+- Expected source-level failure allowed: yes，OA/data reset/manual table/settingsDesign remain after P103。
 
 ### MG Prompt Template
 
