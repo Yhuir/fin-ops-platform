@@ -1,9 +1,30 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
+
+const settingsSourceFiles = [
+  "src/pages/SettingsPage.tsx",
+  "src/components/settings/SettingsPageContent.tsx",
+  "src/components/settings/SettingsTreeNav.tsx",
+  "src/components/settings/SettingsProjectsSection.tsx",
+  "src/components/settings/SettingsBankAccountsSection.tsx",
+  "src/components/settings/SettingsPendingInvoiceTagsSection.tsx",
+  "src/components/settings/SettingsOaRetentionSection.tsx",
+  "src/components/settings/SettingsOaInvoiceOffsetSection.tsx",
+  "src/components/settings/SettingsAccessAccountsSection.tsx",
+  "src/components/settings/SettingsDataResetSection.tsx",
+  "src/components/settings/OaManualSearchImportTable.tsx",
+  "src/components/settings/settingsDesign.ts",
+] as const;
+
+function readWebSource(path: (typeof settingsSourceFiles)[number]) {
+  return readFileSync(resolve(__dirname, "..", path.replace(/^src\//, "")), "utf8");
+}
 
 function installSettingsTagFetch() {
   const baseFetch = installMockApiFetch();
@@ -98,6 +119,41 @@ function installInvalidPendingInvoiceTagFetch() {
 }
 
 describe("Settings page", () => {
+  test("targets project primitives for settings navigation, tables, dialogs, menus, and feedback", () => {
+    const sourceByPath = Object.fromEntries(settingsSourceFiles.map((path) => [path, readWebSource(path)]));
+    const forbiddenMuiImports = settingsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
+    });
+    const forbiddenMuiSelectors = settingsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /\.Mui[A-Z][A-Za-z-]*/.test(source) ? [path] : [];
+    });
+    const forbiddenLegacySurfaces = settingsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /<(?:Alert|Box|Button|Card|Checkbox|Chip|CircularProgress|Collapse|DataGrid|Dialog|DialogActions|DialogContent|DialogTitle|FormControl|FormControlLabel|FormGroup|FormLabel|IconButton|InputLabel|LinearProgress|List|ListItem|ListItemButton|ListItemText|Menu|MenuItem|Select|Stack|Table|TableBody|TableCell|TableContainer|TableHead|TablePagination|TableRow|TextField|Tooltip|Typography)\b|ThemeProvider|settingsTheme|settingsButtonSx|settingsDataGridSx|settingsSectionSx|settingsTokens|DeleteOutlined|KeyboardArrowDownIcon|KeyboardArrowRightIcon|RefreshIcon|UndoIcon|CheckCircleOutlineIcon/.test(source)
+        ? [path]
+        : [];
+    });
+
+    expect(forbiddenMuiImports).toEqual([]);
+    expect(forbiddenMuiSelectors).toEqual([]);
+    expect(forbiddenLegacySurfaces).toEqual([]);
+
+    const pageSource = sourceByPath["src/pages/SettingsPage.tsx"];
+    const contentSource = sourceByPath["src/components/settings/SettingsPageContent.tsx"];
+    const oaManualTableSource = sourceByPath["src/components/settings/OaManualSearchImportTable.tsx"];
+    const missingPrimitiveTargets = [
+      pageSource.includes("SettingsPageContent") ? null : "SettingsPage.tsx should keep SettingsPageContent",
+      contentSource.includes("SettingsTreeNav") ? null : "SettingsPageContent.tsx should keep SettingsTreeNav",
+      /role=["']treeitem["']/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should preserve treeitem semantics",
+      /aria-label=["']OA全量搜索导入结果["']/.test(oaManualTableSource) ? null : "OA manual search should preserve table accessible name",
+      /确认数据重置/.test(contentSource) && /OA 密码复核/.test(contentSource) ? null : "Data reset should keep two modal dialog labels",
+    ].filter(Boolean);
+
+    expect(missingPrimitiveTargets).toEqual([]);
+  });
+
   test("renders as a tree-and-panel page without an extra page header title", async () => {
     installMockApiFetch();
     renderAppAt("/settings");
@@ -107,8 +163,9 @@ describe("Settings page", () => {
     expect(screen.queryByRole("dialog", { name: "关联台设置" })).not.toBeInTheDocument();
 
     const tree = await screen.findByRole("tree", { name: "设置分类" });
-    expect(tree).toHaveClass("MuiList-root");
     expect(within(tree).getByRole("treeitem", { name: /项目状态/ })).toHaveAttribute("aria-selected", "true");
+    expect(within(tree).getByRole("treeitem", { name: /银行账户/ })).toHaveAttribute("aria-controls", "settings-section-bank-accounts");
+    expect(screen.getByRole("region", { name: "项目状态管理" })).toHaveAttribute("id", "settings-section-projects");
 
     expect(screen.getByRole("region", { name: "项目状态管理" })).toBeInTheDocument();
   });
@@ -143,8 +200,8 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(screen.getByText("当前账号仅支持查看和导出，不能保存设置。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存设置" })).toBeDisabled();
+    expect(await screen.findByText("当前账号仅支持查看和导出，不能保存设置。")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "保存设置" })).toBeDisabled();
   });
 
   test("keeps data reset behind impact confirmation, OA password review, and job progress", async () => {
@@ -157,7 +214,7 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    const tree = await screen.findByRole("tree", { name: "设置分类" });
     await user.click(within(tree).getByRole("treeitem", { name: /数据重置/ }));
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
 
@@ -186,7 +243,7 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    const tree = await screen.findByRole("tree", { name: "设置分类" });
     expect(within(tree).queryByRole("treeitem", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
     expect(within(tree).queryByText("全 app 银行明细标签字典")).not.toBeInTheDocument();
     expect(within(tree).queryByRole("treeitem", { name: /银行流水标签/ })).not.toBeInTheDocument();
@@ -218,7 +275,7 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    const tree = await screen.findByRole("tree", { name: "设置分类" });
     await user.click(within(tree).getByRole("treeitem", { name: /待找发票筛选/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "待找发票筛选" });

@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P100-phase-6-settings-characterization-tests`
+- Current Prompt ID: `P101-phase-6-settings-shell-navigation`
 - Current MG ID: `MG-P098-phase-6-etc-tickets`
 
 ## Global Invariants
@@ -54,14 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 Settings characterization tests generated after P099 discovery。
-- Files touched in P099:
+- Scope: phase 6 Settings shell/navigation migration generated after P100 characterization tests。
+- Files touched in P100:
+  - `web/src/test/SettingsPage.test.tsx`
+  - `web/src/test/SettingsOaManualSearchImportTable.test.tsx`
   - `docs/refactor-ui/modules/phase_6_settings.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P099 Settings discovery doc exists；required discovery terms and P100 prompt are recorded；diff check passed。
+- Verification run: Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected against current Settings MUI runtime；diff check passed。
 - Failures: none.
-- Next action: 执行 `P100-phase-6-settings-characterization-tests`。
+- Next action: 执行 `P101-phase-6-settings-shell-navigation`。
 
 ## Prompt Lifecycle
 
@@ -93,12 +95,14 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P100-phase-6-settings-characterization-tests` | P099 Settings discovery verified；next characterization tests |
+| page batches | `in_progress` | `P101-phase-6-settings-shell-navigation` | P100 Settings characterization verified；next migrate Settings shell/navigation |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P100-phase-6-settings-characterization-tests` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level no-MUI/project primitive contract failed as expected against current Settings MUI runtime |
+| 2026-06-07 | `P100-phase-6-settings-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|opens tag selection drawer\|confirms a manual zero-difference\|confirms closure when cash direction crosses\|blocks cross-group selection"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining ExtraDrawer/ExportDialog targets |
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |

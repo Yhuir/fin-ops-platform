@@ -175,7 +175,7 @@ afterEach(() => {
 });
 
 describe("OaManualSearchImportTable", () => {
-  test("searches OA rows with MUI table semantics and no DataGrid surface", async () => {
+  test("searches OA rows with native table semantics and no DataGrid surface", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     renderTable();

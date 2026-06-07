@@ -5581,7 +5581,7 @@ Scope: `/settings` discovery only.
 ### P100-phase-6-settings-characterization-tests
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: `/settings` characterization tests only。
 
@@ -5603,6 +5603,48 @@ Scope: `/settings` characterization tests only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level no-MUI contract should fail against current Settings MUI runtime while behavior tests pass。
+
+#### Execution Notes
+
+- Runtime implementation changed: no。
+- Test implementation changed:
+  - `SettingsPage.test.tsx` now has a source-level no-MUI/project primitive contract for `SettingsPage.tsx` and `web/src/components/settings`。
+  - Removed the legacy `MuiList-root` assertion and replaced it with treeitem/region/aria-controls assertions。
+  - Stabilized async Settings render assertions by waiting for the tree and read-only notice。
+  - `SettingsOaManualSearchImportTable.test.tsx` now names the table contract as native table semantics rather than MUI table semantics。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Verification:
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: expected-fail；12 behavior tests passed, 1 source-level contract failed as expected against current Settings MUI runtime。
+  - `git diff --check`: passed。
+- Next prompt generated: `P101-phase-6-settings-shell-navigation`。
+
+### P101-phase-6-settings-shell-navigation
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/settings` page shell, save feedback, loading/error wrappers and left settings navigation only。
+
+#### Prompt
+
+```text
+Prompt ID: P101-phase-6-settings-shell-navigation
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/settings` page shell, save feedback, loading/error wrappers and left settings navigation only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/SettingsPage.tsx、web/src/components/settings/SettingsPageContent.tsx、web/src/components/settings/SettingsTreeNav.tsx、web/src/components/settings/settingsDesign.ts、web/src/test/SettingsPage.test.tsx 和 web/src/app/styles.css。只迁移 Settings page shell、loading/error/read-only/save feedback、primary save button、left settings nav/tree 和 content wrapper classes；不得迁移 section bodies、DataGrid/native table bodies、pending tag menu、data reset dialogs、OA manual search/import table 或 settings API/data logic。不得修改 API client、mock response shape、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留用户可见行为：`settings-page` test id, no extra legacy `关联台设置` page title/dialog, left nav remains `设置导航`, tree remains `role="tree"` with `设置分类`, treeitems keep names/selection/aria-controls, content region remains `设置内容`, section regions keep the same accessible names, read-only notice and `保存设置` disabled state stay visible, loading/error/save status messages stay equivalent. 运行 `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|renders as a tree-and-panel page|switches the content panel|keeps workbench-only header actions|keeps read-only settings users"`，预期 selected behavior tests pass and source-level contract still fails for remaining section bodies；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level contract fails for remaining Settings MUI runtime；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|ThemeProvider|settingsTheme|settingsButtonSx|settingsSectionSx|<(Alert|Box|Button|CircularProgress|List|ListItem|ListItemButton|ListItemText|Stack|Typography)\\b' web/src/pages/SettingsPage.tsx web/src/components/settings/SettingsPageContent.tsx web/src/components/settings/SettingsTreeNav.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P102 projects/bank accounts prompt。
+```
+
+#### Review
+
+- Single slice: yes，Settings shell/navigation only。
+- Section body migration deferred: yes，P102-P105。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- User-visible behavior preserved: required，left nav/tree, content regions, save/read-only/loading/error states remain equivalent。
+- Expected source-level failure allowed: yes，remaining Settings section bodies still use MUI after P101。
 
 ### MG Prompt Template
 
