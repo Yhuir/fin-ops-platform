@@ -246,6 +246,7 @@ Scope: `/etc-tickets` upload/drop blocks, source-file context, and upload/source
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P095 page/style files changed before docs.
+- Commit: `a58e74c3 feat: migrate etc tickets upload panels`, pushed to `origin/refactor-ui`.
 
 ## P096 Prompt Draft
 
