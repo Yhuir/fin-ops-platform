@@ -804,6 +804,149 @@ textarea {
   border-radius: var(--fp-radius-pill);
 }
 
+.input-invoice-usage-drawer-body {
+  display: grid;
+  gap: var(--fp-space-4);
+}
+
+.input-invoice-usage-drawer-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+}
+
+.input-invoice-usage-drawer-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--fp-border);
+  border-top-color: var(--fp-primary);
+  border-radius: var(--fp-radius-pill);
+  animation: input-invoice-usage-spinner 0.8s linear infinite;
+}
+
+@keyframes input-invoice-usage-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.input-invoice-usage-drawer-alert {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  font-size: var(--fp-text-body);
+  line-height: 1.45;
+  padding: var(--fp-space-3);
+}
+
+.input-invoice-usage-drawer-alert__title {
+  font-weight: 900;
+}
+
+.input-invoice-usage-drawer-alert--error {
+  border-color: color-mix(in srgb, var(--fp-danger) 32%, var(--fp-border));
+  background: var(--fp-danger-soft);
+  color: var(--fp-danger);
+}
+
+.input-invoice-usage-drawer-alert--info {
+  border-color: color-mix(in srgb, var(--fp-info) 28%, var(--fp-border));
+  background: var(--fp-primary-soft);
+  color: var(--fp-text-primary);
+}
+
+.input-invoice-usage-drawer-alert--success {
+  border-color: color-mix(in srgb, var(--fp-success) 28%, var(--fp-border));
+  background: var(--fp-success-soft);
+  color: var(--fp-success);
+}
+
+.input-invoice-usage-detail-section,
+.input-invoice-usage-export-summary,
+.input-invoice-usage-export-sample {
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-surface);
+  padding: var(--fp-space-4);
+}
+
+.input-invoice-usage-detail-section h3,
+.input-invoice-usage-export-summary h3 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.input-invoice-usage-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--fp-space-3);
+  margin-top: var(--fp-space-3);
+}
+
+.input-invoice-usage-detail-field {
+  min-width: 0;
+}
+
+.input-invoice-usage-detail-field__label {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.input-invoice-usage-detail-field__value {
+  margin-top: 2px;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.input-invoice-usage-export-summary p {
+  margin: 4px 0 0;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+}
+
+.input-invoice-usage-export-sample {
+  overflow: auto;
+  padding: 0;
+}
+
+.input-invoice-usage-export-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fp-text-label);
+}
+
+.input-invoice-usage-export-table th,
+.input-invoice-usage-export-table td {
+  border-bottom: 1px solid var(--fp-border);
+  padding: var(--fp-space-2) var(--fp-space-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.input-invoice-usage-export-table th {
+  background: var(--fp-table-header-bg);
+  color: var(--fp-text-secondary);
+  font-weight: 900;
+}
+
+.input-invoice-usage-export-table td {
+  color: var(--fp-text-primary);
+}
+
+.input-invoice-usage-export-table tr:last-child td {
+  border-bottom: 0;
+}
+
 .pending-invoices-page {
   min-height: 100%;
   padding: var(--fp-space-5) var(--fp-space-6);

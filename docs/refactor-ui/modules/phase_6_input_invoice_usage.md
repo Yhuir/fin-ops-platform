@@ -427,3 +427,44 @@ Scope: Input invoice usage detail drawer and export drawer only: `InputInvoiceUs
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、web/src/components/common/AppDrawer.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx、web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 detail/export drawers 的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Box`、`Button`、`CircularProgress`、`Divider`、`Drawer`、`IconButton`、`Paper`、`Stack`、`Table*`、`Typography`。使用 `AppDrawer`、project/native status messages/loading、project detail section cards、project sample table and project action buttons。必须保留 detail drawer right placement、`aria-label="详情"` 或 equivalent drawer accessible label、close button `关闭详情抽屉`、lazy load on open、progress label `正在加载详情`、text `正在加载完整详情`、error text、`详情暂不可用` and unavailable reason behavior、empty detail `暂无更多详情。`、field section labels and values。必须保留 export drawer right placement、drawer label `进项发票使用情况导出`、close `关闭进项发票使用情况导出`、title `筛选内容导出`、preview loading `正在加载导出预览` / `正在计算导出范围`、refreshing notice `导出数据准备中，请稍后再试。`、success `已生成 <file>`、`预计导出 <n> 行`、sample table `进项发票使用情况导出样例`、empty sample `暂无样例。`、`关闭` and `下载导出` buttons and actual download trigger behavior。不得修改 page shell、main table、filter menu、payment-rules/OA-reverse drawers、input invoice usage API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx -t "detail drawer|loads export preview|workflow primitive targets"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P059-P060/P061 payment-rules/OA-reverse source contract failures 可以继续 expected-fail，但 detail/export drawer files must disappear from source-level failure lists；运行 `cd web && npm run build`；运行 detail/export drawer MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|Drawer|TableCell|TableRow|TableHead|TableBody' web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx web/src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P059 payment status rules drawer prompt。
 ```
+
+## Execution Update: P058 Detail And Export Drawers
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx`
+  - `web/src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx`
+  - `web/src/app/styles.css`
+- Runtime implementation changed: detail and export right drawers only.
+- Payment rules and OA reverse drawers changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - Replaced detail/export MUI Drawer implementations with `AppDrawer`.
+  - Replaced MUI alert/loading/paper/table/button/layout usage with project/native status blocks, sections, sample table and action buttons.
+  - Preserved lazy loading, unavailable OA detail behavior, detail sections, export preview, sample table, refreshing notice, success message and download trigger.
+  - Added detail/export drawer styles in `web/src/app/styles.css`.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|@mui/material/Drawer|TableCell|TableRow|TableHead|TableBody' web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx web/src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx -t "detail drawer|loads export preview|workflow primitive targets"`: expected-fail. Detail/export behavior passed where selected; source failure now lists only payment rules and OA reverse drawers.
+  - `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "lazy-loads full invoice detail|supports invoice, bank, OA and relation-list detail payloads"`: passed, 2 tests passed.
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: expected-fail, 19 passed and 2 source-level failures. Detail/export drawer files no longer appear in failure lists.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
+## Current Expected Failures After P058
+
+The two source-level failures are expected until P059-P060/P061 complete:
+
+- `src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx`: still imports MUI Drawer/table/form/tag/status/action components; P059 owns this.
+- `src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`: still imports MUI Drawer/table/form/selection/tag/status/action components; P060 owns this.
+
+## P059 Prompt Draft
+
+```text
+Prompt ID: P059-phase-6-input-invoice-usage-payment-rules-drawer
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `PaymentStatusRulesDrawer.tsx` only, plus necessary styles/tests. Do not migrate `OaReverseWorkspaceDrawer.tsx`.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、web/src/components/common/AppDrawer.tsx、web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx、web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 payment rules drawer 的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Box`、`Button`、`Chip`、`CircularProgress`、`Divider`、`Drawer`、`IconButton`、`Paper`、`Stack`、`Table*`、`TextField`、`Typography`。使用 `AppDrawer`、project/native status messages/loading/tags/table/inputs/buttons。必须保留 drawer title `发票与支付状态规则设置`、close label `关闭支付状态规则抽屉`、loading progress label `正在加载支付状态规则` and text `正在读取规则`、error text、success `规则已保存，读模型会按后端返回的刷新状态更新。`、version chip `版本 <n>`、read-only/no-save mode、editable `支付状态`/`规则`/`优先级` inputs、pending direction inputs/chips、`还原`、`保存规则`、dirty disabled behavior、versioned save payload with idempotency key and conflict text `规则已被其他人更新，请重新加载后再编辑。`。不得修改 page shell、main table、filter menu、detail/export drawers、OA-reverse drawer、input invoice usage API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run InputInvoiceUsageFiltersAndDrawers.test.tsx -t "payment status rules|workflow primitive targets"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P060/P061 OA-reverse source contract failure 可以继续 expected-fail，但 `PaymentStatusRulesDrawer.tsx` must disappear from source-level failure lists；运行 `cd web && npm run build`；运行 payment rules MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|@mui/material/Drawer|TextField|TableCell|TableRow|TableHead|TableBody|Chip' web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P060 OA reverse workspace drawer prompt。
+```

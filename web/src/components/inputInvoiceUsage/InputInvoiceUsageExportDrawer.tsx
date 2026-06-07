@@ -1,22 +1,7 @@
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
 import type { InputInvoiceUsageExportDownload, InputInvoiceUsageExportPreview } from "../../features/inputInvoiceUsage/types";
+import AppDrawer from "../common/AppDrawer";
 
 type InputInvoiceUsageExportDrawerProps = {
   open: boolean;
@@ -89,85 +74,74 @@ export default function InputInvoiceUsageExportDrawer({
 
   const refreshing = preview?.readModelStatus === "refreshing";
   return (
-    <Drawer
-      anchor="right"
-      open={open}
-      variant="persistent"
-      onClose={onClose}
-      transitionDuration={{ enter: 180, exit: 140 }}
-      PaperProps={{
-        "aria-label": open ? "进项发票使用情况导出" : undefined,
-        role: "presentation",
-        sx: { width: { xs: "100%", sm: "min(840px, 54vw)" }, maxWidth: "100vw" },
-      }}
-    >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
-          <Box>
-            <Typography component="h2" variant="h6" fontWeight={900}>筛选内容导出</Typography>
-            <Typography variant="caption" color="text.secondary">{preview?.scopeLabel || "当前筛选"}</Typography>
-          </Box>
-          <IconButton aria-label="关闭进项发票使用情况导出" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 2.5 }}>
-          {loading ? (
-            <Stack direction="row" spacing={1.25} alignItems="center">
-              <CircularProgress aria-label="正在加载导出预览" size={22} />
-              <Typography variant="body2" color="text.secondary">正在计算导出范围</Typography>
-            </Stack>
-          ) : null}
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          {refreshing ? <Alert severity="info">导出数据准备中，请稍后再试。</Alert> : null}
-          {downloadedFileName ? <Alert severity="success">已生成 {downloadedFileName}</Alert> : null}
-          {preview ? (
-            <>
-              <Paper variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
-                <Typography variant="subtitle2" fontWeight={900}>
-                  预计导出 {preview.rowCount.toLocaleString("en-US")} 行
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  {preview.fileName}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ borderRadius: 1 }}>
-                <Table size="small" aria-label="进项发票使用情况导出样例">
-                  <TableHead>
-                    <TableRow>
-                      {preview.columns.map((column) => (
-                        <TableCell key={column}>{column}</TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {preview.sampleRows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={Math.max(1, preview.columns.length)}>暂无样例。</TableCell>
-                      </TableRow>
-                    ) : preview.sampleRows.map((row, index) => (
-                      <TableRow key={index}>
-                        {preview.columns.map((column) => (
-                          <TableCell key={`${index}-${column}`}>{row[column] ?? "-"}</TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </Paper>
-            </>
-          ) : null}
-        </Stack>
-        <Divider />
-        <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ p: 2 }}>
-          <Button onClick={onClose} disabled={downloading}>关闭</Button>
-          <Button variant="contained" onClick={handleDownload} disabled={!preview || loading || downloading || refreshing}>
+    <AppDrawer
+      className="input-invoice-usage-export-drawer"
+      closeLabel="关闭进项发票使用情况导出"
+      footer={(
+        <>
+          <button className="input-invoice-usage-button" disabled={downloading} onClick={onClose} type="button">
+            关闭
+          </button>
+          <button
+            className="input-invoice-usage-button input-invoice-usage-button--primary"
+            disabled={!preview || loading || downloading || refreshing}
+            onClick={handleDownload}
+            type="button"
+          >
             {downloading ? "下载中..." : "下载导出"}
-          </Button>
-        </Stack>
-      </Stack>
-    </Drawer>
+          </button>
+        </>
+      )}
+      open={open}
+      subtitle={preview?.scopeLabel || "当前筛选"}
+      title="筛选内容导出"
+      width="min(840px, 100vw)"
+      onClose={onClose}
+    >
+      <div aria-label={open ? "进项发票使用情况导出" : undefined} className="input-invoice-usage-drawer-body">
+        {loading ? (
+          <div className="input-invoice-usage-drawer-loading">
+            <span aria-label="正在加载导出预览" className="input-invoice-usage-drawer-spinner" role="progressbar" />
+            <span>正在计算导出范围</span>
+          </div>
+        ) : null}
+        {error ? <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--error" role="alert">{error}</div> : null}
+        {refreshing ? <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info" role="status">导出数据准备中，请稍后再试。</div> : null}
+        {downloadedFileName ? <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--success" role="status">已生成 {downloadedFileName}</div> : null}
+        {preview ? (
+          <>
+            <section className="input-invoice-usage-export-summary">
+              <h3>预计导出 {preview.rowCount.toLocaleString("en-US")} 行</h3>
+              <p>{preview.fileName}</p>
+            </section>
+            <section className="input-invoice-usage-export-sample">
+              <table aria-label="进项发票使用情况导出样例" className="input-invoice-usage-export-table">
+                <thead>
+                  <tr>
+                    {preview.columns.map((column) => (
+                      <th key={column} scope="col">{column}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.sampleRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={Math.max(1, preview.columns.length)}>暂无样例。</td>
+                    </tr>
+                  ) : preview.sampleRows.map((row, index) => (
+                    <tr key={index}>
+                      {preview.columns.map((column) => (
+                        <td key={`${index}-${column}`}>{row[column] ?? "-"}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </>
+        ) : null}
+      </div>
+    </AppDrawer>
   );
 }
 
