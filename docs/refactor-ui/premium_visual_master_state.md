@@ -47,7 +47,7 @@ Last updated: 2026-06-08
 | 15 | `PV-015-oa-pending-payments-premium-visual` | verified | OA 待付款核对 premium visual slice。 |
 | 16 | `PV-016-output-invoice-collections-discovery` | verified | `/output-invoice-collections` discovery。 |
 | 17 | `PV-017-output-invoice-collections-premium-visual` | verified | 销项发票收款 premium visual slice。 |
-| 18 | `PV-018-no-oa-bank-batches-discovery` | pending | `/no-oa-bank-batches` discovery。 |
+| 18 | `PV-018-no-oa-bank-batches-discovery` | verified | `/no-oa-bank-batches` discovery。 |
 | 19 | `PV-019-no-oa-bank-batches-premium-visual` | pending | 免 OA 流水批量处理 premium visual slice。 |
 | 20 | `PV-020-batch-accounting-discovery` | pending | `/batch-accounting` discovery。 |
 | 21 | `PV-021-batch-accounting-premium-visual` | pending | 批量账务 premium visual slice。 |
@@ -62,29 +62,28 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-018-no-oa-bank-batches-discovery`
+`PV-019-no-oa-bank-batches-premium-visual`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/module_inventory.md`
 - `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
 - `web/src/pages/NoOaBankBatchPage.tsx`
-- `web/src/features/noOaBankBatches/*`
+- `web/src/app/styles.css`
 - `web/src/test/NoOaBankBatchPage.test.tsx`
-- `web/src/test/NoOaBankBatchApi.test.ts`
 
 ### Verification
 
-Required for PV-018:
+Required for PV-019:
 
+- `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- `git status --short --branch`
-
-PV-018 is discovery-only. It must not change runtime code unless a very small characterization test gap is found and can be filled without behavior change.
+- Browser smoke `/no-oa-bank-batches`: heading, filter region, status segmented controls, rails, transaction table, tag drawer, withdraw dialog or submitted workflow entry, and no top-level horizontal overflow.
 
 ## Execution Rules
 
@@ -128,3 +127,5 @@ Each implementation slice must:
 | 2026-06-08 | `PV-016-output-invoice-collections-discovery` | `51bc31fb` | pushed to `origin/main` | Output invoice collections premium discovery verified; PV-017 prompt generated. |
 | 2026-06-08 | `PV-016-push-log-update` | `b94f089a` | pushed to `origin/main` | Recorded PV-016 push status after push. |
 | 2026-06-08 | `PV-017-output-invoice-collections-premium-visual` | `81729836` | pushed to `origin/main` | Output invoice collections premium visual polish verified; PV-018 prompt generated. |
+| 2026-06-08 | `PV-017-push-log-update` | `9c58fb9d` | pushed to `origin/main` | Recorded PV-017 push status after push. |
+| 2026-06-08 | `PV-018-no-oa-bank-batches-discovery` | pending | pending | No-OA bank batches premium discovery verified; PV-019 prompt generated. |

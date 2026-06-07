@@ -60,7 +60,7 @@ Last updated: 2026-06-08
 | 7 | 进项发票使用 | `/input-invoice-usage` | `InputInvoiceUsagePage.tsx`, `components/inputInvoiceUsage/*` | high | 表格、筛选菜单、详情/导出/规则/OA 反查右侧抽屉。 |
 | 8 | OA 待付款核对 | `/oa-pending-payments` | `OaPendingPaymentsPage.tsx`, `components/oaPendingPayments/*` | high | 表格、状态、筛选、异常反馈。Premium discovery: `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`. |
 | 9 | 销项发票收款 | `/output-invoice-collections` | `OutputInvoiceCollectionsPage.tsx`, `components/outputInvoiceCollections/*` | high | 表格、详情/回款/红票/预览/设置/历史右侧抽屉。Premium discovery: `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`. |
-| 10 | 免OA流水批量处理 | `/no-oa-bank-batches` | `NoOaBankBatchPage.tsx`, `features/noOaBankBatches/*` | high | 批量选择、确认、状态反馈。 |
+| 10 | 免OA流水批量处理 | `/no-oa-bank-batches` | `NoOaBankBatchPage.tsx`, `features/noOaBankBatches/*` | high | 批量选择、确认、状态反馈。Premium discovery: `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`. |
 | 11 | 批量账务 | `/batch-accounting` | `BatchAccountingPage.tsx`, `features/batchAccounting/*` | high | 表格、搜索、选择、撤回弹窗、Snackbar。 |
 | 12 | 外部往来款管理 | `/turnover-ledger` | `TurnoverLedgerPage.tsx`, `components/turnoverLedger/*` | high | 左右双栏表格、选择、展开、补充信息右侧抽屉、导出弹窗。 |
 | 13 | ETC 票据管理 | `/etc-tickets` | `EtcTicketManagementPage.tsx`, `features/etc/*` | high | 导入、表格、对账、确认、空/错误状态。 |

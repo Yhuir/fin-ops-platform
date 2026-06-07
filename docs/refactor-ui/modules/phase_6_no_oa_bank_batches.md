@@ -24,6 +24,68 @@
 | API tests | `web/src/test/NoOaBankBatchApi.test.ts` | API client mapping, request payloads, HTML/error handling and mutation contracts. |
 | Related docs | `docs/dev/api-contracts.md`, `docs/app-architecture/pages.md` | API contract and page/read-model ownership references. |
 
+## PV-018 Premium Visual Discovery
+
+- Prompt ID: `PV-018-no-oa-bank-batches-discovery`
+- Type: premium visual discovery
+- Status: verified
+- Scope: `/no-oa-bank-batches` only.
+- Implementation changed: no.
+- Tests changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Current Implementation Status On `main`
+
+- Page shell, filter region, status segmented controls, label rails, transaction region, batch rows, detail table, tag drawer shell, withdraw dialog and toast feedback already use project/native primitives.
+- The page is a dense three-zone operational layout: filter controls on top, main/sub rails on the left/middle, transaction batches and detail table on the right.
+- The tag-management workflow is a right-side project drawer surface implemented with `no-oa-bank-batches-drawer*` classes; withdraw remains an `AppDialog`.
+- Source-level tests already require no direct runtime MUI imports/selectors and require `PageScaffold`, `StatePanel`, project rail/table/drawer/dialog classes.
+
+### User-visible Entrypoint Matrix
+
+| Area | Preserve exactly |
+| --- | --- |
+| Route/sidebar | `/no-oa-bank-batches`, sidebar label `免OA流水批量处理`, page heading `免OA流水批量处理`. |
+| Header actions | `免OA流水标签管理`, `刷新`; keep location, disabled/loading behavior and tag selection refetch on drawer open. |
+| Filter region | Region `批次筛选`; status segmented buttons `未提交 <count>`, `已提交 <count>`, `历史 <count>`; fields `月份` and `银行账户`. |
+| Selected feedback | Unsubmitted bucket shows `提交批次` and `已选 <n> 条`; cross-bank selection warning remains visible. |
+| Main rail | Region `主标签`; empty title `请先在标签管理中选择免OA标签`; buttons expose `<label> <批数/条数>` and Enter/Space activation. |
+| Sub rail | Region `子标签`; empty title `暂无子标签`; subtitle follows selected main label; buttons expose `<label> <批数/条数>` and Enter/Space activation. |
+| Transaction region | Region `流水`; selected title `<主标签> / <子标签>`; bucket hint copy, selected account copy and stale/loading/empty states remain. |
+| Batch list | Account label, status tag, row count, total amount, blocking reason and audit metadata remain in the batch item. |
+| Batch actions | `查看<account>流水`, `全选`, `清空`, `提交内部往来批次`, `撤回批次` remain in the transaction region with existing disabled/mutating semantics. |
+| Detail table | Accessible name `<account>流水`; columns `交易时间`, `对方户名`, `金额`, `摘要/用途/备注`, `分类来源`; row checkboxes and account select-all remain. |
+| Tag drawer | Right drawer/dialog name `免OA流水标签管理`; close label `关闭免OA流水标签管理`; version caption; actions `全选`, `清空`, `保存`; inactive warning and main/child checkboxes remain. |
+| Withdraw dialog | Dialog title `撤回批次`; warning copy, `撤回原因`, `取消`, `确认撤回`; disabled without reason. |
+| Feedback/status | Snackbar/status feedback for save, submit, withdraw, selection warnings and API errors remains user visible. |
+| Read model | Stale/read-model-refresh details stay hidden while current rows remain visible and retry timers clean up on route unmount. |
+
+### Table And List Content Roles
+
+| Surface | Premium layout requirement |
+| --- | --- |
+| Status segmented controls | Keep compact segmented controls with stable button height, no page-transition delay and clear active state. |
+| Main/sub rails | Keep rail items dense and scan-friendly; active rail state must not shift layout; counts align at the right edge where possible. |
+| Batch list | Avoid big card treatment; batch rows should read like compact operational list items with stable status tag, amount and action alignment. |
+| Detail table | Amount column right-aligns with tabular nums; direction/bank/source tags keep stable height; long counterparty/summary/purpose/remark text wraps or truncates without breaking row rhythm. |
+| Drawer | Tag management drawer remains right-side and compact; checkbox rows align consistently with labels and nested child tags. |
+| Dialog/toast | Withdraw dialog and feedback surfaces stay small, focused and non-blocking beyond their original workflow semantics. |
+
+### PV-019 Premium Opportunities
+
+- Replace any no-OA hard-coded hover/focus/table/surface colors with Ledger Calm token-based `color-mix(...)` treatments.
+- Add motion-token feedback to no-OA page buttons, segmented controls, filter inputs, rail items, batch actions, table row/checkbox affordances, drawer close/actions and dialog actions.
+- Tighten rail, batch-list, table-wrap, drawer and toast surfaces while preserving the existing three-zone layout.
+- Add CSS contract coverage in `NoOaBankBatchPage.test.tsx` for compact rails/list/table treatment, motion-token usage, amount alignment and token colors.
+
+### Non-scope For PV-019
+
+- Do not change API client/types, request params, mutation payloads, domain events, read-model freshness handling, retry behavior or workbench rebuild behavior.
+- Do not change the three-zone page structure, row selection guard, internal-transfer submit endpoint, withdraw dialog shape or tag drawer shape.
+- Do not convert the batch list into large cards or a dashboard.
+- Do not touch the frozen reconciliation workbench internals.
+
 ## Current MUI Inventory
 
 | File | Current MUI usage | Target |

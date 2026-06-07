@@ -984,7 +984,13 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-018-no-oa-bank-batches-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-018-no-oa-bank-batches-discovery`
 
@@ -1007,3 +1013,54 @@ Notes:
 - `git status --short --branch`
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和相关模块文档，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Updated `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md` with premium visual discovery for `/no-oa-bank-batches`.
+- Linked the no-OA bank batch queue item in `docs/refactor-ui/module_inventory.md`.
+- Confirmed current implementation on `main` already uses project/native page shell, filters, segmented controls, rail classes, transaction table classes, custom right drawer shell, `AppDialog` withdraw confirmation and native toast feedback.
+- Preserved the original route, header actions, filter region, main/sub rails, transaction region, batch list, detail table, selection guard, submit/withdraw flows, tag drawer, withdraw dialog, feedback states, read-model retry behavior and API/domain-event contracts as mandatory PV-019 constraints.
+- No runtime code or tests changed because PV-018 is discovery-only and existing `NoOaBankBatchPage.test.tsx` plus `NoOaBankBatchApi.test.ts` already cover the critical behavior.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-018 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-019-no-oa-bank-batches-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/app/styles.css`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts` 和当前 `git status`。本切片只做 `/no-oa-bank-batches` premium visual implementation，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+实现要求：
+
+- 保留现有三区布局和所有功能：route/sidebar、page heading、description、`免OA流水标签管理`、`刷新`、status segmented controls、`月份`、`银行账户`、`提交批次`、`已选 <n> 条`、主/子标签 rails、流水 region、批次列表、明细表、全选/清空/提交/撤回、标签管理右侧抽屉、撤回 dialog、toast/status feedback、loading/empty/error/read-model states。
+- 不做大 card 设计，不制造大留白；批次列表保持紧凑 operational list，不改成 dashboard cards。
+- 主/子 rails 保持原 region 和 keyboard behavior；active state 不改变 rail item height。
+- Detail table 继续是 `<account>流水` 的 dense table，保留 columns `交易时间` / `对方户名` / `金额` / `摘要/用途/备注` / `分类来源`，保留 row checkboxes and account select-all。
+- 金额右对齐并保持 tabular nums；方向/银行/来源/status tag 高度稳定；长摘要、用途、备注、账户名、对方户名需要截断或可读换行，不得撑乱行高。
+- 使用 `docs/refactor-ui/interaction_smoothness.md` 的 motion tokens 给 no-OA buttons、segmented controls、filter inputs、rail items、batch actions、detail table controls、drawer close/actions、dialog actions and toast close 增加 hover/press/focus feedback。
+- 将 no-OA hard-coded hover/focus/table/surface colors 尽量替换为 `DESIGN.md` token-based `color-mix(...)` treatment。
+- Tighten rail、transaction region、batch list、table wrap、drawer and toast surfaces，使其接近银行明细 premium sample，但不改变信息层级或 workflow shape。
+- 增加或更新 `NoOaBankBatchPage.test.tsx` 的 CSS contract：锁定 compact rails/list/table treatment、motion-token usage、amount alignment、tag stability 和 token colors。
+
+验证：
+
+- `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 浏览器 smoke `/no-oa-bank-batches`：确认 heading、filter region、status segmented controls、main/sub rails、transaction batch/table、tag drawer open/close、withdraw dialog or submitted workflow entry and no top-level horizontal overflow。
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`，精确 staging，commit 并 push 到 `origin/main`。
