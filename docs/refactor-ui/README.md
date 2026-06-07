@@ -45,6 +45,10 @@
 | `refactor_ui_state.md` | 状态机、当前阶段、验证结果和下一步 |
 | `refactor_ui_prompt.md` | 当前切片 prompt、审查记录、执行记录和 MG prompt |
 | `refactor_ui_master_goal_prompt.md` | 可直接交给 Codex 的端到端主控 `/goal` 指令 |
+| `workbench_migration_master_goal_prompt.md` | 关联台内部工作区 MUI 迁移的专项主控 `/goal` 指令 |
+| `workbench_migration_state.md` | 关联台内部工作区 MUI 迁移专项状态机 |
+| `workbench_migration_prompt.md` | 关联台内部工作区 MUI 迁移专项切片 prompt registry |
+| `modules/workbench_mui_migration.md` | 关联台内部工作区 MUI 迁移基线、风险、测试和切片队列 |
 | `baseline_inventory.md` | MUI 基线、页面清单、测试清单、右侧抽屉/弹窗形态和风险等级 |
 | `platform_stack_migration.md` | React 19、HeroUI v3、Tailwind v4、Vite、CSS import、provider 和 rollback |
 | `test_migration_strategy.md` | MUI class/theme 测试迁移到行为、语义、primitive 合约测试的策略 |
@@ -152,4 +156,4 @@ phase 只有在该阶段所有必要 prompt 和 MG 都 verified 后才能进入�
 - Vite build 仍报告当前单包 chunk size warning，代码拆分不属于本次 UI 平台迁移范围。
 - HeroUI/Tailwind CSS build 仍报告生成选择器 minifier warning。
 - Import page tests 中仍有 React Aria `<Focusable> child must be focusable` warning，建议作为后续 accessibility cleanup 切片。
-- 冻结关联台内部工作区仍可使用 MUI；如要迁移关联台内部，必须另起专项计划。
+- 冻结关联台内部工作区仍可使用 MUI；如要迁移关联台内部，专项主控计划见 `workbench_migration_master_goal_prompt.md`。
