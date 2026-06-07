@@ -167,6 +167,37 @@ Non-scope for PV-007:
 - Do not replace native file input behavior with a custom upload library.
 - Do not change preview table columns, accessible names, API payloads, confirm copy or error copy.
 
+## PV-007 Premium Visual Implementation
+
+Prompt ID: `PV-007-import-pages-premium-visual`
+
+Runtime changes:
+
+- Tightened import page vertical rhythm: content gap and two-column workflow gap now use `--fp-space-3`.
+- Removed ordinary panel shadow and lowered panel radius to `--fp-radius-sm`, keeping border-first Ledger Calm surfaces.
+- Added a compact panel header divider so `文件` and `预览` read as work sections instead of floating cards.
+- Added motion-token transitions to `返回关联台`, upload zone, native select controls, file cards, audit counters and detail tabs.
+- Reduced upload zone height and padding so it remains a recognizable upload target without becoming a large blank area.
+- Tightened file list spacing and file card padding; long names still truncate through existing file-card identity rules.
+- Reduced audit counter width and value size so audit counts read as compact ledger counters instead of dashboard cards.
+- Reduced preview/detail/ETC table shell heights to `260px`、`220px` and `300px` to avoid large empty surfaces while preserving scrollable `FinanceTable` frames.
+
+Behavior preserved:
+
+- No changes to route wrappers, import APIs, ETC APIs, draft context, session persistence, health mutation blocking, preview/confirm payload mapping or workbench internals.
+- Upload remains `label` + hidden file input with click upload and drag/drop.
+- `导入预览结果`、`重复项明细`、`未导入项明细` and `ETC导入预览结果` remain `FinanceTable` grids with the same accessible names and column headers.
+- `导入预览明细` remains tabs.
+- `银行账户冲突确认` remains `AppDialog`.
+
+Verification:
+
+- `cd web && npx vitest run ImportCenterPage.test.tsx useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- Browser smoke for `/imports/bank-transactions`、`/imports/invoices`、`/imports/etc-invoices`: headings, upload zone, four header actions, table surfaces and top-level overflow.
+- Browser smoke for `/imports/invoices` upload/preview with mocked preview API: success message, 7 audit counters, 2 tables, 2 tabs, preview height `260px`, detail height `220px`, overflow `0`; screenshot `/tmp/import-invoices-premium-smoke.png`.
+
 ## Migration Slices
 
 Recommended Micro-JIT sequence:

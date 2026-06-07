@@ -356,7 +356,13 @@ Notes:
 
 - Code tests were not run for PV-006 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-007-import-pages-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-007-import-pages-premium-visual`
 
@@ -386,3 +392,53 @@ Notes:
 - 如 dev server 可用，浏览器 smoke 三条 route：确认 heading、上传区、清空/开始预览/确认导入、预览表区域存在，无明显重叠或顶层横向溢出；至少对一个 route 执行上传/预览后确认表格和 detail tabs 可见。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_import_pages.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Tightened the import workflow two-column page rhythm and reduced fixed table-shell heights to avoid large empty preview surfaces.
+- Removed ordinary panel shadow and shifted import panels to border-first Ledger Calm surfaces.
+- Added motion-token hover/press/focus feedback for the back link, upload zone, native selects, file cards, audit counters and detail tabs.
+- Kept upload semantics, route wrappers, draft/session persistence, preview and confirm APIs, ETC task gating, conflict dialog, all `FinanceTable` accessible names and table columns unchanged.
+- Added a CSS contract test in `ImportCenterPage.test.tsx` to lock compact premium treatment and motion-token usage.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run ImportCenterPage.test.tsx useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- Browser smoke for `/imports/bank-transactions`、`/imports/invoices`、`/imports/etc-invoices`
+- Browser smoke for `/imports/invoices` upload/preview with mocked preview API
+
+Browser smoke result:
+
+- Three import routes render the expected heading, 1 upload zone, 4 header actions, table surfaces and top-level overflow `0`.
+- Invoice preview smoke renders success message, 7 audit counters, 2 finance tables, 2 detail tabs, preview height `260px`, detail height `220px`, top-level overflow `0`.
+- Screenshot: `/tmp/import-invoices-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-008-cost-statistics-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_cost_statistics.md`、`web/src/pages/CostStatisticsPage.tsx`、`web/src/components/cost-statistics/*`、相关 `CostStatistics` tests 和当前 `git status`。本切片只做成本统计 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_6_cost_statistics.md` 追加 premium visual discovery；如果现有文档不足，补齐旧入口清单和下一条 prompt。
+- 清点 `/cost-statistics` 的旧页面入口：月份/日期/范围控制、筛选/search、表格、导入/导出入口、详情弹窗/抽屉/Popover、loading/empty/error/stale/permission 状态。
+- 标明哪些元素必须功能等价保留：旧表格仍为表格，旧弹窗仍为弹窗，旧导出/详情入口仍在原信息层级。
+- 列出表格列角色和排版要求：金额/数量右对齐、tabular nums、状态/方向 tag 稳定高度、长文本截断、行 hover 不改变行高。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
+- 生成下一条唯一 prompt：`PV-009-cost-statistics-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`

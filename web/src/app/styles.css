@@ -7215,6 +7215,11 @@ textarea {
   font-weight: 700;
   line-height: 1;
   text-decoration: none;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .import-workflow-back-link:hover {
@@ -7222,25 +7227,29 @@ textarea {
   background: var(--fp-surface-raised);
 }
 
+.import-workflow-back-link:active {
+  transform: translateY(1px);
+}
+
 .import-workflow-content {
   display: flex;
   flex-direction: column;
-  gap: var(--fp-space-5);
+  gap: var(--fp-space-3);
 }
 
 .import-workflow-layout {
   display: grid;
   grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.3fr);
-  gap: var(--fp-space-4);
+  gap: var(--fp-space-3);
   align-items: start;
 }
 
 .import-workflow-panel {
   min-width: 0;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .import-workflow-panel__content,
@@ -7259,7 +7268,7 @@ textarea {
 }
 
 .import-workflow-panel__content {
-  padding: var(--fp-space-4);
+  padding: var(--fp-space-3);
 }
 
 .import-workflow-panel__header,
@@ -7277,6 +7286,12 @@ textarea {
 .import-workflow-preview-heading,
 .import-workflow-file-card__header {
   justify-content: space-between;
+}
+
+.import-workflow-panel__header {
+  min-height: 36px;
+  border-bottom: 1px solid var(--fp-border);
+  padding-bottom: var(--fp-space-2);
 }
 
 .import-workflow-panel__title,
@@ -7343,6 +7358,21 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.import-workflow-select-field__control:hover:not(:disabled) {
+  border-color: var(--fp-border-strong);
+  background: var(--fp-surface-raised);
+}
+
+.import-workflow-select-field__control:focus-visible {
+  outline: none;
+  border-color: var(--fp-primary);
+  box-shadow: 0 0 0 3px var(--fp-primary-soft);
 }
 
 .import-workflow-select-field__control:disabled {
@@ -7354,15 +7384,30 @@ textarea {
 .import-workflow-upload-zone {
   display: grid;
   place-items: center;
-  gap: var(--fp-space-2);
-  min-height: 150px;
+  gap: var(--fp-space-1);
+  min-height: 112px;
   border: 1px dashed var(--fp-border-strong);
-  border-radius: var(--fp-radius-md);
-  padding: var(--fp-space-6) var(--fp-space-4);
+  border-radius: var(--fp-radius-sm);
+  padding: var(--fp-space-4);
   background: var(--fp-surface-raised);
   color: var(--fp-text-secondary);
   cursor: pointer;
   text-align: center;
+  transition:
+    border-color var(--motion-base) var(--ease-standard),
+    background-color var(--motion-base) var(--ease-standard),
+    color var(--motion-base) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-out-quart);
+}
+
+.import-workflow-upload-zone:hover {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary);
+}
+
+.import-workflow-upload-zone:active {
+  transform: translateY(1px);
 }
 
 .import-workflow-upload-zone--active {
@@ -7394,7 +7439,7 @@ textarea {
 .import-workflow-file-list {
   display: flex;
   flex-direction: column;
-  gap: var(--fp-space-3);
+  gap: var(--fp-space-2);
 }
 
 .import-workflow-file-card,
@@ -7403,13 +7448,26 @@ textarea {
 .import-workflow-conflict-card {
   min-width: 0;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface-raised);
 }
 
 .import-workflow-file-card,
 .import-workflow-conflict-card {
-  padding: var(--fp-space-3);
+  padding: var(--fp-space-2);
+}
+
+.import-workflow-file-card,
+.import-workflow-audit-card {
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.import-workflow-file-card:hover,
+.import-workflow-audit-card:hover {
+  border-color: var(--fp-border-strong);
+  background: var(--fp-surface);
 }
 
 .import-workflow-file-card__identity {
@@ -7433,7 +7491,7 @@ textarea {
 
 .import-workflow-audit-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
   gap: var(--fp-space-2);
 }
 
@@ -7452,7 +7510,7 @@ textarea {
   margin-top: var(--fp-space-1);
   color: var(--fp-ink);
   font-family: var(--fp-font-data);
-  font-size: var(--fp-text-headline);
+  font-size: 18px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
@@ -7460,18 +7518,19 @@ textarea {
 
 .import-workflow-grid-shell {
   width: 100%;
+  min-width: 0;
 }
 
 .import-workflow-grid-shell--etc {
-  height: 420px;
+  height: 300px;
 }
 
 .import-workflow-grid-shell--preview {
-  height: 480px;
+  height: 260px;
 }
 
 .import-workflow-grid-shell--detail {
-  height: 360px;
+  height: 220px;
 }
 
 .import-workflow-detail-shell {
@@ -7501,6 +7560,14 @@ textarea {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-data);
   font-weight: 800;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.import-workflow-detail-tabs .tabs__tab:hover {
+  background: var(--fp-surface-raised);
+  color: var(--fp-text-primary);
 }
 
 .import-workflow-detail-tabs .tabs__tab[aria-selected="true"] {

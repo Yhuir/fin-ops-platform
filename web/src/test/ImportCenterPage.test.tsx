@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
@@ -117,6 +119,20 @@ async function selectReadyEtcTask(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("Import pages", () => {
+  test("keeps import workflow premium visual treatment compact and motion-token based", () => {
+    const css = readFileSync("src/app/styles.css", "utf8");
+
+    expect(css).toContain(".import-workflow-content {\n  display: flex;\n  flex-direction: column;\n  gap: var(--fp-space-3);");
+    expect(css).toContain(".import-workflow-panel {\n  min-width: 0;\n  border: 1px solid var(--fp-border);\n  border-radius: var(--fp-radius-sm);\n  background: var(--fp-surface);\n  box-shadow: none;");
+    expect(css).toContain(".import-workflow-upload-zone {\n  display: grid;\n  place-items: center;\n  gap: var(--fp-space-1);\n  min-height: 112px;");
+    expect(css).toContain("border-color var(--motion-base) var(--ease-standard)");
+    expect(css).toContain(".import-workflow-select-field__control:focus-visible");
+    expect(css).toContain(".import-workflow-audit-card__value {\n  margin-top: var(--fp-space-1);\n  color: var(--fp-ink);\n  font-family: var(--fp-font-data);\n  font-size: 18px;");
+    expect(css).toContain(".import-workflow-grid-shell--preview {\n  height: 260px;");
+    expect(css).toContain(".import-workflow-grid-shell--detail {\n  height: 220px;");
+    expect(css).toContain(".import-workflow-detail-tabs .tabs__tab:hover");
+  });
+
   test("bank transaction import uses the standalone route and sends bank mapping overrides", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
