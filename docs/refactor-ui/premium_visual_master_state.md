@@ -128,4 +128,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-016-push-log-update` | `b94f089a` | pushed to `origin/main` | Recorded PV-016 push status after push. |
 | 2026-06-08 | `PV-017-output-invoice-collections-premium-visual` | `81729836` | pushed to `origin/main` | Output invoice collections premium visual polish verified; PV-018 prompt generated. |
 | 2026-06-08 | `PV-017-push-log-update` | `9c58fb9d` | pushed to `origin/main` | Recorded PV-017 push status after push. |
-| 2026-06-08 | `PV-018-no-oa-bank-batches-discovery` | pending | pending | No-OA bank batches premium discovery verified; PV-019 prompt generated. |
+| 2026-06-08 | `PV-018-no-oa-bank-batches-discovery` | `753c4a70` | pushed to `origin/main` | No-OA bank batches premium discovery verified; PV-019 prompt generated. |
