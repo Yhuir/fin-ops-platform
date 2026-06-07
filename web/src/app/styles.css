@@ -1138,6 +1138,155 @@ textarea {
   font-size: 18px;
 }
 
+.pending-invoice-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--fp-space-2);
+}
+
+.pending-invoice-rule-block {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.pending-invoice-rule-block__header {
+  display: flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+  margin-bottom: 5px;
+  min-width: 0;
+}
+
+.pending-invoice-rule-block__title {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-data);
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.pending-invoice-rule-block__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-pill);
+  color: var(--fp-text-secondary);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pending-invoice-rule-list {
+  display: grid;
+  gap: 4px;
+}
+
+.pending-invoice-rule-primary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pending-invoice-rule-primary__label {
+  justify-self: start;
+  color: var(--fp-text-secondary);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.pending-invoice-rule-primary__label--readonly {
+  padding: 2px 5px;
+  border-left: 2px solid var(--fp-border);
+  border-radius: 3px;
+  background: var(--fp-surface-muted);
+}
+
+.pending-invoice-rule-tags {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 1px;
+  padding-left: 2px;
+}
+
+.pending-invoice-rule-tags--readonly {
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  column-gap: 4px;
+  row-gap: 3px;
+  padding-left: 0;
+}
+
+.pending-invoice-rule-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  min-width: 0;
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.pending-invoice-rule-checkbox input {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  accent-color: var(--fp-primary);
+}
+
+.pending-invoice-rule-checkbox span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-invoice-rule-checkbox:has(input:disabled) {
+  color: var(--fp-text-disabled);
+  cursor: default;
+}
+
+.pending-invoice-rule-readonly-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--fp-border);
+  border-radius: 6px;
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.pending-invoice-rule-readonly-tag__dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--fp-text-disabled);
+}
+
+.pending-invoice-rule-readonly-tag__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   .pending-invoices-page {
     padding: var(--fp-space-4);
@@ -1154,7 +1303,8 @@ textarea {
 
   .pending-invoice-metric-grid,
   .pending-invoice-field-grid,
-  .pending-invoice-print-approvals {
+  .pending-invoice-print-approvals,
+  .pending-invoice-rules-grid {
     grid-template-columns: 1fr;
   }
 

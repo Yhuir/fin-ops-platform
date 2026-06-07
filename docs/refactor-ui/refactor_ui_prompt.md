@@ -3059,7 +3059,7 @@ Scope: PendingInvoices shared drawer frame plus simple drawers only: `PendingInv
 ### P051-phase-6-pending-invoices-rules-drawer
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只迁移 `PendingInvoiceRulesDrawer.tsx` 待找发票规则右侧抽屉、checkbox tree、loading/error/refresh/save/permission states 和必要 styles/tests；不迁移 invoice picker drawer 或 manual invoice dialog。
 
@@ -3083,6 +3083,51 @@ Scope: PendingInvoices rules drawer only: `web/src/components/pendingInvoices/Pe
 - Business-sensitive behavior preserved: required，mutual exclusion, stale conflict, tag refresh merge and readonly permission must stay covered。
 - Expected failure allowed: yes，P052 source contracts can remain after P051, but `PendingInvoiceRulesDrawer.tsx` must clear。
 - Next prompt: P052 invoice picker and manual dialog only after P051 implementation is verified/expected-fail documented。
+
+#### Execution Notes
+
+- Replaced `PendingInvoiceRulesDrawer.tsx` MUI alert/button/loading/checkbox/layout components with existing `PendingInvoiceDrawerFrame`, native/project buttons, native checkboxes, project status messages and rule block markup.
+- Preserved the rules drawer right-side shape, headings, `关闭规则抽屉`, `保存规则`, version subtitle, loading label, readonly permission notice, save success/stale conflict/tag refresh notices, checkbox group names and mutual exclusion behavior.
+- Added rules drawer grid, rule block, checkbox and readonly tag styles in `web/src/app/styles.css`.
+- Did not modify pending invoice API/mock/read model/worker/backend, reconciliation workbench internals, invoice picker drawer or manual invoice dialog.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "opens relation, object detail, rules, and export drawers with loading callbacks|keeps pending invoice rule draft|preserves unsaved rule selections|shows income rule-group filters|targets project primitives"`: expected-fail. P051 behavior tests passed; the only failure is the source-level contract for P052。
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx`: expected-fail with 14 passed and 1 failure. The remaining failure lists only `PendingInvoiceInvoicePickerDrawer.tsx` and `ManualInvoiceDialog.tsx`。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|Mui[A-Z]|FormControlLabel|CircularProgress|Checkbox' web/src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+
+### P052-phase-6-pending-invoices-invoice-picker-and-manual-dialog
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: 只迁移 `PendingInvoiceInvoicePickerDrawer.tsx` 发票选择右侧抽屉、`ManualInvoiceDialog.tsx` 手工补录发票弹窗、必要 styles/tests；不迁移其他 pending invoice surfaces。
+
+#### Prompt
+
+```text
+Prompt ID: P052-phase-6-pending-invoices-invoice-picker-and-manual-dialog
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: Final pending invoices UI migration slice: `web/src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx`, `web/src/components/pendingInvoices/ManualInvoiceDialog.tsx`, necessary `web/src/app/styles.css` and necessary `web/src/test/PendingInvoicesPage.test.tsx` expectations. Do not modify backend, API contracts, read models, workers, mocks or reconciliation workbench internals.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/table_layout_system.md、web/src/components/common/AppDialog.tsx、web/src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx、web/src/components/pendingInvoices/ManualInvoiceDialog.tsx、web/src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx、web/src/test/PendingInvoicesPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：迁移 invoice picker right drawer，移除 MUI Alert/Button/Chip/CircularProgress/Paper/Stack/Table/TablePagination/TextField/Typography，使用 existing `PendingInvoiceDrawerFrame`、native/project form controls、project status messages、native `发票候选` table、project pagination/buttons/status tags；必须保留 filters `关键词`/`销方`/`开票开始`/`开票结束`/`最小金额`/`最大金额`、`搜索`、candidate rows、status labels `可关联`/`已关联本流水`/`存在冲突`、`预览关联 <invoice>`、preview message、`确认建立关系` 和 server page/pageSize behavior。迁移 `ManualInvoiceDialog.tsx` 到 `AppDialog` 和 native/project inputs/buttons/status messages，保留 dialog name `手工补录发票`、row context text、所有 form labels、`预览`、`确认写入`、duplicate/preview feedback、disabled/busy behavior and confirm flow。不得修改 pending invoice API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "opens invoice picker from status column|manual invoice action still previews before confirm|targets project primitives"`；运行完整 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，source-level project primitive contract must pass fully；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 pending invoices MUI grep：`if rg -n '@mui/|Mui[A-Z]|DataGrid|GridColDef|TablePagination|TextField|Dialog' web/src/components/pendingInvoices web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 `MG-P052-phase-6-pending-invoices` cumulative MG prompt。
+```
+
+#### Review
+
+- Single slice: yes，invoice picker drawer and manual invoice dialog only。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Overlay equivalence preserved: required，invoice picker remains right drawer and manual invoice remains dialog。
+- Source contract target: after P052, `PendingInvoicesPage.test.tsx` source-level project primitive contract must pass fully。
+- Next prompt: cumulative `MG-P052-phase-6-pending-invoices` only after P052 implementation is verified。
 
 ### MG Prompt Template
 

@@ -1,12 +1,3 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Checkbox from "@mui/material/Checkbox";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
 import { useEffect, useRef, useState } from "react";
 
 import type { PendingInvoiceRuleGroup, PendingInvoiceRuleTag, PendingInvoiceRulesPayload } from "../../features/pendingInvoices/types";
@@ -166,32 +157,27 @@ export default function PendingInvoiceRulesDrawer({
       contentSx={{ p: 2 }}
       onClose={onClose}
       footer={(
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
-          <Button onClick={onClose} disabled={saving}>关闭</Button>
-          <Button variant="contained" onClick={handleSave} disabled={!payload?.permissions.canSave || loading || saving}>
+        <div className="pending-invoice-drawer-actions">
+          <button className="pending-invoices-button" disabled={saving} onClick={onClose} type="button">关闭</button>
+          <button
+            className="pending-invoices-button pending-invoices-button--primary"
+            disabled={!payload?.permissions.canSave || loading || saving}
+            onClick={handleSave}
+            type="button"
+          >
             保存规则
-          </Button>
-        </Stack>
+          </button>
+        </div>
       )}
     >
-      {loading ? (
-        <Stack direction="row" spacing={1.25} alignItems="center">
-          <CircularProgress aria-label="正在加载待找发票规则" size={22} />
-          <Typography variant="body2" color="text.secondary">正在读取规则</Typography>
-        </Stack>
-      ) : null}
-      {error ? <Alert severity="error">{error}</Alert> : null}
-      {refreshNotice ? <Alert severity="info">{refreshNotice}</Alert> : null}
-      {payload && !payload.permissions.canSave ? <Alert severity="info">当前账号只能查看规则，不能保存。</Alert> : null}
+      {loading ? <LoadingMessage label="正在加载待找发票规则" text="正在读取规则" /> : null}
+      {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
+      {refreshNotice ? <StatusMessage tone="info">{refreshNotice}</StatusMessage> : null}
+      {payload && !payload.permissions.canSave ? <StatusMessage tone="info">当前账号只能查看规则，不能保存。</StatusMessage> : null}
       {payload && requiresInvoiceGroup ? (
-        <Box
+        <div
+          className="pending-invoice-rules-grid"
           data-testid="pending-invoice-rules-grid"
-          sx={{
-            display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" },
-            gap: 0.85,
-            alignItems: "start",
-          }}
         >
           {editableGroupKeys(payload).map((key) => (
             <HierarchicalRuleBlock
@@ -212,9 +198,26 @@ export default function PendingInvoiceRulesDrawer({
             disabled
             readonly
           />
-        </Box>
+        </div>
       ) : null}
     </PendingInvoiceDrawerFrame>
+  );
+}
+
+function LoadingMessage({ label, text }: { label: string; text: string }) {
+  return (
+    <div aria-label={label} className="pending-invoice-status-message" role="status">
+      <span aria-hidden="true" className="pending-invoice-spinner" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function StatusMessage({ children, tone }: { children: string; tone: "danger" | "success" | "info" }) {
+  return (
+    <div className={`pending-invoice-status-message pending-invoice-status-message--${tone}`} role={tone === "danger" ? "alert" : "status"}>
+      {children}
+    </div>
   );
 }
 
@@ -403,143 +406,59 @@ function HierarchicalRuleBlock({
 }) {
   const tree = tagTree(tags);
   return (
-    <Paper role="group" aria-label={group.label} variant="outlined" sx={{ borderRadius: 1, p: 0.75, minWidth: 0 }}>
-      <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.55 }}>
-        <Typography variant="subtitle2" fontWeight={900} sx={{ fontSize: 13, lineHeight: 1.25 }}>
-          {group.label}
-        </Typography>
-        {readonly ? (
-          <Box
-            component="span"
-            sx={{
-              border: 1,
-              borderColor: "divider",
-              borderRadius: 999,
-              color: "text.secondary",
-              fontSize: 10.5,
-              fontWeight: 800,
-              lineHeight: 1,
-              px: 0.55,
-              py: 0.28,
-            }}
-          >
-            自动归类
-          </Box>
-        ) : null}
-      </Stack>
+    <section aria-label={group.label} className="pending-invoice-rule-block" role="group">
+      <div className="pending-invoice-rule-block__header">
+        <h3 className="pending-invoice-rule-block__title">{group.label}</h3>
+        {readonly ? <span className="pending-invoice-rule-block__badge">自动归类</span> : null}
+      </div>
       {tree.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">暂无标签。</Typography>
+        <p className="pending-invoice-empty">暂无标签。</p>
       ) : (
-        <Stack data-testid="pending-invoice-rule-list" spacing={0.35} sx={{ overflowY: "visible" }}>
+        <div className="pending-invoice-rule-list" data-testid="pending-invoice-rule-list">
           {tree.map(({ primary, items }) => (
-            <Stack key={primary} spacing={0.2}>
-              <Typography
+            <div className="pending-invoice-rule-primary" key={primary}>
+              <div
+                className={`pending-invoice-rule-primary__label${readonly ? " pending-invoice-rule-primary__label--readonly" : ""}`}
                 data-testid="pending-invoice-rule-primary-label"
-                variant="caption"
-                color="text.secondary"
-                fontWeight={900}
-                sx={{
-                  alignSelf: "flex-start",
-                  bgcolor: readonly ? "action.hover" : "transparent",
-                  borderLeft: readonly ? 2 : 0,
-                  borderColor: readonly ? "divider" : "transparent",
-                  borderRadius: 0.5,
-                  fontSize: 11,
-                  lineHeight: 1.25,
-                  px: readonly ? 0.45 : 0,
-                  py: readonly ? 0.2 : 0,
-                }}
               >
                 {primary}
-              </Typography>
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: readonly ? "repeat(auto-fit, minmax(96px, 1fr))" : "repeat(auto-fit, minmax(92px, 1fr))",
-                  columnGap: readonly ? 0.45 : 0.75,
-                  rowGap: readonly ? 0.25 : 0.1,
-                  pl: readonly ? 0 : 0.25,
-                  alignItems: "center",
-                }}
-              >
+              </div>
+              <div className={`pending-invoice-rule-tags${readonly ? " pending-invoice-rule-tags--readonly" : ""}`}>
                 {items.map((tag) => {
                   const childLabel = tagChildLabel(tag);
                   const checked = selectedCodes.has(tag.code);
                   if (readonly) {
                     return (
-                      <Box
+                      <span
+                        className="pending-invoice-rule-readonly-tag"
                         key={tag.code}
                         data-testid="pending-invoice-rule-readonly-tag"
-                        component="span"
-                        sx={{
-                          alignItems: "center",
-                          bgcolor: "background.paper",
-                          border: 1,
-                          borderColor: "divider",
-                          borderRadius: 0.75,
-                          color: "text.primary",
-                          display: "inline-flex",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          gap: 0.5,
-                          lineHeight: 1.2,
-                          minHeight: 22,
-                          minWidth: 0,
-                          px: 0.65,
-                        }}
                       >
-                        <Box
-                          component="span"
-                          aria-hidden="true"
-                          sx={{
-                            bgcolor: "text.disabled",
-                            borderRadius: 999,
-                            flex: "0 0 auto",
-                            height: 5,
-                            width: 5,
-                          }}
-                        />
-                        <Box
-                          component="span"
-                          sx={{
-                            minWidth: 0,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {childLabel}
-                        </Box>
-                      </Box>
+                        <span aria-hidden="true" className="pending-invoice-rule-readonly-tag__dot" />
+                        <span className="pending-invoice-rule-readonly-tag__label">{childLabel}</span>
+                      </span>
                     );
                   }
                   return (
-                    <FormControlLabel
+                    <label
+                      className="pending-invoice-rule-checkbox"
                       key={tag.code}
-                      sx={{
-                        m: 0,
-                        minHeight: 21,
-                        alignItems: "center",
-                        "& .MuiFormControlLabel-label": { fontSize: 12, lineHeight: 1.2 },
-                      }}
-                      control={(
-                        <Checkbox
-                          size="small"
-                          checked={checked}
-                          disabled={disabled || (!checked && assignedElsewhere.has(tag.code))}
-                          onChange={() => onToggle?.(tag.code)}
-                          sx={{ p: 0.3 }}
-                        />
-                      )}
-                      label={childLabel}
-                    />
+                    >
+                      <input
+                        checked={checked}
+                        disabled={disabled || (!checked && assignedElsewhere.has(tag.code))}
+                        onChange={() => onToggle?.(tag.code)}
+                        type="checkbox"
+                      />
+                      <span>{childLabel}</span>
+                    </label>
                   );
                 })}
-              </Box>
-            </Stack>
+              </div>
+            </div>
           ))}
-        </Stack>
+        </div>
       )}
-    </Paper>
+    </section>
   );
 }
