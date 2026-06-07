@@ -6104,6 +6104,7 @@ Scope: obsolete MUI DataGrid session hook cleanup only.
   - Full reference grep only finds a negative test string in `BankDetailsPage.test.tsx`。
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `git diff --check`: passed。
+- Commit: `a3fff0da feat: remove mui datagrid session`, pushed to `origin/refactor-ui`。
 - Next prompt generated: `P111-phase-7-test-provider-containment`。
 
 ### P111-phase-7-test-provider-containment
