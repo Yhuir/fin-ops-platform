@@ -208,3 +208,16 @@ Scope: completed `/oa-pending-payments` page batch P061-P064.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_oa_pending_payments.md、web/src/pages/OaPendingPaymentsPage.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx、web/src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx、web/src/app/styles.css 和当前 git status。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff scope、测试结果和文档状态。确认已通过：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OaPendingPaymentsPage.tsx web/src/components/oaPendingPayments; then exit 1; else exit 0; fi`、`cd web && npx vitest run OaPendingPaymentsPage.test.tsx`、`cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build`、`git diff --check`。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_oa_pending_payments.md web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx web/src/app/styles.css`；禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: complete oa pending payments ui migration`。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
 ```
+
+## MG-P064 Execution Notes
+
+- Status: verified and pushed.
+- Commit: `94efb866 feat: complete oa pending payments ui migration`.
+- Push: `origin/refactor-ui` updated from `24506bda` to `94efb866`.
+- Scope committed: P064 grouped dense table migration, OA pending payments table styles, and state/prompt/module docs.
+- Verification confirmed before push:
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/OaPendingPaymentsPage.tsx web/src/components/oaPendingPayments; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`: passed, 6 tests.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.

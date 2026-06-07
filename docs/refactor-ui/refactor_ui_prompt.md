@@ -3809,6 +3809,46 @@ Scope: completed `/oa-pending-payments` page batch P061-P064.
 - Verification is available and passing: source greps, full module tests, table/platform smoke tests, build and diff check.
 - After MG push, generate the next Micro-JIT prompt from `refactor-ui` branch.
 
+#### Execution Notes
+
+- Status: verified and pushed。
+- Commit: `94efb866 feat: complete oa pending payments ui migration`。
+- Push: `origin/refactor-ui` updated from `24506bda` to `94efb866`。
+- Scope committed: P064 grouped dense table migration, OA pending payments table styles, and state/prompt/module docs.
+- Verification confirmed before push:
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/OaPendingPaymentsPage.tsx web/src/components/oaPendingPayments; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`: passed，6 tests。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed，15 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### P065-phase-6-output-invoice-collections-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/output-invoice-collections` discovery only. Do not modify implementation or tests in this prompt.
+
+#### Prompt
+
+```text
+Prompt ID: P065-phase-6-output-invoice-collections-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/output-invoice-collections` discovery only. Do not modify implementation or tests in this prompt.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、DESIGN.md、PRODUCT.md、docs/dev/api-contracts.md#销项发票收款情况 API、docs/app-architecture/pages.md、web/src/pages/OutputInvoiceCollectionsPage.tsx、web/src/components/outputInvoiceCollections/*、web/src/features/outputInvoiceCollections/*、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和当前 git status。梳理 `/output-invoice-collections` 的旧 UI 入口、MUI/DataGrid/Table/session hook inventory、页面 shell/toolbar/query/status/表格/右侧抽屉族/弹窗/菜单/Popover/loading empty error stale permission 状态、现有测试覆盖、API/read model 风险和迁移切片风险。必须重点记录这些用户可见入口并保持行为等价：路由/sidebar label `销项发票收款情况`、page heading、rows/filter-options/status-rules/receipt-settings/receipt-preview/receipt history/detail endpoints、表格 `销项发票收款情况表`、详情右侧抽屉 `销项发票收款情况详情`、回款状态/提醒右侧抽屉、红票关系右侧抽屉、收据预览右侧抽屉、收据设置右侧抽屉、收据历史右侧抽屉、所有旧按钮/菜单/确认操作的位置和语义。不得修改实现、测试、mock、后端、API、read model、worker 或关联台。若 discovery 需要跨后续切片复用，创建 `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`；更新 `docs/refactor-ui/refactor_ui_state.md`、`docs/refactor-ui/refactor_ui_prompt.md` 和模块文档，生成下一条 P066 characterization tests prompt。验证命令：`test -f docs/refactor-ui/modules/phase_6_output_invoice_collections.md`；`rg -n "P065-phase-6-output-invoice-collections-discovery|Current MUI Inventory|User-visible Entrypoints|P066-phase-6-output-invoice-collections-characterization-tests" docs/refactor-ui/modules/phase_6_output_invoice_collections.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；`git diff --check`；`git status --short --branch`。
+```
+
+#### Review
+
+- Single slice: yes，discovery only。
+- No implementation/test changes: required。
+- Module doc warranted because this module has a grouped table plus multiple right drawers, receipt lifecycle operations, settings and history surfaces.
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Next prompt: P066 characterization tests only after P065 discovery is verified.
+
 ### MG Prompt Template
 
 ```text
