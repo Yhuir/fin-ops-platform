@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
+import { RefreshCw } from "lucide-react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -26,8 +26,6 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
 import CloseIcon from "@mui/icons-material/Close";
 
@@ -228,6 +226,10 @@ function handleButtonKeyDown(event: KeyboardEvent<HTMLElement>, action: () => vo
   }
   event.preventDefault();
   action();
+}
+
+function cx(...values: Array<string | false | undefined>) {
+  return values.filter(Boolean).join(" ");
 }
 
 function formatCountMeta(batchCount: number, rowCount: number) {
@@ -818,91 +820,102 @@ export default function NoOaBankBatchPage() {
   }, [tagSelection.activeTags]);
 
   const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
+  const selectBucket = (nextBucket: NoOaBankBatchStatusBucket) => {
+    if (nextBucket === bucket) {
+      return;
+    }
+    clearSelection();
+    manualLabelSelectionRef.current = false;
+    setSelectedPrimaryLabel("");
+    setSelectedSubKey("");
+    setSelectedBatchId("");
+    setBucket(nextBucket);
+  };
 
   return (
     <PageScaffold
       title="免OA流水批量处理"
       description="按月份、主子标签和银行账户确认免 OA 银行流水批次。"
       actions={(
-        <Stack direction="row" spacing={1}>
-          <Button
+        <div className="no-oa-bank-batches-actions">
+          <button
+            className="no-oa-bank-batches-button"
             disabled={tagLoading}
+            type="button"
             onClick={() => {
               loadTagSelection();
               setTagDrawerOpen(true);
             }}
-            variant="outlined"
           >
             免OA流水标签管理
-          </Button>
-          <Button
+          </button>
+          <button
+            className="no-oa-bank-batches-button"
             disabled={loading}
+            type="button"
             onClick={() => {
               setDetails({});
               loadTagSelection();
               setRefreshToken((current) => current + 1);
             }}
-            startIcon={<RefreshOutlinedIcon />}
-            variant="outlined"
           >
+            <RefreshCw aria-hidden="true" size={16} strokeWidth={2.2} />
             刷新
-          </Button>
-        </Stack>
+          </button>
+        </div>
       )}
     >
-      <Box
-        aria-label="批次筛选"
-        role="region"
-        sx={{
-          px: 0.5,
-          py: 0.25,
-        }}
-      >
-        <Stack
-          alignItems={{ xs: "stretch", lg: "center" }}
-          direction={{ xs: "column", lg: "row" }}
-          spacing={1.25}
-          sx={{
-            flexWrap: { lg: "wrap" },
-          }}
-          useFlexGap
-        >
-          <ToggleButtonGroup
-            aria-label="批次状态"
-            color="primary"
-            exclusive
-            onChange={(_event, nextBucket: NoOaBankBatchStatusBucket | null) => {
-              if (!nextBucket) {
-                return;
-              }
-              clearSelection();
-              manualLabelSelectionRef.current = false;
-              setSelectedPrimaryLabel("");
-              setSelectedSubKey("");
-              setSelectedBatchId("");
-              setBucket(nextBucket);
-            }}
-            size="small"
-            value={bucket}
+      <div aria-label="批次筛选" className="no-oa-bank-batches-filter" role="region">
+        <div aria-label="批次状态" className="no-oa-bank-batches-segment" role="group">
+          <button
+            aria-pressed={bucket === "unsubmitted"}
+            className={cx("no-oa-bank-batches-segment__button", bucket === "unsubmitted" && "no-oa-bank-batches-segment__button--active")}
+            type="button"
+            onClick={() => selectBucket("unsubmitted")}
           >
-            <ToggleButton value="unsubmitted">未提交 {unsubmittedCount}</ToggleButton>
-            <ToggleButton value="submitted">已提交 {payload.summary.submittedCount}</ToggleButton>
-            <ToggleButton value="withdrawn">历史 {payload.summary.withdrawnCount}</ToggleButton>
-          </ToggleButtonGroup>
-          <TextField InputLabelProps={{ shrink: true }} label="月份" onChange={(event) => setMonth(event.target.value)} size="small" type="month" value={month} />
-          <TextField label="银行账户" onChange={(event) => setAccountKey(event.target.value)} placeholder="精确账户键，如 建设银行:8106" size="small" value={accountKey} />
+            未提交 {unsubmittedCount}
+          </button>
+          <button
+            aria-pressed={bucket === "submitted"}
+            className={cx("no-oa-bank-batches-segment__button", bucket === "submitted" && "no-oa-bank-batches-segment__button--active")}
+            type="button"
+            onClick={() => selectBucket("submitted")}
+          >
+            已提交 {payload.summary.submittedCount}
+          </button>
+          <button
+            aria-pressed={bucket === "withdrawn"}
+            className={cx("no-oa-bank-batches-segment__button", bucket === "withdrawn" && "no-oa-bank-batches-segment__button--active")}
+            type="button"
+            onClick={() => selectBucket("withdrawn")}
+          >
+            历史 {payload.summary.withdrawnCount}
+          </button>
+        </div>
+        <label className="no-oa-bank-batches-field">
+          <span>月份</span>
+          <input onChange={(event) => setMonth(event.target.value)} type="month" value={month} />
+        </label>
+        <label className="no-oa-bank-batches-field no-oa-bank-batches-field--account">
+          <span>银行账户</span>
+          <input onChange={(event) => setAccountKey(event.target.value)} placeholder="精确账户键，如 建设银行:8106" type="text" value={accountKey} />
+        </label>
           {bucket === "unsubmitted" ? (
-            <Button disabled={selectedTransactionIds.size === 0 || mutating} onClick={handleSubmitSelected} variant="contained">
+            <button
+              className="no-oa-bank-batches-button no-oa-bank-batches-button--primary"
+              disabled={selectedTransactionIds.size === 0 || mutating}
+              type="button"
+              onClick={handleSubmitSelected}
+            >
               提交批次
-            </Button>
+            </button>
           ) : null}
           {selectedTransactionIds.size > 0 ? (
-            <Typography color="primary.dark" fontWeight={800} variant="body2">
+            <span className="no-oa-bank-batches-selected-count">
               已选 {selectedTransactionIds.size} 条
-            </Typography>
+            </span>
           ) : null}
-        </Stack>
-      </Box>
+      </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
 

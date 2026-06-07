@@ -4330,7 +4330,7 @@ Scope: `/no-oa-bank-batches` tests only. Do not modify runtime implementation.
 ### P075-phase-6-no-oa-bank-batches-page-shell-filters
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/no-oa-bank-batches` page shell actions and filter region only. Do not migrate label rails, transaction region, tag drawer, withdraw dialog or snackbar.
 
@@ -4353,6 +4353,53 @@ Scope: `/no-oa-bank-batches` page shell actions and filter region only. Do not m
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract can continue failing for rails/table/overlays until P076-P078。
 - Next prompt: P076 label rails only after P075 implementation is verified as expected-fail。
+
+#### Execution Notes
+
+- Migrated page shell actions and filter region from MUI controls to native/project controls.
+- Replaced `RefreshOutlinedIcon` with `lucide-react` `RefreshCw`.
+- Replaced status `ToggleButtonGroup` / `ToggleButton` with native segmented buttons preserving labels and `aria-pressed`.
+- Replaced filter `TextField` controls for `月份` and `银行账户` with labeled native inputs.
+- Preserved tag drawer open/refetch trigger, refresh disabled behavior, bucket reset/clearSelection behavior, selected-row submit disabled logic and selected count text.
+- Did not modify `LabelRail`, transaction region/table/cards, tag drawer, withdraw dialog, snackbar, API client, backend, read model, worker or workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|main and child label rails"`: expected-fail，4 selected behavior tests passed and 1 source-level contract failed。
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: expected-fail，19 behavior tests passed and 1 source-level contract failed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n 'RefreshOutlinedIcon|ToggleButton|ToggleButtonGroup|<TextField[^\\n]*(label="月份"|label="银行账户")' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P075 implementation files changed before docs。
+
+### P076-phase-6-no-oa-bank-batches-label-rails
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `LabelRail` and main/sub rail surfaces in `NoOaBankBatchPage.tsx` only, plus necessary styles/tests. Do not migrate transaction region, tag drawer, withdraw dialog or snackbar.
+
+#### Prompt
+
+```text
+Prompt ID: P076-phase-6-no-oa-bank-batches-label-rails
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `LabelRail` and main/sub rail surfaces in `NoOaBankBatchPage.tsx` only, plus necessary styles/tests. Do not migrate transaction region, tag drawer, withdraw dialog or snackbar.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：迁移 `LabelRail` 以及 `主标签`/`子标签` rail surfaces，移除该 slice 的 MUI `Paper`、`List`、`ListItemButton`、`Divider`、`Box`、`Stack`、`Typography` and `.Mui-selected` rail selector usage，使用 native/project region, header, button list, count meta and project rail classes。必须保留 regions `主标签`/`子标签`、empty titles `请先在标签管理中选择免OA标签`/`暂无子标签`、titles/subtitles、button accessible names `<label> <countMeta>`、`aria-pressed` selected state, Enter/Space keyboard activation, selected main/sub state behavior and clearSelection behavior on rail selection。不得修改 page shell/filter controls, transaction region/table/cards, tag drawer, withdraw dialog, snackbar, API client, mock data shape, backend, read model, worker or reconciliation workbench internals。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|main and child label rails"`，source-level contract expected-fail can remain for table/overlays but selected behavior tests must pass；运行完整 `cd web && npx vitest run NoOaBankBatchPage.test.tsx` expected-fail only for remaining source-level contract；运行 `cd web && npm run build`；运行 rail grep：`if rg -n 'ListItemButton|<List\\b|Mui-selected' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P077 transaction region prompt。
+```
+
+#### Review
+
+- Single slice: yes，LabelRail/main-sub rails only。
+- Runtime scope excludes transaction region/table/drawer/dialog/snackbar: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract can continue failing for table/overlays until P077-P078。
+- Next prompt: P077 transaction region only after P076 implementation is verified as expected-fail。
 
 ### MG Prompt Template
 
