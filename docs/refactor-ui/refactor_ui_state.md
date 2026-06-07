@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers`
+- Current Prompt ID: `P051-phase-6-pending-invoices-rules-drawer`
 - Current MG ID: `MG-P045-phase-6-bank-details`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices P049 main four-zone table migration verified as expected-fail；next P050 drawer frame/simple drawers migration |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices P050 drawer frame/simple drawers migration verified as expected-fail；next P051 rules drawer migration |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,14 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 pending invoices drawer frame/simple drawers prompt generated after main four-zone table migration。
+- Scope: phase 6 pending invoices rules drawer prompt generated after drawer frame/simple drawers migration。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_pending_invoices.md`
-- Verification run: `cd web && npx vitest run PendingInvoicesPage.test.tsx` expected-fail with 14 passed and 1 failure；page and main table source have cleared P048/P049 source contracts, and the remaining source-level failure lists only drawer/dialog files for P050-P052。
-- Failures: expected until P050-P052 remove pending invoice drawer/dialog MUI imports and add required project primitives。
-- Next action: 执行 `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers`。
+- Verification run: `cd web && npx vitest run PendingInvoicesPage.test.tsx` expected-fail with 14 passed and 1 failure；page, main table, shared drawer frame, relation/detail/export drawers and OA print dialog have cleared P048-P050 source contracts, and the remaining source-level failure lists only rules drawer, invoice picker drawer and manual dialog for P051-P052。
+- Failures: expected until P051-P052 remove remaining pending invoice drawer/dialog MUI imports and add required project primitives。
+- Next action: 执行 `P051-phase-6-pending-invoices-rules-drawer`。
 
 ## Prompt Lifecycle
 
@@ -93,12 +93,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers` | PendingInvoices P049 main four-zone table migration verified as expected-fail；next P050 drawer frame/simple drawers migration |
+| page batches | `in_progress` | `P051-phase-6-pending-invoices-rules-drawer` | PendingInvoices P050 drawer frame/simple drawers migration verified as expected-fail；next P051 rules drawer migration |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers` | `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "opens relation, object detail, rules, and export drawers with loading callbacks\|renders project four-zone table contract\|targets project primitives"` | expected-fail | P050 behavior tests passed; single remaining failure is P051-P052 source contract |
+| 2026-06-07 | `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers` | `cd web && npx vitest run PendingInvoicesPage.test.tsx` | expected-fail | 14 passed, 1 expected source-level failure listing only rules drawer, invoice picker drawer and manual dialog |
+| 2026-06-07 | `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers` | `if rg -n '@mui/' web/src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx web/src/components/pendingInvoices/PendingInvoiceRelationDrawer.tsx web/src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx web/src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx; then exit 1; else exit 0; fi` | passed | P050 source has no MUI imports |
+| 2026-06-07 | `P050-phase-6-pending-invoices-drawer-frame-and-simple-drawers` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P049-phase-6-pending-invoices-four-zone-table` | `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "renders project four-zone table contract\|shows income rule-group filters\|keeps row status actions available\|targets project primitives"` | expected-fail | Main table behavior tests passed; single remaining failure is P050-P052 drawer/dialog source contract |
 | 2026-06-07 | `P049-phase-6-pending-invoices-four-zone-table` | `cd web && npx vitest run PendingInvoicesPage.test.tsx` | expected-fail | 14 passed, 1 expected source-level failure listing only 7 drawer/dialog files |
 | 2026-06-07 | `P049-phase-6-pending-invoices-four-zone-table` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed after resolving local selector collision with shared FinanceTable CSS contract |

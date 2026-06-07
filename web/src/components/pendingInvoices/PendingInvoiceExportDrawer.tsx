@@ -1,14 +1,3 @@
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
 import type { PendingInvoiceExportDownload, PendingInvoiceExportPreview } from "../../features/pendingInvoices/types";
@@ -85,65 +74,78 @@ export default function PendingInvoiceExportDrawer({
 
   return (
     <PendingInvoiceDrawerFrame
-      open={open}
-      title="导出预览"
-      subtitle={preview?.scopeLabel}
       closeLabel="关闭导出抽屉"
-      onClose={onClose}
       footer={(
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
-          <Button onClick={onClose} disabled={downloading}>关闭</Button>
-          <Button variant="contained" onClick={handleDownload} disabled={!preview || loading || downloading}>
+        <div className="pending-invoice-drawer-actions">
+          <button className="pending-invoices-button" disabled={downloading} onClick={onClose} type="button">关闭</button>
+          <button
+            className="pending-invoices-button pending-invoices-button--primary"
+            disabled={!preview || loading || downloading}
+            onClick={handleDownload}
+            type="button"
+          >
             下载导出
-          </Button>
-        </Stack>
+          </button>
+        </div>
       )}
+      onClose={onClose}
+      open={open}
+      subtitle={preview?.scopeLabel}
+      title="导出预览"
     >
-      {loading ? (
-        <Stack direction="row" spacing={1.25} alignItems="center">
-          <CircularProgress aria-label="正在加载导出预览" size={22} />
-          <Typography variant="body2" color="text.secondary">正在计算导出范围</Typography>
-        </Stack>
-      ) : null}
-      {error ? <Alert severity="error">{error}</Alert> : null}
-      {downloadedFileName ? <Alert severity="success">已生成 {downloadedFileName}</Alert> : null}
+      {loading ? <LoadingMessage label="正在加载导出预览" text="正在计算导出范围" /> : null}
+      {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
+      {downloadedFileName ? <StatusMessage tone="success">{`已生成 ${downloadedFileName}`}</StatusMessage> : null}
       {preview ? (
         <>
-          <Paper variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
-            <Typography variant="subtitle2" fontWeight={900}>
-              预计导出 {preview.rowCount.toLocaleString("en-US")} 行
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {preview.fileName}
-            </Typography>
-          </Paper>
-          <Paper variant="outlined" sx={{ borderRadius: 1 }}>
-            <Table size="small" aria-label="导出样例">
-              <TableHead>
-                <TableRow>
+          <section className="pending-invoice-panel">
+            <h3 className="pending-invoice-panel__title">预计导出 {preview.rowCount.toLocaleString("en-US")} 行</h3>
+            <p className="pending-invoice-panel__description">{preview.fileName}</p>
+          </section>
+          <section className="pending-invoice-panel">
+            <table aria-label="导出样例" className="pending-invoice-simple-table">
+              <thead>
+                <tr>
                   {preview.columns.map((column) => (
-                    <TableCell key={column}>{column}</TableCell>
+                    <th key={column} scope="col">{column}</th>
                   ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
+                </tr>
+              </thead>
+              <tbody>
                 {preview.sampleRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={Math.max(1, preview.columns.length)}>暂无样例。</TableCell>
-                  </TableRow>
+                  <tr>
+                    <td colSpan={Math.max(1, preview.columns.length)}>暂无样例。</td>
+                  </tr>
                 ) : preview.sampleRows.map((row, index) => (
-                  <TableRow key={index}>
+                  <tr key={index}>
                     {preview.columns.map((column) => (
-                      <TableCell key={`${index}-${column}`}>{row[column] ?? row[toCamel(column)] ?? "-"}</TableCell>
+                      <td key={`${index}-${column}`}>{row[column] ?? row[toCamel(column)] ?? "-"}</td>
                     ))}
-                  </TableRow>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
-          </Paper>
+              </tbody>
+            </table>
+          </section>
         </>
       ) : null}
     </PendingInvoiceDrawerFrame>
+  );
+}
+
+function LoadingMessage({ label, text }: { label: string; text: string }) {
+  return (
+    <div aria-label={label} className="pending-invoice-status-message" role="status">
+      <span aria-hidden="true" className="pending-invoice-spinner" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function StatusMessage({ children, tone }: { children: string; tone: "danger" | "success" | "info" }) {
+  return (
+    <div className={`pending-invoice-status-message pending-invoice-status-message--${tone}`} role={tone === "danger" ? "alert" : "status"}>
+      {children}
+    </div>
   );
 }
 

@@ -1,15 +1,3 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
 import type { PendingInvoiceRelationDetail } from "../../features/pendingInvoices/types";
@@ -73,72 +61,67 @@ export default function PendingInvoiceRelationDrawer({
 
   return (
     <PendingInvoiceDrawerFrame
-      open={open}
-      title="关系与支付明细"
-      subtitle={detail?.transactionSummary.counterpartyName ?? transactionId ?? undefined}
       closeLabel="关闭关系明细抽屉"
-      onClose={onClose}
       footer={transactionId && detail?.availableActions.includes("attach_existing_invoice") ? (
-        <Button variant="contained" onClick={() => onOpenInvoicePicker(transactionId)}>
+        <button className="pending-invoices-button pending-invoices-button--primary" onClick={() => onOpenInvoicePicker(transactionId)} type="button">
           选择已有发票
-        </Button>
+        </button>
       ) : null}
+      onClose={onClose}
+      open={open}
+      subtitle={detail?.transactionSummary.counterpartyName ?? transactionId ?? undefined}
+      title="关系与支付明细"
     >
-      {loading ? (
-        <Stack direction="row" spacing={1.25} alignItems="center">
-          <CircularProgress aria-label="正在加载关系明细" size={22} />
-          <Typography variant="body2" color="text.secondary">正在加载关系明细</Typography>
-        </Stack>
-      ) : null}
-      {error ? <Alert severity="error">{error}</Alert> : null}
+      {loading ? <LoadingMessage label="正在加载关系明细" text="正在加载关系明细" /> : null}
+      {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
       {detail ? (
         <>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(4, minmax(0, 1fr))" }, gap: 1.5 }}>
+          <section className="pending-invoice-metric-grid" aria-label="支付汇总">
             <Metric label="已付合计" value={formatMoney(detail.paidTotal)} />
             <Metric label="发票合计" value={formatMoney(detail.invoiceTotal)} />
             <Metric label="待付金额" value={formatMoney(detail.remainingAmount)} />
             <Metric label="支付差额" value={formatMoney(detail.differenceAmount)} />
-          </Box>
-          <Paper variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
-            <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1 }}>已关联发票</Typography>
-            <Stack spacing={1}>
-              {detail.relatedInvoices.length === 0 ? <Typography color="text.secondary">暂无关联发票。</Typography> : null}
+          </section>
+          <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-invoices-title">
+            <h3 className="pending-invoice-panel__title" id="pending-invoice-related-invoices-title">已关联发票</h3>
+            <div className="pending-invoice-list">
+              {detail.relatedInvoices.length === 0 ? <p className="pending-invoice-empty">暂无关联发票。</p> : null}
               {detail.relatedInvoices.map((invoice) => (
-                <Box key={invoice.id || invoice.digitalInvoiceNo}>
-                  <Typography variant="body2" fontWeight={800}>{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</Typography>
-                  <Typography variant="caption" color="text.secondary">
+                <div className="pending-invoice-list__item" key={invoice.id || invoice.digitalInvoiceNo}>
+                  <div className="pending-invoice-list__primary">{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</div>
+                  <div className="pending-invoice-list__secondary">
                     {invoice.sellerName || "-"} · {formatMoney(invoice.totalWithTax)}
-                  </Typography>
-                </Box>
+                  </div>
+                </div>
               ))}
-            </Stack>
-          </Paper>
-          <Paper variant="outlined" sx={{ borderRadius: 1 }}>
-            <Table size="small" aria-label="历史支付流水">
-              <TableHead>
-                <TableRow>
-                  <TableCell>支付日期</TableCell>
-                  <TableCell>对方</TableCell>
-                  <TableCell align="right">金额</TableCell>
-                  <TableCell>关系</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
+            </div>
+          </section>
+          <section className="pending-invoice-panel">
+            <table aria-label="历史支付流水" className="pending-invoice-simple-table">
+              <thead>
+                <tr>
+                  <th scope="col">支付日期</th>
+                  <th scope="col">对方</th>
+                  <th className="pending-invoice-simple-table__amount" scope="col">金额</th>
+                  <th scope="col">关系</th>
+                </tr>
+              </thead>
+              <tbody>
                 {detail.paymentRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4}>暂无历史支付。</TableCell>
-                  </TableRow>
+                  <tr>
+                    <td colSpan={4}>暂无历史支付。</td>
+                  </tr>
                 ) : detail.paymentRows.map((row) => (
-                  <TableRow key={row.id || row.relationCaseId}>
-                    <TableCell>{row.tradeTime || "-"}</TableCell>
-                    <TableCell>{row.counterpartyName || "-"}</TableCell>
-                    <TableCell align="right">{formatMoney(row.debitAmount)}</TableCell>
-                    <TableCell>{row.relationCaseId || "-"}</TableCell>
-                  </TableRow>
+                  <tr key={row.id || row.relationCaseId}>
+                    <td>{row.tradeTime || "-"}</td>
+                    <td>{row.counterpartyName || "-"}</td>
+                    <td className="pending-invoice-simple-table__amount">{formatMoney(row.debitAmount)}</td>
+                    <td>{row.relationCaseId || "-"}</td>
+                  </tr>
                 ))}
-              </TableBody>
-            </Table>
-          </Paper>
+              </tbody>
+            </table>
+          </section>
         </>
       ) : null}
     </PendingInvoiceDrawerFrame>
@@ -147,9 +130,26 @@ export default function PendingInvoiceRelationDrawer({
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 1, p: 1.25 }}>
-      <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
-      <Typography variant="body1" fontWeight={900} sx={{ fontVariantNumeric: "tabular-nums" }}>{value}</Typography>
-    </Paper>
+    <div className="pending-invoice-metric">
+      <div className="pending-invoice-metric__label">{label}</div>
+      <div className="pending-invoice-metric__value">{value}</div>
+    </div>
+  );
+}
+
+function LoadingMessage({ label, text }: { label: string; text: string }) {
+  return (
+    <div aria-label={label} className="pending-invoice-status-message" role="status">
+      <span aria-hidden="true" className="pending-invoice-spinner" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function StatusMessage({ children, tone }: { children: string; tone: "danger" | "success" | "info" }) {
+  return (
+    <div className={`pending-invoice-status-message pending-invoice-status-message--${tone}`} role={tone === "danger" ? "alert" : "status"}>
+      {children}
+    </div>
   );
 }

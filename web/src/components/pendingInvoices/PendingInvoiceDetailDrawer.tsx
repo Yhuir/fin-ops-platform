@@ -1,16 +1,6 @@
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
+import AppDialog from "../common/AppDialog";
 import type {
   PendingInvoiceObjectDetail,
   PendingInvoiceObjectDetailTarget,
@@ -75,83 +65,68 @@ export default function PendingInvoiceDetailDrawer({
 
   const title = detail?.title || (target ? fallbackTitles[target.kind] : "详情");
   const body = (
-    <>
-      {loading ? (
-        <Stack direction="row" spacing={1.25} alignItems="center">
-          <CircularProgress aria-label="正在加载详情" size={22} />
-          <Typography variant="body2" color="text.secondary">正在加载完整详情</Typography>
-        </Stack>
-      ) : null}
-      {error ? <Alert severity="error">{error}</Alert> : null}
+    <div className="pending-invoice-detail-body">
+      {loading ? <LoadingMessage label="正在加载详情" text="正在加载完整详情" /> : null}
+      {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
       {detail?.detailAvailable === false ? (
-        <Alert severity="info">{detail.unavailableReason || "后端未返回可展示的完整详情。"}</Alert>
+        <StatusMessage tone="info">{detail.unavailableReason || "后端未返回可展示的完整详情。"}</StatusMessage>
       ) : null}
       {detail?.oaPrintLayout ? <OaPrintLayout layout={detail.oaPrintLayout} /> : null}
       {!detail?.oaPrintLayout ? detail?.sections.map((section) => (
-        <Paper key={section.title} variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
-          <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1.25 }}>
-            {section.title}
-          </Typography>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
+        <section className="pending-invoice-panel" key={section.title}>
+          <h3 className="pending-invoice-panel__title">{section.title}</h3>
+          <div className="pending-invoice-field-grid">
             {section.fields.map((field) => (
-              <Box key={`${section.title}-${field.label}`}>
-                <Typography variant="caption" color="text.secondary" fontWeight={800}>
-                  {field.label}
-                </Typography>
-                <Typography variant="body2" sx={{ mt: 0.25, wordBreak: "break-word" }}>
-                  {formatValue(field.value)}
-                </Typography>
-              </Box>
+              <div className="pending-invoice-field" key={`${section.title}-${field.label}`}>
+                <div className="pending-invoice-field__label">{field.label}</div>
+                <div className="pending-invoice-field__value">{formatValue(field.value)}</div>
+              </div>
             ))}
-          </Box>
-        </Paper>
+          </div>
+        </section>
       )) : null}
       {!loading && !error && detail && detail.sections.length === 0 && detail.detailAvailable !== false && !detail.oaPrintLayout ? (
-        <Alert severity="info">暂无更多详情。</Alert>
+        <StatusMessage tone="info">暂无更多详情。</StatusMessage>
       ) : null}
-    </>
+    </div>
   );
 
   if (target?.kind === "oa") {
     return (
-      <Dialog
-        open={open}
-        onClose={onClose}
-        fullWidth
+      <AppDialog
+        actions={(
+          <>
+            <button
+              className="pending-invoices-button pending-invoices-button--primary"
+              onClick={() => {
+                if (typeof window !== "undefined" && typeof window.print === "function") {
+                  window.print();
+                }
+              }}
+              type="button"
+            >
+              {detail?.oaPrintLayout?.downloadLabel || "打印下载"}
+            </button>
+            <button aria-label="关闭详情抽屉" className="pending-invoices-button" onClick={onClose} type="button">关闭</button>
+          </>
+        )}
         maxWidth="xl"
-        aria-labelledby="pending-invoice-oa-print-title"
-        PaperProps={{ sx: { height: { xs: "100%", md: "calc(100vh - 96px)" } } }}
+        onClose={onClose}
+        open={open}
+        title={title}
       >
-        <DialogTitle id="pending-invoice-oa-print-title" sx={{ fontWeight: 500 }}>
-          {title}
-        </DialogTitle>
-        <DialogContent dividers sx={{ bgcolor: "grey.50" }}>
-          <Stack spacing={2}>{body}</Stack>
-        </DialogContent>
-        <DialogActions sx={{ justifyContent: "space-between", px: 3, py: 1.5 }}>
-          <Button
-            variant="contained"
-            onClick={() => {
-              if (typeof window !== "undefined" && typeof window.print === "function") {
-                window.print();
-              }
-            }}
-          >
-            {detail?.oaPrintLayout?.downloadLabel || "打印下载"}
-          </Button>
-          <Button onClick={onClose} aria-label="关闭详情抽屉">关闭</Button>
-        </DialogActions>
-      </Dialog>
+        {body}
+      </AppDialog>
     );
   }
 
   return (
     <PendingInvoiceDrawerFrame
-      open={open}
-      title={title}
-      subtitle={detail?.subtitle || target?.id}
       closeLabel="关闭详情抽屉"
       onClose={onClose}
+      open={open}
+      subtitle={detail?.subtitle || target?.id}
+      title={title}
     >
       {body}
     </PendingInvoiceDrawerFrame>
@@ -160,94 +135,60 @@ export default function PendingInvoiceDetailDrawer({
 
 function OaPrintLayout({ layout }: { layout: PendingInvoiceOaPrintLayout }) {
   return (
-    <Box
-      sx={{
-        bgcolor: "background.paper",
-        color: "text.primary",
-        mx: "auto",
-        p: { xs: 1.5, md: 2.5 },
-        width: "100%",
-        maxWidth: 1180,
-      }}
-    >
-      <Typography component="h2" align="center" fontWeight={700} sx={{ fontSize: 18, mb: 1.5 }}>
-        {layout.formTitle}
-      </Typography>
-      <Box
-        component="table"
-        sx={{
-          borderCollapse: "collapse",
-          tableLayout: "fixed",
-          width: "100%",
-          "& th, & td": {
-            border: "1px solid",
-            borderColor: "grey.900",
-            px: 1,
-            py: 0.55,
-            fontSize: 13,
-            lineHeight: 1.35,
-            verticalAlign: "middle",
-            wordBreak: "break-word",
-          },
-          "& th": {
-            bgcolor: "grey.50",
-            fontWeight: 500,
-            textAlign: "right",
-            width: 120,
-          },
-        }}
-      >
+    <section className="pending-invoice-print-layout">
+      <h2 className="pending-invoice-print-layout__title">{layout.formTitle}</h2>
+      <table className="pending-invoice-print-table">
         <tbody>
           {layout.fields.map((field) => (
             <tr key={field.label}>
-              <th>{field.label}</th>
+              <th scope="row">{field.label}</th>
               <td>{formatValue(field.value)}</td>
             </tr>
           ))}
           {layout.approvals.length > 0 ? (
             <>
               <tr>
-                <td colSpan={2} style={{ textAlign: "center", fontWeight: 700 }}>
+                <td className="pending-invoice-print-table__section" colSpan={2}>
                   申请提交/审批意见及评论
                 </td>
               </tr>
               <tr>
-                <td colSpan={2} style={{ padding: 0 }}>
-                  <Box
-                    sx={{
-                      display: "grid",
-                      gridTemplateColumns: { xs: "1fr", md: `repeat(${Math.min(layout.approvals.length, 3)}, minmax(0, 1fr))` },
-                    }}
-                  >
+                <td className="pending-invoice-print-table__approval-cell" colSpan={2}>
+                  <div className="pending-invoice-print-approvals">
                     {layout.approvals.map((approval, index) => (
-                      <Box
-                        key={`${approval.title}-${index}`}
-                        sx={{
-                          minHeight: 96,
-                          p: 1.5,
-                          textAlign: "center",
-                          borderLeft: { md: index === 0 ? 0 : "1px solid" },
-                          borderTop: { xs: index === 0 ? 0 : "1px solid", md: 0 },
-                          borderColor: "grey.900",
-                        }}
-                      >
-                        <Typography fontWeight={500} sx={{ fontSize: 13 }}>{approval.title}</Typography>
+                      <section className="pending-invoice-print-approval" key={`${approval.title}-${index}`}>
+                        <h3>{approval.title}</h3>
                         {approval.lines.map((line) => (
-                          <Typography key={line} sx={{ fontSize: 13 }}>{line}</Typography>
+                          <p key={line}>{line}</p>
                         ))}
-                        {approval.signature ? (
-                          <Typography sx={{ mt: 1, fontFamily: "cursive", fontSize: 18 }}>{approval.signature}</Typography>
-                        ) : null}
-                      </Box>
+                        {approval.signature ? <p className="pending-invoice-print-approval__signature">{approval.signature}</p> : null}
+                      </section>
                     ))}
-                  </Box>
+                  </div>
                 </td>
               </tr>
             </>
           ) : null}
         </tbody>
-      </Box>
-    </Box>
+      </table>
+    </section>
+  );
+}
+
+function LoadingMessage({ label, text }: { label: string; text: string }) {
+  return (
+    <div aria-label={label} className="pending-invoice-status-message" role="status">
+      <span aria-hidden="true" className="pending-invoice-spinner" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function StatusMessage({ children, tone }: { children: string; tone: "danger" | "success" | "info" }) {
+  return (
+    <div className={`pending-invoice-status-message pending-invoice-status-message--${tone}`} role={tone === "danger" ? "alert" : "status"}>
+      {children}
+    </div>
   );
 }
 

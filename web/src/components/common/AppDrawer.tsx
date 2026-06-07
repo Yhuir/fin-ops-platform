@@ -4,6 +4,7 @@ import { useId, type CSSProperties, type ReactNode } from "react";
 type AppDrawerProps = {
   open: boolean;
   title: string;
+  subtitle?: ReactNode;
   className?: string;
   children: ReactNode;
   closeLabel?: string;
@@ -19,6 +20,7 @@ type AppDrawerStyle = CSSProperties & {
 export default function AppDrawer({
   open,
   title,
+  subtitle,
   className,
   children,
   closeLabel,
@@ -43,9 +45,12 @@ export default function AppDrawer({
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
         <Drawer.Dialog aria-labelledby={titleId} className={`finance-drawer${className ? ` ${className}` : ""}`} style={drawerStyle}>
           <Drawer.Header className="finance-drawer__header">
-            <Drawer.Heading className="finance-drawer__title" id={titleId}>
-              {title}
-            </Drawer.Heading>
+            <div className="finance-drawer__heading">
+              <Drawer.Heading className="finance-drawer__title" id={titleId}>
+                {title}
+              </Drawer.Heading>
+              {subtitle ? <div className="finance-drawer__subtitle">{subtitle}</div> : null}
+            </div>
             <Button aria-label={closeLabel ?? "关闭抽屉"} isIconOnly onPress={onClose} size="sm" variant="tertiary">
               <span aria-hidden="true">×</span>
             </Button>

@@ -847,6 +847,297 @@ textarea {
   cursor: default;
 }
 
+.pending-invoice-drawer .finance-drawer__body {
+  padding: 0;
+}
+
+.pending-invoice-drawer__body,
+.pending-invoice-detail-body {
+  display: grid;
+  align-content: start;
+  gap: var(--fp-space-4);
+  min-height: 0;
+}
+
+.pending-invoice-drawer__body {
+  padding: var(--fp-space-5);
+}
+
+.pending-invoice-drawer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+}
+
+.pending-invoice-status-message {
+  display: flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+  min-height: 36px;
+  padding: var(--fp-space-3) var(--fp-space-4);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+  font-weight: 700;
+}
+
+.pending-invoice-status-message--danger {
+  border-color: var(--fp-border);
+  background: var(--fp-danger-soft);
+  color: var(--fp-danger);
+}
+
+.pending-invoice-status-message--success {
+  border-color: var(--fp-border);
+  background: var(--fp-success-soft);
+  color: var(--fp-success);
+}
+
+.pending-invoice-status-message--info {
+  border-color: var(--fp-border);
+  background: var(--fp-primary-soft);
+  color: var(--fp-info);
+}
+
+.pending-invoice-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in oklch, var(--fp-primary) 20%, transparent);
+  border-top-color: var(--fp-primary);
+  border-radius: 999px;
+  animation: pending-invoice-spin 0.8s linear infinite;
+}
+
+@keyframes pending-invoice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pending-invoice-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--fp-space-3);
+}
+
+.pending-invoice-metric,
+.pending-invoice-panel {
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.pending-invoice-metric {
+  display: grid;
+  gap: 4px;
+  padding: var(--fp-space-3);
+}
+
+.pending-invoice-metric__label,
+.pending-invoice-field__label {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.pending-invoice-metric__value {
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.pending-invoice-panel {
+  overflow: hidden;
+}
+
+.pending-invoice-panel__title {
+  margin: 0;
+  padding: var(--fp-space-4) var(--fp-space-4) 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.pending-invoice-panel__description {
+  margin: 0;
+  padding: var(--fp-space-2) var(--fp-space-4) var(--fp-space-4);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+}
+
+.pending-invoice-list {
+  display: grid;
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-4);
+}
+
+.pending-invoice-list__item {
+  display: grid;
+  gap: 3px;
+}
+
+.pending-invoice-list__primary {
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 850;
+}
+
+.pending-invoice-list__secondary,
+.pending-invoice-empty {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+}
+
+.pending-invoice-empty {
+  margin: 0;
+}
+
+.pending-invoice-simple-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+}
+
+.pending-invoice-simple-table th,
+.pending-invoice-simple-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--fp-border);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: top;
+}
+
+.pending-invoice-simple-table th {
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 850;
+}
+
+.pending-invoice-simple-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.pending-invoice-simple-table__amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pending-invoice-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--fp-space-4);
+  padding: var(--fp-space-4);
+}
+
+.pending-invoice-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pending-invoice-field__value {
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.pending-invoice-print-layout {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--fp-space-5);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+}
+
+.pending-invoice-print-layout__title {
+  margin: 0 0 var(--fp-space-4);
+  color: var(--fp-text-primary);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.pending-invoice-print-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.pending-invoice-print-table th,
+.pending-invoice-print-table td {
+  padding: 6px 8px;
+  border: 1px solid var(--fp-ink);
+  color: var(--fp-text-primary);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
+
+.pending-invoice-print-table th {
+  width: 120px;
+  background: var(--fp-surface-muted);
+  font-weight: 600;
+  text-align: right;
+}
+
+.pending-invoice-print-table__section {
+  font-weight: 700;
+  text-align: center;
+}
+
+.pending-invoice-print-table__approval-cell {
+  padding: 0;
+}
+
+.pending-invoice-print-approvals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pending-invoice-print-approval {
+  min-height: 96px;
+  padding: var(--fp-space-3);
+  border-left: 1px solid var(--fp-ink);
+  text-align: center;
+}
+
+.pending-invoice-print-approval:first-child {
+  border-left: 0;
+}
+
+.pending-invoice-print-approval h3,
+.pending-invoice-print-approval p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.pending-invoice-print-approval h3 {
+  font-weight: 700;
+}
+
+.pending-invoice-print-approval__signature {
+  margin-top: var(--fp-space-2);
+  font-family: cursive;
+  font-size: 18px;
+}
+
 @media (max-width: 900px) {
   .pending-invoices-page {
     padding: var(--fp-space-4);
@@ -859,6 +1150,22 @@ textarea {
   .pending-invoices-toolbar-actions,
   .pending-invoices-pagination {
     justify-content: flex-start;
+  }
+
+  .pending-invoice-metric-grid,
+  .pending-invoice-field-grid,
+  .pending-invoice-print-approvals {
+    grid-template-columns: 1fr;
+  }
+
+  .pending-invoice-print-approval,
+  .pending-invoice-print-approval:first-child {
+    border-left: 0;
+    border-top: 1px solid var(--fp-ink);
+  }
+
+  .pending-invoice-print-approval:first-child {
+    border-top: 0;
   }
 }
 
@@ -1535,11 +1842,32 @@ textarea {
   padding: var(--fp-space-4);
 }
 
+.finance-drawer__heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .finance-drawer__title {
+  min-width: 0;
+  overflow: hidden;
   color: var(--fp-ink);
   font-size: var(--fp-text-title);
   font-weight: 800;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finance-drawer__subtitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .finance-drawer__body {
