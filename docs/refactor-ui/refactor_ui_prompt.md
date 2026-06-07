@@ -5145,7 +5145,7 @@ Scope: `/turnover-ledger` export dialog, page-level feedback/status surfaces, an
 ### MG-P091-phase-6-turnover-ledger
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `cumulative merge gate`
 - Scope: TurnoverLedger P085-P091 only。
 
@@ -5167,6 +5167,48 @@ Scope: TurnoverLedger P085-P091 only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected outcome: TurnoverLedger module committed, pushed and ready to move to next Phase 6 module。
+
+#### Execution Notes
+
+- Runtime implementation changed during MG: no。
+- Test implementation changed during MG: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- MG grep was corrected during execution to use JSX-tag boundaries for `<Tab>`/`<Table>` so project names like `TurnoverLedgerGroupedTable` are not false positives。
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts`: passed，21 tests。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed，15 tests。
+  - `if rg -n '@mui/|Mui[A-Z]|DownloadOutlinedIcon|KeyboardArrowDownIcon|KeyboardArrowRightIcon|CloseIcon|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|<Dialog\\b|<Drawer\\b|<Button\\b|<TextField\\b|<MenuItem\\b|<Table\\b|<TableHead\\b|<TableBody\\b|<TableRow\\b|<TableCell\\b|<TableContainer\\b|<Checkbox\\b|<Chip\\b|<IconButton\\b|<Stack\\b|<Typography\\b|<Paper\\b|<Divider\\b|<FormControlLabel\\b|<Tabs\\b|<Tab\\b' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: clean before MG docs update。
+- Next prompt generated: `P092-phase-6-etc-tickets-discovery`。
+
+### P092-phase-6-etc-tickets-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/etc-tickets` ETC ticket management discovery only。
+
+#### Prompt
+
+```text
+Prompt ID: P092-phase-6-etc-tickets-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/etc-tickets` ETC ticket management discovery only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/test/EtcApi.test.ts、web/src/test/EtcOaNavigation.test.ts、web/src/features/etc/api.ts、web/src/features/etc/types.ts 和 web/src/features/etc/oaNavigation.ts。只做 discovery/planning：生成 docs/refactor-ui/modules/phase_6_etc_tickets.md，记录当前 MUI inventory、用户可见入口、表格/导入/对账/确认/空错误状态、弹窗/抽屉/菜单边界、现有测试覆盖、需要新增的 characterization tests、推荐 Micro-JIT 切片队列和 P093 prompt。不得修改 runtime code、tests、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。保留原则：大布局和使用感不变，旧按钮/表格/导入/对账/确认入口位置保持等价，旧弹窗仍为弹窗，旧右侧抽屉仍为右侧抽屉。运行 `test -f docs/refactor-ui/modules/phase_6_etc_tickets.md`、`rg -n "P092-phase-6-etc-tickets-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P093-phase-6-etc-tickets-characterization-tests" docs/refactor-ui/modules/phase_6_etc_tickets.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs。完成后提交并 push 到 `origin/refactor-ui`，再写入 Push Log。
+```
+
+#### Review
+
+- Single slice: yes，ETC ticket management discovery only。
+- Runtime implementation limited: yes，no runtime/test/API/backend changes。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Next prompt: P093 characterization tests only after P092 discovery doc and grep pass。
 
 ### MG Prompt Template
 

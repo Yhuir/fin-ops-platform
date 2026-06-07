@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P091-phase-6-turnover-ledger`
+- Current Prompt ID: `P092-phase-6-etc-tickets-discovery`
 - Current MG ID: `MG-P091-phase-6-turnover-ledger`
 
 ## Global Invariants
@@ -54,18 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 turnover ledger cumulative MG generated after P091 export dialog and feedback closeout。
-- Files touched in P091:
-  - `web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx`
-  - `web/src/pages/TurnoverLedgerPage.tsx`
-  - `web/src/test/TurnoverLedgerPage.test.tsx`
-  - `web/src/app/styles.css`
+- Scope: phase 6 ETC tickets discovery prompt generated after TurnoverLedger cumulative MG。
+- Files touched in MG-P091:
   - `docs/refactor-ui/modules/phase_6_turnover_ledger.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P091 selected tests passed；full `TurnoverLedgerPage.test.tsx` passed with 12 tests；build passed；scoped grep passed；diff/status passed。
-- Failures: none for P091.
-- Next action: 执行 `MG-P091-phase-6-turnover-ledger`。
+- Verification run: MG-P091 TurnoverLedger API/UI tests passed；table/common/HeroUI platform regression passed；build passed；corrected no-MUI grep passed；diff/status passed。
+- Failures: none for MG-P091.
+- Next action: 执行 `P092-phase-6-etc-tickets-discovery`。
 
 ## Prompt Lifecycle
 
@@ -97,7 +93,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P091-phase-6-turnover-ledger` | TurnoverLedger P091 verified；next cumulative MG |
+| page batches | `in_progress` | `P092-phase-6-etc-tickets-discovery` | TurnoverLedger MG verified；next ETC ticket management discovery |
 
 ## Verification Log
 
@@ -118,6 +114,12 @@
 | 2026-06-07 | `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout` | `if rg -n '@mui/\|Mui[A-Z]\|DialogTitle\|DialogContent\|DialogActions\|Snackbar\|<Alert\\b\|<Dialog\\b\|<Button\|<TextField\|<MenuItem\|<Table\|TableHead\|TableBody\|TableRow\|TableCell\|TableContainer\|<Stack\|<Typography' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx; then exit 1; else exit 0; fi` | passed | Export dialog and page feedback MUI residues cleared |
 | 2026-06-07 | `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts` | passed | 21 tests passed |
+| 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `if rg -n '@mui/\|Mui[A-Z]\|DownloadOutlinedIcon\|KeyboardArrowDownIcon\|KeyboardArrowRightIcon\|CloseIcon\|DialogTitle\|DialogContent\|DialogActions\|Snackbar\|<Alert\\b\|<Dialog\\b\|<Drawer\\b\|<Button\\b\|<TextField\\b\|<MenuItem\\b\|<Table\\b\|<TableHead\\b\|<TableBody\\b\|<TableRow\\b\|<TableCell\\b\|<TableContainer\\b\|<Checkbox\\b\|<Chip\\b\|<IconButton\\b\|<Stack\\b\|<Typography\\b\|<Paper\\b\|<Divider\\b\|<FormControlLabel\\b\|<Tabs\\b\|<Tab\\b' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger; then exit 1; else exit 0; fi` | passed | Corrected JSX-boundary grep avoids project-name false positives |
+| 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `git status --short --branch` | passed | Clean before MG docs update |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|renders grouped\|expands Jia Xiaohua\|confirms a manual zero-difference\|blocks cross-group selection\|shows bank-detail tags"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining drawer/dialog/feedback targets |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |

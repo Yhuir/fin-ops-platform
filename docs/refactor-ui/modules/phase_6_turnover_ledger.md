@@ -261,3 +261,20 @@ Scope: TurnoverLedger P085-P091 only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx、web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx、web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx、web/src/test/TurnoverLedgerPage.test.tsx、web/src/test/TurnoverLedgerApi.test.ts 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 P085-P091 已记录并且 TurnoverLedger runtime no-MUI contract passed。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts`；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|DownloadOutlinedIcon|KeyboardArrowDownIcon|KeyboardArrowRightIcon|CloseIcon|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|<Dialog\\b|<Drawer\\b|<Button|<TextField|<MenuItem|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|<IconButton|<Stack|<Typography|<Paper|<Divider|FormControlLabel|Tabs|Tab' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。确认 scope 只包含 TurnoverLedger runtime/tests/docs files and `web/src/app/styles.css`；禁止 `git add .` 和 `git add -A`，只允许精确 git add。MG 通过后提交并 push 到 `origin/refactor-ui`，再更新 state/prompt/module docs 的 MG execution notes 和 Push Log，标记 MG verified，并从 `refactor-ui` 分支生成下一条 Micro-JIT prompt。
 ```
+
+## MG-P091 Execution Notes
+
+- Status: verified.
+- Runtime implementation changed during MG: no.
+- Test implementation changed during MG: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- MG grep was corrected during execution to use JSX-tag boundaries for `<Tab>`/`<Table>` so project names like `TurnoverLedgerGroupedTable` are not false positives.
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts`: passed, 21 tests.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests.
+  - `if rg -n '@mui/|Mui[A-Z]|DownloadOutlinedIcon|KeyboardArrowDownIcon|KeyboardArrowRightIcon|CloseIcon|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|<Dialog\\b|<Drawer\\b|<Button\\b|<TextField\\b|<MenuItem\\b|<Table\\b|<TableHead\\b|<TableBody\\b|<TableRow\\b|<TableCell\\b|<TableContainer\\b|<Checkbox\\b|<Chip\\b|<IconButton\\b|<Stack\\b|<Typography\\b|<Paper\\b|<Divider\\b|<FormControlLabel\\b|<Tabs\\b|<Tab\\b' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: clean before MG docs update.
+- Next prompt generated: `P092-phase-6-etc-tickets-discovery`.
