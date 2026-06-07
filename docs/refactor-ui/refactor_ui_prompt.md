@@ -4763,6 +4763,7 @@ Scope: `/batch-accounting` OA/relation table, native checkbox selection, Expanda
   - `if rg -n '<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|MuiTable|MuiCheckbox|MuiChip' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed。
   - `git diff --check`: passed。
   - `git status --short --branch`: passed；only P083 page/style files changed before docs。
+- Commit: `1ae9068d feat: migrate batch accounting oa table`, pushed to `origin/refactor-ui`.
 - Current expected source-level failure now lists remaining withdraw dialog and mutation feedback/toast targets。
 - Next prompt generated: `P084-phase-6-batch-accounting-overlays-feedback`.
 
