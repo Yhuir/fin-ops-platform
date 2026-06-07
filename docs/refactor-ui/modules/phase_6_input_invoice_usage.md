@@ -252,3 +252,47 @@ Scope: 只更新 input invoice usage tests，锁定 `/input-invoice-usage` 非 M
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/*.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx。只修改 `web/src/test/InputInvoiceUsagePage.test.tsx` 和 `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`：把当前 `dense MUI Table layout without DataGrid`、`.MuiDataGrid-root`、`.MuiChip-root` 等 MUI wording/class assertions 改成行为和 project primitive assertions；新增 source-level contracts，锁定 page shell/toolbar/search/loading、main dense table、ExpandableCellText、shared filter menu、detail/export/payment-rules/OA-reverse right drawers 未来均不再依赖 `@mui/*`、`Mui[A-Z]`、`TablePagination`、`TextField`、`Drawer`、`Dialog`、`Menu`、`Chip` 等旧 MUI surface；新增或保留行为断言确保旧右侧抽屉仍是右侧抽屉，`进项发票使用情况表`、`进项发票使用情况导出样例`、`Sheet4 支付状态规则`、`反提 OA 候选发票清单` 表格语义保留，`筛选 支付状态` menu、`关闭详情抽屉`、`关闭进项发票使用情况导出`、`关闭支付状态规则抽屉`、`关闭以发票反提 OA 工作流` 标签保留。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P055 page shell toolbar prompt。
 ```
+
+## Execution Update: P054 Characterization Tests
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/test/InputInvoiceUsagePage.test.tsx`
+  - `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Test changes:
+  - Added source-level project primitive contracts for page shell, dense table, expandable cell, shared filter menu and workflow drawers.
+  - Reworded the main table test away from old MUI terminology.
+  - Replaced `.MuiDataGrid-root` and `.MuiChip-root` assertions with behavior/table/text assertions.
+  - Preserved behavior coverage for table semantics, pagination, detail drawer, export drawer, filter menu, payment rules and OA reverse workflows.
+- Verification:
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: expected-fail, 19 passed and 2 source-level failures.
+  - Expected failures:
+    - `InputInvoiceUsagePage.test.tsx` source contract lists remaining MUI imports/selectors and missing page/table/drawer primitive targets.
+    - `InputInvoiceUsageFiltersAndDrawers.test.tsx` source contract lists remaining MUI overlay imports/selectors and missing AppDrawer targets.
+
+## Current Expected Failures After P054
+
+The two source-level failures are expected until P055-P060/P061 complete:
+
+- `src/pages/InputInvoiceUsagePage.tsx`: still imports MUI page shell controls/icons/search/loading; P055 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx`: still imports MUI table/tag/pagination/tooltip/button controls and `.MuiChip-label`/`.MuiTablePagination-*` selectors; P056 owns this.
+- `src/components/inputInvoiceUsage/ExpandableCellText.tsx`: still imports MUI icons/tooltip/button/text layout; P056 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx`: still imports MUI menu/check/radio/button/icons and `.MuiButton-startIcon`; P057 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx`: still imports MUI Drawer and status/layout components; P058 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx`: still imports MUI Drawer/table/status/action components; P058 owns this.
+- `src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx`: still imports MUI Drawer/table/form/tag/status/action components; P059 owns this.
+- `src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`: still imports MUI Drawer/table/form/selection/tag/status/action components; P060 owns this.
+
+## P055 Prompt Draft
+
+```text
+Prompt ID: P055-phase-6-input-invoice-usage-page-shell-toolbar
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/input-invoice-usage` page shell/actions/search/loading/error only. Do not migrate `InputInvoiceUsageTable`, `ExpandableCellText`, `InputInvoiceUsageFilterMenu` or any input invoice usage drawer/workflow component.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/test/InputInvoiceUsagePage.test.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/InputInvoiceUsagePage.tsx`、必要 `web/src/app/styles.css` 和必要的 `web/src/test/InputInvoiceUsagePage.test.tsx` expectation：移除 page shell/actions/search/loading/error scope 的 MUI imports/usages，包括 `FileDownloadOutlinedIcon`、`RefreshOutlinedIcon`、`Alert`、`Box`、`Button`、`Skeleton`、`Stack`、`TextField`。使用 existing `PageScaffold`、`PageToolbar` 或等价 project toolbar、native/project buttons、native/project search input、project loading skeleton/status message 和 lucide icons。必须保留 `data-testid="input-invoice-usage-page"`、heading `进项发票使用情况`、description `以进项发票为主对象反查支付状态、OA 和银行流水。`、toolbar buttons `以发票反提 OA`、`发票与支付状态规则设置`、`筛选内容导出`、`刷新`、search input label `关键字`、submit button `查询`、Enter submit、refresh disabled while refreshing、error feedback、loading label `进项发票使用情况加载中`、empty state `当前条件下暂无记录。`、query/page reset and read model retry behavior。不得修改 input invoice usage API/mock/read model/worker/backend/关联台；不得修改 `web/src/components/inputInvoiceUsage/*`。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|uses a standard empty state|pauses read model retry|adds sidebar route|drops legacy column filters|loads export preview"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P056-P060/P061 table/filter/drawer source contract failures 可以继续 expected-fail，但 `src/pages/InputInvoiceUsagePage.tsx` must disappear from the source-level failure list；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|Mui[A-Z]|FileDownloadOutlinedIcon|RefreshOutlinedIcon|Skeleton|TextField' web/src/pages/InputInvoiceUsagePage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P056 main table and expandable cell prompt。
+```

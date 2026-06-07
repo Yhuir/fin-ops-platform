@@ -3264,6 +3264,49 @@ Scope: 只更新 input invoice usage tests，锁定 `/input-invoice-usage` 非 M
 - Expected failure allowed: yes，source-level no-MUI contract should fail until P055-P060/P061 implement migration。
 - Next prompt: P055 page shell/toolbar only after P054 is implemented and verified/expected-fail documented。
 
+#### Execution Notes
+
+- Updated `web/src/test/InputInvoiceUsagePage.test.tsx` with source-level project primitive contracts for page shell, dense table, expandable cell, shared filter menu and workflow drawers.
+- Updated the main page behavior test wording from old MUI terminology to project dense table contract.
+- Replaced `.MuiDataGrid-root` and `.MuiChip-root` assertions with user-observable table/text assertions.
+- Updated `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` with workflow source-level contracts for the shared filter menu and right drawer surfaces.
+- Did not modify runtime implementation, mocks, backend, API contracts, read models, workers or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: expected-fail, 19 passed and 2 failed. Both failures are the intended source-level contracts listing remaining MUI imports/selectors and missing project primitive targets.
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed。
+
+### P055-phase-6-input-invoice-usage-page-shell-toolbar
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/input-invoice-usage` page shell/actions/search/loading/error only. Do not migrate `InputInvoiceUsageTable`, `ExpandableCellText`, `InputInvoiceUsageFilterMenu` or any input invoice usage drawer/workflow component.
+
+#### Prompt
+
+```text
+Prompt ID: P055-phase-6-input-invoice-usage-page-shell-toolbar
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/input-invoice-usage` page shell/actions/search/loading/error only. Do not migrate `InputInvoiceUsageTable`, `ExpandableCellText`, `InputInvoiceUsageFilterMenu` or any input invoice usage drawer/workflow component.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/test/InputInvoiceUsagePage.test.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/InputInvoiceUsagePage.tsx`、必要 `web/src/app/styles.css` 和必要的 `web/src/test/InputInvoiceUsagePage.test.tsx` expectation：移除 page shell/actions/search/loading/error scope 的 MUI imports/usages，包括 `FileDownloadOutlinedIcon`、`RefreshOutlinedIcon`、`Alert`、`Box`、`Button`、`Skeleton`、`Stack`、`TextField`。使用 existing `PageScaffold`、`PageToolbar` 或等价 project toolbar、native/project buttons、native/project search input、project loading skeleton/status message 和 lucide icons。必须保留 `data-testid="input-invoice-usage-page"`、heading `进项发票使用情况`、description `以进项发票为主对象反查支付状态、OA 和银行流水。`、toolbar buttons `以发票反提 OA`、`发票与支付状态规则设置`、`筛选内容导出`、`刷新`、search input label `关键字`、submit button `查询`、Enter submit、refresh disabled while refreshing、error feedback、loading label `进项发票使用情况加载中`、empty state `当前条件下暂无记录。`、query/page reset and read model retry behavior。不得修改 input invoice usage API/mock/read model/worker/backend/关联台；不得修改 `web/src/components/inputInvoiceUsage/*`。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|uses a standard empty state|pauses read model retry|adds sidebar route|drops legacy column filters|loads export preview"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P056-P060/P061 table/filter/drawer source contract failures 可以继续 expected-fail，但 `src/pages/InputInvoiceUsagePage.tsx` must disappear from the source-level failure list；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|Mui[A-Z]|FileDownloadOutlinedIcon|RefreshOutlinedIcon|Skeleton|TextField' web/src/pages/InputInvoiceUsagePage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P056 main table and expandable cell prompt。
+```
+
+#### Review
+
+- Single slice: yes，page shell/actions/search/loading/error only。
+- Runtime table/filter/drawers untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，P056-P060/P061 source-level failures can remain, but page source must clear。
+- Next prompt: P056 main table and expandable cell only after P055 implementation is verified/expected-fail documented。
+
 ### MG Prompt Template
 
 ```text

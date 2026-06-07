@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -8,6 +11,21 @@ import {
   createStoredPayload,
 } from "../contexts/pageSessionStorage";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
+
+const inputInvoiceUsageSourceFiles = [
+  "src/pages/InputInvoiceUsagePage.tsx",
+  "src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx",
+  "src/components/inputInvoiceUsage/ExpandableCellText.tsx",
+  "src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx",
+  "src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx",
+  "src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx",
+  "src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx",
+  "src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx",
+] as const;
+
+function readWebSource(path: string) {
+  return readFileSync(resolve(path), "utf8");
+}
 
 const rowsPayload = {
   rows: [
@@ -163,6 +181,50 @@ afterEach(() => {
 });
 
 describe("Input invoice usage page", () => {
+  test("targets project primitives for page shell, dense table, and workflow drawers", () => {
+    const forbiddenMuiImports = inputInvoiceUsageSourceFiles.flatMap((path) => {
+      const source = readWebSource(path);
+      const hasMuiImport = /from ["']@mui\/|import\s+[^;]*@mui\//.test(source);
+      return hasMuiImport ? [path] : [];
+    });
+    const forbiddenMuiSelectors = inputInvoiceUsageSourceFiles.flatMap((path) => {
+      const source = readWebSource(path);
+      const hasMuiSelector = /\.Mui[A-Z][A-Za-z-]*/.test(source);
+      return hasMuiSelector ? [path] : [];
+    });
+    const sourceByPath = Object.fromEntries(inputInvoiceUsageSourceFiles.map((path) => [path, readWebSource(path)]));
+    const missingPrimitiveTargets = [
+      sourceByPath["src/pages/InputInvoiceUsagePage.tsx"].includes("PageScaffold") ? null : "InputInvoiceUsagePage.tsx should keep PageScaffold or equivalent project shell",
+      sourceByPath["src/pages/InputInvoiceUsagePage.tsx"].includes("PageToolbar") ? null : "InputInvoiceUsagePage.tsx should use PageToolbar or equivalent project toolbar",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx"].includes("FinanceTable")
+        || sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx"].includes("input-invoice-usage-table-shell")
+        ? null
+        : "InputInvoiceUsageTable.tsx should use FinanceTable or the project dense table shell",
+      sourceByPath["src/components/inputInvoiceUsage/ExpandableCellText.tsx"].includes("lucide-react")
+        || sourceByPath["src/components/inputInvoiceUsage/ExpandableCellText.tsx"].includes("expandable-cell-text")
+        ? null
+        : "ExpandableCellText.tsx should use project/lucide controls instead of MUI icons",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemcheckbox\"")
+        && sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemradio\"")
+        ? null
+        : "InputInvoiceUsageFilterMenu.tsx should preserve checkbox/radio menu semantics",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer for the right drawer shape",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer for the right drawer shape",
+      sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer for the right drawer shape",
+      sourceByPath["src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx"].includes("AppDrawer") ? null : "OaReverseWorkspaceDrawer.tsx should use AppDrawer for the right drawer shape",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
   test("uses a standard empty state while read model refresh details stay hidden", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -248,7 +310,7 @@ describe("Input invoice usage page", () => {
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
-  test("adds sidebar route and renders the dense MUI Table layout without DataGrid", async () => {
+  test("adds sidebar route and renders the project dense table contract", async () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();
 
@@ -263,7 +325,8 @@ describe("Input invoice usage page", () => {
 
     const page = await screen.findByTestId("input-invoice-usage-page");
     expect(within(page).getByRole("heading", { name: "进项发票使用情况" })).toBeInTheDocument();
-    expect(document.querySelector(".MuiDataGrid-root")).not.toBeInTheDocument();
+    expect(within(page).queryByRole("grid")).not.toBeInTheDocument();
+    expect(await within(page).findByRole("table", { name: "进项发票使用情况表" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
 
     const headerRows = within(page).getAllByRole("row").slice(0, 2);
@@ -297,13 +360,13 @@ describe("Input invoice usage page", () => {
     expect(within(firstRowCells[2] as HTMLElement).getByText("12,345.67")).toBeInTheDocument();
     expect(within(firstRowCells[2] as HTMLElement).getByText("11,646.86 6% (698.81)")).toBeInTheDocument();
     expect(within(firstRowCells[3] as HTMLElement).getByText("很长很长的货物或应税劳务名称用于验证两行截断后出现展开按钮")).toBeInTheDocument();
-    expect(within(page).getByText("2026-05-02").closest(".MuiChip-root")).toBeInTheDocument();
+    expect(within(page).getByText("2026-05-02")).toBeInTheDocument();
     const invoiceDetailButton = within(page).getByRole("button", { name: "查看发票 SD-INV-2026-0001 详情" });
     expect(invoiceDetailButton).toBeInTheDocument();
     const invoiceCell = firstRowCells[0];
     expect(invoiceCell).toBeTruthy();
     expect(within(invoiceCell as HTMLElement).queryByText("详情")).not.toBeInTheDocument();
-    expect(within(page).getByText("2026-05-03 10:30:00").closest(".MuiChip-root")).toBeInTheDocument();
+    expect(within(page).getByText("2026-05-03 10:30:00")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "查看流水 云南银行交易对方户名很长很长需要换行显示 详情" })).toBeInTheDocument();
     expect(within(page).getByText("待处理").closest(".input-invoice-usage-payment-cell")).toBeInTheDocument();
 

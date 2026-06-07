@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -19,9 +22,57 @@ import {
   previewInputInvoiceUsageOaReverse,
 } from "../features/inputInvoiceUsage/api";
 
+const inputInvoiceUsageWorkflowSourceFiles = [
+  "src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx",
+  "src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx",
+  "src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx",
+  "src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx",
+  "src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx",
+] as const;
+
+function readWebSource(path: string) {
+  return readFileSync(resolve(path), "utf8");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("Input invoice usage workflow primitive targets", () => {
+  test("targets project menu and right drawer primitives without MUI overlay surfaces", () => {
+    const forbiddenMuiImports = inputInvoiceUsageWorkflowSourceFiles.flatMap((path) => {
+      const source = readWebSource(path);
+      const hasMuiImport = /from ["']@mui\/|import\s+[^;]*@mui\//.test(source);
+      return hasMuiImport ? [path] : [];
+    });
+    const forbiddenMuiSelectors = inputInvoiceUsageWorkflowSourceFiles.flatMap((path) => {
+      const source = readWebSource(path);
+      const hasMuiSelector = /\.Mui[A-Z][A-Za-z-]*/.test(source);
+      return hasMuiSelector ? [path] : [];
+    });
+    const sourceByPath = Object.fromEntries(inputInvoiceUsageWorkflowSourceFiles.map((path) => [path, readWebSource(path)]));
+    const missingPrimitiveTargets = [
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemcheckbox\"")
+        && sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx"].includes("role=\"menuitemradio\"")
+        ? null
+        : "InputInvoiceUsageFilterMenu.tsx should preserve menuitemcheckbox and menuitemradio semantics",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageDetailDrawer.tsx should use AppDrawer",
+      sourceByPath["src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx"].includes("AppDrawer") ? null : "InputInvoiceUsageExportDrawer.tsx should use AppDrawer",
+      sourceByPath["src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "PaymentStatusRulesDrawer.tsx should use AppDrawer",
+      sourceByPath["src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx"].includes("AppDrawer") ? null : "OaReverseWorkspaceDrawer.tsx should use AppDrawer",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      missingPrimitiveTargets: [],
+    });
+  });
 });
 
 describe("InputInvoiceUsageFilterMenu", () => {
