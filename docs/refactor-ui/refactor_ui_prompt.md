@@ -4770,7 +4770,7 @@ Scope: `/batch-accounting` OA/relation table, native checkbox selection, Expanda
 ### P084-phase-6-batch-accounting-overlays-feedback
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/batch-accounting` withdraw dialog, mutation feedback, remaining action buttons/layout wrappers and final page MUI cleanup only.
 
@@ -4793,6 +4793,44 @@ Scope: `/batch-accounting` withdraw dialog, mutation feedback, remaining action 
 - Behavior preservation explicit: yes，dialog role/name, reason field, disabled rules, feedback messages and domain event source are locked。
 - Verification strictness: full `BatchAccountingPage.test.tsx` must pass；source-level no-MUI/project primitive contract must pass。
 - Next prompt: MG-P084 only after P084 tests, build, no-MUI grep and docs pass。
+
+#### Execution Notes
+
+- Implemented: remaining `BatchAccountingPage.tsx` MUI imports and legacy surfaces removed, including Box/Paper/Stack/Divider/Button/Dialog/TextField/Snackbar/Alert。
+- Implemented: right-side OA panel wrapper/layout and submit/withdraw action buttons migrated to native/project controls and `batch-accounting-*` classes。
+- Implemented: withdraw confirmation migrated to `AppDialog` with native labelled textarea while preserving `撤回关联`, `撤回原因`, confirm disabled rule and withdraw payload。
+- Implemented: mutation feedback migrated to `batch-accounting-feedback` with close and 4000ms auto-hide behavior。
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: passed；13 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+- Next prompt generated: `MG-P084-phase-6-batch-accounting`.
+
+### MG-P084-phase-6-batch-accounting
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `cumulative merge gate`
+- Scope: `/batch-accounting` P080-P084 characterization and UI migration only.
+
+#### Prompt
+
+```text
+Prompt ID: MG-P084-phase-6-batch-accounting
+Type: cumulative merge gate
+Scope: `/batch-accounting` P080-P084 characterization and UI migration only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 BatchAccounting P080-P084：characterization tests, page shell/filters, bank list/summary, OA table, overlays/feedback and final page MUI cleanup。不得包含 backend/API/read model/worker、mock data shape、domain event semantic changes 或关联台内部工作区。运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`、`cd web && npm run build`、no-MUI grep `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`、`git diff --check`、`git status --short --branch`。只允许精确 `git add web/src/pages/BatchAccountingPage.tsx web/src/app/styles.css docs/refactor-ui/modules/phase_6_batch_accounting.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；禁止 `git add .` 和 `git add -A`。提交并 push 到 `origin/refactor-ui`。完成后更新 state/prompt/module docs 和 Push Log，标记 MG verified。
+```
+
+#### Review
+
+- Merge boundary reached: yes，BatchAccounting source-level contract now passes and final page no-MUI grep is clean。
+- Scope limited: yes，only page/style and refactor-ui docs。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Exact staging required: yes，no `git add .` or `git add -A`。
 
 ### MG Prompt Template
 

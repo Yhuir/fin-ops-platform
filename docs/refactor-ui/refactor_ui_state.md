@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P084-phase-6-batch-accounting-overlays-feedback`
-- Current MG ID: `MG-P078-phase-6-no-oa-bank-batches`
+- Current Prompt ID: `MG-P084-phase-6-batch-accounting`
+- Current MG ID: `MG-P084-phase-6-batch-accounting`
 
 ## Global Invariants
 
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections and NoOaBankBatches MG verified；BatchAccounting P083 OA table migration verified，next P084 overlays/feedback and final page MUI cleanup |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections and NoOaBankBatches MG verified；BatchAccounting P084 overlays/feedback migration verified，next MG-P084 cumulative merge gate |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 batch accounting overlays/feedback and final page MUI cleanup prompt generated after P083 OA table migration。
-- Files touched in P083:
+- Scope: phase 6 batch accounting cumulative merge gate after P084 overlays/feedback and final page MUI cleanup。
+- Files touched in P084:
   - `web/src/pages/BatchAccountingPage.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_batch_accounting.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P083 selected tests expected-fail with selected behavior tests passed；full `BatchAccountingPage.test.tsx` expected-fail with 12 behavior tests passed and 1 source-level primitive contract failure；build passed；scoped grep passed；diff/status passed。
-- Failures: expected source-level failure now lists current `BatchAccountingPage.tsx` MUI imports/legacy surfaces and missing withdraw dialog/feedback targets; OA table target and scoped table residues cleared.
-- Next action: 执行 `P084-phase-6-batch-accounting-overlays-feedback`。
+- Verification run: P084 full `BatchAccountingPage.test.tsx` passed with 13 tests；build passed；no-MUI grep passed；diff check passed。
+- Failures: none in P084 targeted verification；build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+- Next action: 执行 `MG-P084-phase-6-batch-accounting`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +95,16 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P084-phase-6-batch-accounting-overlays-feedback` | BatchAccounting P083 OA table migration verified；next overlays/feedback and final page MUI cleanup |
+| page batches | `in_progress` | `MG-P084-phase-6-batch-accounting` | BatchAccounting P084 overlays/feedback migration verified；next cumulative merge gate |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P084-phase-6-batch-accounting-overlays-feedback` | `cd web && npx vitest run BatchAccountingPage.test.tsx` | passed | 13 tests passed; source-level no-MUI/project primitive contract passed |
+| 2026-06-07 | `P084-phase-6-batch-accounting-overlays-feedback` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P084-phase-6-batch-accounting-overlays-feedback` | `if rg -n '@mui/\|Mui[A-Z]\|DialogTitle\|DialogContent\|DialogActions\|Snackbar\|<Alert\\b\|TextField\|<Button\|<Dialog\|<Stack\|<Paper\|<Box\|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi` | passed | Final page MUI residues cleared |
+| 2026-06-07 | `P084-phase-6-batch-accounting-overlays-feedback` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P083-phase-6-batch-accounting-oa-table` | `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives\|renders controls\|filters right side OA rows\|keeps selected bank and OA rows\|renders submitted bucket\|shows loading and empty states"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining dialog/feedback targets |
 | 2026-06-07 | `P083-phase-6-batch-accounting-oa-table` | `cd web && npx vitest run BatchAccountingPage.test.tsx` | expected-fail | 12 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P083-phase-6-batch-accounting-oa-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |

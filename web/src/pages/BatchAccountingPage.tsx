@@ -1,18 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
 import { AlertTriangle, RefreshCw, Search, X } from "lucide-react";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Divider from "@mui/material/Divider";
-import Paper from "@mui/material/Paper";
-import Snackbar from "@mui/material/Snackbar";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
 
+import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import { usePageScrollSession } from "../hooks/usePageScrollSession";
@@ -194,7 +183,7 @@ export default function BatchAccountingPage() {
   const [withdrawReason, setWithdrawReason] = useState("");
   const [oaSearchQuery, setOaSearchQuery] = useState("");
   const [differenceNote, setDifferenceNote] = useState("");
-  const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ severity: "success" | "error"; message: string } | null>(null);
 
   const selectedBankRow = useMemo(
     () => (
@@ -294,6 +283,14 @@ export default function BatchAccountingPage() {
     return () => controller.abort();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!feedback) {
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => setFeedback(null), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [feedback]);
+
   const handleBucketChange = (nextBucket: BatchAccountingBucket) => {
     if (nextBucket === bucket) {
       return;
@@ -330,7 +327,7 @@ export default function BatchAccountingPage() {
       ...mutationEventDetail(result),
       source: "batch_accounting_mutation",
     });
-    setSnackbar({ severity: "success", message: result.message || fallbackMessage });
+    setFeedback({ severity: "success", message: result.message || fallbackMessage });
     loadData();
   };
 
@@ -350,7 +347,7 @@ export default function BatchAccountingPage() {
       });
       handleMutationComplete("已关联批量账务流水与 OA。", result);
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "关联OA项与流水失败" });
+      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "关联OA项与流水失败" });
     } finally {
       setMutating(false);
     }
@@ -371,7 +368,7 @@ export default function BatchAccountingPage() {
       setWithdrawReason("");
       handleMutationComplete("已撤回批量账务关联。", result);
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "撤回关联失败" });
+      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "撤回关联失败" });
     } finally {
       setMutating(false);
     }
@@ -415,14 +412,7 @@ export default function BatchAccountingPage() {
 
       {error ? <StatePanel tone="error" title={error} /> : null}
 
-      <Box
-        sx={{
-          display: "grid",
-          gap: 1.5,
-          gridTemplateColumns: { xs: "1fr", lg: "30% minmax(0, 1fr)" },
-          alignItems: "start",
-        }}
-      >
+      <div className="batch-accounting-layout">
         <section aria-label="批量账务流水" className="batch-accounting-bank-panel" role="region">
           <header className="batch-accounting-bank-panel__header">
             <div>
@@ -478,9 +468,9 @@ export default function BatchAccountingPage() {
           </div>
         </section>
 
-        <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-          <Stack alignItems={{ xs: "stretch", xl: "center" }} direction={{ xs: "column", xl: "row" }} justifyContent="space-between" spacing={1.5} sx={{ px: 2, py: 1.5 }}>
-            <Stack direction={{ xs: "column", lg: "row" }} spacing={1.25} sx={{ minWidth: 0 }}>
+        <section aria-label={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"} className="batch-accounting-oa-panel">
+          <div className="batch-accounting-oa-panel__toolbar">
+            <div className="batch-accounting-oa-panel__controls">
               <div className="batch-accounting-summary">
                 <span className="batch-accounting-summary-tag">{`银行流水金额 ${formatCents(bankAmountCents)}`}</span>
                 <span className="batch-accounting-summary__warning-slot">
@@ -547,18 +537,28 @@ export default function BatchAccountingPage() {
                   ) : null}
                 </div>
               </div>
-            </Stack>
+            </div>
             {bucket === "unsubmitted" ? (
-              <Button disabled={!canSubmit} onClick={handleSubmit} variant="contained">
+              <button
+                className="batch-accounting-button batch-accounting-button--primary"
+                disabled={!canSubmit}
+                onClick={handleSubmit}
+                type="button"
+              >
                 关联OA项与流水
-              </Button>
+              </button>
             ) : (
-              <Button disabled={!canWithdraw} onClick={() => setWithdrawOpen(true)} variant="contained">
+              <button
+                className="batch-accounting-button batch-accounting-button--primary"
+                disabled={!canWithdraw}
+                onClick={() => setWithdrawOpen(true)}
+                type="button"
+              >
                 撤回关联
-              </Button>
+              </button>
             )}
-          </Stack>
-          <Divider />
+          </div>
+          <div className="batch-accounting-oa-panel__divider" />
           <div className="batch-accounting-oa-table-wrap" ref={tableWrapRef}>
             <table className="batch-accounting-oa-table" aria-label={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"}>
               <thead>
@@ -609,42 +609,58 @@ export default function BatchAccountingPage() {
               </tbody>
             </table>
           </div>
-        </Paper>
-      </Box>
+        </section>
+      </div>
 
-      <Dialog fullWidth maxWidth="sm" onClose={() => setWithdrawOpen(false)} open={withdrawOpen}>
-        <DialogTitle>撤回关联</DialogTitle>
-        <DialogContent>
-          <TextField
+      <AppDialog
+        actions={(
+          <>
+            <button className="batch-accounting-button" onClick={() => setWithdrawOpen(false)} type="button">
+              取消
+            </button>
+            <button
+              className="batch-accounting-button batch-accounting-button--primary"
+              disabled={!withdrawReason.trim() || mutating}
+              onClick={handleConfirmWithdraw}
+              type="button"
+            >
+              确认撤回
+            </button>
+          </>
+        )}
+        maxWidth="sm"
+        onClose={() => setWithdrawOpen(false)}
+        open={withdrawOpen}
+        title="撤回关联"
+      >
+        <label className="batch-accounting-field batch-accounting-field--withdraw" htmlFor="batch-accounting-withdraw-reason">
+          <span>撤回原因</span>
+          <textarea
             autoFocus
-            fullWidth
-            label="撤回原因"
-            minRows={3}
-            multiline
+            id="batch-accounting-withdraw-reason"
+            rows={3}
             onChange={(event) => setWithdrawReason(event.target.value)}
-            sx={{ mt: 1 }}
             value={withdrawReason}
           />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setWithdrawOpen(false)}>取消</Button>
-          <Button disabled={!withdrawReason.trim() || mutating} onClick={handleConfirmWithdraw} variant="contained">
-            确认撤回
-          </Button>
-        </DialogActions>
-      </Dialog>
+        </label>
+      </AppDialog>
 
-      <Snackbar
-        autoHideDuration={4000}
-        onClose={() => setSnackbar(null)}
-        open={Boolean(snackbar)}
-      >
-        {snackbar ? (
-          <Alert onClose={() => setSnackbar(null)} severity={snackbar.severity} variant="filled">
-            {snackbar.message}
-          </Alert>
-        ) : undefined}
-      </Snackbar>
+      {feedback ? (
+        <div
+          className={cx("batch-accounting-feedback", `batch-accounting-feedback--${feedback.severity}`)}
+          role="alert"
+        >
+          <span>{feedback.message}</span>
+          <button
+            aria-label="关闭消息"
+            className="batch-accounting-feedback__close"
+            onClick={() => setFeedback(null)}
+            type="button"
+          >
+            <X aria-hidden="true" size={14} strokeWidth={2.4} />
+          </button>
+        </div>
+      ) : null}
     </PageScaffold>
   );
 }

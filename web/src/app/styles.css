@@ -3208,6 +3208,13 @@ textarea {
   background: var(--fp-surface);
 }
 
+.batch-accounting-layout {
+  display: grid;
+  align-items: start;
+  gap: var(--fp-space-3);
+  grid-template-columns: minmax(280px, 30%) minmax(0, 1fr);
+}
+
 .batch-accounting-button {
   display: inline-flex;
   min-height: 34px;
@@ -3230,6 +3237,12 @@ textarea {
   color: var(--fp-primary-hover);
 }
 
+.batch-accounting-button--primary {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary);
+  color: var(--fp-surface);
+}
+
 .batch-accounting-button:hover:not(:disabled),
 .batch-accounting-button:focus-visible {
   border-color: var(--fp-primary);
@@ -3241,8 +3254,17 @@ textarea {
 .batch-accounting-button:focus-visible,
 .batch-accounting-segment__button:focus-visible,
 .batch-accounting-field input:focus-visible,
+.batch-accounting-field textarea:focus-visible,
+.batch-accounting-feedback__close:focus-visible,
 .batch-accounting-search__clear:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.batch-accounting-button--primary:hover:not(:disabled),
+.batch-accounting-button--primary:focus-visible {
+  border-color: var(--fp-primary-hover);
+  background: var(--fp-primary-hover);
+  color: var(--fp-surface);
 }
 
 .batch-accounting-button:disabled {
@@ -3305,7 +3327,8 @@ textarea {
   min-width: min(280px, 100%);
 }
 
-.batch-accounting-field input {
+.batch-accounting-field input,
+.batch-accounting-field textarea {
   min-height: 34px;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
@@ -3319,11 +3342,19 @@ textarea {
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.batch-accounting-field input:hover {
+.batch-accounting-field textarea {
+  min-height: 88px;
+  line-height: var(--fp-leading-normal);
+  resize: vertical;
+}
+
+.batch-accounting-field input:hover,
+.batch-accounting-field textarea:hover {
   border-color: var(--fp-border-strong);
 }
 
-.batch-accounting-field input:focus-visible {
+.batch-accounting-field input:focus-visible,
+.batch-accounting-field textarea:focus-visible {
   border-color: var(--fp-primary);
   outline: none;
 }
@@ -3521,6 +3552,10 @@ textarea {
   min-width: min(280px, 100%);
 }
 
+.batch-accounting-field--withdraw {
+  min-width: 0;
+}
+
 .batch-accounting-field--note small {
   color: var(--fp-text-muted);
   font-size: var(--fp-text-caption);
@@ -3572,6 +3607,35 @@ textarea {
   font-weight: 700;
   line-height: var(--fp-leading-normal);
   padding: var(--fp-space-2);
+}
+
+.batch-accounting-oa-panel {
+  overflow: hidden;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.batch-accounting-oa-panel__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-3);
+}
+
+.batch-accounting-oa-panel__controls {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.batch-accounting-oa-panel__divider {
+  height: 1px;
+  background: var(--fp-border-subtle);
 }
 
 .batch-accounting-oa-table-wrap {
@@ -3693,6 +3757,70 @@ textarea {
 .batch-accounting-expandable__toggle:focus-visible {
   background: var(--fp-primary-soft);
   outline: none;
+}
+
+.batch-accounting-feedback {
+  position: fixed;
+  z-index: 50;
+  right: var(--fp-space-4);
+  bottom: var(--fp-space-4);
+  display: flex;
+  min-width: min(360px, calc(100vw - (var(--fp-space-4) * 2)));
+  max-width: min(480px, calc(100vw - (var(--fp-space-4) * 2)));
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-2);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  box-shadow: var(--fp-shadow-popover);
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: var(--fp-leading-normal);
+  padding: var(--fp-space-2) var(--fp-space-3);
+}
+
+.batch-accounting-feedback--success {
+  border-color: color-mix(in srgb, var(--fp-success) 42%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-success) 10%, var(--fp-surface));
+  color: var(--fp-success);
+}
+
+.batch-accounting-feedback--error {
+  border-color: color-mix(in srgb, var(--fp-danger) 42%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-danger) 10%, var(--fp-surface));
+  color: var(--fp-danger);
+}
+
+.batch-accounting-feedback__close {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--fp-radius-sm);
+  background: transparent;
+  color: currentColor;
+  cursor: pointer;
+}
+
+.batch-accounting-feedback__close:hover,
+.batch-accounting-feedback__close:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  outline: none;
+}
+
+@media (max-width: 1100px) {
+  .batch-accounting-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .batch-accounting-oa-panel__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .no-oa-bank-batches-actions,

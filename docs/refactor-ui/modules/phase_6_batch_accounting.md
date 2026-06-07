@@ -256,3 +256,32 @@ Scope: `/batch-accounting` withdraw dialog, mutation feedback, remaining action 
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/components/common/AppDialog.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。迁移 `BatchAccountingPage.tsx` 剩余 MUI surfaces：submit/withdraw action buttons, OA panel wrapper/layout, withdraw dialog (`撤回关联`/`撤回原因`/`取消`/`确认撤回`), snackbar/alert feedback (`已关联批量账务流水与 2 项 OA。`/`已撤回批量账务关联。`/error fallbacks), and any remaining MUI Box/Paper/Button/Dialog/TextField/Snackbar/Alert/Stack/Divider imports 到 `AppDialog`、native/project controls and `batch-accounting-*` classes。不得修改 API client、mock data shape、backend、read model、worker、domain event name/payload 或关联台内部工作区。保留用户可见行为：submit disabled/enabled rules, submitted withdraw button disabled rules, modal dialog role/name `撤回关联`, `撤回原因` accessible label, confirm disabled without trimmed reason, cancel/close behavior, withdraw payload `{ expected_version, reason }`, feedback messages and close/autohide-equivalent behavior, and `FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated` source `batch_accounting_mutation`. 运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`，现在 source-level contract must pass and all behavior tests must pass；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 MG-P084 cumulative merge gate prompt。
 ```
+
+## P084 Execution Notes
+
+- Status: verified.
+- Runtime implementation changed: yes, only `web/src/pages/BatchAccountingPage.tsx`.
+- CSS changed: yes, only `web/src/app/styles.css` `batch-accounting-*` layout, OA panel, withdraw field and feedback classes.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Migrated remaining page MUI surfaces from `BatchAccountingPage.tsx`: Box/Paper/Stack/Divider/Button/Dialog/TextField/Snackbar/Alert imports are removed.
+- Migrated right-side OA panel wrapper/layout and submit/withdraw action buttons to native project controls.
+- Migrated withdraw confirmation to `AppDialog` and native labelled textarea while preserving dialog title `撤回关联`, label `撤回原因`, disabled confirm rule and withdraw payload.
+- Migrated mutation feedback to native `batch-accounting-feedback` with close and 4000ms auto-hide behavior while preserving success/error messages.
+- Preserved `FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated` source `batch_accounting_mutation`.
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: passed; 13 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+
+## MG-P084 Prompt Draft
+
+```text
+Prompt ID: MG-P084-phase-6-batch-accounting
+Type: cumulative merge gate
+Scope: `/batch-accounting` P080-P084 characterization and UI migration only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 BatchAccounting P080-P084：characterization tests, page shell/filters, bank list/summary, OA table, overlays/feedback and final page MUI cleanup。不得包含 backend/API/read model/worker、mock data shape、domain event semantic changes 或关联台内部工作区。运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`、`cd web && npm run build`、no-MUI grep `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`、`git diff --check`、`git status --short --branch`。只允许精确 `git add web/src/pages/BatchAccountingPage.tsx web/src/app/styles.css docs/refactor-ui/modules/phase_6_batch_accounting.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；禁止 `git add .` 和 `git add -A`。提交并 push 到 `origin/refactor-ui`。完成后更新 state/prompt/module docs 和 Push Log，标记 MG verified。
+```
