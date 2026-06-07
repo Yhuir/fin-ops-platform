@@ -231,6 +231,7 @@ Scope: `LabelRail` and main/sub rail surfaces in `NoOaBankBatchPage.tsx` only, p
   - `if rg -n 'ListItemButton|<List\\b|Mui-selected' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P076 implementation files changed before docs.
+- Commit: `379d24cd feat: migrate no oa bank batch label rails`, pushed to `origin/refactor-ui`.
 
 ## Current Expected Failures After P076
 

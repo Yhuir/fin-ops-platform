@@ -496,3 +496,4 @@
 | 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `refactor-ui` | `ac9a18ac` | pushed |
 | 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `refactor-ui` | `4a958ce8` | pushed |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `refactor-ui` | `1c872bfe` | pushed |
+| 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `refactor-ui` | `379d24cd` | pushed |

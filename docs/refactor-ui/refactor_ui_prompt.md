@@ -4409,6 +4409,7 @@ Scope: `LabelRail` and main/sub rail surfaces in `NoOaBankBatchPage.tsx` only, p
 - Replaced `LabelRail` MUI rail structure with native section/header/button list markup and project rail classes.
 - Preserved `主标签`/`子标签` region names, empty states, `<label> <countMeta>` button names, `aria-pressed`, click and Enter/Space activation, and selection-clearing behavior.
 - Did not modify transaction region, tag drawer, withdraw dialog, snackbar, API client, backend, read model, worker or workbench internals.
+- Committed and pushed `379d24cd feat: migrate no oa bank batch label rails` to `origin/refactor-ui`.
 - Verification:
   - `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|main and child label rails"`: expected-fail; 4 selected behavior tests passed and 1 source-level contract failed.
   - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: expected-fail; 19 behavior tests passed and 1 source-level contract failed.
