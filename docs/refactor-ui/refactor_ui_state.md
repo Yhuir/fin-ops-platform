@@ -595,6 +595,7 @@
 | 2026-06-07 | `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout` | `refactor-ui` | `8a3eb3cb` | pushed |
 | 2026-06-07 | `MG-P091-phase-6-turnover-ledger` | `refactor-ui` | `392a5d41` | pushed |
 | 2026-06-07 | `P092-phase-6-etc-tickets-discovery` | `refactor-ui` | `5267a7a2` | pushed |
+| 2026-06-07 | `P093-phase-6-etc-tickets-characterization-tests` | `refactor-ui` | `1d0773cc` | pushed |
 | 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `refactor-ui` | `4a958ce8` | pushed |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `refactor-ui` | `1c872bfe` | pushed |
 | 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `refactor-ui` | `379d24cd` | pushed |

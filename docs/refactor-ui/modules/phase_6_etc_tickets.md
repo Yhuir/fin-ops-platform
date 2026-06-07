@@ -188,6 +188,7 @@ Scope: `/etc-tickets` characterization tests only.
   - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: expected-fail; 41 behavior tests passed and 1 source-level no-MUI/project primitive contract failed against current MUI runtime.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P093 test file changed before docs.
+- Commit: `1d0773cc test: characterize etc tickets ui migration`, pushed to `origin/refactor-ui`.
 
 ## P094 Prompt Draft
 
