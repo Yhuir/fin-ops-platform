@@ -7,7 +7,6 @@ import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import ReconciliationWorkbenchPage from "../pages/ReconciliationWorkbenchPage";
-import LegacyWorkbenchMuiProvider from "./legacyWorkbenchMuiProvider";
 
 const defaultSession: SessionPayload = {
   allowed: true,
@@ -41,17 +40,15 @@ function WorkbenchPageHarness() {
 export function renderWorkbenchPage() {
   return render(
     <MemoryRouter>
-      <LegacyWorkbenchMuiProvider>
-        <AppChromeProvider>
-          <MonthProvider>
-            <SessionContext.Provider value={staticWorkbenchSession}>
-              <PageSessionStateProvider>
-                <WorkbenchPageHarness />
-              </PageSessionStateProvider>
-            </SessionContext.Provider>
-          </MonthProvider>
-        </AppChromeProvider>
-      </LegacyWorkbenchMuiProvider>
+      <AppChromeProvider>
+        <MonthProvider>
+          <SessionContext.Provider value={staticWorkbenchSession}>
+            <PageSessionStateProvider>
+              <WorkbenchPageHarness />
+            </PageSessionStateProvider>
+          </SessionContext.Provider>
+        </MonthProvider>
+      </AppChromeProvider>
     </MemoryRouter>,
   );
 }

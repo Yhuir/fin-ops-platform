@@ -58,9 +58,9 @@ rg -n "^import .*@mui|from \"@mui|from '@mui|@mui/|Mui[A-Z]|\\.Mui" web/src/page
 
 | File | Current role | Migration target |
 | --- | --- | --- |
-| `web/src/test/legacyWorkbenchMuiProvider.tsx` | MUI ThemeProvider, CssBaseline, date picker LocalizationProvider for legacy workbench tests | Delete after workbench runtime no longer needs MUI |
-| `web/src/test/workbenchRenderHelpers.tsx` | Wraps workbench tests with `LegacyWorkbenchMuiProvider` | Switch to project/HeroUI test provider |
-| `web/src/test/WorkbenchExceptionModal.test.tsx` | Uses `LegacyWorkbenchMuiProvider` for modal render helper path | Remove legacy provider wrapping |
+| `web/src/test/legacyWorkbenchMuiProvider.tsx` | deleted in `P-WB007` | resolved |
+| `web/src/test/workbenchRenderHelpers.tsx` | migrated in `P-WB007` to non-MUI app/session/month/page-state providers | resolved |
+| `web/src/test/WorkbenchExceptionModal.test.tsx` | migrated in `P-WB007` to direct non-MUI test providers | resolved |
 
 ### Non-workbench Runtime MUI Scan
 
@@ -316,7 +316,6 @@ Workbench CSS no longer depends on MUI-generated classes. The migrated styles pr
 
 Remaining workbench MUI cleanup is limited to:
 
-- test-only `legacyWorkbenchMuiProvider` and related render helpers;
 - package dependencies after no references remain.
 
 ### Verification
@@ -324,6 +323,50 @@ Remaining workbench MUI cleanup is limited to:
 ```bash
 if rg -n '\.Mui|Mui[A-Z]' web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi
 cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx
+cd web && npm run build
+git diff --check
+```
+
+Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
+## P-WB007 Test Provider Cleanup
+
+- Prompt ID: `P-WB007-test-provider-cleanup`
+- Phase: `wb_phase_6_test_provider_cleanup`
+- Type: `extraction/refactor`
+- Runtime changed: no.
+- CSS changed: no.
+- Test changed:
+  - deleted `web/src/test/legacyWorkbenchMuiProvider.tsx`
+  - updated `web/src/test/workbenchRenderHelpers.tsx`
+  - updated `web/src/test/WorkbenchExceptionModal.test.tsx`
+  - updated `web/src/test/MuiContainment.test.ts`
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Result
+
+Workbench tests no longer need a MUI ThemeProvider, CssBaseline or MUI date-picker LocalizationProvider. Page-level workbench tests still keep the actual required test context:
+
+- `MemoryRouter`
+- `AppChromeProvider`
+- `MonthProvider`
+- `SessionContext.Provider`
+- `PageSessionStateProvider`
+
+`MuiContainment.test.ts` now asserts:
+
+- no runtime app MUI providers exist;
+- `legacyWorkbenchMuiProvider.tsx` does not exist;
+- `styles.css` has no MUI-generated selectors.
+
+Remaining workbench MUI cleanup is limited to package dependencies after source scans confirm no imports remain.
+
+### Verification
+
+```bash
+if rg -n "from ['\"]@mui/|import\s+[^;]*@mui/|LegacyWorkbenchMuiProvider|from ['\"]\.\/legacyWorkbenchMuiProvider" web/src/test web/src/components/workbench web/src/pages/ReconciliationWorkbenchPage.tsx; then exit 1; else exit 0; fi
+cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx MuiContainment.test.ts
 cd web && npm run build
 git diff --check
 ```
@@ -344,7 +387,7 @@ Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warn
 5. `P-WB006-css-containment-cleanup`
    - Remove workbench `.Mui*` selectors from `styles.css`. Completed.
 6. `P-WB007-test-provider-cleanup`
-   - Remove `legacyWorkbenchMuiProvider` and update render helpers/tests.
+   - Remove `legacyWorkbenchMuiProvider` and update render helpers/tests. Completed.
 7. `P-WB008-dependency-cleanup`
    - Remove MUI/Emotion deps after no references remain.
 8. `P-WB009-full-verification`

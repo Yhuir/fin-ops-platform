@@ -556,12 +556,12 @@
   - `git commit -m "refactor: remove workbench mui css hooks"`
   - `git push origin refactor-ui`
 
-## Next Prompt
+## Prompt History
 
 ### P-WB007-test-provider-cleanup
 
 - Phase: `wb_phase_6_test_provider_cleanup`
-- Status: `drafted`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只移除 workbench test-only legacy MUI provider 和相关测试包装；不改 runtime UI、CSS、dependencies 或后端。
 
@@ -569,4 +569,65 @@
 
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/legacyWorkbenchMuiProvider.tsx、web/src/test/workbenchRenderHelpers.tsx、web/src/test/WorkbenchExceptionModal.test.tsx、web/src/test/ProcessedExceptionsModal.test.tsx、web/src/test/OaBankExceptionModal.test.tsx 和所有引用 legacy provider 的测试。只清理测试 provider：删除或停用 LegacyWorkbenchMuiProvider，改用项目/HeroUI 测试包装或直接 render；移除测试中的 @mui/* provider imports；保留测试断言、弹窗/抽屉行为和 workbench render helper API。不得修改 runtime UI、styles.css、package dependencies、backend/API/read model/worker。运行 `rg -n '@mui/|LegacyWorkbenchMuiProvider|legacyWorkbenchMuiProvider' web/src/test web/src/components/workbench web/src/pages/ReconciliationWorkbenchPage.tsx` 检查剩余 test-only 引用，运行 workbench modal/helper tests 和 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB008 dependency cleanup prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime UI/CSS/dependencies untouched: yes。
+- Backend/API/read model/worker untouched: yes。
+- Modal/drawer behavior protected: yes，modal tests remain in the targeted verification set.
+- Dependency cleanup deferred: yes，`package.json` and lockfile remain unchanged until `P-WB008`.
+
+#### Execution Notes
+
+- Deleted `web/src/test/legacyWorkbenchMuiProvider.tsx`.
+- `workbenchRenderHelpers.tsx` now renders workbench page tests with the real non-MUI app/session/month/page-state providers only.
+- `WorkbenchExceptionModal.test.tsx` now renders the modal without the legacy MUI wrapper.
+- `MuiContainment.test.ts` now asserts `legacyWorkbenchMuiProvider.tsx` does not exist and global CSS has no MUI-generated selectors.
+- Runtime UI/CSS/dependencies/backend/API/read model/worker changed: no.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - scoped test provider import scan: passed。
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx MuiContainment.test.ts`: passed，7 files / 69 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+
+### MG-WB007-test-provider-cleanup
+
+- Phase: `wb_phase_6_test_provider_cleanup`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push workbench test-only legacy MUI provider cleanup 和专项文档更新。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- web/src/test/legacyWorkbenchMuiProvider.tsx web/src/test/workbenchRenderHelpers.tsx web/src/test/WorkbenchExceptionModal.test.tsx web/src/test/MuiContainment.test.ts docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB007 scope。只允许精确 git add web/src/test/legacyWorkbenchMuiProvider.tsx web/src/test/workbenchRenderHelpers.tsx web/src/test/WorkbenchExceptionModal.test.tsx web/src/test/MuiContainment.test.ts docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 test: remove workbench legacy mui provider。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB007 和 wb_phase_6_test_provider_cleanup 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- Runtime UI/CSS/dependencies cleanup deferred: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+- Verification before commit specified: yes。
+
+## Next Prompt
+
+### P-WB008-dependency-cleanup
+
+- Phase: `wb_phase_7_dependency_cleanup`
+- Status: `drafted`
+- Type: `extraction/refactor`
+- Scope: 只在确认无剩余 runtime/test import 后移除 MUI/Emotion dependencies 和 lockfile entries；不改 runtime UI、CSS、backend/API/read model/worker。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、docs/refactor-ui/platform_stack_migration.md、web/package.json、web/package-lock.json、web/vite.config.ts 和 web/src/test/MuiContainment.test.ts。先运行 source scan 确认无真实 MUI imports：`if rg -n "from ['\\\"]@mui/|import\\s+[^;]*@mui/|@mui/x-|@mui/material|@mui/icons-material|@emotion/" web/src web/vite.config.ts; then exit 1; else exit 0; fi`。如果无剩余引用，只修改 web/package.json 和 web/package-lock.json，移除 `@emotion/react`、`@emotion/styled`、`@mui/icons-material`、`@mui/material`、`@mui/x-data-grid`、`@mui/x-date-pickers`。使用 npm install/package-lock 规范命令更新 lockfile，不手写 lockfile。不得修改 runtime UI、CSS、backend/API/read model/worker。运行 `cd web && npm install` 或等效 lockfile 更新命令，运行 `cd web && npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled` 预期不再作为 direct dependency，运行 `cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB009 full verification prompt。
 ```

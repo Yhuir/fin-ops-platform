@@ -7,7 +7,6 @@ import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { WorkbenchExceptionPreview } from "../features/workbench/exceptionTypes";
 import type { WorkbenchRecord } from "../features/workbench/types";
-import LegacyWorkbenchMuiProvider from "./legacyWorkbenchMuiProvider";
 
 const sessionValue: SessionContextValue = {
   status: "authenticated",
@@ -290,18 +289,16 @@ function renderModal({
   onClose?: () => void;
 }) {
   return render(
-    <LegacyWorkbenchMuiProvider>
-      <SessionContext.Provider value={sessionValue}>
-        <PageSessionStateProvider>
-          <WorkbenchExceptionModal
-            month="all"
-            rows={rows}
-            onApplied={onApplied}
-            onClose={onClose}
-          />
-        </PageSessionStateProvider>
-      </SessionContext.Provider>
-    </LegacyWorkbenchMuiProvider>,
+    <SessionContext.Provider value={sessionValue}>
+      <PageSessionStateProvider>
+        <WorkbenchExceptionModal
+          month="all"
+          rows={rows}
+          onApplied={onApplied}
+          onClose={onClose}
+        />
+      </PageSessionStateProvider>
+    </SessionContext.Provider>,
   );
 }
 
