@@ -1,22 +1,12 @@
-import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import SortOutlinedIcon from "@mui/icons-material/SortOutlined";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
-import type { MutableRefObject } from "react";
+import { ArrowUpDown, Info } from "lucide-react";
+import type { MutableRefObject, ReactNode } from "react";
 
+import {
+  EmptyValue,
+  FinanceDirectionTag,
+  FinanceStatusTag,
+  type FinanceTone,
+} from "../common/FinanceTable";
 import InputInvoiceUsageFilterMenu from "../inputInvoiceUsage/InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "../inputInvoiceUsage/InputInvoiceUsageFilterMenu";
 import type {
@@ -48,43 +38,29 @@ type OaPendingPaymentsTableProps = {
 type OaPendingPaymentColumn = {
   id: string;
   label: string;
-  width: number;
   align?: "left" | "right";
   field?: string;
   filterable?: boolean;
   sortable?: boolean;
+  group: "oa" | "status" | "bank" | "invoice";
 };
 
 const columns: OaPendingPaymentColumn[] = [
-  { id: "oaApplicant", label: "OA申请人", field: "oa_applicant", width: 170, filterable: true },
-  { id: "projectName", label: "项目名称", width: 220 },
-  { id: "oaAmount", label: "金额", width: 120, align: "right" },
-  { id: "paymentStatus", label: "支付状态", width: 150 },
-  { id: "bankCounterparty", label: "对方户名/交易时间", field: "bank_trade_time", width: 230, sortable: true },
-  { id: "bankAmountAccount", label: "金额/账户", width: 170, align: "right" },
-  { id: "bankSummaryRemark", label: "摘要/备注", width: 300 },
-  { id: "invoiceNoParty", label: "发票号码/发票方", width: 240 },
-  { id: "invoiceDate", label: "日期", width: 120 },
-  { id: "totalWithTax", label: "价税合计", width: 130, align: "right" },
+  { id: "oaApplicant", label: "OA申请人", field: "oa_applicant", filterable: true, group: "oa" },
+  { id: "projectName", label: "项目名称", group: "oa" },
+  { id: "oaAmount", label: "金额", align: "right", group: "oa" },
+  { id: "paymentStatus", label: "支付状态", group: "status" },
+  { id: "bankCounterparty", label: "对方户名/交易时间", field: "bank_trade_time", sortable: true, group: "bank" },
+  { id: "bankAmountAccount", label: "金额/账户", align: "right", group: "bank" },
+  { id: "bankSummaryRemark", label: "摘要/备注", group: "bank" },
+  { id: "invoiceNoParty", label: "发票号码/发票方", group: "invoice" },
+  { id: "invoiceDate", label: "日期", group: "invoice" },
+  { id: "totalWithTax", label: "价税合计", align: "right", group: "invoice" },
 ];
 
-const bodyCellSx = {
-  verticalAlign: "top",
-  fontSize: "12px",
-  lineHeight: 1.35,
-  py: 0.85,
-  minWidth: 0,
-  overflowWrap: "anywhere",
-};
-
-const denseChipSx = {
-  height: 22,
-  maxWidth: "100%",
-  "& .MuiChip-label": {
-    fontSize: "11px",
-    px: 0.75,
-  },
-};
+function cx(...values: Array<string | false | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
 
 export default function OaPendingPaymentsTable({
   rows,
@@ -105,108 +81,113 @@ export default function OaPendingPaymentsTable({
   const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
 
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
-      <TableContainer ref={tableWrapRef} sx={{ maxHeight: "calc(100vh - 280px)", minHeight: 360 }}>
-        <Table stickyHeader size="small" aria-label="OA待付款核对表格" sx={{ minWidth: 1690, tableLayout: "fixed" }}>
-          <TableHead>
-            <TableRow>
-              <GroupHeader label="OA情况" colSpan={3} />
-              <GroupHeader label="支付状态" colSpan={1} />
-              <GroupHeader label="支出流水" colSpan={3} />
-              <GroupHeader label="发票情况" colSpan={3} />
-            </TableRow>
-            <TableRow>
+    <div className="oa-pending-payments-table-frame">
+      <div ref={tableWrapRef} className="oa-pending-payments-table-shell" data-testid="oa-pending-payments-table-shell">
+        <table aria-label="OA待付款核对表格" className="oa-pending-payments-table">
+          <colgroup>
+            {columns.map((column) => (
+              <col className={`oa-pending-payments-col-${column.id}`} key={column.id} />
+            ))}
+          </colgroup>
+          <thead>
+            <tr>
+              <GroupHeader group="oa" label="OA情况" span={3} />
+              <GroupHeader group="status" label="支付状态" span={1} />
+              <GroupHeader group="bank" label="支出流水" span={3} />
+              <GroupHeader group="invoice" label="发票情况" span={3} />
+            </tr>
+            <tr>
               {columns.map((column) => {
                 const field = column.field;
                 const config = field ? configsByField.get(field) : undefined;
                 const currentFilter = field
-                  ? filters.find((filter) => filter.field === field) as InputInvoiceUsageFilterValue | undefined
-                  : null;
+                  ? (filters.find((filter) => filter.field === field) as InputInvoiceUsageFilterValue | undefined)
+                  : undefined;
                 return (
-                  <TableCell
+                  <th
+                    className={cx(
+                      "oa-pending-payments-table-sub-header",
+                      `oa-pending-payments-table-sub-header--${column.group}`,
+                      column.align === "right" && "oa-pending-payments-table-cell--amount",
+                      ["status", "bank", "invoice"].includes(column.group) && firstColumnInGroup(column.id) && "oa-pending-payments-table-cell--left-border",
+                    )}
                     key={column.id}
-                    align={column.align === "right" ? "right" : "left"}
-                    sx={{
-                      top: 33,
-                      width: column.width,
-                      minWidth: column.width,
-                      maxWidth: column.width,
-                      bgcolor: "background.paper",
-                      fontWeight: 900,
-                      whiteSpace: "nowrap",
-                    }}
+                    scope="col"
                   >
                     {column.filterable && config ? (
                       <InputInvoiceUsageFilterMenu
-                        fieldConfig={config}
                         currentFilter={currentFilter}
-                        options={field ? filterOptions[field] ?? [] : []}
+                        fieldConfig={config}
                         onApply={onFilterApply}
                         onClear={onFilterClear}
                         onSort={(direction) => field && onSortChange(field, direction)}
+                        options={field ? filterOptions[field] ?? [] : []}
                       />
                     ) : column.sortable && field ? (
-                      <Button
-                        aria-label={`${column.id === "bankCounterparty" ? "交易时间" : column.label} 排序`}
-                        color="inherit"
-                        size="small"
-                        startIcon={<SortOutlinedIcon fontSize="small" />}
+                      <SortButton
+                        label={column.label}
+                        sortLabel={column.id === "bankCounterparty" ? "交易时间" : column.label}
                         onClick={() => onSortChange(field)}
-                        sx={{ justifyContent: "flex-start", minWidth: 0, px: 0.5 }}
-                      >
-                        <Typography component="span" variant="inherit" noWrap>{column.label}</Typography>
-                      </Button>
+                      />
                     ) : (
-                      column.label
+                      <span>{column.label}</span>
                     )}
-                  </TableCell>
+                  </th>
                 );
               })}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.id} hover>
-                <TableCell sx={bodyCellSx}>
-                  <Stack direction="row" spacing={0.25} alignItems="center" sx={{ minWidth: 0 }}>
-                    <TextLine value={row.oa.applicantName} strong />
-                    <DetailIconButton
-                      label={`查看 OA ${row.oa.applicantName} 详情`}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td className="oa-pending-payments-table-state-cell" colSpan={columns.length}>
+                  暂无 OA 待付款核对数据
+                </td>
+              </tr>
+            ) : rows.map((row) => (
+              <tr className="oa-pending-payments-table-row" key={row.id}>
+                <td className="oa-pending-payments-table-cell" data-column-role="identity">
+                  <span className="oa-pending-payments-inline-row">
+                    <TextLine strong value={row.oa.applicantName} />
+                    <DetailButton
                       disabled={!row.oa.detailAvailable}
+                      label={`查看 OA ${row.oa.applicantName} 详情`}
                       onClick={() => onOpenDetail({ kind: "oa", id: row.oa.id })}
                     />
-                  </Stack>
-                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.45, flexWrap: "wrap" }}>
-                    <Chip label={row.oa.applicationType || "类型为空"} size="small" variant="outlined" sx={denseChipSx} />
-                  </Stack>
-                </TableCell>
-                <TableCell sx={bodyCellSx}>
+                  </span>
+                  <span className="oa-pending-payments-tag-row">
+                    <TableTag>{row.oa.applicationType || "类型为空"}</TableTag>
+                  </span>
+                </td>
+                <td className="oa-pending-payments-table-cell" data-column-role="description">
                   <TextLine value={row.oa.projectName} />
-                </TableCell>
-                <TableCell align="right" sx={bodyCellSx}>
-                  <TextLine value={row.oa.amount} strong numeric />
-                </TableCell>
-                <TableCell className="oa-pending-payment-status-cell">
-                  <Chip
-                    label={row.paymentStatus.label}
-                    color={statusColor(row.paymentStatus.severity)}
-                    size="small"
-                    variant={row.paymentStatus.code === "paid" || row.paymentStatus.code === "merged_paid" ? "filled" : "outlined"}
-                  />
-                </TableCell>
-                <TableCell sx={bodyCellSx}>
-                  <TextLine value={row.bankTransaction.counterpartyName} strong />
-                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.45, flexWrap: "wrap" }}>
-                    <Chip label={row.bankTransaction.tradeTime || "交易时间为空"} size="small" variant="outlined" sx={denseChipSx} />
-                  </Stack>
-                </TableCell>
-                <TableCell align="right" sx={bodyCellSx}>
-                  <Stack direction="row" spacing={0.25} alignItems="center" justifyContent="flex-end" sx={{ minWidth: 0 }}>
-                    <TextLine value={bankAmount(row)} strong numeric />
-                    <Chip label={row.bankTransaction.directionLabel || "支出"} size="small" variant="outlined" sx={denseChipSx} />
-                    <DetailIconButton
-                      label={bankDetailLabel(row)}
+                </td>
+                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
+                  <TextLine numeric strong value={row.oa.amount} />
+                </td>
+                <td
+                  className="oa-pending-payments-table-cell oa-pending-payments-table-cell--status oa-pending-payments-table-cell--left-border oa-pending-payment-status-cell"
+                  data-column-role="status"
+                >
+                  <FinanceStatusTag tone={statusTone(row.paymentStatus.severity)}>
+                    {row.paymentStatus.label}
+                  </FinanceStatusTag>
+                </td>
+                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
+                  <TextLine strong value={row.bankTransaction.counterpartyName} />
+                  <span className="oa-pending-payments-tag-row">
+                    <TableTag>{row.bankTransaction.tradeTime || "交易时间为空"}</TableTag>
+                  </span>
+                </td>
+                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
+                  <span className="oa-pending-payments-amount-detail-row">
+                    <TextLine numeric strong value={bankAmount(row)} />
+                    <FinanceDirectionTag direction={row.bankTransaction.directionLabel || "支出"}>
+                      {row.bankTransaction.directionLabel || "支出"}
+                    </FinanceDirectionTag>
+                    <DetailButton
                       disabled={!bankDetailTarget(row)}
+                      label={bankDetailLabel(row)}
                       onClick={() => {
                         const target = bankDetailTarget(row);
                         if (target) {
@@ -214,18 +195,20 @@ export default function OaPendingPaymentsTable({
                         }
                       }}
                     />
-                  </Stack>
-                  <Chip label={bankAccountLabel(row)} size="small" variant="outlined" sx={{ ...denseChipSx, mt: 0.45 }} />
-                </TableCell>
-                <TableCell sx={bodyCellSx}>
+                  </span>
+                  <span className="oa-pending-payments-tag-row oa-pending-payments-tag-row--right">
+                    <TableTag>{bankAccountLabel(row)}</TableTag>
+                  </span>
+                </td>
+                <td className="oa-pending-payments-table-cell" data-column-role="description">
                   <MultiLineValue value={combinedBankSummaryRemark(row)} />
-                </TableCell>
-                <TableCell sx={bodyCellSx}>
-                  <Stack direction="row" spacing={0.25} alignItems="center" sx={{ minWidth: 0 }}>
-                    <TextLine value={row.invoice.digitalInvoiceNo} strong />
-                    <DetailIconButton
-                      label={invoiceDetailLabel(row)}
+                </td>
+                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
+                  <span className="oa-pending-payments-inline-row">
+                    <TextLine strong value={row.invoice.digitalInvoiceNo} />
+                    <DetailButton
                       disabled={!invoiceDetailTarget(row)}
+                      label={invoiceDetailLabel(row)}
                       onClick={() => {
                         const target = invoiceDetailTarget(row);
                         if (target) {
@@ -233,62 +216,59 @@ export default function OaPendingPaymentsTable({
                         }
                       }}
                     />
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.35 }}>
-                    进项发票方名称
-                  </Typography>
+                  </span>
+                  <span className="oa-pending-payments-cell-caption">进项发票方名称</span>
                   <TextLine value={row.invoice.sellerName} />
-                </TableCell>
-                <TableCell sx={bodyCellSx}>
+                </td>
+                <td className="oa-pending-payments-table-cell" data-column-role="date">
                   <TextLine value={row.invoice.invoiceDate} />
-                </TableCell>
-                <TableCell align="right" sx={bodyCellSx}>
-                  <TextLine value={row.invoice.totalWithTax} strong numeric />
-                </TableCell>
-              </TableRow>
+                </td>
+                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
+                  <TextLine numeric strong value={row.invoice.totalWithTax} />
+                </td>
+              </tr>
             ))}
-            {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length}>
-                  <Box sx={{ py: 6, textAlign: "center" }}>
-                    <Typography color="text.secondary">暂无 OA 待付款核对数据</Typography>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      <TablePagination
-        component="div"
-        count={total}
-        page={Math.max(page - 1, 0)}
-        rowsPerPage={pageSize}
-        rowsPerPageOptions={[20, 50, 100]}
-        labelRowsPerPage="每页"
-        onPageChange={(_event, nextPage) => onPageChange(nextPage + 1)}
-        onRowsPerPageChange={(event) => onPageSizeChange(Number(event.target.value))}
+          </tbody>
+        </table>
+      </div>
+      <PaginationControls
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+        page={page}
+        pageSize={pageSize}
+        total={total}
       />
-    </Paper>
+    </div>
   );
 }
 
-function GroupHeader({ label, colSpan }: { label: string; colSpan: number }) {
+function GroupHeader({ label, span, group }: { label: string; span: number; group: "oa" | "status" | "bank" | "invoice" }) {
   return (
-    <TableCell
-      align="center"
-      colSpan={colSpan}
-      sx={{
-        bgcolor: "grey.100",
-        borderRight: "1px solid",
-        borderColor: "divider",
-        fontWeight: 900,
-        top: 0,
-        whiteSpace: "nowrap",
-      }}
+    <th
+      className={cx(
+        "oa-pending-payments-table-group-header",
+        `oa-pending-payments-table-group-header--${group}`,
+        group !== "oa" && "oa-pending-payments-table-cell--left-border",
+      )}
+      colSpan={span}
+      scope="colgroup"
     >
       {label}
-    </TableCell>
+    </th>
+  );
+}
+
+function SortButton({ label, sortLabel, onClick }: { label: string; sortLabel: string; onClick: () => void }) {
+  return (
+    <button
+      aria-label={`${sortLabel} 排序`}
+      className="oa-pending-payments-sort-button"
+      onClick={onClick}
+      type="button"
+    >
+      <ArrowUpDown aria-hidden="true" size={14} strokeWidth={2.3} />
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -302,52 +282,40 @@ function TextLine({
   numeric?: boolean;
 }) {
   const text = value == null || value === "" ? "-" : String(value);
+  if (text === "-") {
+    return <EmptyValue />;
+  }
   return (
-    <Tooltip title={text === "-" ? "" : text}>
-      <Typography
-        component="span"
-        variant="body2"
-        sx={{
-          display: "block",
-          minWidth: 0,
-          fontSize: "12px",
-          fontWeight: strong ? 800 : 400,
-          fontVariantNumeric: numeric ? "tabular-nums" : undefined,
-          lineHeight: 1.35,
-          overflowWrap: "anywhere",
-        }}
-      >
-        {text}
-      </Typography>
-    </Tooltip>
+    <span
+      className={cx(
+        "oa-pending-payments-table-text",
+        strong && "oa-pending-payments-table-text--strong",
+        numeric && "oa-pending-payments-table-text--numeric",
+      )}
+      title={text}
+    >
+      {text}
+    </span>
   );
 }
 
 function MultiLineValue({ value }: { value: string }) {
   const text = value || "-";
+  if (text === "-") {
+    return <EmptyValue />;
+  }
   return (
-    <Tooltip title={text === "-" ? "" : text}>
-      <Typography
-        component="span"
-        variant="body2"
-        sx={{
-          display: "-webkit-box",
-          WebkitBoxOrient: "vertical",
-          WebkitLineClamp: 4,
-          overflow: "hidden",
-          fontSize: "12px",
-          lineHeight: 1.4,
-          overflowWrap: "anywhere",
-          whiteSpace: "pre-line",
-        }}
-      >
-        {text}
-      </Typography>
-    </Tooltip>
+    <span className="oa-pending-payments-table-multiline" title={text}>
+      {text}
+    </span>
   );
 }
 
-function DetailIconButton({
+function TableTag({ children }: { children: ReactNode }) {
+  return <span className="oa-pending-payments-table-tag">{children}</span>;
+}
+
+function DetailButton({
   label,
   disabled,
   onClick,
@@ -357,20 +325,70 @@ function DetailIconButton({
   onClick: () => void;
 }) {
   return (
-    <Tooltip title={label}>
-      <span>
-        <IconButton
-          aria-label={label}
-          disabled={disabled}
-          size="small"
-          onClick={onClick}
-          sx={{ flexShrink: 0, p: 0.25 }}
-        >
-          <InfoOutlinedIcon fontSize="inherit" />
-        </IconButton>
-      </span>
-    </Tooltip>
+    <button
+      aria-label={label}
+      className="oa-pending-payments-detail-button"
+      disabled={disabled}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      <Info aria-hidden="true" size={14} strokeWidth={2.3} />
+    </button>
   );
+}
+
+function PaginationControls({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  return (
+    <div className="oa-pending-payments-pagination">
+      <label className="oa-pending-payments-pagination-size">
+        <span>每页</span>
+        <select
+          aria-label="每页"
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+          value={pageSize}
+        >
+          {[20, 50, 100].map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+      <span className="oa-pending-payments-pagination-range">{displayedRange(currentPage, pageSize, total)}</span>
+      <span className="oa-pending-payments-pagination-actions">
+        <button disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)} type="button">上一页</button>
+        <button disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)} type="button">下一页</button>
+      </span>
+    </div>
+  );
+}
+
+function displayedRange(page: number, pageSize: number, total: number) {
+  if (total <= 0) {
+    return "0-0 / 0";
+  }
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const from = (currentPage - 1) * pageSize + 1;
+  const to = Math.min(currentPage * pageSize, total);
+  return `${from}-${to} / ${total}`;
+}
+
+function firstColumnInGroup(columnId: string) {
+  return columnId === "paymentStatus" || columnId === "bankCounterparty" || columnId === "invoiceNoParty";
 }
 
 function bankAmount(row: OaPendingPaymentRow): string {
@@ -446,15 +464,15 @@ function invoiceDetailLabel(row: OaPendingPaymentRow): string {
   return `查看发票 ${applicant} 详情`;
 }
 
-function statusColor(severity: string | undefined) {
+function statusTone(severity: string | undefined): FinanceTone {
   if (severity === "success") {
     return "success";
   }
   if (severity === "error") {
-    return "error";
+    return "danger";
   }
   if (severity === "warning") {
     return "warning";
   }
-  return "default";
+  return "neutral";
 }

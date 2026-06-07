@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P064-phase-6-oa-pending-payments-grouped-table`
-- Current MG ID: `MG-P060-phase-6-input-invoice-usage`
+- Current Prompt ID: `MG-P064-phase-6-oa-pending-payments`
+- Current MG ID: `MG-P064-phase-6-oa-pending-payments`
 
 ## Global Invariants
 
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices and InputInvoiceUsage MG verified and pushed；OaPendingPayments P063 verified as expected-fail，next P064 grouped table |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices and InputInvoiceUsage MG verified and pushed；OaPendingPayments P064 verified，next MG-P064 |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,17 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 OA pending payments grouped dense table prompt generated after P063 page shell migration。
-- Files touched in P063:
-  - `web/src/pages/OaPendingPaymentsPage.tsx`
+- Scope: phase 6 OA pending payments cumulative MG generated after P064 grouped table migration。
+- Files touched in P064:
+  - `web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx`
   - `web/src/app/styles.css`
-  - `web/src/test/OaPendingPaymentsPage.test.tsx`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`
-- Verification run: P063 page shell grep passed；focused and full module tests are expected-fail only because `OaPendingPaymentsTable.tsx` still has scoped MUI residue；build and diff check passed。
-- Failures: expected source-level MUI contract failure remains only for `src/components/oaPendingPayments/OaPendingPaymentsTable.tsx`。
-- Next action: 执行 `P064-phase-6-oa-pending-payments-grouped-table`。
+- Verification run: P064 table grep and full OA pending payments residue grep passed；`OaPendingPaymentsPage.test.tsx` passed；table/platform smoke tests passed；build and diff check passed。
+- Failures: none in `/oa-pending-payments` scoped no-MUI contracts。
+- Next action: 执行 `MG-P064-phase-6-oa-pending-payments`，精确 stage P064 implementation/docs，commit and push。
 
 ## Prompt Lifecycle
 
@@ -96,12 +95,19 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P064-phase-6-oa-pending-payments-grouped-table` | OaPendingPayments P063 verified as expected-fail；next grouped dense table |
+| page batches | `in_progress` | `MG-P064-phase-6-oa-pending-payments` | OaPendingPayments P064 verified；next cumulative MG |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P064-phase-6-oa-pending-payments-grouped-table` | `if rg -n '@mui/\|Mui[A-Z]\|TablePagination\|InfoOutlinedIcon\|SortOutlinedIcon\|TableCell\|TableRow\|TableHead\|TableBody\|Chip\|IconButton' web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx; then exit 1; else exit 0; fi` | passed | Grouped table has no scoped MUI/table/tag/action residue |
+| 2026-06-07 | `P064-phase-6-oa-pending-payments-grouped-table` | `if rg -n '@mui/\|Mui[A-Z]' web/src/pages/OaPendingPaymentsPage.tsx web/src/components/oaPendingPayments; then exit 1; else exit 0; fi` | passed | OaPendingPayments page and components have no scoped MUI residue |
+| 2026-06-07 | `P064-phase-6-oa-pending-payments-grouped-table` | `cd web && npx vitest run OaPendingPaymentsPage.test.tsx` | passed | 6 tests passed |
+| 2026-06-07 | `P064-phase-6-oa-pending-payments-grouped-table` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `P064-phase-6-oa-pending-payments-grouped-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P064-phase-6-oa-pending-payments-grouped-table` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P064-phase-6-oa-pending-payments-grouped-table` | `git status --short --branch` | passed | Only P064 table/style files changed before docs |
 | 2026-06-07 | `P063-phase-6-oa-pending-payments-page-shell-toolbar` | `if rg -n '@mui/\|Mui[A-Z]\|RefreshOutlinedIcon\|TuneOutlinedIcon\|Skeleton\|TextField\|MenuItem' web/src/pages/OaPendingPaymentsPage.tsx; then exit 1; else exit 0; fi` | passed | Page shell has no scoped MUI/icon/TextField/MenuItem residue |
 | 2026-06-07 | `P063-phase-6-oa-pending-payments-page-shell-toolbar` | `cd web && npx vitest run OaPendingPaymentsPage.test.tsx -t "targets project primitives\|adds sidebar route\|keeps pending invoice rules drawer\|uses a standard empty state\|shows neutral unavailable detail"` | expected-fail | 4 behavior tests passed; remaining source-level failure lists only `OaPendingPaymentsTable.tsx` |
 | 2026-06-07 | `P063-phase-6-oa-pending-payments-page-shell-toolbar` | `cd web && npx vitest run OaPendingPaymentsPage.test.tsx` | expected-fail | 5 behavior tests passed; 1 source-level contract failed, limited to table residue |

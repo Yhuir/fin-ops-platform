@@ -3763,6 +3763,52 @@ Scope: `/oa-pending-payments` grouped dense table only: `OaPendingPaymentsTable.
 - Expected failure allowed: no，after P064 all OA pending payments source-level no-MUI contracts should pass。
 - Next prompt: OA pending payments cumulative MG after P064 implementation is verified。
 
+#### Execution Notes
+
+- Migrated `OaPendingPaymentsTable.tsx` from MUI `Table*`, MUI tags/buttons/tooltips and MUI pagination to a project-owned native grouped dense table.
+- Preserved `InputInvoiceUsageFilterMenu` usage and prop contract for `筛选 OA申请人`.
+- Preserved accessible table name `OA待付款核对表格`, group headers, 10 leaf columns, `交易时间 排序`, `bank_trade_time` sort behavior, detail button labels and relation-list targets.
+- Preserved empty row text `暂无 OA 待付款核对数据`, server pagination labels/options `每页` and `[20, 50, 100]`, and total range display.
+- Added OA pending payments table, tag, action and pagination CSS using project tokens and table layout rules.
+- Did not modify page shell, shared filter/detail/rules drawers, API/mock/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `if rg -n '@mui/|Mui[A-Z]|TablePagination|InfoOutlinedIcon|SortOutlinedIcon|TableCell|TableRow|TableHead|TableBody|Chip|IconButton' web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx; then exit 1; else exit 0; fi`: passed。
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/OaPendingPaymentsPage.tsx web/src/components/oaPendingPayments; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run OaPendingPaymentsPage.test.tsx`: passed，6 tests。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed，15 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P064 table/style files changed before docs。
+
+### MG-P064-phase-6-oa-pending-payments
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `cumulative_mg`
+- Scope: completed `/oa-pending-payments` page batch P061-P064.
+
+#### Prompt
+
+```text
+Prompt ID: MG-P064-phase-6-oa-pending-payments
+Scope: completed `/oa-pending-payments` page batch P061-P064.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_oa_pending_payments.md、web/src/pages/OaPendingPaymentsPage.tsx、web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx、web/src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx、web/src/app/styles.css 和当前 git status。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff scope、测试结果和文档状态。确认已通过：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OaPendingPaymentsPage.tsx web/src/components/oaPendingPayments; then exit 1; else exit 0; fi`、`cd web && npx vitest run OaPendingPaymentsPage.test.tsx`、`cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build`、`git diff --check`。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_oa_pending_payments.md web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx web/src/app/styles.css`；禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: complete oa pending payments ui migration`。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
+```
+
+#### Review
+
+- Current branch must be `refactor-ui`.
+- Scope is cumulative for the completed OaPendingPayments module slice; current unstaged P064 diff must be exact-staged only.
+- Backend/API/read model/worker untouched: required.
+- Workbench internals frozen: required.
+- Verification is available and passing: source greps, full module tests, table/platform smoke tests, build and diff check.
+- After MG push, generate the next Micro-JIT prompt from `refactor-ui` branch.
+
 ### MG Prompt Template
 
 ```text
