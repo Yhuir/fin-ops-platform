@@ -5538,7 +5538,7 @@ Scope: `/etc-tickets` P092-P098 migration closeout only.
 ### P099-phase-6-settings-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: `/settings` discovery only。
 
@@ -5560,6 +5560,49 @@ Scope: `/settings` discovery only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - New module doc justified: yes，settings has multiple sections, DataGrid/table surfaces, destructive reset flows, permission surfaces and OA import workflow。
+
+#### Execution Notes
+
+- Created `docs/refactor-ui/modules/phase_6_settings.md`.
+- Runtime implementation changed: no.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Recorded Settings MUI inventory, user-visible entrypoints, existing test coverage, test gaps, API/contract risks, table layout risks, overlay/menu risks and recommended Micro-JIT queue.
+- Existing test issue recorded: `SettingsPage.test.tsx` still asserts `MuiList-root`; P100 must convert that to semantic/form-factor assertions plus source-level no-MUI contract.
+- Existing OA manual import table test issue recorded: test name protects "MUI table semantics"; P100 must migrate it to native/user-observable table semantics.
+- Verification:
+  - `test -f docs/refactor-ui/modules/phase_6_settings.md`: passed.
+  - `rg -n "P099-phase-6-settings-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P100-phase-6-settings-characterization-tests" docs/refactor-ui/modules/phase_6_settings.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P099 docs changed.
+- Next prompt generated: `P100-phase-6-settings-characterization-tests`.
+
+### P100-phase-6-settings-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: `/settings` characterization tests only。
+
+#### Prompt
+
+```text
+Prompt ID: P100-phase-6-settings-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/settings` characterization tests only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/SettingsPage.tsx、web/src/components/settings/*、web/src/test/SettingsPage.test.tsx、web/src/test/SettingsOaManualSearchImportTable.test.tsx 和 web/src/features/workbench/types.ts。只修改 Settings 相关测试，不改 runtime code、API client、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。添加 source-level no-MUI/project primitive contract，覆盖 `SettingsPage.tsx` 和 `web/src/components/settings`；更新现有 MUI class/theme 断言为用户可观察语义、ARIA、table/dialog/menu form-factor 断言，不得保护旧 MUI class。测试必须覆盖：left settings nav remains tree, content sections remain regions, Settings page does not show extra legacy title/dialog, read-only save disabled, data reset remains two modal dialogs, pending invoice tag menu remains menu, DataGrid/table surfaces remain table form factor, OA manual search/import keeps table, nested detail table, selection, refresh/import payload and shell-status isolation。运行 `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level no-MUI contract fails against current MUI runtime；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P101 settings shell/navigation prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Runtime implementation untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level no-MUI contract should fail against current Settings MUI runtime while behavior tests pass。
 
 ### MG Prompt Template
 
