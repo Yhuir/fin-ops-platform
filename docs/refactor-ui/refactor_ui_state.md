@@ -8,8 +8,8 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P072-phase-6-output-invoice-collections-receipt-history-and-preview`
-- Current MG ID: `MG-P064-phase-6-oa-pending-payments`
+- Current Prompt ID: `P073-phase-6-no-oa-bank-batches-discovery`
+- Current MG ID: `MG-P072-phase-6-output-invoice-collections`
 
 ## Global Invariants
 
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments MG verified and pushed；OutputInvoiceCollections P071 verified as expected-fail，next P072 receipt drawers |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；next NoOaBankBatches discovery |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,17 +54,18 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 output invoice collections receipt history and preview prompt generated after P071 workflow drawer migration。
-- Files touched in P071:
-  - `web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx`
-  - `web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx`
+- Scope: phase 6 no-OA bank batches discovery prompt generated after OutputInvoiceCollections cumulative MG。
+- Files touched in P072:
+  - `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`
+  - `web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`
-- Verification run: P071 workflow drawer grep passed；focused and full module tests are expected-fail only because receipt history and preview drawers still have scoped MUI residue；build and diff check passed。
-- Failures: expected source-level MUI contract failure remains only for `ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx`。
-- Next action: 执行 `P072-phase-6-output-invoice-collections-receipt-history-and-preview`。
+- Verification run: MG-P072 reran full `OutputInvoiceCollectionsPage.test.tsx`、build、full module no-MUI grep、diff/status；all passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+- Failures: none in P072 scope。
+- Prompt review correction: P072 draft grep used `Dialog\b|Drawer\b` and would incorrectly match approved project primitives `AppDialog`/`AppDrawer`; executed grep was narrowed to real MUI imports/usages and JSX `<Dialog>/<Drawer>` surfaces。
+- Next action: 执行 `P073-phase-6-no-oa-bank-batches-discovery`。
 
 ## Prompt Lifecycle
 
@@ -96,12 +97,24 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | OutputInvoiceCollections P071 verified as expected-fail；next receipt history/preview |
+| page batches | `in_progress` | `P073-phase-6-no-oa-bank-batches-discovery` | OutputInvoiceCollections MG verified；next NoOaBankBatches discovery |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | passed | 6 tests passed |
+| 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `if rg -n '@mui/\|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi` | passed | OutputInvoiceCollections runtime scope has no direct MUI import/selector residue |
+| 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `git status --short --branch` | passed | Only allowed P072 implementation/docs files changed before exact staging |
+| 2026-06-07 | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives\|opens the three right-side workflow drawers\|closes lifecycle actions"` | passed | Source-level primitive contract and receipt drawer workflows passed |
+| 2026-06-07 | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | passed | 6 tests passed |
+| 2026-06-07 | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | `if rg -n '@mui/\|Mui[A-Z]\|CloseOutlinedIcon\|CircularProgress\|TextField\|FormControlLabel\|RadioGroup\|IconButton\|DialogTitle\|DialogContent\|DialogActions\|<Dialog\|</Dialog\|<Drawer\|</Drawer\|Chip' web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx; then exit 1; else exit 0; fi` | passed | Corrected from the over-broad draft grep so `AppDialog`/`AppDrawer` are allowed while real MUI surfaces are blocked |
+| 2026-06-07 | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | `if rg -n '@mui/\|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi` | passed | OutputInvoiceCollections runtime scope has no direct MUI import/selector residue |
+| 2026-06-07 | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P072-phase-6-output-invoice-collections-receipt-history-and-preview` | `git status --short --branch` | passed | Only P072 implementation files changed before docs |
 | 2026-06-07 | `P071-phase-6-output-invoice-collections-workflow-drawers` | `if rg -n '@mui/\|Mui[A-Z]\|CloseOutlinedIcon\|TextField\|MenuItem\|FormControlLabel\|RadioGroup\|Radio\|IconButton\|DialogTitle\|DialogContent\|DialogActions' web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx; then exit 1; else exit 0; fi` | passed | Status/reminder and red relation workflow drawers have no scoped MUI residue |
 | 2026-06-07 | `P071-phase-6-output-invoice-collections-workflow-drawers` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives\|closes lifecycle actions"` | expected-fail | Lifecycle behavior test passed; remaining source-level failure lists only receipt history/preview |
 | 2026-06-07 | `P071-phase-6-output-invoice-collections-workflow-drawers` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | expected-fail | 5 behavior tests passed; 1 source-level contract failed, limited to receipt history/preview |

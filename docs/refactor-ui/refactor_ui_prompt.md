@@ -4143,7 +4143,7 @@ Scope: `CollectionStatusReminderDrawer.tsx` and `RedInvoiceRelationDrawer.tsx` o
 ### P072-phase-6-output-invoice-collections-receipt-history-and-preview
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx` only, plus necessary styles/tests. Do not migrate unrelated modules.
 
@@ -4166,7 +4166,102 @@ Scope: `ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx` only, plus nece
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: no，after P072 the OutputInvoiceCollections project primitive source contract and module tests must pass。
+- Review correction: the draft receipt drawer grep included `Dialog\b|Drawer\b`, which would incorrectly fail approved `AppDialog`/`AppDrawer` imports. The executed grep blocks real MUI imports/usages and JSX `<Dialog>/<Drawer>` surfaces while allowing project primitives。
 - Next prompt: MG-P072 cumulative module gate after P072 implementation is verified.
+
+#### Execution Notes
+
+- Migrated receipt history and receipt preview drawers from MUI to `AppDrawer`, `AppDialog`, `StatePanel`, native form controls, native radio inputs and project classes.
+- Preserved right-side drawer accessible names `已出收据历史` and `待出收据预览`, close labels, loading labels, source unavailable/empty messages, receipt cards, void/reissue dialog labels and fields, lifecycle write calls, reload/onChanged behavior, receipt preview content and disabled create behavior.
+- Added receipt history card and receipt preview grid/card styles in `web/src/app/styles.css`.
+- Did not modify page shell/table/filter/expandable, previous drawers, mock/API/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|opens the three right-side workflow drawers|closes lifecycle actions"`: passed，3 selected tests passed including source-level project primitive contract。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: passed，6 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|TextField|FormControlLabel|RadioGroup|IconButton|DialogTitle|DialogContent|DialogActions|<Dialog|</Dialog|<Drawer|</Drawer|Chip' web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx; then exit 1; else exit 0; fi`: passed。
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P072 implementation files changed before docs。
+
+### MG-P072-phase-6-output-invoice-collections
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `cumulative MG`
+- Scope: Completed and verified output invoice collections migration slice P066-P072 plus related docs only.
+
+#### Prompt
+
+```text
+Prompt ID: MG-P072-phase-6-output-invoice-collections
+Phase: phase_6_page_batches
+Type: cumulative MG
+Scope: OutputInvoiceCollections P066-P072 completed migration only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、docs/refactor-ui/table_layout_system.md、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 `git status --short --branch`。确认当前分支必须是 `refactor-ui` 且 tracking `origin/refactor-ui`。检查 untracked files、diff、测试结果和文档状态。Scope 只允许本 MG 的 P072 implementation/docs 文件以及此前已提交的 P066-P071 历史；当前未提交 diff 应仅包含 `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`、`web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`、`web/src/app/styles.css`、`docs/refactor-ui/refactor_ui_state.md`、`docs/refactor-ui/refactor_ui_prompt.md`、`docs/refactor-ui/modules/phase_6_output_invoice_collections.md`。禁止 `git add .` 和 `git add -A`；只允许精确 `git add <file...>`。
+
+执行验证：`cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`；`cd web && npm run build`；`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`；`git diff --check`；`git status --short --branch`。如验证通过，精确 stage 上述文件，commit message 使用 `feat: migrate output invoice collection receipt drawers`，push 到 `origin refactor-ui`。push 完成后更新 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md 和 docs/refactor-ui/modules/phase_6_output_invoice_collections.md，标记 MG verified、记录 commit/push、并从最新 `refactor-ui` 状态单独生成下一条 prompt。下一条 prompt 必须基于当前状态机分析，不得预生成多个模块 prompt。
+```
+
+#### Review
+
+- Single module boundary: yes，OutputInvoiceCollections cumulative gate only。
+- Scope check required: yes，current uncommitted diff must be limited to P072 implementation/docs files。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Exact staging required: yes，no `git add .` or `git add -A`。
+- Push required after verified MG: yes，push to `origin refactor-ui`。
+- Next prompt generation: after push, generate exactly one next prompt from latest state。
+
+#### Execution Notes
+
+- Confirmed current branch `refactor-ui` and tracking `origin/refactor-ui`.
+- Confirmed current uncommitted diff is limited to P072 implementation/docs files.
+- Reran full module verification and no-MUI grep.
+- Exact staging only; no `git add .` or `git add -A`.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: passed，6 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only allowed P072 implementation/docs files changed before exact staging。
+
+### P073-phase-6-no-oa-bank-batches-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/no-oa-bank-batches` only. Do not modify runtime implementation.
+
+#### Prompt
+
+```text
+Prompt ID: P073-phase-6-no-oa-bank-batches-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/no-oa-bank-batches` only. Do not modify runtime implementation.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/baseline_inventory.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/features/noOaBankBatches/api.ts、web/src/features/noOaBankBatches/types.ts、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/test/NoOaBankBatchApi.test.ts。只做 discovery/planning：梳理当前 MUI imports/usages、用户可见入口、表格/批量选择/标签管理右侧抽屉/确认弹窗/Snackbar/状态提示、API/read model 边界、现有测试覆盖和迁移风险。若该模块需要跨后续切片复用的入口矩阵和测试策略，创建 `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`；否则直接在现有文档记录。不得修改页面实现、测试实现、mock、API client、backend、read model、worker 或关联台内部工作区。运行 `test -f docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`；运行 `rg -n "P073-phase-6-no-oa-bank-batches-discovery|Current MUI Inventory|User-visible Entrypoints|P074-phase-6-no-oa-bank-batches-characterization-tests" docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成且只生成下一条 `P074-phase-6-no-oa-bank-batches-characterization-tests` prompt。
+```
+
+#### Review
+
+- Single module boundary: yes，NoOaBankBatches discovery only。
+- Runtime implementation untouched: required。
+- Characterization before refactor: required，next prompt must be P074 tests。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Docs on demand: yes，this module is high risk and has table, batch selection, right drawer, dialogs and API/read model interactions, so module doc is required。
+- Verification defined: module doc exists, key discovery terms recorded, diff/status clean for doc-only slice。
 
 ### MG Prompt Template
 

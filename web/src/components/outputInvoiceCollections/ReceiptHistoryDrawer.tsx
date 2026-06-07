@@ -1,22 +1,9 @@
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Divider from "@mui/material/Divider";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
 import type { OutputInvoiceReceiptHistoryResponse } from "../../features/outputInvoiceCollections/types";
+import AppDialog from "../common/AppDialog";
+import AppDrawer from "../common/AppDrawer";
+import StatePanel from "../common/StatePanel";
 
 type ReceiptHistoryDrawerProps = {
   open: boolean;
@@ -66,9 +53,9 @@ export default function ReceiptHistoryDrawer({
           setPayload(nextPayload);
         }
       })
-      .catch((reason: unknown) => {
+      .catch((loadReason: unknown) => {
         if (active) {
-          setError(reason instanceof Error ? reason.message : "收据历史加载失败");
+          setError(loadReason instanceof Error ? loadReason.message : "收据历史加载失败");
         }
       })
       .finally(() => {
@@ -95,8 +82,8 @@ export default function ReceiptHistoryDrawer({
       await onVoidReceipt(receiptId, actionReason);
       await reload();
       onChanged?.();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "作废收据失败");
+    } catch (voidReason) {
+      setError(voidReason instanceof Error ? voidReason.message : "作废收据失败");
     } finally {
       setSubmittingId("");
     }
@@ -109,8 +96,8 @@ export default function ReceiptHistoryDrawer({
       await onReissueReceipt(receiptId, actionReason);
       await reload();
       onChanged?.();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "重开收据失败");
+    } catch (reissueReason) {
+      setError(reissueReason instanceof Error ? reissueReason.message : "重开收据失败");
     } finally {
       setSubmittingId("");
     }
@@ -148,114 +135,122 @@ export default function ReceiptHistoryDrawer({
     setReason("");
   };
 
+  const dialogTitle = pendingAction?.kind === "void" ? "作废收据原因" : "重开收据原因";
+  const reasonLabel = pendingAction?.kind === "void" ? "作废原因" : "重开原因";
+
   return (
-    <Drawer
-      anchor="right"
-      open={open}
-      onClose={onClose}
-      transitionDuration={{ enter: 180, exit: 140 }}
-      PaperProps={{
-        "aria-label": open ? "已出收据历史" : undefined,
-        sx: { width: { xs: "100%", sm: 640 }, maxWidth: "100vw" },
-      }}
-    >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
-          <Box>
-            <Typography component="h2" variant="h6" fontWeight={900}>已出收据历史</Typography>
-            {invoiceId ? <Typography variant="caption" color="text.secondary">{invoiceId}</Typography> : null}
-          </Box>
-          <IconButton aria-label="关闭已出收据历史" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 2.5 }}>
+    <>
+      <AppDrawer
+        className="output-invoice-collection-drawer"
+        closeLabel="关闭已出收据历史"
+        open={open}
+        subtitle={invoiceId || undefined}
+        title="已出收据历史"
+        width={640}
+        onClose={onClose}
+      >
+        <div className="output-invoice-collection-drawer__body">
           {loading ? (
-            <Stack direction="row" alignItems="center" spacing={1.25}>
-              <CircularProgress aria-label="正在加载已出收据历史" size={22} />
-              <Typography variant="body2" color="text.secondary">正在读取历史</Typography>
-            </Stack>
+            <div aria-label="正在加载已出收据历史">
+              <StatePanel compact tone="loading" title="正在读取历史" />
+            </div>
           ) : null}
-          {error ? <Alert severity="error">{error}</Alert> : null}
+          {error ? (
+            <StatePanel compact tone="error">
+              {error}
+            </StatePanel>
+          ) : null}
           {payload && !payload.sourceAvailable ? (
-            <Alert severity="info">{payload.message || "暂无系统内历史收据事实。"}</Alert>
+            <StatePanel compact tone="info">
+              {payload.message || "暂无系统内历史收据事实。"}
+            </StatePanel>
           ) : null}
           {payload?.sourceAvailable && payload.receipts.length === 0 ? (
-            <Alert severity="info">暂无已出收据。</Alert>
+            <StatePanel compact tone="info">
+              暂无已出收据。
+            </StatePanel>
           ) : null}
-          {payload?.receipts.map((receipt) => (
-            <Paper key={receipt.id || receipt.receiptNo} variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
-              <Typography variant="subtitle2" fontWeight={900}>{receipt.receiptNo || receipt.id}</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {receipt.createdAt || "日期为空"} / {receipt.amount || "金额为空"} / {receipt.status || "状态为空"}
-              </Typography>
-              {receipt.voidedAt || receipt.voidReason ? (
-                <Typography variant="caption" color="text.secondary">
-                  作废：{receipt.voidedAt || "时间为空"} {receipt.voidReason || ""}
-                </Typography>
-              ) : null}
-              <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 1 }}>
-                {receipt.status === "issued" && receipt.id ? (
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color="warning"
-                    disabled={submittingId === receipt.id}
-                    onClick={() => openActionDialog("void", receipt.id || "", receipt.receiptNo || receipt.id || "")}
-                  >
-                    作废收据 {receipt.receiptNo || receipt.id}
-                  </Button>
-                ) : null}
-                {receipt.status === "voided" && receipt.id ? (
-                  <Button
-                    size="small"
-                    variant="contained"
-                    disabled={submittingId === receipt.id}
-                    onClick={() => openActionDialog("reissue", receipt.id || "", receipt.receiptNo || receipt.id || "")}
-                  >
-                    重开收据 {receipt.receiptNo || receipt.id}
-                  </Button>
-                ) : null}
-              </Stack>
-            </Paper>
-          ))}
-        </Stack>
-      </Stack>
-      <Dialog
+          <div className="output-invoice-collection-receipt-history-list">
+            {payload?.receipts.map((receipt) => {
+              const receiptIdentity = receipt.receiptNo || receipt.id || "";
+              return (
+                <article className="output-invoice-collection-receipt-history-card" key={receipt.id || receipt.receiptNo}>
+                  <div className="output-invoice-collection-receipt-history-card__main">
+                    <h3>{receiptIdentity}</h3>
+                    <p>
+                      {receipt.createdAt || "日期为空"} / {receipt.amount || "金额为空"} / {receipt.status || "状态为空"}
+                    </p>
+                    {receipt.voidedAt || receipt.voidReason ? (
+                      <p className="output-invoice-collection-receipt-history-card__voided">
+                        作废：{receipt.voidedAt || "时间为空"} {receipt.voidReason || ""}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="output-invoice-collection-receipt-history-card__actions">
+                    {receipt.status === "issued" && receipt.id ? (
+                      <button
+                        className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--warning"
+                        disabled={submittingId === receipt.id}
+                        type="button"
+                        onClick={() => openActionDialog("void", receipt.id || "", receiptIdentity)}
+                      >
+                        作废收据 {receiptIdentity}
+                      </button>
+                    ) : null}
+                    {receipt.status === "voided" && receipt.id ? (
+                      <button
+                        className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--primary"
+                        disabled={submittingId === receipt.id}
+                        type="button"
+                        onClick={() => openActionDialog("reissue", receipt.id || "", receiptIdentity)}
+                      >
+                        重开收据 {receiptIdentity}
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </AppDrawer>
+
+      <AppDialog
+        description={pendingAction?.receiptNo || undefined}
+        maxWidth="sm"
         open={Boolean(pendingAction)}
+        title={dialogTitle}
         onClose={closeActionDialog}
-        PaperProps={{
-          "aria-label": pendingAction?.kind === "void" ? "作废收据原因" : "重开收据原因",
-        }}
+        actions={
+          <>
+            <button
+              className="output-invoice-collection-drawer__button"
+              disabled={Boolean(submittingId)}
+              type="button"
+              onClick={closeActionDialog}
+            >
+              取消
+            </button>
+            <button
+              className={`output-invoice-collection-drawer__button ${
+                pendingAction?.kind === "void"
+                  ? "output-invoice-collection-drawer__button--warning"
+                  : "output-invoice-collection-drawer__button--primary"
+              }`}
+              disabled={Boolean(submittingId) || !reason.trim()}
+              type="button"
+              onClick={handleConfirmAction}
+            >
+              {pendingAction?.kind === "void" ? "确认作废" : "确认重开"}
+            </button>
+          </>
+        }
       >
-        <DialogTitle>{pendingAction?.kind === "void" ? "作废收据" : "重开收据"}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.5} sx={{ pt: 1, minWidth: { xs: 280, sm: 420 } }}>
-            <Typography variant="body2" color="text.secondary">
-              {pendingAction?.receiptNo || ""}
-            </Typography>
-            <TextField
-              autoFocus
-              label={pendingAction?.kind === "void" ? "作废原因" : "重开原因"}
-              size="small"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeActionDialog} disabled={Boolean(submittingId)}>取消</Button>
-          <Button
-            variant="contained"
-            color={pendingAction?.kind === "void" ? "warning" : "primary"}
-            disabled={Boolean(submittingId) || !reason.trim()}
-            onClick={handleConfirmAction}
-          >
-            {pendingAction?.kind === "void" ? "确认作废" : "确认重开"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Drawer>
+        <label className="output-invoice-collection-drawer__field">
+          <span>{reasonLabel}</span>
+          <input autoFocus type="text" value={reason} onChange={(event) => setReason(event.target.value)} />
+        </label>
+      </AppDialog>
+    </>
   );
 }

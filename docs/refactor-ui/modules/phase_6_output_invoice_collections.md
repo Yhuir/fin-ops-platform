@@ -368,3 +368,71 @@ Scope: `ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx` only, plus nece
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/StatePanel.tsx、web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx、web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 receipt history/preview 的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Box`、`Button`、`Chip`、`CircularProgress`、`Divider`、`Dialog*`、`Drawer`、`FormControl`、`FormControlLabel`、`IconButton`、`Paper`、`Radio`、`RadioGroup`、`Stack`、`TextField` 和 `Typography`。使用 `AppDrawer` 保持右侧抽屉形态，使用 `AppDialog` 保持作废/重开确认弹窗形态，使用 project/native cards, receipt preview grid/table, native radio inputs, native buttons and StatePanel。必须保留 accessible names：`已出收据历史`、`待出收据预览`、dialog labels `作废收据原因`/`重开收据原因`；保留关闭 labels `关闭已出收据历史`、`关闭待出收据预览`；保留 loading labels `正在加载已出收据历史`、`正在加载待出收据预览`；保留 history source unavailable/empty messages, receipt cards, buttons `作废收据 <no>`、`重开收据 <no>`、dialog fields `作废原因`/`重开原因`、buttons `取消`/`确认作废`/`确认重开`, reason validation, void/reissue calls, reload/onChanged behavior；保留 preview bank selection required warning, candidate radio list, receipt preview title `收 据`, company/date/payer/summary/amount/remark/uppercase/lowercase display, `创建正式收据` button disabled/submitting behavior and createReceipt call。不得修改 page shell/table/filter/expandable, previous drawers, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|opens the three right-side workflow drawers|closes lifecycle actions"`，source-level project primitive contract must fully pass；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`，must pass；运行 `cd web && npm run build`；运行 receipt drawer MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|TextField|FormControlLabel|RadioGroup|Radio|IconButton|DialogTitle|DialogContent|DialogActions|Dialog\\b|Drawer\\b|Chip' web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx; then exit 1; else exit 0; fi`；运行 full module no-MUI grep：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 `MG-P072-phase-6-output-invoice-collections` cumulative MG prompt。
 ```
+
+## P072 Execution Notes
+
+- Status: verified.
+- Files changed:
+  - `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`
+  - `web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`
+  - `web/src/app/styles.css`
+- Behavior preserved:
+  - Receipt history and receipt preview remain right-side drawers.
+  - Accessible names `已出收据历史` and `待出收据预览` are preserved through `AppDrawer` titles.
+  - Close labels `关闭已出收据历史` and `关闭待出收据预览` are preserved.
+  - Loading labels `正在加载已出收据历史` and `正在加载待出收据预览` are preserved.
+  - Receipt history source unavailable/empty messages, receipt cards, `作废收据 <no>` / `重开收据 <no>` buttons, void/reissue confirmation dialog labels, reason fields, submit buttons, reload/onChanged behavior and lifecycle calls are preserved.
+  - Receipt preview bank selection warning, candidate radio list, receipt title/content/amount display, `创建正式收据` disabled/submitting behavior and createReceipt call are preserved.
+- Implementation:
+  - Replaced MUI drawer/dialog/layout/form components with `AppDrawer`, `AppDialog`, `StatePanel`, native controls and project styles.
+  - Added receipt history card and receipt preview grid/card styles in `web/src/app/styles.css`.
+  - Corrected the P072 grep during review because `Dialog\b|Drawer\b` would incorrectly match approved `AppDialog` and `AppDrawer` project primitives; the executed grep blocks real MUI imports/usages and JSX `<Dialog>/<Drawer>` surfaces.
+- Non-goals honored:
+  - Did not modify page shell, table, filter, expandable text, previous drawers, mock/API/read model/worker/backend or reconciliation workbench internals.
+- Verification:
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|opens the three right-side workflow drawers|closes lifecycle actions"`: passed.
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: passed, 6 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|TextField|FormControlLabel|RadioGroup|IconButton|DialogTitle|DialogContent|DialogActions|<Dialog|</Dialog|<Drawer|</Drawer|Chip' web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx; then exit 1; else exit 0; fi`: passed.
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P072 implementation files changed before docs.
+
+## Current Expected Failures After P072
+
+- None in the OutputInvoiceCollections runtime scope.
+- `web/src/pages/OutputInvoiceCollectionsPage.tsx` and `web/src/components/outputInvoiceCollections/*` have no direct `@mui/*` imports or `.Mui*` selector residue.
+- Full `OutputInvoiceCollectionsPage.test.tsx` passes.
+
+## MG-P072 Prompt Draft
+
+```text
+Prompt ID: MG-P072-phase-6-output-invoice-collections
+Phase: phase_6_page_batches
+Type: cumulative MG
+Scope: OutputInvoiceCollections P066-P072 completed migration only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、docs/refactor-ui/table_layout_system.md、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 `git status --short --branch`。确认当前分支必须是 `refactor-ui` 且 tracking `origin/refactor-ui`。检查 untracked files、diff、测试结果和文档状态。Scope 只允许本 MG 的 P072 implementation/docs 文件以及此前已提交的 P066-P071 历史；当前未提交 diff 应仅包含 `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`、`web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`、`web/src/app/styles.css`、`docs/refactor-ui/refactor_ui_state.md`、`docs/refactor-ui/refactor_ui_prompt.md`、`docs/refactor-ui/modules/phase_6_output_invoice_collections.md`。禁止 `git add .` 和 `git add -A`；只允许精确 `git add <file...>`。
+
+执行验证：`cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`；`cd web && npm run build`；`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`；`git diff --check`；`git status --short --branch`。如验证通过，精确 stage 上述文件，commit message 使用 `feat: migrate output invoice collection receipt drawers`，push 到 `origin refactor-ui`。push 完成后更新 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md 和 docs/refactor-ui/modules/phase_6_output_invoice_collections.md，标记 MG verified、记录 commit/push、并从最新 `refactor-ui` 状态单独生成下一条 prompt。下一条 prompt 必须基于当前状态机分析，不得预生成多个模块 prompt。
+```
+
+## MG-P072 Execution Notes
+
+- Status: verified.
+- Scope checked:
+  - `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`
+  - `web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`
+  - `web/src/app/styles.css`
+  - `docs/refactor-ui/refactor_ui_state.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`
+- Verification:
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: passed, 6 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed before exact staging.
+- Result:
+  - OutputInvoiceCollections runtime scope has no direct `@mui/*` imports or `.Mui*` selector residue.
+  - The next module prompt is `P073-phase-6-no-oa-bank-batches-discovery`.
