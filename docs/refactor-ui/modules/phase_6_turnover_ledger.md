@@ -187,6 +187,7 @@ Scope: `/turnover-ledger` page-owned tag settings right drawer and closure right
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `if rg -n '<Drawer|<IconButton|CloseIcon|FormControlLabel|<Checkbox|<Button|<Box|<Stack|<Typography|<Paper|<Divider' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi`: passed.
   - `git diff --check`: passed.
+- Commit: `3675bed3 feat: migrate turnover ledger drawers`, pushed to `origin/refactor-ui`.
 
 ## P090 Prompt Draft
 

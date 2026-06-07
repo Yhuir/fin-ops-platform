@@ -568,6 +568,7 @@
 | 2026-06-07 | `MG-P045-phase-6-bank-details` | `refactor-ui` | `9a0b74ea` | pushed |
 | 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `refactor-ui` | `60f9593b` | pushed |
 | 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `refactor-ui` | `ac9a18ac` | pushed |
+| 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `refactor-ui` | `3675bed3` | pushed |
 | 2026-06-07 | `P074-phase-6-no-oa-bank-batches-characterization-tests` | `refactor-ui` | `4a958ce8` | pushed |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `refactor-ui` | `1c872bfe` | pushed |
 | 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `refactor-ui` | `379d24cd` | pushed |
