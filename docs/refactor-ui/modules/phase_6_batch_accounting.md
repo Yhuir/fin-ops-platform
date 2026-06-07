@@ -101,6 +101,7 @@ Scope: `/batch-accounting` tests only. Do not modify runtime implementation.
 - Runtime implementation changed: no.
 - Backend/API/read model/worker changed: no.
 - Workbench internals changed: no.
+- Commit: `cae1d091 test: characterize batch accounting ui migration`, pushed to `origin/refactor-ui`.
 - Added source-level no-MUI/project primitive contract for `BatchAccountingPage.tsx`.
 - Added behavior coverage for loading/empty states and page-level API error fallback.
 - Preserved existing behavior coverage for heading, route/sidebar entry, refresh, status buttons, years, bank region, OA table labels, OA checkboxes, search clear, amount summary, mismatch note, submit payload/event, withdraw payload, feedback messages and selection/note reset behavior.

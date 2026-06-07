@@ -4623,6 +4623,7 @@ Scope: `/batch-accounting` tests only. Do not modify runtime implementation.
 - Preserved existing behavior coverage for heading, route/sidebar entry, refresh, status buttons, year fields, bank region, OA table labels, OA checkbox labels, search clear, amount summary, mismatch note, submit payload/event, withdraw payload, feedback messages and selection/note reset behavior.
 - Runtime implementation changed: no.
 - Backend/API/read model/worker and workbench internals changed: no.
+- Committed and pushed `cae1d091 test: characterize batch accounting ui migration` to `origin/refactor-ui`.
 - Verification:
   - `cd web && npx vitest run BatchAccountingPage.test.tsx`: expected-fail; 12 behavior tests passed and 1 source-level contract failed against current MUI runtime.
   - `git diff --check`: passed.
