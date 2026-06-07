@@ -246,3 +246,48 @@ Scope: `OutputInvoiceCollectionsTable.tsx` grouped dense table only, plus necess
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、docs/refactor-ui/table_layout_system.md、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx、web/src/components/outputInvoiceCollections/ExpandableCellText.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 grouped table 的 MUI imports/usages，包括 `SortOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Paper`、`Stack`、`Table*`、`TablePagination`、`Tooltip`、`Typography`、`SxProps`、`Theme` 和 inline `col style`。使用 project/native grouped dense table, project tags/buttons, native/project pagination, lucide icons and tokenized table styles。必须保留 `aria-label="销项发票收款情况表"`、group headers `销项发票`/`收款状态`/`收入流水`/`收据`、10 leaf columns, filter menu prop contract, sort button labels such as `发票号码 排序`, backend sort/filter behavior, expanded cell controls, status cell class `.output-invoice-collection-status-cell`, row buttons `详情`/`状态/提醒`/`红蓝票`/`已出收据`/`待出收据`, detail/workflow target mapping, empty row `当前条件下没有销项发票收款记录。`, pagination label `每页行数`, options `[20, 50, 100]` and displayed range。不得修改 page shell, filter menu/expandable except import compatibility if required, drawer internals, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route|opens the three right-side workflow drawers"`，P070-P072 drawer source failures 可以继续 expected-fail，但 table file must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for drawers；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|Mui[A-Z]|TablePagination|SortOutlinedIcon|TableCell|TableRow|TableHead|TableBody|Chip|IconButton|SxProps|Theme' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P070 simple drawers prompt。
 ```
+
+## P069 Execution Notes
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx`
+  - `web/src/app/styles.css`
+- Behavior preserved:
+  - Table aria-label `销项发票收款情况表`.
+  - Group headers `销项发票`、`收款状态`、`收入流水`、`收据`.
+  - 10 leaf columns and filter menu contracts.
+  - Sort button labels and backend sort/filter behavior.
+  - Expanded cell controls and `.output-invoice-collection-status-cell`.
+  - Row buttons `详情`、`状态/提醒`、`红蓝票`、`已出收据`、`待出收据`.
+  - Detail/workflow target mapping and pagination label/options/range/actions.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|TablePagination|SortOutlinedIcon|TableCell|TableRow|TableHead|TableBody|Chip|IconButton|SxProps|Theme' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route|opens the three right-side workflow drawers"`: expected-fail; selected behavior tests passed and remaining source-level failure lists only seven drawer files.
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail; 5 behavior tests passed and 1 source-level contract failed, limited to drawer residue.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed; 15 tests passed.
+  - `cd web && npm run build`: passed after fixing sort button field narrowing; known HeroUI/Tailwind CSS minifier warnings and chunk size warning remain.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P069 table/style files changed before docs.
+
+## Current Expected Failures After P069
+
+- `src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx`: cleared from source-level no-MUI failure lists.
+- `src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx`: still imports MUI right drawer/detail/loading/card controls; P070 owns this.
+- `src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx`: still imports MUI right drawer/rules/table/tag controls; P070 owns this.
+- `src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx`: still imports MUI right drawer/form controls; P070 owns this.
+- `src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx`: workflow drawer remains P071.
+- `src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx`: workflow drawer remains P071.
+- `src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`: lifecycle drawer/dialog remains P072.
+- `src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`: receipt preview drawer remains P072.
+
+## P070 Prompt Draft
+
+```text
+Prompt ID: P070-phase-6-output-invoice-collections-simple-drawers
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `OutputInvoiceCollectionDetailDrawer.tsx`, `CollectionStatusRulesDrawer.tsx` and `ReceiptSettingsDrawer.tsx` only, plus necessary styles/tests. Do not migrate status reminder, red relation, receipt history or receipt preview drawers.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/common/AppDrawer.tsx、web/src/components/common/StatePanel.tsx、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx、web/src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx、web/src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除这三个简单抽屉的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Box`、`Button`、`Chip`、`CircularProgress`、`Divider`、`Drawer`、`IconButton`、`MenuItem`、`Paper`、`Stack`、`Table*`、`TextField` 和 `Typography`。使用 `AppDrawer` 保持右侧抽屉形态，使用 project/native loading/error panels, native buttons, native inputs/selects, native table/card layouts and lucide close icon。必须保留 `aria-label`：详情抽屉 `销项发票收款情况详情`、规则抽屉 `收款状态规则`、设置抽屉 `收据编号设置`；保留关闭按钮 labels `关闭详情抽屉`、`关闭收款状态规则`、`关闭收据编号设置`；保留 loading labels `正在加载详情`、`正在加载收款状态规则`；保留详情 unavailable/empty 文案、规则表 `Sheet6 销项发票收款情况规则` 与 columns `收款状态`/`识别方式`/`规则`/`必要事实`/`优先级`、版本/只读 tag、后续服务边界；保留设置表单 labels `编号前缀`/`重置周期`、options `每月重置`/`每年重置`/`不按日期重置`、buttons `取消`/`保存收据编号设置`、loading/submitting disabled behavior and uppercase prefix transform。不得修改 page shell/table/filter/expandable, status reminder/red relation/receipt history/receipt preview drawers, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|opens the three right-side workflow drawers|closes lifecycle actions"`，P071-P072 drawer source failures 可以继续 expected-fail，但 these three simple drawer files must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for status reminder/red relation/receipt history/receipt preview drawers；运行 `cd web && npm run build`；运行 simple drawer MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|TextField|MenuItem|TableCell|TableRow|TableHead|TableBody|Chip|IconButton|DialogTitle|DialogContent|DialogActions' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx web/src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P071 workflow drawers prompt。
+```
