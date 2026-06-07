@@ -275,6 +275,7 @@ Scope: `/etc-tickets` reconciliation detail table, row selection controls, expan
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P096 page/style files changed before docs.
+- Commit: `64341c3c feat: migrate etc tickets reconciliation table`, pushed to `origin/refactor-ui`.
 
 ## P097 Prompt Draft
 
