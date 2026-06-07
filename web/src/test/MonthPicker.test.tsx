@@ -4,7 +4,6 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import MonthPicker, { formatMonthLabel } from "../components/MonthPicker";
 
 const monthPickerSourceFiles = [
@@ -24,13 +23,11 @@ function renderMonthPicker(
   props: Partial<Parameters<typeof MonthPicker>[0]> = {},
 ) {
   return render(
-    <MuiProviders>
-      <MonthPicker
-        value="2026-03"
-        onChange={() => {}}
-        {...props}
-      />
-    </MuiProviders>,
+    <MonthPicker
+      value="2026-03"
+      onChange={() => {}}
+      {...props}
+    />,
   );
 }
 

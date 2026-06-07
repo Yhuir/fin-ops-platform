@@ -5,7 +5,8 @@ import { afterEach, vi } from "vitest";
 
 import { installMockApiFetch } from "./apiMock";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
-import { renderAppAt, renderAuthenticatedAppAt, renderWorkbenchPage } from "./renderHelpers";
+import { renderAppAt, renderAuthenticatedAppAt } from "./renderHelpers";
+import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 afterEach(() => {
   vi.useRealTimers();

@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
-import MuiProviders from "../app/MuiProviders";
 import OaManualSearchImportTable from "../components/settings/OaManualSearchImportTable";
 import AppSidebar from "../components/shell/AppSidebar";
 import { AppChromeProvider, useAppChrome } from "../contexts/AppChromeContext";
@@ -96,16 +95,14 @@ function SidebarStatusHarness() {
 
 function renderTable({ withSidebar = false }: { withSidebar?: boolean } = {}) {
   return render(
-    <MuiProviders>
-      <AppChromeProvider>
-        {withSidebar ? (
-          <MemoryRouter>
-            <SidebarStatusHarness />
-          </MemoryRouter>
-        ) : null}
-        <OaManualSearchImportTable />
-      </AppChromeProvider>
-    </MuiProviders>,
+    <AppChromeProvider>
+      {withSidebar ? (
+        <MemoryRouter>
+          <SidebarStatusHarness />
+        </MemoryRouter>
+      ) : null}
+      <OaManualSearchImportTable />
+    </AppChromeProvider>,
   );
 }
 

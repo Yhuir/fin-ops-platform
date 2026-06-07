@@ -9,7 +9,7 @@ import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/work
 import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
 import { installMockApiFetch } from "./apiMock";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
-import { renderWorkbenchPage } from "./renderHelpers";
+import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 describe("Workbench candidate grouping layout", () => {
   const invoiceColumns = getWorkbenchColumns("invoice");

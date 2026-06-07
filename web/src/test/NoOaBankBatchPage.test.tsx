@@ -4,7 +4,6 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
@@ -227,11 +226,9 @@ function readWebSource(path: string) {
 
 function renderPage() {
   return render(
-    <MuiProviders>
-      <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
-        <NoOaBankBatchPage />
-      </PageRuntimeProvider>
-    </MuiProviders>,
+    <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
+      <NoOaBankBatchPage />
+    </PageRuntimeProvider>,
   );
 }
 

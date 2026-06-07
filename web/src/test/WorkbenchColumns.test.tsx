@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 
 import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
 import { installMockApiFetch } from "./apiMock";
-import { renderWorkbenchPage } from "./renderHelpers";
+import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 describe("Workbench columns and inline actions", () => {
   test("renders requirement-aligned column headers for OA, bank, and invoice panes", async () => {

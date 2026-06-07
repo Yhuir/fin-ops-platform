@@ -4,7 +4,6 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import BatchAccountingPage from "../pages/BatchAccountingPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
@@ -149,11 +148,7 @@ function readWebSource(path: string) {
 }
 
 function renderPage() {
-  return render(
-    <MuiProviders>
-      <BatchAccountingPage />
-    </MuiProviders>,
-  );
+  return render(<BatchAccountingPage />);
 }
 
 function installFetchMock() {

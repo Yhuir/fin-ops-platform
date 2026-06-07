@@ -8,7 +8,7 @@ import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } fr
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import { installMockApiFetch } from "./apiMock";
-import { renderWorkbenchPage } from "./renderHelpers";
+import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 function buildRow(id: string, recordType: WorkbenchRecordType, tableValues: Record<string, string>): WorkbenchRecord {
   return {

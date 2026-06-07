@@ -4,7 +4,6 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
@@ -44,13 +43,11 @@ function renderTurnoverLedgerPage(session: SessionPayload = fullSession) {
     refresh: () => undefined,
   };
   return render(
-    <MuiProviders>
-      <SessionContext.Provider value={value}>
-        <PageSessionStateProvider>
-          <TurnoverLedgerPage />
-        </PageSessionStateProvider>
-      </SessionContext.Provider>
-    </MuiProviders>,
+    <SessionContext.Provider value={value}>
+      <PageSessionStateProvider>
+        <TurnoverLedgerPage />
+      </PageSessionStateProvider>
+    </SessionContext.Provider>,
   );
 }
 

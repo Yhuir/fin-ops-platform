@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
@@ -108,15 +107,13 @@ function findCostStatisticsHeading() {
 function renderCostStatisticsPage() {
   return render(
     <MemoryRouter initialEntries={["/cost-statistics"]}>
-      <MuiProviders>
-        <AppChromeProvider>
-          <SessionContext.Provider value={staticSession}>
-            <PageSessionStateProvider>
-              <CostStatisticsPage />
-            </PageSessionStateProvider>
-          </SessionContext.Provider>
-        </AppChromeProvider>
-      </MuiProviders>
+      <AppChromeProvider>
+        <SessionContext.Provider value={staticSession}>
+          <PageSessionStateProvider>
+            <CostStatisticsPage />
+          </PageSessionStateProvider>
+        </SessionContext.Provider>
+      </AppChromeProvider>
     </MemoryRouter>,
   );
 }

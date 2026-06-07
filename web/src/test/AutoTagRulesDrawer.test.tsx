@@ -4,16 +4,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
 import { installMockApiFetch } from "./apiMock";
 
 function renderDrawer(onSaved = vi.fn()) {
   const onClose = vi.fn();
   render(
-    <MuiProviders>
-      <AutoTagRulesDrawer open onClose={onClose} onSaved={onSaved} />
-    </MuiProviders>,
+    <AutoTagRulesDrawer open onClose={onClose} onSaved={onSaved} />,
   );
   return { onClose, onSaved };
 }

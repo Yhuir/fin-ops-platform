@@ -271,3 +271,37 @@ Scope: non-workbench test provider containment only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/test/renderHelpers.tsx、web/src/app/MuiProviders.tsx、web/src/app/muiTheme.ts、web/src/test/CommonMuiComponents.test.tsx、web/src/test/SettingsOaManualSearchImportTable.test.tsx、web/src/test/MonthPicker.test.tsx、web/src/test/WorkbenchExceptionModal.test.tsx 和当前 `rg -n "import MuiProviders|<MuiProviders|MuiProviders" web/src/test` 结果。只处理测试 provider containment：新增或调整 project test provider helper，使非关联台 tests 不再默认 import/wrap `MuiProviders`；如冻结 workbench tests still need MUI provider, expose an explicitly named legacy helper or keep direct `MuiProviders` only in workbench test scope and document it。不得修改 runtime UI、backend、API、read model、worker 或关联台内部工作区。运行 targeted tests for changed harness users（至少 `cd web && npx vitest run CommonMuiComponents.test.tsx MonthPicker.test.tsx SettingsOaManualSearchImportTable.test.tsx WorkbenchExceptionModal.test.tsx`）；运行 provider grep to prove non-workbench test provider no longer defaults to MUI and only workbench legacy remains；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P112 global CSS containment prompt。
 ```
+
+## P111 Execution Notes
+
+- Prompt ID: `P111-phase-7-test-provider-containment`
+- Status: `verified`
+- Runtime UI changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Test harness changed:
+  - `renderAuthenticatedAppAt` no longer wraps non-workbench app tests in `MuiProviders`.
+  - Added `web/src/test/workbenchRenderHelpers.tsx` as the explicit frozen workbench legacy helper that may still wrap `MuiProviders`.
+  - Updated workbench tests to import `renderWorkbenchPage` from the explicit workbench helper.
+  - Removed direct `MuiProviders` wrappers from non-workbench page/common tests.
+- Remaining test provider MUI hits are intentionally limited to:
+  - `web/src/test/workbenchRenderHelpers.tsx`
+  - `web/src/test/WorkbenchExceptionModal.test.tsx`
+- Verification:
+  - `cd web && npx vitest run CommonMuiComponents.test.tsx MonthPicker.test.tsx SettingsOaManualSearchImportTable.test.tsx WorkbenchExceptionModal.test.tsx`: passed, 27 tests.
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx NoOaBankBatchPage.test.tsx TurnoverLedgerPage.test.tsx BankDetailsPage.test.tsx CostStatisticsPage.test.tsx AutoTagRulesDrawer.test.tsx`: passed, 112 tests.
+  - `cd web && npx vitest run WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx`: passed, 58 tests.
+  - `rg -n "import MuiProviders|<MuiProviders|MuiProviders" web/src/test`: passed with only explicit workbench legacy hits.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+
+## P112 Prompt Draft
+
+```text
+Prompt ID: P112-phase-7-global-css-containment
+Phase: phase_7_mui_containment
+Type: extraction/refactor
+Scope: global CSS MUI containment only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/app/styles.css、web/src/components/workbench/WorkbenchZone.tsx、web/src/components/workbench/WorkbenchPaneSearch.tsx、web/src/components/workbench/WorkbenchRecordCard.tsx 和当前 `rg -n "Mui|DataGrid|@mui" web/src/app/styles.css` 结果。只处理 `styles.css` 的 MUI selector containment：删除非关联台 legacy MUI DataGrid selectors；保留冻结 workbench 仍需要的 `.zone-*`、`.pane-search-field` 等 `.Mui*` selectors，但必须集中或明确标注为 frozen workbench legacy containment，不得新增非 workbench `.Mui*` selectors。不得修改 runtime component code、backend、API、read model、worker 或关联台内部工作区。运行 `rg -n "MuiDataGrid|DataGrid" web/src/app/styles.css`，必须无命中；运行 `rg -n "Mui|@mui" web/src/app/styles.css`，命中只能是标注过的 frozen workbench legacy containment；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P113 final no-MUI contract prompt。
+```

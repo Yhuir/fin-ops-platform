@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
@@ -39,13 +38,11 @@ const staticSession: SessionContextValue = {
 
 function renderBankDetailsPage() {
   return render(
-    <MuiProviders>
-      <SessionContext.Provider value={staticSession}>
-        <PageSessionStateProvider>
-          <BankDetailsPage />
-        </PageSessionStateProvider>
-      </SessionContext.Provider>
-    </MuiProviders>,
+    <SessionContext.Provider value={staticSession}>
+      <PageSessionStateProvider>
+        <BankDetailsPage />
+      </PageSessionStateProvider>
+    </SessionContext.Provider>,
   );
 }
 

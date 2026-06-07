@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P111-phase-7-test-provider-containment`
+- Current Prompt ID: `P112-phase-7-global-css-containment`
 - Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
@@ -54,17 +54,18 @@
 
 ## Active Checkpoint
 
-- Scope: phase 7 test provider containment generated after P110 DataGrid session cleanup。
-- Files touched in P110:
-  - `web/src/hooks/useMuiDataGridPageSession.ts`
-  - `web/src/test/useMuiDataGridPageSession.test.tsx`
-  - `web/src/app/muiTheme.ts`
+- Scope: phase 7 global CSS containment generated after P111 test provider containment。
+- Files touched in P111:
+  - `web/src/test/renderHelpers.tsx`
+  - `web/src/test/workbenchRenderHelpers.tsx`
+  - non-workbench test files that previously wrapped `MuiProviders`
+  - frozen workbench tests updated to use explicit `workbenchRenderHelpers`
   - `docs/refactor-ui/modules/phase_7_mui_containment.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: FinanceTable session/table alignment tests passed；runtime MUI DataGrid session grep passed；build passed；diff check passed。
+- Verification run: P111 targeted provider tests passed；extra non-workbench page tests passed；workbench helper regression tests passed；provider grep passed with only explicit workbench legacy hits；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P111-phase-7-test-provider-containment`。
+- Next action: 执行 `P112-phase-7-global-css-containment`。
 
 ## Prompt Lifecycle
 
@@ -97,12 +98,18 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `in_progress` | `P111-phase-7-test-provider-containment` | P110 DataGrid session cleanup verified；next isolate test MUI provider usage |
+| mui containment | `in_progress` | `P112-phase-7-global-css-containment` | P111 test provider containment verified；next remove non-workbench global CSS MUI selectors |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P111-phase-7-test-provider-containment` | `cd web && npx vitest run CommonMuiComponents.test.tsx MonthPicker.test.tsx SettingsOaManualSearchImportTable.test.tsx WorkbenchExceptionModal.test.tsx` | passed | 27 tests passed |
+| 2026-06-07 | `P111-phase-7-test-provider-containment` | `cd web && npx vitest run BatchAccountingPage.test.tsx NoOaBankBatchPage.test.tsx TurnoverLedgerPage.test.tsx BankDetailsPage.test.tsx CostStatisticsPage.test.tsx AutoTagRulesDrawer.test.tsx` | passed | 112 non-workbench page/drawer regression tests passed |
+| 2026-06-07 | `P111-phase-7-test-provider-containment` | `cd web && npx vitest run WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchPaneFilter.test.ts WorkbenchColumnLayout.test.tsx` | passed | 58 frozen workbench helper regression tests passed |
+| 2026-06-07 | `P111-phase-7-test-provider-containment` | `rg -n "import MuiProviders\|<MuiProviders\|MuiProviders" web/src/test` | passed | Only `workbenchRenderHelpers.tsx` and `WorkbenchExceptionModal.test.tsx` remain as explicit workbench legacy hits |
+| 2026-06-07 | `P111-phase-7-test-provider-containment` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P111-phase-7-test-provider-containment` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | reference grep before deletion | passed | No runtime page references to the obsolete MUI DataGrid session hook |
 | 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | `cd web && npx vitest run useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts` | passed | 7 tests passed |
 | 2026-06-07 | `P110-phase-7-datagrid-session-cleanup` | runtime MUI DataGrid session grep excluding tests | passed | No runtime `useMuiDataGridPageSession` / `@mui/x-data-grid` references remain |

@@ -4,7 +4,7 @@ import { reorderWorkbenchColumnLayout } from "../features/workbench/columnLayout
 import { getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
 import { fetchWorkbenchSettings, saveWorkbenchSettings } from "../features/workbench/api";
 import { installMockApiFetch } from "./apiMock";
-import { renderWorkbenchPage } from "./renderHelpers";
+import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 describe("Workbench column layout", () => {
   test("reorders a pane layout before the target column", () => {

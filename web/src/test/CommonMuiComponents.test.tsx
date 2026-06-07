@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import type React from "react";
 import { vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import AppDrawer from "../components/common/AppDrawer";
 import AppDialog from "../components/common/AppDialog";
 import ConfirmActionDialog from "../components/common/ConfirmActionDialog";
@@ -13,13 +12,13 @@ import PageToolbar from "../components/common/PageToolbar";
 import PermissionNotice from "../components/common/PermissionNotice";
 import StatePanel from "../components/common/StatePanel";
 
-function renderWithMui(ui: React.ReactElement) {
-  return render(<MuiProviders>{ui}</MuiProviders>);
+function renderWithProject(ui: React.ReactElement) {
+  return render(ui);
 }
 
 describe("common MUI components", () => {
   test("renders state panels with accessible roles and loading affordances", () => {
-    renderWithMui(
+    renderWithProject(
       <>
         <StatePanel tone="loading" title="正在加载">
           请稍候
@@ -37,7 +36,7 @@ describe("common MUI components", () => {
   });
 
   test("keeps compact loading state concise", () => {
-    renderWithMui(
+    renderWithProject(
       <StatePanel tone="loading" title="正在加载" compact>
         请稍候
       </StatePanel>,
@@ -49,7 +48,7 @@ describe("common MUI components", () => {
   });
 
   test("renders permission notice as a warning status", () => {
-    renderWithMui(<PermissionNotice>当前账号没有审核权限。</PermissionNotice>);
+    renderWithProject(<PermissionNotice>当前账号没有审核权限。</PermissionNotice>);
 
     expect(screen.getByRole("status")).toHaveTextContent("当前账号没有审核权限。");
   });
@@ -59,7 +58,7 @@ describe("common MUI components", () => {
     const onCancel = vi.fn();
     const onConfirm = vi.fn();
 
-    renderWithMui(
+    renderWithProject(
       <ConfirmActionDialog
         open
         title="确认撤销"
@@ -77,7 +76,7 @@ describe("common MUI components", () => {
   });
 
   test("renders app dialog with name, description, body, and actions", () => {
-    renderWithMui(
+    renderWithProject(
       <AppDialog
         actions={<button type="button">保存</button>}
         description="用于确认本次操作。"
@@ -99,16 +98,14 @@ describe("common MUI components", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    const { rerender } = renderWithMui(<AppDialog onClose={onClose} open title="可关闭弹窗" />);
+    const { rerender } = renderWithProject(<AppDialog onClose={onClose} open title="可关闭弹窗" />);
 
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
 
     onClose.mockClear();
     rerender(
-      <MuiProviders>
-        <AppDialog disableEscapeClose onClose={onClose} open title="不可按 Esc 关闭弹窗" />
-      </MuiProviders>,
+      <AppDialog disableEscapeClose onClose={onClose} open title="不可按 Esc 关闭弹窗" />,
     );
 
     await user.keyboard("{Escape}");
@@ -116,7 +113,7 @@ describe("common MUI components", () => {
   });
 
   test("disables confirm dialog actions while loading", () => {
-    renderWithMui(
+    renderWithProject(
       <ConfirmActionDialog
         destructive
         loading
@@ -136,7 +133,7 @@ describe("common MUI components", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
 
-    renderWithMui(
+    renderWithProject(
       <AppDrawer
         footer={<button type="button">保存设置</button>}
         onClose={onClose}
@@ -157,7 +154,7 @@ describe("common MUI components", () => {
   });
 
   test("renders page scaffold heading, description, actions, and children", () => {
-    renderWithMui(
+    renderWithProject(
       <PageScaffold
         actions={<button type="button">新增</button>}
         description="页面说明"
@@ -174,7 +171,7 @@ describe("common MUI components", () => {
   });
 
   test("renders page toolbar groups and children fallback", () => {
-    const { rerender } = renderWithMui(
+    const { rerender } = renderWithProject(
       <PageToolbar left={<button type="button">筛选</button>} right={<button type="button">导出</button>} />,
     );
 
@@ -182,11 +179,9 @@ describe("common MUI components", () => {
     expect(screen.getByRole("button", { name: "导出" })).toBeInTheDocument();
 
     rerender(
-      <MuiProviders>
-        <PageToolbar>
-          <button type="button">刷新</button>
-        </PageToolbar>
-      </MuiProviders>,
+      <PageToolbar>
+        <button type="button">刷新</button>
+      </PageToolbar>,
     );
 
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
@@ -196,7 +191,7 @@ describe("common MUI components", () => {
     const onFiles = vi.fn();
     const file = new File(["a,b"], "bank.csv", { type: "text/csv" });
 
-    renderWithMui(<FileDropzone label="上传银行流水" onFiles={onFiles} />);
+    renderWithProject(<FileDropzone label="上传银行流水" onFiles={onFiles} />);
 
     fireEvent.drop(screen.getByRole("button", { name: "上传银行流水" }), {
       dataTransfer: {
