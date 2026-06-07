@@ -303,6 +303,7 @@ Scope: `/etc-tickets` business batch detail, imported invoice section, import at
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P097 page/style files changed before docs.
+- Commit: `35d55842 feat: migrate etc tickets detail tables`, pushed to `origin/refactor-ui`.
 
 ## P098 Prompt Draft
 
