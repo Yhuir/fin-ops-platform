@@ -5360,7 +5360,7 @@ Scope: `/etc-tickets` upload/drop blocks, source-file context, and upload/source
 ### P096-phase-6-etc-tickets-reconciliation-table
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/etc-tickets` reconciliation detail table, row selection controls, expandable descriptions, and manual review panel only。
 
@@ -5382,6 +5382,50 @@ Scope: `/etc-tickets` reconciliation detail table, row selection controls, expan
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract remains expected-fail until all ETC runtime slices clear MUI。
+
+#### Execution Notes
+
+- Runtime implementation changed: yes，only `web/src/pages/EtcTicketManagementPage.tsx` and `web/src/app/styles.css`。
+- Test implementation changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Migrated reconciliation description cell, amount/time/evidence helper cells, unmatched supplement upload action, reconciliation toolbar, `ETC双侧核对明细` native table/checkboxes and manual review form/actions to native/project classes。
+- Preserved table accessible name, row/cell test ids, row highlight states, local selection actions, one-line description expansion, selected-card/evidence payloads and manual review disabled rules。
+- Draft grep was over-broad because it matched P097 invoice/detail tables and future imported-invoice/detail chips；execution used a narrowed reconciliation/manual-class grep and documented the reason。
+- Verification:
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|renders paired reconciliation table|keeps long reconciliation descriptions|selects reconciliation rows locally|updates confirmation metrics|submits the checked card item ids|manual reconciliation accepts"`: expected-fail；selected reconciliation/manual behavior tests passed and source-level contract failed as expected。
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: expected-fail；41 behavior tests passed and 1 source-level contract failed against remaining ETC MUI runtime。
+  - `if rg -n 'etc-reconciliation-description-toggle\\.MuiButton-root|etc-reconciliation-table .*Mui|etc-reconciliation-[^\\n]*Mui|<TextField[^\\n]*(选择票根|处理说明)|<Table(Container|Head|Body|Row|Cell)?\\b[^\\n]*etc-reconciliation|<Checkbox\\b|<Tooltip[^\\n]*(重新计算匹配|上传补充凭证)|<IconButton[^\\n]*(aria-label=\\{label\\}|上传补充)|etc-reconciliation-chip-line[^\\n]*<Chip' web/src/pages/EtcTicketManagementPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P096 page/style files changed before docs。
+- Next prompt generated: `P097-phase-6-etc-tickets-detail-and-invoice-tables`。
+
+### P097-phase-6-etc-tickets-detail-and-invoice-tables
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/etc-tickets` business batch detail, imported invoice section, import attempts, vehicle summaries, and ETC invoice tables only。
+
+#### Prompt
+
+```text
+Prompt ID: P097-phase-6-etc-tickets-detail-and-invoice-tables
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/etc-tickets` business batch detail, imported invoice section, import attempts, vehicle summaries, and ETC invoice tables only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx 和 web/src/app/styles.css。只迁移 `renderEtcInvoiceTable`, `已导入ETC发票`, `ETC批次详情`, `批次指标`, `车牌汇总`, `导入记录`, batch detail collapse button, revoke/not-submitted actions and related table/detail tags 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell/Button/Chip/Stack/Typography/Box usages 到 native table/button/project classes and table layout system classes。不得迁移 dialog contents, OA status/detection panel, page-level remaining feedback, API client、backend、read model、worker、domain event semantics 或关联台内部工作区。保留用户可见行为：invoice table accessible names (`ETC批次发票明细`, `已导入ETC发票明细`), native table expectation, loading/empty text, amount/date alignment, imported invoice remove action, batch detail collapse state, import attempt visibility, vehicle summary text, revoke/not-submitted action labels and disabled rules。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|renders batch invoice details with a native table|shows imported task invoices|submitted mode hides submit action|creates OA draft from the selected imported reconciliation task batch"`，预期 source-level contract remains expected-fail but selected behavior tests pass；运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 41 behavior tests pass and 1 source-level contract remains expected-fail until P098 closeout；运行 scoped grep for detail/invoice slice `if rg -n '<Table(Container|Head|Body|Row|Cell)?\\b|<Chip\\b|<Button[^\\n]*(移除发票|撤销草稿|未提交OA)|etc-invoice-[^\\n]*Mui|etc-import-attempt-row .*Mui|etc-plate-summary[^\\n]*Mui' web/src/pages/EtcTicketManagementPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`，若 grep 命中 P098 dialog/OA/feedback surfaces, narrow to detail/invoice classes and document why；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P098 dialogs/OA/feedback closeout prompt。
+```
+
+#### Review
+
+- Single slice: yes，only business detail/imported invoice/invoice tables。
+- Runtime implementation limited: yes，dialogs/OA/feedback closeout remains P098。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract remains expected-fail until P098 closeout clears remaining ETC MUI。
 
 ### MG Prompt Template
 

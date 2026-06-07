@@ -560,22 +560,18 @@ function ReconciliationDescriptionCell({
   const canExpand = expanded || measuredOverflow || estimatedDescriptionUnits(text) > DESCRIPTION_EXPANSION_UNITS;
 
   return (
-    <Stack className="etc-reconciliation-description-cell" direction="row" spacing={0.5} alignItems="center">
-      <Tooltip title={text} describeChild placement="top">
-        <Typography
-          ref={textRef}
-          component="span"
-          data-testid={`etc-reconciliation-description-${cardId}`}
-          className={`etc-reconciliation-description ${expanded ? "etc-reconciliation-description--expanded" : "etc-reconciliation-description--collapsed"}`}
-        >
-          {text}
-        </Typography>
-      </Tooltip>
+    <span className="etc-reconciliation-description-cell">
+      <span
+        ref={textRef}
+        title={text}
+        data-testid={`etc-reconciliation-description-${cardId}`}
+        className={`etc-reconciliation-description ${expanded ? "etc-reconciliation-description--expanded" : "etc-reconciliation-description--collapsed"}`}
+      >
+        {text}
+      </span>
       {canExpand ? (
-        <Button
+        <button
           type="button"
-          size="small"
-          variant="text"
           className="etc-reconciliation-description-toggle"
           aria-label={`${expanded ? "收起" : "展开"}交易描述 ${cardId}`}
           onClick={(event) => {
@@ -584,9 +580,9 @@ function ReconciliationDescriptionCell({
           }}
         >
           {expanded ? "收起" : "展开"}
-        </Button>
+        </button>
       ) : null}
-    </Stack>
+    </span>
   );
 }
 
@@ -1892,9 +1888,9 @@ export default function EtcTicketManagementPage() {
     }
     const transactionDate = splitDateParts(card.transactionDate);
     return (
-      <Box className="etc-reconciliation-date-pair" data-testid={`etc-card-date-transaction-${card.itemId}`}>
+      <span className="etc-reconciliation-date-pair" data-testid={`etc-card-date-transaction-${card.itemId}`}>
         <span>{transactionDate}</span>
-      </Box>
+      </span>
     );
   };
 
@@ -1917,11 +1913,9 @@ export default function EtcTicketManagementPage() {
       return <span className="etc-reconciliation-empty">-</span>;
     }
     return (
-      <Stack className="etc-reconciliation-amount-cell" spacing={0.65} alignItems="center">
-        <Typography component="span" className="etc-reconciliation-money">
-          {formatMoney(card.settlementAmount)}
-        </Typography>
-      </Stack>
+      <span className="etc-reconciliation-amount-cell">
+        <span className="etc-reconciliation-money">{formatMoney(card.settlementAmount)}</span>
+      </span>
     );
   };
 
@@ -1932,10 +1926,10 @@ export default function EtcTicketManagementPage() {
     const parts = splitDateTimeParts(evidence.transactionTime);
     const showFallback = parts.date === "-" && evidence.fallbackTimeLabel;
     return (
-      <Stack className="etc-reconciliation-time-cell" spacing={0.35}>
+      <span className="etc-reconciliation-time-cell">
         <span>{showFallback ? evidence.fallbackTimeLabel : parts.date}</span>
         {parts.time ? <span>{parts.time}</span> : null}
-      </Stack>
+      </span>
     );
   };
 
@@ -1946,41 +1940,36 @@ export default function EtcTicketManagementPage() {
       }
       const label = `上传补充凭证覆盖 ${card.description || card.itemId}`;
       return (
-        <Stack className="etc-reconciliation-empty-action" direction="row" spacing={0.75} alignItems="center" justifyContent="center">
+        <span className="etc-reconciliation-empty-action">
           <span>未匹配</span>
-          <Tooltip title="上传补充凭证并覆盖该信用卡项">
-            <span>
-              <IconButton
-                type="button"
-                size="small"
-                aria-label={label}
-                disabled={taskActionLoading}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openSupplementUploadDialog(card);
-                }}
-              >
-                <UploadCloud aria-hidden="true" size={16} />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Stack>
+          <button
+            type="button"
+            className="etc-inline-icon-action"
+            aria-label={label}
+            title="上传补充凭证并覆盖该信用卡项"
+            disabled={taskActionLoading}
+            onClick={(event) => {
+              event.stopPropagation();
+              openSupplementUploadDialog(card);
+            }}
+          >
+            <UploadCloud aria-hidden="true" size={16} />
+          </button>
+        </span>
       );
     }
     return (
-      <Stack className="etc-reconciliation-evidence-cell" spacing={0.7}>
-        <Stack className="etc-reconciliation-chip-line" direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center" justifyContent="center">
-          <Typography component="span" className="etc-reconciliation-money">
-            {formatMoney(evidence.amount)}
-          </Typography>
-          <Chip label={evidence.plateOrMerchant || (evidence.source === "ticket" ? "未记录车牌" : "补充凭证")} size="small" variant="outlined" />
-        </Stack>
+      <span className="etc-reconciliation-evidence-cell">
+        <span className="etc-reconciliation-chip-line">
+          <span className="etc-reconciliation-money">{formatMoney(evidence.amount)}</span>
+          <span className="etc-status-tag">{evidence.plateOrMerchant || (evidence.source === "ticket" ? "未记录车牌" : "补充凭证")}</span>
+        </span>
         {evidence.source === "supplement" && evidence.tags.length > 0 ? (
-          <Stack className="etc-reconciliation-chip-line" direction="row" spacing={0.5} flexWrap="wrap" useFlexGap justifyContent="center">
-            {evidence.tags.map((tag) => <Chip key={tag} label={tag} size="small" color="warning" variant="outlined" />)}
-          </Stack>
+          <span className="etc-reconciliation-chip-line">
+            {evidence.tags.map((tag) => <span key={tag} className="etc-status-tag etc-status-tag--warning">{tag}</span>)}
+          </span>
         ) : null}
-      </Stack>
+      </span>
     );
   };
 
@@ -2379,35 +2368,22 @@ export default function EtcTicketManagementPage() {
                       </Box>
 
                       <section className="etc-manual-review-panel" aria-label="人工核对处理">
-                        <Stack spacing={1.5}>
-                          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ xs: "stretch", md: "center" }}>
-                            <Box className="etc-manual-review-card">
-                              <Typography variant="caption" color="text.secondary">当前信用卡项</Typography>
-                              <Typography fontWeight={800}>
-                                {selectedCardItem ? `${selectedCardItem.transactionDate} / ${formatMoney(selectedCardItem.settlementAmount)}` : "未选择"}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {selectedCardItem?.description ?? "点击信用卡侧明细行后处理。"}
-                              </Typography>
-                            </Box>
-                            <Box className="etc-manual-review-card">
-                              <Typography variant="caption" color="text.secondary">推荐票根</Typography>
-                              <Typography fontWeight={800}>
-                                {suggestedTicket ? `${suggestedTicket.vehiclePlate} / ${formatMoney(suggestedTicket.amount)}` : "无可接受建议"}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {suggestedTicket ? "金额与信用卡项一致，可人工确认后接受。" : "仅在推荐候选命中时可直接接受。"}
-                              </Typography>
-                            </Box>
-                            <TextField
-                              select
-                              SelectProps={{ native: true }}
-                              InputLabelProps={{ shrink: true }}
-                              label="选择票根/凭证"
-                              size="small"
+                        <div className="etc-manual-review-grid">
+                          <div className="etc-manual-review-card">
+                            <span className="etc-manual-review-label">当前信用卡项</span>
+                            <strong>{selectedCardItem ? `${selectedCardItem.transactionDate} / ${formatMoney(selectedCardItem.settlementAmount)}` : "未选择"}</strong>
+                            <span>{selectedCardItem?.description ?? "点击信用卡侧明细行后处理。"}</span>
+                          </div>
+                          <div className="etc-manual-review-card">
+                            <span className="etc-manual-review-label">推荐票根</span>
+                            <strong>{suggestedTicket ? `${suggestedTicket.vehiclePlate} / ${formatMoney(suggestedTicket.amount)}` : "无可接受建议"}</strong>
+                            <span>{suggestedTicket ? "金额与信用卡项一致，可人工确认后接受。" : "仅在推荐候选命中时可直接接受。"}</span>
+                          </div>
+                          <label className="etc-manual-review-field">
+                            <span>选择票根/凭证</span>
+                            <select
                               value={selectedEvidenceRowId}
                               onChange={(event) => setSelectedEvidenceRowId(event.target.value)}
-                              sx={{ minWidth: 240, flex: 1 }}
                               disabled={!taskIsMutable || taskActionLoading}
                             >
                               <option value="">选择一条记录</option>
@@ -2416,66 +2392,60 @@ export default function EtcTicketManagementPage() {
                                   {item.source === "ticket" ? "票根" : "补充"} / {formatMoney(item.amount)} / {item.plateOrMerchant}
                                 </option>
                               ))}
-                            </TextField>
-                          </Stack>
-                          <TextField
-                            label="处理说明"
-                            size="small"
+                            </select>
+                          </label>
+                        </div>
+                        <label className="etc-manual-review-field">
+                          <span>处理说明</span>
+                          <input
                             value={reviewNote}
                             onChange={(event) => setReviewNote(event.target.value)}
                             placeholder="排除、异常或手工确认时必填"
                             disabled={!taskIsMutable || taskActionLoading}
                           />
-                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                            <Button
-                              type="button"
-                              size="small"
-                              variant="contained"
-                              disabled={!taskIsMutable || taskActionLoading || !selectedCardItem || !suggestedTicket}
-                              onClick={handleAcceptSuggestedTicket}
-                            >
-                              接受推荐票根
-                            </Button>
-                            <Button
-                              type="button"
-                              size="small"
-                              variant="outlined"
-                              disabled={!taskIsMutable || taskActionLoading || !selectedCardItem || !selectedEvidenceRow}
-                              onClick={handleLinkSelectedEvidence}
-                            >
-                              关联所选记录
-                            </Button>
-                            <Button
-                              type="button"
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              disabled={!taskIsMutable || taskActionLoading || !selectedCardItem}
-                              onClick={() => handleExcludeCard("excluded_non_etc")}
-                            >
-                              排除非ETC
-                            </Button>
-                            <Button
-                              type="button"
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              disabled={!taskIsMutable || taskActionLoading || !selectedCardItem}
-                              onClick={() => handleExcludeCard("excluded_error")}
-                            >
-                              标记异常
-                            </Button>
-                            <Button
-                              type="button"
-                              size="small"
-                              variant="outlined"
-                              disabled={!taskIsMutable || taskActionLoading || !selectedCardItem}
-                              onClick={handleManualConfirmCard}
-                            >
-                              手工确认
-                            </Button>
-                          </Stack>
-                        </Stack>
+                        </label>
+                        <div className="etc-manual-review-actions">
+                          <button
+                            type="button"
+                            className="etc-primary-action"
+                            disabled={!taskIsMutable || taskActionLoading || !selectedCardItem || !suggestedTicket}
+                            onClick={handleAcceptSuggestedTicket}
+                          >
+                            接受推荐票根
+                          </button>
+                          <button
+                            type="button"
+                            className="etc-secondary-action"
+                            disabled={!taskIsMutable || taskActionLoading || !selectedCardItem || !selectedEvidenceRow}
+                            onClick={handleLinkSelectedEvidence}
+                          >
+                            关联所选记录
+                          </button>
+                          <button
+                            type="button"
+                            className="etc-secondary-action etc-secondary-action--warning"
+                            disabled={!taskIsMutable || taskActionLoading || !selectedCardItem}
+                            onClick={() => handleExcludeCard("excluded_non_etc")}
+                          >
+                            排除非ETC
+                          </button>
+                          <button
+                            type="button"
+                            className="etc-secondary-action etc-secondary-action--warning"
+                            disabled={!taskIsMutable || taskActionLoading || !selectedCardItem}
+                            onClick={() => handleExcludeCard("excluded_error")}
+                          >
+                            标记异常
+                          </button>
+                          <button
+                            type="button"
+                            className="etc-secondary-action"
+                            disabled={!taskIsMutable || taskActionLoading || !selectedCardItem}
+                            onClick={handleManualConfirmCard}
+                          >
+                            手工确认
+                          </button>
+                        </div>
                       </section>
 
                       {selectedTask.parseIssues.length > 0 ? (
@@ -2503,139 +2473,127 @@ export default function EtcTicketManagementPage() {
                         className="etc-reconciliation-table-block"
                         style={{ "--etc-reconciliation-row-height": "32px" } as CSSProperties}
                       >
-                        <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-                          <Typography component="h3" variant="subtitle1" fontWeight={800}>
-                            双侧核对
-                          </Typography>
-                          <Chip label={`${reconciliationRows.length} 行`} size="small" variant="outlined" />
-                          <Button
+                        <div className="etc-reconciliation-table-toolbar">
+                          <h3>双侧核对</h3>
+                          <span className="etc-count-tag">{reconciliationRows.length} 行</span>
+                          <button
                             type="button"
-                            size="small"
-                            variant="outlined"
+                            className="etc-secondary-action"
                             disabled={reconciliationRows.length === 0}
                             onClick={handleSelectAllReconciliationRows}
                           >
                             全选
-                          </Button>
-                          <Button
+                          </button>
+                          <button
                             type="button"
-                            size="small"
-                            variant="outlined"
+                            className="etc-secondary-action"
                             disabled={pairedReconciliationRowIds.length === 0}
                             onClick={handleSelectPairedReconciliationRows}
                           >
                             全选配对项
-                          </Button>
-                          <Button
+                          </button>
+                          <button
                             type="button"
-                            size="small"
-                            variant="outlined"
+                            className="etc-secondary-action"
                             disabled={selectedReconciliationRowIds.size === 0}
                             onClick={handleClearReconciliationSelection}
                           >
                             清空
-                          </Button>
-                          <Tooltip title="重新计算匹配">
-                            <span>
-                              <Button
-                                type="button"
-                                size="small"
-                                variant="outlined"
-                                startIcon={<RefreshCw aria-hidden="true" size={16} />}
-                                disabled={!selectedTask || taskActionLoading}
-                                onClick={handleRefreshReconciliationMatches}
-                              >
-                                刷新匹配
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        </Stack>
-                        <TableContainer ref={reconciliationTableWrapRef} className="etc-reconciliation-table-container">
-                          <Table
+                          </button>
+                          <button
+                            type="button"
+                            className="etc-secondary-action"
+                            title="重新计算匹配"
+                            disabled={!selectedTask || taskActionLoading}
+                            onClick={handleRefreshReconciliationMatches}
+                          >
+                            <RefreshCw aria-hidden="true" size={16} />
+                            刷新匹配
+                          </button>
+                        </div>
+                        <div ref={reconciliationTableWrapRef} className="etc-reconciliation-table-container">
+                          <table
                             aria-label="ETC双侧核对明细"
                             className="etc-reconciliation-table"
-                            size="small"
                           >
-                            <TableHead>
-                              <TableRow>
-                                <TableCell className="etc-reconciliation-select-column" aria-label="选择列" />
-                                <TableCell className="etc-reconciliation-table-side-heading" colSpan={3} align="center">
+                            <thead>
+                              <tr>
+                                <th className="etc-reconciliation-select-column" aria-label="选择列" />
+                                <th className="etc-reconciliation-table-side-heading" colSpan={3}>
                                   信用卡侧
-                                </TableCell>
-                                <TableCell className="etc-reconciliation-table-side-heading etc-reconciliation-divider" colSpan={2} align="center">
+                                </th>
+                                <th className="etc-reconciliation-table-side-heading etc-reconciliation-divider" colSpan={2}>
                                   票根/补充凭证侧
-                                </TableCell>
-                              </TableRow>
-                              <TableRow>
-                                <TableCell className="etc-reconciliation-select-column" align="center">选择</TableCell>
-                                <TableCell className="etc-reconciliation-date-column">交易日</TableCell>
-                                <TableCell className="etc-reconciliation-description-column">交易描述</TableCell>
-                                <TableCell className="etc-reconciliation-amount-column" align="center">金额</TableCell>
-                                <TableCell className="etc-reconciliation-time-column etc-reconciliation-divider">交易时间</TableCell>
-                                <TableCell className="etc-reconciliation-evidence-column" align="center">金额 / 车牌</TableCell>
-                              </TableRow>
-                            </TableHead>
-                            <TableBody>
+                                </th>
+                              </tr>
+                              <tr>
+                                <th className="etc-reconciliation-select-column">选择</th>
+                                <th className="etc-reconciliation-date-column">交易日</th>
+                                <th className="etc-reconciliation-description-column">交易描述</th>
+                                <th className="etc-reconciliation-amount-column">金额</th>
+                                <th className="etc-reconciliation-time-column etc-reconciliation-divider">交易时间</th>
+                                <th className="etc-reconciliation-evidence-column">金额 / 车牌</th>
+                              </tr>
+                            </thead>
+                            <tbody>
                               {reconciliationRows.map((row) => (
-                                <TableRow
+                                <tr
                                   key={row.id}
                                   className="etc-reconciliation-table-row"
                                   data-testid={`etc-reconciliation-row-${row.id}`}
                                   data-highlight={row.highlight || undefined}
                                 >
-                                  <TableCell className="etc-reconciliation-select-column" align="center">
-                                    <Checkbox
-                                      size="small"
+                                  <td className="etc-reconciliation-select-column">
+                                    <input
+                                      type="checkbox"
                                       checked={selectedReconciliationRowIds.has(row.id)}
                                       onChange={() => handleToggleReconciliationRow(row.id)}
                                       onClick={(event) => event.stopPropagation()}
-                                      slotProps={{ input: { "aria-label": `选择核对行 ${row.id}` } }}
+                                      aria-label={`选择核对行 ${row.id}`}
                                     />
-                                  </TableCell>
-                                  <TableCell
+                                  </td>
+                                  <td
                                     className="etc-reconciliation-card-cell etc-reconciliation-date-column"
                                     data-highlight={row.cardHighlight || undefined}
                                     onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
                                   >
                                     {renderCardDateCell(row.card)}
-                                  </TableCell>
-                                  <TableCell
+                                  </td>
+                                  <td
                                     className="etc-reconciliation-card-cell etc-reconciliation-description-column"
                                     data-testid={row.card ? `etc-reconciliation-card-cell-${row.card.itemId}` : undefined}
                                     data-highlight={row.cardHighlight || undefined}
                                     onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
                                   >
                                     {renderCardDescriptionCell(row.card)}
-                                  </TableCell>
-                                  <TableCell
+                                  </td>
+                                  <td
                                     className="etc-reconciliation-card-cell etc-reconciliation-amount-column"
                                     data-highlight={row.cardHighlight || undefined}
-                                    align="center"
                                     onClick={() => row.card && setSelectedCardItemId(row.card.itemId)}
                                   >
                                     {renderCardAmountCell(row.card)}
-                                  </TableCell>
-                                  <TableCell
+                                  </td>
+                                  <td
                                     className="etc-reconciliation-evidence-side-cell etc-reconciliation-time-column etc-reconciliation-divider"
                                     data-highlight={row.evidenceHighlight || undefined}
                                     onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
                                   >
                                     {renderEvidenceTimeCell(row.evidence)}
-                                  </TableCell>
-                                  <TableCell
+                                  </td>
+                                  <td
                                     className="etc-reconciliation-evidence-side-cell etc-reconciliation-evidence-column"
                                     data-testid={row.evidence ? `etc-reconciliation-evidence-cell-${row.evidence.id}` : undefined}
                                     data-highlight={row.evidenceHighlight || undefined}
-                                    align="center"
                                     onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
                                   >
                                     {renderEvidenceSummaryCell(row.evidence, row.card)}
-                                  </TableCell>
-                                </TableRow>
+                                  </td>
+                                </tr>
                               ))}
-                            </TableBody>
-                          </Table>
-                        </TableContainer>
+                            </tbody>
+                          </table>
+                        </div>
                       </Box>
                       {selectedTaskBusinessBatch && isOaDetectionStatus(selectedTaskBusinessBatch.status)
                         ? renderOaStatusPanel(selectedTaskBusinessBatch)

@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P096-phase-6-etc-tickets-reconciliation-table`
+- Current Prompt ID: `P097-phase-6-etc-tickets-detail-and-invoice-tables`
 - Current MG ID: `MG-P091-phase-6-turnover-ledger`
 
 ## Global Invariants
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 ETC tickets reconciliation table prompt generated after P095 upload/source panels migration。
-- Files touched in P095:
+- Scope: phase 6 ETC tickets detail/invoice table prompt generated after P096 reconciliation table migration。
+- Files touched in P096:
   - `web/src/pages/EtcTicketManagementPage.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_etc_tickets.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P095 selected/full ETC page tests expected-failed only on source-level no-MUI/project primitive contract；41 behavior tests passed；narrow upload/source grep and build passed。
-- Failures: none beyond expected P095 source-level contract failure against remaining ETC MUI runtime.
-- Next action: 执行 `P096-phase-6-etc-tickets-reconciliation-table`。
+- Verification run: P096 selected/full ETC page tests expected-failed only on source-level no-MUI/project primitive contract；41 behavior tests passed；narrow reconciliation/manual grep and build passed。
+- Failures: none beyond expected P096 source-level contract failure against remaining ETC MUI runtime.
+- Next action: 执行 `P097-phase-6-etc-tickets-detail-and-invoice-tables`。
 
 ## Prompt Lifecycle
 
@@ -95,7 +95,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P096-phase-6-etc-tickets-reconciliation-table` | P095 ETC upload/source panels verified；next reconciliation table/manual review |
+| page batches | `in_progress` | `P097-phase-6-etc-tickets-detail-and-invoice-tables` | P096 ETC reconciliation table/manual review verified；next detail/invoice tables |
 
 ## Verification Log
 
@@ -141,6 +141,12 @@
 | 2026-06-07 | `P095-phase-6-etc-tickets-upload-and-source-panels` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P095-phase-6-etc-tickets-upload-and-source-panels` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P095-phase-6-etc-tickets-upload-and-source-panels` | `git status --short --branch` | passed | Only P095 page/style files changed before docs |
+| 2026-06-07 | `P096-phase-6-etc-tickets-reconciliation-table` | `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives\|renders paired reconciliation table\|keeps long reconciliation descriptions\|selects reconciliation rows locally\|updates confirmation metrics\|submits the checked card item ids\|manual reconciliation accepts"` | expected-fail | Selected reconciliation/manual behavior tests passed; source-level contract failed as expected |
+| 2026-06-07 | `P096-phase-6-etc-tickets-reconciliation-table` | `cd web && npx vitest run EtcTicketManagementPage.test.tsx` | expected-fail | 41 behavior tests passed; 1 source-level no-MUI/project primitive contract failed against remaining ETC MUI runtime |
+| 2026-06-07 | `P096-phase-6-etc-tickets-reconciliation-table` | `if rg -n 'etc-reconciliation-description-toggle\\.MuiButton-root\|etc-reconciliation-table .*Mui\|etc-reconciliation-[^\\n]*Mui\|<TextField[^\\n]*(选择票根\|处理说明)\|<Table(Container\|Head\|Body\|Row\|Cell)?\\b[^\\n]*etc-reconciliation\|<Checkbox\\b\|<Tooltip[^\\n]*(重新计算匹配\|上传补充凭证)\|<IconButton[^\\n]*(aria-label=\\{label\\}\|上传补充)\|etc-reconciliation-chip-line[^\\n]*<Chip' web/src/pages/EtcTicketManagementPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi` | passed | Narrowed to reconciliation/manual classes because draft grep hit P097 future detail/invoice surfaces |
+| 2026-06-07 | `P096-phase-6-etc-tickets-reconciliation-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P096-phase-6-etc-tickets-reconciliation-table` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P096-phase-6-etc-tickets-reconciliation-table` | `git status --short --branch` | passed | Only P096 page/style files changed before docs |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|renders grouped\|expands Jia Xiaohua\|confirms a manual zero-difference\|blocks cross-group selection\|shows bank-detail tags"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining drawer/dialog/feedback targets |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
