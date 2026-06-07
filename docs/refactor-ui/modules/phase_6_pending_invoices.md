@@ -154,6 +154,80 @@ Do not change:
 - Domain events emitted after manual invoice and existing invoice attach.
 - Page activation/tag refresh behavior and scroll session key `pending-invoices-table`.
 
+## PV-010 Premium Visual Discovery
+
+Prompt ID: `PV-010-pending-invoices-discovery`
+
+Current source files on `main`:
+
+- `web/src/pages/PendingInvoicesPage.tsx`
+- `web/src/components/pendingInvoices/PendingInvoicesTable.tsx`
+- `web/src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx`
+- `web/src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx`
+- `web/src/components/pendingInvoices/PendingInvoiceRelationDrawer.tsx`
+- `web/src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx`
+- `web/src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx`
+- `web/src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx`
+- `web/src/components/pendingInvoices/ManualInvoiceDialog.tsx`
+- `web/src/test/PendingInvoicesPage.test.tsx`
+- `web/src/app/styles.css`
+
+Current implementation status on `main`:
+
+- Page shell and toolbar already use `PageScaffold` and `PageToolbar`.
+- Main four-zone table is project-owned native table markup and imports `FinanceTable` value primitives for `AmountCell`, `EmptyValue`, `FinanceDirectionTag` and `FinanceStatusTag`.
+- Shared pending invoice drawer frame already uses `AppDrawer`, preserving right-drawer shape.
+- OA print detail and manual invoice are `AppDialog` dialogs.
+- `PendingInvoicesPage.test.tsx` already has a source-level no-MUI/project primitive contract for page, table, drawer frame, OA print dialog and manual dialog.
+- Runtime source in this scope has no `@mui/*` imports.
+
+Current user-visible entrypoint matrix:
+
+| Area | Current UI | Must preserve |
+| --- | --- | --- |
+| Route | `/pending-invoices` inside App Shell | Same route and sidebar link. |
+| Page root | `data-testid="pending-invoices-page"` | Preserve or update tests to equivalent root contract only if strictly necessary. |
+| Direction segment | `全部 <n>` / `支出 <n>` / `收入 <n>` | Same labels, counts, selected state and page reset behavior. |
+| Status filter | `筛选发票获取状态：<label>` menu | Same trigger text, direction-specific options and filter request semantics. |
+| Toolbar actions | `支出待找发票规则设置`, `收入待找发票规则设置`, `筛选内容导出`, `搜索流水`, `刷新` | Same positions in toolbar, disabled export when read model is not fresh. |
+| Main table | `待找发票四区表` | Dense four-zone table remains a table; no card conversion. |
+| Row actions | `<counterparty> 发票获取操作` menu | Actions remain collapsed under menu; no inline action clutter. |
+| Detail buttons | `流水详情 <counterparty>`, `发票详情 <invoice>`, `OA详情 <applicant>` | Same buttons and disabled OA candidate behavior. |
+| Rules drawer | `支出待找发票规则设置`, `收入待找发票规则设置` | Right drawer remains right drawer; preserve mutual exclusion, stale conflict and tag refresh merge. |
+| Relation drawer | `关系与支付明细` | Right drawer remains right drawer; preserve metrics, `历史支付流水`, `选择已有发票`. |
+| Invoice picker drawer | `选择已有进项发票` | Right drawer remains right drawer; preserve filters, candidate table, preview and confirm. |
+| Detail drawer | invoice/bank/OA detail headings such as `DIG-001` | Right drawer remains right drawer; OA print detail remains `打印选择` dialog. |
+| Export drawer | `导出预览` | Right drawer remains right drawer; preserve `导出样例`, `下载导出`, success feedback. |
+| Manual invoice | `手工补录发票` | Dialog remains dialog; preserve preview/confirm form labels and request semantics. |
+| States | loading bar, read-model warning, errors, empty table, drawer loading/error/success | Same copy and roles; do not enlarge into page-blocking hero/card states. |
+
+Table and layout requirements for PV-011:
+
+- The main table must keep four zone groups: bank/status/invoice/OA.
+- Amount columns keep right alignment and tabular nums.
+- Status/方向 tags keep stable height and do not change row height on hover or selection.
+- Counterparty, tag path, invoice number, seller, applicant and project text must truncate or wrap inside their column instead of causing horizontal overflow.
+- Row action menu popover must remain anchored to the row action trigger and must not resize the row.
+- Sticky group headers must remain visible and stable during vertical scroll.
+- Drawer simple tables (`历史支付流水`, `发票候选`, `导出样例`) keep table semantics and compact numeric alignment.
+- Avoid large cards and large whitespace; pending-invoice metric/panel surfaces should read as dense ledger side panels, not dashboards.
+
+Premium visual opportunities for PV-011:
+
+- Harmonize the page shell spacing with bank details/cost statistics premium slices: compact header, dense toolbar, no oversized panels.
+- Add motion-token hover/press feedback for direction segment buttons, toolbar buttons, status filter button/menu items, sort buttons, inline detail buttons, row action trigger/menu items, pagination buttons and drawer footer buttons.
+- Improve the four-zone table surface: subtler group colors, clearer vertical zone boundaries, more refined row hover, stable row density and less utility-table feel.
+- Polish right drawer internals: compact metric strips, lower panel emphasis, consistent drawer body gap and button feedback.
+- Polish manual dialog: compact form grid rhythm, stable preview status message and tokenized action feedback.
+- Keep all changes CSS/test/component-local; do not alter API query shape, state transitions, event emissions or business logic.
+
+Non-scope for PV-011:
+
+- Do not change pending invoice API calls, request/response shape, read model freshness behavior, domain event emissions, rules conflict handling, candidate attach flow or manual invoice flow.
+- Do not change right drawers into dialogs, inline panels or routes.
+- Do not convert the main four-zone table into cards or a generic `FinanceTable` if that loses the existing four-zone header geometry.
+- Do not change workbench internals or backend code.
+
 ## Migration Slices
 
 1. `P047-phase-6-pending-invoices-characterization-tests`

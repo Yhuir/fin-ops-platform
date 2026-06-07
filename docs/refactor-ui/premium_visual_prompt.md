@@ -537,11 +537,11 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-010-pending-invoices-discovery
 
 `PV-010-pending-invoices-discovery`
 
-读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_pending_invoices.md`、`web/src/pages/PendingInvoicesPage.tsx`、`web/src/components/pending-invoices/*`、相关 `PendingInvoices` tests 和当前 `git status`。本切片只做待找发票 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_pending_invoices.md`、`web/src/pages/PendingInvoicesPage.tsx`、`web/src/components/pendingInvoices/*`、相关 `PendingInvoices` tests 和当前 `git status`。本切片只做待找发票 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
 
 输出要求：
 
@@ -558,5 +558,56 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_pending_invoices.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Updated `docs/refactor-ui/modules/phase_6_pending_invoices.md` with current `main` discovery: page shell/toolbar, main four-zone table, drawer frame and dialogs are already project primitives with no runtime `@mui/*` imports.
+- Recorded the current user-visible entrypoint matrix for direction segment, status filter, toolbar actions, main four-zone table, row action menu, rules/relation/invoice picker/detail/export drawers, OA print dialog, manual invoice dialog and states.
+- Captured PV-011 table requirements: preserve four zone groups, sticky headers, right-aligned amounts, tabular nums, stable tags, row menu anchoring and compact drawer simple tables.
+- Identified PV-011 as a visual/interactions polish slice: compact header/toolbar, refined four-zone table surface, motion-token controls, dense right drawer internals and manual dialog rhythm.
+- Did not change runtime code and did not add tests because PV-010 is discovery-only and existing tests already lock non-MUI/project primitive contracts.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-010 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-011-pending-invoices-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_pending_invoices.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/PendingInvoicesPage.tsx`、`web/src/components/pendingInvoices/*`、`web/src/app/styles.css`、`web/src/test/PendingInvoicesPage.test.tsx` 和当前 `git status`。本切片只做 `/pending-invoices` premium visual implementation：保留现有 route、方向切换、状态筛选、规则设置、导出、搜索、刷新、分页、主四区表、行操作菜单、所有右侧抽屉、OA `打印选择` dialog、`手工补录发票` dialog、loading/error/empty/read-model-refreshing/permission 状态和所有 API 行为。禁止改后端/API/read model/worker/关联台内部工作区。
+
+实现要求：
+
+- 不做大 card 设计，不制造大留白；把 page shell、toolbar、direction segment、status filter、pagination、main four-zone table、right drawers 和 manual dialog 调整成紧凑、统一、银行明细 sample 同方向的 premium finance UI。
+- 继续使用项目 primitives：`PageScaffold`、`PageToolbar`、project native table、`AppDrawer`、`AppDialog`、`FinanceTable` value primitives；不新增依赖，不新增 MUI。
+- 主表继续是 `待找发票四区表`，保留 bank/status/invoice/OA 四个 zone group、sticky group headers、9 列结构、row action menu 和 detail buttons；不要改成 cards 或普通单区表。
+- 金额/差额列右对齐、tabular nums；方向/status/tag 稳定高度；行 hover/active 不改变行高；长供应商/项目/发票/标签文本在列内截断或换行，不造成顶层横向溢出。
+- `pending-invoices-button`、direction buttons、status filter button/menu items、sort buttons、row menu trigger/items、inline detail buttons、pagination buttons、drawer footer buttons 使用 `interaction_smoothness.md` motion tokens 做 hover/press/focus feedback；不得增加页面转场或阻塞路由。
+- 所有旧右侧抽屉仍为右侧抽屉：规则、关系、选择已有进项发票、详情、导出预览；保持 close labels、titles、footer actions and loading/error/success states。
+- `打印选择` 和 `手工补录发票` 继续是 dialogs，保留 field labels、preview/confirm/download controls and close behavior。
+- Drawer metric/panel/simple-table surfaces 应更 compact、少阴影、低卡片感；不要做 dashboard metric cards。
+- Existing tests must keep passing; add or adjust CSS contract tests only where they lock premium compact treatment and motion-token usage without testing implementation trivia.
+
+验证：
+
+- `cd web && npx vitest run PendingInvoicesPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 如 dev server 可用，浏览器 smoke `/pending-invoices`：确认 heading、direction segment、toolbar、status filter、main table、row action menu、relation/rules/export drawers、OA print dialog/manual invoice dialog 能显示/打开/关闭，无明显重叠或顶层横向溢出。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_pending_invoices.md`，精确 staging，commit 并 push 到 `origin/main`。
