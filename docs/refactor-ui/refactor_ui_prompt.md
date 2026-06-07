@@ -5878,6 +5878,7 @@ Scope: `/settings` closeout for `settingsDesign.ts` only.
   - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: passed；13 tests passed。
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `git diff --check`: passed。
+- Commit: `ad8b3d40 feat: close settings mui bridge`, pushed to `origin/refactor-ui`。
 - Next prompt generated: `MG-P106-phase-6-settings`。
 
 ### MG-P106-phase-6-settings
