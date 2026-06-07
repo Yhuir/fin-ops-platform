@@ -332,3 +332,39 @@ Scope: `CollectionStatusReminderDrawer.tsx` and `RedInvoiceRelationDrawer.tsx` o
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/common/AppDrawer.tsx、web/src/components/common/StatePanel.tsx、web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx、web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除这两个 workflow 抽屉的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Button`、`Divider`、`Drawer`、`FormControlLabel`、`IconButton`、`MenuItem`、`Radio`、`RadioGroup`、`Stack`、`TextField` 和 `Typography`。使用 `AppDrawer` 保持右侧抽屉形态，使用 project/native fields, selects, textarea, radio inputs, buttons and StatePanel error。必须保留 `aria-label`/accessible name：`收款状态和提醒`、`红蓝票关系`；保留关闭 labels `关闭收款状态抽屉`、`关闭红蓝票关系抽屉`；保留字段 labels `手动状态`、`预计收款日期`、`状态备注`、`提醒时间`、`提醒备注`、`搜索关联发票`、`关联发票候选`、`关系类型`、`确认依据`；保留 buttons `撤销手动状态`、`取消提醒`、`取消`、`保存`、`撤销人工关系 <invoiceNo>`、`确认关系`；保留 status submit payload、reminder submit payload、clear/cancel reminder calls、candidate search/filter, radio candidate labels, relation type options `红字发票`/`蓝字发票`, evidence validation, confirm/revoke payloads and disabled/submitting behavior。不得修改 page shell/table/filter/expandable, simple drawers, receipt history/receipt preview drawers, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|closes lifecycle actions"`，P072 receipt source failures 可以继续 expected-fail，但 these two workflow drawer files must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for receipt history/receipt preview drawers；运行 `cd web && npm run build`；运行 workflow drawer MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|TextField|MenuItem|FormControlLabel|RadioGroup|Radio|IconButton|DialogTitle|DialogContent|DialogActions' web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P072 receipt history and preview prompt。
 ```
+
+## P071 Execution Notes
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx`
+  - `web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx`
+  - `web/src/app/styles.css`
+- Behavior preserved:
+  - Status/reminder and red/blue relation remain right-side drawers.
+  - Field labels, close labels, action buttons, status/reminder payloads, clear/cancel calls, candidate search/filter, radio candidate labels, relation type options and confirm/revoke payloads are preserved.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|TextField|MenuItem|FormControlLabel|RadioGroup|Radio|IconButton|DialogTitle|DialogContent|DialogActions' web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|closes lifecycle actions"`: expected-fail; lifecycle behavior test passed and remaining source-level failure lists only receipt history/preview.
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail; 5 behavior tests passed and 1 source-level contract failed, limited to receipt history/preview.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P071 implementation files changed before docs.
+
+## Current Expected Failures After P071
+
+- `src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx`: cleared from source-level no-MUI failure lists.
+- `src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx`: cleared from source-level no-MUI failure lists.
+- `src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx`: lifecycle drawer/dialog remains P072.
+- `src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx`: receipt preview drawer remains P072.
+
+## P072 Prompt Draft
+
+```text
+Prompt ID: P072-phase-6-output-invoice-collections-receipt-history-and-preview
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx` only, plus necessary styles/tests. Do not migrate unrelated modules.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/StatePanel.tsx、web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx、web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 receipt history/preview 的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Box`、`Button`、`Chip`、`CircularProgress`、`Divider`、`Dialog*`、`Drawer`、`FormControl`、`FormControlLabel`、`IconButton`、`Paper`、`Radio`、`RadioGroup`、`Stack`、`TextField` 和 `Typography`。使用 `AppDrawer` 保持右侧抽屉形态，使用 `AppDialog` 保持作废/重开确认弹窗形态，使用 project/native cards, receipt preview grid/table, native radio inputs, native buttons and StatePanel。必须保留 accessible names：`已出收据历史`、`待出收据预览`、dialog labels `作废收据原因`/`重开收据原因`；保留关闭 labels `关闭已出收据历史`、`关闭待出收据预览`；保留 loading labels `正在加载已出收据历史`、`正在加载待出收据预览`；保留 history source unavailable/empty messages, receipt cards, buttons `作废收据 <no>`、`重开收据 <no>`、dialog fields `作废原因`/`重开原因`、buttons `取消`/`确认作废`/`确认重开`, reason validation, void/reissue calls, reload/onChanged behavior；保留 preview bank selection required warning, candidate radio list, receipt preview title `收 据`, company/date/payer/summary/amount/remark/uppercase/lowercase display, `创建正式收据` button disabled/submitting behavior and createReceipt call。不得修改 page shell/table/filter/expandable, previous drawers, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|opens the three right-side workflow drawers|closes lifecycle actions"`，source-level project primitive contract must fully pass；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`，must pass；运行 `cd web && npm run build`；运行 receipt drawer MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|TextField|FormControlLabel|RadioGroup|Radio|IconButton|DialogTitle|DialogContent|DialogActions|Dialog\\b|Drawer\\b|Chip' web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx; then exit 1; else exit 0; fi`；运行 full module no-MUI grep：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 `MG-P072-phase-6-output-invoice-collections` cumulative MG prompt。
+```

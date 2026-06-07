@@ -1,22 +1,11 @@
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import IconButton from "@mui/material/IconButton";
-import MenuItem from "@mui/material/MenuItem";
-import Radio from "@mui/material/Radio";
-import RadioGroup from "@mui/material/RadioGroup";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { useEffect, useMemo, useState } from "react";
 
 import type {
   OutputInvoiceCollectionRedRelationRequest,
   OutputInvoiceCollectionRow,
 } from "../../features/outputInvoiceCollections/types";
+import AppDrawer from "../common/AppDrawer";
+import StatePanel from "../common/StatePanel";
 
 type RedInvoiceRelationDrawerProps = {
   open: boolean;
@@ -74,6 +63,7 @@ export default function RedInvoiceRelationDrawer({
       })
       .slice(0, 20);
   }, [candidateRows, row, search]);
+
   const selectedCandidate = candidates.find((candidate) => candidate.id === selectedCandidateId)
     ?? candidateRows.find((candidate) => candidate.id === selectedCandidateId)
     ?? null;
@@ -117,92 +107,103 @@ export default function RedInvoiceRelationDrawer({
   };
 
   return (
-    <Drawer
-      anchor="right"
-      open={open}
+    <AppDrawer
+      className="output-invoice-collection-drawer"
+      closeLabel="关闭红蓝票关系抽屉"
+      footer={(
+        <div className="output-invoice-collection-drawer__footer-actions">
+          <button
+            className="output-invoice-collection-drawer__button"
+            disabled={submitting}
+            onClick={onClose}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--primary"
+            disabled={submitting || !selectedCandidate || !evidence.trim()}
+            onClick={handleSubmit}
+            type="button"
+          >
+            确认关系
+          </button>
+        </div>
+      )}
       onClose={onClose}
-      PaperProps={{
-        "aria-label": open ? "红蓝票关系" : undefined,
-        sx: { width: { xs: "100%", sm: 560 }, maxWidth: "100vw" },
-      }}
+      open={open}
+      subtitle={row?.invoice.displayNo || row?.invoice.invoiceNo || ""}
+      title="红蓝票关系"
+      width={560}
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
-          <div>
-            <Typography component="h2" variant="h6" fontWeight={900}>红蓝票关系</Typography>
-            <Typography variant="caption" color="text.secondary">{row?.invoice.displayNo || row?.invoice.invoiceNo || ""}</Typography>
-          </div>
-          <IconButton aria-label="关闭红蓝票关系抽屉" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ p: 2.5 }}>
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          {row?.redInvoice.summaries.length ? (
-            <Stack spacing={0.75}>
-              <Typography variant="subtitle2" fontWeight={900}>已有依据</Typography>
+      <div className="output-invoice-collection-drawer__body">
+        {error ? <StatePanel compact tone="error">{error}</StatePanel> : null}
+        {row?.redInvoice.summaries.length ? (
+          <section className="output-invoice-collection-drawer__section">
+            <h3>已有依据</h3>
+            <div className="output-invoice-collection-relation-list">
               {row.redInvoice.summaries.map((item) => (
-                <Stack key={`${item.id}:${item.source}`} direction="row" spacing={1} alignItems="center" justifyContent="space-between">
-                  <Typography variant="body2" color="text.secondary">
-                    {item.invoiceNo || item.id} / {item.source || "auto"} / {item.evidence || item.reason}
-                  </Typography>
+                <div className="output-invoice-collection-relation-list__item" key={`${item.id}:${item.source}`}>
+                  <span>{item.invoiceNo || item.id} / {item.source || "auto"} / {item.evidence || item.reason}</span>
                   {item.source === "manual" && item.relationId ? (
-                    <Button
-                      size="small"
-                      color="warning"
-                      variant="outlined"
+                    <button
+                      className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--warning"
                       disabled={submitting}
                       onClick={() => handleRevoke(item.relationId || "")}
+                      type="button"
                     >
                       撤销人工关系 {item.invoiceNo || item.id}
-                    </Button>
+                    </button>
                   ) : null}
-                </Stack>
+                </div>
               ))}
-            </Stack>
-          ) : null}
-          <TextField
-            label="搜索关联发票"
-            size="small"
-            value={search}
+            </div>
+          </section>
+        ) : null}
+        <label className="output-invoice-collection-drawer__field">
+          <span>搜索关联发票</span>
+          <input
             onChange={(event) => setSearch(event.target.value)}
             placeholder="按发票号、购方、金额或日期搜索"
+            value={search}
           />
-          <RadioGroup
-            aria-label="关联发票候选"
-            value={selectedCandidateId}
-            onChange={(event) => setSelectedCandidateId(event.target.value)}
-          >
-            <Stack spacing={1} sx={{ maxHeight: 240, overflow: "auto" }}>
-              {candidates.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">暂无匹配候选发票。</Typography>
-              ) : null}
-              {candidates.map((candidate) => {
-                const displayNo = candidate.invoice.displayNo || candidate.invoice.invoiceNo || candidate.invoiceId;
-                const label = `${displayNo} / ${candidate.invoice.buyerName || "购方为空"} / ${candidate.invoice.totalWithTax || "金额为空"} / ${candidate.invoice.issueDate || "日期为空"}`;
-                return (
-                  <FormControlLabel
-                    key={candidate.id}
+        </label>
+        <fieldset className="output-invoice-collection-candidate-list">
+          <legend>关联发票候选</legend>
+          <div className="output-invoice-collection-candidate-list__scroll">
+            {candidates.length === 0 ? (
+              <p className="output-invoice-collection-candidate-list__empty">暂无匹配候选发票。</p>
+            ) : null}
+            {candidates.map((candidate) => {
+              const displayNo = candidate.invoice.displayNo || candidate.invoice.invoiceNo || candidate.invoiceId;
+              const label = `${displayNo} / ${candidate.invoice.buyerName || "购方为空"} / ${candidate.invoice.totalWithTax || "金额为空"} / ${candidate.invoice.issueDate || "日期为空"}`;
+              return (
+                <label className="output-invoice-collection-candidate-list__option" key={candidate.id}>
+                  <input
+                    checked={selectedCandidateId === candidate.id}
+                    name="output-invoice-red-relation-candidate"
+                    onChange={(event) => setSelectedCandidateId(event.target.value)}
+                    type="radio"
                     value={candidate.id}
-                    control={<Radio size="small" />}
-                    label={label}
                   />
-                );
-              })}
-            </Stack>
-          </RadioGroup>
-          <TextField select label="关系类型" size="small" value={relationType} onChange={(event) => setRelationType(event.target.value as "red_invoice" | "blue_invoice")}>
-            <MenuItem value="red_invoice">红字发票</MenuItem>
-            <MenuItem value="blue_invoice">蓝字发票</MenuItem>
-          </TextField>
-          <TextField label="确认依据" size="small" multiline minRows={4} value={evidence} onChange={(event) => setEvidence(event.target.value)} />
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
-            <Button onClick={onClose} disabled={submitting}>取消</Button>
-            <Button variant="contained" onClick={handleSubmit} disabled={submitting || !selectedCandidate || !evidence.trim()}>确认关系</Button>
-          </Stack>
-        </Stack>
-      </Stack>
-    </Drawer>
+                  <span>{label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+        <label className="output-invoice-collection-drawer__field">
+          <span>关系类型</span>
+          <select value={relationType} onChange={(event) => setRelationType(event.target.value as "red_invoice" | "blue_invoice")}>
+            <option value="red_invoice">红字发票</option>
+            <option value="blue_invoice">蓝字发票</option>
+          </select>
+        </label>
+        <label className="output-invoice-collection-drawer__field">
+          <span>确认依据</span>
+          <textarea rows={4} value={evidence} onChange={(event) => setEvidence(event.target.value)} />
+        </label>
+      </div>
+    </AppDrawer>
   );
 }

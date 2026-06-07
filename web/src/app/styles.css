@@ -2789,7 +2789,8 @@ textarea {
 }
 
 .output-invoice-collection-drawer__field input,
-.output-invoice-collection-drawer__field select {
+.output-invoice-collection-drawer__field select,
+.output-invoice-collection-drawer__field textarea {
   width: 100%;
   min-height: 34px;
   border: 1px solid var(--fp-border);
@@ -2804,25 +2805,51 @@ textarea {
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
+.output-invoice-collection-drawer__field textarea {
+  min-height: 76px;
+  padding: var(--fp-space-2) var(--fp-space-3);
+  resize: vertical;
+}
+
 .output-invoice-collection-drawer__field select {
   appearance: auto;
 }
 
 .output-invoice-collection-drawer__field input:hover:not(:disabled),
-.output-invoice-collection-drawer__field select:hover:not(:disabled) {
+.output-invoice-collection-drawer__field select:hover:not(:disabled),
+.output-invoice-collection-drawer__field textarea:hover:not(:disabled) {
   border-color: var(--fp-border-strong);
 }
 
 .output-invoice-collection-drawer__field input:focus-visible,
-.output-invoice-collection-drawer__field select:focus-visible {
+.output-invoice-collection-drawer__field select:focus-visible,
+.output-invoice-collection-drawer__field textarea:focus-visible {
   border-color: var(--fp-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
 }
 
 .output-invoice-collection-drawer__field input:disabled,
-.output-invoice-collection-drawer__field select:disabled {
+.output-invoice-collection-drawer__field select:disabled,
+.output-invoice-collection-drawer__field textarea:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+.output-invoice-collection-drawer__section-divider {
+  height: 1px;
+  background: var(--fp-border);
+}
+
+.output-invoice-collection-drawer__section {
+  display: grid;
+  gap: var(--fp-space-2);
+}
+
+.output-invoice-collection-drawer__section h3 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 900;
 }
 
 .output-invoice-collection-drawer__footer-actions {
@@ -2866,9 +2893,86 @@ textarea {
   color: var(--fp-surface);
 }
 
+.output-invoice-collection-drawer__button--warning {
+  width: fit-content;
+  border-color: color-mix(in srgb, var(--fp-warning) 32%, var(--fp-border));
+  color: var(--fp-warning);
+}
+
+.output-invoice-collection-drawer__button--warning:hover:not(:disabled),
+.output-invoice-collection-drawer__button--warning:focus-visible {
+  border-color: var(--fp-warning);
+  background: var(--fp-warning-soft);
+  color: var(--fp-warning);
+  outline: none;
+}
+
 .output-invoice-collection-drawer__button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.output-invoice-collection-relation-list {
+  display: grid;
+  gap: var(--fp-space-2);
+}
+
+.output-invoice-collection-relation-list__item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-2);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+}
+
+.output-invoice-collection-candidate-list {
+  display: grid;
+  gap: var(--fp-space-2);
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.output-invoice-collection-candidate-list legend {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  padding: 0;
+}
+
+.output-invoice-collection-candidate-list__scroll {
+  display: grid;
+  max-height: 240px;
+  overflow: auto;
+  gap: var(--fp-space-2);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  padding: var(--fp-space-2);
+}
+
+.output-invoice-collection-candidate-list__empty {
+  margin: 0;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+}
+
+.output-invoice-collection-candidate-list__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--fp-space-2);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  font-size: var(--fp-text-body);
+  line-height: 1.35;
+}
+
+.output-invoice-collection-candidate-list__option input {
+  margin-top: 2px;
 }
 
 @media (max-width: 640px) {

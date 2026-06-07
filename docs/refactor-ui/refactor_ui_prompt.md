@@ -4097,7 +4097,7 @@ Scope: `OutputInvoiceCollectionDetailDrawer.tsx`, `CollectionStatusRulesDrawer.t
 ### P071-phase-6-output-invoice-collections-workflow-drawers
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `CollectionStatusReminderDrawer.tsx` and `RedInvoiceRelationDrawer.tsx` only, plus necessary styles/tests. Do not migrate receipt history or receipt preview drawers.
 
@@ -4121,6 +4121,52 @@ Scope: `CollectionStatusReminderDrawer.tsx` and `RedInvoiceRelationDrawer.tsx` o
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，P072 receipt drawer source failures can remain, but these two workflow drawer sources must clear。
 - Next prompt: P072 receipt history and receipt preview only after P071 implementation is verified/expected-fail documented.
+
+#### Execution Notes
+
+- Migrated collection status/reminder and red/blue invoice relation workflow drawers from MUI to `AppDrawer`, native form controls, native radio inputs and `StatePanel`.
+- Preserved right-side drawer shape, close labels, field labels, workflow buttons, status/reminder payloads, clear/cancel calls, candidate search/filter, radio candidate labels, relation type options, confirm/revoke payloads and disabled/submitting behavior.
+- Added textarea, section, relation list and candidate list styles in `web/src/app/styles.css`.
+- Did not modify page shell/table/filter/expandable, simple drawers, receipt history/receipt preview drawers, mock/API/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|TextField|MenuItem|FormControlLabel|RadioGroup|Radio|IconButton|DialogTitle|DialogContent|DialogActions' web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx web/src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|closes lifecycle actions"`: expected-fail，lifecycle behavior test passed；remaining source-level failure lists only receipt history/preview。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail，5 behavior tests passed and 1 source-level contract failed，limited to receipt history/preview。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P071 implementation files changed before docs。
+
+### P072-phase-6-output-invoice-collections-receipt-history-and-preview
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx` only, plus necessary styles/tests. Do not migrate unrelated modules.
+
+#### Prompt
+
+```text
+Prompt ID: P072-phase-6-output-invoice-collections-receipt-history-and-preview
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `ReceiptHistoryDrawer.tsx` and `ReceiptPreviewDrawer.tsx` only, plus necessary styles/tests. Do not migrate unrelated modules.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/StatePanel.tsx、web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx、web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 receipt history/preview 的 MUI imports/usages，包括 `CloseOutlinedIcon`、`Alert`、`Box`、`Button`、`Chip`、`CircularProgress`、`Divider`、`Dialog*`、`Drawer`、`FormControl`、`FormControlLabel`、`IconButton`、`Paper`、`Radio`、`RadioGroup`、`Stack`、`TextField` 和 `Typography`。使用 `AppDrawer` 保持右侧抽屉形态，使用 `AppDialog` 保持作废/重开确认弹窗形态，使用 project/native cards, receipt preview grid/table, native radio inputs, native buttons and StatePanel。必须保留 accessible names：`已出收据历史`、`待出收据预览`、dialog labels `作废收据原因`/`重开收据原因`；保留关闭 labels `关闭已出收据历史`、`关闭待出收据预览`；保留 loading labels `正在加载已出收据历史`、`正在加载待出收据预览`；保留 history source unavailable/empty messages, receipt cards, buttons `作废收据 <no>`、`重开收据 <no>`、dialog fields `作废原因`/`重开原因`、buttons `取消`/`确认作废`/`确认重开`, reason validation, void/reissue calls, reload/onChanged behavior；保留 preview bank selection required warning, candidate radio list, receipt preview title `收 据`, company/date/payer/summary/amount/remark/uppercase/lowercase display, `创建正式收据` button disabled/submitting behavior and createReceipt call。不得修改 page shell/table/filter/expandable, previous drawers, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|opens the three right-side workflow drawers|closes lifecycle actions"`，source-level project primitive contract must fully pass；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`，must pass；运行 `cd web && npm run build`；运行 receipt drawer MUI grep：`if rg -n '@mui/|Mui[A-Z]|CloseOutlinedIcon|CircularProgress|TextField|FormControlLabel|RadioGroup|Radio|IconButton|DialogTitle|DialogContent|DialogActions|Dialog\\b|Drawer\\b|Chip' web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx web/src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx; then exit 1; else exit 0; fi`；运行 full module no-MUI grep：`if rg -n '@mui/|Mui[A-Z]' web/src/pages/OutputInvoiceCollectionsPage.tsx web/src/components/outputInvoiceCollections; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 `MG-P072-phase-6-output-invoice-collections` cumulative MG prompt。
+```
+
+#### Review
+
+- Single slice: yes，receipt history and preview only。
+- Right-side drawer shape preserved via AppDrawer: required。
+- Confirmation dialog shape preserved via AppDialog: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: no，after P072 the OutputInvoiceCollections project primitive source contract and module tests must pass。
+- Next prompt: MG-P072 cumulative module gate after P072 implementation is verified.
 
 ### MG Prompt Template
 

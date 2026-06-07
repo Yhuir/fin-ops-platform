@@ -1,20 +1,12 @@
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import MenuItem from "@mui/material/MenuItem";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState } from "react";
 
 import type {
+  OutputInvoiceCollectionReminderUpdateRequest,
   OutputInvoiceCollectionRow,
   OutputInvoiceCollectionStatusUpdateRequest,
-  OutputInvoiceCollectionReminderUpdateRequest,
 } from "../../features/outputInvoiceCollections/types";
+import AppDrawer from "../common/AppDrawer";
+import StatePanel from "../common/StatePanel";
 
 type CollectionStatusReminderDrawerProps = {
   open: boolean;
@@ -116,69 +108,92 @@ export default function CollectionStatusReminderDrawer({
   };
 
   return (
-    <Drawer
-      anchor="right"
-      open={open}
+    <AppDrawer
+      className="output-invoice-collection-drawer"
+      closeLabel="关闭收款状态抽屉"
+      footer={(
+        <div className="output-invoice-collection-drawer__footer-actions">
+          <button
+            className="output-invoice-collection-drawer__button"
+            disabled={submitting}
+            onClick={onClose}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--primary"
+            disabled={submitting || !statusCode}
+            onClick={handleSubmit}
+            type="button"
+          >
+            保存
+          </button>
+        </div>
+      )}
       onClose={onClose}
-      PaperProps={{
-        "aria-label": open ? "收款状态和提醒" : undefined,
-        sx: { width: { xs: "100%", sm: 520 }, maxWidth: "100vw" },
-      }}
+      open={open}
+      subtitle={row?.invoice.displayNo || row?.invoice.invoiceNo || ""}
+      title="收款状态和提醒"
+      width={520}
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
-          <div>
-            <Typography component="h2" variant="h6" fontWeight={900}>收款状态</Typography>
-            <Typography variant="caption" color="text.secondary">{row?.invoice.displayNo || row?.invoice.invoiceNo || ""}</Typography>
-          </div>
-          <IconButton aria-label="关闭收款状态抽屉" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ p: 2.5 }}>
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          <TextField select label="手动状态" size="small" value={statusCode} onChange={(event) => setStatusCode(event.target.value)}>
+      <div className="output-invoice-collection-drawer__body">
+        {error ? <StatePanel compact tone="error">{error}</StatePanel> : null}
+        <label className="output-invoice-collection-drawer__field">
+          <span>手动状态</span>
+          <select value={statusCode} onChange={(event) => setStatusCode(event.target.value)}>
             {statusOptions.map((option) => (
-              <MenuItem key={option.code} value={option.code}>{option.label}</MenuItem>
+              <option key={option.code} value={option.code}>{option.label}</option>
             ))}
-          </TextField>
-          {row?.collectionStatus.manualOverride ? (
-            <Button variant="outlined" color="warning" onClick={handleClearStatus} disabled={submitting}>
-              撤销手动状态
-            </Button>
-          ) : null}
-          <TextField
-            label="预计收款日期"
+          </select>
+        </label>
+        {row?.collectionStatus.manualOverride ? (
+          <button
+            className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--warning"
+            disabled={submitting}
+            onClick={handleClearStatus}
+            type="button"
+          >
+            撤销手动状态
+          </button>
+        ) : null}
+        <label className="output-invoice-collection-drawer__field">
+          <span>预计收款日期</span>
+          <input
             type="date"
-            size="small"
             value={expectedCollectionDate}
             onChange={(event) => setExpectedCollectionDate(event.target.value)}
-            InputLabelProps={{ shrink: true }}
           />
-          <TextField label="状态备注" size="small" multiline minRows={3} value={statusNote} onChange={(event) => setStatusNote(event.target.value)} />
-          <Divider />
-          <TextField
-            label="提醒时间"
+        </label>
+        <label className="output-invoice-collection-drawer__field">
+          <span>状态备注</span>
+          <textarea rows={3} value={statusNote} onChange={(event) => setStatusNote(event.target.value)} />
+        </label>
+        <div className="output-invoice-collection-drawer__section-divider" />
+        <label className="output-invoice-collection-drawer__field">
+          <span>提醒时间</span>
+          <input
             type="datetime-local"
-            size="small"
             value={remindAt}
             onChange={(event) => setRemindAt(event.target.value)}
-            InputLabelProps={{ shrink: true }}
           />
-          <TextField label="提醒备注" size="small" multiline minRows={2} value={reminderNote} onChange={(event) => setReminderNote(event.target.value)} />
-          {row?.collectionStatus.reminder?.id ? (
-            <Button variant="outlined" color="warning" onClick={handleCancelReminder} disabled={submitting}>
-              取消提醒
-            </Button>
-          ) : null}
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
-            <Button onClick={onClose} disabled={submitting}>取消</Button>
-            <Button variant="contained" onClick={handleSubmit} disabled={submitting || !statusCode}>保存</Button>
-          </Stack>
-        </Stack>
-      </Stack>
-    </Drawer>
+        </label>
+        <label className="output-invoice-collection-drawer__field">
+          <span>提醒备注</span>
+          <textarea rows={2} value={reminderNote} onChange={(event) => setReminderNote(event.target.value)} />
+        </label>
+        {row?.collectionStatus.reminder?.id ? (
+          <button
+            className="output-invoice-collection-drawer__button output-invoice-collection-drawer__button--warning"
+            disabled={submitting}
+            onClick={handleCancelReminder}
+            type="button"
+          >
+            取消提醒
+          </button>
+        ) : null}
+      </div>
+    </AppDrawer>
   );
 }
 
