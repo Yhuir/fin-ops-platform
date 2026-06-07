@@ -2,12 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import MuiProviders from "../app/MuiProviders";
 import WorkbenchExceptionModal from "../components/workbench/WorkbenchExceptionModal";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { WorkbenchExceptionPreview } from "../features/workbench/exceptionTypes";
 import type { WorkbenchRecord } from "../features/workbench/types";
+import LegacyWorkbenchMuiProvider from "./legacyWorkbenchMuiProvider";
 
 const sessionValue: SessionContextValue = {
   status: "authenticated",
@@ -290,7 +290,7 @@ function renderModal({
   onClose?: () => void;
 }) {
   return render(
-    <MuiProviders>
+    <LegacyWorkbenchMuiProvider>
       <SessionContext.Provider value={sessionValue}>
         <PageSessionStateProvider>
           <WorkbenchExceptionModal
@@ -301,7 +301,7 @@ function renderModal({
           />
         </PageSessionStateProvider>
       </SessionContext.Provider>
-    </MuiProviders>,
+    </LegacyWorkbenchMuiProvider>,
   );
 }
 

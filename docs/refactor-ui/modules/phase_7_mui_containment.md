@@ -335,3 +335,36 @@ Scope: final non-workbench no-MUI source contract and legacy provider cleanup on
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/app/MuiProviders.tsx、web/src/app/muiTheme.ts、web/src/test/workbenchRenderHelpers.tsx、web/src/test/WorkbenchExceptionModal.test.tsx、web/src/app/styles.css、web/src/components/workbench/WorkbenchZone.tsx、web/src/components/workbench/WorkbenchPaneSearch.tsx、web/src/components/workbench/WorkbenchRecordCard.tsx 和当前 `rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!components/workbench/**"` 结果。添加或更新一个源代码合约测试，证明非关联台 runtime 无 `@mui/*`、`MuiProviders`、`muiTheme`、MUI X date/data-grid 或非 workbench `.Mui*` selector；允许列表只能包含冻结 workbench internals、明确命名的 test-only legacy provider/helper 和负向断言字符串。若 `web/src/app/MuiProviders.tsx` 与 `web/src/app/muiTheme.ts` 只被 workbench legacy tests 使用，则把 legacy provider 移到 `web/src/test` 下或内联到 test-only helper，并删除 app runtime provider/theme 文件；更新 `WorkbenchExceptionModal.test.tsx` 和 `workbenchRenderHelpers.tsx` 使用 test-only legacy provider。不得修改业务 runtime UI、backend、API、read model、worker 或关联台内部工作区。运行 final source contract test；运行 `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 final grep `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!components/workbench/**" --glob "!test/**"; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 MG-P113 phase 7 MUI containment prompt。
 ```
+
+## P113 Execution Notes
+
+- Prompt ID: `P113-phase-7-final-no-mui-contract`
+- Status: `verified`
+- Runtime business UI changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Runtime legacy provider cleanup:
+  - Deleted `web/src/app/MuiProviders.tsx`.
+  - Deleted `web/src/app/muiTheme.ts`.
+  - Added `web/src/test/legacyWorkbenchMuiProvider.tsx` for explicit test-only workbench legacy provider coverage.
+  - Updated `workbenchRenderHelpers.tsx` and `WorkbenchExceptionModal.test.tsx` to use the test-only legacy provider.
+- Source contract:
+  - Added `web/src/test/MuiContainment.test.ts`.
+  - Contract proves non-workbench runtime source has no MUI imports/providers/theme and that global `.Mui*` CSS is limited to documented frozen workbench containment selectors.
+- Verification:
+  - `cd web && npx vitest run MuiContainment.test.ts`: passed, 3 tests.
+  - `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 50 tests.
+  - Corrected final grep `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!web/src/components/workbench/**" --glob "!web/src/test/**" --glob "!web/src/app/styles.css"; then exit 1; else exit 0; fi`: passed. `styles.css` is covered by `MuiContainment.test.ts` because it intentionally retains documented frozen workbench selectors.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+
+## MG-P113 Prompt Draft
+
+```text
+Prompt ID: MG-P113-phase-7-mui-containment
+Phase: phase_7_mui_containment
+Type: cumulative MG
+Scope: Phase 7 MUI containment through P113.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 P107-P113 已记录并验证；确认非关联台 runtime 无 app-level MUI provider/theme、MUI X date/data-grid 或 non-workbench MUI imports；确认保留 MUI 仅限冻结 workbench internals 和 test-only legacy provider/helper。运行 `cd web && npx vitest run MuiContainment.test.ts MonthPicker.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CandidateGroupGrid.test.tsx WorkbenchColumnLayout.test.tsx`；运行 final grep `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!web/src/components/workbench/**" --glob "!web/src/test/**" --glob "!web/src/app/styles.css"; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。确认 scope 只包含 Phase 7 containment files and docs，禁止 `git add .` 和 `git add -A`，只允许精确 git add。MG 通过后将 `phase_7_mui_containment` 标记 completed，`Current Prompt ID` 推进到 phase 8 full verification discovery/prompt，commit 并 push 到 `origin/refactor-ui`，再更新 Push Log。
+```

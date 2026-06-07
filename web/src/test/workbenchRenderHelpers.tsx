@@ -1,13 +1,13 @@
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
-import MuiProviders from "../app/MuiProviders";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import ReconciliationWorkbenchPage from "../pages/ReconciliationWorkbenchPage";
+import LegacyWorkbenchMuiProvider from "./legacyWorkbenchMuiProvider";
 
 const defaultSession: SessionPayload = {
   allowed: true,
@@ -41,7 +41,7 @@ function WorkbenchPageHarness() {
 export function renderWorkbenchPage() {
   return render(
     <MemoryRouter>
-      <MuiProviders>
+      <LegacyWorkbenchMuiProvider>
         <AppChromeProvider>
           <MonthProvider>
             <SessionContext.Provider value={staticWorkbenchSession}>
@@ -51,7 +51,7 @@ export function renderWorkbenchPage() {
             </SessionContext.Provider>
           </MonthProvider>
         </AppChromeProvider>
-      </MuiProviders>
+      </LegacyWorkbenchMuiProvider>
     </MemoryRouter>,
   );
 }

@@ -1,14 +1,13 @@
-import { createTheme } from "@mui/material/styles";
-import type { zhCN as coreZhCN } from "@mui/material/locale";
+import CssBaseline from "@mui/material/CssBaseline";
 import { zhCN } from "@mui/material/locale";
+import { createTheme, ThemeProvider } from "@mui/material/styles";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { zhCN as datePickersZhCN } from "@mui/x-date-pickers/locales";
+import "dayjs/locale/zh-cn";
+import type { ReactNode } from "react";
 
-const localeLayers: [typeof coreZhCN, typeof datePickersZhCN] = [
-  zhCN,
-  datePickersZhCN,
-];
-
-export const muiTheme = createTheme(
+const legacyWorkbenchMuiTheme = createTheme(
   {
     palette: {
       mode: "light",
@@ -76,5 +75,17 @@ export const muiTheme = createTheme(
       },
     },
   },
-  ...localeLayers,
+  zhCN,
+  datePickersZhCN,
 );
+
+export default function LegacyWorkbenchMuiProvider({ children }: { children: ReactNode }) {
+  return (
+    <ThemeProvider theme={legacyWorkbenchMuiTheme}>
+      <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="zh-cn">
+        <CssBaseline />
+        {children}
+      </LocalizationProvider>
+    </ThemeProvider>
+  );
+}

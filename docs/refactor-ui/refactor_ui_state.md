@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P113-phase-7-final-no-mui-contract`
+- Current Prompt ID: `MG-P113-phase-7-mui-containment`
 - Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
@@ -54,15 +54,20 @@
 
 ## Active Checkpoint
 
-- Scope: phase 7 final no-MUI contract generated after P112 global CSS containment。
-- Files touched in P112:
-  - `web/src/app/styles.css`
+- Scope: phase 7 cumulative MG generated after P113 final no-MUI contract。
+- Files touched in P113:
+  - `web/src/app/MuiProviders.tsx`
+  - `web/src/app/muiTheme.ts`
+  - `web/src/test/legacyWorkbenchMuiProvider.tsx`
+  - `web/src/test/MuiContainment.test.ts`
+  - `web/src/test/workbenchRenderHelpers.tsx`
+  - `web/src/test/WorkbenchExceptionModal.test.tsx`
   - `docs/refactor-ui/modules/phase_7_mui_containment.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: DataGrid CSS grep passed；remaining CSS MUI hits are documented workbench legacy selectors；table/common/workbench targeted tests passed；build passed；diff check passed。
+- Verification run: MUI containment source contract passed；workbench legacy/common/HeroUI targeted tests passed；corrected final grep passed；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P113-phase-7-final-no-mui-contract`。
+- Next action: 执行 `MG-P113-phase-7-mui-containment`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +100,17 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `in_progress` | `P113-phase-7-final-no-mui-contract` | P112 global CSS containment verified；next final non-workbench no-MUI contract and legacy provider cleanup |
+| mui containment | `in_progress` | `MG-P113-phase-7-mui-containment` | P113 final no-MUI contract verified；next execute cumulative MG |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P113-phase-7-final-no-mui-contract` | `cd web && npx vitest run MuiContainment.test.ts` | passed | 3 source contract tests passed |
+| 2026-06-07 | `P113-phase-7-final-no-mui-contract` | `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 50 tests passed |
+| 2026-06-07 | `P113-phase-7-final-no-mui-contract` | corrected final non-workbench runtime MUI grep excluding workbench, tests and styles.css | passed | `styles.css` frozen workbench selectors are covered by `MuiContainment.test.ts` |
+| 2026-06-07 | `P113-phase-7-final-no-mui-contract` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P113-phase-7-final-no-mui-contract` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P112-phase-7-global-css-containment` | `if rg -n "MuiDataGrid\|DataGrid" web/src/app/styles.css; then exit 1; else exit 0; fi` | passed | Non-workbench DataGrid CSS selectors removed |
 | 2026-06-07 | `P112-phase-7-global-css-containment` | `rg -n "Mui\|@mui\|Frozen workbench legacy containment" web/src/app/styles.css` | passed | Remaining CSS MUI hits are documented frozen workbench legacy selectors |
 | 2026-06-07 | `P112-phase-7-global-css-containment` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts` | passed | 46 tests passed |
