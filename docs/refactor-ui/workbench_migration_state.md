@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `wb_phase_3_pane_search`
-- Status: `completed`
+- Phase: `wb_phase_4_record_card_actions`
+- Status: `implemented`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P-WB004-pane-search`
-- Current MG ID: `MG-WB004-pane-search`
+- Current Prompt ID: `P-WB005-record-card-actions`
+- Current MG ID: `MG-WB005-record-card-actions`
 
 ## Global Invariants
 
@@ -20,8 +20,8 @@
 | Read model / worker untouched | yes | 未修改 read model、worker、queue 或 background job |
 | App Shell untouched | yes | 本专项只处理关联台内部工作区残留 MUI |
 | Tri-pane core preserved | yes | `ResizableTriPane.tsx`、`CandidateGroupGrid.tsx` 当前无 MUI，专项规则要求不重写 |
-| User-visible workbench behavior preserved | planned | 后续 prompt 必须先补 characterization tests，再迁移控件 |
-| Prompt generated just-in-time | yes | `P-WB001` 为当前唯一执行 prompt；下一条为 `P-WB002` |
+| User-visible workbench behavior preserved | yes | `P-WB002` characterization tests 已覆盖 toolbar/search/record warning/action bubbling；后续仍需全量验证 |
+| Prompt generated just-in-time | yes | 当前只执行 `P-WB005`；下一条只生成 `P-WB006` |
 | Exact staging only | required | MG 明确禁止 `git add .` 和 `git add -A` |
 
 ## Phase Table
@@ -32,7 +32,7 @@
 | `wb_phase_1_characterization` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | WorkbenchZone/PaneSearch/RecordCard 行为 characterization tests 已补，MG-WB002 已 push |
 | `wb_phase_2_zone_header_controls` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchZone.tsx` 已迁出 MUI；MG-WB003 已 push |
 | `wb_phase_3_pane_search` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchPaneSearch.tsx` 已迁出 MUI；MG-WB004 已 push |
-| `wb_phase_4_record_card_actions` | `pending` | pending | pending | pending | 迁移 `WorkbenchRecordCard.tsx` |
+| `wb_phase_4_record_card_actions` | `implemented` | 2026-06-07 | pending MG | `passed` | `WorkbenchRecordCard.tsx` 已迁出 MUI；等待 MG-WB005 |
 | `wb_phase_5_css_containment_cleanup` | `pending` | pending | pending | pending | 清理 workbench `.Mui*` CSS |
 | `wb_phase_6_test_provider_cleanup` | `pending` | pending | pending | pending | 移除 `legacyWorkbenchMuiProvider` |
 | `wb_phase_7_dependency_cleanup` | `pending` | pending | pending | pending | 移除无用途 MUI/Emotion 依赖 |
@@ -51,7 +51,9 @@
 | `MG-WB003-zone-header-controls` | `wb_phase_2_zone_header_controls` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB004-pane-search` | `wb_phase_3_pane_search` | `extraction/refactor` | `verified` | `WorkbenchPaneSearch.tsx` MUI imports/JSX 已清理 |
 | `MG-WB004-pane-search` | `wb_phase_3_pane_search` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
-| `P-WB005-record-card-actions` | `wb_phase_4_record_card_actions` | `extraction/refactor` | `drafted` | MG-WB004 push 后执行 |
+| `P-WB005-record-card-actions` | `wb_phase_4_record_card_actions` | `extraction/refactor` | `verified` | `WorkbenchRecordCard.tsx` MUI imports/JSX 已清理 |
+| `MG-WB005-record-card-actions` | `wb_phase_4_record_card_actions` | `cumulative MG` | `pending` | 检查 scope、diff、测试、文档后精确 stage/commit/push |
+| `P-WB006-css-containment-cleanup` | `wb_phase_5_css_containment_cleanup` | `extraction/refactor` | `drafted` | MG-WB005 push 后执行 |
 
 ## Verification Log
 
@@ -78,6 +80,9 @@
 | 2026-06-07 | `P-WB004-pane-search` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P-WB004-pane-search` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-WB004-pane-search` | `git add web/src/components/workbench/WorkbenchPaneSearch.tsx web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `36253433` pushed to `origin/refactor-ui` |
+| 2026-06-07 | `P-WB005-record-card-actions` | scoped `WorkbenchRecordCard.tsx` no-MUI grep | passed | No MUI imports/JSX/sx symbols remain in `WorkbenchRecordCard.tsx` |
+| 2026-06-07 | `P-WB005-record-card-actions` | `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx` | passed | 3 files / 57 tests passed |
+| 2026-06-07 | `P-WB005-record-card-actions` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 
 ## Push Log
 
@@ -90,4 +95,4 @@
 
 ## Next Action
 
-从远端最新 `refactor-ui` 继续执行 `P-WB005-record-card-actions`。该 prompt 只迁移 `WorkbenchRecordCard.tsx` 的 warning tooltip/icon buttons，不处理 CSS cleanup、test provider 或依赖。
+执行 `MG-WB005-record-card-actions`：检查 scope、untracked files、diff、测试和文档状态，只精确 stage `P-WB005` 相关文件，commit/push 后再进入 `P-WB006-css-containment-cleanup`。

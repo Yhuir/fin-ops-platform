@@ -41,7 +41,7 @@ rg -n "^import .*@mui|from \"@mui|from '@mui|@mui/|Mui[A-Z]|\\.Mui" web/src/page
 | --- | --- | --- | --- |
 | `web/src/components/workbench/WorkbenchZone.tsx` | migrated in `P-WB003` | Semantic `div`/`span`/`button` with existing project class hooks | resolved |
 | `web/src/components/workbench/WorkbenchPaneSearch.tsx` | migrated in `P-WB004` | Native search input/button with existing project class hooks | resolved |
-| `web/src/components/workbench/WorkbenchRecordCard.tsx` | `WarningAmberRoundedIcon`, `IconButton`, `Tooltip`, `& .MuiSvgIcon-root` selectors | lucide warning/info icons + HeroUI/project tooltip/icon button classes | medium |
+| `web/src/components/workbench/WorkbenchRecordCard.tsx` | migrated in `P-WB005` | Native warning icon buttons + project tooltip classes | resolved |
 
 `web/src/pages/ReconciliationWorkbenchPage.tsx` 当前没有直接 MUI import。
 
@@ -97,7 +97,7 @@ These must remain until runtime/test references are removed, then be audited in 
 | --- | --- |
 | 0 | `web/src/components/workbench/WorkbenchZone.tsx` after `P-WB003` |
 | 0 | `web/src/components/workbench/WorkbenchPaneSearch.tsx` after `P-WB004` |
-| 5 | `web/src/components/workbench/WorkbenchRecordCard.tsx` |
+| 0 | `web/src/components/workbench/WorkbenchRecordCard.tsx` after `P-WB005` |
 | 0 | all other `web/src/components/workbench/*.tsx` files in the baseline count |
 
 ### Core Workbench Files to Preserve
@@ -244,7 +244,7 @@ Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warn
 
 Remaining direct runtime MUI target:
 
-- `web/src/components/workbench/WorkbenchRecordCard.tsx`
+- none in `web/src/components/workbench/*.tsx`
 
 ### Verification
 
@@ -253,6 +253,45 @@ if rg -n '@mui/|Mui[A-Z]|<Grow\b|<TextField\b|<InputAdornment\b|<IconButton\b|Cl
 cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchPaneFilter.test.ts WorkbenchSelection.test.tsx
 cd web && npm run build
 git diff --check
+```
+
+Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
+## P-WB005 Record Card Actions
+
+- Prompt ID: `P-WB005-record-card-actions`
+- Phase: `wb_phase_4_record_card_actions`
+- Type: `extraction/refactor`
+- Runtime changed:
+  - `web/src/components/workbench/WorkbenchRecordCard.tsx`
+- Test changed:
+  - `web/src/test/WorkbenchZone.test.tsx` source target contract now expects zero direct runtime MUI targets in workbench component files.
+- CSS changed: no.
+- Dependencies changed: no.
+- Backend/API/read model/worker changed: no.
+
+### Result
+
+`WorkbenchRecordCard.tsx` no longer imports or renders MUI components. It preserves:
+
+- amount mismatch and reconciliation warning accessible labels;
+- hover/focus/click/touch tooltip open behavior;
+- `stopPropagation` so warning/action clicks do not trigger row selection or detail opening;
+- tooltip text, warning titles and amount formatting;
+- record card layout and existing row/action behavior.
+
+Direct runtime MUI targets in `web/src/components/workbench/*.tsx` are now zero. Remaining workbench MUI cleanup is limited to:
+
+- workbench `.Mui*` selectors in `web/src/app/styles.css`;
+- test-only `legacyWorkbenchMuiProvider` and related render helpers;
+- package dependencies after no references remain.
+
+### Verification
+
+```bash
+if rg -n '@mui/|Mui[A-Z]|WarningAmberRoundedIcon|<IconButton\b|<Tooltip\b|sx=|MuiSvgIcon' web/src/components/workbench/WorkbenchRecordCard.tsx; then exit 1; else exit 0; fi
+cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx
+cd web && npm run build
 ```
 
 Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
@@ -267,7 +306,7 @@ Results: all passed. Build still reports known HeroUI/Tailwind CSS minifier warn
 3. `P-WB004-pane-search`
    - Migrate `WorkbenchPaneSearch.tsx`.
 4. `P-WB005-record-card-actions`
-   - Migrate `WorkbenchRecordCard.tsx`.
+   - Migrate `WorkbenchRecordCard.tsx`. Completed.
 5. `P-WB006-css-containment-cleanup`
    - Remove workbench `.Mui*` selectors from `styles.css`.
 6. `P-WB007-test-provider-cleanup`

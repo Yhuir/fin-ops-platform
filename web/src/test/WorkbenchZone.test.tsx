@@ -265,9 +265,7 @@ describe("WorkbenchZone", () => {
 
   test("records current workbench MUI migration targets without broadening the tri-pane core scope", () => {
     const sourceRoot = resolve(__dirname, "..");
-    const runtimeTargets = [
-      "components/workbench/WorkbenchRecordCard.tsx",
-    ];
+    const runtimeTargets: string[] = [];
     const runtimeOffenders = runtimeTargets.flatMap((path) => {
       const source = readFileSync(resolve(sourceRoot, path), "utf8");
       return /from ["']@mui\/|import\s+[^;]*@mui\/|Mui[A-Z]|\.Mui/.test(source) ? [path] : [];

@@ -388,12 +388,12 @@
   - `git commit -m "refactor: migrate workbench pane search from mui"`
   - `git push origin refactor-ui`
 
-## Next Prompt
+## Prompt History
 
 ### P-WB005-record-card-actions
 
 - Phase: `wb_phase_4_record_card_actions`
-- Status: `drafted`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 只迁移 `web/src/components/workbench/WorkbenchRecordCard.tsx` 的 MUI warning tooltip/icon buttons，不改 CSS cleanup、test provider、dependencies 或后端。
 
@@ -401,4 +401,65 @@
 
 ```text
 读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、DESIGN.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/workbench/WorkbenchRecordCard.tsx、web/src/components/workbench/RowActions.tsx、web/src/test/WorkbenchColumns.test.tsx、web/src/test/WorkbenchZone.test.tsx 和 web/src/test/CandidateGroupGrid.test.tsx。只迁移 WorkbenchRecordCard.tsx：移除 WarningAmberRoundedIcon、IconButton、Tooltip imports 和 `& .MuiSvgIcon-root` sx selectors；使用 native button + project classes + inline SVG warning icon 或 lucide AlertTriangle 替代 `BankAmountMismatchWarning` 和 `ReconciliationDecisionWarningIcon`。保留 aria-label、click/focus/hover/touch open behavior、stopPropagation、tooltip text、warning title、amount formatting、row selection/action bubbling behavior。不得迁移 RowActions，不得清理 styles.css 的 .Mui selectors，不得修改 backend/API/read model/worker。运行 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`，运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|WarningAmberRoundedIcon|<IconButton\\b|<Tooltip\\b|sx=|MuiSvgIcon' web/src/components/workbench/WorkbenchRecordCard.tsx; then exit 1; else exit 0; fi`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB006 CSS containment cleanup prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Backend/API/read model/worker untouched: yes。
+- RowActions untouched: yes。
+- CSS cleanup deferred: yes，`.Mui*` selectors 留到 `P-WB006`。
+- Dependencies untouched: yes。
+- User-visible behavior protected: yes，P-WB002 tests cover warning icon click, tooltip visibility and action bubbling isolation.
+
+#### Execution Notes
+
+- `WorkbenchRecordCard.tsx` removed MUI imports and JSX for `WarningAmberRoundedIcon`、`IconButton`、`Tooltip`.
+- `BankAmountMismatchWarning` and `ReconciliationDecisionWarningIcon` now use native icon buttons, project class hooks and an inline `WarningTriangleIcon`.
+- Preserved aria-labels, hover/focus/click/touch tooltip open behavior, `stopPropagation`, warning text, amount formatting and row selection/action bubbling behavior.
+- `WorkbenchZone.test.tsx` source target contract now expects zero direct runtime MUI targets in workbench component files.
+- Runtime/CSS/dependencies/backend/API/read model/worker changed: no, except `WorkbenchRecordCard.tsx` runtime UI component.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - scoped `WorkbenchRecordCard.tsx` no-MUI grep: passed。
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`: passed，3 files / 57 tests。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+
+### MG-WB005-record-card-actions
+
+- Phase: `wb_phase_4_record_card_actions`
+- Status: `pending`
+- Type: `cumulative MG`
+- Scope: 提交并 push `WorkbenchRecordCard.tsx` MUI migration 和专项文档更新。
+
+#### MG Prompt
+
+```text
+检查 git status --short --branch、git diff -- web/src/components/workbench/WorkbenchRecordCard.tsx web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md、git diff --check。确认只包含 P-WB005 scope。只允许精确 git add web/src/components/workbench/WorkbenchRecordCard.tsx web/src/test/WorkbenchZone.test.tsx docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md。commit message 使用 refactor: migrate workbench record card actions from mui。push 到 refactor-ui。push 后更新 workbench_migration_state.md 和 workbench_migration_prompt.md，把 MG-WB005 和 wb_phase_4_record_card_actions 标记为 verified/completed，并记录 commit hash。
+```
+
+#### Review
+
+- Scope exact: yes。
+- CSS/dependencies cleanup deferred: yes。
+- Backend/API/read model/worker untouched: yes。
+- Exact staging specified: yes。
+- Verification before commit specified: yes。
+
+## Next Prompt
+
+### P-WB006-css-containment-cleanup
+
+- Phase: `wb_phase_5_css_containment_cleanup`
+- Status: `drafted`
+- Type: `extraction/refactor`
+- Scope: 只清理 workbench 相关 `.Mui*` CSS selectors，并补齐 P-WB003/P-WB004/P-WB005 迁移后的 project class styles；不改 runtime behavior、test provider、dependencies 或后端。
+
+#### Prompt
+
+```text
+读取 docs/refactor-ui/workbench_migration_state.md、docs/refactor-ui/workbench_migration_prompt.md、docs/refactor-ui/modules/workbench_mui_migration.md、DESIGN.md、docs/refactor-ui/table_layout_system.md、web/src/app/styles.css、web/src/components/workbench/WorkbenchZone.tsx、WorkbenchPaneSearch.tsx、WorkbenchRecordCard.tsx、web/src/test/WorkbenchZone.test.tsx 和 web/src/test/WorkbenchColumns.test.tsx。只修改 web/src/app/styles.css 和必要的 source-level CSS contract tests：把 workbench `.Mui*` selectors 改为稳定 project selectors，覆盖 `.zone-title`、`.zone-selection-pill`、`.zone-selection-btn`、`.zone-toggle`、`.zone-expand-icon-btn`、`.pane-search-field`、`.pane-search-input-wrap`、`.pane-search-input-icon`、`.pane-search-clear-btn`、`.record-warning-tooltip-wrap`、`.record-warning-icon-btn`、`.record-warning-icon`、`.bank-amount-mismatch-tooltip`。保留密度、字号、间距、颜色、hover/focus/disabled/selected 状态和搜索框/警示 tooltip 的视觉位置；不得修改 backend/API/read model/worker，不得删除 legacy test provider，不得改 package dependencies。运行 CSS scoped grep `if rg -n '\\.Mui|Mui[A-Z]' web/src/app/styles.css web/src/components/workbench; then exit 1; else exit 0; fi`，运行 `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`，运行 build、git diff --check、git status。更新 state/prompt/module docs，并生成 P-WB007 test provider cleanup prompt。
 ```

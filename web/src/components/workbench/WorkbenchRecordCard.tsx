@@ -1,9 +1,5 @@
 import { memo, useState, type FocusEvent, type MouseEvent, type TouchEvent } from "react";
 
-import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
-import IconButton from "@mui/material/IconButton";
-import Tooltip from "@mui/material/Tooltip";
-
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
 import type { WorkbenchRecord, WorkbenchRecordType, WorkbenchSourceKind } from "../../features/workbench/types";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
@@ -501,33 +497,11 @@ function BankAmountMismatchWarning({ row }: { row: WorkbenchRecord }) {
   };
 
   return (
-    <Tooltip
-      arrow
-      describeChild
-      onClose={() => setOpen(false)}
-      onOpen={() => setOpen(true)}
-      open={open}
-      placement="top"
-      title={(
-        <span className="bank-amount-mismatch-tooltip" style={{ display: "grid", gap: 2 }}>
-          <strong>金额不一致</strong>
-          <span>{`银行流水金额：${formatMismatchAmount(amountCheck.bankAmount)}`}</span>
-          <span>{`OA合计：${formatMismatchAmount(amountCheck.oaAmount)}`}</span>
-          <span>{`差额：${formatMismatchAmount(amountCheck.amountDelta)}`}</span>
-          <span>{`差额说明：${relationNote || "—"}`}</span>
-        </span>
-      )}
-    >
-      <IconButton
+    <span className="record-warning-tooltip-wrap">
+      <button
         aria-label="查看金额不一致差额说明"
-        color="warning"
-        size="small"
-        sx={{
-          ml: 0.25,
-          p: 0.25,
-          verticalAlign: "middle",
-          "& .MuiSvgIcon-root": { fontSize: 16 },
-        }}
+        className="record-warning-icon-btn"
+        type="button"
         onBlur={hideTooltip}
         onClick={showTooltip}
         onFocus={showTooltip}
@@ -535,9 +509,18 @@ function BankAmountMismatchWarning({ row }: { row: WorkbenchRecord }) {
         onMouseLeave={hideTooltip}
         onTouchStart={showTooltip}
       >
-        <WarningAmberRoundedIcon fontSize="inherit" />
-      </IconButton>
-    </Tooltip>
+        <WarningTriangleIcon />
+      </button>
+      {open ? (
+        <span className="bank-amount-mismatch-tooltip" role="tooltip">
+          <strong>金额不一致</strong>
+          <span>{`银行流水金额：${formatMismatchAmount(amountCheck.bankAmount)}`}</span>
+          <span>{`OA合计：${formatMismatchAmount(amountCheck.oaAmount)}`}</span>
+          <span>{`差额：${formatMismatchAmount(amountCheck.amountDelta)}`}</span>
+          <span>{`差额说明：${relationNote || "—"}`}</span>
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -561,34 +544,11 @@ function ReconciliationDecisionWarningIcon({ row, zoneId }: { row: WorkbenchReco
   };
 
   return (
-    <Tooltip
-      arrow
-      describeChild
-      onClose={() => setOpen(false)}
-      onOpen={() => setOpen(true)}
-      open={open}
-      placement="top"
-      title={(
-        <span className="bank-amount-mismatch-tooltip" style={{ display: "grid", gap: 2 }}>
-          <strong>{reconciliationWarningTitle(warnings)}</strong>
-          {warnings.map((warning) => (
-            <span key={`${warning.code}:${warning.message}`}>
-              {warning.message || warning.code}
-            </span>
-          ))}
-        </span>
-      )}
-    >
-      <IconButton
+    <span className="record-warning-tooltip-wrap">
+      <button
         aria-label="查看自动匹配警示"
-        color="warning"
-        size="small"
-        sx={{
-          ml: 0.25,
-          p: 0.25,
-          verticalAlign: "middle",
-          "& .MuiSvgIcon-root": { fontSize: 16 },
-        }}
+        className="record-warning-icon-btn"
+        type="button"
         onBlur={hideTooltip}
         onClick={showTooltip}
         onFocus={showTooltip}
@@ -596,9 +556,35 @@ function ReconciliationDecisionWarningIcon({ row, zoneId }: { row: WorkbenchReco
         onMouseLeave={hideTooltip}
         onTouchStart={showTooltip}
       >
-        <WarningAmberRoundedIcon fontSize="inherit" />
-      </IconButton>
-    </Tooltip>
+        <WarningTriangleIcon />
+      </button>
+      {open ? (
+        <span className="bank-amount-mismatch-tooltip" role="tooltip">
+          <strong>{reconciliationWarningTitle(warnings)}</strong>
+          {warnings.map((warning) => (
+            <span key={`${warning.code}:${warning.message}`}>
+              {warning.message || warning.code}
+            </span>
+          ))}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function WarningTriangleIcon() {
+  return (
+    <svg aria-hidden="true" className="record-warning-icon" viewBox="0 0 20 20">
+      <path
+        d="M10 3.1 18 16.4H2L10 3.1Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.7"
+      />
+      <path d="M10 7.4v4.2" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <circle cx="10" cy="14.1" r="0.8" fill="currentColor" />
+    </svg>
   );
 }
 
