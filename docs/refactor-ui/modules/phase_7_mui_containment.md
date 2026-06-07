@@ -294,6 +294,7 @@ Scope: non-workbench test provider containment only.
   - `rg -n "import MuiProviders|<MuiProviders|MuiProviders" web/src/test`: passed with only explicit workbench legacy hits.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
+- Commit: `b63d25ca test: isolate mui test providers`, pushed to `origin/refactor-ui`.
 
 ## P112 Prompt Draft
 
