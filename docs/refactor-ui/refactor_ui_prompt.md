@@ -4922,6 +4922,7 @@ Scope: `/turnover-ledger` source-level and behavior guardrails only.
   - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: expected-fail；11 behavior tests passed，1 source-level contract failed against current MUI runtime。
   - `git diff --check`: passed。
   - `git status --short --branch`: passed；only P086 test file changed before docs。
+- Commit: `e8b462a7 test: characterize turnover ledger ui migration`, pushed to `origin/refactor-ui`.
 - Next prompt generated: `P087-phase-6-turnover-ledger-page-shell-tabs-summary`.
 
 ### P087-phase-6-turnover-ledger-page-shell-tabs-summary
