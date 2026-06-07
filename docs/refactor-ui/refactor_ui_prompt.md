@@ -4224,6 +4224,7 @@ Scope: OutputInvoiceCollections P066-P072 completed migration only.
 - Confirmed current uncommitted diff is limited to P072 implementation/docs files.
 - Reran full module verification and no-MUI grep.
 - Exact staging only; no `git add .` or `git add -A`.
+- Committed and pushed `60f9593b feat: migrate output invoice collection receipt drawers` to `origin/refactor-ui`.
 
 #### Verification
 

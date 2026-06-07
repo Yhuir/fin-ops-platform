@@ -435,4 +435,5 @@ Scope: OutputInvoiceCollections P066-P072 completed migration only.
   - `git status --short --branch`: passed before exact staging.
 - Result:
   - OutputInvoiceCollections runtime scope has no direct `@mui/*` imports or `.Mui*` selector residue.
+  - Commit `60f9593b feat: migrate output invoice collection receipt drawers` was pushed to `origin/refactor-ui`.
   - The next module prompt is `P073-phase-6-no-oa-bank-batches-discovery`.
