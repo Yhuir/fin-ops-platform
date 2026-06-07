@@ -753,7 +753,7 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-014-oa-pending-payments-discovery
 
 `PV-014-oa-pending-payments-discovery`
 
@@ -776,3 +776,54 @@ Notes:
 - `git status --short --branch`
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和相关模块文档，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Updated `docs/refactor-ui/modules/phase_6_oa_pending_payments.md` with current `main` premium visual discovery.
+- Linked OA pending payments in `docs/refactor-ui/module_inventory.md` to its module discovery document.
+- Recorded current user-visible entrypoints: route/sidebar, heading, header actions, query controls, main grouped table, shared filter menu, sort button, detail buttons, detail right drawer, expense rules right drawer and loading/empty/error states.
+- Captured main table requirements: preserve 10 columns, four zone groups, right-aligned tabular amount columns, stable status/direction/account tags, detail icon sizing and long text containment.
+- Identified PV-015 as a visual/interactions polish slice: compact page/query/table/pagination treatment, token-based group header washes, motion-token controls and no behavior change.
+- Did not change runtime code and did not add tests because PV-014 is discovery-only and existing `OaPendingPaymentsPage.test.tsx` already locks no-MUI/project primitive contracts and key behavior.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-014 because this slice only documents discovery and next prompt.
+
+## Next Prompt Draft
+
+`PV-015-oa-pending-payments-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_oa_pending_payments.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx`、`web/src/app/styles.css`、`web/src/test/OaPendingPaymentsPage.test.tsx` 和当前 `git status`。本切片只做 `/oa-pending-payments` premium visual implementation：保留现有 route、page header actions、query controls、main grouped table、shared `InputInvoiceUsageFilterMenu` behavior、sort behavior、detail buttons、detail right drawer、expense rules right drawer、loading/error/empty/read-model-refreshing states and all API/workflow behavior。禁止改后端/API/read model/worker/关联台内部工作区。
+
+实现要求：
+
+- 不做大 card 设计，不制造大留白；把 page shell、query toolbar、main grouped table、pagination、loading/error states and drawer-adjacent surfaces 调整成紧凑、统一、银行明细/input invoice usage 同方向的 premium finance UI。
+- 继续使用项目 primitives：`PageScaffold`、`PageToolbar`、project native dense table、`InputInvoiceUsageFilterMenu`、`InputInvoiceUsageDetailDrawer`、`PendingInvoiceRulesDrawer`；不新增依赖，不新增 MUI。
+- 主表继续是 `OA待付款核对表格`，保留 `OA情况` / `支付状态` / `支出流水` / `发票情况` 四个 group、10 列结构、shared filter menu, sort button, detail buttons and pagination controls；不要改成 cards 或普通单区表。
+- 金额列右对齐、tabular nums；payment status cell 使用 project semantic tags；date/status/direction/account tags 稳定高度；row hover 不改变行高；长 OA/project/counterparty/summary/invoice text 在列内截断或换行，不造成顶层横向溢出。
+- `oa-pending-payments-button`、query inputs/selects、sort button、detail buttons、pagination buttons、shared filter menu trigger/items 使用 `interaction_smoothness.md` motion tokens 做 hover/press/focus feedback；不得增加页面转场或阻塞路由。
+- 旧右侧抽屉仍为右侧抽屉：detail drawer and expense rules drawer；保持 close labels、titles、footer actions, loading/error/success/unavailable states。
+- Group header colors must use `DESIGN.md` / CSS token color-mix, not hard-coded one-off hex washes.
+- Existing tests must keep passing; add or adjust CSS contract tests only where they lock premium compact treatment and motion-token usage without testing implementation trivia.
+
+验证：
+
+- `cd web && npx vitest run OaPendingPaymentsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 如 dev server 可用，浏览器 smoke `/oa-pending-payments`：确认 heading、query toolbar、main grouped table、shared filter menu trigger、detail drawer and expense rules drawer can display/open/close without obvious overlap or top-level horizontal overflow。
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`，精确 staging，commit 并 push 到 `origin/main`。

@@ -43,7 +43,7 @@ Last updated: 2026-06-08
 | 11 | `PV-011-pending-invoices-premium-visual` | verified | 待找发票 premium visual slice。 |
 | 12 | `PV-012-input-invoice-usage-discovery` | verified | `/input-invoice-usage` discovery。 |
 | 13 | `PV-013-input-invoice-usage-premium-visual` | verified | 进项发票使用 premium visual slice。 |
-| 14 | `PV-014-oa-pending-payments-discovery` | pending | `/oa-pending-payments` discovery。 |
+| 14 | `PV-014-oa-pending-payments-discovery` | verified | `/oa-pending-payments` discovery。 |
 | 15 | `PV-015-oa-pending-payments-premium-visual` | pending | OA 待付款核对 premium visual slice。 |
 | 16 | `PV-016-output-invoice-collections-discovery` | pending | `/output-invoice-collections` discovery。 |
 | 17 | `PV-017-output-invoice-collections-premium-visual` | pending | 销项发票收款 premium visual slice。 |
@@ -62,28 +62,31 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-014-oa-pending-payments-discovery`
+`PV-015-oa-pending-payments-premium-visual`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/module_inventory.md`
 - `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`
 - `web/src/pages/OaPendingPaymentsPage.tsx`
-- `web/src/components/oaPendingPayments/*`
-- related `OaPendingPayments` tests
+- `web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx`
+- `web/src/app/styles.css`
+- `web/src/test/OaPendingPaymentsPage.test.tsx`
 
 ### Verification
 
-Required for PV-014:
+Required for PV-015:
 
+- `cd web && npx vitest run OaPendingPaymentsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- `git status --short --branch`
+- Browser smoke for `/oa-pending-payments` where practical.
 
-PV-014 is discovery-only. It must not change runtime code unless a very small characterization test gap is found and can be filled without behavior change.
+PV-015 is a runtime visual/interactions slice. It must preserve OA pending payments behavior and only polish the current project primitive implementation.
 
 ## Execution Rules
 
@@ -120,3 +123,5 @@ Each implementation slice must:
 | 2026-06-08 | `PV-012-input-invoice-usage-discovery` | `06b6f6e2` | pushed to `origin/main` | Input invoice usage premium discovery and PV-013 prompt generated. |
 | 2026-06-08 | `PV-012-push-log-update` | `0936770a` | pushed to `origin/main` | Recorded PV-012 push status after push. |
 | 2026-06-08 | `PV-013-input-invoice-usage-premium-visual` | `abb3d9cc` | pushed to `origin/main` | Input invoice usage premium visual polish verified; PV-014 prompt generated. |
+| 2026-06-08 | `PV-013-push-log-update` | `03cc0882` | pushed to `origin/main` | Recorded PV-013 push status after push. |
+| 2026-06-08 | `PV-014-oa-pending-payments-discovery` | pending commit | pending push | OA pending payments premium discovery and PV-015 prompt generated. |

@@ -23,6 +23,97 @@
 | Tests | `web/src/test/OaPendingPaymentsPage.test.tsx` | Route/sidebar, grouped table, search/filter/sort, detail drawers, rules drawer stability, empty/read-model refreshing states. |
 | Shared migrated dependencies | `InputInvoiceUsageFilterMenu`, `InputInvoiceUsageDetailDrawer`, `PendingInvoiceRulesDrawer` | Already migrated project primitives. Future slices must preserve their prop contracts. |
 
+## PV-014 Premium Visual Discovery
+
+Prompt ID: `PV-014-oa-pending-payments-discovery`
+
+Status: verified.
+
+Current source files on `main`:
+
+- `web/src/pages/OaPendingPaymentsPage.tsx`
+- `web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx`
+- `web/src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx`
+- `web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx`
+- `web/src/components/pendingInvoices/PendingInvoiceRulesDrawer.tsx`
+- `web/src/features/oaPendingPayments/api.ts`
+- `web/src/features/oaPendingPayments/types.ts`
+- `web/src/test/OaPendingPaymentsPage.test.tsx`
+- `web/src/app/styles.css`
+
+Current implementation status on `main`:
+
+- Page shell and query toolbar already use project primitives and native controls: `PageScaffold`, `PageToolbar`, `StatePanel`, project buttons, text/month/date/select inputs and lucide icons.
+- Main `OA待付款核对表格` is a project-owned dense native grouped table.
+- Shared `InputInvoiceUsageFilterMenu` remains the table filter primitive and must keep its prop/ARIA contract for both OA pending payments and input invoice usage consumers.
+- Detail workflow reuses `InputInvoiceUsageDetailDrawer` as a right drawer.
+- Rules workflow reuses `PendingInvoiceRulesDrawer` with `direction=expense`.
+- Source-level no-MUI contracts in `OaPendingPaymentsPage.test.tsx` currently pass for page and table source.
+- Runtime source in this scope has no `@mui/*` imports.
+
+Current user-visible entrypoint matrix:
+
+| Area | Current UI | Must preserve |
+| --- | --- | --- |
+| Route | `/oa-pending-payments` inside App Shell | Same route and sidebar link `OA待付款核对`. |
+| Page root | `data-testid="oa-pending-payments-page"` | Preserve root contract. |
+| Heading | `OA 待付款核对` | Same page purpose and hierarchy. |
+| Header actions | `支出流水无需开票规则设置`, `刷新` | Same toolbar positions; refresh disabled while refreshing. |
+| Query | `全页面检索`, `查询`, `月份`, `交易开始`, `交易结束`, `支付状态` | Same labels, Enter submit, status options and query behavior. |
+| Main table | `OA待付款核对表格` | Dense grouped table remains table; no card conversion. |
+| Table groups | `OA情况`, `支付状态`, `支出流水`, `发票情况` | Same group geometry and boundaries. |
+| Shared filter menu | `筛选 OA申请人` | Use API-provided options, no fabricated options, keep `menuitemcheckbox` semantics. |
+| Sorting | `交易时间 排序` | Same backend `bank_trade_time` sort field behavior. |
+| Detail buttons | `查看 OA <applicant> 详情`, `查看流水 <applicant> 详情`, `查看发票 <applicant> 详情`, relation-list labels | Same labels, disabled/unavailable behavior and target mapping. |
+| Detail drawer | `OA详情`, `支出流水详情`, `发票详情`, relation-list details | Right drawer remains right drawer and reuses `InputInvoiceUsageDetailDrawer`. |
+| Rules drawer | `支出流水无需开票规则设置` -> `PendingInvoiceRulesDrawer` | Right drawer remains right drawer; keep `direction=expense` endpoint and stable parent refresh behavior. |
+| States | loading skeleton, empty state, row empty, error, refreshing detail unavailable state | Same copy, roles and non-blocking behavior. |
+
+Main table column roles:
+
+| Group | Column | Role | Layout requirement |
+| --- | --- | --- | --- |
+| `OA情况` | `OA申请人` | identity + detail | Primary applicant bold; detail icon stable 24px; application type tag below. |
+| `OA情况` | `项目名称` | description | Long project names wrap/clamp inside column; no page overflow. |
+| `OA情况` | `金额` | amount | Right aligned, tabular nums. |
+| `支付状态` | `支付状态` | status | Centered stable status tag; semantic tone from backend severity. |
+| `支出流水` | `对方户名/交易时间` | identity/date | Counterparty primary, trade time stable tag below. |
+| `支出流水` | `金额/账户` | amount + direction + detail | Right aligned, tabular nums, direction tag and detail icon stable. |
+| `支出流水` | `摘要/备注` | description | Multi-line clamped text; no row width expansion. |
+| `发票情况` | `发票号码/发票方` | identity + detail | Invoice number primary, seller label/value below. |
+| `发票情况` | `日期` | date | Centered date text. |
+| `发票情况` | `价税合计` | amount | Right aligned, tabular nums. |
+
+Premium visual opportunities for PV-015:
+
+- Replace remaining hard-coded OA pending group header colors with `DESIGN.md` token-based washes.
+- Add `interaction_smoothness.md` motion tokens to page buttons, query inputs, status/select controls, table sort/detail buttons, pagination buttons and shared filter menu affordances in this page context.
+- Tighten loading skeleton radius, alert radius, table viewport, pagination and query toolbar density to match the bank details/input invoice usage premium direction.
+- Keep the 10-column table and group boundaries, but refine sticky headers and hover states so the table feels like a complete product surface rather than a migrated utility table.
+- Do not change `InputInvoiceUsageFilterMenu`, `InputInvoiceUsageDetailDrawer` or `PendingInvoiceRulesDrawer` behavior; only style context and OA pending table/page classes unless a small shared CSS rule is necessary and covered by existing tests.
+
+Non-scope for PV-015:
+
+- Do not change OA pending payments API calls, request/response shape, read model status handling, filter-options behavior, detail endpoints, or pending invoice rules save behavior.
+- Do not alter `direction=expense` when opening rules.
+- Do not add new row actions, remove existing detail buttons, or convert drawers/dialogs into another shape.
+- Do not change workbench internals or backend code.
+
+Existing premium test coverage:
+
+- `OaPendingPaymentsPage.test.tsx`
+  - Source-level no-MUI/project primitive contract.
+  - Sidebar route, page heading, grouped table headers, column labels, search, filter and sort behavior.
+  - OA/bank/invoice/relation detail right drawers.
+  - Expense rules drawer endpoint and stability during parent refresh.
+  - Empty/read-model-refreshing list state and refreshing detail unavailable state.
+
+Recommended PV-015 CSS contract coverage:
+
+- Compact page/table/loading/drawer-adjacent surface treatment.
+- Motion-token use for `oa-pending-payments-button`, field controls, sort/detail buttons and pagination buttons.
+- Token-based group header background treatment for `OA情况`, `支付状态`, `支出流水`, `发票情况`.
+
 ## Current MUI Inventory
 
 | File | Current MUI usage | Target |
