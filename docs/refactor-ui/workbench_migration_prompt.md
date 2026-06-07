@@ -431,7 +431,7 @@
 ### MG-WB005-record-card-actions
 
 - Phase: `wb_phase_4_record_card_actions`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push `WorkbenchRecordCard.tsx` MUI migration 和专项文档更新。
 
@@ -448,6 +448,30 @@
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
 - Verification before commit specified: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `web/src/components/workbench/WorkbenchRecordCard.tsx`
+  - `web/src/test/WorkbenchZone.test.tsx`
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `d3edb0aa refactor: migrate workbench record card actions from mui`
+- Push: `origin/refactor-ui`
+- CSS/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - scoped `WorkbenchRecordCard.tsx` no-MUI grep。
+  - scoped workbench runtime no-MUI grep for `WorkbenchZone.tsx`、`WorkbenchPaneSearch.tsx`、`WorkbenchRecordCard.tsx`。
+  - `cd web && npx vitest run WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `git commit -m "refactor: migrate workbench record card actions from mui"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 
