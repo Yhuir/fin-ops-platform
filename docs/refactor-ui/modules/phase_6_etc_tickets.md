@@ -333,6 +333,7 @@ Scope: `/etc-tickets` dialog contents, OA status/detection panel, page feedback,
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P098 page/style files changed before docs.
+- Commit: `071e3f98 feat: complete etc tickets ui migration`, pushed to `origin/refactor-ui`.
 
 ## MG-P098 Prompt Draft
 
