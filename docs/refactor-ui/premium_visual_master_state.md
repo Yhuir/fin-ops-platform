@@ -42,7 +42,7 @@ Last updated: 2026-06-08
 | 10 | `PV-010-pending-invoices-discovery` | verified | `/pending-invoices` discovery。 |
 | 11 | `PV-011-pending-invoices-premium-visual` | verified | 待找发票 premium visual slice。 |
 | 12 | `PV-012-input-invoice-usage-discovery` | verified | `/input-invoice-usage` discovery。 |
-| 13 | `PV-013-input-invoice-usage-premium-visual` | pending | 进项发票使用 premium visual slice。 |
+| 13 | `PV-013-input-invoice-usage-premium-visual` | verified | 进项发票使用 premium visual slice。 |
 | 14 | `PV-014-oa-pending-payments-discovery` | pending | `/oa-pending-payments` discovery。 |
 | 15 | `PV-015-oa-pending-payments-premium-visual` | pending | OA 待付款核对 premium visual slice。 |
 | 16 | `PV-016-output-invoice-collections-discovery` | pending | `/output-invoice-collections` discovery。 |
@@ -62,34 +62,28 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-013-input-invoice-usage-premium-visual`
+`PV-014-oa-pending-payments-discovery`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/premium_visual_master_state.md`
-- `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
-- `web/src/pages/InputInvoiceUsagePage.tsx`
-- `web/src/components/inputInvoiceUsage/*`
-- `web/src/app/styles.css`
-- `web/src/test/InputInvoiceUsagePage.test.tsx`
-- `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`
+- `docs/refactor-ui/module_inventory.md`
+- `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`
+- `web/src/pages/OaPendingPaymentsPage.tsx`
+- `web/src/components/oaPendingPayments/*`
+- related `OaPendingPayments` tests
 
 ### Verification
 
-Required for PV-013:
+Required for PV-014:
 
-- `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
 - `git diff --check`
 - `rg` no keepalive/snapshot/scroll-session forbidden terms in current facts.
 - `rg` no non-workbench runtime MUI imports.
-- Browser smoke for `/input-invoice-usage` where practical.
+- `git status --short --branch`
 
-PV-013 is a runtime visual/interactions slice. It must preserve InputInvoiceUsage behavior and only polish the current project primitive implementation.
+PV-014 is discovery-only. It must not change runtime code unless a very small characterization test gap is found and can be filled without behavior change.
 
 ## Execution Rules
 
@@ -124,3 +118,5 @@ Each implementation slice must:
 | 2026-06-08 | `PV-011-pending-invoices-premium-visual` | `bcc292f1` | pushed to `origin/main` | Pending invoices premium visual polish verified; PV-012 prompt generated. |
 | 2026-06-08 | `PV-011-push-log-update` | `b467f9e2` | pushed to `origin/main` | Recorded PV-011 push status after push. |
 | 2026-06-08 | `PV-012-input-invoice-usage-discovery` | `06b6f6e2` | pushed to `origin/main` | Input invoice usage premium discovery and PV-013 prompt generated. |
+| 2026-06-08 | `PV-012-push-log-update` | `0936770a` | pushed to `origin/main` | Recorded PV-012 push status after push. |
+| 2026-06-08 | `PV-013-input-invoice-usage-premium-visual` | pending commit | pending push | Input invoice usage premium visual polish verified; PV-014 prompt generated. |

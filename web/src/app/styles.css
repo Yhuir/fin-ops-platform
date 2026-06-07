@@ -250,7 +250,7 @@ textarea {
   font-size: var(--fp-text-body);
   outline: none;
   padding: 0 var(--fp-space-3);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-search input:hover {
@@ -277,7 +277,7 @@ textarea {
   font-weight: 700;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
   white-space: nowrap;
 }
 
@@ -291,6 +291,10 @@ textarea {
 
 .input-invoice-usage-button:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.input-invoice-usage-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .input-invoice-usage-button--primary {
@@ -320,7 +324,7 @@ textarea {
   height: 96px;
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: linear-gradient(90deg, var(--fp-surface-muted), var(--fp-surface), var(--fp-surface-muted));
   background-size: 240% 100%;
   animation: input-invoice-usage-loading 1.2s ease-in-out infinite;
@@ -345,14 +349,16 @@ textarea {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
 .input-invoice-usage-table-shell {
   width: 100%;
+  max-height: calc(100vh - 188px);
+  min-height: 300px;
   min-width: 0;
-  overflow-x: hidden;
+  overflow: auto;
 }
 
 .input-invoice-usage-table {
@@ -434,20 +440,20 @@ textarea {
 }
 
 .input-invoice-usage-table-group-header--invoice {
-  background: #f6fbf8;
+  background: color-mix(in srgb, var(--fp-success-soft) 58%, var(--fp-surface));
 }
 
 .input-invoice-usage-table-group-header--payment,
 .input-invoice-usage-table-cell--payment {
-  background: rgba(255, 193, 7, 0.14);
+  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
 }
 
 .input-invoice-usage-table-group-header--oa {
-  background: #f8fafc;
+  background: color-mix(in srgb, var(--fp-surface-muted) 58%, var(--fp-surface));
 }
 
 .input-invoice-usage-table-group-header--bank {
-  background: #f5f9ff;
+  background: color-mix(in srgb, var(--fp-primary-soft) 64%, var(--fp-surface));
 }
 
 .input-invoice-usage-table-cell {
@@ -458,6 +464,10 @@ textarea {
   overflow-wrap: anywhere;
   padding: 8px var(--fp-table-cell-padding-x);
   vertical-align: top;
+}
+
+.input-invoice-usage-table-row {
+  transition: background var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-table-row:hover .input-invoice-usage-table-cell {
@@ -547,6 +557,7 @@ textarea {
   font-weight: 700;
   line-height: 1.1;
   padding: 2px 7px;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-tag--warning {
@@ -587,6 +598,7 @@ textarea {
   font-weight: 800;
   line-height: 1;
   padding: 1px 5px;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .input-invoice-usage-table-action--icon {
@@ -602,6 +614,11 @@ textarea {
   border-color: var(--fp-primary);
   background: var(--fp-primary-soft);
   outline: none;
+}
+
+.input-invoice-usage-table-action:active,
+.input-invoice-usage-expandable-cell-text__button:active {
+  transform: translateY(1px);
 }
 
 .input-invoice-usage-expandable-cell-text {
@@ -656,6 +673,7 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   padding: 0 var(--fp-space-2);
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-pagination-range {
@@ -680,6 +698,7 @@ textarea {
   font-size: var(--fp-text-label);
   font-weight: 700;
   padding: 0 var(--fp-space-2);
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .input-invoice-usage-pagination-actions button:hover:not(:disabled),
@@ -693,6 +712,10 @@ textarea {
 .input-invoice-usage-pagination-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.input-invoice-usage-pagination-actions button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .input-invoice-usage-filter-menu {
@@ -717,6 +740,7 @@ textarea {
   font-weight: 800;
   line-height: 1;
   padding: 0 5px;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .input-invoice-usage-filter-menu__trigger span {
@@ -733,6 +757,10 @@ textarea {
   background: var(--fp-primary-soft);
   color: var(--fp-primary-hover);
   outline: none;
+}
+
+.input-invoice-usage-filter-menu__trigger:active {
+  transform: translateY(1px);
 }
 
 .input-invoice-usage-filter-menu__panel {
@@ -752,6 +780,19 @@ textarea {
   color: var(--fp-text-primary);
   padding: var(--fp-space-1) 0;
   text-align: left;
+  animation: input-invoice-usage-menu-in var(--motion-base) var(--ease-out-quart);
+}
+
+@keyframes input-invoice-usage-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .input-invoice-usage-filter-menu__header {
@@ -793,6 +834,7 @@ textarea {
   line-height: 1.25;
   padding: 0 var(--fp-space-3);
   text-align: left;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-filter-menu__item:hover:not(.input-invoice-usage-filter-menu__item--disabled),
@@ -832,7 +874,7 @@ textarea {
 
 .input-invoice-usage-drawer-body {
   display: grid;
-  gap: var(--fp-space-4);
+  gap: var(--fp-space-3);
 }
 
 .input-invoice-usage-drawer-loading {
@@ -862,7 +904,7 @@ textarea {
   display: grid;
   gap: 2px;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   font-size: var(--fp-text-body);
   line-height: 1.45;
   padding: var(--fp-space-3);
@@ -900,9 +942,9 @@ textarea {
 .input-invoice-usage-export-summary,
 .input-invoice-usage-export-sample {
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  padding: var(--fp-space-4);
+  padding: var(--fp-space-3);
 }
 
 .input-invoice-usage-detail-section h3,
@@ -917,8 +959,8 @@ textarea {
 .input-invoice-usage-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--fp-space-3);
-  margin-top: var(--fp-space-3);
+  gap: var(--fp-space-2);
+  margin-top: var(--fp-space-2);
 }
 
 .input-invoice-usage-detail-field {
@@ -1010,7 +1052,7 @@ textarea {
 .input-invoice-usage-rules-table-shell,
 .input-invoice-usage-rules-section {
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
 }
 
@@ -1028,7 +1070,7 @@ textarea {
 .input-invoice-usage-rules-table th,
 .input-invoice-usage-rules-table td {
   border-bottom: 1px solid var(--fp-border);
-  padding: var(--fp-space-3);
+  padding: var(--fp-space-2) var(--fp-space-3);
   text-align: left;
   vertical-align: top;
 }
@@ -1085,7 +1127,7 @@ textarea {
   line-height: 1.35;
   outline: none;
   padding: var(--fp-space-2);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-rules-field select {
@@ -1111,8 +1153,8 @@ textarea {
 
 .input-invoice-usage-rules-section {
   display: grid;
-  gap: var(--fp-space-3);
-  padding: var(--fp-space-4);
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3);
 }
 
 .input-invoice-usage-rules-section h3 {
@@ -1148,7 +1190,7 @@ textarea {
 .input-invoice-usage-oa-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--fp-space-3);
+  gap: var(--fp-space-2);
 }
 
 .input-invoice-usage-oa-metric,
@@ -1156,9 +1198,9 @@ textarea {
   display: grid;
   gap: var(--fp-space-1);
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  padding: var(--fp-space-3);
+  padding: var(--fp-space-2) var(--fp-space-3);
 }
 
 .input-invoice-usage-oa-metric span {
@@ -1194,6 +1236,7 @@ textarea {
   line-height: 1.35;
   padding: var(--fp-space-2);
   text-align: left;
+  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-oa-select:hover,
@@ -1228,6 +1271,7 @@ textarea {
   font-weight: 700;
   padding: var(--fp-space-2) var(--fp-space-3);
   text-align: left;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
 
 .input-invoice-usage-oa-option:hover,
@@ -1249,9 +1293,9 @@ textarea {
   align-items: center;
   gap: var(--fp-space-2);
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  padding: var(--fp-space-3);
+  padding: var(--fp-space-2) var(--fp-space-3);
 }
 
 .input-invoice-usage-oa-group strong {

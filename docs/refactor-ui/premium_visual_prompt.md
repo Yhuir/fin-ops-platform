@@ -691,7 +691,7 @@ Notes:
 
 - Code tests were not run for PV-012 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-013-input-invoice-usage-premium-visual
 
 `PV-013-input-invoice-usage-premium-visual`
 
@@ -719,3 +719,57 @@ Notes:
 - 如 dev server 可用，浏览器 smoke `/input-invoice-usage`：确认 heading、query toolbar、main grouped table、detail drawer、export drawer、payment rules drawer、OA reverse drawer 能显示/打开/关闭，无明显重叠或顶层横向溢出。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Tightened `/input-invoice-usage` table frame, table viewport, loading skeleton radius, drawer body rhythm and drawer section surfaces.
+- Replaced hard-coded grouped-table header washes with Ledger Calm token-based `color-mix` treatments for `进项发票` / `支付状态` / `OA` / `流水`.
+- Added motion-token hover/press/focus feedback for page buttons, query input, table detail buttons, expandable text buttons, pagination controls, filter menu trigger/items, rules fields and OA reverse controls.
+- Reduced drawer internals for detail/export/payment-rules/OA-reverse surfaces without converting them into large cards.
+- Added CSS contract coverage in `InputInvoiceUsagePage.test.tsx` for compact table/drawer treatment and motion-token usage.
+- Preserved all InputInvoiceUsage behavior: route, search/query, header actions, main grouped table, detail/export/payment-rules/OA-reverse right drawers, shared filter menu behavior, loading/error/empty/read-model-refreshing states and API/workflow behavior.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- Browser smoke for `/input-invoice-usage` with system Chrome and mocked API at `http://127.0.0.1:4180/input-invoice-usage`
+
+Browser smoke result:
+
+- Main table rendered with 6 data rows.
+- Group headers rendered: `进项发票`, `支付状态`, `OA`, `流水`.
+- Key buttons present: `以发票反提 OA`, `发票与支付状态规则设置`, `筛选内容导出`, `刷新`, `查询`.
+- Top-level body overflow: `0`; page root overflow: `0`.
+- Screenshot: `/tmp/input-invoice-usage-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-014-oa-pending-payments-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、相关 `OaPendingPayments` tests 和当前 `git status`。本切片只做 OA 待付款核对 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 新建或更新 `docs/refactor-ui/modules/phase_6_oa_pending_payments.md`，并从 `docs/refactor-ui/module_inventory.md` 链接（如未链接）。
+- 清点 `/oa-pending-payments` 的用户可见入口：页面 header actions、筛选/search、主表、共享 `InputInvoiceUsageFilterMenu`、行操作、付款/OA/银行流水详情入口、导出或批处理入口、loading/empty/error/stale/permission 状态。
+- 标明哪些元素必须功能等价保留：旧表格仍为表格，旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗，旧按钮/行操作仍在原信息层级。
+- 列出表格列角色和排版要求：金额列右对齐、tabular nums、状态/方向/tag 稳定高度，长 OA/项目/供应商/银行文本截断或换行，行 hover 不改变行高。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置，尤其共享 filter menu 的 contract 不能被破坏。
+- 生成下一条唯一 prompt：`PV-015-oa-pending-payments-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和相关模块文档，精确 staging，commit 并 push 到 `origin/main`。

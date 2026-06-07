@@ -27,6 +27,13 @@ function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
 
+function cssRule(source: string, selector: string) {
+  const normalizedSelector = selector.replace(/\\n/g, "\n");
+  const escapedSelector = normalizedSelector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "m"));
+  return match?.[1] ?? "";
+}
+
 const rowsPayload = {
   rows: [
     {
@@ -223,6 +230,34 @@ describe("Input invoice usage page", () => {
       forbiddenMuiSelectors: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("keeps premium compact table, drawer, and interaction CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const tableFrame = cssRule(styles, ".input-invoice-usage-table-frame");
+    const tableShell = cssRule(styles, ".input-invoice-usage-table-shell");
+    const button = cssRule(styles, ".input-invoice-usage-button");
+    const tableAction = cssRule(styles, ".input-invoice-usage-table-action,\\n.input-invoice-usage-expandable-cell-text__button");
+    const drawerBody = cssRule(styles, ".input-invoice-usage-drawer-body");
+    const detailSection = cssRule(styles, ".input-invoice-usage-detail-section,\\n.input-invoice-usage-export-summary,\\n.input-invoice-usage-export-sample");
+    const filterTrigger = cssRule(styles, ".input-invoice-usage-filter-menu__trigger");
+    const groupInvoice = cssRule(styles, ".input-invoice-usage-table-group-header--invoice");
+    const groupPayment = cssRule(styles, ".input-invoice-usage-table-group-header--payment,\\n.input-invoice-usage-table-cell--payment");
+    const groupBank = cssRule(styles, ".input-invoice-usage-table-group-header--bank");
+
+    expect(tableFrame).toContain("border-radius: var(--fp-radius-sm)");
+    expect(tableShell).toContain("max-height: calc(100vh - 188px)");
+    expect(tableShell).toContain("min-height: 300px");
+    expect(button).toContain("var(--motion-fast)");
+    expect(button).toContain("var(--ease-out-quart)");
+    expect(tableAction).toContain("var(--motion-fast)");
+    expect(drawerBody).toContain("gap: var(--fp-space-3)");
+    expect(detailSection).toContain("border-radius: var(--fp-radius-sm)");
+    expect(detailSection).toContain("padding: var(--fp-space-3)");
+    expect(filterTrigger).toContain("var(--motion-fast)");
+    expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
+    expect(groupPayment).toContain("color-mix(in srgb, var(--fp-warning-soft)");
+    expect(groupBank).toContain("color-mix(in srgb, var(--fp-primary-soft)");
   });
 
   test("uses a standard empty state while read model refresh details stay hidden", async () => {

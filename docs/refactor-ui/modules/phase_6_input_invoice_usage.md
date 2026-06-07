@@ -277,6 +277,46 @@ Non-scope for PV-013:
 - Do not change right drawers into dialogs, inline panels or routes.
 - Do not change workbench internals or backend code.
 
+## PV-013 Premium Visual Implementation
+
+Prompt ID: `PV-013-input-invoice-usage-premium-visual`
+
+Status: verified.
+
+Implementation summary:
+
+- Tightened the page's main table frame with compact `6px` radius, bounded table viewport and internal scroll instead of top-level horizontal overflow.
+- Replaced hard-coded group header washes with Ledger Calm token-based treatments:
+  - `进项发票`: success wash mixed with surface.
+  - `支付状态`: warning wash mixed with surface.
+  - `OA`: muted neutral wash mixed with surface.
+  - `流水`: primary wash mixed with surface.
+- Added motion-token feedback for page buttons, query input, table detail buttons, expandable-cell buttons, pagination buttons, shared filter menu trigger/items, payment-rules fields and OA reverse controls.
+- Reduced drawer body gap and detail/export/rules/OA workspace surfaces to keep the right drawers compact and table-first.
+- Preserved route, page root, toolbar actions, keyword query, main 10-column grouped table, detail buttons, expandable text, pagination, detail/export/payment-rules/OA-reverse right drawers, shared filter menu contract and all API/workflow behavior.
+
+Tests added or updated:
+
+- `web/src/test/InputInvoiceUsagePage.test.tsx`
+  - Added `keeps premium compact table, drawer, and interaction CSS contracts`.
+  - Covers compact table frame/viewport, compact drawer surfaces, token-based grouped table colors and motion-token usage.
+
+Verification:
+
+- `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`: passed, 31 tests.
+- `cd web && npx tsc -b --pretty false`: passed.
+- `cd web && npm run build`: passed with existing HeroUI/Tailwind CSS minify warnings.
+- Browser smoke for `/input-invoice-usage` using system Chrome and mocked API:
+  - Main table rendered with 6 data rows.
+  - Group headers rendered: `进项发票`, `支付状态`, `OA`, `流水`.
+  - Key buttons present: `以发票反提 OA`, `发票与支付状态规则设置`, `筛选内容导出`, `刷新`, `查询`.
+  - Top-level body overflow: `0`; page root overflow: `0`.
+  - Screenshot: `/tmp/input-invoice-usage-premium-smoke.png`.
+
+Remaining risk:
+
+- Browser smoke used mocked API data to make the table state visible. Full backend business-flow validation is covered by existing API/component tests and remains outside this visual slice.
+
 ## Migration Slices
 
 1. `P054-phase-6-input-invoice-usage-characterization-tests`
