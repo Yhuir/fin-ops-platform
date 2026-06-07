@@ -5,7 +5,7 @@
 ## Current Phase
 
 - Phase: `wb_phase_7_dependency_cleanup`
-- Status: `implemented`
+- Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P-WB008-dependency-cleanup`
@@ -35,7 +35,7 @@
 | `wb_phase_4_record_card_actions` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | `WorkbenchRecordCard.tsx` 已迁出 MUI；MG-WB005 已 push |
 | `wb_phase_5_css_containment_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | workbench `.Mui*` CSS 已清理；MG-WB006 已 push |
 | `wb_phase_6_test_provider_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | test-only legacy MUI provider 已移除；MG-WB007 已 push |
-| `wb_phase_7_dependency_cleanup` | `implemented` | 2026-06-07 | pending MG | `passed` | MUI/Emotion direct dependencies 已移除；等待 MG-WB008 |
+| `wb_phase_7_dependency_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MUI/Emotion direct dependencies 已移除；MG-WB008 已 push |
 | `wb_phase_8_full_verification` | `pending` | pending | pending | pending | 工作台专项测试、非关联台回归、build、smoke |
 | `wb_phase_9_closeout` | `pending` | pending | pending | pending | 最终 no-MUI contract、风险和 push log 收口 |
 
@@ -58,7 +58,7 @@
 | `P-WB007-test-provider-cleanup` | `wb_phase_6_test_provider_cleanup` | `extraction/refactor` | `verified` | `legacyWorkbenchMuiProvider.tsx` 已删除，测试包装已迁出 MUI |
 | `MG-WB007-test-provider-cleanup` | `wb_phase_6_test_provider_cleanup` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB008-dependency-cleanup` | `wb_phase_7_dependency_cleanup` | `extraction/refactor` | `verified` | MUI/Emotion direct dependencies and lockfile entries removed |
-| `MG-WB008-dependency-cleanup` | `wb_phase_7_dependency_cleanup` | `cumulative MG` | `pending` | 检查 scope、diff、测试、文档后精确 stage/commit/push |
+| `MG-WB008-dependency-cleanup` | `wb_phase_7_dependency_cleanup` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB009-full-verification` | `wb_phase_8_full_verification` | `cumulative verification` | `drafted` | MG-WB008 push 后执行 |
 
 ## Verification Log
@@ -109,6 +109,7 @@
 | 2026-06-07 | `P-WB008-dependency-cleanup` | `cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx` | passed | 7 files / 69 tests passed |
 | 2026-06-07 | `P-WB008-dependency-cleanup` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P-WB008-dependency-cleanup` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-WB008-dependency-cleanup` | `git add web/package.json web/package-lock.json docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `f59883c1` pushed to `origin/refactor-ui` |
 
 ## Push Log
 
@@ -121,7 +122,8 @@
 | 2026-06-07 | `MG-WB005-record-card-actions` | `d3edb0aa` | `origin/refactor-ui` | workbench record card actions migrated |
 | 2026-06-07 | `MG-WB006-css-containment-cleanup` | `25729aca` | `origin/refactor-ui` | workbench MUI CSS hooks removed |
 | 2026-06-07 | `MG-WB007-test-provider-cleanup` | `1307b159` | `origin/refactor-ui` | workbench legacy MUI test provider removed |
+| 2026-06-07 | `MG-WB008-dependency-cleanup` | `f59883c1` | `origin/refactor-ui` | MUI/Emotion dependencies removed |
 
 ## Next Action
 
-执行 `MG-WB008-dependency-cleanup`：检查 scope、untracked files、diff、测试和文档状态，只精确 stage `P-WB008` 相关文件，commit/push 后再进入 `P-WB009-full-verification`。
+从远端最新 `refactor-ui` 继续执行 `P-WB009-full-verification`。该 prompt 只执行全量验证和必要测试断言补强，不做新 UI 功能。

@@ -689,7 +689,7 @@
 ### MG-WB008-dependency-cleanup
 
 - Phase: `wb_phase_7_dependency_cleanup`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push MUI/Emotion dependency cleanup、lockfile cleanup 和专项文档更新。
 
@@ -706,6 +706,32 @@
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
 - Verification before commit specified: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `web/package.json`
+  - `web/package-lock.json`
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `f59883c1 chore: remove workbench mui dependencies`
+- Push: `origin/refactor-ui`
+- Runtime UI/CSS/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - real source import scan for MUI/Emotion。
+  - `npm uninstall @emotion/react @emotion/styled @mui/icons-material @mui/material @mui/x-data-grid @mui/x-date-pickers`
+  - `npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled`
+  - `rg -n '"@emotion/|"@mui/' web/package.json web/package-lock.json`
+  - `cd web && npx vitest run MuiContainment.test.ts WorkbenchZone.test.tsx WorkbenchColumns.test.tsx CandidateGroupGrid.test.tsx WorkbenchExceptionModal.test.tsx ProcessedExceptionsModal.test.tsx OaBankExceptionModal.test.tsx`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `git commit -m "chore: remove workbench mui dependencies"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 
