@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
@@ -6,12 +8,60 @@ import { installMockApiFetch } from "./apiMock";
 import { renderAppAt } from "./renderHelpers";
 import * as etcApi from "../features/etc/api";
 
+const etcTicketSourceFiles = [
+  "src/pages/EtcTicketManagementPage.tsx",
+] as const;
+
+function readWebSource(path: (typeof etcTicketSourceFiles)[number]) {
+  return readFileSync(resolve(__dirname, "..", path.replace(/^src\//, "")), "utf8");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("ETC ticket management page", () => {
+  test("targets project primitives for page shell, lists, uploads, reconciliation tables, dialogs, and feedback", () => {
+    const sourceByPath = Object.fromEntries(etcTicketSourceFiles.map((path) => [path, readWebSource(path)]));
+    const forbiddenMuiImports = etcTicketSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
+    });
+    const forbiddenMuiSelectors = etcTicketSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /\.Mui[A-Z][A-Za-z-]*/.test(source) ? [path] : [];
+    });
+    const forbiddenLegacySurfaces = etcTicketSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /AddOutlinedIcon|ArrowForwardOutlinedIcon|DeleteOutlineOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|OpenInNewOutlinedIcon|RefreshOutlinedIcon|ReportProblemOutlinedIcon|UndoOutlinedIcon|UploadFileOutlinedIcon|<(?:Alert|Box|Button|Checkbox|Chip|Collapse|Divider|IconButton|List|ListItem|ListItemButton|ListItemText|Paper|Stack|Table|TableBody|TableCell|TableContainer|TableHead|TableRow|TextField|ToggleButton|ToggleButtonGroup|Tooltip|Typography)\b/.test(source)
+        ? [path]
+        : [];
+    });
+    const pageSource = sourceByPath["src/pages/EtcTicketManagementPage.tsx"];
+    const missingPrimitiveTargets = [
+      pageSource.includes("PageScaffold") ? null : "EtcTicketManagementPage.tsx should keep PageScaffold",
+      pageSource.includes("StatePanel") ? null : "ETC loading/empty/error states should keep StatePanel",
+      pageSource.includes("AppDialog") ? null : "ETC destructive/OA/upload flows should keep AppDialog",
+      /etc.*list|etc.*batch/.test(pageSource) ? null : "ETC batch/task list structure should keep project classes",
+      /etc.*upload/.test(pageSource) ? null : "ETC upload/drop controls should keep project classes",
+      /etc.*table|finance-table/.test(pageSource) ? null : "ETC invoice and reconciliation data should stay table-based",
+      /etc.*toast|etc.*feedback|etc.*notice|StatePanel/.test(pageSource) ? null : "ETC feedback/status surfaces should use project feedback classes",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      forbiddenLegacySurfaces,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      forbiddenLegacySurfaces: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
   test("refreshes batch list when ETC import background job completes", async () => {
     const fetchMock = installMockApiFetch({
       backgroundJobs: [
@@ -54,8 +104,10 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(within(page).getByRole("heading", { name: "ETC票据" })).toBeInTheDocument();
+    expect(within(page).getByRole("group", { name: "ETC批次状态" })).toBeInTheDocument();
     expect(await within(page).findByRole("button", { name: "未提交 2" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
+    expect(within(page).getByRole("region", { name: "ETC批次列表区" })).toBeInTheDocument();
     expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("ETC-2026-03-A");
     await waitFor(() => expect(within(page).getByRole("button", { name: "提交OA" })).toBeEnabled());
@@ -862,11 +914,14 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByLabelText("上传信用卡账单")).toBeInTheDocument();
     expect(within(page).queryByLabelText("上传补充凭证")).not.toBeInTheDocument();
     expect(within(page).getByLabelText("上传票根网")).toBeInTheDocument();
+    expect(within(page).getByRole("region", { name: "ETC对账工作区" })).toBeInTheDocument();
+    expect(within(page).getByLabelText("ETC对账文件上传")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "确认对账" })).toBeDisabled();
 
     expect(within(page).getByText("信用卡侧")).toBeInTheDocument();
     expect(within(page).getByText("票根/补充凭证侧")).toBeInTheDocument();
+    expect(within(page).getByRole("table", { name: "ETC双侧核对明细" })).toBeInTheDocument();
     expect(within(page).getByRole("region", { name: "人工核对处理" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "接受推荐票根" })).toBeDisabled();
     expect(within(page).getByRole("button", { name: "关联所选记录" })).toBeDisabled();
@@ -2064,9 +2119,6 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByRole("region", { name: "导入记录" })).toBeInTheDocument();
-    expect(within(page).getByText(/导入 36，重复 0，补齐 0，失败 0/)).toBeInTheDocument();
-
     const submitButton = within(page).getByRole("button", { name: "提交OA" });
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);

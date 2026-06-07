@@ -5228,7 +5228,7 @@ Scope: `/etc-tickets` ETC ticket management discovery only.
 ### P093-phase-6-etc-tickets-characterization-tests
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `characterization tests`
 - Scope: `/etc-tickets` characterization tests only。
 
@@ -5250,6 +5250,47 @@ Scope: `/etc-tickets` characterization tests only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract fails until ETC runtime slices clear MUI。
+
+#### Execution Notes
+
+- Test implementation changed: yes，only `web/src/test/EtcTicketManagementPage.test.tsx`。
+- Runtime implementation changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Added source-level no-MUI/project primitive contract for ETC ticket management page。
+- Added form-factor assertions for status segmented controls, batch list region, reconciliation workspace, upload/drop control label and reconciliation table accessible name。
+- Stabilized the OA draft creation behavior test by removing a brittle import-attempt precheck unrelated to the actual submit flow。
+- Verification:
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: expected-fail；41 behavior tests passed and 1 source-level contract failed against current MUI runtime。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P093 test file changed before docs。
+- Next prompt generated: `P094-phase-6-etc-tickets-shell-filters-lists`。
+
+### P094-phase-6-etc-tickets-shell-filters-lists
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels only。
+
+#### Prompt
+
+```text
+Prompt ID: P094-phase-6-etc-tickets-shell-filters-lists
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/app/styles.css 和 web/src/components/common/PageScaffold.tsx。只迁移 `EtcTicketManagementPage.tsx` 中 page shell local wrapper、top action icons、status segmented controls、月份/车牌/信用卡任务筛选输入、左侧 `ETC批次列表区`、`ETC批次列表` 和 `ETC对账任务列表` 的 MUI icons/layout/forms/list items/buttons/chips 到 lucide icons、native/project controls and `etc-*` classes；必要时只补 `web/src/app/styles.css` 中该切片 classes。不得迁移 upload/drop blocks、reconciliation workspace tables、business batch detail tables、manual review panel、dialog contents、OA status/detection panels、feedback Alert surfaces、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。保留用户可见行为：page heading `ETC票据`、import link `导入发票`、primary action `提交OA`、status controls `未提交 2`/`已提交 1`、filter labels `月份`/`车牌`/`信用卡任务`、batch/task list accessible names, selected row behavior, task row delete/view actions, batch row delete/reopen/open-draft actions and disabled rules。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|unsubmitted mode shows batch list|submitted mode hides submit action|creates OA draft through the selected business batch"`，预期 source-level contract remains expected-fail but selected behavior tests pass；运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 41 behavior tests pass and 1 source-level contract remains expected-fail until later ETC slices；运行 scoped grep `if rg -n 'AddOutlinedIcon|ArrowForwardOutlinedIcon|DeleteOutlineOutlinedIcon|OpenInNewOutlinedIcon|RefreshOutlinedIcon|UndoOutlinedIcon|UploadFileOutlinedIcon|<ToggleButton\\b|<ToggleButtonGroup\\b|<List\\b|<ListItem\\b|<ListItemButton\\b|<ListItemText\\b|<Paper\\b|<TextField[^\\n]*(label="月份"|label="车牌"|label="信用卡任务")' web/src/pages/EtcTicketManagementPage.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P095 upload/source panels prompt。
+```
+
+#### Review
+
+- Single slice: yes，only page shell/status/filter/list panel surfaces。
+- Runtime implementation limited: yes，upload/workspace tables/detail tables/dialogs/OA feedback remain later slices。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract remains expected-fail until all ETC runtime slices clear MUI。
 
 ### MG Prompt Template
 

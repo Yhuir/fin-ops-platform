@@ -169,3 +169,33 @@ Scope: `/etc-tickets` characterization tests only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/test/EtcApi.test.ts、web/src/test/EtcOaNavigation.test.ts 和 web/src/features/etc/types.ts。只修改 `web/src/test/EtcTicketManagementPage.test.tsx`，新增 source-level no-MUI/project primitive contract 和必要的用户可见 form-factor characterization assertions。不得修改 runtime code、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。测试必须覆盖：page shell heading/actions, status segmented controls, batch/task list accessible names, upload/drop controls, reconciliation workspace/table accessible names, dialogs remain dialogs, OA detection actions, feedback/status surfaces, and existing table alignment expectations。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 source-level contract against current MUI runtime is expected-fail while existing/new behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P094 shell/filters/lists prompt。
 ```
+
+## P093 Execution Notes
+
+- Test implementation changed: yes, only `web/src/test/EtcTicketManagementPage.test.tsx`.
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Added a source-level no-MUI/project primitive contract for `EtcTicketManagementPage.tsx`.
+- Added user-visible form-factor assertions for:
+  - status segmented control group `ETC批次状态`;
+  - batch list region `ETC批次列表区`;
+  - reconciliation workspace region `ETC对账工作区`;
+  - upload/drop control label `ETC对账文件上传`;
+  - reconciliation table accessible name `ETC双侧核对明细`.
+- Stabilized the OA draft creation behavior test by removing a brittle precheck on import attempt text that was not required for the user-visible submit flow.
+- Verification:
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: expected-fail; 41 behavior tests passed and 1 source-level no-MUI/project primitive contract failed against current MUI runtime.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P093 test file changed before docs.
+
+## P094 Prompt Draft
+
+```text
+Prompt ID: P094-phase-6-etc-tickets-shell-filters-lists
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx、web/src/app/styles.css 和 web/src/components/common/PageScaffold.tsx。只迁移 `EtcTicketManagementPage.tsx` 中 page shell local wrapper、top action icons、status segmented controls、月份/车牌/信用卡任务筛选输入、左侧 `ETC批次列表区`、`ETC批次列表` 和 `ETC对账任务列表` 的 MUI icons/layout/forms/list items/buttons/chips 到 lucide icons、native/project controls and `etc-*` classes；必要时只补 `web/src/app/styles.css` 中该切片 classes。不得迁移 upload/drop blocks、reconciliation workspace tables、business batch detail tables、manual review panel、dialog contents、OA status/detection panels、feedback Alert surfaces、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。保留用户可见行为：page heading `ETC票据`、import link `导入发票`、primary action `提交OA`、status controls `未提交 2`/`已提交 1`、filter labels `月份`/`车牌`/`信用卡任务`、batch/task list accessible names, selected row behavior, task row delete/view actions, batch row delete/reopen/open-draft actions and disabled rules。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|unsubmitted mode shows batch list|submitted mode hides submit action|creates OA draft through the selected business batch"`，预期 source-level contract remains expected-fail but selected behavior tests pass；运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 41 behavior tests pass and 1 source-level contract remains expected-fail until later ETC slices；运行 scoped grep `if rg -n 'AddOutlinedIcon|ArrowForwardOutlinedIcon|DeleteOutlineOutlinedIcon|OpenInNewOutlinedIcon|RefreshOutlinedIcon|UndoOutlinedIcon|UploadFileOutlinedIcon|<ToggleButton\\b|<ToggleButtonGroup\\b|<List\\b|<ListItem\\b|<ListItemButton\\b|<ListItemText\\b|<Paper\\b|<TextField[^\\n]*(label="月份"|label="车牌"|label="信用卡任务")' web/src/pages/EtcTicketManagementPage.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P095 upload/source panels prompt。
+```
