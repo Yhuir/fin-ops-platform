@@ -5622,7 +5622,7 @@ Scope: `/settings` characterization tests only.
 ### P101-phase-6-settings-shell-navigation
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/settings` page shell, save feedback, loading/error wrappers and left settings navigation only。
 
@@ -5645,6 +5645,52 @@ Scope: `/settings` page shell, save feedback, loading/error wrappers and left se
 - Workbench internals frozen: required。
 - User-visible behavior preserved: required，left nav/tree, content regions, save/read-only/loading/error states remain equivalent。
 - Expected source-level failure allowed: yes，remaining Settings section bodies still use MUI after P101。
+
+#### Execution Notes
+
+- Runtime implementation changed:
+  - `SettingsPage.tsx` page feedback moved from MUI Alert/Box/Stack to project `StatePanel` and native layout.
+  - `SettingsTreeNav.tsx` moved from MUI List/ListItemButton/Typography to native `aside`/`ul role="tree"`/button `role="treeitem"` with preserved names, counts, selected state and `aria-controls`.
+  - `SettingsPageContent.tsx` shell/header/save/read-only feedback moved off MUI and `ThemeProvider`.
+  - `SettingsDataResetDialogs.tsx` was extracted to preserve existing destructive modal dialogs while keeping them visible to later source-level contract checks.
+  - `web/src/app/styles.css` added Settings shell/nav/header/save/inline status classes with existing `--fp-*` tokens.
+- Test implementation changed:
+  - `SettingsPage.test.tsx` includes `SettingsDataResetDialogs.tsx` in the source-level contract.
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Verification:
+  - scoped page/content/nav no-MUI grep: passed。
+  - `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|renders as a tree-and-panel page|switches the content panel|keeps workbench-only header actions|keeps read-only settings users"`: expected-fail；selected behavior tests passed, source-level contract failed only for remaining section/dialog/table/settingsDesign files。
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: expected-fail；12 behavior tests passed, 1 source-level contract failed for remaining Settings MUI runtime。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+- Next prompt generated: `P102-phase-6-settings-projects-and-bank-accounts`。
+
+### P102-phase-6-settings-projects-and-bank-accounts
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/settings` project status and bank account mapping sections only。
+
+#### Prompt
+
+```text
+Prompt ID: P102-phase-6-settings-projects-and-bank-accounts
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/settings` project status and bank account mapping sections only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/settings/SettingsProjectsSection.tsx、web/src/components/settings/SettingsBankAccountsSection.tsx、web/src/components/settings/settingsDesign.ts、web/src/test/SettingsPage.test.tsx 和 web/src/app/styles.css。只迁移项目状态 section 和银行账户映射 section：移除 MUI DataGrid、MUI Buttons/TextFields/Alerts/IconButtons/icons、settingsDataGridSx/settingsButtonSx 在这两个 section 的使用，改为原生/project table/form/button/status classes，并保持表格 form factor。不得迁移 pending invoice tags、access accounts、OA retention/import、OA invoice offset、data reset section/dialogs、OA manual search/import table 或 settings API/data logic。不得修改 API client、mock response shape、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留用户可见行为：`项目状态管理` region、`银行账户映射` region、从 OA 同步项目、新增本地项目、进行中/已完成项目双表格、完成/恢复/删除行操作、银行名称/简称/尾号输入、新增账户映射、行内编辑/删除、disabled/loading/status/error states、表格内容高密度对齐、金额/数字列若出现必须 tabular/right align。运行 selected tests `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|renders as a tree-and-panel page|switches the content panel|keeps read-only settings users"`，预期 behavior tests pass and source-level contract still fails for later Settings sections；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level contract fails only for remaining later sections/dialogs/table/settingsDesign；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|DataGrid|GridColDef|settingsDataGridSx|settingsButtonSx|DeleteOutlined|CheckCircleOutlineIcon|UndoIcon|<(Alert|Box|Button|IconButton|TextField|Typography)\\b' web/src/components/settings/SettingsProjectsSection.tsx web/src/components/settings/SettingsBankAccountsSection.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P103 access/pending tags prompt。
+```
+
+#### Review
+
+- Single slice: yes，only Settings project and bank account sections。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Table form factor preserved: required，do not turn editable tables into card lists。
+- Expected source-level failure allowed: yes，later Settings sections/dialogs/table/settingsDesign still use MUI after P102。
 
 ### MG Prompt Template
 

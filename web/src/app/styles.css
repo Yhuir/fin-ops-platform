@@ -12898,8 +12898,38 @@ body.column-layout-dragging {
   align-items: start;
 }
 
+.settings-route {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--fp-surface);
+}
+
+.settings-route-status {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .settings-state-banner {
   grid-column: 1 / -1;
+}
+
+.settings-layout {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  background: var(--fp-surface);
+}
+
+.settings-nav-shell {
+  min-width: 0;
+  padding: 12px;
+  background: var(--fp-surface-muted);
+  border-bottom: 1px solid var(--fp-border);
 }
 
 .settings-two-column-layout {
@@ -12907,6 +12937,34 @@ body.column-layout-dragging {
   grid-template-columns: minmax(240px, 0.92fr) minmax(0, 1.58fr);
   gap: 14px;
   min-height: 520px;
+}
+
+.settings-tree-nav {
+  width: 100%;
+}
+
+.settings-tree-nav__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
+.settings-tree-nav__header h2 {
+  margin: 0;
+  color: var(--fp-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.settings-tree-nav__header span {
+  color: var(--fp-text-muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .settings-tree-panel {
@@ -12918,16 +12976,42 @@ body.column-layout-dragging {
 }
 
 .settings-tree {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
   width: 100%;
+  list-style: none;
 }
 
 .settings-tree-item {
-  border-bottom: 1px solid #e7edf5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 8px 8px 16px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--fp-border);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  text-align: left;
 }
 
-.settings-tree-item.Mui-selected {
-  background: #eef6ff;
-  box-shadow: inset 3px 0 0 #0f4c81;
+.settings-tree-item:hover {
+  background: var(--fp-surface-muted);
+}
+
+.settings-tree-item:focus-visible {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: -2px;
+}
+
+.settings-tree-item[aria-selected="true"],
+.settings-tree-item--selected {
+  background: var(--fp-primary-soft);
+  border-left-color: var(--fp-primary);
 }
 
 .settings-tree-dot {
@@ -12941,14 +13025,16 @@ body.column-layout-dragging {
 }
 
 .settings-tree-copy strong {
-  font-size: 12px;
+  color: var(--fp-text-primary);
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
 .settings-tree-copy small {
-  color: #5d6d7e;
-  font-size: 11px;
+  color: var(--fp-text-secondary);
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -12958,15 +13044,160 @@ body.column-layout-dragging {
   align-items: center;
   padding: 0;
   background: none;
-  color: #0f4c81;
+  color: var(--fp-primary);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   white-space: nowrap;
 }
 
 .settings-content-panel,
 .settings-section-panel {
   min-width: 0;
+}
+
+.settings-content-panel {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: var(--fp-surface);
+}
+
+.settings-content-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--fp-border);
+}
+
+.settings-content-title {
+  min-width: 0;
+}
+
+.settings-content-title h1 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.settings-content-title p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: var(--fp-text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.settings-inline-alert {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-inline-alert--warning {
+  color: var(--fp-warning);
+  background: var(--fp-warning-soft);
+  border-color: var(--fp-warning);
+}
+
+.settings-inline-alert--success {
+  color: var(--fp-success);
+  background: var(--fp-success-soft);
+  border-color: var(--fp-success);
+}
+
+.settings-inline-alert--error {
+  color: var(--fp-danger);
+  background: var(--fp-danger-soft);
+  border-color: var(--fp-danger);
+}
+
+.settings-save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.settings-save-actions > span {
+  color: var(--fp-text-muted);
+  font-size: 12px;
+}
+
+.settings-save-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  background: var(--fp-primary);
+  color: var(--fp-surface);
+  border: 1px solid var(--fp-primary);
+  border-radius: var(--fp-radius-sm);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-save-button:hover:not(:disabled) {
+  background: var(--fp-primary-hover);
+  border-color: var(--fp-primary-hover);
+}
+
+.settings-save-button:focus-visible {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: 2px;
+}
+
+.settings-save-button:disabled {
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-muted);
+  border-color: var(--fp-border);
+  cursor: not-allowed;
+}
+
+.settings-save-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: bank-auto-tag-spin 0.8s linear infinite;
+}
+
+@media (min-width: 768px) {
+  .settings-layout {
+    grid-template-columns: 272px minmax(0, 1fr);
+  }
+
+  .settings-nav-shell {
+    padding: 16px;
+    border-right: 1px solid var(--fp-border);
+    border-bottom: 0;
+  }
+
+  .settings-content-panel {
+    padding: 24px;
+  }
+
+  .settings-content-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .settings-save-actions {
+    justify-content: flex-end;
+  }
 }
 
 .settings-nav-header h3,

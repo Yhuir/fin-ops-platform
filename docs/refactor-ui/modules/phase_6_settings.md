@@ -254,3 +254,46 @@ Scope: `/settings` page shell, save feedback, loading/error wrappers and left se
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/SettingsPage.tsx、web/src/components/settings/SettingsPageContent.tsx、web/src/components/settings/SettingsTreeNav.tsx、web/src/components/settings/settingsDesign.ts、web/src/test/SettingsPage.test.tsx 和 web/src/app/styles.css。只迁移 Settings page shell、loading/error/read-only/save feedback、primary save button、left settings nav/tree 和 content wrapper classes；不得迁移 section bodies、DataGrid/native table bodies、pending tag menu、data reset dialogs、OA manual search/import table 或 settings API/data logic。不得修改 API client、mock response shape、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留用户可见行为：`settings-page` test id, no extra legacy `关联台设置` page title/dialog, left nav remains `设置导航`, tree remains `role="tree"` with `设置分类`, treeitems keep names/selection/aria-controls, content region remains `设置内容`, section regions keep the same accessible names, read-only notice and `保存设置` disabled state stay visible, loading/error/save status messages stay equivalent. 运行 `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|renders as a tree-and-panel page|switches the content panel|keeps workbench-only header actions|keeps read-only settings users"`，预期 selected behavior tests pass and source-level contract still fails for remaining section bodies；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level contract fails for remaining Settings MUI runtime；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|ThemeProvider|settingsTheme|settingsButtonSx|settingsSectionSx|<(Alert|Box|Button|CircularProgress|List|ListItem|ListItemButton|ListItemText|Stack|Typography)\\b' web/src/pages/SettingsPage.tsx web/src/components/settings/SettingsPageContent.tsx web/src/components/settings/SettingsTreeNav.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P102 projects/bank accounts prompt。
 ```
+
+## P101 Execution Notes
+
+- Prompt ID: `P101-phase-6-settings-shell-navigation`
+- Status: `verified`
+- Runtime implementation changed:
+  - `SettingsPage.tsx` no longer imports MUI; page loading/error/success feedback uses the project `StatePanel`.
+  - `SettingsTreeNav.tsx` no longer imports MUI; the left nav is a native `aside` + `ul role="tree"` + button `role="treeitem"` structure with preserved names, counts, selection and `aria-controls`.
+  - `SettingsPageContent.tsx` no longer imports MUI for shell/header/save/read-only feedback and no longer wraps the page in `ThemeProvider`.
+  - Existing data reset dialogs were moved unchanged into `SettingsDataResetDialogs.tsx` so P101 does not migrate the destructive dialog flow prematurely; the file is tracked by the source-level contract for P104.
+  - `web/src/app/styles.css` adds Settings shell/nav/header/save/inline status classes using existing `--fp-*` tokens.
+- Test implementation changed:
+  - `SettingsPage.test.tsx` now includes `SettingsDataResetDialogs.tsx` in the source-level contract and checks the two data-reset dialog labels there.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - Scoped grep for page/content/nav MUI shell residues: passed.
+  - `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|renders as a tree-and-panel page|switches the content panel|keeps workbench-only header actions|keeps read-only settings users"`: expected-fail; selected behavior tests passed, source-level contract failed only for remaining section/dialog/table/settingsDesign files.
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: expected-fail; 12 behavior tests passed, 1 source-level contract failed for remaining Settings MUI runtime.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+- Expected remaining source-level failure files:
+  - `SettingsProjectsSection.tsx`
+  - `SettingsBankAccountsSection.tsx`
+  - `SettingsPendingInvoiceTagsSection.tsx`
+  - `SettingsOaRetentionSection.tsx`
+  - `SettingsOaInvoiceOffsetSection.tsx`
+  - `SettingsAccessAccountsSection.tsx`
+  - `SettingsDataResetSection.tsx`
+  - `SettingsDataResetDialogs.tsx`
+  - `OaManualSearchImportTable.tsx`
+  - `settingsDesign.ts`
+
+## P102 Prompt Draft
+
+```text
+Prompt ID: P102-phase-6-settings-projects-and-bank-accounts
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/settings` project status and bank account mapping sections only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/settings/SettingsProjectsSection.tsx、web/src/components/settings/SettingsBankAccountsSection.tsx、web/src/components/settings/settingsDesign.ts、web/src/test/SettingsPage.test.tsx 和 web/src/app/styles.css。只迁移项目状态 section 和银行账户映射 section：移除 MUI DataGrid、MUI Buttons/TextFields/Alerts/IconButtons/icons、settingsDataGridSx/settingsButtonSx 在这两个 section 的使用，改为原生/project table/form/button/status classes，并保持表格 form factor。不得迁移 pending invoice tags、access accounts、OA retention/import、OA invoice offset、data reset section/dialogs、OA manual search/import table 或 settings API/data logic。不得修改 API client、mock response shape、backend、read model、worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留用户可见行为：`项目状态管理` region、`银行账户映射` region、从 OA 同步项目、新增本地项目、进行中/已完成项目双表格、完成/恢复/删除行操作、银行名称/简称/尾号输入、新增账户映射、行内编辑/删除、disabled/loading/status/error states、表格内容高密度对齐、金额/数字列若出现必须 tabular/right align。运行 selected tests `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives|renders as a tree-and-panel page|switches the content panel|keeps read-only settings users"`，预期 behavior tests pass and source-level contract still fails for later Settings sections；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，预期 behavior tests pass and source-level contract fails only for remaining later sections/dialogs/table/settingsDesign；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|DataGrid|GridColDef|settingsDataGridSx|settingsButtonSx|DeleteOutlined|CheckCircleOutlineIcon|UndoIcon|<(Alert|Box|Button|IconButton|TextField|Typography)\\b' web/src/components/settings/SettingsProjectsSection.tsx web/src/components/settings/SettingsBankAccountsSection.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P103 access/pending tags prompt。
+```

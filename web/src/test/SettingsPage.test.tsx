@@ -18,6 +18,7 @@ const settingsSourceFiles = [
   "src/components/settings/SettingsOaInvoiceOffsetSection.tsx",
   "src/components/settings/SettingsAccessAccountsSection.tsx",
   "src/components/settings/SettingsDataResetSection.tsx",
+  "src/components/settings/SettingsDataResetDialogs.tsx",
   "src/components/settings/OaManualSearchImportTable.tsx",
   "src/components/settings/settingsDesign.ts",
 ] as const;
@@ -142,13 +143,14 @@ describe("Settings page", () => {
 
     const pageSource = sourceByPath["src/pages/SettingsPage.tsx"];
     const contentSource = sourceByPath["src/components/settings/SettingsPageContent.tsx"];
+    const dataResetDialogsSource = sourceByPath["src/components/settings/SettingsDataResetDialogs.tsx"];
     const oaManualTableSource = sourceByPath["src/components/settings/OaManualSearchImportTable.tsx"];
     const missingPrimitiveTargets = [
       pageSource.includes("SettingsPageContent") ? null : "SettingsPage.tsx should keep SettingsPageContent",
       contentSource.includes("SettingsTreeNav") ? null : "SettingsPageContent.tsx should keep SettingsTreeNav",
       /role=["']treeitem["']/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should preserve treeitem semantics",
       /aria-label=["']OA全量搜索导入结果["']/.test(oaManualTableSource) ? null : "OA manual search should preserve table accessible name",
-      /确认数据重置/.test(contentSource) && /OA 密码复核/.test(contentSource) ? null : "Data reset should keep two modal dialog labels",
+      /确认数据重置/.test(dataResetDialogsSource) && /OA 密码复核/.test(dataResetDialogsSource) ? null : "Data reset should keep two modal dialog labels",
     ].filter(Boolean);
 
     expect(missingPrimitiveTargets).toEqual([]);

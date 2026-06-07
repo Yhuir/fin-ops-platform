@@ -1,12 +1,3 @@
-import Box from "@mui/material/Box";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemText from "@mui/material/ListItemText";
-import Stack from "@mui/material/Stack";
-import Typography from "@mui/material/Typography";
-
-import { settingsTokens } from "./settingsDesign";
 import type { SettingsNavigationItem, SettingsSectionId } from "./types";
 
 type SettingsTreeNavProps = {
@@ -14,6 +5,10 @@ type SettingsTreeNavProps = {
   activeSectionId: SettingsSectionId;
   onSelect: (id: SettingsSectionId) => void;
 };
+
+function classNames(...values: Array<string | false | undefined>) {
+  return values.filter(Boolean).join(" ");
+}
 
 export default function SettingsTreeNav({
   items,
@@ -42,88 +37,36 @@ export default function SettingsTreeNav({
   }
 
   return (
-    <Box component="aside" aria-label="设置导航" sx={{ width: "100%" }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5, px: 0.5 }}>
-        <Typography
-          component="h2"
-          variant="caption"
-          sx={{ color: settingsTokens.textSecondary, fontWeight: 600, textTransform: "uppercase" }}
-        >
+    <aside aria-label="设置导航" className="settings-tree-nav">
+      <div className="settings-tree-nav__header">
+        <h2>
           设置分类
-        </Typography>
-        <Typography component="span" variant="caption" sx={{ color: settingsTokens.textMuted }}>
-          {items.length}
-        </Typography>
-      </Stack>
-      <List role="tree" aria-label="设置分类" dense disablePadding>
+        </h2>
+        <span>{items.length}</span>
+      </div>
+      <ul className="settings-tree" role="tree" aria-label="设置分类">
         {items.map((item) => {
           const selected = activeSectionId === item.id;
           return (
-            <ListItem key={item.id} disablePadding role="none">
-              <ListItemButton
+            <li key={item.id} role="none">
+              <button
+                className={classNames("settings-tree-item", selected && "settings-tree-item--selected")}
+                type="button"
                 aria-controls={panelId(item.id)}
                 role="treeitem"
                 aria-selected={selected}
-                selected={selected}
                 onClick={() => onSelect(item.id)}
-                sx={{
-                  position: "relative",
-                  minHeight: 56,
-                  borderRadius: 0,
-                  py: 1,
-                  pr: 1,
-                  pl: 2,
-                  borderLeft: `2px solid ${selected ? settingsTokens.primary : settingsTokens.borderSubtle}`,
-                  color: settingsTokens.textPrimary,
-                  "&:hover": {
-                    bgcolor: settingsTokens.layer01Hover,
-                  },
-                  "&.Mui-focusVisible": {
-                    outline: `2px solid ${settingsTokens.primary}`,
-                    outlineOffset: "-2px",
-                  },
-                  ...(selected
-                    ? {
-                        bgcolor: settingsTokens.selected,
-                        "&.Mui-selected": {
-                          bgcolor: settingsTokens.selected,
-                        },
-                        "&.Mui-selected:hover": {
-                          bgcolor: settingsTokens.selected,
-                        },
-                      }
-                    : {}),
-                }}
               >
-                <ListItemText
-                  primary={item.label}
-                  secondary={item.description}
-                  primaryTypographyProps={{
-                    component: "strong",
-                    variant: "body2",
-                    sx: {
-                      color: selected ? settingsTokens.textPrimary : settingsTokens.textPrimary,
-                      fontWeight: selected ? 600 : 400,
-                      letterSpacing: "0.16px",
-                    },
-                  }}
-                  secondaryTypographyProps={{
-                    component: "small",
-                    sx: { color: settingsTokens.textSecondary, fontSize: "12px", mt: 0.25 },
-                  }}
-                />
-                <Typography
-                  component="span"
-                  variant="caption"
-                  sx={{ color: selected ? settingsTokens.primary : settingsTokens.textMuted, ml: 1, fontWeight: 600 }}
-                >
-                  {item.count}
-                </Typography>
-              </ListItemButton>
-            </ListItem>
+                <span className="settings-tree-copy">
+                  <strong>{item.label}</strong>
+                  <small>{item.description}</small>
+                </span>
+                <span className="settings-tree-count">{item.count}</span>
+              </button>
+            </li>
           );
         })}
-      </List>
-    </Box>
+      </ul>
+    </aside>
   );
 }

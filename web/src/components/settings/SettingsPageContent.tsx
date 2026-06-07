@@ -1,18 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import CircularProgress from "@mui/material/CircularProgress";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import { ThemeProvider } from "@mui/material/styles";
-
 import { usePageSessionState } from "../../contexts/PageSessionStateContext";
 import { useSession } from "../../contexts/SessionContext";
 import type {
@@ -26,21 +13,13 @@ import type {
 } from "../../features/workbench/types";
 import SettingsAccessAccountsSection from "./SettingsAccessAccountsSection";
 import SettingsBankAccountsSection from "./SettingsBankAccountsSection";
+import SettingsDataResetDialogs from "./SettingsDataResetDialogs";
 import SettingsDataResetSection from "./SettingsDataResetSection";
 import SettingsOaInvoiceOffsetSection from "./SettingsOaInvoiceOffsetSection";
 import SettingsOaRetentionSection from "./SettingsOaRetentionSection";
 import SettingsPendingInvoiceTagsSection from "./SettingsPendingInvoiceTagsSection";
 import SettingsProjectsSection from "./SettingsProjectsSection";
 import SettingsTreeNav from "./SettingsTreeNav";
-import {
-  settingsButtonSx,
-  settingsContentSx,
-  settingsHeaderSx,
-  settingsLayoutSx,
-  settingsNavShellSx,
-  settingsTheme,
-  settingsTokens,
-} from "./settingsDesign";
 import type {
   DataResetActionConfig,
   DataResetStatus,
@@ -668,63 +647,53 @@ export default function SettingsPageContent({
   }
 
   return (
-    <ThemeProvider theme={settingsTheme}>
-      <Box sx={settingsLayoutSx}>
-        <Box component="nav" sx={settingsNavShellSx}>
+    <div className="settings-layout">
+        <nav className="settings-nav-shell">
           <SettingsTreeNav
             items={settingsNavigationItems}
             activeSectionId={activeSectionId}
             onSelect={setActiveSectionId}
           />
-        </Box>
+        </nav>
 
-        <Box aria-label="设置内容" component="section" sx={settingsContentSx}>
-          <Box component="header" sx={[settingsHeaderSx, { px: 0, pt: 0, mb: 3 }]}>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography component="h1" variant="h4" sx={{ color: settingsTokens.textPrimary }}>
+        <section aria-label="设置内容" className="settings-content-panel">
+          <header className="settings-content-header">
+            <div className="settings-content-title">
+              <h1>
                 设置
-              </Typography>
-              <Typography
-                component="p"
-                variant="body2"
-                sx={{ color: settingsTokens.textSecondary, mt: 0.5, maxWidth: 720 }}
-              >
+              </h1>
+              <p>
                 管理关联台项目、账户、OA导入与高风险维护配置。
-              </Typography>
+              </p>
               {!canSave ? (
-                <Alert severity="warning" sx={{ mt: 1.5, py: 0.5 }}>
+                <div className="settings-inline-alert settings-inline-alert--warning" role="status">
                   当前账号仅支持查看和导出，不能保存设置。
-                </Alert>
+                </div>
               ) : null}
               {settingsActionStatus ? (
-                <Alert severity={settingsActionStatus.tone} sx={{ mt: 1.5, py: 0.5 }}>
+                <div
+                  className={`settings-inline-alert settings-inline-alert--${settingsActionStatus.tone}`}
+                  role={settingsActionStatus.tone === "error" ? "alert" : "status"}
+                >
                   {settingsActionStatus.message}
-                </Alert>
+                </div>
               ) : null}
-            </Box>
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent={{ xs: "space-between", md: "flex-end" }}
-              spacing={2}
-              sx={{ flexShrink: 0 }}
-            >
-              <Typography component="span" variant="caption" sx={{ color: settingsTokens.textMuted }}>
+            </div>
+            <div className="settings-save-actions">
+              <span>
                 {isSaving ? "正在保存变更" : "变更需手动保存"}
-              </Typography>
-              <Button
+              </span>
+              <button
+                className="settings-save-button"
                 type="button"
-                variant="contained"
-                disableElevation
                 disabled={controlsDisabled}
                 onClick={handleSave}
-                sx={settingsButtonSx}
-                startIcon={isSaving ? <CircularProgress size={16} color="inherit" /> : null}
               >
+                {isSaving ? <span className="settings-save-spinner" aria-hidden="true" /> : null}
                 {isSaving ? "保存中..." : "保存设置"}
-              </Button>
-            </Stack>
-          </Box>
+              </button>
+            </div>
+          </header>
 
             {activeSectionId === "projects" ? (
                 <SettingsProjectsSection
@@ -835,10 +804,9 @@ export default function SettingsPageContent({
                   onOpenDataResetConfirm={handleOpenDataResetConfirm}
                 />
               ) : null}
-        </Box>
-      </Box>
+        </section>
       {dataResetDialog ? (
-        <DataResetDialog
+        <SettingsDataResetDialogs
           config={dataResetActionConfig(dataResetDialog.action)}
           isBusy={isDataResetting}
           password={dataResetPassword}
@@ -849,138 +817,6 @@ export default function SettingsPageContent({
           onSubmit={handleConfirmDataReset}
         />
       ) : null}
-    </ThemeProvider>
-  );
-}
-
-function DataResetDialog({
-  config,
-  isBusy,
-  password,
-  step,
-  onCancel,
-  onContinue,
-  onPasswordChange,
-  onSubmit,
-}: {
-  config: DataResetActionConfig;
-  isBusy: boolean;
-  password: string;
-  step: "confirm" | "password";
-  onCancel: () => void;
-  onContinue: () => void;
-  onPasswordChange: (value: string) => void;
-  onSubmit: () => void;
-}) {
-  const dialogPaperProps = {
-    sx: {
-      border: `1px solid ${settingsTokens.borderSubtle}`,
-      borderRadius: "4px",
-      boxShadow: "none",
-    },
-  };
-
-  if (step === "confirm") {
-    return (
-      <Dialog
-        open
-        onClose={onCancel}
-        aria-labelledby="data-reset-confirm-title"
-        maxWidth="sm"
-        fullWidth
-        PaperProps={dialogPaperProps}
-      >
-        <DialogTitle id="data-reset-confirm-title" sx={{ color: settingsTokens.textPrimary }}>
-          确认数据重置
-        </DialogTitle>
-        <DialogContent dividers>
-          <Stack spacing={2}>
-            <Typography variant="body2" sx={{ color: settingsTokens.textPrimary }}>
-              {config.description}
-            </Typography>
-            <Box component="ul" sx={{ pl: 2, m: 0, "& li": { mb: 0.5 } }}>
-              {config.impact.map((item) => (
-                <Typography component="li" variant="body2" color="text.secondary" key={item}>
-                  {item}
-                </Typography>
-              ))}
-            </Box>
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ p: 2, px: 3 }}>
-          <Button type="button" onClick={onCancel} sx={{ color: settingsTokens.textSecondary }}>
-            取消
-          </Button>
-          <Button
-            color="error"
-            type="button"
-            variant="contained"
-            onClick={onContinue}
-            disableElevation
-            sx={{ borderRadius: "4px" }}
-          >
-            继续
-          </Button>
-        </DialogActions>
-      </Dialog>
-    );
-  }
-
-  return (
-    <Dialog
-      open
-      onClose={isBusy ? undefined : onCancel}
-      aria-labelledby="data-reset-password-title"
-      maxWidth="sm"
-      fullWidth
-      PaperProps={dialogPaperProps}
-    >
-      <DialogTitle id="data-reset-password-title" sx={{ color: settingsTokens.textPrimary }}>
-        OA 密码复核
-      </DialogTitle>
-      <DialogContent dividers>
-        <Stack spacing={2} sx={{ pt: 1 }}>
-          <Typography variant="body2" sx={{ color: settingsTokens.textPrimary }}>
-            请输入当前 OA 用户密码以确认本次高风险操作。
-          </Typography>
-          <TextField
-            autoComplete="current-password"
-            autoFocus
-            fullWidth
-            label="当前 OA 用户密码"
-            size="small"
-            type="password"
-            value={password}
-            disabled={isBusy}
-            onChange={(event) => onPasswordChange(event.currentTarget.value)}
-            sx={{
-              "& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                borderColor: settingsTokens.primary,
-              },
-              "& .MuiInputLabel-root.Mui-focused": {
-                color: settingsTokens.primary,
-              },
-            }}
-          />
-        </Stack>
-      </DialogContent>
-      <DialogActions sx={{ p: 2, px: 3 }}>
-        <Button type="button" disabled={isBusy} onClick={onCancel} sx={{ color: settingsTokens.textSecondary }}>
-          取消
-        </Button>
-        <Button
-          color="error"
-          type="button"
-          variant="contained"
-          disabled={isBusy || !password}
-          onClick={onSubmit}
-          disableElevation
-          sx={{ borderRadius: "4px" }}
-          startIcon={isBusy ? <CircularProgress size={16} color="inherit" /> : null}
-        >
-          {isBusy ? "清理中..." : "确认清理"}
-        </Button>
-      </DialogActions>
-    </Dialog>
+    </div>
   );
 }

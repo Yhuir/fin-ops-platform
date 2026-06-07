@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Stack from "@mui/material/Stack";
-
+import StatePanel from "../components/common/StatePanel";
 import SettingsPageContent from "../components/settings/SettingsPageContent";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
@@ -281,18 +278,22 @@ export default function SettingsPage() {
   }, [canMutateData, canMutateWithHealth, handleStayOnSettings, navigate, setWorkbenchHeaderActions]);
 
   return (
-    <Box data-testid="settings-page" sx={{ display: "flex", flexDirection: "column", flex: 1, height: "100%" }}>
-      <Stack spacing={2} sx={{ mb: 3 }}>
+    <div className="settings-route" data-testid="settings-page">
+      <div className="settings-route-status">
         {pageFeedback ? (
-          <Alert
-            severity={pageFeedback.tone === "error" ? "error" : "success"}
-          >
+          <StatePanel compact tone={pageFeedback.tone}>
             {pageFeedback.message}
-          </Alert>
+          </StatePanel>
         ) : null}
-        {loadError ? <Alert severity="error">{loadError}</Alert> : null}
-        {isLoading && !loadError ? <Alert severity="info">正在同步关联台设置...</Alert> : null}
-      </Stack>
+        {loadError ? <StatePanel compact tone="error">{loadError}</StatePanel> : null}
+        {isLoading && !loadError ? (
+          <StatePanel compact tone="loading">
+            {loadProgress.percent === null
+              ? "正在同步关联台设置..."
+              : `${loadProgress.label} ${loadProgress.percent}%`}
+          </StatePanel>
+        ) : null}
+      </div>
       {!isLoading && !loadError && settings ? (
         <SettingsPageContent
           canManageAccessControl={canAdminAccess}
@@ -307,6 +308,6 @@ export default function SettingsPage() {
           onSyncProjects={handleSyncSettingsProjects}
         />
       ) : null}
-    </Box>
+    </div>
   );
 }

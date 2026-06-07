@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P101-phase-6-settings-shell-navigation`
+- Current Prompt ID: `P102-phase-6-settings-projects-and-bank-accounts`
 - Current MG ID: `MG-P098-phase-6-etc-tickets`
 
 ## Global Invariants
@@ -54,16 +54,20 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 Settings shell/navigation migration generated after P100 characterization tests。
-- Files touched in P100:
+- Scope: phase 6 Settings project status and bank account sections generated after P101 shell/navigation migration。
+- Files touched in P101:
+  - `web/src/pages/SettingsPage.tsx`
+  - `web/src/components/settings/SettingsPageContent.tsx`
+  - `web/src/components/settings/SettingsTreeNav.tsx`
+  - `web/src/components/settings/SettingsDataResetDialogs.tsx`
   - `web/src/test/SettingsPage.test.tsx`
-  - `web/src/test/SettingsOaManualSearchImportTable.test.tsx`
+  - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_settings.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected against current Settings MUI runtime；diff check passed。
+- Verification run: Settings page/content/nav scoped MUI grep passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for remaining section/dialog/table/settingsDesign files；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P101-phase-6-settings-shell-navigation`。
+- Next action: 执行 `P102-phase-6-settings-projects-and-bank-accounts`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +99,17 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P101-phase-6-settings-shell-navigation` | P100 Settings characterization verified；next migrate Settings shell/navigation |
+| page batches | `in_progress` | `P102-phase-6-settings-projects-and-bank-accounts` | P101 Settings shell/navigation verified；next migrate project and bank account sections |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P101-phase-6-settings-shell-navigation` | scoped page/content/nav no-MUI grep | passed | `SettingsPage.tsx`, `SettingsPageContent.tsx` and `SettingsTreeNav.tsx` have no scoped MUI shell/navigation residue |
+| 2026-06-07 | `P101-phase-6-settings-shell-navigation` | `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives\|renders as a tree-and-panel page\|switches the content panel\|keeps workbench-only header actions\|keeps read-only settings users"` | expected-fail | Selected behavior tests passed；source-level contract failed only for remaining Settings section/dialog/table/settingsDesign files |
+| 2026-06-07 | `P101-phase-6-settings-shell-navigation` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level contract failed for remaining Settings MUI runtime |
+| 2026-06-07 | `P101-phase-6-settings-shell-navigation` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P101-phase-6-settings-shell-navigation` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P100-phase-6-settings-characterization-tests` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level no-MUI/project primitive contract failed as expected against current Settings MUI runtime |
 | 2026-06-07 | `P100-phase-6-settings-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|opens tag selection drawer\|confirms a manual zero-difference\|confirms closure when cash direction crosses\|blocks cross-group selection"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining ExtraDrawer/ExportDialog targets |
