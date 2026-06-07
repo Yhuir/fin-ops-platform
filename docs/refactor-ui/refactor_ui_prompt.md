@@ -4726,7 +4726,7 @@ Scope: `/batch-accounting` bank row region/list, amount summary, mismatch note f
 ### P083-phase-6-batch-accounting-oa-table
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/batch-accounting` OA/relation table, native checkbox selection, ExpandableText and table empty states only.
 
@@ -4750,6 +4750,48 @@ Scope: `/batch-accounting` OA/relation table, native checkbox selection, Expanda
 - Withdraw dialog and feedback migration excluded: yes，reserved for P084。
 - Expected failure allowed: yes，source-level contract remains expected-fail until remaining overlay/feedback surfaces are cleared。
 - Next prompt: P084 overlays feedback only after P083 scoped behavior and grep pass。
+
+#### Execution Notes
+
+- Implemented: `BatchAccountingPage.tsx` OA relation table migrated from MUI `Table`/`Checkbox`/`Chip` surfaces to native table, native checkbox and `batch-accounting-*` classes。
+- Implemented: `ExpandableText` migrated from MUI layout/text/button primitives to native text and button controls while preserving expand/collapse copy。
+- Implemented: OA table empty states remain inside the table area and preserve `暂无可关联 OA` / `暂无已关联 OA` behavior。
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx -t "targets project primitives|renders controls|filters right side OA rows|keeps selected bank and OA rows|renders submitted bucket|shows loading and empty states"`: expected-fail；selected behavior tests passed，source-level contract failed as expected for remaining dialog/feedback targets。
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: expected-fail；12 behavior tests passed，1 source-level contract failed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|MuiTable|MuiCheckbox|MuiChip' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P083 page/style files changed before docs。
+- Current expected source-level failure now lists remaining withdraw dialog and mutation feedback/toast targets。
+- Next prompt generated: `P084-phase-6-batch-accounting-overlays-feedback`.
+
+### P084-phase-6-batch-accounting-overlays-feedback
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/batch-accounting` withdraw dialog, mutation feedback, remaining action buttons/layout wrappers and final page MUI cleanup only.
+
+#### Prompt
+
+```text
+Prompt ID: P084-phase-6-batch-accounting-overlays-feedback
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/batch-accounting` withdraw dialog, mutation feedback, remaining action buttons/layout wrappers and final page MUI cleanup only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/components/common/AppDialog.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。迁移 `BatchAccountingPage.tsx` 剩余 MUI surfaces：submit/withdraw action buttons, OA panel wrapper/layout, withdraw dialog (`撤回关联`/`撤回原因`/`取消`/`确认撤回`), snackbar/alert feedback (`已关联批量账务流水与 2 项 OA。`/`已撤回批量账务关联。`/error fallbacks), and any remaining MUI Box/Paper/Button/Dialog/TextField/Snackbar/Alert/Stack/Divider imports 到 `AppDialog`、native/project controls and `batch-accounting-*` classes。不得修改 API client、mock data shape、backend、read model、worker、domain event name/payload 或关联台内部工作区。保留用户可见行为：submit disabled/enabled rules, submitted withdraw button disabled rules, modal dialog role/name `撤回关联`, `撤回原因` accessible label, confirm disabled without trimmed reason, cancel/close behavior, withdraw payload `{ expected_version, reason }`, feedback messages and close/autohide-equivalent behavior, and `FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated` source `batch_accounting_mutation`. 运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`，现在 source-level contract must pass and all behavior tests must pass；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 MG-P084 cumulative merge gate prompt。
+```
+
+#### Review
+
+- Single slice: yes，only remaining overlay/feedback/action/layout cleanup for `/batch-accounting`。
+- Runtime implementation limited: yes，no API/mocks/backend/read model/worker/domain event changes。
+- Workbench internals frozen: required。
+- Behavior preservation explicit: yes，dialog role/name, reason field, disabled rules, feedback messages and domain event source are locked。
+- Verification strictness: full `BatchAccountingPage.test.tsx` must pass；source-level no-MUI/project primitive contract must pass。
+- Next prompt: MG-P084 only after P084 tests, build, no-MUI grep and docs pass。
 
 ### MG Prompt Template
 

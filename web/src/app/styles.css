@@ -3574,6 +3574,127 @@ textarea {
   padding: var(--fp-space-2);
 }
 
+.batch-accounting-oa-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.batch-accounting-oa-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+}
+
+.batch-accounting-oa-table th,
+.batch-accounting-oa-table td {
+  border-bottom: 1px solid var(--fp-border-subtle);
+  padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
+  text-align: left;
+  vertical-align: top;
+}
+
+.batch-accounting-oa-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--fp-table-header-bg);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 900;
+}
+
+.batch-accounting-oa-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.batch-accounting-oa-table__row--selected td {
+  background: color-mix(in srgb, var(--fp-primary-soft) 46%, var(--fp-surface));
+}
+
+.batch-accounting-oa-table__check {
+  width: 56px;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+.batch-accounting-oa-table__identity {
+  min-width: 140px;
+}
+
+.batch-accounting-oa-table__applicant {
+  display: block;
+  margin-bottom: var(--fp-space-1);
+  font-weight: 850;
+  line-height: var(--fp-leading-tight);
+}
+
+.batch-accounting-oa-table__description {
+  max-width: 360px;
+}
+
+.batch-accounting-oa-table .batch-accounting-oa-table__amount {
+  width: 132px;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 820;
+}
+
+.batch-accounting-oa-table__empty {
+  padding: var(--fp-space-3) !important;
+}
+
+.batch-accounting-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--fp-primary);
+  cursor: pointer;
+}
+
+.batch-accounting-checkbox:focus-visible {
+  outline: 2px solid var(--fp-primary);
+  outline-offset: 2px;
+}
+
+.batch-accounting-expandable {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.batch-accounting-expandable__text {
+  min-width: 0;
+  color: var(--fp-text-primary);
+  line-height: var(--fp-leading-normal);
+}
+
+.batch-accounting-expandable__text--clamped {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-accounting-expandable__toggle {
+  width: fit-content;
+  border: 0;
+  border-radius: var(--fp-radius-xs);
+  background: transparent;
+  color: var(--fp-primary-hover);
+  cursor: pointer;
+  font-size: var(--fp-text-caption);
+  font-weight: 850;
+  padding: 1px var(--fp-space-1);
+}
+
+.batch-accounting-expandable__toggle:hover,
+.batch-accounting-expandable__toggle:focus-visible {
+  background: var(--fp-primary-soft);
+  outline: none;
+}
+
 .no-oa-bank-batches-actions,
 .no-oa-bank-batches-filter {
   display: flex;

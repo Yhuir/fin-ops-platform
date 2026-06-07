@@ -3,8 +3,6 @@ import { AlertTriangle, RefreshCw, Search, X } from "lucide-react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Chip from "@mui/material/Chip";
 import Dialog from "@mui/material/Dialog";
 import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
@@ -13,14 +11,7 @@ import Divider from "@mui/material/Divider";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
@@ -124,22 +115,19 @@ function ExpandableText({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   const shouldOfferToggle = text.length > 18;
   return (
-    <Stack spacing={0.5}>
-      <Typography
-        color="text.primary"
-        noWrap={!expanded}
-        sx={{ maxWidth: 320 }}
+    <span className="batch-accounting-expandable">
+      <span
+        className={cx("batch-accounting-expandable__text", !expanded && "batch-accounting-expandable__text--clamped")}
         title={text}
-        variant="body2"
       >
         {text || "-"}
-      </Typography>
+      </span>
       {shouldOfferToggle ? (
-        <Button onClick={() => setExpanded((current) => !current)} size="small" sx={{ alignSelf: "flex-start", minWidth: 0, px: 0.5 }}>
+        <button className="batch-accounting-expandable__toggle" onClick={() => setExpanded((current) => !current)} type="button">
           {expanded ? "收起" : "展开"}
-        </Button>
+        </button>
       ) : null}
-    </Stack>
+    </span>
   );
 }
 
@@ -571,56 +559,56 @@ export default function BatchAccountingPage() {
             )}
           </Stack>
           <Divider />
-          <TableContainer ref={tableWrapRef}>
-            <Table aria-label={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"} size="small">
-              <TableHead>
-                <TableRow>
-                  {bucket === "unsubmitted" ? <TableCell padding="checkbox">选择</TableCell> : null}
-                  <TableCell>申请人</TableCell>
-                  <TableCell>项目名称</TableCell>
-                  <TableCell align="right">金额</TableCell>
-                  <TableCell>申请事由</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
+          <div className="batch-accounting-oa-table-wrap" ref={tableWrapRef}>
+            <table className="batch-accounting-oa-table" aria-label={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"}>
+              <thead>
+                <tr>
+                  {bucket === "unsubmitted" ? <th className="batch-accounting-oa-table__check" scope="col">选择</th> : null}
+                  <th scope="col">申请人</th>
+                  <th scope="col">项目名称</th>
+                  <th className="batch-accounting-oa-table__amount" scope="col">金额</th>
+                  <th scope="col">申请事由</th>
+                </tr>
+              </thead>
+              <tbody>
                 {visibleOaRows.map((row) => (
-                  <TableRow hover key={row.id} selected={selectedOaRowIds.has(row.id)}>
+                  <tr className={cx(selectedOaRowIds.has(row.id) && "batch-accounting-oa-table__row--selected")} key={row.id}>
                     {bucket === "unsubmitted" ? (
-                      <TableCell padding="checkbox">
-                        <Checkbox
+                      <td className="batch-accounting-oa-table__check">
+                        <input
+                          aria-label={`选择 ${row.applicant} ${row.applyTime}`}
+                          className="batch-accounting-checkbox"
                           checked={selectedOaRowIds.has(row.id)}
-                          inputProps={{ "aria-label": `选择 ${row.applicant} ${row.applyTime}` }}
                           onChange={(event) => handleOaToggle(row, event.target.checked)}
+                          type="checkbox"
                         />
-                      </TableCell>
+                      </td>
                     ) : null}
-                    <TableCell sx={{ minWidth: 140 }}>
-                      <Stack spacing={0.5}>
-                        <Typography fontWeight={800}>{row.applicant || "-"}</Typography>
-                        <Chip label={row.applyTime || "-"} size="small" variant="outlined" />
-                      </Stack>
-                    </TableCell>
-                    <TableCell sx={{ maxWidth: 340 }}>
+                    <td className="batch-accounting-oa-table__identity">
+                      <span className="batch-accounting-oa-table__applicant">{row.applicant || "-"}</span>
+                      <span className="batch-accounting-tag batch-accounting-tag--meta">{row.applyTime || "-"}</span>
+                    </td>
+                    <td className="batch-accounting-oa-table__description">
                       <ExpandableText text={row.projectName} />
-                    </TableCell>
-                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                    </td>
+                    <td className="batch-accounting-oa-table__amount">
                       {formatMoney(row.amount)}
-                    </TableCell>
-                    <TableCell sx={{ maxWidth: 360 }}>
+                    </td>
+                    <td className="batch-accounting-oa-table__description">
                       <ExpandableText text={row.reason} />
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ))}
                 {visibleOaRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={bucket === "unsubmitted" ? 5 : 4}>
+                  <tr>
+                    <td className="batch-accounting-oa-table__empty" colSpan={bucket === "unsubmitted" ? 5 : 4}>
                       <StatePanel compact tone="empty" title={bucket === "unsubmitted" ? "暂无可关联 OA" : "暂无已关联 OA"} />
-                    </TableCell>
-                  </TableRow>
+                    </td>
+                  </tr>
                 ) : null}
-              </TableBody>
-            </Table>
-          </TableContainer>
+              </tbody>
+            </table>
+          </div>
         </Paper>
       </Box>
 
