@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P109-phase-7-month-picker-and-date-compat`
+- Current Prompt ID: `P110-phase-7-datagrid-session-cleanup`
 - Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
@@ -54,15 +54,18 @@
 
 ## Active Checkpoint
 
-- Scope: phase 7 MonthPicker/date compat implementation generated after P108 characterization。
-- Files touched in P108:
+- Scope: phase 7 MUI DataGrid session cleanup generated after P109 MonthPicker/date compat migration。
+- Files touched in P109:
+  - `web/src/components/MonthPicker.tsx`
+  - `web/src/app/MuiDatePickerCompatProvider.tsx`
+  - `web/src/app/App.tsx`
   - `web/src/test/MonthPicker.test.tsx`
   - `docs/refactor-ui/modules/phase_7_mui_containment.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: MonthPicker behavior tests passed；source-level no-MUI/date-compat contract failed as expected against `MonthPicker.tsx` and `MuiDatePickerCompatProvider.tsx`；diff check passed。
+- Verification run: MonthPicker tests passed；App/common/HeroUI smoke passed；MonthPicker/date compat scoped no-MUI grep passed；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P109-phase-7-month-picker-and-date-compat`。
+- Next action: 执行 `P110-phase-7-datagrid-session-cleanup`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +98,17 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `in_progress` | `P109-phase-7-month-picker-and-date-compat` | P108 MonthPicker characterization verified；next implement native MonthPicker and remove date compat wrapper |
+| mui containment | `in_progress` | `P110-phase-7-datagrid-session-cleanup` | P109 MonthPicker/date compat verified；next remove obsolete MUI DataGrid session hook |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | `cd web && npx vitest run MonthPicker.test.tsx` | passed | 5 tests passed |
+| 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 26 tests passed |
+| 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | scoped MonthPicker/date compat no-MUI grep | passed | `MuiDatePickerCompatProvider.tsx` deleted；`MonthPicker.tsx` and `App.tsx` have no date compat residue |
+| 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P109-phase-7-month-picker-and-date-compat` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P108-phase-7-month-picker-characterization-tests` | `cd web && npx vitest run MonthPicker.test.tsx` | expected-fail | 4 behavior tests passed；source-level contract failed for `MonthPicker.tsx` and `MuiDatePickerCompatProvider.tsx` |
 | 2026-06-07 | `P108-phase-7-month-picker-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P107-phase-7-mui-containment-discovery` | `test -f docs/refactor-ui/modules/phase_7_mui_containment.md` | passed | Phase 7 containment doc exists |

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,8 +9,11 @@ import MonthPicker, { formatMonthLabel } from "../components/MonthPicker";
 
 const monthPickerSourceFiles = [
   "src/components/MonthPicker.tsx",
-  "src/app/MuiDatePickerCompatProvider.tsx",
   "src/app/App.tsx",
+] as const;
+
+const removedDateCompatFiles = [
+  "src/app/MuiDatePickerCompatProvider.tsx",
 ] as const;
 
 function readWebSource(path: (typeof monthPickerSourceFiles)[number]) {
@@ -34,6 +37,9 @@ function renderMonthPicker(
 describe("MonthPicker", () => {
   test("targets project month primitives and removes date picker compatibility", () => {
     const sourceByPath = Object.fromEntries(monthPickerSourceFiles.map((path) => [path, readWebSource(path)]));
+    const remainingDateCompatFiles = removedDateCompatFiles.flatMap((path) => (
+      existsSync(resolve(__dirname, "..", path.replace(/^src\//, ""))) ? [path] : []
+    ));
     const forbiddenMuiImports = monthPickerSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
       return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
@@ -45,6 +51,7 @@ describe("MonthPicker", () => {
         : [];
     });
 
+    expect(remainingDateCompatFiles).toEqual([]);
     expect(forbiddenMuiImports).toEqual([]);
     expect(forbiddenDateCompat).toEqual([]);
   });

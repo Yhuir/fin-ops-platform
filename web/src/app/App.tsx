@@ -15,7 +15,6 @@ import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionProvider } from "../contexts/SessionContext";
 import { BackgroundJobProgressProvider, useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
-import MuiDatePickerCompatProvider from "./MuiDatePickerCompatProvider";
 import AppRouter from "./router";
 import { APP_BASE_PATH, isOaEmbeddedMode } from "./runtime";
 import "./styles.css";
@@ -180,25 +179,23 @@ export default function App() {
       basename={APP_BASE_PATH === "/" ? undefined : APP_BASE_PATH}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <MuiDatePickerCompatProvider>
-        <MonthProvider>
-          <ImportProgressProvider>
-            <SessionProvider>
-              <PageSessionStateProvider>
-                <ImportWorkflowDraftProvider>
-                  <AppChromeProvider initialShellHeaderMounted>
-                    <BackgroundJobProgressProvider>
-                      <AppHealthStatusProvider>
-                        <AppShell />
-                      </AppHealthStatusProvider>
-                    </BackgroundJobProgressProvider>
-                  </AppChromeProvider>
-                </ImportWorkflowDraftProvider>
-              </PageSessionStateProvider>
-            </SessionProvider>
-          </ImportProgressProvider>
-        </MonthProvider>
-      </MuiDatePickerCompatProvider>
+      <MonthProvider>
+        <ImportProgressProvider>
+          <SessionProvider>
+            <PageSessionStateProvider>
+              <ImportWorkflowDraftProvider>
+                <AppChromeProvider initialShellHeaderMounted>
+                  <BackgroundJobProgressProvider>
+                    <AppHealthStatusProvider>
+                      <AppShell />
+                    </AppHealthStatusProvider>
+                  </BackgroundJobProgressProvider>
+                </AppChromeProvider>
+              </ImportWorkflowDraftProvider>
+            </PageSessionStateProvider>
+          </SessionProvider>
+        </ImportProgressProvider>
+      </MonthProvider>
     </BrowserRouter>
   );
 }

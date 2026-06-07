@@ -6020,7 +6020,7 @@ Scope: MonthPicker/date compat characterization tests only.
 ### P109-phase-7-month-picker-and-date-compat
 
 - Phase: `phase_7_mui_containment`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: MonthPicker/date compat implementation only。
 
@@ -6042,6 +6042,50 @@ Scope: MonthPicker/date compat implementation only.
 - Workbench internals frozen: required。
 - Provider order preserved except removing the obsolete date picker compat wrapper: required。
 - Expected source-level failure allowed: no，P109 must make MonthPicker/date compat contract pass。
+
+#### Execution Notes
+
+- Runtime implementation changed:
+  - `MonthPicker.tsx` now uses native/project button, radio-group and popover markup; no MUI or MUI X imports remain。
+  - `MuiDatePickerCompatProvider.tsx` was deleted。
+  - `App.tsx` no longer imports or wraps the app in `MuiDatePickerCompatProvider`; all other business provider ordering remains unchanged。
+- Test implementation changed:
+  - `MonthPicker.test.tsx` now treats deleted date compat files as the passing state。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Verification:
+  - `cd web && npx vitest run MonthPicker.test.tsx`: passed；5 tests passed。
+  - `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed；26 tests passed。
+  - `test ! -f web/src/app/MuiDatePickerCompatProvider.tsx` plus scoped no-MUI/date-compat grep for `MonthPicker.tsx` and `App.tsx`: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+- Next prompt generated: `P110-phase-7-datagrid-session-cleanup`。
+
+### P110-phase-7-datagrid-session-cleanup
+
+- Phase: `phase_7_mui_containment`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: obsolete MUI DataGrid session hook cleanup only。
+
+#### Prompt
+
+```text
+Prompt ID: P110-phase-7-datagrid-session-cleanup
+Phase: phase_7_mui_containment
+Type: extraction/refactor
+Scope: obsolete MUI DataGrid session hook cleanup only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/hooks/useMuiDataGridPageSession.ts、web/src/test/useMuiDataGridPageSession.test.tsx、web/src/hooks/useFinanceTableSession.ts、web/src/test/useFinanceTableSession.test.tsx 和当前 `rg -n "useMuiDataGridPageSession|useMuiDataGridScrollSession|MuiDataGridPageSession|@mui/x-data-grid" web/src` 结果。只处理 MUI DataGrid session cleanup：如果 runtime references 只剩该 hook/test，则删除 `useMuiDataGridPageSession.ts` 和 `useMuiDataGridPageSession.test.tsx`；确认 `useFinanceTableSession` 仍覆盖 native table session persistence；如发现 runtime 页面仍引用 MUI DataGrid session，停止删除并生成更小迁移 prompt。不得修改页面 UI、backend、API、read model、worker 或关联台内部工作区。运行 reference grep，运行 `cd web && npx vitest run useFinanceTableSession.test.tsx TableAlignmentStyles.test.ts`，运行 `if rg -n 'useMuiDataGridPageSession|useMuiDataGridScrollSession|MuiDataGridPageSession|@mui/x-data-grid' web/src --glob '!**/*.test.tsx' --glob '!**/*.test.ts'; then exit 1; else exit 0; fi`，运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P111 test provider containment prompt。
+```
+
+#### Review
+
+- Single slice: yes，obsolete MUI DataGrid session hook cleanup only。
+- Runtime page UI untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected source-level failure allowed: no，runtime MUI DataGrid session references must be gone after P110。
 
 ### MG Prompt Template
 
