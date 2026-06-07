@@ -176,3 +176,6 @@ Scope: MonthPicker/date compat characterization tests only.
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/MonthPicker.tsx、web/src/test/MonthPicker.test.tsx、web/src/app/App.tsx、web/src/app/MuiDatePickerCompatProvider.tsx 和 web/src/app/styles.css。只修改 MonthPicker/date compat 相关测试，不改 runtime code、CSS、依赖、backend、API、read model、worker 或关联台内部工作区。把 `MonthPicker.test.tsx` 中保护 MUI X field/class 的断言改成用户可见行为和 ARIA 合约：普通模式显示当前 `YYYY-MM` 对应年月、点击 `年月选择` 后可选择年份和月份并 emit `YYYY-MM`、inline 模式可直接选择月份、`formatMonthLabel` 保持中文年月、invalid month fallback 保持可预测。添加 source-level no-MUI/date-compat contract，覆盖 `MonthPicker.tsx`、`MuiDatePickerCompatProvider.tsx` 和 `App.tsx` date compat wrapper，预期 contract 失败但行为测试通过。运行 `cd web && npx vitest run MonthPicker.test.tsx`，预期 behavior tests pass and source-level contract fails against current MUI X runtime；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P109 month picker/date compat implementation prompt。
 ```
 
+## P107 Push
+
+- Commit: `f135e4bd docs: add mui containment discovery`, pushed to `origin/refactor-ui`.
