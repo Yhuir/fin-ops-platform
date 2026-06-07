@@ -791,6 +791,7 @@
 | 2026-06-07 | `MG-P038-phase-6-cost-statistics-table-migration` | `refactor-ui` | `4baffcff` | pushed |
 | 2026-06-07 | `P040-phase-6-bank-details-discovery` | `refactor-ui` | `e720504d` | pushed |
 | 2026-06-07 | `MG-P045-phase-6-bank-details` | `refactor-ui` | `9a0b74ea` | pushed |
+| 2026-06-07 | `MG-P121-bank-details-premium-sample` | `refactor-ui` | `e92cf8e2` | pushed |
 | 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `refactor-ui` | `60f9593b` | pushed |
 | 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `refactor-ui` | `ac9a18ac` | pushed |
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `refactor-ui` | `3675bed3` | pushed |
