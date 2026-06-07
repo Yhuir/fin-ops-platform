@@ -521,7 +521,10 @@ describe("Output invoice collections page", () => {
     expect(bodyRows.some((row) => within(row).queryByText("付款方/日期"))).toBe(false);
 
     expect(within(page).getAllByText("云南客户科技有限公司").length).toBeGreaterThan(0);
-    expect(within(page).getByText("待收款，已收部分款").closest(".output-invoice-collection-status-cell")).toBeInTheDocument();
+    expect(
+      within(page).getAllByText("待收款，已收部分款")
+        .some((element) => element.closest(".output-invoice-collection-status-cell")),
+    ).toBe(true);
     expect(within(page).getAllByRole("button", { name: "已出收据" }).length).toBeGreaterThan(0);
     expect(within(page).getAllByRole("button", { name: "待出收据" }).length).toBeGreaterThan(0);
 

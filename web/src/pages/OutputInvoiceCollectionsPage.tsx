@@ -1,16 +1,8 @@
-import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import MenuItem from "@mui/material/MenuItem";
-import Paper from "@mui/material/Paper";
-import Skeleton from "@mui/material/Skeleton";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
+import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import CollectionStatusReminderDrawer from "../components/outputInvoiceCollections/CollectionStatusReminderDrawer";
 import CollectionStatusRulesDrawer from "../components/outputInvoiceCollections/CollectionStatusRulesDrawer";
@@ -475,94 +467,101 @@ export default function OutputInvoiceCollectionsPage() {
   }, [loadRows]);
 
   const actions = useMemo(() => (
-    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-      <Button
-        variant="outlined"
+    <div className="output-invoice-collections-actions">
+      <button
+        className="output-invoice-collections-button"
         onClick={() => handleOpenWorkflow({ kind: "statusRules" })}
+        type="button"
       >
         收款状态规则
-      </Button>
+      </button>
       {canAdminAccess ? (
-        <Button
-          variant="outlined"
+        <button
+          className="output-invoice-collections-button"
           onClick={() => handleOpenWorkflow({ kind: "receiptSettings" })}
+          type="button"
         >
           收据编号设置
-        </Button>
+        </button>
       ) : null}
-      <Button
-        startIcon={<RefreshOutlinedIcon />}
-        variant="contained"
+      <button
+        className="output-invoice-collections-button output-invoice-collections-button--primary"
         disabled={refreshing}
         onClick={() => loadRows("refresh")}
+        type="button"
       >
+        <RefreshCw aria-hidden="true" size={16} strokeWidth={2.3} />
         刷新
-      </Button>
-    </Stack>
+      </button>
+    </div>
   ), [canAdminAccess, handleOpenWorkflow, loadRows, refreshing]);
   const isEmpty = !loading && !error && rows.length === 0;
 
   return (
     <>
-    <Box data-testid="output-invoice-collections-page" sx={{ minWidth: 0, overflowX: "hidden" }}>
+    <div className="output-invoice-collections-page" data-testid="output-invoice-collections-page">
       <PageScaffold
         title="销项发票收款情况"
         description="以销项发票为主对象查看收款状态、收入流水和收据预览。"
         actions={actions}
       >
-        <Stack spacing={2} sx={{ minWidth: 0, overflowX: "hidden" }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-            <TextField
-              label="关键字"
-              size="small"
-              value={keywordDraft}
-              onChange={(event) => setKeywordDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  handleKeywordSubmit();
-                }
-              }}
-              sx={{ width: { xs: "100%", md: 320 } }}
-            />
-            <Button variant="outlined" onClick={handleKeywordSubmit}>
-              查询
-            </Button>
-            <TextField
-              label="月份"
-              size="small"
-              type="month"
-              value={query.month}
-              onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
-              InputLabelProps={{ shrink: true }}
-              sx={{ width: { xs: "100%", md: 150 } }}
-            />
-            <TextField
-              select
-              label="收款状态"
-              size="small"
-              value={query.filters.find((filter) => filter.field === "collection_status")?.values?.[0] ?? ""}
-              onChange={(event) => applyQuickStatusFilter(event.target.value)}
-              sx={{ width: { xs: "100%", md: 170 } }}
-            >
-              <MenuItem value="">全部</MenuItem>
-              {quickCollectionStatusOptions.map((option) => (
-                <MenuItem key={option.code} value={option.code}>{option.label}</MenuItem>
-              ))}
-            </TextField>
-          </Stack>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1.25}>
+        <div className="output-invoice-collections-content">
+          <PageToolbar className="output-invoice-collections-query">
+            <div className="output-invoice-collections-query__grid">
+              <label className="output-invoice-collections-field output-invoice-collections-field--keyword">
+                <span>关键字</span>
+                <input
+                  value={keywordDraft}
+                  onChange={(event) => setKeywordDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleKeywordSubmit();
+                    }
+                  }}
+                />
+              </label>
+              <button
+                className="output-invoice-collections-button"
+                onClick={handleKeywordSubmit}
+                type="button"
+              >
+                查询
+              </button>
+              <label className="output-invoice-collections-field">
+                <span>月份</span>
+                <input
+                  type="month"
+                  value={query.month}
+                  onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
+                />
+              </label>
+              <label className="output-invoice-collections-field">
+                <span>收款状态</span>
+                <select
+                  value={query.filters.find((filter) => filter.field === "collection_status")?.values?.[0] ?? ""}
+                  onChange={(event) => applyQuickStatusFilter(event.target.value)}
+                >
+                  <option value="">全部</option>
+                  {quickCollectionStatusOptions.map((option) => (
+                    <option key={option.code} value={option.code}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </PageToolbar>
+          <div className="output-invoice-collections-summary">
             <SummaryTile label="销项发票数" value={String(summary.invoiceCount)} />
             <SummaryTile label="待收款金额" value={formatMoney(summary.pendingAmount)} />
             <SummaryTile label="已收金额" value={formatMoney(summary.collectedAmount)} />
             <SummaryTile label="待出收据数" value={String(summary.receiptPendingCount)} />
-          </Stack>
-          {error ? <Alert severity="error">{error}</Alert> : null}
+          </div>
+          {error ? <div className="output-invoice-collections-alert" role="alert">{error}</div> : null}
           {loading ? (
-            <Stack spacing={1.25} aria-label="销项发票收款情况加载中">
-              <Skeleton variant="rounded" height={44} />
-              <Skeleton variant="rounded" height={96} />
-              <Skeleton variant="rounded" height={96} />
-            </Stack>
+            <div className="output-invoice-collections-loading" aria-label="销项发票收款情况加载中">
+              <span className="output-invoice-collections-loading__bar" />
+              <span className="output-invoice-collections-loading__panel" />
+              <span className="output-invoice-collections-loading__panel" />
+            </div>
           ) : (
             <>
               {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
@@ -589,9 +588,9 @@ export default function OutputInvoiceCollectionsPage() {
               />
             </>
           )}
-        </Stack>
+        </div>
       </PageScaffold>
-    </Box>
+    </div>
     <OutputInvoiceCollectionDetailDrawer
       open={Boolean(query.detailTarget)}
       target={query.detailTarget}
@@ -664,11 +663,9 @@ function formatMoney(value: string) {
 
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
-    <Paper variant="outlined" sx={{ flex: 1, minWidth: 0, borderRadius: 1, p: 1.5 }}>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography variant="h6" fontWeight={900} sx={{ mt: 0.25, fontVariantNumeric: "tabular-nums" }}>
-        {value}
-      </Typography>
-    </Paper>
+    <div className="output-invoice-collections-summary-tile">
+      <span className="output-invoice-collections-summary-tile__label">{label}</span>
+      <strong className="output-invoice-collections-summary-tile__value">{value}</strong>
+    </div>
   );
 }

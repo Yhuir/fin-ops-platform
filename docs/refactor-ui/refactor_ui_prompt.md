@@ -3934,6 +3934,53 @@ Scope: `/output-invoice-collections` page shell/actions/query/summary/loading/er
 - Expected failure allowed: yes，P068-P072 source failures can remain, but page source must clear。
 - Next prompt: P068 filter menu and expandable text only after P067 implementation is verified/expected-fail documented.
 
+#### Execution Notes
+
+- Migrated `OutputInvoiceCollectionsPage.tsx` page actions, query toolbar, summary tiles, loading skeleton and error alert from MUI to project/native controls.
+- Replaced the refresh icon with `lucide-react`.
+- Preserved route/sidebar, heading, description, refresh behavior, status rules/settings actions, query labels, Enter submit, quick status options, summary labels, empty/loading/error text, table props and all drawer wiring.
+- Adjusted the status text assertion in `OutputInvoiceCollectionsPage.test.tsx` because the native quick-status option duplicates the table status text `待收款，已收部分款`.
+- Did not modify table, filter menu, expandable text, drawer internals, mock/API/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|Skeleton|TextField|MenuItem|Paper|Typography' web/src/pages/OutputInvoiceCollectionsPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route|uses a standard empty state|pauses read model"`: expected-fail，selected behavior tests passed；remaining source-level failure lists only table/filter/expandable/drawer files。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail，5 behavior tests passed and 1 source-level contract failed，limited to table/filter/expandable/drawer residue。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P067 files and docs changed。
+
+### P068-phase-6-output-invoice-collections-filter-and-expandable
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx` only, plus necessary styles/tests. Do not migrate page shell, table or drawer internals.
+
+#### Prompt
+
+```text
+Prompt ID: P068-phase-6-output-invoice-collections-filter-and-expandable
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx` only, plus necessary styles/tests. Do not migrate page shell, table or drawer internals.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx、web/src/components/outputInvoiceCollections/ExpandableCellText.tsx、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 filter menu 和 expandable text 的 MUI imports/usages，包括 `ArrowDownwardOutlinedIcon`、`ArrowUpwardOutlinedIcon`、`FilterListOutlinedIcon`、`ExpandLessOutlinedIcon`、`ExpandMoreOutlinedIcon`、`Button`、`Checkbox`、`Divider`、`ListItemIcon`、`ListItemText`、`Menu`、`MenuItem`、`Radio`、`Stack`、`TextField`、`Typography`、`Box`、`IconButton`、`Tooltip` 和 `.MuiButton-startIcon` selector。使用 project/native popover/menu controls, native checkbox/radio/input/select/button controls, lucide icons and project text clamp/expand control。必须保留 trigger aria-label `筛选 <field label>`、menu aria-label `<field label>筛选与排序`、sort actions `升序排序`/`降序排序`、enum actions `全选`/`清空`/`暂无可选项`、checkbox/radio menuitem roles and option labels with counts、text mode labels `匹配方式`/`包含`/`等于`/`<label>筛选值`、money/date mode labels `区间`/`<label>最小值`/`<label>最大值`/`<label>开始日期`/`<label>结束日期`、`应用筛选`、Enter apply behavior, clear behavior, onApply/onClear/onSort prop contracts, expandable aria-label `展开 <preview>` / `收起 <preview>` and collapsed two-line behavior。不得修改 `OutputInvoiceCollectionsPage.tsx`、`OutputInvoiceCollectionsTable.tsx` except import compatibility if required, drawer internals, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route"`，P069-P072 source failures 可以继续 expected-fail，但 filter/expandable files must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for table/drawers；运行 `cd web && npm run build`；运行 filter/expandable MUI grep：`if rg -n '@mui/|Mui[A-Z]|FilterListOutlinedIcon|ArrowDownwardOutlinedIcon|ArrowUpwardOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|TextField|MenuItem|Checkbox|Radio|IconButton|Tooltip|MuiButton-startIcon' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx web/src/components/outputInvoiceCollections/ExpandableCellText.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P069 grouped table prompt。
+```
+
+#### Review
+
+- Single slice: yes，filter menu and expandable text only。
+- Page shell, table and drawers untouched: required。
+- Filter prop contract preserved: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，P069-P072 source failures can remain, but filter/expandable source must clear。
+- Next prompt: P069 grouped table only after P068 implementation is verified/expected-fail documented.
+
 ### MG Prompt Template
 
 ```text
