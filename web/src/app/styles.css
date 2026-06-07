@@ -6989,9 +6989,9 @@ textarea {
 .app-health-page {
   display: flex;
   flex-direction: column;
-  gap: var(--fp-space-4);
+  gap: var(--fp-space-3);
   min-height: 100%;
-  padding: var(--fp-space-6);
+  padding: var(--fp-space-5);
   background: var(--fp-page);
 }
 
@@ -7005,6 +7005,7 @@ textarea {
   justify-content: space-between;
   gap: var(--fp-space-3);
   min-width: 0;
+  padding-bottom: var(--fp-space-1);
 }
 
 .app-health-heading {
@@ -7014,7 +7015,7 @@ textarea {
 .app-health-title {
   margin: 0;
   color: var(--fp-ink);
-  font-size: 28px;
+  font-size: var(--fp-text-display);
   font-weight: 800;
   line-height: 1.2;
 }
@@ -7033,16 +7034,25 @@ textarea {
   border: 1px solid var(--fp-border);
   background: var(--fp-surface);
   color: var(--fp-text-primary);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
-.app-health-refresh-button:hover {
-  border-color: var(--fp-border-strong);
-  background: var(--fp-surface-raised);
+.app-health-refresh-button:hover,
+.app-health-refresh-button:focus-visible {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 14%, transparent);
+  outline: none;
 }
 
 .app-health-notice {
   border-radius: var(--fp-radius-sm);
-  font-size: var(--fp-text-body);
+  font-size: var(--fp-text-label);
   line-height: 1.45;
 }
 
@@ -7060,12 +7070,13 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-md);
   background: var(--fp-surface);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
 }
 
 .app-health-section__header {
   border-bottom: 1px solid var(--fp-border);
-  padding: 10px var(--fp-space-4);
+  padding: 9px var(--fp-space-3);
+  background: var(--fp-surface-muted);
 }
 
 .app-health-section__title {
@@ -7077,14 +7088,14 @@ textarea {
 }
 
 .app-health-section__body {
-  padding: var(--fp-space-4);
+  padding: var(--fp-space-3);
 }
 
 .app-health-inventory-grid,
 .app-health-source-grid,
 .app-health-runtime-grid {
   display: grid;
-  gap: var(--fp-space-3);
+  gap: var(--fp-space-2);
   min-width: 0;
 }
 
@@ -7094,7 +7105,7 @@ textarea {
 
 .app-health-source-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: var(--fp-space-3);
+  margin-top: var(--fp-space-2);
 }
 
 .app-health-runtime-grid--primary {
@@ -7103,14 +7114,22 @@ textarea {
 
 .app-health-runtime-grid--secondary {
   grid-template-columns: minmax(420px, 1.4fr) minmax(220px, 0.6fr);
-  margin-top: var(--fp-space-3);
+  margin-top: var(--fp-space-2);
 }
 
 .app-health-inventory-card {
   min-width: 0;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-md);
-  padding: var(--fp-space-3);
+  padding: 10px 12px;
+  background: var(--fp-surface);
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.app-health-inventory-card:hover {
+  border-color: var(--fp-border-strong);
   background: var(--fp-surface-raised);
 }
 
@@ -7125,7 +7144,7 @@ textarea {
   margin-top: var(--fp-space-1);
   color: var(--fp-ink);
   font-family: var(--fp-font-data);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;

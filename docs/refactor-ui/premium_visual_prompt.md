@@ -250,7 +250,13 @@ Notes:
 
 - Code tests were not run for PV-004 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-005-app-health-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-005-app-health-premium-visual`
 
@@ -278,3 +284,54 @@ Notes:
 - 如 dev server 可用，浏览器 smoke `/operations/app-health`：确认 heading、刷新按钮、三类 section、关键表格存在，无明显重叠或横向顶层溢出。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/app-health.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Tightened AppHealth page spacing, section headers, inventory summaries and grid rhythm.
+- Added motion-token hover/focus feedback for the refresh button.
+- Kept all dashboard tables, permission gating, refresh behavior, AppHealth resolver and BroadcastChannel logic unchanged.
+- Did not change backend/API/read model/worker/workbench internals.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run AppHealthOperationsPage.test.tsx AppHealthStatusContext.test.tsx AppHealthBroadcast.test.tsx AppHealthResolver.test.ts DesignTokens.test.ts TableAlignmentStyles.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4173/operations/app-health`
+
+Browser smoke result:
+
+- 1 refresh button, 3 main sections, 8 grids.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/app-health-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-006-import-pages-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_import_pages.md`、`web/src/components/imports/ImportWorkflowPage.tsx`、三个 import route wrapper、相关 import tests 和当前 `git status`。本切片只做导入页族 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 在 `docs/refactor-ui/module_inventory.md` 追加或更新 import pages discovery；如果 `phase_6_import_pages.md` 已足够完整，则在其中追加 premium visual section；否则新建 `docs/refactor-ui/modules/import-pages.md` 并从 `module_inventory.md` 链接。
+- 清点 `/imports/bank-transactions`、`/imports/invoices`、`/imports/etc-invoices` 的旧页面入口：上传区、文件列表、预览表、确认按钮、清空/返回、进度、错误、详情预览、loading/empty/error 状态。
+- 标明哪些元素必须功能等价保留：旧导入页仍为 standalone route，旧上传区仍为上传区，旧预览仍为表格，旧确认流程仍为同页流程。
+- 列出表格/预览排版要求：列角色、金额/数量 tabular nums、错误文本处理、长文件名换行、进度状态不导致布局跳动。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置。
+- 生成下一条唯一 prompt：`PV-007-import-pages-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`

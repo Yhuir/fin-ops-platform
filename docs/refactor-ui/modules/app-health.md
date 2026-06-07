@@ -143,3 +143,47 @@ Last updated: 2026-06-08
   - non-admin users do not fetch dashboard,
   - refresh failure preserves previous dashboard data.
 - `git diff --check`, forbidden legacy page-cache/snapshot grep and non-workbench MUI grep pass.
+
+## PV-005 Premium Visual Implementation
+
+- Prompt ID: `PV-005-app-health-premium-visual`
+- Type: implementation
+- Status: verified
+- Runtime changed: CSS-only visual/interaction polish.
+- Tests changed: yes, source/style contract in `AppHealthOperationsPage.test.tsx`.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Changes
+
+- Tightened `app-health-page` spacing and page padding.
+- Kept the header plain and compact, with tokenized display type and generated-at tabular timestamp.
+- Added motion-token hover/focus feedback for the icon-only `刷新` button.
+- Kept permission/loading/error notices compact while preserving their `role`.
+- Made section headers use muted workbench-style bands and reduced section body padding.
+- Tightened data/source/runtime grid gaps.
+- Kept inventory summaries as compact auxiliary stats rather than large dashboard cards.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run AppHealthOperationsPage.test.tsx AppHealthStatusContext.test.tsx AppHealthBroadcast.test.tsx AppHealthResolver.test.ts DesignTokens.test.ts TableAlignmentStyles.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- Forbidden legacy page-cache/snapshot grep over runtime and module docs.
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked `/api/*` at `http://127.0.0.1:4173/operations/app-health`.
+
+Browser smoke evidence:
+
+- Refresh button: 1.
+- Sections: `数据`, `请求`, `后台`.
+- Grids: 8.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/app-health-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` still emits existing HeroUI/Tailwind CSS minify warnings; build exits successfully.

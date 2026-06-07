@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -33,6 +34,16 @@ function expectProjectSection(section: HTMLElement) {
 }
 
 describe("AppHealthOperationsPage", () => {
+  test("keeps AppHealth premium visual treatment compact and scoped", () => {
+    const styles = readFileSync("src/app/styles.css", "utf8");
+
+    expect(styles).toMatch(/\.app-health-page\s*\{[\s\S]*gap:\s*var\(--fp-space-3\)/);
+    expect(styles).toMatch(/\.app-health-title\s*\{[\s\S]*font-size:\s*var\(--fp-text-display\)/);
+    expect(styles).toMatch(/\.app-health-section__header\s*\{[\s\S]*background:\s*var\(--fp-surface-muted\)/);
+    expect(styles).toMatch(/\.app-health-inventory-card__value\s*\{[\s\S]*font-family:\s*var\(--fp-font-data\)/);
+    expect(styles).toMatch(/\.app-health-refresh-button\s*\{[\s\S]*transition:[\s\S]*border-color var\(--motion-fast\) var\(--ease-standard\)/);
+  });
+
   test("renders the read-only operations dashboard", async () => {
     const fetchMock = renderOperationsPage();
 
