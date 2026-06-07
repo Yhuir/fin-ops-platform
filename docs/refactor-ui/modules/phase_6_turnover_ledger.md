@@ -157,6 +157,7 @@ Scope: `/turnover-ledger` grouped ledger table only.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `if rg -n '@mui/|Mui[A-Z]|KeyboardArrowDownIcon|KeyboardArrowRightIcon|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|<IconButton|<Button|<Paper|<Stack|<Typography' web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx; then exit 1; else exit 0; fi`: passed.
   - `git diff --check`: passed.
+- Commit: `db426030 feat: migrate turnover ledger grouped table`, pushed to `origin/refactor-ui`.
 
 ## P089 Prompt Draft
 
