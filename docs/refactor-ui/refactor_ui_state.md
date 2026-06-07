@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P046-phase-6-pending-invoices-discovery`
+- Current Prompt ID: `P047-phase-6-pending-invoices-characterization-tests`
 - Current MG ID: `MG-P045-phase-6-bank-details`
 
 ## Global Invariants
@@ -54,14 +54,15 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 pending invoices discovery prompt generated after BankDetails MG。
+- Scope: phase 6 pending invoices characterization tests prompt generated after discovery。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_bank_details.md`
-- Verification run: MG-P045 pushed commit `9a0b74ea` to `origin/refactor-ui`。
+  - `docs/refactor-ui/modules/phase_6_pending_invoices.md`
+- Verification run: P046 discovery doc exists and next P047 prompt drafted。
 - Failures: none。
-- Next action: 执行 `P046-phase-6-pending-invoices-discovery`。
+- Next action: 执行 `P047-phase-6-pending-invoices-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -93,7 +94,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P046-phase-6-pending-invoices-discovery` | BankDetails MG-P045 pushed；next module is PendingInvoices discovery |
+| page batches | `in_progress` | `P047-phase-6-pending-invoices-characterization-tests` | PendingInvoices P046 discovery verified；next P047 characterization tests |
 
 ## Verification Log
 
@@ -284,6 +285,8 @@
 | 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `if rg -n 'bank-details-page[^\n]*Mui\|bank-[^\n]*Mui\|Mui[^\n]*bank-\|bank-auto-tag[^\n]*Mui\|Mui[^\n]*bank-auto-tag' web/src/app/styles.css; then exit 1; else exit 0; fi` | passed | BankDetails CSS scope has no MUI selector residue |
 | 2026-06-07 | `P045-phase-6-bank-details-auto-tag-drawer` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P045-phase-6-bank-details` | `git push origin refactor-ui` | passed | Commit `9a0b74ea` pushed |
+| 2026-06-07 | `P046-phase-6-pending-invoices-discovery` | `test -f docs/refactor-ui/modules/phase_6_pending_invoices.md` | passed | PendingInvoices module discovery doc exists |
+| 2026-06-07 | `P046-phase-6-pending-invoices-discovery` | `rg -n "P046-phase-6-pending-invoices-discovery\|Current MUI Inventory\|User-visible Entrypoints\|P047-phase-6-pending-invoices-characterization-tests" docs/refactor-ui/modules/phase_6_pending_invoices.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | PendingInvoices inventory and next prompt recorded |
 
 ## Push Log
 

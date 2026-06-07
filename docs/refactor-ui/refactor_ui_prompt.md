@@ -2830,7 +2830,7 @@ Scope: BankDetails module P040-P045 only: docs/refactor-ui BankDetails state/pro
 ### P046-phase-6-pending-invoices-discovery
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: `/pending-invoices` module only. Discovery/planning for pending invoice UI migration; do not modify runtime implementation or tests except docs/state/prompt/module doc required for discovery.
 
@@ -2853,6 +2853,48 @@ Scope: `/pending-invoices` only: PendingInvoices page, pending invoice component
 - Workbench internals frozen: required。
 - Module doc allowed: yes，pending invoices has high risk and multiple drawers/dialogs/tables。
 - Next prompt: P047 characterization tests only after discovery is implemented and verified。
+
+#### Execution Notes
+
+- Created `docs/refactor-ui/modules/phase_6_pending_invoices.md` as the module fact source for `/pending-invoices` migration.
+- Recorded current MUI inventory for page shell, four-zone table, shared drawer frame, rules/relation/detail/export/invoice-picker drawers and manual invoice dialog.
+- Recorded user-visible entrypoints, table headers, right drawer/dialog matrix, loading/empty/error/stale states, API boundaries, test coverage, risk list and migration slices P047-P052 plus MG.
+- Generated the next single prompt: `P047-phase-6-pending-invoices-characterization-tests`.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_pending_invoices.md`: passed。
+  - `rg -n "P046-phase-6-pending-invoices-discovery|Current MUI Inventory|User-visible Entrypoints|P047-phase-6-pending-invoices-characterization-tests" docs/refactor-ui/modules/phase_6_pending_invoices.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+
+### P047-phase-6-pending-invoices-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: 只更新 pending invoices tests，锁定 `/pending-invoices` 非 MUI/project primitive contract；不改实现。
+
+#### Prompt
+
+```text
+Prompt ID: P047-phase-6-pending-invoices-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: 只更新 pending invoices tests，锁定 `/pending-invoices` 非 MUI/project primitive contract；不改实现。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/PendingInvoicesPage.tsx、web/src/components/pendingInvoices/*.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx、web/src/components/common/FinanceTable.tsx 和 web/src/test/PendingInvoicesPage.test.tsx。只修改 `web/src/test/PendingInvoicesPage.test.tsx`：把当前 “upgraded four-zone MUI table without DataGrid” 等 MUI wording/class assertions 改成 project primitive assertions；新增 source-level contracts 锁定 page shell/toolbar/status menu/pagination、main four-zone table、row action menu、shared right drawer frame、rules/relation/detail/export/invoice-picker drawers、OA print dialog 和 manual invoice dialog 未来均不再依赖 `@mui/*`；新增行为断言确保旧右侧抽屉仍是右侧抽屉、旧 dialog 仍是 dialog、主表仍是 `待找发票四区表` table、`发票候选`/`历史支付流水`/`导出样例` 表格语义保留、`打印选择` 和 `手工补录发票` dialog 名称保留。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P048 page shell toolbar prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Runtime implementation untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，implementation still uses MUI before P048-P052。
+- Next prompt: P048 page shell toolbar refactor only after P047 implemented and verified/expected-fail documented。
 
 ### MG Prompt Template
 
