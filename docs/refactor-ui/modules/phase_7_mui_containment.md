@@ -179,3 +179,32 @@ Scope: MonthPicker/date compat characterization tests only.
 ## P107 Push
 
 - Commit: `f135e4bd docs: add mui containment discovery`, pushed to `origin/refactor-ui`.
+
+## P108 Execution Notes
+
+- Prompt ID: `P108-phase-7-month-picker-characterization-tests`
+- Status: `verified`
+- Runtime implementation changed: no.
+- Test implementation changed:
+  - `MonthPicker.test.tsx` now reads source files for `MonthPicker.tsx`, `MuiDatePickerCompatProvider.tsx` and `App.tsx`.
+  - Replaced the old `.MuiFormControl-root` assertion with user-visible month field semantics.
+  - Added inline month selection coverage.
+  - Added `formatMonthLabel` coverage for normal and invalid values.
+  - Added a source-level no-MUI/date-compat contract that currently fails against the MUI X MonthPicker runtime.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `cd web && npx vitest run MonthPicker.test.tsx`: expected-fail; 4 behavior tests passed, 1 source-level contract failed.
+  - Expected failure files: `src/components/MonthPicker.tsx`, `src/app/MuiDatePickerCompatProvider.tsx`.
+  - `git diff --check`: passed.
+
+## P109 Prompt Draft
+
+```text
+Prompt ID: P109-phase-7-month-picker-and-date-compat
+Phase: phase_7_mui_containment
+Type: extraction/refactor
+Scope: MonthPicker/date compat implementation only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/MonthPicker.tsx、web/src/test/MonthPicker.test.tsx、web/src/app/App.tsx、web/src/app/MuiDatePickerCompatProvider.tsx 和 web/src/app/styles.css。只迁移 MonthPicker/date compat：把 `MonthPicker.tsx` 从 MUI Box、MUI X DatePicker、StaticDatePicker、SxProps/Theme 改为 native/project month picker；移除 `MuiDatePickerCompatProvider` 文件和 `App.tsx` 中的 wrapper/import；保留 `formatMonthLabel`、`YYYY-MM` external contract、invalid fallback、默认 aria label `年月选择`、caption `月份`、inline 和 non-inline modes、用户选择年份/月后 emit `YYYY-MM`。不得修改 MonthProvider、路由、业务 providers 顺序、backend、API、read model、worker 或关联台内部工作区。运行 `cd web && npx vitest run MonthPicker.test.tsx`，必须通过；运行 `cd web && npx vitest run App.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`，必须通过；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|MuiDatePickerCompatProvider|LocalizationProvider|DatePicker|StaticDatePicker|MuiInputBase|MuiFormControl' web/src/components/MonthPicker.tsx web/src/app/App.tsx web/src/app/MuiDatePickerCompatProvider.tsx; then exit 1; else exit 0; fi`，必须通过（若 `MuiDatePickerCompatProvider.tsx` 被删除，用 `test ! -f web/src/app/MuiDatePickerCompatProvider.tsx` 记录）；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P110 DataGrid session cleanup prompt。
+```
