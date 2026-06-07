@@ -5,7 +5,7 @@
 ## Current Phase
 
 - Phase: `wb_phase_0_baseline`
-- Status: `implemented`
+- Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P-WB001-baseline-discovery`
@@ -28,7 +28,7 @@
 
 | Phase | Status | Started | Completed | Verification | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `wb_phase_0_baseline` | `implemented` | 2026-06-07 | pending | `passed` | 专项 state/prompt/module 文档已创建，MUI/CSS/test/dependency 基线已记录；等待 MG push |
+| `wb_phase_0_baseline` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | 专项 state/prompt/module 文档已创建，MUI/CSS/test/dependency 基线已记录；MG-WB001 已 push |
 | `wb_phase_1_characterization` | `pending` | pending | pending | pending | 下一步：补 WorkbenchZone/PaneSearch/RecordCard 行为和 source contract 测试 |
 | `wb_phase_2_zone_header_controls` | `pending` | pending | pending | pending | 迁移 `WorkbenchZone.tsx` 的 MUI controls |
 | `wb_phase_3_pane_search` | `pending` | pending | pending | pending | 迁移 `WorkbenchPaneSearch.tsx` |
@@ -44,7 +44,7 @@
 | Prompt / MG | Phase | Type | Status | Notes |
 | --- | --- | --- | --- | --- |
 | `P-WB001-baseline-discovery` | `wb_phase_0_baseline` | `discovery/planning` | `verified` | 文档和基线扫描完成 |
-| `MG-WB001-baseline` | `wb_phase_0_baseline` | `cumulative MG` | `pending` | 等待精确 stage、commit、push |
+| `MG-WB001-baseline` | `wb_phase_0_baseline` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB002-characterization-tests` | `wb_phase_1_characterization` | `characterization tests` | `drafted` | MG-WB001 push 后执行 |
 
 ## Verification Log
@@ -55,13 +55,14 @@
 | 2026-06-07 | `P-WB001-baseline-discovery` | workbench MUI baseline scan | passed | 运行时 MUI 集中在 `WorkbenchZone.tsx`、`WorkbenchPaneSearch.tsx`、`WorkbenchRecordCard.tsx` 和 workbench CSS/test helper |
 | 2026-06-07 | `P-WB001-baseline-discovery` | non-workbench runtime MUI scan | passed | `rg` 无输出，非关联台 runtime 当前无 `@mui/*` import |
 | 2026-06-07 | `P-WB001-baseline-discovery` | `rg --files web/src/components/workbench web/src/test` | passed | 工作台组件/测试清单已记录到模块文档 |
+| 2026-06-07 | `MG-WB001-baseline` | `git add docs/refactor-ui/README.md docs/refactor-ui/workbench_migration_master_goal_prompt.md docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `1b2ef143` pushed to `origin/refactor-ui` |
 
 ## Push Log
 
 | Date | MG | Commit | Remote | Notes |
 | --- | --- | --- | --- | --- |
-| pending | `MG-WB001-baseline` | pending | pending | baseline docs 等待 push |
+| 2026-06-07 | `MG-WB001-baseline` | `1b2ef143` | `origin/refactor-ui` | baseline docs pushed |
 
 ## Next Action
 
-执行 `MG-WB001-baseline`：检查 scope、untracked files、diff、文档验证；只精确 stage 本次文档文件；commit 并 push 到 `refactor-ui`。push 后把本文件 `wb_phase_0_baseline` 和 `MG-WB001-baseline` 标记为 verified/completed，再从远端最新 `refactor-ui` 生成并执行 `P-WB002-characterization-tests`。
+从远端最新 `refactor-ui` 继续执行 `P-WB002-characterization-tests`。该 prompt 只补关联台残留 MUI 三个切片的行为和 source-level characterization tests，不改 runtime implementation。

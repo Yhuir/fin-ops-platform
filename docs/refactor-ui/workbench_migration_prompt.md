@@ -82,7 +82,7 @@
 ### MG-WB001-baseline
 
 - Phase: `wb_phase_0_baseline`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push 关联台迁移基线文档。
 
@@ -100,6 +100,29 @@
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
 - Verification before commit specified: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `docs/refactor-ui/README.md`
+  - `docs/refactor-ui/workbench_migration_master_goal_prompt.md`
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `1b2ef143 docs: add workbench mui migration baseline`
+- Push: `origin/refactor-ui`
+- Runtime/CSS/tests/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/workbench_migration_state.md && test -f docs/refactor-ui/workbench_migration_prompt.md && test -f docs/refactor-ui/modules/workbench_mui_migration.md`
+  - `rg -n "P-WB001|MG-WB001|P-WB002|wb_phase_0_baseline|Current MUI Inventory|Runtime MUI Files|Test Inventory" docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md docs/refactor-ui/README.md`
+  - `git diff --check`
+  - `git status --short --branch`
+  - `git commit -m "docs: add workbench mui migration baseline"`
+  - `git push origin refactor-ui`
 
 ## Next Prompt
 
