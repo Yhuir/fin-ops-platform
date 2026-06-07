@@ -427,3 +427,41 @@ Scope: Final pending invoices UI migration slice: `web/src/components/pendingInv
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/table_layout_system.md、web/src/components/common/AppDialog.tsx、web/src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx、web/src/components/pendingInvoices/ManualInvoiceDialog.tsx、web/src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx、web/src/test/PendingInvoicesPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：迁移 invoice picker right drawer，移除 MUI Alert/Button/Chip/CircularProgress/Paper/Stack/Table/TablePagination/TextField/Typography，使用 existing `PendingInvoiceDrawerFrame`、native/project form controls、project status messages、native `发票候选` table、project pagination/buttons/status tags；必须保留 filters `关键词`/`销方`/`开票开始`/`开票结束`/`最小金额`/`最大金额`、`搜索`、candidate rows、status labels `可关联`/`已关联本流水`/`存在冲突`、`预览关联 <invoice>`、preview message、`确认建立关系` 和 server page/pageSize behavior。迁移 `ManualInvoiceDialog.tsx` 到 `AppDialog` 和 native/project inputs/buttons/status messages，保留 dialog name `手工补录发票`、row context text、所有 form labels、`预览`、`确认写入`、duplicate/preview feedback、disabled/busy behavior and confirm flow。不得修改 pending invoice API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "opens invoice picker from status column|manual invoice action still previews before confirm|targets project primitives"`；运行完整 `cd web && npx vitest run PendingInvoicesPage.test.tsx`，source-level project primitive contract must pass fully；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 pending invoices MUI grep：`if rg -n '@mui/|Mui[A-Z]|DataGrid|GridColDef|TablePagination|TextField|Dialog' web/src/components/pendingInvoices web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 `MG-P052-phase-6-pending-invoices` cumulative MG prompt。
 ```
+
+## Execution Update: P052 Invoice Picker And Manual Dialog
+
+- Status: verified.
+- Files changed:
+  - `web/src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx`
+  - `web/src/components/pendingInvoices/ManualInvoiceDialog.tsx`
+  - `web/src/app/styles.css`
+- Runtime implementation changed: invoice picker drawer and manual invoice dialog only.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - Invoice picker now uses existing `PendingInvoiceDrawerFrame`, native/project form controls, project status messages, native `发票候选` table, project pagination/buttons/status tags.
+  - Manual invoice now uses `AppDialog`, native/project inputs, project buttons and status messages.
+  - Preserved candidate search/preview/confirm and manual invoice preview/confirm flows.
+- Verification:
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx -t "opens invoice picker from status column|manual invoice action still previews before confirm|targets project primitives"`: passed, 3 focused tests passed.
+  - `cd web && npx vitest run PendingInvoicesPage.test.tsx`: passed, 15 tests passed.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|DataGrid|GridColDef|TablePagination|TextField' web/src/components/pendingInvoices web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+
+## Current Expected Failures After P052
+
+- None for `PendingInvoicesPage.test.tsx`.
+- Pending invoices page/components scoped source-level project primitive contract now passes fully.
+
+## MG-P052 Prompt Draft
+
+```text
+Prompt ID: MG-P052-phase-6-pending-invoices
+Phase: phase_6_page_batches
+Type: cumulative MG
+Scope: PendingInvoices module P046-P052 only. Confirm all pending invoice migration slices are implemented and verified; commit/push only the exact PendingInvoices MG files.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_pending_invoices.md、docs/refactor-ui/table_layout_system.md、当前 git status 和当前 diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 `cd web && npx vitest run PendingInvoicesPage.test.tsx`、`cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`、`cd web && npm run build` 已通过；确认 pending invoices MUI/DataGrid residue grep 已通过：`if rg -n '@mui/|Mui[A-Z]|DataGrid|GridColDef|TablePagination|TextField' web/src/components/pendingInvoices web/src/pages/PendingInvoicesPage.tsx; then exit 1; else exit 0; fi`。只允许精确 `git add docs/refactor-ui/refactor_ui_state.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/modules/phase_6_pending_invoices.md web/src/app/styles.css web/src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx web/src/components/pendingInvoices/ManualInvoiceDialog.tsx`；如果当前 diff 还包含本模块此前未提交的 P052 scope 文件，必须逐个精确列出；禁止 `git add .` 或 `git add -A`。commit message 使用 `feat: complete pending invoices ui migration` 或更准确的 PendingInvoices module message。push 到 `origin refactor-ui`。完成后更新 state/prompt/module docs 的 MG execution notes、verification、Push Log，标记 MG verified，并从 `refactor-ui` 分支继续生成下一条 Micro-JIT prompt。
+```

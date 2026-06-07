@@ -1,14 +1,6 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
+import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from "react";
 
+import AppDialog from "../common/AppDialog";
 import {
   confirmManualPendingInvoice,
   previewManualPendingInvoice,
@@ -91,7 +83,7 @@ export default function ManualInvoiceDialog({
     return Boolean(row && hasInvoiceNumber && form.issueDate.trim() && form.totalWithTax.trim() && hasParty);
   }, [direction, form, row]);
 
-  const updateField = (key: keyof FormState) => (event: ChangeEvent<HTMLInputElement>) => {
+  const updateField = (key: keyof FormState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm((current) => ({ ...current, [key]: event.target.value }));
     setPreview(null);
   };
@@ -160,50 +152,90 @@ export default function ManualInvoiceDialog({
   }
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth aria-labelledby="manual-invoice-dialog-title">
-      <DialogTitle id="manual-invoice-dialog-title">手工补录发票</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ pt: 1 }}>
-          <Typography color="text.secondary" variant="body2">
-            {row ? `${row.bankTransaction.counterpartyName} · ${targetLabel}` : targetLabel}
-          </Typography>
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField label="发票号码" size="small" value={form.invoiceNo} onChange={updateField("invoiceNo")} fullWidth />
-            <TextField label="数电发票号码" size="small" value={form.digitalInvoiceNo} onChange={updateField("digitalInvoiceNo")} fullWidth />
-            <TextField label="发票代码" size="small" value={form.invoiceCode} onChange={updateField("invoiceCode")} fullWidth />
-          </Stack>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField label="开票日期" size="small" value={form.issueDate} onChange={updateField("issueDate")} placeholder="YYYY-MM-DD" fullWidth />
-            <TextField label="价税合计" size="small" value={form.totalWithTax} onChange={updateField("totalWithTax")} fullWidth />
-            <TextField label="税额" size="small" value={form.taxAmount} onChange={updateField("taxAmount")} fullWidth />
-            <TextField label="税率" size="small" value={form.taxRate} onChange={updateField("taxRate")} fullWidth />
-          </Stack>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField label="销方名称" size="small" value={form.sellerName} onChange={updateField("sellerName")} fullWidth />
-            <TextField label="销方税号" size="small" value={form.sellerTaxNo} onChange={updateField("sellerTaxNo")} fullWidth />
-          </Stack>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
-            <TextField label="购方名称" size="small" value={form.buyerName} onChange={updateField("buyerName")} fullWidth />
-            <TextField label="购方税号" size="small" value={form.buyerTaxNo} onChange={updateField("buyerTaxNo")} fullWidth />
-          </Stack>
-          <TextField label="备注" size="small" value={form.remark} onChange={updateField("remark")} multiline minRows={2} fullWidth />
-          {preview ? (
-            <Alert severity={preview.canConfirm ? "info" : "warning"}>
-              <Stack spacing={0.5}>
-                <Typography variant="body2">预览键：{preview.requestKey}</Typography>
-                <Typography variant="body2">重复检查：{preview.duplicateCheck.message || preview.duplicateCheck.status}</Typography>
-                <Typography variant="body2">影响月份：{preview.affectedMonths.join("、") || "—"}</Typography>
-              </Stack>
-            </Alert>
-          ) : null}
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={handleClose} disabled={busy}>取消</Button>
-        <Button onClick={handlePreview} disabled={!canPreview || busy} variant="outlined">预览</Button>
-        <Button onClick={handleConfirm} disabled={!preview?.canConfirm || busy} variant="contained">确认写入</Button>
-      </DialogActions>
-    </Dialog>
+    <AppDialog
+      actions={(
+        <>
+          <button className="pending-invoices-button" disabled={busy} onClick={handleClose} type="button">取消</button>
+          <button className="pending-invoices-button" disabled={!canPreview || busy} onClick={handlePreview} type="button">预览</button>
+          <button
+            className="pending-invoices-button pending-invoices-button--primary"
+            disabled={!preview?.canConfirm || busy}
+            onClick={handleConfirm}
+            type="button"
+          >
+            确认写入
+          </button>
+        </>
+      )}
+      maxWidth="md"
+      onClose={handleClose}
+      open={open}
+      title="手工补录发票"
+    >
+      <div className="pending-invoice-manual-dialog">
+        <p className="pending-invoice-panel__description">
+          {row ? `${row.bankTransaction.counterpartyName} · ${targetLabel}` : targetLabel}
+        </p>
+        {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
+        <div className="pending-invoice-manual-grid pending-invoice-manual-grid--three">
+          <Field label="发票号码" value={form.invoiceNo} onChange={updateField("invoiceNo")} />
+          <Field label="数电发票号码" value={form.digitalInvoiceNo} onChange={updateField("digitalInvoiceNo")} />
+          <Field label="发票代码" value={form.invoiceCode} onChange={updateField("invoiceCode")} />
+        </div>
+        <div className="pending-invoice-manual-grid pending-invoice-manual-grid--four">
+          <Field label="开票日期" value={form.issueDate} onChange={updateField("issueDate")} />
+          <Field label="价税合计" value={form.totalWithTax} onChange={updateField("totalWithTax")} />
+          <Field label="税额" value={form.taxAmount} onChange={updateField("taxAmount")} />
+          <Field label="税率" value={form.taxRate} onChange={updateField("taxRate")} />
+        </div>
+        <div className="pending-invoice-manual-grid pending-invoice-manual-grid--two">
+          <Field label="销方名称" value={form.sellerName} onChange={updateField("sellerName")} />
+          <Field label="销方税号" value={form.sellerTaxNo} onChange={updateField("sellerTaxNo")} />
+        </div>
+        <div className="pending-invoice-manual-grid pending-invoice-manual-grid--two">
+          <Field label="购方名称" value={form.buyerName} onChange={updateField("buyerName")} />
+          <Field label="购方税号" value={form.buyerTaxNo} onChange={updateField("buyerTaxNo")} />
+        </div>
+        <Field label="备注" multiline value={form.remark} onChange={updateField("remark")} />
+        {preview ? (
+          <StatusMessage tone={preview.canConfirm ? "info" : "warning"}>
+            <span>预览键：{preview.requestKey}</span>
+            <span>重复检查：{preview.duplicateCheck.message || preview.duplicateCheck.status}</span>
+            <span>影响月份：{preview.affectedMonths.join("、") || "—"}</span>
+          </StatusMessage>
+        ) : null}
+      </div>
+    </AppDialog>
+  );
+}
+
+function Field({
+  label,
+  multiline = false,
+  value,
+  onChange,
+}: {
+  label: string;
+  multiline?: boolean;
+  value: string;
+  onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
+}) {
+  return (
+    <label className="pending-invoice-form-field">
+      <span>{label}</span>
+      {multiline ? (
+        <textarea rows={2} value={value} onChange={onChange} />
+      ) : (
+        <input value={value} onChange={onChange} />
+      )}
+    </label>
+  );
+}
+
+function StatusMessage({ children, tone }: { children: ReactNode; tone: "danger" | "success" | "info" | "warning" }) {
+  return (
+    <div className={`pending-invoice-status-message pending-invoice-status-message--${tone}`} role={tone === "danger" ? "alert" : "status"}>
+      {children}
+    </div>
   );
 }

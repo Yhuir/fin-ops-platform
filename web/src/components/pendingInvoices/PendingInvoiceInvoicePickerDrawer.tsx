@@ -1,18 +1,4 @@
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type {
   AttachExistingInvoicePreview,
@@ -56,6 +42,16 @@ function candidateStatusLabel(status: PendingInvoiceCandidate["candidateStatus"]
     conflict: "存在冲突",
   };
   return labels[status] ?? status;
+}
+
+function candidateStatusTone(status: PendingInvoiceCandidate["candidateStatus"]) {
+  if (status === "available") {
+    return "success";
+  }
+  if (status === "conflict") {
+    return "warning";
+  }
+  return "neutral";
 }
 
 export default function PendingInvoiceInvoicePickerDrawer({
@@ -171,120 +167,174 @@ export default function PendingInvoiceInvoicePickerDrawer({
     }
   }
 
+  const pagination = payload?.pagination;
+  const total = pagination?.total ?? 0;
+  const currentPage = pagination?.page ?? page;
+  const currentPageSize = pagination?.pageSize ?? pageSize;
+  const from = total === 0 ? 0 : (currentPage - 1) * currentPageSize + 1;
+  const to = Math.min(total, currentPage * currentPageSize);
+
   return (
     <PendingInvoiceDrawerFrame
-      open={open}
-      title="选择已有进项发票"
-      subtitle={transactionId ?? undefined}
       closeLabel="关闭发票选择抽屉"
-      width={820}
-      onClose={onClose}
       footer={(
-        <Stack direction="row" spacing={1} justifyContent="flex-end">
-          <Button onClick={onClose} disabled={busy}>关闭</Button>
-          <Button variant="contained" onClick={handleConfirm} disabled={!preview?.canConfirm || busy}>
+        <div className="pending-invoice-drawer-actions">
+          <button className="pending-invoices-button" disabled={busy} onClick={onClose} type="button">关闭</button>
+          <button
+            className="pending-invoices-button pending-invoices-button--primary"
+            disabled={!preview?.canConfirm || busy}
+            onClick={handleConfirm}
+            type="button"
+          >
             确认建立关系
-          </Button>
-        </Stack>
+          </button>
+        </div>
       )}
+      onClose={onClose}
+      open={open}
+      subtitle={transactionId ?? undefined}
+      title="选择已有进项发票"
+      width={820}
     >
-      {loading ? (
-        <Stack direction="row" spacing={1.25} alignItems="center">
-          <CircularProgress aria-label="正在加载发票候选" size={22} />
-          <Typography variant="body2" color="text.secondary">正在加载发票候选</Typography>
-        </Stack>
-      ) : null}
-      {error ? <Alert severity="error">{error}</Alert> : null}
+      {loading ? <LoadingMessage label="正在加载发票候选" text="正在加载发票候选" /> : null}
+      {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
       {preview ? (
-        <Alert severity={preview.canConfirm ? "info" : "warning"}>
-          <Stack spacing={0.5}>
-            <Typography variant="body2">{preview.requestKey}</Typography>
-            <Typography variant="body2">关联后待付 {formatMoney(preview.paymentImpact.remainingAmountAfter)}</Typography>
-          </Stack>
-        </Alert>
+        <StatusMessage tone={preview.canConfirm ? "info" : "warning"}>
+          <span>{preview.requestKey}</span>
+          <span>关联后待付 {formatMoney(preview.paymentImpact.remainingAmountAfter)}</span>
+        </StatusMessage>
       ) : null}
-      <Paper variant="outlined" sx={{ borderRadius: 1, p: 1.5 }}>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={1} useFlexGap flexWrap="wrap">
-          <TextField size="small" label="关键词" value={keyword} onChange={(event) => { setKeyword(event.target.value); setPage(1); }} />
-          <TextField size="small" label="销方" value={sellerName} onChange={(event) => { setSellerName(event.target.value); setPage(1); }} />
-          <TextField size="small" label="开票开始" type="date" value={issueDateFrom} onChange={(event) => { setIssueDateFrom(event.target.value); setPage(1); }} InputLabelProps={{ shrink: true }} />
-          <TextField size="small" label="开票结束" type="date" value={issueDateTo} onChange={(event) => { setIssueDateTo(event.target.value); setPage(1); }} InputLabelProps={{ shrink: true }} />
-          <TextField size="small" label="最小金额" value={amountMin} onChange={(event) => { setAmountMin(event.target.value); setPage(1); }} inputProps={{ inputMode: "decimal" }} />
-          <TextField size="small" label="最大金额" value={amountMax} onChange={(event) => { setAmountMax(event.target.value); setPage(1); }} inputProps={{ inputMode: "decimal" }} />
-          <Button variant="outlined" onClick={() => reloadCandidates()} disabled={loading || busy}>搜索</Button>
-        </Stack>
-      </Paper>
-      <Paper variant="outlined" sx={{ borderRadius: 1 }}>
-        <Table size="small" aria-label="发票候选">
-          <TableHead>
-            <TableRow>
-              <TableCell>发票号码</TableCell>
-              <TableCell>销方</TableCell>
-              <TableCell align="right">价税合计</TableCell>
-              <TableCell align="right">待支付</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell align="right">操作</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
+      <section className="pending-invoice-panel pending-invoice-filter-panel" aria-label="发票候选筛选">
+        <Field label="关键词" value={keyword} onChange={(value) => { setKeyword(value); setPage(1); }} />
+        <Field label="销方" value={sellerName} onChange={(value) => { setSellerName(value); setPage(1); }} />
+        <Field label="开票开始" type="date" value={issueDateFrom} onChange={(value) => { setIssueDateFrom(value); setPage(1); }} />
+        <Field label="开票结束" type="date" value={issueDateTo} onChange={(value) => { setIssueDateTo(value); setPage(1); }} />
+        <Field inputMode="decimal" label="最小金额" value={amountMin} onChange={(value) => { setAmountMin(value); setPage(1); }} />
+        <Field inputMode="decimal" label="最大金额" value={amountMax} onChange={(value) => { setAmountMax(value); setPage(1); }} />
+        <button className="pending-invoices-button" disabled={loading || busy} onClick={() => reloadCandidates()} type="button">搜索</button>
+      </section>
+      <section className="pending-invoice-panel">
+        <table aria-label="发票候选" className="pending-invoice-simple-table">
+          <thead>
+            <tr>
+              <th scope="col">发票号码</th>
+              <th scope="col">销方</th>
+              <th className="pending-invoice-simple-table__amount" scope="col">价税合计</th>
+              <th className="pending-invoice-simple-table__amount" scope="col">待支付</th>
+              <th scope="col">状态</th>
+              <th className="pending-invoice-simple-table__amount" scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
             {payload?.rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6}>暂无候选发票。</TableCell>
-              </TableRow>
+              <tr>
+                <td colSpan={6}>暂无候选发票。</td>
+              </tr>
             ) : null}
             {payload?.rows.map((candidate) => (
-              <TableRow key={candidate.invoiceId || candidate.id}>
-                <TableCell>
-                  <Typography variant="body2" fontWeight={900}>{invoiceNumber(candidate)}</Typography>
-                  <Typography variant="caption" color="text.secondary">{candidate.issueDate || "-"}</Typography>
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2">{candidate.sellerName || "-"}</Typography>
-                  <Typography variant="caption" color="text.secondary">{candidate.sellerTaxNo || "-"}</Typography>
-                </TableCell>
-                <TableCell align="right">{formatMoney(candidate.totalWithTax)}</TableCell>
-                <TableCell align="right">{formatMoney(candidate.remainingAmount)}</TableCell>
-                <TableCell>
-                  <Stack spacing={0.25} alignItems="flex-start">
-                    <Chip
-                      size="small"
-                      label={candidateStatusLabel(candidate.candidateStatus)}
-                      color={candidate.candidateStatus === "available" ? "success" : candidate.candidateStatus === "conflict" ? "warning" : "default"}
-                      variant="outlined"
-                    />
-                    {candidate.conflictReason ? <Typography variant="caption" color="text.secondary">{candidate.conflictReason}</Typography> : null}
-                  </Stack>
-                </TableCell>
-                <TableCell align="right">
-                  <Button
-                    size="small"
-                    variant="outlined"
+              <tr key={candidate.invoiceId || candidate.id}>
+                <td>
+                  <span className="pending-invoice-table-stack">
+                    <strong>{invoiceNumber(candidate)}</strong>
+                    <span>{candidate.issueDate || "-"}</span>
+                  </span>
+                </td>
+                <td>
+                  <span className="pending-invoice-table-stack">
+                    <span>{candidate.sellerName || "-"}</span>
+                    <span>{candidate.sellerTaxNo || "-"}</span>
+                  </span>
+                </td>
+                <td className="pending-invoice-simple-table__amount">{formatMoney(candidate.totalWithTax)}</td>
+                <td className="pending-invoice-simple-table__amount">{formatMoney(candidate.remainingAmount)}</td>
+                <td>
+                  <span className="pending-invoice-table-stack">
+                    <span className={`pending-invoice-status-tag pending-invoice-status-tag--${candidateStatusTone(candidate.candidateStatus)}`}>
+                      {candidateStatusLabel(candidate.candidateStatus)}
+                    </span>
+                    {candidate.conflictReason ? <span>{candidate.conflictReason}</span> : null}
+                  </span>
+                </td>
+                <td className="pending-invoice-simple-table__amount">
+                  <button
+                    aria-label={`预览关联 ${invoiceNumber(candidate)}`}
+                    className="pending-invoices-button"
                     disabled={candidate.candidateStatus !== "available" || busy}
                     onClick={() => handlePreview(candidate)}
-                    aria-label={`预览关联 ${invoiceNumber(candidate)}`}
+                    type="button"
                   >
                     预览关联
-                  </Button>
-                </TableCell>
-              </TableRow>
+                  </button>
+                </td>
+              </tr>
             ))}
-          </TableBody>
-        </Table>
-        <TablePagination
-          component="div"
-          count={payload?.pagination.total ?? 0}
-          page={Math.max(0, (payload?.pagination.page ?? page) - 1)}
-          rowsPerPage={payload?.pagination.pageSize ?? pageSize}
-          rowsPerPageOptions={[10, 20, 50]}
-          labelRowsPerPage="每页发票"
-          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
-          onPageChange={(_event, nextPage) => setPage(nextPage + 1)}
-          onRowsPerPageChange={(event) => {
-            setPageSize(Number(event.target.value));
-            setPage(1);
-          }}
-        />
-      </Paper>
+          </tbody>
+        </table>
+        <div className="pending-invoice-picker-pagination">
+          <label>
+            <span>每页发票</span>
+            <select
+              value={currentPageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+            >
+              {[10, 20, 50].map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+          <span>{from}-{to} / {total}</span>
+          <div className="pending-invoice-picker-pagination__actions">
+            <button className="pending-invoices-button" disabled={currentPage <= 1 || loading || busy} onClick={() => setPage(currentPage - 1)} type="button">上一页</button>
+            <button
+              className="pending-invoices-button"
+              disabled={to >= total || loading || busy}
+              onClick={() => setPage(currentPage + 1)}
+              type="button"
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      </section>
     </PendingInvoiceDrawerFrame>
+  );
+}
+
+function Field({
+  inputMode,
+  label,
+  type = "text",
+  value,
+  onChange,
+}: {
+  inputMode?: "decimal";
+  label: string;
+  type?: "date" | "text";
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="pending-invoice-form-field">
+      <span>{label}</span>
+      <input inputMode={inputMode} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function LoadingMessage({ label, text }: { label: string; text: string }) {
+  return (
+    <div aria-label={label} className="pending-invoice-status-message" role="status">
+      <span aria-hidden="true" className="pending-invoice-spinner" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function StatusMessage({ children, tone }: { children: ReactNode; tone: "danger" | "success" | "info" | "warning" }) {
+  return (
+    <div className={`pending-invoice-status-message pending-invoice-status-message--${tone}`} role={tone === "danger" ? "alert" : "status"}>
+      {children}
+    </div>
   );
 }

@@ -902,6 +902,16 @@ textarea {
   color: var(--fp-info);
 }
 
+.pending-invoice-status-message--warning {
+  border-color: var(--fp-border);
+  background: var(--fp-warning-soft);
+  color: var(--fp-warning);
+}
+
+.pending-invoice-status-message > span {
+  display: block;
+}
+
 .pending-invoice-spinner {
   width: 16px;
   height: 16px;
@@ -1052,6 +1062,153 @@ textarea {
   font-weight: 700;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.pending-invoice-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-4);
+}
+
+.pending-invoice-form-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.pending-invoice-form-field input,
+.pending-invoice-form-field textarea {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font: inherit;
+  font-size: var(--fp-text-body);
+  font-weight: 650;
+}
+
+.pending-invoice-form-field textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.pending-invoice-form-field input:focus-visible,
+.pending-invoice-form-field textarea:focus-visible {
+  border-color: var(--fp-primary);
+  outline: 2px solid color-mix(in srgb, var(--fp-primary) 20%, transparent);
+}
+
+.pending-invoice-table-stack {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pending-invoice-table-stack span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fp-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-invoice-table-stack strong {
+  color: var(--fp-text-primary);
+  font-weight: 900;
+}
+
+.pending-invoice-status-tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-pill);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.pending-invoice-status-tag--success {
+  background: var(--fp-success-soft);
+  color: var(--fp-success);
+}
+
+.pending-invoice-status-tag--warning {
+  background: var(--fp-warning-soft);
+  color: var(--fp-warning);
+}
+
+.pending-invoice-status-tag--neutral {
+  background: var(--fp-neutral-tag);
+  color: var(--fp-text-secondary);
+}
+
+.pending-invoice-picker-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-3) var(--fp-space-4);
+  border-top: 1px solid var(--fp-border);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-body);
+  font-weight: 700;
+}
+
+.pending-invoice-picker-pagination label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.pending-invoice-picker-pagination select {
+  min-height: 30px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+}
+
+.pending-invoice-picker-pagination__actions {
+  display: flex;
+  gap: var(--fp-space-2);
+}
+
+.pending-invoice-manual-dialog {
+  display: grid;
+  gap: var(--fp-space-4);
+}
+
+.pending-invoice-manual-dialog .pending-invoice-panel__description {
+  padding: 0;
+}
+
+.pending-invoice-manual-grid {
+  display: grid;
+  gap: var(--fp-space-3);
+}
+
+.pending-invoice-manual-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pending-invoice-manual-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pending-invoice-manual-grid--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .pending-invoice-print-layout {
@@ -1304,8 +1461,17 @@ textarea {
   .pending-invoice-metric-grid,
   .pending-invoice-field-grid,
   .pending-invoice-print-approvals,
-  .pending-invoice-rules-grid {
+  .pending-invoice-rules-grid,
+  .pending-invoice-filter-panel,
+  .pending-invoice-manual-grid--two,
+  .pending-invoice-manual-grid--three,
+  .pending-invoice-manual-grid--four {
     grid-template-columns: 1fr;
+  }
+
+  .pending-invoice-picker-pagination {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .pending-invoice-print-approval,
