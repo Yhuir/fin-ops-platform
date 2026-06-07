@@ -1,10 +1,4 @@
-import ExpandLessOutlinedIcon from "@mui/icons-material/ExpandLessOutlined";
-import ExpandMoreOutlinedIcon from "@mui/icons-material/ExpandMoreOutlined";
-import Box from "@mui/material/Box";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 type ExpandableCellTextProps = {
   text: string;
@@ -28,39 +22,26 @@ export default function ExpandableCellText({
   const value = text || "—";
   const canExpand = value.length > threshold;
   return (
-    <Stack direction="row" spacing={0.25} alignItems="flex-start" sx={{ minWidth: 0 }}>
-      <Typography
-        component="div"
-        variant="body2"
+    <span className="output-invoice-collection-expandable-cell-text">
+      <span
+        className={expanded || !canExpand
+          ? "output-invoice-collection-expandable-cell-text__value"
+          : "output-invoice-collection-expandable-cell-text__value output-invoice-collection-expandable-cell-text__value--clamped"}
         title={title ?? value}
-        sx={{
-          minWidth: 0,
-          overflowWrap: "anywhere",
-          ...(expanded || !canExpand
-            ? {}
-            : {
-              display: "-webkit-box",
-              WebkitBoxOrient: "vertical",
-              WebkitLineClamp: 2,
-              overflow: "hidden",
-            }),
-        }}
       >
         {value}
-      </Typography>
+      </span>
       {canExpand ? (
-        <Box component="span" sx={{ flexShrink: 0, mt: -0.5 }}>
-          <Tooltip title={expanded ? "收起" : "展开"}>
-            <IconButton
-              aria-label={`${expanded ? "收起" : "展开"} ${previewLabel(value)}`}
-              size="small"
-              onClick={onToggle}
-            >
-              {expanded ? <ExpandLessOutlinedIcon fontSize="inherit" /> : <ExpandMoreOutlinedIcon fontSize="inherit" />}
-            </IconButton>
-          </Tooltip>
-        </Box>
+        <button
+          aria-label={`${expanded ? "收起" : "展开"} ${previewLabel(value)}`}
+          className="output-invoice-collection-expandable-cell-text__button"
+          onClick={onToggle}
+          title={expanded ? "收起" : "展开"}
+          type="button"
+        >
+          {expanded ? <ChevronUp aria-hidden="true" size={14} /> : <ChevronDown aria-hidden="true" size={14} />}
+        </button>
       ) : null}
-    </Stack>
+    </span>
   );
 }

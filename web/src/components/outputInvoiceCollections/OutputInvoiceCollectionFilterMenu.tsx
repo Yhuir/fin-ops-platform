@@ -1,18 +1,6 @@
-import ArrowDownwardOutlinedIcon from "@mui/icons-material/ArrowDownwardOutlined";
-import ArrowUpwardOutlinedIcon from "@mui/icons-material/ArrowUpwardOutlined";
-import FilterListOutlinedIcon from "@mui/icons-material/FilterListOutlined";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Divider from "@mui/material/Divider";
-import ListItemIcon from "@mui/material/ListItemIcon";
-import ListItemText from "@mui/material/ListItemText";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import Radio from "@mui/material/Radio";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, Filter } from "lucide-react";
+import type { KeyboardEvent, ReactNode } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 export type OutputInvoiceCollectionFilterMode = "text" | "enum_single" | "enum_multi" | "date" | "money";
 
@@ -54,8 +42,8 @@ export default function OutputInvoiceCollectionFilterMenu({
   onClear,
   onSort,
 }: OutputInvoiceCollectionFilterMenuProps) {
-  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
-  const open = Boolean(anchorEl);
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
   const selectedValues = useMemo(() => resolveSelectedValues(currentFilter), [currentFilter]);
   const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues]);
   const [operator, setOperator] = useState<"contains" | "equals" | "between">("contains");
@@ -138,179 +126,216 @@ export default function OutputInvoiceCollectionFilterMenu({
         onApply({ field: fieldConfig.field, operator, value });
       }
     }
-    setAnchorEl(null);
+    setOpen(false);
+  };
+
+  const clearCurrentFilter = () => {
+    onClear(fieldConfig.field);
+    setOpen(false);
+  };
+
+  const handleValueKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      applyValueFilter();
+    }
   };
 
   return (
-    <>
-      <Button
+    <span className="output-invoice-collection-filter-menu">
+      <button
+        aria-controls={open ? menuId : undefined}
+        aria-expanded={open}
+        aria-haspopup="menu"
         aria-label={`筛选 ${fieldConfig.label}`}
-        color={hasActiveFilter || selectedValues.length > 0 ? "primary" : "inherit"}
-        size="small"
-        startIcon={<FilterListOutlinedIcon fontSize="small" />}
-        onClick={(event) => setAnchorEl(event.currentTarget)}
-        sx={{
-          justifyContent: "flex-start",
-          maxWidth: "100%",
-          minWidth: 0,
-          px: 0.5,
-          ".MuiButton-startIcon": { mr: 0.25 },
-        }}
+        className={hasActiveFilter || selectedValues.length > 0
+          ? "output-invoice-collection-filter-menu__trigger output-invoice-collection-filter-menu__trigger--active"
+          : "output-invoice-collection-filter-menu__trigger"}
+        onClick={() => setOpen((current) => !current)}
+        type="button"
       >
-        <Typography component="span" variant="inherit" noWrap>
-          {fieldConfig.label}
-        </Typography>
-      </Button>
-      <Menu
-        anchorEl={anchorEl}
+        <Filter aria-hidden="true" size={14} />
+        <span>{fieldConfig.label}</span>
+      </button>
+      {open ? (
+      <div
         aria-label={`${fieldConfig.label}筛选与排序`}
-        MenuListProps={{ "aria-label": `${fieldConfig.label}筛选与排序` }}
-        open={open}
-        onClose={() => setAnchorEl(null)}
+        className="output-invoice-collection-filter-menu__panel"
+        id={menuId}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        role="menu"
       >
-        <Stack sx={{ px: 2, py: 1 }}>
-          <Typography variant="subtitle2" fontWeight={900}>
-            {fieldConfig.label}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            筛选项来自当前后端查询上下文
-          </Typography>
-        </Stack>
-        <MenuItem onClick={() => onSort("asc")}>
-          <ListItemIcon><ArrowUpwardOutlinedIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>升序排序</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => onSort("desc")}>
-          <ListItemIcon><ArrowDownwardOutlinedIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>降序排序</ListItemText>
-        </MenuItem>
-        <Divider />
+        <div className="output-invoice-collection-filter-menu__header">
+          <div className="output-invoice-collection-filter-menu__title">{fieldConfig.label}</div>
+          <div className="output-invoice-collection-filter-menu__subtitle">筛选项来自当前后端查询上下文</div>
+        </div>
+        <MenuAction onClick={() => onSort("asc")}>
+          <ArrowUp aria-hidden="true" size={14} />
+          <span>升序排序</span>
+        </MenuAction>
+        <MenuAction onClick={() => onSort("desc")}>
+          <ArrowDown aria-hidden="true" size={14} />
+          <span>降序排序</span>
+        </MenuAction>
+        <div className="output-invoice-collection-filter-menu__divider" role="separator" />
         {fieldConfig.mode === "enum_multi" ? (
           <>
-            <MenuItem onClick={() => applyMulti(options.map((option) => option.value))}>全选</MenuItem>
-            <MenuItem onClick={() => onClear(fieldConfig.field)}>清空</MenuItem>
-            <Divider />
-            {options.length === 0 ? <MenuItem disabled>暂无可选项</MenuItem> : null}
+            <MenuAction onClick={() => applyMulti(options.map((option) => option.value))}>全选</MenuAction>
+            <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
+            <div className="output-invoice-collection-filter-menu__divider" role="separator" />
+            {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
             {options.map((option) => (
-              <MenuItem
+              <button
                 key={option.value}
                 aria-checked={selectedSet.has(option.value)}
+                className="output-invoice-collection-filter-menu__item"
                 role="menuitemcheckbox"
                 onClick={() => toggleMulti(option.value)}
+                type="button"
               >
-                <Checkbox checked={selectedSet.has(option.value)} size="small" tabIndex={-1} />
-                <ListItemText>{optionLabel(option)}</ListItemText>
-              </MenuItem>
+                <span aria-hidden="true" className="output-invoice-collection-filter-menu__checkmark">
+                  {selectedSet.has(option.value) ? "✓" : ""}
+                </span>
+                <span>{optionLabel(option)}</span>
+              </button>
             ))}
           </>
         ) : null}
         {fieldConfig.mode === "enum_single" ? (
           <>
-            <MenuItem onClick={() => onClear(fieldConfig.field)}>清空</MenuItem>
-            <Divider />
-            {options.length === 0 ? <MenuItem disabled>暂无可选项</MenuItem> : null}
+            <MenuAction onClick={() => onClear(fieldConfig.field)}>清空</MenuAction>
+            <div className="output-invoice-collection-filter-menu__divider" role="separator" />
+            {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
             {options.map((option) => (
-              <MenuItem
+              <button
                 key={option.value}
                 aria-checked={selectedSet.has(option.value)}
+                className="output-invoice-collection-filter-menu__item"
                 role="menuitemradio"
                 onClick={() => applySingle(option.value)}
+                type="button"
               >
-                <Radio checked={selectedSet.has(option.value)} size="small" tabIndex={-1} />
-                <ListItemText>{optionLabel(option)}</ListItemText>
-              </MenuItem>
+                <span aria-hidden="true" className="output-invoice-collection-filter-menu__choice-dot">
+                  {selectedSet.has(option.value) ? "●" : ""}
+                </span>
+                <span>{optionLabel(option)}</span>
+              </button>
             ))}
           </>
         ) : null}
         {fieldConfig.mode !== "enum_multi" && fieldConfig.mode !== "enum_single" ? (
-          <Stack spacing={1.25} sx={{ px: 2, py: 1.5, width: 300 }}>
-            <Button
-              size="small"
-              onClick={() => {
-                onClear(fieldConfig.field);
-                setAnchorEl(null);
-              }}
-            >
+          <div className="output-invoice-collection-filter-menu__fields">
+            <button className="output-invoice-collection-filter-menu__clear" onClick={clearCurrentFilter} role="menuitem" type="button">
               清空
-            </Button>
+            </button>
             {fieldConfig.mode === "text" ? (
               <>
-                <TextField
-                  select
-                  label="匹配方式"
-                  size="small"
-                  value={operator === "equals" ? "equals" : "contains"}
-                  onChange={(event) => setOperator(event.target.value as "contains" | "equals")}
-                >
-                  <MenuItem value="contains">包含</MenuItem>
-                  <MenuItem value="equals">等于</MenuItem>
-                </TextField>
-                <TextField
-                  autoFocus
-                  label={`${fieldConfig.label}筛选值`}
-                  size="small"
-                  value={singleValue}
-                  onChange={(event) => setSingleValue(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      applyValueFilter();
-                    }
-                  }}
-                />
+                <label className="output-invoice-collection-filter-menu__field">
+                  <span>匹配方式</span>
+                  <select
+                    value={operator === "equals" ? "equals" : "contains"}
+                    onChange={(event) => setOperator(event.target.value as "contains" | "equals")}
+                  >
+                    <option value="contains">包含</option>
+                    <option value="equals">等于</option>
+                  </select>
+                </label>
+                <label className="output-invoice-collection-filter-menu__field">
+                  <span>{`${fieldConfig.label}筛选值`}</span>
+                  <input
+                    autoFocus
+                    value={singleValue}
+                    onChange={(event) => setSingleValue(event.target.value)}
+                    onKeyDown={handleValueKeyDown}
+                  />
+                </label>
               </>
             ) : null}
             {fieldConfig.mode === "money" || fieldConfig.mode === "date" ? (
               <>
-                <TextField
-                  select
-                  label="匹配方式"
-                  size="small"
-                  value={operator === "equals" ? "equals" : "between"}
-                  onChange={(event) => setOperator(event.target.value as "between" | "equals")}
-                >
-                  <MenuItem value="between">区间</MenuItem>
-                  <MenuItem value="equals">等于</MenuItem>
-                </TextField>
+                <label className="output-invoice-collection-filter-menu__field">
+                  <span>匹配方式</span>
+                  <select
+                    value={operator === "equals" ? "equals" : "between"}
+                    onChange={(event) => setOperator(event.target.value as "between" | "equals")}
+                  >
+                    <option value="between">区间</option>
+                    <option value="equals">等于</option>
+                  </select>
+                </label>
                 {operator === "equals" ? (
-                  <TextField
-                    autoFocus
-                    label={`${fieldConfig.label}筛选值`}
-                    size="small"
-                    type={fieldConfig.mode === "date" ? "date" : "text"}
-                    value={singleValue}
-                    onChange={(event) => setSingleValue(event.target.value)}
-                    InputLabelProps={fieldConfig.mode === "date" ? { shrink: true } : undefined}
-                  />
+                  <label className="output-invoice-collection-filter-menu__field">
+                    <span>{`${fieldConfig.label}筛选值`}</span>
+                    <input
+                      autoFocus
+                      type={fieldConfig.mode === "date" ? "date" : "text"}
+                      value={singleValue}
+                      onChange={(event) => setSingleValue(event.target.value)}
+                      onKeyDown={handleValueKeyDown}
+                    />
+                  </label>
                 ) : (
                   <>
-                    <TextField
-                      autoFocus
-                      label={fieldConfig.mode === "date" ? `${fieldConfig.label}开始日期` : `${fieldConfig.label}最小值`}
-                      size="small"
-                      type={fieldConfig.mode === "date" ? "date" : "text"}
-                      value={minValue}
-                      onChange={(event) => setMinValue(event.target.value)}
-                      InputLabelProps={fieldConfig.mode === "date" ? { shrink: true } : undefined}
-                    />
-                    <TextField
-                      label={fieldConfig.mode === "date" ? `${fieldConfig.label}结束日期` : `${fieldConfig.label}最大值`}
-                      size="small"
-                      type={fieldConfig.mode === "date" ? "date" : "text"}
-                      value={maxValue}
-                      onChange={(event) => setMaxValue(event.target.value)}
-                      InputLabelProps={fieldConfig.mode === "date" ? { shrink: true } : undefined}
-                    />
+                    <label className="output-invoice-collection-filter-menu__field">
+                      <span>{fieldConfig.mode === "date" ? `${fieldConfig.label}开始日期` : `${fieldConfig.label}最小值`}</span>
+                      <input
+                        autoFocus
+                        type={fieldConfig.mode === "date" ? "date" : "text"}
+                        value={minValue}
+                        onChange={(event) => setMinValue(event.target.value)}
+                        onKeyDown={handleValueKeyDown}
+                      />
+                    </label>
+                    <label className="output-invoice-collection-filter-menu__field">
+                      <span>{fieldConfig.mode === "date" ? `${fieldConfig.label}结束日期` : `${fieldConfig.label}最大值`}</span>
+                      <input
+                        type={fieldConfig.mode === "date" ? "date" : "text"}
+                        value={maxValue}
+                        onChange={(event) => setMaxValue(event.target.value)}
+                        onKeyDown={handleValueKeyDown}
+                      />
+                    </label>
                   </>
                 )}
               </>
             ) : null}
-            <Button variant="contained" onClick={applyValueFilter}>
+            <button className="output-invoice-collection-filter-menu__apply" onClick={applyValueFilter} type="button">
               应用筛选
-            </Button>
-          </Stack>
+            </button>
+          </div>
         ) : null}
-      </Menu>
-    </>
+      </div>
+      ) : null}
+    </span>
+  );
+}
+
+function MenuAction({
+  children,
+  onClick,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button className="output-invoice-collection-filter-menu__item" onClick={onClick} role="menuitem" type="button">
+      {children}
+    </button>
+  );
+}
+
+function DisabledChoice({ children }: { children: ReactNode }) {
+  return (
+    <div
+      aria-disabled="true"
+      className="output-invoice-collection-filter-menu__item output-invoice-collection-filter-menu__item--disabled"
+      role="menuitem"
+    >
+      {children}
+    </div>
   );
 }
 

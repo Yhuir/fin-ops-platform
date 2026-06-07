@@ -3956,7 +3956,7 @@ Scope: `/output-invoice-collections` page shell/actions/query/summary/loading/er
 ### P068-phase-6-output-invoice-collections-filter-and-expandable
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx` only, plus necessary styles/tests. Do not migrate page shell, table or drawer internals.
 
@@ -3980,6 +3980,53 @@ Scope: `OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx` only
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，P069-P072 source failures can remain, but filter/expandable source must clear。
 - Next prompt: P069 grouped table only after P068 implementation is verified/expected-fail documented.
+
+#### Execution Notes
+
+- Replaced MUI filter menu imports/usages with native trigger/menu controls and `lucide-react` icons.
+- Preserved trigger aria-label `筛选 <field label>`、menu aria-label `<field label>筛选与排序`、sort actions、enum selection roles、option labels with counts、text/money/date labels、clear/apply behavior and onApply/onClear/onSort contracts.
+- Replaced MUI expandable text stack/tooltip/icon button with project class-based clamp text and `lucide-react` chevrons.
+- Added output invoice collection filter/expandable styles in `web/src/app/styles.css`.
+- Did not modify page shell, grouped table runtime, drawer internals, mock/API/read model/worker/backend or reconciliation workbench internals.
+
+#### Verification
+
+- Status: verified as expected-fail。
+- Commands:
+  - `if rg -n '@mui/|Mui[A-Z]|FilterListOutlinedIcon|ArrowDownwardOutlinedIcon|ArrowUpwardOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|TextField|MenuItem|Checkbox|Radio|IconButton|Tooltip|MuiButton-startIcon' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx web/src/components/outputInvoiceCollections/ExpandableCellText.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route"`: expected-fail，main behavior test passed；remaining source-level failure lists only table and drawer files。
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail，5 behavior tests passed and 1 source-level contract failed，limited to table/drawer residue。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P068 implementation files changed before docs。
+
+### P069-phase-6-output-invoice-collections-grouped-table
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `OutputInvoiceCollectionsTable.tsx` grouped dense table only, plus necessary styles/tests. Do not migrate drawer internals.
+
+#### Prompt
+
+```text
+Prompt ID: P069-phase-6-output-invoice-collections-grouped-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `OutputInvoiceCollectionsTable.tsx` grouped dense table only, plus necessary styles/tests. Do not migrate drawer internals.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、docs/refactor-ui/table_layout_system.md、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx、web/src/components/outputInvoiceCollections/ExpandableCellText.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 grouped table 的 MUI imports/usages，包括 `SortOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Paper`、`Stack`、`Table*`、`TablePagination`、`Tooltip`、`Typography`、`SxProps`、`Theme` 和 inline `col style`。使用 project/native grouped dense table, project tags/buttons, native/project pagination, lucide icons and tokenized table styles。必须保留 `aria-label="销项发票收款情况表"`、group headers `销项发票`/`收款状态`/`收入流水`/`收据`、10 leaf columns, filter menu prop contract, sort button labels such as `发票号码 排序`, backend sort/filter behavior, expanded cell controls, status cell class `.output-invoice-collection-status-cell`, row buttons `详情`/`状态/提醒`/`红蓝票`/`已出收据`/`待出收据`, detail/workflow target mapping, empty row `当前条件下没有销项发票收款记录。`, pagination label `每页行数`, options `[20, 50, 100]` and displayed range。不得修改 page shell, filter menu/expandable except import compatibility if required, drawer internals, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route|opens the three right-side workflow drawers"`，P070-P072 drawer source failures 可以继续 expected-fail，但 table file must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for drawers；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|Mui[A-Z]|TablePagination|SortOutlinedIcon|TableCell|TableRow|TableHead|TableBody|Chip|IconButton|SxProps|Theme' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P070 simple drawers prompt。
+```
+
+#### Review
+
+- Single slice: yes，grouped table only。
+- Page shell, filter menu, expandable text and drawers untouched except compatibility if required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Table layout system applies: yes，group headers, dense row content, numeric alignment and stable pagination must use project tokens。
+- Expected failure allowed: yes，P070-P072 drawer source failures can remain, but table source must clear。
+- Next prompt: P070 simple drawers only after P069 implementation is verified/expected-fail documented.
 
 ### MG Prompt Template
 

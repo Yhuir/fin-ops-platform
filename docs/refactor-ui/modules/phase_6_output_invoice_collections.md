@@ -205,20 +205,44 @@ Scope: `/output-invoice-collections` page shell/actions/query/summary/loading/er
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; only P067 files and docs changed.
 
-## Current Expected Failures After P067
+## P068 Execution Notes
 
-- `src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx`: still import MUI menu/filter/expand controls and `.MuiButton-startIcon`; P068 owns this.
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx`
+  - `web/src/components/outputInvoiceCollections/ExpandableCellText.tsx`
+  - `web/src/app/styles.css`
+- Behavior preserved:
+  - Filter trigger aria-label `筛选 <field label>`.
+  - Menu aria-label `<field label>筛选与排序`.
+  - Sort actions `升序排序` and `降序排序`.
+  - Enum actions `全选`、`清空`、`暂无可选项`.
+  - `menuitemcheckbox` / `menuitemradio` roles and labels with counts.
+  - Text/money/date labels and `应用筛选`.
+  - Enter apply behavior and clear/apply/sort prop contracts.
+  - Expand/collapse aria labels and two-line collapsed text behavior.
+- Verification:
+  - `if rg -n '@mui/|Mui[A-Z]|FilterListOutlinedIcon|ArrowDownwardOutlinedIcon|ArrowUpwardOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|TextField|MenuItem|Checkbox|Radio|IconButton|Tooltip|MuiButton-startIcon' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx web/src/components/outputInvoiceCollections/ExpandableCellText.tsx; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route"`: expected-fail; main behavior test passed and remaining source-level failure lists only table and drawer files.
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail; 5 behavior tests passed and 1 source-level contract failed, limited to table/drawer residue.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P068 implementation files changed before docs.
+
+## Current Expected Failures After P068
+
 - `src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx`: still imports MUI grouped table/tag/button/pagination controls; P069 owns this.
 - Output invoice collection drawer files still import MUI right drawer/form/table/dialog controls; P070-P072 own these.
 - `src/pages/OutputInvoiceCollectionsPage.tsx`: cleared from source-level no-MUI failure lists.
+- `src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx`: cleared from source-level no-MUI failure lists.
 
-## P068 Prompt Draft
+## P069 Prompt Draft
 
 ```text
-Prompt ID: P068-phase-6-output-invoice-collections-filter-and-expandable
+Prompt ID: P069-phase-6-output-invoice-collections-grouped-table
 Phase: phase_6_page_batches
 Type: extraction/refactor
-Scope: `OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx` only, plus necessary styles/tests. Do not migrate page shell, table or drawer internals.
+Scope: `OutputInvoiceCollectionsTable.tsx` grouped dense table only, plus necessary styles/tests. Do not migrate drawer internals.
 
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx、web/src/components/outputInvoiceCollections/ExpandableCellText.tsx、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 filter menu 和 expandable text 的 MUI imports/usages，包括 `ArrowDownwardOutlinedIcon`、`ArrowUpwardOutlinedIcon`、`FilterListOutlinedIcon`、`ExpandLessOutlinedIcon`、`ExpandMoreOutlinedIcon`、`Button`、`Checkbox`、`Divider`、`ListItemIcon`、`ListItemText`、`Menu`、`MenuItem`、`Radio`、`Stack`、`TextField`、`Typography`、`Box`、`IconButton`、`Tooltip` 和 `.MuiButton-startIcon` selector。使用 project/native popover/menu controls, native checkbox/radio/input/select/button controls, lucide icons and project text clamp/expand control。必须保留 trigger aria-label `筛选 <field label>`、menu aria-label `<field label>筛选与排序`、sort actions `升序排序`/`降序排序`、enum actions `全选`/`清空`/`暂无可选项`、checkbox/radio menuitem roles and option labels with counts、text mode labels `匹配方式`/`包含`/`等于`/`<label>筛选值`、money/date mode labels `区间`/`<label>最小值`/`<label>最大值`/`<label>开始日期`/`<label>结束日期`、`应用筛选`、Enter apply behavior, clear behavior, onApply/onClear/onSort prop contracts, expandable aria-label `展开 <preview>` / `收起 <preview>` and collapsed two-line behavior。不得修改 `OutputInvoiceCollectionsPage.tsx`、`OutputInvoiceCollectionsTable.tsx` except import compatibility if required, drawer internals, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route"`，P069-P072 source failures 可以继续 expected-fail，但 filter/expandable files must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for table/drawers；运行 `cd web && npm run build`；运行 filter/expandable MUI grep：`if rg -n '@mui/|Mui[A-Z]|FilterListOutlinedIcon|ArrowDownwardOutlinedIcon|ArrowUpwardOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon|TextField|MenuItem|Checkbox|Radio|IconButton|Tooltip|MuiButton-startIcon' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx web/src/components/outputInvoiceCollections/ExpandableCellText.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P069 grouped table prompt。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、docs/refactor-ui/table_layout_system.md、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx、web/src/components/outputInvoiceCollections/ExpandableCellText.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 grouped table 的 MUI imports/usages，包括 `SortOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Paper`、`Stack`、`Table*`、`TablePagination`、`Tooltip`、`Typography`、`SxProps`、`Theme` 和 inline `col style`。使用 project/native grouped dense table, project tags/buttons, native/project pagination, lucide icons and tokenized table styles。必须保留 `aria-label="销项发票收款情况表"`、group headers `销项发票`/`收款状态`/`收入流水`/`收据`、10 leaf columns, filter menu prop contract, sort button labels such as `发票号码 排序`, backend sort/filter behavior, expanded cell controls, status cell class `.output-invoice-collection-status-cell`, row buttons `详情`/`状态/提醒`/`红蓝票`/`已出收据`/`待出收据`, detail/workflow target mapping, empty row `当前条件下没有销项发票收款记录。`, pagination label `每页行数`, options `[20, 50, 100]` and displayed range。不得修改 page shell, filter menu/expandable except import compatibility if required, drawer internals, mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route|opens the three right-side workflow drawers"`，P070-P072 drawer source failures 可以继续 expected-fail，但 table file must disappear from source-level failure lists；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` expected-fail only for drawers；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|Mui[A-Z]|TablePagination|SortOutlinedIcon|TableCell|TableRow|TableHead|TableBody|Chip|IconButton|SxProps|Theme' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P070 simple drawers prompt。
 ```

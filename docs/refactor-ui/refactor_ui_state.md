@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P068-phase-6-output-invoice-collections-filter-and-expandable`
+- Current Prompt ID: `P069-phase-6-output-invoice-collections-grouped-table`
 - Current MG ID: `MG-P064-phase-6-oa-pending-payments`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments MG verified and pushed；OutputInvoiceCollections P067 verified as expected-fail，next P068 filter/expandable |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments MG verified and pushed；OutputInvoiceCollections P068 verified as expected-fail，next P069 grouped table |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,17 +54,17 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 output invoice collections filter menu and expandable text prompt generated after P067 page shell migration。
-- Files touched in P067:
-  - `web/src/pages/OutputInvoiceCollectionsPage.tsx`
+- Scope: phase 6 output invoice collections grouped dense table prompt generated after P068 filter/expandable migration。
+- Files touched in P068:
+  - `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx`
+  - `web/src/components/outputInvoiceCollections/ExpandableCellText.tsx`
   - `web/src/app/styles.css`
-  - `web/src/test/OutputInvoiceCollectionsPage.test.tsx`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`
-- Verification run: P067 page shell grep passed；focused and full module tests are expected-fail only because table/filter/expandable/drawers still have scoped MUI residue；build and diff check passed。
-- Failures: expected source-level MUI contract failure remains only for table/filter/expandable/drawer runtime。
-- Next action: 执行 `P068-phase-6-output-invoice-collections-filter-and-expandable`。
+- Verification run: P068 filter/expandable grep passed；focused and full module tests are expected-fail only because table/drawers still have scoped MUI residue；build and diff check passed。
+- Failures: expected source-level MUI contract failure remains only for grouped table and drawer runtime。
+- Next action: 执行 `P069-phase-6-output-invoice-collections-grouped-table`。
 
 ## Prompt Lifecycle
 
@@ -96,12 +96,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P068-phase-6-output-invoice-collections-filter-and-expandable` | OutputInvoiceCollections P067 verified as expected-fail；next filter menu and expandable text |
+| page batches | `in_progress` | `P069-phase-6-output-invoice-collections-grouped-table` | OutputInvoiceCollections P068 verified as expected-fail；next grouped table |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P068-phase-6-output-invoice-collections-filter-and-expandable` | `if rg -n '@mui/\|Mui[A-Z]\|FilterListOutlinedIcon\|ArrowDownwardOutlinedIcon\|ArrowUpwardOutlinedIcon\|ExpandLessOutlinedIcon\|ExpandMoreOutlinedIcon\|TextField\|MenuItem\|Checkbox\|Radio\|IconButton\|Tooltip\|MuiButton-startIcon' web/src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx web/src/components/outputInvoiceCollections/ExpandableCellText.tsx; then exit 1; else exit 0; fi` | passed | Filter menu and expandable text have no scoped MUI/icon/input/menu residue |
+| 2026-06-07 | `P068-phase-6-output-invoice-collections-filter-and-expandable` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives\|adds sidebar route"` | expected-fail | Main behavior test passed; remaining source-level failure lists only table and drawer files |
+| 2026-06-07 | `P068-phase-6-output-invoice-collections-filter-and-expandable` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | expected-fail | 5 behavior tests passed; 1 source-level contract failed, limited to table/drawer residue |
+| 2026-06-07 | `P068-phase-6-output-invoice-collections-filter-and-expandable` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P068-phase-6-output-invoice-collections-filter-and-expandable` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P068-phase-6-output-invoice-collections-filter-and-expandable` | `git status --short --branch` | passed | Only P068 implementation files changed before docs |
 | 2026-06-07 | `P067-phase-6-output-invoice-collections-page-shell` | `if rg -n '@mui/\|Mui[A-Z]\|RefreshOutlinedIcon\|Skeleton\|TextField\|MenuItem\|Paper\|Typography' web/src/pages/OutputInvoiceCollectionsPage.tsx; then exit 1; else exit 0; fi` | passed | Page shell has no scoped MUI/icon/input/loading/summary residue |
 | 2026-06-07 | `P067-phase-6-output-invoice-collections-page-shell` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives\|adds sidebar route\|uses a standard empty state\|pauses read model"` | expected-fail | Selected behavior tests passed; remaining source-level failure lists only table/filter/expandable/drawer files |
 | 2026-06-07 | `P067-phase-6-output-invoice-collections-page-shell` | `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx` | expected-fail | 5 behavior tests passed; 1 source-level contract failed, limited to table/filter/expandable/drawer residue |
