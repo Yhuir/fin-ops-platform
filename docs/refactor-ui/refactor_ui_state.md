@@ -5,11 +5,11 @@
 ## Current Phase
 
 - Phase: `phase_7_mui_containment`
-- Status: `in_progress`
+- Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P113-phase-7-mui-containment`
-- Current MG ID: `MG-P106-phase-6-settings`
+- Current Prompt ID: `P114-phase-8-full-verification`
+- Current MG ID: `MG-P113-phase-7-mui-containment`
 
 ## Global Invariants
 
@@ -37,8 +37,8 @@
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
 | `phase_6_page_batches` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches、BatchAccounting、TurnoverLedger、ETC tickets and Settings MG verified |
-| `phase_7_mui_containment` | `in_progress` | 2026-06-07 |  | `pending` | Next: MUI containment discovery |
-| `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
+| `phase_7_mui_containment` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P113 verified；non-workbench runtime no-MUI contract passed；frozen workbench legacy isolated |
+| `phase_8_full_verification` | `in_progress` | 2026-06-07 |  | `pending` | Next: full frontend verification and smoke inventory |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
 
 ## Status Values
@@ -54,20 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 7 cumulative MG generated after P113 final no-MUI contract。
-- Files touched in P113:
-  - `web/src/app/MuiProviders.tsx`
-  - `web/src/app/muiTheme.ts`
-  - `web/src/test/legacyWorkbenchMuiProvider.tsx`
-  - `web/src/test/MuiContainment.test.ts`
-  - `web/src/test/workbenchRenderHelpers.tsx`
-  - `web/src/test/WorkbenchExceptionModal.test.tsx`
+- Scope: phase 8 full verification generated after MG-P113 MUI containment。
+- Files touched in MG-P113:
   - `docs/refactor-ui/modules/phase_7_mui_containment.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: MUI containment source contract passed；workbench legacy/common/HeroUI targeted tests passed；corrected final grep passed；build passed；diff check passed。
+- Verification run: Phase 7 cumulative source contract, month/table/common/HeroUI, workbench legacy tests, final grep, build and diff check passed。
 - Failures: none.
-- Next action: 执行 `MG-P113-phase-7-mui-containment`。
+- Next action: 执行 `P114-phase-8-full-verification`。
 
 ## Prompt Lifecycle
 
@@ -100,12 +94,19 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `in_progress` | `MG-P113-phase-7-mui-containment` | P113 final no-MUI contract verified；next execute cumulative MG |
+| mui containment | `verified` | `MG-P113-phase-7-mui-containment` | Phase 7 completed; MUI limited to frozen workbench internals and test-only legacy provider/helper |
+| full verification | `in_progress` | `P114-phase-8-full-verification` | Run full frontend verification, source greps and smoke inventory |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P113-phase-7-mui-containment` | `git status --short --branch` | passed | Clean on `refactor-ui...origin/refactor-ui` before MG verification |
+| 2026-06-07 | `MG-P113-phase-7-mui-containment` | `cd web && npx vitest run MuiContainment.test.ts MonthPicker.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 23 tests passed |
+| 2026-06-07 | `MG-P113-phase-7-mui-containment` | `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CandidateGroupGrid.test.tsx WorkbenchColumnLayout.test.tsx` | passed | 64 tests passed |
+| 2026-06-07 | `MG-P113-phase-7-mui-containment` | final non-workbench runtime MUI grep excluding frozen workbench, tests and documented styles containment | passed | No non-workbench runtime MUI imports/providers/theme remain |
+| 2026-06-07 | `MG-P113-phase-7-mui-containment` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `MG-P113-phase-7-mui-containment` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P113-phase-7-final-no-mui-contract` | `cd web && npx vitest run MuiContainment.test.ts` | passed | 3 source contract tests passed |
 | 2026-06-07 | `P113-phase-7-final-no-mui-contract` | `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 50 tests passed |
 | 2026-06-07 | `P113-phase-7-final-no-mui-contract` | corrected final non-workbench runtime MUI grep excluding workbench, tests and styles.css | passed | `styles.css` frozen workbench selectors are covered by `MuiContainment.test.ts` |

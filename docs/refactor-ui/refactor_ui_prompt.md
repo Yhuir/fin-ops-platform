@@ -6271,6 +6271,52 @@ Scope: Phase 7 MUI containment through P113.
 - Exact staging required: yes。
 - Verification defined: source contract, month/table/common/HeroUI smoke, workbench legacy tests, final grep, build, diff/status。
 
+#### Execution Notes
+
+- MG verified Phase 7 MUI containment through P113.
+- No code changed during MG; P113 code was already committed and pushed.
+- Confirmed non-workbench runtime has no app-level MUI provider/theme, no MUI X date/data-grid, and no non-workbench MUI imports.
+- Confirmed remaining MUI is restricted to frozen workbench internals and test-only legacy provider/helper.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `git status --short --branch`
+  - `cd web && npx vitest run MuiContainment.test.ts MonthPicker.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`
+  - `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CandidateGroupGrid.test.tsx WorkbenchColumnLayout.test.tsx`
+  - `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!web/src/components/workbench/**" --glob "!web/src/test/**" --glob "!web/src/app/styles.css"; then exit 1; else exit 0; fi`
+  - `cd web && npm run build`
+  - `git diff --check`
+- Next prompt generated: `P114-phase-8-full-verification`。
+
+### P114-phase-8-full-verification
+
+- Phase: `phase_8_full_verification`
+- Status: `approved_for_execution`
+- Type: `verification`
+- Scope: full frontend verification and smoke inventory only。
+
+#### Prompt
+
+```text
+Prompt ID: P114-phase-8-full-verification
+Phase: phase_8_full_verification
+Type: verification
+Scope: full frontend verification and smoke inventory only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/README.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/package.json、web/README.md、web/src/test/MuiContainment.test.ts 和当前 git status。只做 full verification 和 smoke inventory，不迁移新页面、不改业务 UI、不改 backend/API/read model/worker/关联台内部工作区。运行最大可行前端验证：`cd web && npm run build`；运行 `cd web && npx vitest run MuiContainment.test.ts DesignTokens.test.ts TableLayoutTokens.test.ts TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx MonthPicker.test.tsx App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx`；运行已迁移页面关键 tests（至少 Settings、ETC、TurnoverLedger、BatchAccounting、NoOaBankBatch、BankDetails、InputInvoiceUsage、OutputInvoiceCollections、OaPendingPayments、PendingInvoices、AppHealth、CostStatistics、TaxOffset、ImportCenter）；运行 workbench wrapper/legacy tests（至少 WorkbenchExceptionModal、WorkbenchColumns、WorkbenchPaneFilter、CandidateGroupGrid、WorkbenchColumnLayout、WorkbenchSelection 如时间允许）。运行 source grep：final non-workbench runtime MUI grep、DataGrid/date-picker grep、provider/theme absence grep。若可启动本地 dev server，启动并用浏览器或 Playwright smoke 关键路由；至少记录是否完成桌面/紧凑屏/OA embedded/关联台 wrapper smoke，若无法完成则说明原因和风险。更新 state/prompt/docs，记录所有命令、结果、known warnings 和未覆盖风险。通过后生成 `P115-phase-9-closeout` prompt；如果发现失败，生成最小修复 prompt 而不是跳过。
+```
+
+#### Review
+
+- Single phase verification slice: yes。
+- Runtime changes expected: no。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Verification scope broad enough for phase 8: yes。
+- If failures occur: must generate targeted fix prompt before closeout。
+
 ### MG Prompt Template
 
 ```text

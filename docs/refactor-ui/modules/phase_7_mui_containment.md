@@ -369,3 +369,19 @@ Scope: Phase 7 MUI containment through P113.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 P107-P113 已记录并验证；确认非关联台 runtime 无 app-level MUI provider/theme、MUI X date/data-grid 或 non-workbench MUI imports；确认保留 MUI 仅限冻结 workbench internals 和 test-only legacy provider/helper。运行 `cd web && npx vitest run MuiContainment.test.ts MonthPicker.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CandidateGroupGrid.test.tsx WorkbenchColumnLayout.test.tsx`；运行 final grep `if rg -n "@mui/|Mui[A-Z]|muiTheme|MuiProviders|@mui/x-date-pickers|@mui/x-data-grid" web/src --glob "!web/src/components/workbench/**" --glob "!web/src/test/**" --glob "!web/src/app/styles.css"; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。确认 scope 只包含 Phase 7 containment files and docs，禁止 `git add .` 和 `git add -A`，只允许精确 git add。MG 通过后将 `phase_7_mui_containment` 标记 completed，`Current Prompt ID` 推进到 phase 8 full verification discovery/prompt，commit 并 push 到 `origin/refactor-ui`，再更新 Push Log。
 ```
+
+## MG-P113 Execution Notes
+
+- MG ID: `MG-P113-phase-7-mui-containment`
+- Status: `verified`
+- Scope: Phase 7 MUI containment through P113.
+- Code changed during MG: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `git status --short --branch`: clean on `refactor-ui...origin/refactor-ui` before MG verification.
+  - `cd web && npx vitest run MuiContainment.test.ts MonthPicker.test.tsx TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 23 tests.
+  - `cd web && npx vitest run WorkbenchExceptionModal.test.tsx WorkbenchColumns.test.tsx WorkbenchPaneFilter.test.ts CandidateGroupGrid.test.tsx WorkbenchColumnLayout.test.tsx`: passed, 64 tests.
+  - Final non-workbench runtime MUI grep excluding frozen workbench, tests and documented `styles.css` containment: passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `git diff --check`: passed.
