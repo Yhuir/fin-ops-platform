@@ -404,11 +404,9 @@ function UploadBlock({ label, accept, disabled, helperText, disabledReason, mult
   };
 
   return (
-    <Button
-      component="label"
-      variant="outlined"
-      startIcon={<UploadCloud aria-hidden="true" size={16} />}
-      disabled={disabled}
+    <label
+      role="button"
+      tabIndex={disabled ? -1 : 0}
       aria-label={`上传${label}`}
       aria-disabled={disabled ? "true" : undefined}
       className={`etc-upload-drop-box${dragActive ? " dragging" : ""}`}
@@ -417,25 +415,27 @@ function UploadBlock({ label, accept, disabled, helperText, disabledReason, mult
       onDragLeave={handleDrag}
       onDrop={handleDrop}
     >
-      <Stack spacing={0.5} alignItems="flex-start" className="etc-upload-drop-content">
-        <Typography component="span" fontWeight={800}>{label}</Typography>
-        <Typography component="span" variant="caption" color="text.secondary">{helperText}</Typography>
+      <UploadCloud aria-hidden="true" size={18} />
+      <span className="etc-upload-drop-content">
+        <strong>{label}</strong>
+        <span>{helperText}</span>
         {disabled && disabledReason ? (
-          <Typography component="span" variant="caption" color="warning.main">{disabledReason}</Typography>
+          <span className="etc-upload-drop-disabled-reason">{disabledReason}</span>
         ) : null}
-      </Stack>
+      </span>
       <input
         hidden
         type="file"
         accept={accept}
         multiple={multiple}
+        disabled={disabled}
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
           event.target.value = "";
           handleFiles(files);
         }}
       />
-    </Button>
+    </label>
   );
 }
 
@@ -2329,13 +2329,11 @@ export default function EtcTicketManagementPage() {
                       </Box>
 
                       <Box component="section" aria-label="已上传文件">
-                        <Stack spacing={1}>
-                          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                            <Typography component="h3" variant="subtitle1" fontWeight={800}>
-                              上传文件
-                            </Typography>
-                            <Chip label={`${selectedTask.sourceFiles.length} 个文件`} size="small" variant="outlined" />
-                          </Stack>
+                        <div className="etc-source-file-section">
+                          <div className="etc-source-file-heading">
+                            <h3>上传文件</h3>
+                            <span className="etc-count-tag">{selectedTask.sourceFiles.length} 个文件</span>
+                          </div>
                           {selectedTask.sourceFiles.length === 0 ? (
                             <StatePanel tone="empty" compact>暂无文件。</StatePanel>
                           ) : (
@@ -2350,15 +2348,15 @@ export default function EtcTicketManagementPage() {
                                     <div className="etc-source-file-main">
                                       <div className="etc-source-file-title">
                                         <strong>{sourceFile.originalName || sourceFile.fileId}</strong>
-                                        <Chip label={sourceKindLabel(sourceFile.sourceKind)} size="small" variant="outlined" />
+                                        <span className="etc-status-tag">{sourceKindLabel(sourceFile.sourceKind)}</span>
                                         {sourceSummary ? (
                                           <>
-                                            <Chip label={`${sourceSummary.plateLabel} / 已解析 ${sourceSummary.parsedCount} 条`} size="small" variant="outlined" />
-                                            <Chip label={`金额合计 ${sourceSummary.totalAmount}`} size="small" variant="outlined" />
-                                            <Chip label={`日期 ${sourceSummary.dateRange}`} size="small" variant="outlined" />
+                                            <span className="etc-status-tag">{sourceSummary.plateLabel} / 已解析 {sourceSummary.parsedCount} 条</span>
+                                            <span className="etc-status-tag">金额合计 {sourceSummary.totalAmount}</span>
+                                            <span className="etc-status-tag">日期 {sourceSummary.dateRange}</span>
                                           </>
                                         ) : null}
-                                        {sourceFile.hasBlockingIssue ? <Chip label="blocking" size="small" color="error" /> : null}
+                                        {sourceFile.hasBlockingIssue ? <span className="etc-status-tag etc-status-tag--error">blocking</span> : null}
                                       </div>
                                       <span className="etc-source-file-id">{sourceFile.fileId}</span>
                                     </div>
@@ -2377,7 +2375,7 @@ export default function EtcTicketManagementPage() {
                               })}
                             </ul>
                           )}
-                        </Stack>
+                        </div>
                       </Box>
 
                       <section className="etc-manual-review-panel" aria-label="人工核对处理">
@@ -2481,31 +2479,24 @@ export default function EtcTicketManagementPage() {
                       </section>
 
                       {selectedTask.parseIssues.length > 0 ? (
-                        <Stack spacing={1}>
+                        <div className="etc-source-issue-list">
                           {selectedTask.parseIssues.map((issue) => (
-                            <Alert
+                            <div
                               key={issue.issueId || `${issue.fileId}-${issue.sourcePage ?? ""}-${issue.sourceLine ?? ""}-${issue.message}`}
-                              severity={issue.severity === "blocking" ? "error" : "warning"}
+                              role="alert"
+                              className={`etc-source-issue etc-source-issue--${issue.severity === "blocking" ? "error" : "warning"}`}
                             >
-                              <Stack spacing={0.5}>
-                                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                  <Typography component="span" fontWeight={800}>
-                                    {issue.originalName || issue.fileId || "未知文件"}
-                                  </Typography>
-                                  <Chip label={sourceKindLabel(issue.sourceKind)} size="small" variant="outlined" />
-                                  {parseIssueContextLabel(issue) ? (
-                                    <Typography component="span" variant="caption" color="text.secondary">
-                                      {parseIssueContextLabel(issue)}
-                                    </Typography>
-                                  ) : null}
-                                </Stack>
-                                <Typography component="span" variant="body2">
-                                  {issue.message}
-                                </Typography>
-                              </Stack>
-                            </Alert>
+                              <div className="etc-source-issue__header">
+                                <strong>{issue.originalName || issue.fileId || "未知文件"}</strong>
+                                <span className="etc-status-tag">{sourceKindLabel(issue.sourceKind)}</span>
+                                {parseIssueContextLabel(issue) ? (
+                                  <span>{parseIssueContextLabel(issue)}</span>
+                                ) : null}
+                              </div>
+                              <p>{issue.message}</p>
+                            </div>
                           ))}
-                        </Stack>
+                        </div>
                       ) : null}
 
                       <Box

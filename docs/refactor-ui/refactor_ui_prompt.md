@@ -5315,7 +5315,7 @@ Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels 
 ### P095-phase-6-etc-tickets-upload-and-source-panels
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/etc-tickets` upload/drop blocks, source-file context, and upload/source notices only。
 
@@ -5334,6 +5334,50 @@ Scope: `/etc-tickets` upload/drop blocks, source-file context, and upload/source
 
 - Single slice: yes，only upload/drop/source panels and source notices。
 - Runtime implementation limited: yes，tables/manual review/detail/dialog/OA surfaces remain later slices。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract remains expected-fail until all ETC runtime slices clear MUI。
+
+#### Execution Notes
+
+- Runtime implementation changed: yes，only `web/src/pages/EtcTicketManagementPage.tsx` and `web/src/app/styles.css`。
+- Test implementation changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Migrated `UploadBlock` from MUI Button/Stack/Typography to native label/input and project upload classes while preserving aria-labels, drag/drop handlers, accepted file types, disabled state and hidden file input behavior。
+- Migrated uploaded source-file heading/list tags and parse issue notices to native/project classes。
+- Draft grep was over-broad and matched frozen workbench CSS plus future ETC table/detail/OA/dialog surfaces；execution used narrowed upload/source-class grep and documented the reason。
+- Verification:
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|shows the reconciliation workspace with upload blocks|uploads ticket-root TXT files|uploads ticket-root TXT files by dropping|shows source file context|removes legacy ticket-root mode controls|disables ticket-root TXT upload"`: expected-fail；selected upload/source behavior tests passed and source-level contract failed as expected。
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: expected-fail；41 behavior tests passed and 1 source-level contract failed against remaining ETC MUI runtime。
+  - `if rg -n 'etc-upload-drop-box[^\\n]*MuiButton|\\.etc-upload-drop-box\\.Mui|\\.etc-upload-drop-box[^\\n]*Mui-disabled|<Stack[^\\n]*etc-upload|<Typography[^\\n]*etc-upload|etc-source-file-title[^\\n]*<Chip|etc-source-issue[^\\n]*<Chip|etc-source-file-row[^\\n]*<Tooltip|etc-source-file-row[^\\n]*<IconButton' web/src/pages/EtcTicketManagementPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P095 page/style files changed before docs。
+- Next prompt generated: `P096-phase-6-etc-tickets-reconciliation-table`。
+
+### P096-phase-6-etc-tickets-reconciliation-table
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/etc-tickets` reconciliation detail table, row selection controls, expandable descriptions, and manual review panel only。
+
+#### Prompt
+
+```text
+Prompt ID: P096-phase-6-etc-tickets-reconciliation-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/etc-tickets` reconciliation detail table, row selection controls, expandable descriptions, and manual review panel only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_etc_tickets.md、docs/refactor-ui/table_layout_system.md、web/src/pages/EtcTicketManagementPage.tsx、web/src/test/EtcTicketManagementPage.test.tsx 和 web/src/app/styles.css。只迁移 `ETC双侧核对明细` table block, reconciliation metric cards, selection buttons (`全选`/`仅保留已配对`/`清空`), row checkboxes, expandable description button, evidence chips, unmatched supplement upload action, manual review panel/form controls and confirm buttons 的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell/Checkbox/Button/IconButton/Tooltip/Chip/Stack/Typography/TextField usages 到 native table/form/button/project classes and table layout system classes。不得迁移 business batch detail/invoice tables, imported invoice section, dialog contents, OA status/detection panels, API client、backend、read model、worker、domain event semantics 或关联台内部工作区。保留用户可见行为：table accessible name `ETC双侧核对明细`, `etc-reconciliation-row-*` and cell test ids, row highlight states, local row selection behavior, all/paired-only/clear actions, one-line collapsed descriptions and expand control, selected metrics, `接受推荐票根`, `关联所选记录`, `手工确认`, selected card/evidence payloads and disabled rules。运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx -t "targets project primitives|renders paired reconciliation table|keeps long reconciliation descriptions|selects reconciliation rows locally|updates confirmation metrics|submits the checked card item ids|manual reconciliation accepts"`，预期 source-level contract remains expected-fail but selected behavior tests pass；运行 `cd web && npx vitest run EtcTicketManagementPage.test.tsx`，预期 41 behavior tests pass and 1 source-level contract remains expected-fail until later ETC slices；运行 scoped grep for reconciliation/manual slice `if rg -n '<Table(Container|Head|Body|Row|Cell)?\\b|<Checkbox\\b|<Tooltip\\b|<IconButton\\b|<Chip\\b|etc-reconciliation-description-toggle\\.MuiButton-root|etc-reconciliation-table .*Mui|etc-reconciliation-[^\\n]*Mui|<TextField[^\\n]*(选择票根|处理说明)' web/src/pages/EtcTicketManagementPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`，若 grep 命中 future detail/OA/dialog surfaces, narrow to reconciliation/manual classes and document why；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P097 detail/imported invoice tables prompt。
+```
+
+#### Review
+
+- Single slice: yes，only reconciliation table/manual review surface。
+- Runtime implementation limited: yes，business detail/imported invoice/dialog/OA surfaces remain later slices。
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract remains expected-fail until all ETC runtime slices clear MUI。
