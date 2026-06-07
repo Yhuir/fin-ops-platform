@@ -1,20 +1,4 @@
-import Alert from "@mui/material/Alert";
-import Button from "@mui/material/Button";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import MenuItem from "@mui/material/MenuItem";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-
+import AppDialog from "../common/AppDialog";
 import type {
   TurnoverLedgerExportPreview,
   TurnoverLedgerExportRow,
@@ -94,82 +78,89 @@ export default function TurnoverLedgerExportDialog({
   onDownload: () => void;
 }) {
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle>下载往来款台账</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ pt: 1 }}>
-          <TextField
-            select
-            size="small"
-            label="下载范围"
+    <AppDialog
+      actions={(
+        <>
+          <button className="turnover-ledger-button" onClick={onClose} type="button">
+            取消
+          </button>
+          <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={loading || downloading} onClick={onDownload} type="button">
+            确认下载
+          </button>
+        </>
+      )}
+      maxWidth="xl"
+      open={open}
+      title="下载往来款台账"
+      onClose={onClose}
+    >
+      <div className="turnover-ledger-export-dialog">
+        <label className="turnover-ledger-extra-control turnover-ledger-export-dialog__range">
+          <span>下载范围</span>
+          <select
             value={family}
             onChange={(event) => onFamilyChange(event.target.value as TurnoverLedgerFamily)}
-            sx={{ width: { xs: "100%", sm: 220 } }}
           >
             {FAMILY_OPTIONS.map((option) => (
-              <MenuItem key={option.value} value={option.value}>
+              <option key={option.value} value={option.value}>
                 {option.label}
-              </MenuItem>
+              </option>
             ))}
-          </TextField>
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          <Typography variant="subtitle2" fontWeight={900}>
-            正式字段预览
-          </Typography>
-          <TableContainer sx={{ maxHeight: 420, border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
-            <Table stickyHeader size="small" aria-label="往来款导出预览">
-              <TableHead>
-                <TableRow>
-                  {PREVIEW_COLUMNS.map((column) => (
-                    <TableCell key={column.key} sx={{ whiteSpace: "nowrap", fontWeight: 900 }}>
-                      {column.label}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={PREVIEW_COLUMNS.length} align="center" sx={{ py: 6 }}>
-                      正在加载导出预览
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-                {!loading && (preview?.rows.length ?? 0) === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={PREVIEW_COLUMNS.length} align="center" sx={{ py: 6 }}>
-                      当前范围没有可导出的台账行
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-                {!loading
-                  ? (preview?.rows ?? []).map((row) => (
-                      <TableRow key={`${row.sequenceNo}-${row.rowType}-${row.lotId}-${row.counterpartyName}`}>
-                        {PREVIEW_COLUMNS.map((column) => {
-                          const value = formatPreviewValue(row, column);
-                          return <TableCell key={column.key}>{value}</TableCell>;
-                        })}
-                      </TableRow>
-                    ))
-                  : null}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          </select>
+        </label>
+        {error ? <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--danger" role="alert">{error}</div> : null}
+        <h3 className="turnover-ledger-extra-section__title">正式字段预览</h3>
+        <div className="turnover-ledger-export-dialog__table-wrap">
+          <table aria-label="往来款导出预览" className="turnover-ledger-export-dialog__table">
+            <thead>
+              <tr>
+                {PREVIEW_COLUMNS.map((column) => (
+                  <th key={column.key} scope="col">
+                    {column.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td className="turnover-ledger-export-dialog__state-cell" colSpan={PREVIEW_COLUMNS.length}>
+                    正在加载导出预览
+                  </td>
+                </tr>
+              ) : null}
+              {!loading && (preview?.rows.length ?? 0) === 0 ? (
+                <tr>
+                  <td className="turnover-ledger-export-dialog__state-cell" colSpan={PREVIEW_COLUMNS.length}>
+                    当前范围没有可导出的台账行
+                  </td>
+                </tr>
+              ) : null}
+              {!loading
+                ? (preview?.rows ?? []).map((row) => (
+                    <tr key={`${row.sequenceNo}-${row.rowType}-${row.lotId}-${row.counterpartyName}`}>
+                      {PREVIEW_COLUMNS.map((column) => {
+                        const value = formatPreviewValue(row, column);
+                        return (
+                          <td className={column.money ? "turnover-ledger-export-dialog__money-cell" : undefined} key={column.key}>
+                            {value}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                : null}
+            </tbody>
+          </table>
+        </div>
           {preview ? (
-            <Typography variant="caption" color="text.secondary">
+            <p className="turnover-ledger-export-dialog__summary">
               合计：待还款 {formatMoney(preview.summary.pendingRepaymentAmount)}，待收款{" "}
               {formatMoney(preview.summary.pendingCollectionAmount)}，应还利息{" "}
               {formatMoney(preview.summary.accruedInterest)}
-            </Typography>
+            </p>
           ) : null}
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>取消</Button>
-        <Button variant="contained" disabled={loading || downloading} onClick={onDownload}>
-          确认下载
-        </Button>
-      </DialogActions>
-    </Dialog>
+      </div>
+    </AppDialog>
   );
 }

@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from "react";
 import { Download } from "lucide-react";
-import Alert from "@mui/material/Alert";
-import Snackbar from "@mui/material/Snackbar";
 
 import AppDrawer from "../components/common/AppDrawer";
 import PageScaffold from "../components/common/PageScaffold";
@@ -297,7 +295,7 @@ export default function TurnoverLedgerPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportDownloading, setExportDownloading] = useState(false);
-  const [snackbar, setSnackbar] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = useState<{ severity: "success" | "error"; message: string } | null>(null);
   const tableWrapRef = usePageScrollSession<HTMLDivElement>({
     pageKey: "turnover-ledger",
     scrollKey: "grouped-table",
@@ -332,7 +330,7 @@ export default function TurnoverLedgerPage() {
       })
       .catch((caught: unknown) => {
         if (!isAbortLikeError(caught)) {
-          setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来款标签设置加载失败" });
+          setToast({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来款标签设置加载失败" });
         }
       })
       .finally(() => setTagLoading(false));
@@ -370,6 +368,14 @@ export default function TurnoverLedgerPage() {
     return () => controller.abort();
   }, [loadTagSelection]);
 
+  useEffect(() => {
+    if (!toast) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   const handleCategoryUpdated = useCallback(() => {
     loadTagSelection();
     loadLedger();
@@ -406,12 +412,12 @@ export default function TurnoverLedgerPage() {
 
   const handleToggleClosureRow = (group: { groupId: string; counterpartyName: string; familyLabel: string }, row: TurnoverLedgerGroupedRow) => {
     if (ledgerActionsDisabled) {
-      setSnackbar({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再操作" });
+      setToast({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再操作" });
       return;
     }
     const rowId = flowBankRowId(row);
     if (!rowId) {
-      setSnackbar({ severity: "error", message: "这条流水缺少银行流水 ID，无法选择" });
+      setToast({ severity: "error", message: "这条流水缺少银行流水 ID，无法选择" });
       return;
     }
     setClosureSelection((current) => {
@@ -423,7 +429,7 @@ export default function TurnoverLedgerPage() {
         };
       }
       if (current.groupId !== group.groupId) {
-        setSnackbar({ severity: "error", message: "一次只能选择同一往来组内的两条流水" });
+        setToast({ severity: "error", message: "一次只能选择同一往来组内的两条流水" });
         return current;
       }
       const exists = current.rows.some((item) => flowBankRowId(item) === rowId);
@@ -432,7 +438,7 @@ export default function TurnoverLedgerPage() {
         return rows.length > 0 ? { ...current, rows } : null;
       }
       if (current.rows.length >= 2) {
-        setSnackbar({ severity: "error", message: "一次最多选择两条流水" });
+        setToast({ severity: "error", message: "一次最多选择两条流水" });
         return current;
       }
       return { ...current, rows: [...current.rows, row] };
@@ -466,10 +472,10 @@ export default function TurnoverLedgerPage() {
       });
       setClosureSelection(null);
       setClosureDrawerOpen(false);
-      setSnackbar({ severity: "success", message: "外部往来闭环已确认" });
+      setToast({ severity: "success", message: "外部往来闭环已确认" });
       loadLedger();
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来闭环确认失败" });
+      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来闭环确认失败" });
     } finally {
       setClosureSubmitting(false);
     }
@@ -489,12 +495,12 @@ export default function TurnoverLedgerPage() {
       return;
     }
     if (ledgerActionsDisabled) {
-      setSnackbar({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再编辑" });
+      setToast({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再编辑" });
       return;
     }
     const normalizedRow = { ...row, relationId: relationIdForRow(row) };
     if (!normalizedRow.relationId) {
-      setSnackbar({ severity: "error", message: "这条流水缺少可编辑关系，无法打开补充信息" });
+      setToast({ severity: "error", message: "这条流水缺少可编辑关系，无法打开补充信息" });
       return;
     }
     setSelectedRow(normalizedRow);
@@ -539,10 +545,10 @@ export default function TurnoverLedgerPage() {
         relationId: selectedRow.relationId,
         source: "turnover_extra_save",
       });
-      setSnackbar({ severity: "success", message: "补充信息已保存" });
+      setToast({ severity: "success", message: "补充信息已保存" });
       loadLedger();
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "补充信息保存失败" });
+      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "补充信息保存失败" });
     } finally {
       setSavingExtra(false);
     }
@@ -562,10 +568,10 @@ export default function TurnoverLedgerPage() {
         action: kind,
         source: "turnover_relation_mutation",
       });
-      setSnackbar({ severity: "success", message: kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销" });
+      setToast({ severity: "success", message: kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销" });
       loadLedger();
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "往来关系操作失败" });
+      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "往来关系操作失败" });
     } finally {
       setMutatingRelation(false);
     }
@@ -591,10 +597,10 @@ export default function TurnoverLedgerPage() {
       setTagSelection(saved);
       setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
       setTagDrawerOpen(false);
-      setSnackbar({ severity: "success", message: "外部往来款标签设置已保存" });
+      setToast({ severity: "success", message: "外部往来款标签设置已保存" });
       loadLedger();
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来款标签设置保存失败" });
+      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来款标签设置保存失败" });
     } finally {
       setTagSaving(false);
     }
@@ -613,7 +619,7 @@ export default function TurnoverLedgerPage() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(href);
-      setSnackbar({ severity: "success", message: "往来款台账下载已开始" });
+      setToast({ severity: "success", message: "往来款台账下载已开始" });
       setExportOpen(false);
     } catch (caught) {
       setExportError(caught instanceof Error ? caught.message : "往来款台账下载失败");
@@ -638,7 +644,9 @@ export default function TurnoverLedgerPage() {
         )}
       >
         {!canMutateData ? (
-          <Alert severity="info">当前账号为只读权限，可查看台账与详情，不能确认或撤销归并。</Alert>
+          <div className="turnover-ledger-page-notice turnover-ledger-page-notice--info" role="status">
+            当前账号为只读权限，可查看台账与详情，不能确认或撤销归并。
+          </div>
         ) : null}
 
         {error ? (
@@ -647,9 +655,9 @@ export default function TurnoverLedgerPage() {
           </StatePanel>
         ) : null}
         {ledgerActionsDisabled ? (
-          <Alert severity="warning">
+          <div className="turnover-ledger-page-notice turnover-ledger-page-notice--warning" role="alert">
             往来款台账正在刷新，当前展示的是非最新数据。
-          </Alert>
+          </div>
         ) : null}
 
         <div className="turnover-ledger-summary-grid">
@@ -901,18 +909,12 @@ export default function TurnoverLedgerPage() {
         onDownload={() => void handleDownloadExport()}
       />
 
-      <Snackbar
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-        autoHideDuration={4000}
-        open={snackbar !== null}
-        onClose={() => setSnackbar(null)}
-      >
-        {snackbar ? (
-          <Alert severity={snackbar.severity} variant="filled" onClose={() => setSnackbar(null)} sx={{ width: "100%" }}>
-            {snackbar.message}
-          </Alert>
-        ) : undefined}
-      </Snackbar>
+      {toast ? (
+        <div className={`turnover-ledger-toast turnover-ledger-toast--${toast.severity}`} role={toast.severity === "error" ? "alert" : "status"}>
+          <span>{toast.message}</span>
+          <button aria-label="关闭提示" onClick={() => setToast(null)} type="button">×</button>
+        </div>
+      ) : null}
     </div>
   );
 }

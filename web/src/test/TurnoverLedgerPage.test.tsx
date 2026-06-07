@@ -874,7 +874,7 @@ describe("Turnover ledger page", () => {
     });
     const forbiddenLegacySurfaces = turnoverLedgerSourceFiles.flatMap((path) => {
       const source = sourceByPath[path];
-      return /DownloadOutlinedIcon|KeyboardArrowDownIcon|KeyboardArrowRightIcon|CloseIcon|TextField|TableCell|TableRow|TableHead|TableBody|TableContainer|DialogTitle|DialogContent|DialogActions|Snackbar|Drawer|Chip|IconButton|Tooltip|Tabs|Tab|FormControlLabel|MenuItem/.test(source)
+      return /DownloadOutlinedIcon|KeyboardArrowDownIcon|KeyboardArrowRightIcon|CloseIcon|Snackbar|<(?:TextField|TableCell|TableRow|TableHead|TableBody|TableContainer|Dialog|DialogTitle|DialogContent|DialogActions|Drawer|Chip|IconButton|Tooltip|Tabs|Tab|FormControlLabel|MenuItem)\b/.test(source)
         ? [path]
         : [];
     });

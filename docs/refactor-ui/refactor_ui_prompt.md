@@ -5099,7 +5099,7 @@ Scope: `/turnover-ledger` extra info right drawer component only.
 ### P091-phase-6-turnover-ledger-export-dialog-feedback-closeout
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor + contract closeout`
 - Scope: `/turnover-ledger` export dialog, page-level feedback/status surfaces, and source-level migration contract false-positive cleanup only。
 
@@ -5121,6 +5121,51 @@ Scope: `/turnover-ledger` export dialog, page-level feedback/status surfaces, an
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected outcome: TurnoverLedger source-level contract and all behavior tests pass after this closeout。
+
+#### Execution Notes
+
+- Runtime implementation changed: yes，`web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx` and `web/src/pages/TurnoverLedgerPage.tsx`。
+- CSS changed: yes，only `web/src/app/styles.css` export dialog/page notice/toast classes。
+- Test implementation changed: yes，only source-level no-MUI contract false-positive cleanup in `web/src/test/TurnoverLedgerPage.test.tsx`。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Migrated export dialog from MUI Dialog/layout/table/select/alert/buttons to `AppDialog`, native select/table/buttons and project classes。
+- Migrated page-level read-only/stale notices and mutation feedback from MUI Alert/Snackbar to native project notices/toast with 4-second auto close and manual close button。
+- Preserved download entry, modal dialog name, download range options, export preview table accessible name, loading/empty/error text, summary text, cancel/download buttons, disabled rules and download request family。
+- Source-level migration contract now passes and still forbids MUI imports, MUI selectors and legacy MUI JSX/import names without flagging project primitives。
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|reloads on category updates and downloads a previewed export|opens the extra drawer|shows a business error|disables turnover write actions"`: passed。
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: passed，12 tests。
+  - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|<Dialog\\b|<Button|<TextField|<MenuItem|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Stack|<Typography' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+- Next prompt generated: `MG-P091-phase-6-turnover-ledger`。
+
+### MG-P091-phase-6-turnover-ledger
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `cumulative merge gate`
+- Scope: TurnoverLedger P085-P091 only。
+
+#### Prompt
+
+```text
+Prompt ID: MG-P091-phase-6-turnover-ledger
+Phase: phase_6_page_batches
+Type: cumulative merge gate
+Scope: TurnoverLedger P085-P091 only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx、web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx、web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx、web/src/test/TurnoverLedgerPage.test.tsx、web/src/test/TurnoverLedgerApi.test.ts 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 P085-P091 已记录并且 TurnoverLedger runtime no-MUI contract passed。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts`；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|DownloadOutlinedIcon|KeyboardArrowDownIcon|KeyboardArrowRightIcon|CloseIcon|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|<Dialog\\b|<Drawer\\b|<Button|<TextField|<MenuItem|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Checkbox|<Chip|<IconButton|<Stack|<Typography|<Paper|<Divider|FormControlLabel|Tabs|Tab' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。确认 scope 只包含 TurnoverLedger runtime/tests/docs files and `web/src/app/styles.css`；禁止 `git add .` 和 `git add -A`，只允许精确 git add。MG 通过后提交并 push 到 `origin/refactor-ui`，再更新 state/prompt/module docs 的 MG execution notes 和 Push Log，标记 MG verified，并从 `refactor-ui` 分支生成下一条 Micro-JIT prompt。
+```
+
+#### Review
+
+- Cumulative boundary: yes，TurnoverLedger P085-P091 complete and source-level contract now passes。
+- Runtime implementation limited: yes，only TurnoverLedger runtime/test/docs and app styles。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected outcome: TurnoverLedger module committed, pushed and ready to move to next Phase 6 module。
 
 ### MG Prompt Template
 

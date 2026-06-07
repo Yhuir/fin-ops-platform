@@ -4396,6 +4396,29 @@ textarea {
   color: var(--fp-danger);
 }
 
+.turnover-ledger-page-notice {
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  font-weight: 750;
+  line-height: var(--fp-leading-normal);
+  padding: var(--fp-space-3);
+}
+
+.turnover-ledger-page-notice--info {
+  border-color: color-mix(in srgb, var(--fp-primary) 32%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-primary) 8%, var(--fp-surface));
+  color: var(--fp-primary-hover);
+}
+
+.turnover-ledger-page-notice--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 38%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning) 10%, var(--fp-surface));
+  color: var(--fp-warning);
+}
+
 .turnover-ledger-tag-list {
   display: grid;
   overflow: auto;
@@ -4639,6 +4662,128 @@ textarea {
   gap: var(--fp-space-2);
 }
 
+.turnover-ledger-export-dialog {
+  display: grid;
+  gap: var(--fp-space-4);
+}
+
+.turnover-ledger-export-dialog__range {
+  width: min(220px, 100%);
+}
+
+.turnover-ledger-export-dialog__table-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.turnover-ledger-export-dialog__table {
+  width: 100%;
+  min-width: 1440px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+}
+
+.turnover-ledger-export-dialog__table th,
+.turnover-ledger-export-dialog__table td {
+  border-bottom: 1px solid var(--fp-border-subtle);
+  padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.turnover-ledger-export-dialog__table th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  background: var(--fp-table-header-bg);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.turnover-ledger-export-dialog__money-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 780;
+}
+
+.turnover-ledger-export-dialog__state-cell {
+  height: 120px;
+  color: var(--fp-text-secondary);
+  font-weight: 800;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+.turnover-ledger-export-dialog__summary {
+  margin: 0;
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--fp-leading-normal);
+}
+
+.turnover-ledger-toast {
+  position: fixed;
+  z-index: 1300;
+  right: var(--fp-space-6);
+  bottom: var(--fp-space-6);
+  display: flex;
+  max-width: min(420px, calc(100vw - var(--fp-space-6) * 2));
+  align-items: center;
+  gap: var(--fp-space-3);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-text-primary);
+  box-shadow: var(--fp-shadow-lg);
+  color: var(--fp-surface);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.4;
+  padding: var(--fp-space-3);
+}
+
+.turnover-ledger-toast--success {
+  border-color: color-mix(in srgb, var(--fp-success) 68%, var(--fp-border));
+  background: var(--fp-success);
+}
+
+.turnover-ledger-toast--error {
+  border-color: color-mix(in srgb, var(--fp-danger) 68%, var(--fp-border));
+  background: var(--fp-danger);
+}
+
+.turnover-ledger-toast button {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--fp-surface) 38%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.turnover-ledger-toast button:hover,
+.turnover-ledger-toast button:focus-visible {
+  background: color-mix(in srgb, var(--fp-surface) 18%, transparent);
+  outline: none;
+}
+
 @media (max-width: 1100px) {
   .turnover-ledger-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4668,6 +4813,11 @@ textarea {
   .turnover-ledger-extra-footer__group,
   .turnover-ledger-extra-footer .turnover-ledger-button {
     width: 100%;
+  }
+
+  .turnover-ledger-toast {
+    right: var(--fp-space-3);
+    bottom: var(--fp-space-3);
   }
 }
 
