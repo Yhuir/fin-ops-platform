@@ -11,6 +11,7 @@
 - Test implementation changed: no.
 - Backend/API/read model/worker changed: no.
 - Workbench internals changed: no.
+- Commit: `e113d6e6 docs: add batch accounting migration discovery`, pushed to `origin/refactor-ui`.
 
 ## Current MUI Inventory
 

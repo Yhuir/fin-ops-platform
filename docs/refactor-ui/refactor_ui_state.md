@@ -520,3 +520,4 @@
 | 2026-06-07 | `P077-phase-6-no-oa-bank-batches-transaction-region` | `refactor-ui` | `00e0ca44` | pushed |
 | 2026-06-07 | `P078-phase-6-no-oa-bank-batches-overlays-feedback` | `refactor-ui` | `87b92e20` | pushed |
 | 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `refactor-ui` | `f5736c0c` | pushed |
+| 2026-06-07 | `P079-phase-6-batch-accounting-discovery` | `refactor-ui` | `e113d6e6` | pushed |

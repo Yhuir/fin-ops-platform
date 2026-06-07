@@ -4582,6 +4582,7 @@ Scope: `/batch-accounting` only. Do not modify runtime implementation or tests.
 - Test implementation changed: no.
 - Backend/API/read model/worker and workbench internals changed: no.
 - Discovery recorded current MUI inventory, user-visible entrypoints, API/read model boundary, existing test coverage, migration slice plan and risks.
+- Committed and pushed `e113d6e6 docs: add batch accounting migration discovery` to `origin/refactor-ui`.
 - Verification:
   - `test -f docs/refactor-ui/modules/phase_6_batch_accounting.md`: passed.
   - `rg -n "P079-phase-6-batch-accounting-discovery|Current MUI Inventory|User-visible Entrypoints|P080-phase-6-batch-accounting-characterization-tests" docs/refactor-ui/modules/phase_6_batch_accounting.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed.
