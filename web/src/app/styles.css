@@ -1938,7 +1938,12 @@ textarea {
   font-weight: 800;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
   white-space: nowrap;
 }
 
@@ -1964,6 +1969,10 @@ textarea {
 .output-invoice-collections-button--primary:focus-visible {
   background: var(--fp-primary-hover);
   color: var(--fp-surface);
+}
+
+.output-invoice-collections-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .output-invoice-collections-button:disabled {
@@ -2011,7 +2020,10 @@ textarea {
   font-weight: 600;
   outline: none;
   padding: 0 var(--fp-space-3);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    background-color var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collections-field select {
@@ -2042,7 +2054,7 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  padding: var(--fp-space-3);
+  padding: var(--fp-space-2) var(--fp-space-3);
 }
 
 .output-invoice-collections-summary-tile__label {
@@ -2062,7 +2074,7 @@ textarea {
 
 .output-invoice-collections-alert {
   border: 1px solid color-mix(in srgb, var(--fp-danger) 32%, var(--fp-border));
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: var(--fp-danger-soft);
   color: var(--fp-danger);
   font-size: var(--fp-text-body);
@@ -2080,7 +2092,7 @@ textarea {
   display: block;
   overflow: hidden;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
+  border-radius: var(--fp-radius-sm);
   background: linear-gradient(90deg, var(--fp-surface-muted), var(--fp-surface), var(--fp-surface-muted));
   background-size: 240% 100%;
   animation: input-invoice-usage-loading 1.2s ease-in-out infinite;
@@ -2116,6 +2128,12 @@ textarea {
   font-weight: 800;
   line-height: 1;
   padding: 0 5px;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-filter-menu__trigger span {
@@ -2132,6 +2150,10 @@ textarea {
   background: var(--fp-primary-soft);
   color: var(--fp-primary-hover);
   outline: none;
+}
+
+.output-invoice-collection-filter-menu__trigger:active {
+  transform: translateY(1px);
 }
 
 .output-invoice-collection-filter-menu__panel {
@@ -2193,6 +2215,10 @@ textarea {
   line-height: 1.25;
   padding: 0 var(--fp-space-3);
   text-align: left;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-filter-menu__item:hover:not(.output-invoice-collection-filter-menu__item--disabled),
@@ -2202,6 +2228,11 @@ textarea {
   background: var(--fp-primary-soft);
   color: var(--fp-primary-hover);
   outline: none;
+}
+
+.output-invoice-collection-filter-menu__item:active:not(.output-invoice-collection-filter-menu__item--disabled),
+.output-invoice-collection-filter-menu__clear:active {
+  transform: translateY(1px);
 }
 
 .output-invoice-collection-filter-menu__item--disabled {
@@ -2260,7 +2291,10 @@ textarea {
   font-weight: 600;
   outline: none;
   padding: 0 var(--fp-space-2);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    background-color var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-filter-menu__field select {
@@ -2292,12 +2326,22 @@ textarea {
   font-size: var(--fp-text-body);
   font-weight: 850;
   padding: 0 var(--fp-space-3);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-filter-menu__apply:hover,
 .output-invoice-collection-filter-menu__apply:focus-visible {
   background: var(--fp-primary-hover);
   outline: none;
+}
+
+.output-invoice-collection-filter-menu__apply:active {
+  transform: translateY(1px);
 }
 
 .output-invoice-collection-expandable-cell-text {
@@ -2335,6 +2379,11 @@ textarea {
   color: var(--fp-text-secondary);
   cursor: pointer;
   padding: 0;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-expandable-cell-text__button:hover,
@@ -2345,6 +2394,10 @@ textarea {
   outline: none;
 }
 
+.output-invoice-collection-expandable-cell-text__button:active {
+  transform: translateY(1px);
+}
+
 .output-invoice-collections-table-frame {
   overflow: hidden;
   border: 1px solid var(--fp-border);
@@ -2353,8 +2406,8 @@ textarea {
 }
 
 .output-invoice-collections-table-shell {
-  min-height: 360px;
-  max-height: calc(100vh - 280px);
+  min-height: 320px;
+  max-height: calc(100vh - 214px);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -2428,20 +2481,20 @@ textarea {
 }
 
 .output-invoice-collections-table-group-header--invoice {
-  background: #f6fbf8;
+  background: color-mix(in srgb, var(--fp-success-soft) 70%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-group-header--status,
 .output-invoice-collections-table-cell--status {
-  background: rgba(14, 165, 233, 0.10);
+  background: color-mix(in srgb, var(--fp-warning-soft) 66%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-group-header--bank {
-  background: #f5f9ff;
+  background: color-mix(in srgb, var(--fp-primary-soft) 72%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-group-header--receipt {
-  background: #f8fafc;
+  background: color-mix(in srgb, var(--fp-surface-muted) 78%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-sub-header {
@@ -2455,19 +2508,19 @@ textarea {
 }
 
 .output-invoice-collections-table-sub-header--invoice {
-  background: #fbfdfc;
+  background: color-mix(in srgb, var(--fp-success-soft) 34%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-sub-header--status {
-  background: #f1faff;
+  background: color-mix(in srgb, var(--fp-warning-soft) 38%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-sub-header--bank {
-  background: #f8fbff;
+  background: color-mix(in srgb, var(--fp-primary-soft) 42%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-sub-header--receipt {
-  background: #fbfcfd;
+  background: color-mix(in srgb, var(--fp-surface-muted) 48%, var(--fp-surface));
 }
 
 .output-invoice-collections-table-header-stack {
@@ -2490,6 +2543,7 @@ textarea {
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  transition: background-color var(--motion-fast) var(--ease-out-quart);
   vertical-align: top;
 }
 
@@ -2498,7 +2552,7 @@ textarea {
 }
 
 .output-invoice-collections-table-cell--small-border {
-  border-left: 1px solid rgba(148, 163, 184, 0.28);
+  border-left: 1px solid color-mix(in srgb, var(--fp-border-strong) 28%, transparent);
 }
 
 .output-invoice-collections-table-cell--amount,
@@ -2626,6 +2680,12 @@ textarea {
   font-weight: 800;
   line-height: 1.2;
   padding: 0 var(--fp-space-2);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collections-table-action--plain:hover:not(:disabled),
@@ -2661,6 +2721,10 @@ textarea {
   outline: none;
 }
 
+.output-invoice-collections-table-action:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .output-invoice-collections-table-action:disabled {
   color: var(--fp-text-disabled);
   cursor: default;
@@ -2680,6 +2744,11 @@ textarea {
   color: var(--fp-text-secondary);
   cursor: pointer;
   padding: 0;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collections-sort-button:hover,
@@ -2688,6 +2757,10 @@ textarea {
   background: var(--fp-primary-soft);
   color: var(--fp-primary-hover);
   outline: none;
+}
+
+.output-invoice-collections-sort-button:active {
+  transform: translateY(1px);
 }
 
 .output-invoice-collections-pagination {
@@ -2717,6 +2790,10 @@ textarea {
   color: var(--fp-text-primary);
   font: inherit;
   padding: 4px 26px 4px 8px;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    background-color var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collections-pagination-range {
@@ -2743,6 +2820,12 @@ textarea {
   font-size: var(--fp-text-label);
   font-weight: 750;
   padding: 0 var(--fp-space-3);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collections-pagination-actions button:hover:not(:disabled),
@@ -2751,6 +2834,10 @@ textarea {
   background: var(--fp-primary-soft);
   color: var(--fp-primary-hover);
   outline: none;
+}
+
+.output-invoice-collections-pagination-actions button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .output-invoice-collections-pagination-actions button:disabled {
@@ -2769,7 +2856,7 @@ textarea {
 
 .output-invoice-collection-drawer__body {
   display: grid;
-  gap: var(--fp-space-4);
+  gap: var(--fp-space-3);
 }
 
 .output-invoice-collection-detail-card {
@@ -2778,7 +2865,7 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  padding: var(--fp-space-4);
+  padding: var(--fp-space-3);
 }
 
 .output-invoice-collection-detail-card h3 {
@@ -2893,7 +2980,10 @@ textarea {
   font-weight: 600;
   outline: none;
   padding: 0 var(--fp-space-3);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    background-color var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-drawer__field textarea {
@@ -2962,6 +3052,12 @@ textarea {
   font-size: var(--fp-text-body);
   font-weight: 800;
   padding: 0 var(--fp-space-3);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-drawer__button:hover:not(:disabled),
@@ -2996,6 +3092,10 @@ textarea {
   background: var(--fp-warning-soft);
   color: var(--fp-warning);
   outline: none;
+}
+
+.output-invoice-collection-drawer__button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .output-invoice-collection-drawer__button:disabled {
@@ -3060,6 +3160,9 @@ textarea {
   cursor: pointer;
   font-size: var(--fp-text-body);
   line-height: 1.35;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart);
 }
 
 .output-invoice-collection-candidate-list__option input {
@@ -3079,7 +3182,7 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  padding: var(--fp-space-4);
+  padding: var(--fp-space-3);
 }
 
 .output-invoice-collection-receipt-history-card h3,
@@ -3121,7 +3224,7 @@ textarea {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
   background: var(--fp-surface);
-  padding: var(--fp-space-5);
+  padding: var(--fp-space-4);
 }
 
 .output-invoice-collection-receipt-card__header {

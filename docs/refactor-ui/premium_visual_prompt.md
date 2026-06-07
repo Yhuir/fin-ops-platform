@@ -913,7 +913,13 @@ Notes:
 
 - Code tests were not run for PV-016 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-017-output-invoice-collections-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-017-output-invoice-collections-premium-visual`
 
@@ -942,3 +948,62 @@ Notes:
 - 浏览器 smoke `/output-invoice-collections`：确认 heading、query toolbar、summary metrics、grouped table、filter trigger、detail drawer、status/rules/receipt workflows can display/open/close without obvious overlap or top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Replaced output-invoice table group/sub-header hard-coded washes with token-based `color-mix(...)` treatments.
+- Tightened table viewport, summary metrics, alert, loading skeleton, detail surfaces and receipt surfaces without changing layout hierarchy or workflow shape.
+- Added motion-token hover/press/focus feedback to output-invoice buttons, query inputs/selects, filter menu trigger/items/fields/apply, expandable controls, table actions, sort buttons, pagination buttons and drawer controls.
+- Added CSS contract coverage in `OutputInvoiceCollectionsPage.test.tsx` for compact table viewport, token group colors, motion-token usage and no output-specific hard-coded group washes.
+- Preserved all output invoice collection behavior: route, header actions, query controls, summary metrics, grouped table, filter/sort/expand controls, row detail/workflow actions, all right drawers, receipt void/reissue dialogs, loading/empty/error/read-model/permission states and API/workflow behavior.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke for `/output-invoice-collections` with system Chrome and mocked API at `http://127.0.0.1:4181/output-invoice-collections`
+
+Browser smoke result:
+
+- Main table rendered with 1 data row.
+- Group headers rendered: `销项发票`, `收款状态`, `收入流水`, `收据`.
+- Filter menu trigger opened and rendered `待收款，已收部分款`.
+- Detail right drawer opened for `销项发票收款情况详情`.
+- Rules right drawer opened with `收款状态规则`.
+- Receipt history right drawer opened with `已出收据历史`.
+- Top-level body overflow: `0`; page root overflow: `0`.
+- Screenshot: `/tmp/output-invoice-collections-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
+
+## Next Prompt Draft
+
+`PV-018-no-oa-bank-batches-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`、`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/features/noOaBankBatches/*`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts` 和当前 `git status`。本切片只做免 OA 流水批量处理 premium visual discovery，不改运行时代码，除非发现一个很小且纯 characterization 的测试缺口可以无行为变更补上。
+
+输出要求：
+
+- 更新 `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`，追加 `PV-018 Premium Visual Discovery`；从 `docs/refactor-ui/module_inventory.md` 链接（如未链接）。
+- 清点 `/no-oa-bank-batches` 的用户可见入口：page header actions、status segmented controls、月份/银行账户筛选、主/子标签 rails、流水 region、批次列表、明细表、提交/撤回/全选/清空、标签管理右侧抽屉、撤回 dialog、snackbar/status feedback、loading/empty/error/stale/permission 状态。
+- 标明哪些元素必须功能等价保留：旧三列/rail/流水区域仍保持原信息层级，旧右侧抽屉仍为右侧抽屉，旧撤回弹窗仍为弹窗，旧表格仍为表格，旧按钮/行选择/批次操作仍在原位置和原语义。
+- 列出表格和列表排版要求：金额右对齐、数字 tabular nums、方向/银行/来源/status tag 稳定高度，批次卡/列表项不做大 card，不制造大留白，row hover/selected 不改变行高，长摘要/备注/账户名需要截断或可读换行。
+- 列出可迁移到 HeroUI 原生组件或共享 project primitive 的位置，以及哪些只能做局部 CSS polish 以保留功能。
+- 生成下一条唯一 prompt：`PV-019-no-oa-bank-batches-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和相关模块文档，精确 staging，commit 并 push 到 `origin/main`。

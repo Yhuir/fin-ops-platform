@@ -358,6 +358,13 @@ function readWebSource(path: string) {
   return readFileSync(resolve(__dirname, "..", "..", path), "utf8");
 }
 
+function cssRule(source: string, selector: string) {
+  const normalizedSelector = selector.replace(/\\n/g, "\n");
+  const escapedSelector = normalizedSelector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "m"));
+  return match?.[1] ?? "";
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -408,6 +415,53 @@ describe("Output invoice collections page", () => {
       forbiddenLegacySurfaces: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("keeps premium compact table, token colors, and interaction CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const pageButton = cssRule(styles, ".output-invoice-collections-button");
+    const queryControls = cssRule(styles, ".output-invoice-collections-field input,\n.output-invoice-collections-field select");
+    const loading = cssRule(styles, ".output-invoice-collections-loading__bar,\n.output-invoice-collections-loading__panel");
+    const filterTrigger = cssRule(styles, ".output-invoice-collection-filter-menu__trigger");
+    const filterItem = cssRule(styles, ".output-invoice-collection-filter-menu__item,\n.output-invoice-collection-filter-menu__clear");
+    const filterFields = cssRule(styles, ".output-invoice-collection-filter-menu__field input,\n.output-invoice-collection-filter-menu__field select");
+    const filterApply = cssRule(styles, ".output-invoice-collection-filter-menu__apply");
+    const expandableButton = cssRule(styles, ".output-invoice-collection-expandable-cell-text__button");
+    const tableShell = cssRule(styles, ".output-invoice-collections-table-shell");
+    const tableCells = cssRule(styles, ".output-invoice-collections-table-cell");
+    const tableAction = cssRule(styles, ".output-invoice-collections-table-action");
+    const sortButton = cssRule(styles, ".output-invoice-collections-sort-button");
+    const paginationButton = cssRule(styles, ".output-invoice-collections-pagination-actions button");
+    const drawerButton = cssRule(styles, ".output-invoice-collection-drawer__button");
+    const drawerFields = cssRule(styles, ".output-invoice-collection-drawer__field input,\n.output-invoice-collection-drawer__field select,\n.output-invoice-collection-drawer__field textarea");
+    const groupInvoice = cssRule(styles, ".output-invoice-collections-table-group-header--invoice");
+    const groupStatus = cssRule(styles, ".output-invoice-collections-table-group-header--status,\n.output-invoice-collections-table-cell--status");
+    const groupBank = cssRule(styles, ".output-invoice-collections-table-group-header--bank");
+    const groupReceipt = cssRule(styles, ".output-invoice-collections-table-group-header--receipt");
+    const outputGroupRules = [groupInvoice, groupStatus, groupBank, groupReceipt].join("\n");
+
+    expect(pageButton).toContain("var(--motion-fast)");
+    expect(pageButton).toContain("var(--ease-out-quart)");
+    expect(queryControls).toContain("var(--motion-fast)");
+    expect(loading).toContain("border-radius: var(--fp-radius-sm)");
+    expect(filterTrigger).toContain("var(--motion-fast)");
+    expect(filterItem).toContain("var(--motion-fast)");
+    expect(filterFields).toContain("var(--motion-fast)");
+    expect(filterApply).toContain("var(--motion-fast)");
+    expect(expandableButton).toContain("var(--motion-fast)");
+    expect(tableShell).toContain("min-height: 320px");
+    expect(tableShell).toContain("max-height: calc(100vh - 214px)");
+    expect(tableCells).toContain("transition: background-color var(--motion-fast)");
+    expect(tableAction).toContain("var(--motion-fast)");
+    expect(sortButton).toContain("var(--motion-fast)");
+    expect(paginationButton).toContain("var(--motion-fast)");
+    expect(drawerButton).toContain("var(--motion-fast)");
+    expect(drawerFields).toContain("var(--motion-fast)");
+    expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
+    expect(groupStatus).toContain("color-mix(in srgb, var(--fp-warning-soft)");
+    expect(groupBank).toContain("color-mix(in srgb, var(--fp-primary-soft)");
+    expect(groupReceipt).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(outputGroupRules).not.toMatch(/#f6fbf8|#f5f9ff|#f8fafc|#fbfdfc|#f1faff|#f8fbff|#fbfcfd|rgba\(14,\s*165,\s*233,\s*0\.10\)/);
   });
 
   test("uses a standard empty state while read model refresh details stay hidden", async () => {

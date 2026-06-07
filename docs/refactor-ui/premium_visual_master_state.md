@@ -46,7 +46,7 @@ Last updated: 2026-06-08
 | 14 | `PV-014-oa-pending-payments-discovery` | verified | `/oa-pending-payments` discovery。 |
 | 15 | `PV-015-oa-pending-payments-premium-visual` | verified | OA 待付款核对 premium visual slice。 |
 | 16 | `PV-016-output-invoice-collections-discovery` | verified | `/output-invoice-collections` discovery。 |
-| 17 | `PV-017-output-invoice-collections-premium-visual` | pending | 销项发票收款 premium visual slice。 |
+| 17 | `PV-017-output-invoice-collections-premium-visual` | verified | 销项发票收款 premium visual slice。 |
 | 18 | `PV-018-no-oa-bank-batches-discovery` | pending | `/no-oa-bank-batches` discovery。 |
 | 19 | `PV-019-no-oa-bank-batches-premium-visual` | pending | 免 OA 流水批量处理 premium visual slice。 |
 | 20 | `PV-020-batch-accounting-discovery` | pending | `/batch-accounting` discovery。 |
@@ -62,29 +62,29 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-017-output-invoice-collections-premium-visual`
+`PV-018-no-oa-bank-batches-discovery`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`
-- `web/src/pages/OutputInvoiceCollectionsPage.tsx`
-- `web/src/components/outputInvoiceCollections/*`
-- `web/src/app/styles.css`
-- `web/src/test/OutputInvoiceCollectionsPage.test.tsx`
+- `docs/refactor-ui/module_inventory.md`
+- `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
+- `web/src/pages/NoOaBankBatchPage.tsx`
+- `web/src/features/noOaBankBatches/*`
+- `web/src/test/NoOaBankBatchPage.test.tsx`
+- `web/src/test/NoOaBankBatchApi.test.ts`
 
 ### Verification
 
-Required for PV-017:
+Required for PV-018:
 
-- `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- Browser smoke `/output-invoice-collections`: heading, query toolbar, summary metrics, grouped table, filter menu, detail drawer, status/rules/receipt workflows and no top-level horizontal overflow.
+- `git status --short --branch`
+
+PV-018 is discovery-only. It must not change runtime code unless a very small characterization test gap is found and can be filled without behavior change.
 
 ## Execution Rules
 
@@ -126,3 +126,5 @@ Each implementation slice must:
 | 2026-06-08 | `PV-014-push-log-update` | `010e7412` | pushed to `origin/main` | Recorded PV-014 push status after push. |
 | 2026-06-08 | `PV-015-oa-pending-payments-premium-visual` | `80e9a2d3` | pushed to `origin/main` | OA pending payments premium visual polish verified; PV-016 prompt generated. |
 | 2026-06-08 | `PV-016-output-invoice-collections-discovery` | `51bc31fb` | pushed to `origin/main` | Output invoice collections premium discovery verified; PV-017 prompt generated. |
+| 2026-06-08 | `PV-016-push-log-update` | `b94f089a` | pushed to `origin/main` | Recorded PV-016 push status after push. |
+| 2026-06-08 | `PV-017-output-invoice-collections-premium-visual` | pending | pending | Output invoice collections premium visual polish verified; PV-018 prompt generated. |

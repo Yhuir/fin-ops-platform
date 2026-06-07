@@ -498,3 +498,50 @@ Scope: OutputInvoiceCollections P066-P072 completed migration only.
   - OutputInvoiceCollections runtime scope has no direct `@mui/*` imports or `.Mui*` selector residue.
   - Commit `60f9593b feat: migrate output invoice collection receipt drawers` was pushed to `origin/refactor-ui`.
   - The next module prompt is `P073-phase-6-no-oa-bank-batches-discovery`.
+
+## PV-017 Premium Visual Execution Notes
+
+- Prompt ID: `PV-017-output-invoice-collections-premium-visual`
+- Type: premium visual implementation
+- Status: verified
+- Runtime files changed:
+  - `web/src/app/styles.css`
+- Tests changed:
+  - `web/src/test/OutputInvoiceCollectionsPage.test.tsx`
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Implementation
+
+- Replaced output-invoice table group and sub-header hard-coded washes with Ledger Calm token-based `color-mix(...)` treatments.
+- Tightened table viewport from the older tall layout to `min-height: 320px` and `max-height: calc(100vh - 214px)`.
+- Tightened summary, alert, loading, detail, receipt-history and receipt-preview surfaces without changing their information hierarchy.
+- Added motion-token hover/press/focus feedback for page actions, query controls, filter menu trigger/items/fields/apply, expandable text controls, table actions, sort buttons, pagination controls and drawer controls.
+- Preserved the route, header actions, query controls, summary metrics, grouped table, filter/sort/expand controls, row details/workflows, all right drawers, receipt dialogs, loading/empty/error/read-model/permission states and all API behavior.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- keepalive/snapshot forbidden grep for runtime and module docs.
+- non-workbench runtime MUI import grep.
+- Browser smoke for `/output-invoice-collections` with system Chrome and mocked API at `http://127.0.0.1:4181/output-invoice-collections`.
+
+Browser smoke result:
+
+- Main table rendered with 1 data row.
+- Group headers rendered: `销项发票`, `收款状态`, `收入流水`, `收据`.
+- Filter menu trigger opened and rendered `待收款，已收部分款`.
+- Detail right drawer opened for `销项发票收款情况详情`.
+- Rules right drawer opened with `收款状态规则`.
+- Receipt history right drawer opened with `已出收据历史`.
+- Top-level body overflow: `0`; page root overflow: `0`.
+- Screenshot: `/tmp/output-invoice-collections-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minify warnings.
