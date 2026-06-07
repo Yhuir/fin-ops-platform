@@ -476,3 +476,4 @@
 | 2026-06-07 | `P040-phase-6-bank-details-discovery` | `refactor-ui` | `e720504d` | pushed |
 | 2026-06-07 | `MG-P045-phase-6-bank-details` | `refactor-ui` | `9a0b74ea` | pushed |
 | 2026-06-07 | `MG-P072-phase-6-output-invoice-collections` | `refactor-ui` | `60f9593b` | pushed |
+| 2026-06-07 | `P073-phase-6-no-oa-bank-batches-discovery` | `refactor-ui` | `ac9a18ac` | pushed |

@@ -12,6 +12,7 @@
 - Tests changed: no.
 - Backend/API/read model/worker changed: no.
 - Workbench internals changed: no.
+- Commit: `ac9a18ac docs: add no oa bank batches migration discovery`, pushed to `origin/refactor-ui`.
 
 ## Current Files
 

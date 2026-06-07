@@ -4272,6 +4272,7 @@ Scope: `/no-oa-bank-batches` only. Do not modify runtime implementation.
 - Tests changed: no.
 - Backend/API/read model/worker changed: no.
 - Workbench internals changed: no.
+- Committed and pushed `ac9a18ac docs: add no oa bank batches migration discovery` to `origin/refactor-ui`.
 
 #### Verification
 
