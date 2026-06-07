@@ -5929,7 +5929,7 @@ Scope: `/settings` P099-P106 migration only.
 ### P107-phase-7-mui-containment-discovery
 
 - Phase: `phase_7_mui_containment`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `discovery/planning`
 - Scope: MUI containment discovery only。
 
@@ -5952,6 +5952,51 @@ Scope: MUI containment discovery only.
 - Workbench internals frozen: required。
 - Docs on demand: yes，Phase 7 containment needs a reusable inventory and allowed-list。
 - Expected outcome: phase 7 inventory doc created and P108 generated just-in-time。
+
+#### Execution Notes
+
+- Created `docs/refactor-ui/modules/phase_7_mui_containment.md`.
+- Runtime implementation changed: no。
+- Tests changed: no。
+- CSS changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Discovery findings:
+  - Allowed workbench legacy is restricted to frozen `web/src/components/workbench/*` MUI usage.
+  - Non-workbench runtime targets are `MonthPicker.tsx`, `MuiDatePickerCompatProvider.tsx`, `App.tsx` date compat wrapper, `MuiProviders.tsx`, `muiTheme.ts`, `useMuiDataGridPageSession.ts` and non-workbench/global MUI selectors in `styles.css`.
+  - Test harness still imports `MuiProviders`; non-workbench tests need a project provider helper and explicit workbench legacy provider only where required.
+  - MUI-only session hook and MonthPicker tests need characterization before cleanup.
+- Verification:
+  - `test -f docs/refactor-ui/modules/phase_7_mui_containment.md`: passed。
+  - `rg -n "P107-phase-7-mui-containment-discovery|Current MUI Inventory|Allowed Workbench Legacy|Non-workbench Runtime Targets|Recommended Micro-JIT Queue|P108-phase-7" docs/refactor-ui/modules/phase_7_mui_containment.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+- Next prompt generated: `P108-phase-7-month-picker-characterization-tests`。
+
+### P108-phase-7-month-picker-characterization-tests
+
+- Phase: `phase_7_mui_containment`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: MonthPicker/date compat characterization tests only。
+
+#### Prompt
+
+```text
+Prompt ID: P108-phase-7-month-picker-characterization-tests
+Phase: phase_7_mui_containment
+Type: characterization tests
+Scope: MonthPicker/date compat characterization tests only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_7_mui_containment.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/MonthPicker.tsx、web/src/test/MonthPicker.test.tsx、web/src/app/App.tsx、web/src/app/MuiDatePickerCompatProvider.tsx 和 web/src/app/styles.css。只修改 MonthPicker/date compat 相关测试，不改 runtime code、CSS、依赖、backend、API、read model、worker 或关联台内部工作区。把 `MonthPicker.test.tsx` 中保护 MUI X field/class 的断言改成用户可见行为和 ARIA 合约：普通模式显示当前 `YYYY-MM` 对应年月、点击 `年月选择` 后可选择年份和月份并 emit `YYYY-MM`、inline 模式可直接选择月份、`formatMonthLabel` 保持中文年月、invalid month fallback 保持可预测。添加 source-level no-MUI/date-compat contract，覆盖 `MonthPicker.tsx`、`MuiDatePickerCompatProvider.tsx` 和 `App.tsx` date compat wrapper，预期 contract 失败但行为测试通过。运行 `cd web && npx vitest run MonthPicker.test.tsx`，预期 behavior tests pass and source-level contract fails against current MUI X runtime；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P109 month picker/date compat implementation prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Runtime untouched: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level no-MUI/date-compat contract should fail until P109。
 
 ### MG Prompt Template
 

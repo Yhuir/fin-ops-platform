@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P107-phase-7-mui-containment-discovery`
+- Current Prompt ID: `P108-phase-7-month-picker-characterization-tests`
 - Current MG ID: `MG-P106-phase-6-settings`
 
 ## Global Invariants
@@ -54,14 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 7 MUI containment discovery generated after MG-P106 Settings verification。
-- Files touched in MG-P106:
-  - `docs/refactor-ui/modules/phase_6_settings.md`
+- Scope: phase 7 MonthPicker characterization generated after P107 MUI containment discovery。
+- Files touched in P107:
+  - `docs/refactor-ui/modules/phase_7_mui_containment.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Settings page/table tests passed；table/common/HeroUI smoke passed；build passed；Settings scoped no-MUI grep passed；runtime settingsDesign reference grep passed；diff check passed。
+- Verification run: Phase 7 containment doc exists；required P107/P108 terms recorded；diff check passed。
 - Failures: none.
-- Next action: 执行 `P107-phase-7-mui-containment-discovery`。
+- Next action: 执行 `P108-phase-7-month-picker-characterization-tests`。
 
 ## Prompt Lifecycle
 
@@ -94,12 +94,15 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `in_progress` | `P107-phase-7-mui-containment-discovery` | Discovery/planning only; classify remaining MUI into allowed workbench legacy, non-workbench runtime targets, test harness and CSS containment |
+| mui containment | `in_progress` | `P108-phase-7-month-picker-characterization-tests` | P107 discovery verified；next characterize MonthPicker/date compat |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P107-phase-7-mui-containment-discovery` | `test -f docs/refactor-ui/modules/phase_7_mui_containment.md` | passed | Phase 7 containment doc exists |
+| 2026-06-07 | `P107-phase-7-mui-containment-discovery` | `rg -n "P107-phase-7-mui-containment-discovery\|Current MUI Inventory\|Allowed Workbench Legacy\|Non-workbench Runtime Targets\|Recommended Micro-JIT Queue\|P108-phase-7" docs/refactor-ui/modules/phase_7_mui_containment.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md` | passed | Containment inventory and next prompt recorded |
+| 2026-06-07 | `P107-phase-7-mui-containment-discovery` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `MG-P106-phase-6-settings` | `git status --short --branch` | passed | Clean before MG docs update |
 | 2026-06-07 | `MG-P106-phase-6-settings` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | passed | 13 tests passed |
 | 2026-06-07 | `MG-P106-phase-6-settings` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
