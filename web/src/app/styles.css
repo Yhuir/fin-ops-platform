@@ -8781,10 +8781,25 @@ body.column-layout-dragging {
 }
 
 .bank-account-summary {
+  display: grid;
+  gap: 6px;
   flex: 0 0 auto;
   margin-bottom: 2px;
   padding: 4px 4px 10px;
   border-bottom: 1px solid var(--bank-border-subtle);
+}
+
+.bank-account-summary-label {
+  color: var(--bank-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.bank-account-summary-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .bank-section-title {
@@ -8797,6 +8812,7 @@ body.column-layout-dragging {
 
 .bank-account-node {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -8825,33 +8841,41 @@ body.column-layout-dragging {
   box-shadow: inset 3px 0 0 var(--bank-blue);
 }
 
-.bank-account-node .MuiChip-root {
-  height: 20px;
-  border-color: var(--bank-border-subtle);
+.bank-account-list {
+  display: grid;
+  gap: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.bank-account-list > li {
+  min-width: 0;
+}
+
+.bank-account-count-chip,
+.bank-account-total-chip,
+.bank-account-empty-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid var(--bank-border-subtle);
   border-radius: 999px;
+  background: #ffffff;
   color: var(--bank-text-secondary);
   font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
-.bank-account-total-chip {
-  height: 20px;
-  border-color: var(--bank-border-subtle);
-  color: var(--bank-text-secondary);
-}
-
-.bank-account-tree .MuiList-root {
-  min-height: 0;
-  overflow: auto;
-}
-
-.bank-account-divider.MuiDivider-root {
+.bank-account-divider {
+  display: block;
   margin: 3px 10px;
-  border-color: var(--bank-border-subtle);
-}
-
-.bank-account-node .MuiListItemText-root {
-  min-width: 0;
-  margin: 0;
+  border-top: 1px solid var(--bank-border-subtle);
 }
 
 .bank-account-name {
@@ -8939,6 +8963,7 @@ body.column-layout-dragging {
 .bank-account-metric-row {
   display: flex;
   align-items: center;
+  gap: 6px;
   min-width: 0;
   margin-top: 4px;
 }
@@ -8976,6 +9001,9 @@ body.column-layout-dragging {
 }
 
 .bank-transaction-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 8px;
   min-width: 0;
   min-height: 32px;
@@ -8990,9 +9018,20 @@ body.column-layout-dragging {
 .bank-transaction-title-block {
   flex: 0 0 auto;
   min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--bank-text);
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bank-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
   justify-content: flex-end;
   min-width: 0;
@@ -9040,67 +9079,127 @@ body.column-layout-dragging {
 }
 
 .bank-date-toolbar {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
   flex: 0 0 auto;
   min-width: 0;
 }
 
+.bank-auto-rules-button,
 .bank-date-range-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 4px;
+  background: #ffffff;
   border-color: var(--bank-border-subtle);
   color: var(--bank-text);
   font-size: 11px;
+  font-weight: 700;
   line-height: 1;
   text-transform: none;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.bank-auto-rules-button:hover,
+.bank-auto-rules-button:focus-visible,
+.bank-date-range-button:hover,
+.bank-date-range-button:focus-visible {
+  background: var(--bank-hover);
+  outline: none;
 }
 
 .bank-date-filter-popover {
+  position: fixed;
+  top: 168px;
+  right: 36px;
+  z-index: 45;
   width: 260px;
   padding: 12px;
   border: 1px solid var(--bank-border);
   border-radius: 4px;
-}
-
-.bank-transaction-toolbar .MuiTypography-colorTextSecondary,
-.bank-account-tree .MuiTypography-colorTextSecondary {
-  color: var(--bank-text-secondary);
-}
-
-.bank-date-presets .MuiToggleButton-root {
-  min-width: 44px;
-  height: 24px;
-  padding: 0 8px;
-  border-color: var(--bank-border-subtle);
-  color: var(--bank-text);
-  font-size: 11px;
-  text-transform: none;
-}
-
-.bank-date-presets .MuiToggleButton-root:hover {
-  background: var(--bank-hover);
-}
-
-.bank-date-presets .MuiToggleButton-root.Mui-selected {
-  border-color: var(--bank-blue);
-  background: var(--bank-selected);
-  color: var(--bank-blue);
-}
-
-.bank-date-presets .MuiToggleButton-root.Mui-selected:hover {
-  background: #d0e2ff;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
 }
 
 .bank-date-presets {
+  display: flex;
   flex-wrap: nowrap;
 }
 
-.bank-date-filter {
-  align-items: center;
+.bank-date-presets button {
+  min-width: 44px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--bank-border-subtle);
+  background: #ffffff;
+  color: var(--bank-text);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  cursor: pointer;
 }
 
-.bank-date-filter .MuiTextField-root {
+.bank-date-presets button + button {
+  margin-left: -1px;
+}
+
+.bank-date-presets button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.bank-date-presets button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.bank-date-presets button:hover,
+.bank-date-presets button:focus-visible {
+  background: var(--bank-hover);
+  outline: none;
+}
+
+.bank-date-presets button.active,
+.bank-date-presets button[aria-pressed="true"] {
+  border-color: var(--bank-blue);
+  background: var(--bank-selected);
+  color: var(--bank-blue);
+  z-index: 1;
+}
+
+.bank-date-presets button.active:hover,
+.bank-date-presets button[aria-pressed="true"]:hover {
+  background: #d0e2ff;
+}
+
+.bank-date-filter {
+  display: grid;
+  gap: 10px;
+}
+
+.bank-date-filter-field {
+  display: grid;
+  gap: 4px;
+  color: var(--bank-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bank-date-filter-field input {
   width: 100%;
   min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--bank-text);
+  font-size: 12px;
 }
 
 .bank-transaction-grid {
@@ -9534,6 +9633,8 @@ body.column-layout-dragging {
 }
 
 .bank-grid-toolbar-actions {
+  display: flex;
+  gap: 6px;
   flex: 1 1 auto;
   align-items: center;
   flex-wrap: nowrap;
@@ -9554,30 +9655,79 @@ body.column-layout-dragging {
   white-space: nowrap;
 }
 
-.bank-grid-toolbar-actions .MuiButton-root {
-  min-width: 28px;
-  padding-inline: 5px;
-  font-size: 11px;
+.bank-export-menu-host {
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .bank-grid-toolbar-actions .bank-export-button {
   min-width: 52px;
+  min-height: 28px;
   padding-inline: 9px;
+  border: 1px solid var(--bank-border);
+  border-radius: 4px;
+  background: #ffffff;
   border-color: var(--bank-border);
   color: var(--bank-text);
+  font-size: 11px;
   font-weight: 700;
+  cursor: pointer;
 }
 
-.bank-grid-toolbar-actions .MuiInputBase-root {
-  width: 100%;
+.bank-grid-toolbar-actions .bank-export-button:hover,
+.bank-grid-toolbar-actions .bank-export-button:focus-visible {
+  background: var(--bank-hover);
+  outline: none;
+}
+
+.bank-export-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  display: grid;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--bank-border);
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.16);
+}
+
+.bank-export-menu button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--bank-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bank-export-menu button:hover,
+.bank-export-menu button:focus-visible {
+  background: var(--bank-hover);
+  outline: none;
+}
+
+.bank-grid-search-field {
+  flex: 0 1 440px;
+  width: min(440px, 100%);
   min-height: 40px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--bank-text);
   font-size: 12px;
 }
 
-.bank-grid-toolbar-actions .MuiFormControl-root {
-  flex: 0 1 440px;
-  min-width: 0;
-  max-width: min(440px, 100%);
+.bank-grid-search-field:focus-visible {
+  border-color: var(--bank-blue);
+  outline: none;
 }
 
 .bank-transaction-table .MuiTableCell-head {
@@ -10150,14 +10300,14 @@ body.column-layout-dragging {
     overflow: hidden;
   }
 
-  .bank-account-tree .MuiList-root {
+  .bank-account-list {
     display: flex;
     gap: 8px;
     overflow-x: auto;
     padding-bottom: 2px;
   }
 
-  .bank-account-tree .MuiListItem-root {
+  .bank-account-list > li {
     flex: 0 0 min(260px, 82vw);
   }
 

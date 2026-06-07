@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P042-phase-6-bank-details-shell-toolbar-dates`
+- Current Prompt ID: `P043-phase-6-bank-details-transaction-table`
 - Current MG ID: `not_drafted`
 
 ## Global Invariants
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 bank details shell/toolbar/date/export migration。
+- Scope: phase 6 bank details transaction table and pagination migration。
 - Files touched:
   - `docs/refactor-ui/modules/phase_6_bank_details.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-  - `web/src/test/BankDetailsPage.test.tsx`
-  - `web/src/test/AutoTagRulesDrawer.test.tsx`
-- Verification run: P041 targeted tests expected-failed with 47 passed / 5 primitive-contract failures。
-- Failures: expected only, current runtime still uses MUI for BankDetails table/category/date/export/drawer surfaces。
-- Next action: 执行 `P042-phase-6-bank-details-shell-toolbar-dates`。
+  - `web/src/pages/BankDetailsPage.tsx`
+  - `web/src/app/styles.css`
+- Verification run: P042 focused BankDetails tests passed; full BankDetails/AutoTagRulesDrawer target set expected-failed with 47 passed / 5 failures。
+- Failures: expected only; current runtime/CSS still needs P043 table/pagination, P044 category popovers and P045 auto tag drawer。
+- Next action: 执行 `P043-phase-6-bank-details-transaction-table`。
 
 ## Prompt Lifecycle
 
@@ -95,7 +95,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P042-phase-6-bank-details-shell-toolbar-dates` | BankDetails characterization P041 verified as expected-fail；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails shell/toolbar/date/export migration |
+| page batches | `in_progress` | `P043-phase-6-bank-details-transaction-table` | BankDetails P042 shell/toolbar/date/export verified；shared MonthPicker MUI dependency deferred to shared/global cleanup；next BankDetails transaction table/pagination migration |
 
 ## Verification Log
 
@@ -261,6 +261,11 @@
 | 2026-06-07 | `P041-phase-6-bank-details-characterization-tests` | `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` | expected-fail | 47 passed, 5 expected failures; all failures are project primitive contracts against current MUI runtime/CSS |
 | 2026-06-07 | `P041-phase-6-bank-details-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P041-phase-6-bank-details-characterization-tests` | `git status --short --branch` | passed | P041 tests and docs changed |
+| 2026-06-07 | `P042-phase-6-bank-details-shell-toolbar-dates` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P042-phase-6-bank-details-shell-toolbar-dates` | `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts\|requests the current year\|renders accounts\|uses Chinese labels\|selecting account and filters\|exports all banks"` | passed | 6 passed / 32 skipped |
+| 2026-06-07 | `P042-phase-6-bank-details-shell-toolbar-dates` | `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` | expected-fail | 47 passed, 5 expected failures; remaining failures assigned to P043/P044/P045 |
+| 2026-06-07 | `P042-phase-6-bank-details-shell-toolbar-dates` | `cd web && npm run build` | passed | Known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P042-phase-6-bank-details-shell-toolbar-dates` | `if rg -n '@mui/material/(Popover\|TextField\|ToggleButton\|ToggleButtonGroup)\|@mui/x-date-pickers\|dayjs\|RuleIcon\|exportMenuAnchorEl' web/src/pages/BankDetailsPage.tsx; then exit 1; else exit 0; fi` | passed | Toolbar/date/export/search P042 MUI residues removed; `MenuList` remains for P044 TypeCell |
 
 ## Push Log
 

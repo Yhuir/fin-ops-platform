@@ -1,14 +1,11 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import ClickAwayListener from "@mui/material/ClickAwayListener";
 import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
 import MenuList from "@mui/material/MenuList";
-import Popover from "@mui/material/Popover";
 import Popper from "@mui/material/Popper";
 import Paper from "@mui/material/Paper";
 import List from "@mui/material/List";
@@ -23,16 +20,10 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TablePagination from "@mui/material/TablePagination";
 import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
-import ToggleButton from "@mui/material/ToggleButton";
-import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import FilterListOutlinedIcon from "@mui/icons-material/FilterListOutlined";
-import RuleIcon from "@mui/icons-material/Rule";
-import type { Dayjs } from "dayjs";
-import dayjs from "dayjs";
+import { Tags } from "lucide-react";
 
 import StatePanel from "../components/common/StatePanel";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
@@ -383,11 +374,11 @@ type BankCategoryFilterControlProps = {
 type BankDetailsTableToolbarProps = {
   searchKeyword: string;
   onSearchKeywordChange: (value: string) => void;
-  exportMenuAnchorEl: HTMLElement | null;
+  exportMenuOpen: boolean;
   exportFeedback: string | null;
   isExporting: boolean;
   canExportCurrentAccount: boolean;
-  onOpenExportMenu: (event: MouseEvent<HTMLElement>) => void;
+  onOpenExportMenu: () => void;
   onCloseExportMenu: () => void;
   onExport: (mode: BankDetailExportMode) => void;
 };
@@ -449,14 +440,6 @@ function formatMoney(value: string | null) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-function dateValue(value: string) {
-  return value ? dayjs(value) : null;
-}
-
-function formatPickerDate(value: Dayjs | null) {
-  return value?.isValid() ? value.format("YYYY-MM-DD") : null;
 }
 
 function relationTagTone(tag: string) {
@@ -720,7 +703,7 @@ function BankCategoryFilterControl({
 function BankDetailsTableToolbar({
   searchKeyword = "",
   onSearchKeywordChange = () => undefined,
-  exportMenuAnchorEl = null,
+  exportMenuOpen = false,
   exportFeedback = null,
   isExporting = false,
   canExportCurrentAccount = false,
@@ -728,50 +711,58 @@ function BankDetailsTableToolbar({
   onCloseExportMenu = () => undefined,
   onExport = () => undefined,
 }: Partial<BankDetailsTableToolbarProps>) {
-  const exportMenuOpen = Boolean(exportMenuAnchorEl);
-
   return (
-    <Box className="bank-grid-toolbar">
-      <Stack className="bank-grid-toolbar-content" direction="row" spacing={0.75} alignItems="center">
-        <Stack className="bank-grid-toolbar-actions" direction="row" spacing={0.5} alignItems="center">
+    <div className="bank-grid-toolbar">
+      <div className="bank-grid-toolbar-content">
+        <div className="bank-grid-toolbar-actions">
           {exportFeedback ? (
-            <Typography className="bank-export-feedback" color="text.secondary" variant="caption">
+            <span className="bank-export-feedback">
               {exportFeedback}
-            </Typography>
+            </span>
           ) : null}
-          <Button
-            aria-controls={exportMenuOpen ? "bank-detail-export-menu" : undefined}
-            aria-expanded={exportMenuOpen ? "true" : undefined}
-            aria-haspopup="menu"
-            className="bank-export-button"
-            disabled={isExporting}
-            onClick={onOpenExportMenu}
-            size="small"
-            variant="outlined"
-          >
-            {isExporting ? "导出中" : "导出"}
-          </Button>
-          <Menu
-            id="bank-detail-export-menu"
-            anchorEl={exportMenuAnchorEl}
-            open={exportMenuOpen}
-            onClose={onCloseExportMenu}
-            MenuListProps={{ "aria-label": "导出银行明细" }}
-          >
-            <MenuItem onClick={() => onExport("all")} disabled={isExporting}>导出全部银行</MenuItem>
-            <MenuItem onClick={() => onExport("account")} disabled={isExporting || !canExportCurrentAccount}>导出当前账户</MenuItem>
-          </Menu>
-          <TextField
+          <div className="bank-export-menu-host">
+            <button
+              aria-controls={exportMenuOpen ? "bank-detail-export-menu" : undefined}
+              aria-expanded={exportMenuOpen ? "true" : undefined}
+              aria-haspopup="menu"
+              className="bank-export-button"
+              disabled={isExporting}
+              onClick={onOpenExportMenu}
+              type="button"
+            >
+              {isExporting ? "导出中" : "导出"}
+            </button>
+            {exportMenuOpen ? (
+              <div
+                aria-label="导出银行明细"
+                className="bank-export-menu"
+                id="bank-detail-export-menu"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    onCloseExportMenu();
+                  }
+                }}
+                role="menu"
+              >
+                <button disabled={isExporting} onClick={() => onExport("all")} role="menuitem" type="button">
+                  导出全部银行
+                </button>
+                <button disabled={isExporting || !canExportCurrentAccount} onClick={() => onExport("account")} role="menuitem" type="button">
+                  导出当前账户
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <input
+            aria-label="搜索流水"
             className="bank-grid-search-field"
-            size="small"
             placeholder="搜索流水"
             value={searchKeyword}
             onChange={(event) => onSearchKeywordChange(event.target.value)}
-            inputProps={{ "aria-label": "搜索流水" }}
           />
-        </Stack>
-      </Stack>
-    </Box>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1390,7 +1381,7 @@ export default function BankDetailsPage() {
   );
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
   const [dateFilterAnchorEl, setDateFilterAnchorEl] = useState<HTMLElement | null>(null);
-  const [exportMenuAnchorEl, setExportMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
   const [rulesDrawerOpen, setRulesDrawerOpen] = useState(false);
@@ -1922,12 +1913,6 @@ export default function BankDetailsPage() {
     applyDateFilter(createDateFilter(preset, monthValue));
   };
 
-  const handlePresetChange = (_event: MouseEvent<HTMLElement>, preset: BankDateFilter["preset"] | null) => {
-    if (preset) {
-      applyPreset(preset);
-    }
-  };
-
   const openDateFilterPopover = (event: MouseEvent<HTMLElement>) => {
     setDateFilterAnchorEl(event.currentTarget);
   };
@@ -1936,12 +1921,12 @@ export default function BankDetailsPage() {
     setDateFilterAnchorEl(null);
   };
 
-  const openExportMenu = (event: MouseEvent<HTMLElement>) => {
-    setExportMenuAnchorEl(event.currentTarget);
+  const openExportMenu = () => {
+    setExportMenuOpen((current) => !current);
   };
 
   const closeExportMenu = () => {
-    setExportMenuAnchorEl(null);
+    setExportMenuOpen(false);
   };
 
   const handleExport = (mode: BankDetailExportMode) => {
@@ -2045,8 +2030,8 @@ export default function BankDetailsPage() {
   };
 
   return (
-    <Box className="bank-details-page" data-testid="bank-details-page">
-      <Stack className="bank-details-workbench" spacing={1}>
+    <div className="bank-details-page" data-testid="bank-details-page">
+      <div className="bank-details-workbench">
         {error ? <StatePanel tone="error">{error}</StatePanel> : null}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
         {rulesFeedback ? <StatePanel tone="success" compact>{rulesFeedback}</StatePanel> : null}
@@ -2054,144 +2039,138 @@ export default function BankDetailsPage() {
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
 
-        <Box className="bank-details-layout">
-          <Paper component="aside" className="bank-account-tree" elevation={0}>
-            <Stack className="bank-account-summary" spacing={0.75}>
-              <Typography color="text.secondary" variant="caption">总余额</Typography>
-              <Typography className="bank-balance-value bank-total-balance" component="strong" variant="h6" fontWeight={850}>
+        <div className="bank-details-layout">
+          <aside className="bank-account-tree">
+            <div className="bank-account-summary">
+              <span className="bank-account-summary-label">总余额</span>
+              <strong className="bank-balance-value bank-total-balance">
                 {displayBalance(accountsData.totalBalance)}
-              </Typography>
-              <Stack direction="row" flexWrap="wrap" gap={0.75}>
-                <Chip className="bank-account-total-chip" label={`${accountsData.accounts.length} 个账户`} size="small" variant="outlined" />
+              </strong>
+              <div className="bank-account-summary-tags">
+                <span className="bank-account-total-chip bank-chip-auto-size">{accountsData.accounts.length} 个账户</span>
                 {accountsData.missingBalanceAccountCount > 0 ? (
-                  <Chip label={`${accountsData.missingBalanceAccountCount} 个无余额`} size="small" color="warning" variant="outlined" />
+                  <span className="bank-account-empty-chip bank-chip-auto-size">{accountsData.missingBalanceAccountCount} 个无余额</span>
                 ) : null}
-              </Stack>
-            </Stack>
-            <List aria-label="银行账户" dense disablePadding>
-              <ListItem disablePadding>
-                <ListItemButton
+              </div>
+            </div>
+            <ul aria-label="银行账户" className="bank-account-list">
+              <li>
+                <button
                   aria-current={isAllAccountsSelected ? "true" : undefined}
                   aria-label={`全部流水 ${totalTransactionCount} 条`}
                   className={`bank-account-node bank-account-all-node${isAllAccountsSelected ? " active" : ""}`}
-                  component="button"
                   onClick={() => handleAccountSelect(ALL_ACCOUNTS_KEY)}
+                  type="button"
                 >
-                  <ListItemText
-                    disableTypography
-                    primary={(
-                      <Box className="bank-account-title-row">
-                        <Box className="bank-account-identity">
-                          <Typography className="bank-account-name" component="span">全部</Typography>
-                        </Box>
-                        <Chip className="bank-account-count-chip bank-account-title-count" label={`${totalTransactionCount} 条`} size="small" variant="outlined" />
-                      </Box>
-                    )}
-                    secondary={(
-                      <Typography className="bank-account-inline-balance bank-account-secondary-balance bank-balance-value" component="span">
-                        {displayBalance(accountsData.totalBalance)}
-                      </Typography>
-                    )}
-                  />
-                </ListItemButton>
-              </ListItem>
+                  <span className="bank-account-title-row">
+                    <span className="bank-account-identity">
+                      <span className="bank-account-name">全部</span>
+                    </span>
+                    <span className="bank-account-count-chip bank-account-title-count bank-chip-auto-size">{totalTransactionCount} 条</span>
+                  </span>
+                  <span className="bank-account-inline-balance bank-account-secondary-balance bank-balance-value">
+                    {displayBalance(accountsData.totalBalance)}
+                  </span>
+                </button>
+              </li>
               {accountsData.accounts.length > 0 ? (
-                <Divider className="bank-account-divider" component="li" aria-hidden="true" />
+                <li className="bank-account-divider" aria-hidden="true" role="separator" />
               ) : null}
               {accountsData.accounts.map((account, index) => {
                 const selected = account.accountKey === selectedAccountKey;
                 const showDivider = index < accountsData.accounts.length - 1;
                 return (
                   <Fragment key={account.accountKey}>
-                    <ListItem disablePadding>
-                      <ListItemButton
+                    <li>
+                      <button
                         aria-current={selected ? "true" : undefined}
                         aria-label={`${account.displayName} 余额 ${displayBalance(account.latestBalance)} ${account.transactionCount} 条`}
                         className={`bank-account-node${selected ? " active" : ""}`}
-                        component="button"
                         onClick={() => handleAccountSelect(account.accountKey)}
+                        type="button"
                       >
-                        <ListItemText
-                          disableTypography
-                          primary={(
-                            <Box className="bank-account-title-row">
-                              <Box className="bank-account-identity">
-                                <Typography className="bank-account-name" component="span">{account.bankName}</Typography>
-                                <Typography className="bank-account-last4" component="span">{account.accountLast4}</Typography>
-                              </Box>
-                              <Chip className="bank-account-count-chip bank-account-title-count" label={`${account.transactionCount} 条`} size="small" variant="outlined" />
-                            </Box>
-                          )}
-                          secondary={(
-                            <Stack className="bank-account-metric-row" direction="row" alignItems="center" spacing={0.75} minWidth={0}>
-                              {account.hasBalance ? (
-                                <Typography className="bank-account-inline-balance bank-account-secondary-balance bank-balance-value" component="span">
-                                  {displayBalance(account.latestBalance)}
-                                </Typography>
-                              ) : null}
-                              {!account.hasBalance ? (
-                                <Chip className="bank-account-empty-chip" label="余额为空" size="small" variant="outlined" />
-                              ) : null}
-                            </Stack>
-                          )}
-                        />
-                      </ListItemButton>
-                    </ListItem>
-                    {showDivider ? <Divider className="bank-account-divider" component="li" aria-hidden="true" /> : null}
+                        <span className="bank-account-title-row">
+                          <span className="bank-account-identity">
+                            <span className="bank-account-name">{account.bankName}</span>
+                            <span className="bank-account-last4">{account.accountLast4}</span>
+                          </span>
+                          <span className="bank-account-count-chip bank-account-title-count bank-chip-auto-size">{account.transactionCount} 条</span>
+                        </span>
+                        <span className="bank-account-metric-row">
+                          {account.hasBalance ? (
+                            <span className="bank-account-inline-balance bank-account-secondary-balance bank-balance-value">
+                              {displayBalance(account.latestBalance)}
+                            </span>
+                          ) : null}
+                          {!account.hasBalance ? (
+                            <span className="bank-account-empty-chip bank-chip-auto-size">余额为空</span>
+                          ) : null}
+                        </span>
+                      </button>
+                    </li>
+                    {showDivider ? <li className="bank-account-divider" aria-hidden="true" role="separator" /> : null}
                   </Fragment>
                 );
               })}
-            </List>
-          </Paper>
+            </ul>
+          </aside>
 
-          <Paper component="section" className="bank-transaction-panel" elevation={0}>
-            <Stack className="bank-transaction-toolbar" spacing={0.75}>
-              <Stack className="bank-transaction-header" direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
-                <Stack className="bank-transaction-title-row" direction="row" alignItems="center" spacing={1}>
-                  <Typography className="bank-transaction-title" component="h2" variant="subtitle1" fontWeight={850} noWrap>
+          <section className="bank-transaction-panel">
+            <div className="bank-transaction-toolbar">
+              <div className="bank-transaction-header">
+                <div className="bank-transaction-title-row">
+                  <h2 className="bank-transaction-title">
                     {currentViewTitle}
-                  </Typography>
-                </Stack>
+                  </h2>
+                </div>
 
-                <Stack className="bank-header-controls" direction="row" spacing={0.75} alignItems="center">
-                  <Button
-                    startIcon={<RuleIcon />}
-                    size="small"
-                    variant="outlined"
+                <div className="bank-header-controls">
+                  <button
+                    className="bank-auto-rules-button"
                     onClick={() => setRulesDrawerOpen(true)}
+                    type="button"
                   >
+                    <Tags aria-hidden="true" size={14} />
                     自动标签规则
-                  </Button>
-                  <Stack className="bank-date-toolbar" spacing={0.5} alignItems="flex-end">
-                    <ToggleButtonGroup
+                  </button>
+                  <div className="bank-date-toolbar">
+                    <div
                       aria-label="日期快捷筛选"
                       className="bank-date-presets"
-                      exclusive
-                      size="small"
-                      value={dateFilter.preset === "custom" || dateFilter.preset === "month" ? null : dateFilter.preset}
-                      onChange={handlePresetChange}
+                      role="group"
                     >
-                      <ToggleButton value="current_month">本月</ToggleButton>
-                      <ToggleButton value="previous_month">上月</ToggleButton>
-                      <ToggleButton value="last_7_days">近7天</ToggleButton>
-                      <ToggleButton value="last_30_days">近30天</ToggleButton>
-                      <ToggleButton value="current_year">今年</ToggleButton>
-                    </ToggleButtonGroup>
-                    <Button
+                      {[
+                        ["current_month", "本月"],
+                        ["previous_month", "上月"],
+                        ["last_7_days", "近7天"],
+                        ["last_30_days", "近30天"],
+                        ["current_year", "今年"],
+                      ].map(([preset, label]) => (
+                        <button
+                          aria-pressed={dateFilter.preset === preset}
+                          className={dateFilter.preset === preset ? "active" : ""}
+                          key={preset}
+                          onClick={() => applyPreset(preset as BankDateFilter["preset"])}
+                          type="button"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
                       aria-describedby={dateFilterOpen ? "bank-date-filter-popover" : undefined}
                       className="bank-date-range-button"
-                      size="small"
-                      variant="outlined"
                       onClick={openDateFilterPopover}
+                      type="button"
                     >
                       {dateFilter.dateFrom} - {dateFilter.dateTo}
-                    </Button>
-                  </Stack>
-                </Stack>
-              </Stack>
-            </Stack>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-            <Divider />
+            <hr className="bank-transaction-divider" />
 
             <Box className="bank-transaction-grid bank-transaction-grid-readable">
               <BankCategoryFilterControl
@@ -2204,7 +2183,7 @@ export default function BankDetailsPage() {
               <BankDetailsTableToolbar
                 searchKeyword={searchInput}
                 onSearchKeywordChange={handleSearchKeywordChange}
-                exportMenuAnchorEl={exportMenuAnchorEl}
+                exportMenuOpen={exportMenuOpen}
                 exportFeedback={exportFeedback}
                 isExporting={isExporting}
                 canExportCurrentAccount={!isAllAccountsSelected}
@@ -2329,9 +2308,9 @@ export default function BankDetailsPage() {
                 rowsPerPageOptions={[25, 50, 100]}
               />
             </Box>
-          </Paper>
-        </Box>
-      </Stack>
+          </section>
+        </div>
+      </div>
       <AutoTagRulesDrawer
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}
@@ -2339,93 +2318,52 @@ export default function BankDetailsPage() {
         refreshScope={{ dateFrom: dateFilter.dateFrom, dateTo: dateFilter.dateTo }}
         refreshStatus={rulesRefreshStatus}
       />
-      <Popover
-        id="bank-date-filter-popover"
-        open={dateFilterOpen}
-        anchorEl={dateFilterAnchorEl}
-        onClose={closeDateFilterPopover}
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-        transformOrigin={{ vertical: "top", horizontal: "right" }}
-        slotProps={{ paper: { className: "bank-date-filter-popover" } }}
-      >
-        <Stack className="bank-date-filter" spacing={1.25}>
-          <TextField
-            label="年月"
-            type="month"
-            size="small"
-            value={monthValue}
-            onChange={(event) => handleMonthChange(event.target.value)}
-            InputLabelProps={{ shrink: true }}
-            inputProps={{ "aria-label": "年月筛选" }}
-          />
-          <DatePicker
-            enableAccessibleFieldDOMStructure={false}
-            label="开始"
-            format="YYYY-MM-DD"
-            value={dateValue(dateFilter.dateFrom)}
-            onChange={(value) => {
-              if (!value) {
-                handleCustomDateChange("dateFrom", "");
-                return;
-              }
-              const nextValue = formatPickerDate(value);
-              if (nextValue) {
-                handleCustomDateChange("dateFrom", nextValue);
-              }
-            }}
-            slotProps={{
-              textField: {
-                size: "small",
-                inputProps: {
-                  "aria-label": "开始日期",
-                  onInput: (event: FormEvent<HTMLInputElement>) => {
-                    if (event.currentTarget instanceof HTMLInputElement) {
-                      handleCustomDateTextChange("dateFrom", event.currentTarget.value);
-                    }
-                  },
-                },
-                onBlur: (event: FocusEvent<HTMLDivElement>) => {
-                  const input = event.currentTarget.querySelector("input");
-                  handleCustomDateTextChange("dateFrom", input?.value ?? "");
-                },
-              },
-            }}
-          />
-          <DatePicker
-            enableAccessibleFieldDOMStructure={false}
-            label="结束"
-            format="YYYY-MM-DD"
-            value={dateValue(dateFilter.dateTo)}
-            onChange={(value) => {
-              if (!value) {
-                handleCustomDateChange("dateTo", "");
-                return;
-              }
-              const nextValue = formatPickerDate(value);
-              if (nextValue) {
-                handleCustomDateChange("dateTo", nextValue);
-              }
-            }}
-            slotProps={{
-              textField: {
-                size: "small",
-                inputProps: {
-                  "aria-label": "结束日期",
-                  onInput: (event: FormEvent<HTMLInputElement>) => {
-                    if (event.currentTarget instanceof HTMLInputElement) {
-                      handleCustomDateTextChange("dateTo", event.currentTarget.value);
-                    }
-                  },
-                },
-                onBlur: (event: FocusEvent<HTMLDivElement>) => {
-                  const input = event.currentTarget.querySelector("input");
-                  handleCustomDateTextChange("dateTo", input?.value ?? "");
-                },
-              },
-            }}
-          />
-        </Stack>
-      </Popover>
-    </Box>
+      {dateFilterOpen ? (
+        <div
+          className="bank-date-filter-popover"
+          id="bank-date-filter-popover"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closeDateFilterPopover();
+            }
+          }}
+          role="dialog"
+        >
+          <div className="bank-date-filter">
+            <label className="bank-date-filter-field">
+              <span>年月</span>
+              <input
+                aria-label="年月筛选"
+                type="month"
+                value={monthValue}
+                onChange={(event) => handleMonthChange(event.target.value)}
+              />
+            </label>
+            <label className="bank-date-filter-field">
+              <span>开始</span>
+              <input
+                aria-label="开始日期"
+                type="date"
+                value={dateFilter.dateFrom}
+                onBlur={(event) => handleCustomDateTextChange("dateFrom", event.currentTarget.value)}
+                onChange={(event) => handleCustomDateChange("dateFrom", event.currentTarget.value)}
+                onInput={(event) => handleCustomDateTextChange("dateFrom", event.currentTarget.value)}
+              />
+            </label>
+            <label className="bank-date-filter-field">
+              <span>结束</span>
+              <input
+                aria-label="结束日期"
+                type="date"
+                value={dateFilter.dateTo}
+                onBlur={(event) => handleCustomDateTextChange("dateTo", event.currentTarget.value)}
+                onChange={(event) => handleCustomDateChange("dateTo", event.currentTarget.value)}
+                onInput={(event) => handleCustomDateTextChange("dateTo", event.currentTarget.value)}
+              />
+            </label>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

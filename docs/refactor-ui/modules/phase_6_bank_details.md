@@ -170,6 +170,15 @@ Current drawer test migration gaps after P041:
 
 - `P040-phase-6-bank-details-discovery`: BankDetails page、BankCategoryTag、AutoTagRulesDrawer、tests、MUI inventory、user-visible entrypoints and migration slices recorded。
 - `P041-phase-6-bank-details-characterization-tests`: updated `BankDetailsPage.test.tsx` and `AutoTagRulesDrawer.test.tsx` with project primitive source/CSS contracts and table/grid role-compatible helpers. Targeted test expected-failed with 47 passed and 5 failures. All 5 failures are intended red lights caused by current runtime/CSS still using MUI instead of `FinanceTable`, project pagination/category filter selectors, `AppDrawer`, `AppDialog`, non-MUI rule table styles and non-MUI BankDetails primitives。
+- `P042-phase-6-bank-details-shell-toolbar-dates`: migrated BankDetails page shell, account sidebar, header controls, date presets/date popover, export menu and search field away from MUI layout/input/menu/date primitives. Native semantic elements and project classes now preserve the old left-account/right-transaction geometry, `日期快捷筛选`, `年月筛选`/`开始日期`/`结束日期`, export menu labels and search behavior. P042 deliberately leaves transaction table/TablePagination, category Popper/TypeCell/BankCategoryTag and AutoTagRulesDrawer for P043-P045.
+
+## Current Expected Failures After P042
+
+- `BankDetailsPage.test.tsx > targets project table, menu, date, drawer and dialog primitives`: still expects `FinanceTable`; assigned to P043 transaction table/pagination.
+- `BankDetailsPage.test.tsx > keeps pagination outside the table scroll area`: still expects project `.bank-transaction-pagination`; assigned to P043 transaction table/pagination.
+- `BankDetailsPage.test.tsx > uses a dense three-column grouped category filter layout`: still expects project category filter selectors; assigned to P044 category popovers.
+- `AutoTagRulesDrawer.test.tsx > targets project right drawer and dialog primitives`: still expects `AppDrawer`/`AppDialog`; assigned to P045 auto tag drawer.
+- `AutoTagRulesDrawer.test.tsx > keeps automatic tag rule drawer styling table-based and non-truncating`: still expects project rule table selectors; assigned to P045 auto tag drawer.
 
 ## Risks
 
@@ -201,4 +210,15 @@ Type: extraction/refactor
 Scope: 迁移 BankDetails 页面壳、账户列表、顶部工具栏、日期筛选、导出菜单和搜索输入；不迁移交易表格、TypeCell、BankCategoryTag 或 AutoTagRulesDrawer。
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/components/common/StatePanel.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx 和 web/src/app/styles.css。只修改 `BankDetailsPage.tsx`、必要的 `styles.css` 和必要的 BankDetails test expectations：移除页面壳、账户 sidebar、header controls、date presets/date Popover、export menu/search toolbar 的 MUI layout/input/button/menu/date imports；使用 HeroUI/Tailwind/project primitives 或 native `input[type=month/date]` 保留旧布局、旧 labels、旧 query params、旧 export payload、旧 search behavior、旧 loading/empty/error feedback。不得迁移交易 table/TablePagination、TypeCell category Popper、BankCategoryTag、internal transfer tooltip、AutoTagRulesDrawer；不得修改后端、API、read model、worker、mock 或关联台。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "loads all accounts|requests the current year|renders accounts|uses Chinese labels|selecting account and filters|exports all banks"`；运行完整 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P041 中与 table/category/drawer 相关 failures 可以继续 expected-fail，但 shell/toolbar/date/export failures 必须清除；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P043 transaction table prompt。
+```
+
+## P043 Prompt Draft
+
+```text
+Prompt ID: P043-phase-6-bank-details-transaction-table
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 BankDetails 交易流水表格和分页；不迁移 category filter Popper、TypeCell、BankCategoryTag、internal transfer tooltip 或 AutoTagRulesDrawer。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/test/BankDetailsPage.test.tsx、web/src/components/common/FinanceTable.tsx、web/src/components/common/FinanceTag.tsx、web/src/components/common/AmountCell.tsx 和 web/src/app/styles.css。只修改 BankDetailsPage.tsx、必要的 styles.css 和必要的 BankDetails test expectations：移除交易流水表格区域的 MUI Table/TableContainer/TableHead/TableBody/TableRow/TableCell/TablePagination imports 和 usage；使用 FinanceTable/project pagination 保留 accessible name `交易流水`、headers、loading row `正在加载流水。`、empty row `当前时间范围内没有流水。`、row classes、counterparty cell、TypeCell 嵌入位置、amount/balance tabular numeric alignment、direction/source chip vertical alignment、server page/pageSize/total behavior、pagination labels `每页行数`、`1-100 / 299`、`下一页` 和 page size options `[25, 50, 100]`。不得修改后端、API、read model、worker、mock 或关联台。不得迁移 category filter Popper、TypeCell menu internals、BankCategoryTag/internal transfer tooltip 或 AutoTagRulesDrawer；这些仍归属 P044/P045。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "交易流水|pagination|searches current account|loads all accounts|uses Chinese labels"`；运行完整 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P044/P045 category/drawer failures 可以继续 expected-fail，但 P043 table/pagination failures 必须清除；运行 `cd web && npm run build`；运行 BankDetails transaction-table MUI import grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P044 category popovers prompt。
 ```
