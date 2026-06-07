@@ -5,7 +5,7 @@
 ## Current Phase
 
 - Phase: `wb_phase_9_closeout`
-- Status: `implemented`
+- Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
 - Current Prompt ID: `P-WB010-closeout`
@@ -37,7 +37,7 @@
 | `wb_phase_6_test_provider_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | test-only legacy MUI provider 已移除；MG-WB007 已 push |
 | `wb_phase_7_dependency_cleanup` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MUI/Emotion direct dependencies 已移除；MG-WB008 已 push |
 | `wb_phase_8_full_verification` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | full no-MUI scans、workbench tests、non-workbench regressions、build 已通过；MG-WB009 已 push |
-| `wb_phase_9_closeout` | `implemented` | 2026-06-07 | pending MG | `passed` | 最终 no-MUI contract、风险和 push log 已收口；等待 MG-WB010 |
+| `wb_phase_9_closeout` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | 最终 no-MUI contract、风险和 push log 已收口；MG-WB010 已 push |
 
 ## Prompt Queue
 
@@ -62,7 +62,7 @@
 | `P-WB009-full-verification` | `wb_phase_8_full_verification` | `cumulative verification` | `verified` | full no-MUI scans、workbench tests、non-workbench regressions and build passed |
 | `MG-WB009-full-verification` | `wb_phase_8_full_verification` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 | `P-WB010-closeout` | `wb_phase_9_closeout` | `closeout` | `verified` | final no-MUI scans、MuiContainment、build、status passed |
-| `MG-WB010-closeout` | `wb_phase_9_closeout` | `cumulative MG` | `pending` | 检查 scope、diff、测试、文档后精确 stage/commit/push |
+| `MG-WB010-closeout` | `wb_phase_9_closeout` | `cumulative MG` | `verified` | 精确 stage、commit、push 完成 |
 
 ## Verification Log
 
@@ -125,6 +125,7 @@
 | 2026-06-07 | `P-WB010-closeout` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P-WB010-closeout` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P-WB010-closeout` | `git status --short --branch` | passed | Clean before documentation update |
+| 2026-06-07 | `MG-WB010-closeout` | `git add docs/refactor-ui/workbench_migration_state.md docs/refactor-ui/workbench_migration_prompt.md docs/refactor-ui/modules/workbench_mui_migration.md && git commit && git push origin refactor-ui` | passed | Commit `4a161341` pushed to `origin/refactor-ui` |
 
 ## Push Log
 
@@ -139,6 +140,7 @@
 | 2026-06-07 | `MG-WB007-test-provider-cleanup` | `1307b159` | `origin/refactor-ui` | workbench legacy MUI test provider removed |
 | 2026-06-07 | `MG-WB008-dependency-cleanup` | `f59883c1` | `origin/refactor-ui` | MUI/Emotion dependencies removed |
 | 2026-06-07 | `MG-WB009-full-verification` | `b9eb8bb2` | `origin/refactor-ui` | full verification recorded |
+| 2026-06-07 | `MG-WB010-closeout` | `4a161341` | `origin/refactor-ui` | closeout recorded |
 
 ## Residual Risks
 
@@ -150,4 +152,4 @@
 
 ## Next Action
 
-执行 `MG-WB010-closeout`：检查 scope、untracked files、diff、测试和文档状态，只精确 stage closeout 文档，commit/push 后将关联台 MUI migration 标记为 complete。
+关联台 MUI migration 已完成。后续工作应单独开启新 prompt/goal，例如处理 HeroUI/Tailwind CSS minifier warnings、bundle size warning 或 npm audit vulnerabilities。

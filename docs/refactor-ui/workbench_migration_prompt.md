@@ -862,7 +862,7 @@
 ### MG-WB010-closeout
 
 - Phase: `wb_phase_9_closeout`
-- Status: `pending`
+- Status: `verified`
 - Type: `cumulative MG`
 - Scope: 提交并 push closeout 文档记录，完成关联台 MUI migration。
 
@@ -879,3 +879,24 @@
 - Backend/API/read model/worker untouched: yes。
 - Exact staging specified: yes。
 - Final verification completed before commit: yes。
+
+#### Execution Notes
+
+- 精确 staged:
+  - `docs/refactor-ui/workbench_migration_state.md`
+  - `docs/refactor-ui/workbench_migration_prompt.md`
+  - `docs/refactor-ui/modules/workbench_mui_migration.md`
+- Commit: `4a161341 docs: close out workbench mui migration`
+- Push: `origin/refactor-ui`
+- Code/dependencies/backend/API/read model/worker changed: no。
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - final no-MUI source/CSS/package scans。
+  - `cd web && npx vitest run MuiContainment.test.ts`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `git commit -m "docs: close out workbench mui migration"`
+  - `git push origin refactor-ui`
