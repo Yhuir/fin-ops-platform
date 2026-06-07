@@ -41,7 +41,7 @@ Fix: update both the direct dependency and override to `19.2.7`, then run `npm i
 React 19 and platform build surfaced three type issues:
 
 - `vite.config.ts`: `@tailwindcss/vite` exports `.d.mts`; `tsconfig.node.json` needed `moduleResolution: "Bundler"`.
-- `PageKeepAliveHost.tsx`: React 19 types define `inert` as boolean; inactive pages now pass `inert: true`.
+- `PageRouteHost.tsx`: 当前路由只挂载匹配页面；旧 mounted cache、inactive page 和 `inert` 兼容处理已移除。
 - `BankDetailsPage.tsx`: MUI DatePicker `textField` slot `onBlur` is typed on the wrapper element; the handler now reads the inner input value from `event.currentTarget.querySelector("input")`.
 
 These fixes preserve user-visible behavior.
@@ -80,10 +80,9 @@ Observed warnings:
 - `web/vite.config.ts`
 - `web/vite.config.js`
 - `web/tsconfig.node.json`
-- `web/src/app/PageKeepAliveHost.tsx`
+- `web/src/app/PageRouteHost.tsx`
 - `web/src/pages/BankDetailsPage.tsx`
 - `web/src/test/HeroUIPlatformSmoke.test.tsx`
 - `docs/refactor-ui/modules/phase_2_platform_stack.md`
 - `docs/refactor-ui/refactor_ui_prompt.md`
 - `docs/refactor-ui/refactor_ui_state.md`
-

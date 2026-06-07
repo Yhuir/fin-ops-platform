@@ -4,7 +4,6 @@ import { AlertTriangle, RefreshCw, Search, X } from "lucide-react";
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
   fetchBatchAccounting,
@@ -167,10 +166,6 @@ export default function BatchAccountingPage() {
   const [bankYear, setBankYear] = useState(currentYear);
   const [oaYear, setOaYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
-  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
-    pageKey: "batch-accounting",
-    scrollKey: "oa-table",
-  });
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
   const [selectedBankRowId, setSelectedBankRowId] = useState<string | null>(null);
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
@@ -559,7 +554,7 @@ export default function BatchAccountingPage() {
             )}
           </div>
           <div className="batch-accounting-oa-panel__divider" />
-          <div className="batch-accounting-oa-table-wrap" ref={tableWrapRef}>
+          <div className="batch-accounting-oa-table-wrap">
             <table className="batch-accounting-oa-table" aria-label={bucket === "unsubmitted" ? "可关联OA项" : "已关联OA项"}>
               <thead>
                 <tr>

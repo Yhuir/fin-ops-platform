@@ -331,14 +331,3 @@ export function useClearPageSessionState() {
   }
   return context.clearAllForCurrentUser;
 }
-
-export function usePageSessionScope() {
-  const context = useContext(PageSessionStateContext);
-  if (!context) {
-    throw new Error("usePageSessionScope must be used within PageSessionStateProvider.");
-  }
-  return {
-    userScope: context.userScope,
-    generation: context.generation,
-  };
-}

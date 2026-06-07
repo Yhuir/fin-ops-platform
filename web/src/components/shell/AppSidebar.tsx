@@ -44,21 +44,25 @@ export default function AppSidebar({
       <div className={`app-sidebar-brand${showExpandedContent ? "" : " collapsed"}`}>
         <div className="app-sidebar-brand-lockup">
           <AppStatusIndicator />
-          {showExpandedContent ? (
-            <span className="app-sidebar-brand-text">
-              <span className="app-sidebar-eyebrow">溯源办公系统</span>
-              <span className="app-sidebar-title">财务运营平台</span>
-            </span>
-          ) : null}
+          <span className="app-sidebar-brand-text" aria-hidden={!showExpandedContent}>
+            <span className="app-sidebar-eyebrow">溯源办公系统</span>
+            <span className="app-sidebar-title">财务运营平台</span>
+          </span>
         </div>
         {!isCompact ? (
           <button
             aria-label={expanded ? "折叠菜单" : "展开菜单"}
+            aria-expanded={expanded}
             className="app-sidebar-toggle"
             type="button"
             onClick={onToggleExpanded}
           >
-            {expanded ? <ChevronLeft aria-hidden="true" size={18} strokeWidth={2.2} /> : <ChevronRight aria-hidden="true" size={18} strokeWidth={2.2} />}
+            <span className="app-sidebar-toggle-icon app-sidebar-toggle-icon-expanded">
+              <ChevronLeft aria-hidden="true" size={18} strokeWidth={2.2} />
+            </span>
+            <span className="app-sidebar-toggle-icon app-sidebar-toggle-icon-collapsed">
+              <ChevronRight aria-hidden="true" size={18} strokeWidth={2.2} />
+            </span>
           </button>
         ) : null}
       </div>
@@ -68,15 +72,16 @@ export default function AppSidebar({
       <nav className="app-sidebar-scroll" aria-label="主导航">
         {sidebarGroups.map((group) => (
           <section key={group.title} className="app-sidebar-group" aria-labelledby={`app-sidebar-group-${group.title}`}>
-            {showExpandedContent ? (
-              <h2 id={`app-sidebar-group-${group.title}`} className="app-sidebar-group-title">
-                {group.title}
-              </h2>
-            ) : null}
+            <h2 id={`app-sidebar-group-${group.title}`} className="app-sidebar-group-title" aria-hidden={!showExpandedContent}>
+              {group.title}
+            </h2>
             <ul className="app-sidebar-list" aria-label={group.title}>
               {group.items.map((item) => {
                 const Icon = item.icon;
                 const active = item.active === false ? false : isSidebarItemActive(location.pathname, location.search, item.to, item.end);
+                const prefetchRoute = () => {
+                  item.preload().catch(() => undefined);
+                };
                 const link = (
                   <Link
                     to={item.to}
@@ -84,15 +89,16 @@ export default function AppSidebar({
                     aria-label={item.label}
                     className={`app-sidebar-link${active ? " active" : ""}`}
                     onClick={isCompact ? onCloseMobile : undefined}
+                    onFocus={prefetchRoute}
+                    onPointerEnter={prefetchRoute}
+                    onTouchStart={prefetchRoute}
                   >
                     <span className="app-sidebar-link-icon">
                       <Icon aria-hidden="true" size={18} strokeWidth={2} />
                     </span>
-                    {showExpandedContent ? (
-                      <span className="app-sidebar-link-label">
-                        <span className="app-sidebar-link-label-text">{item.label}</span>
-                      </span>
-                    ) : null}
+                    <span className="app-sidebar-link-label" aria-hidden={!showExpandedContent}>
+                      <span className="app-sidebar-link-label-text">{item.label}</span>
+                    </span>
                   </Link>
                 );
 
@@ -117,8 +123,8 @@ export default function AppSidebar({
         ))}
       </nav>
 
-      {embedded && showExpandedContent ? (
-        <div className="app-sidebar-embedded-note">
+      {embedded ? (
+        <div className="app-sidebar-embedded-note" aria-hidden={!showExpandedContent}>
           OA 嵌入模式默认折叠，避免占用工作台宽度。
         </div>
       ) : null}

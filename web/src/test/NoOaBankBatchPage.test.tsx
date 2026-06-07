@@ -795,7 +795,7 @@ describe("NoOaBankBatchPage", () => {
     });
   });
 
-  test("pauses stale read model retry reload while the keep-alive page is inactive", async () => {
+  test("cleans up stale read model retry reload after route unmount", async () => {
     let listCallCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -825,21 +825,19 @@ describe("NoOaBankBatchPage", () => {
       expect(listCallCount).toBe(1);
     });
 
-    vi.useFakeTimers();
     fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(screen.getByTestId("page-frame-no-oa-bank-batches")).toHaveAttribute("aria-hidden", "true");
-    expect(screen.getByTestId("page-frame-settings")).toHaveAttribute("aria-hidden", "false");
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "免OA流水批量处理" })).not.toBeInTheDocument();
+    vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
 
     expect(listCallCount).toBe(1);
 
+    vi.useRealTimers();
     fireEvent.click(screen.getByRole("link", { name: "免OA流水批量处理" }));
-    expect(screen.getByTestId("page-frame-no-oa-bank-batches")).toHaveAttribute("aria-hidden", "false");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
+    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
 
     expect(listCallCount).toBeGreaterThan(1);
   });

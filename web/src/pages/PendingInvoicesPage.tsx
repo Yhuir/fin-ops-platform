@@ -11,7 +11,6 @@ import PendingInvoiceRelationDrawer from "../components/pendingInvoices/PendingI
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   confirmAttachExistingInvoice,
   downloadPendingInvoiceExport,
@@ -139,10 +138,6 @@ export default function PendingInvoicesPage() {
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
   const [dialogRow, setDialogRow] = useState<PendingInvoiceRow | null>(null);
   const [pendingIncomeStatusRows, setPendingIncomeStatusRows] = useState<Set<string>>(() => new Set());
-  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
-    pageKey: "pending-invoices",
-    scrollKey: "pending-invoices-table",
-  });
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
 
   const filterOpen = filterMenuOpen;
@@ -525,7 +520,6 @@ export default function PendingInvoicesPage() {
           direction={direction}
           statusFilterControl={statusFilterControl}
           pendingActionRowIds={pendingIncomeStatusRows}
-          tableWrapRef={tableWrapRef}
         />
         <div className="pending-invoices-pagination">
           <label className="pending-invoices-pagination-size">

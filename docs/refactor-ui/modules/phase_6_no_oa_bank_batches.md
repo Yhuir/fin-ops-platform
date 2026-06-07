@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | Page | `web/src/pages/NoOaBankBatchPage.tsx` | Page shell, status/month/account filters, main/sub label rails, batch cards, detail transaction table, tag-management right drawer, withdraw dialog and snackbar feedback. |
 | API/types | `web/src/features/noOaBankBatches/api.ts`, `types.ts` | List/detail/tag-selection/submit/withdraw API client and response normalization. No UI prompt may change these contracts. |
-| Page tests | `web/src/test/NoOaBankBatchPage.test.tsx` | Route/sidebar, three-column layout, tag drawer, selection boundaries, submit/withdraw flows, stale read model retry and keep-alive behavior. |
+| Page tests | `web/src/test/NoOaBankBatchPage.test.tsx` | Route/sidebar, three-column layout, tag drawer, selection boundaries, submit/withdraw flows, stale read model retry and route remount behavior. |
 | API tests | `web/src/test/NoOaBankBatchApi.test.ts` | API client mapping, request payloads, HTML/error handling and mutation contracts. |
 | Related docs | `docs/dev/api-contracts.md`, `docs/app-architecture/pages.md` | API contract and page/read-model ownership references. |
 
@@ -50,7 +50,7 @@
 | Tag drawer | Right drawer/dialog name `免OA流水标签管理`; close label `关闭免OA流水标签管理`; version caption; actions `全选`/`清空`/`保存`; inactive selected warning; main and child tag checkboxes including `主标签本身`. |
 | Withdraw dialog | Dialog title `撤回批次`; warning copy `撤回后会取消关联台闭环关系，相关流水回到未配对区域。`; field `撤回原因`; buttons `取消` and `确认撤回`; submit disabled without reason. |
 | Snackbar/status feedback | Success/warning/error feedback remains user visible: `免OA流水标签范围已保存`, `选中流水已提交`, `内部往来批次已提交`, `批次已撤回`, selection warning and API error messages. |
-| Read model stale handling | Stale/read-model-refresh detail text stays hidden; page keeps current rows visible while background polling runs; polling pauses while keep-alive page is inactive. |
+| Read model stale handling | Stale/read-model-refresh detail text stays hidden; page keeps current rows visible while background polling runs; retry timers are cleaned up when the route unmounts. |
 
 ## API / Read Model Boundary
 
@@ -83,7 +83,7 @@
 | `shows withdrawn history as read-only` | History bucket hides submit/withdraw controls. | Do not accidentally render actions in withdrawn bucket. |
 | `submits internal transfer draft batches through the batch endpoint` | Internal transfer uses batch submit endpoint, not selected-row endpoint. | Keep special-case action path distinct. |
 | Category/tag update tests | `bankTransactionCategoryUpdated`, `bankAutoTagRulesUpdated`, BroadcastChannel sync refresh list/detail/tag selection. | UI refactor must not rewrite event wiring. |
-| Read model tests | Stale retry, keep-alive inactive pause, background refresh keeps rows visible. | Loading/status replacement must preserve hidden stale copy and background refresh behavior. |
+| Read model tests | Stale retry, route unmount retry cleanup, background refresh keeps rows visible. | Loading/status replacement must preserve hidden stale copy and background refresh behavior. |
 | Sidebar test | Sidebar route entry. | App shell already migrated; keep route label unchanged. |
 
 ## Migration Slice Plan
@@ -110,7 +110,7 @@
 ## Risks
 
 - The page is a single large component with UI and workflow state interleaved. Refactor slices must stay narrow to avoid changing batch/selection semantics.
-- The transaction detail table is loaded lazily per selected batch and cached in `details`; table refactor must not refetch unnecessarily or lose `usePageScrollSession`.
+- The transaction detail table is loaded lazily per selected batch and cached in `details`; table refactor must not refetch unnecessarily or lose lightweight table/session state.
 - Selected-row submit must only allow one bank account region at a time; visual grouping must not hide this boundary.
 - Internal-transfer drafts submit by `batchId` and must not be mixed into selected-row submit.
 - Tag drawer open/refetch and live updates from bank tag events are easy to break if drawer state is extracted too aggressively.
@@ -125,7 +125,7 @@ Phase: phase_6_page_batches
 Type: characterization tests
 Scope: `/no-oa-bank-batches` tests only. Do not modify runtime implementation.
 
-读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/features/noOaBankBatches/api.ts、web/src/features/noOaBankBatches/types.ts、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/test/NoOaBankBatchApi.test.ts。只修改 `web/src/test/NoOaBankBatchPage.test.tsx`：新增或调整 characterization tests，锁定 `/no-oa-bank-batches` 的 project primitive 目标和旧行为。新增 source-level contract，未来 runtime 不得依赖 `@mui/*`、`Mui[A-Z]`、`RefreshOutlinedIcon`、`CloseIcon`、`ToggleButton`、`TextField`、`TableCell`、`TableRow`、`TableHead`、`TableBody`、`Drawer`、`DialogTitle`、`DialogContent`、`DialogActions`、`Snackbar`、`Chip`、`IconButton`；要求页面继续使用 `PageScaffold`、`StatePanel`，后续 drawer/dialog 使用 project primitives 或 native equivalents。行为断言必须继续覆盖 route/sidebar、heading、description/top actions、status buttons `未提交`/`已提交`/`历史`、fields `月份`/`银行账户`、main/sub rail region names and keyboard activation、transaction region/table labels, selection guard, selected-row submit payload, internal-transfer submit payload, tag drawer open/refetch/save payload/live update, withdraw dialog reason payload, snackbar messages, read model stale retry and keep-alive pause。不得修改页面实现、API client、mock data shape、backend、read model、worker 或关联台内部工作区。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx`，实现未迁移前 source-level contract expected-fail 可接受，但 existing behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P075 page shell filters prompt。
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/features/noOaBankBatches/api.ts、web/src/features/noOaBankBatches/types.ts、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/test/NoOaBankBatchApi.test.ts。只修改 `web/src/test/NoOaBankBatchPage.test.tsx`：新增或调整 characterization tests，锁定 `/no-oa-bank-batches` 的 project primitive 目标和旧行为。新增 source-level contract，未来 runtime 不得依赖 `@mui/*`、`Mui[A-Z]`、`RefreshOutlinedIcon`、`CloseIcon`、`ToggleButton`、`TextField`、`TableCell`、`TableRow`、`TableHead`、`TableBody`、`Drawer`、`DialogTitle`、`DialogContent`、`DialogActions`、`Snackbar`、`Chip`、`IconButton`；要求页面继续使用 `PageScaffold`、`StatePanel`，后续 drawer/dialog 使用 project primitives 或 native equivalents。行为断言必须继续覆盖 route/sidebar、heading、description/top actions、status buttons `未提交`/`已提交`/`历史`、fields `月份`/`银行账户`、main/sub rail region names and keyboard activation、transaction region/table labels, selection guard, selected-row submit payload, internal-transfer submit payload, tag drawer open/refetch/save payload/live update, withdraw dialog reason payload, snackbar messages, read model stale retry和 route unmount cleanup。不得修改页面实现、API client、mock data shape、backend、read model、worker 或关联台内部工作区。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx`，实现未迁移前 source-level contract expected-fail 可接受，但 existing behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P075 page shell filters prompt。
 ```
 
 ## P074 Execution Notes

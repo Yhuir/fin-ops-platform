@@ -343,7 +343,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(within(page).getByRole("heading", { name: "OA 待付款核对" })).toBeInTheDocument();
-    expect(within(page).getByRole("table", { name: "OA待付款核对表格" })).toBeInTheDocument();
+    expect(await within(page).findByRole("table", { name: "OA待付款核对表格" })).toBeInTheDocument();
 
     const groupHeader = within(page).getAllByRole("row")[0];
     for (const label of ["OA情况", "支付状态", "支出流水", "发票情况"]) {

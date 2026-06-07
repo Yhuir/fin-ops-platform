@@ -1,0 +1,187 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { lazy, type ComponentType, type ReactNode, useEffect, useState } from "react";
+import { Link, MemoryRouter } from "react-router-dom";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import PageRouteHost from "../app/PageRouteHost";
+import { appPageRoutes, sidebarGroups, type AppPageRoute } from "../app/pageRegistry";
+import { usePageActivation } from "../contexts/PageRuntimeContext";
+
+function Harness({
+  children,
+  initialPath = "/a",
+}: {
+  children: ReactNode;
+  initialPath?: string;
+}) {
+  return (
+    <MemoryRouter initialEntries={[initialPath]}>
+      {children}
+    </MemoryRouter>
+  );
+}
+
+function createRoute(path: string, pageKey: string, Component: AppPageRoute["component"]): AppPageRoute {
+  return {
+    path,
+    pageKey,
+    component: Component,
+    preload: () => Promise.resolve(),
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("PageRouteHost", () => {
+  test("unmounts the previous page and mounts the next route immediately", async () => {
+    const user = userEvent.setup();
+    const mountCounts = { a: 0, b: 0 };
+    const unmountCounts = { a: 0, b: 0 };
+
+    function PageA() {
+      const [count, setCount] = useState(0);
+      const activation = usePageActivation("page-a");
+      useEffect(() => {
+        mountCounts.a += 1;
+        return () => {
+          unmountCounts.a += 1;
+        };
+      }, []);
+      return (
+        <section data-testid="page-a">
+          <p data-testid="page-a-active">{String(activation.active)}</p>
+          <p data-testid="page-a-count">{count}</p>
+          <button type="button" onClick={() => setCount((current) => current + 1)}>increment a</button>
+          <Link to="/b">to b</Link>
+        </section>
+      );
+    }
+
+    function PageB() {
+      useEffect(() => {
+        mountCounts.b += 1;
+        return () => {
+          unmountCounts.b += 1;
+        };
+      }, []);
+      return (
+        <section data-testid="page-b">
+          <Link to="/a">to a</Link>
+        </section>
+      );
+    }
+
+    const routes = [
+      createRoute("/a", "page-a", PageA),
+      createRoute("/b", "page-b", PageB),
+    ];
+
+    render(<PageRouteHost routes={routes} />, { wrapper: Harness });
+
+    await user.click(screen.getByRole("button", { name: "increment a" }));
+    expect(screen.getByTestId("page-a-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("page-a-active")).toHaveTextContent("true");
+
+    await user.click(screen.getByRole("link", { name: "to b" }));
+
+    expect(screen.queryByTestId("page-a")).not.toBeInTheDocument();
+    expect(screen.getByTestId("page-b")).toBeInTheDocument();
+    expect(mountCounts).toEqual({ a: 1, b: 1 });
+    expect(unmountCounts).toEqual({ a: 1, b: 0 });
+
+    await user.click(screen.getByRole("link", { name: "to a" }));
+
+    expect(screen.getByTestId("page-a-count")).toHaveTextContent("0");
+    expect(mountCounts).toEqual({ a: 2, b: 1 });
+    expect(unmountCounts).toEqual({ a: 1, b: 1 });
+  });
+
+  test("redirects unknown paths to the root route", async () => {
+    function RootPage() {
+      return <p>root route</p>;
+    }
+
+    render(<PageRouteHost routes={[createRoute("/", "root", RootPage)]} />, {
+      wrapper: ({ children }) => <Harness initialPath="/missing">{children}</Harness>,
+    });
+
+    expect(await screen.findByText("root route")).toBeInTheDocument();
+  });
+
+  test("renders lazy routes with a lightweight fallback", async () => {
+    const user = userEvent.setup();
+    let resolveLazyPage: ((module: { default: ComponentType }) => void) | null = null;
+    const LazyPage = lazy(() => new Promise<{ default: ComponentType }>((resolve) => {
+      resolveLazyPage = resolve;
+    }));
+
+    function PageA() {
+      return <Link to="/lazy">to lazy</Link>;
+    }
+
+    function PageB() {
+      return <p>lazy page loaded</p>;
+    }
+
+    const routes = [
+      createRoute("/a", "page-a", PageA),
+      createRoute("/lazy", "lazy-page", LazyPage),
+    ];
+
+    render(<PageRouteHost routes={routes} />, { wrapper: Harness });
+
+    expect(screen.queryByText("lazy page loaded")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("link", { name: "to lazy" }));
+
+    expect(screen.getByTestId("page-route-loading-lazy-page")).toBeInTheDocument();
+    await act(async () => {
+      resolveLazyPage?.({ default: PageB });
+    });
+
+    expect(await screen.findByText("lazy page loaded")).toBeInTheDocument();
+  });
+
+  test("keeps app registry focused on route chunks and sidebar preload", () => {
+    const routeByPath = new Map(appPageRoutes.map((route) => [route.path, route]));
+    const sidebarItems = sidebarGroups.flatMap((group) => group.items);
+    const financeItems = sidebarGroups.find((group) => group.title === "财务业务")?.items ?? [];
+    const systemItems = sidebarGroups.find((group) => group.title === "系统操作")?.items ?? [];
+
+    expect(appPageRoutes).toHaveLength(17);
+    expect(financeItems).toHaveLength(12);
+    expect(systemItems).toHaveLength(5);
+    expect(new Set(appPageRoutes.map((route) => route.pageKey))).toHaveLength(appPageRoutes.length);
+    expect(sidebarItems.every((item) => routeByPath.has(item.to))).toBe(true);
+    expect(sidebarItems.every((item) => typeof item.preload === "function")).toBe(true);
+    expect(appPageRoutes.every((route) => typeof route.preload === "function")).toBe(true);
+    expect(appPageRoutes.every((route) => (
+      Object.keys(route).every((key) => ["path", "pageKey", "component", "preload", "end"].includes(key))
+    ))).toBe(true);
+  });
+
+  test("leaves only the current route content after navigation", async () => {
+    const user = userEvent.setup();
+
+    function PageA() {
+      return <Link to="/b">to b</Link>;
+    }
+
+    function PageB() {
+      return <p>page b</p>;
+    }
+
+    render(<PageRouteHost routes={[createRoute("/a", "page-a", PageA), createRoute("/b", "page-b", PageB)]} />, {
+      wrapper: Harness,
+    });
+
+    await user.click(screen.getByRole("link", { name: "to b" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("page b")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("link", { name: "to b" })).not.toBeInTheDocument();
+  });
+});

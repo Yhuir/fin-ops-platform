@@ -170,6 +170,7 @@ describe("AutoTagRulesDrawer", () => {
       "操作",
     ]);
     expect(within(drawer).queryByText("选择查询的项")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText(/版本\s+\d+/)).not.toBeInTheDocument();
     expect(within(drawer).getByText("内部往来款")).toBeInTheDocument();
     const systemRow = rowForText(drawer, "系统规则");
     expect(systemRow).toHaveTextContent("内部往来款");
@@ -491,6 +492,8 @@ describe("AutoTagRulesDrawer", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
 
     expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s*\{[^}]*width:\s*80vw/s);
+    expect(source).toMatch(/\.bank-auto-tag-drawer-paper\s+\.finance-drawer__header\s*\{[^}]*padding:\s*8px 16px/s);
+    expect(source).toMatch(/\.bank-auto-tag-drawer-toolbar\s*\{[^}]*padding:\s*8px 16px/s);
     expect(source).toMatch(/\.bank-auto-tag-table-container\s*\{[^}]*overflow-x:\s*hidden/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*table-layout:\s*fixed/s);
     expect(source).toMatch(/\.bank-auto-tag-rule-table\s*\{[^}]*width:\s*100%/s);
@@ -503,5 +506,6 @@ describe("AutoTagRulesDrawer", () => {
     expect(source).not.toMatch(/bank-auto-tag-priority-cell[\s\S]{0,160}border-right/s);
     expect(source).toMatch(/\.bank-auto-tag-priority-value\s*\{/);
     expect(source).toMatch(/\.bank-auto-tag-field-menu-actions\s*\{/);
+    expect(source).not.toMatch(/bank-auto-tag-version/);
   });
 });

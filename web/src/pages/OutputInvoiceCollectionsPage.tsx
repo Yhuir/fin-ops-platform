@@ -15,7 +15,6 @@ import ReceiptSettingsDrawer from "../components/outputInvoiceCollections/Receip
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   cancelOutputInvoiceCollectionReminder,
   fetchOutputInvoiceCollectionBankTransactionDetail,
@@ -208,10 +207,6 @@ export default function OutputInvoiceCollectionsPage() {
   const [readModelStatus, setReadModelStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
-  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
-    pageKey: "output-invoice-collections",
-    scrollKey: "collections-table",
-  });
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
 
@@ -584,7 +579,6 @@ export default function OutputInvoiceCollectionsPage() {
                 onSortChange={handleSortChange}
                 onPageChange={handlePageChange}
                 onPageSizeChange={handlePageSizeChange}
-                tableWrapRef={tableWrapRef}
               />
             </>
           )}

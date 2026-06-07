@@ -11,7 +11,6 @@ import {
 } from "../features/domainEvents";
 import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatchTagSelection,
@@ -348,10 +347,6 @@ export default function NoOaBankBatchPage() {
   const [withdrawReason, setWithdrawReason] = useState("");
   const [feedback, setFeedback] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
-  const detailTableWrapRef = usePageScrollSession<HTMLDivElement>({
-    pageKey: "no-oa-bank-batch",
-    scrollKey: "detail-transactions-table",
-  });
   const batchRequestSeqRef = useRef(0);
   const detailRequestSeqRef = useRef(0);
   const batchQueryKeyRef = useRef("");
@@ -1068,7 +1063,7 @@ export default function NoOaBankBatchPage() {
                     {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
                     {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
                     {selected && rows.length > 0 ? (
-                      <div className="no-oa-bank-batches-table-wrap" ref={detailTableWrapRef}>
+                      <div className="no-oa-bank-batches-table-wrap">
                         <table className="no-oa-bank-batches-table" aria-label={`${accountLabel(batch)}流水`}>
                           <thead>
                             <tr>

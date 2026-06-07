@@ -1,9 +1,18 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
 
 import App from "../app/App";
 import { installMockApiFetch } from "./apiMock";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  window.sessionStorage.clear();
+  if (typeof window.localStorage?.clear === "function") {
+    window.localStorage.clear();
+  }
+});
 
 function getStatCard(label: string) {
   const card = screen
@@ -161,6 +170,139 @@ describe("Tax offset workbench", () => {
 
     await user.click(screen.getByRole("button", { name: /已认证结果/ }));
     expect(screen.getByRole("button", { name: /展开已认证结果/ })).toBeInTheDocument();
+  });
+
+  test("remounts the tax offset page and revalidates without restoring data snapshots", async () => {
+    window.history.pushState({}, "", "/tax-offset");
+    const user = userEvent.setup();
+    let resolveSecondTaxFetch: ((response: Response) => void) | null = null;
+    let taxFetchCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "/api/session/me") {
+        return new Response(JSON.stringify({
+          user: {
+            user_id: "101",
+            username: "liuji",
+            nickname: "刘际涛",
+            display_name: "刘际涛",
+          },
+          roles: ["finance"],
+          permissions: ["finops:app:view"],
+          allowed: true,
+          can_access_app: true,
+          can_mutate_data: true,
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/settings") {
+        return new Response(JSON.stringify({
+          projects: [],
+          reimbursementAccounts: [],
+          bankAccounts: [],
+          bankTransactionTags: [],
+          bankTransactionAutoTagRules: [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/tax-offset?month=2026-03") {
+        taxFetchCount += 1;
+        const payload = {
+          month: "2026-03",
+          read_model_status: "fresh",
+          read_model_scope_key: "2026-03",
+          read_model_generated_at: "2026-06-08T00:00:00+08:00",
+          output_items: [
+            {
+              id: "to-202603-001",
+              buyer_name: "华东项目甲方",
+              issue_date: "2026-03-25",
+              invoice_no: "90342011",
+              tax_amount: "41,600.00",
+              total_with_tax: "361,600.00",
+              invoice_type: "销项专票",
+            },
+          ],
+          input_plan_items: [
+            {
+              id: "ti-202603-001",
+              seller_name: "设备供应商",
+              issue_date: "2026-03-22",
+              invoice_no: "11203490",
+              tax_amount: "12,480.00",
+              total_with_tax: "108,480.00",
+              risk_level: "低",
+              certified_status: "待认证",
+              is_locked_certified: false,
+            },
+          ],
+          certified_items: [],
+          certified_matched_rows: [],
+          certified_outside_plan_rows: [],
+          locked_certified_input_ids: [],
+          default_selected_output_ids: ["to-202603-001"],
+          default_selected_input_ids: ["ti-202603-001"],
+          summary: {
+            output_tax: "41,600.00",
+            certified_input_tax: "0.00",
+            planned_input_tax: "12,480.00",
+            input_tax: "12,480.00",
+            deductible_tax: "12,480.00",
+            result_label: "本月应纳税额",
+            result_amount: "29,120.00",
+          },
+        };
+        if (taxFetchCount === 1) {
+          return new Response(JSON.stringify(payload), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Promise<Response>((resolve) => {
+          resolveSecondTaxFetch = resolve;
+        });
+      }
+      throw new Error(`Unhandled request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("销项税额")).toBeInTheDocument();
+    expect(within(getStatCard("本月应纳税额")).getByText("29,120.00")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "设置" }));
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("tax-offset-page")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "税金抵扣" }));
+
+    expect(await screen.findByRole("heading", { name: "税金抵扣计划与试算" })).toBeInTheDocument();
+    expect(screen.getByText("正在加载 2026-03 的税金抵扣计划与已认证结果...")).toBeInTheDocument();
+    await waitFor(() => expect(taxFetchCount).toBe(2));
+
+    resolveSecondTaxFetch?.(new Response(JSON.stringify({
+      month: "2026-03",
+      read_model_status: "fresh",
+      read_model_scope_key: "2026-03",
+      output_items: [],
+      input_plan_items: [],
+      certified_items: [],
+      certified_matched_rows: [],
+      certified_outside_plan_rows: [],
+      locked_certified_input_ids: [],
+      default_selected_output_ids: [],
+      default_selected_input_ids: [],
+      summary: {
+        output_tax: "0.00",
+        certified_input_tax: "0.00",
+        planned_input_tax: "0.00",
+        input_tax: "0.00",
+        deductible_tax: "0.00",
+        result_label: "本月留抵税额",
+        result_amount: "0.00",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    expect(await screen.findByText("当前月份没有可用于计划与试算的发票数据。")).toBeInTheDocument();
   });
 
   test("read-only export users can view tax offset data but cannot import certified invoices", async () => {

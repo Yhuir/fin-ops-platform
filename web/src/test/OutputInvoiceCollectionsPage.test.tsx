@@ -436,7 +436,7 @@ describe("Output invoice collections page", () => {
     expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
   });
 
-  test("pauses read model retry reload while the keep-alive page is inactive", async () => {
+  test("cleans up read model retry reload after route unmount", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/output-invoice-collections/rows") {
@@ -460,21 +460,19 @@ describe("Output invoice collections page", () => {
     expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(rowsRequests(fetchMock)).toHaveLength(1);
 
-    vi.useFakeTimers();
     fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(screen.getByTestId("page-frame-output-invoice-collections")).toHaveAttribute("aria-hidden", "true");
-    expect(screen.getByTestId("page-frame-settings")).toHaveAttribute("aria-hidden", "false");
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("output-invoice-collections-page")).not.toBeInTheDocument();
+    vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
     expect(rowsRequests(fetchMock)).toHaveLength(1);
 
+    vi.useRealTimers();
     fireEvent.click(screen.getByRole("link", { name: "销项发票收款情况" }));
-    expect(screen.getByTestId("page-frame-output-invoice-collections")).toHaveAttribute("aria-hidden", "false");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
-    });
+    expect(await screen.findByTestId("output-invoice-collections-page")).toBeInTheDocument();
 
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });

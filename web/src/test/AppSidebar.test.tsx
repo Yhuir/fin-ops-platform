@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { vi } from "vitest";
 
 import AppSidebar from "../components/shell/AppSidebar";
+import { sidebarGroups } from "../components/shell/sidebarItems";
 
 function renderSidebar(expanded = false) {
   return render(
@@ -39,6 +41,10 @@ describe("AppSidebar shell contract", () => {
     const brandMarkRule = appStyles.match(/\.app-sidebar-brand-mark\s*\{[^}]*\}/s)?.[0] ?? "";
 
     expect(brandMarkRule).not.toMatch(/radial-gradient|linear-gradient/);
+    expect(brandMarkRule).toMatch(/border:\s*0;/);
+    expect(brandMarkRule).toMatch(/border-radius:\s*50%;/);
+    expect(brandMarkRule).toMatch(/background:\s*transparent;/);
+    expect(brandMarkRule).toMatch(/color:\s*#2f7d4f;/);
   });
 
   test("renders the expand control as an icon-only control without visible tooltip copy", () => {
@@ -48,5 +54,57 @@ describe("AppSidebar shell contract", () => {
     expect(toggle).toHaveClass("app-sidebar-toggle");
     expect(screen.queryByText("展开菜单")).not.toBeInTheDocument();
     expect(appSidebarSource).not.toMatch(/Tooltip\.Content[\s\S]*(展开菜单|折叠菜单)/);
+  });
+
+  test("keeps collapsed text nodes mounted and animates them with HeroUI-style state transitions", () => {
+    renderSidebar(false);
+
+    const contentRule = appStyles.match(/\.app-sidebar-content\s*\{[^}]*\}/s)?.[0] ?? "";
+    const sidebarRule = appStyles.match(/\.app-sidebar\s*\{[^}]*\}/s)?.[0] ?? "";
+    const brandTextRule = appStyles.match(/\.app-sidebar-brand-text\s*\{[^}]*\}/s)?.[0] ?? "";
+    const collapsedBrandTextRule = appStyles.match(/\.app-sidebar-content\.collapsed \.app-sidebar-brand-text\s*\{[^}]*\}/s)?.[0] ?? "";
+    const linkLabelRule = appStyles.match(/\.app-sidebar-link-label\s*\{[^}]*\}/s)?.[0] ?? "";
+    const collapsedLinkLabelRule = appStyles.match(/\.app-sidebar-content\.collapsed \.app-sidebar-link-label\s*\{[^}]*\}/s)?.[0] ?? "";
+
+    expect(screen.getByText("财务运营平台")).toBeInTheDocument();
+    expect(screen.getByText("财务业务")).toBeInTheDocument();
+    expect(screen.getByText("关联台")).toBeInTheDocument();
+    expect(sidebarRule).toMatch(/--app-sidebar-motion:\s*260ms/);
+    expect(contentRule).toMatch(/transition:[^;]*var\(--app-sidebar-motion\)/);
+    expect(brandTextRule).toMatch(/opacity[^;]*var\(--app-sidebar-motion\)/);
+    expect(brandTextRule).toMatch(/transform[^;]*var\(--app-sidebar-motion\)/);
+    expect(collapsedBrandTextRule).toMatch(/opacity:\s*0;/);
+    expect(linkLabelRule).toMatch(/opacity[^;]*var\(--app-sidebar-content-motion\)/);
+    expect(linkLabelRule).toMatch(/transform[^;]*var\(--app-sidebar-content-motion\)/);
+    expect(collapsedLinkLabelRule).toMatch(/max-width:\s*0;/);
+    expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
+    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.app-sidebar/);
+  });
+
+  test("prefetches the route chunk on sidebar hover and focus without changing the link target", () => {
+    const bankDetailsItem = sidebarGroups
+      .flatMap((group) => group.items)
+      .find((item) => item.label === "银行明细");
+    expect(bankDetailsItem).toBeDefined();
+    const originalPreload = bankDetailsItem?.preload;
+    const preload = vi.fn(() => Promise.resolve());
+    if (bankDetailsItem) {
+      bankDetailsItem.preload = preload;
+    }
+
+    try {
+      renderSidebar(true);
+      const bankDetailsLink = screen.getByRole("link", { name: "银行明细" });
+
+      expect(bankDetailsLink).toHaveAttribute("href", "/bank-details");
+      fireEvent.pointerEnter(bankDetailsLink);
+      fireEvent.focus(bankDetailsLink);
+
+      expect(preload).toHaveBeenCalledTimes(2);
+    } finally {
+      if (bankDetailsItem && originalPreload) {
+        bankDetailsItem.preload = originalPreload;
+      }
+    }
   });
 });

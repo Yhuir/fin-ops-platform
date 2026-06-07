@@ -11,7 +11,6 @@ import OaReverseWorkspaceDrawer, { type OaReversePreviewRequest } from "../compo
 import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import {
   downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
@@ -131,10 +130,6 @@ export default function InputInvoiceUsagePage() {
   const [readModelStatus, setReadModelStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
-  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
-    pageKey: "input-invoice-usage",
-    scrollKey: "usage-table",
-  });
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
 
@@ -390,7 +385,6 @@ export default function InputInvoiceUsagePage() {
                   onOpenDetail={handleOpenDetail}
                   onPageChange={handlePageChange}
                   onPageSizeChange={handlePageSizeChange}
-                  tableWrapRef={tableWrapRef}
                 />
               </>
             )}

@@ -13,7 +13,7 @@
 ## 当前代码事实源
 
 - 前端页面注册表：`web/src/app/pageRegistry.tsx`
-- 前端路由/页面保活：`web/src/app/router.tsx`、`web/src/app/PageKeepAliveHost.tsx`
+- 前端路由 host：`web/src/app/router.tsx`、`web/src/app/PageRouteHost.tsx`
 - 侧边栏导航：`web/src/components/shell/sidebarItems.ts`（从页面注册表派生）
 - 页面入口：`web/src/pages/*`
 - 前端 API client：`web/src/features/*/api.ts`

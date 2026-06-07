@@ -140,6 +140,10 @@ describe("Bank details page", () => {
     expect(drawerSource).toContain("AppDialog");
     expect(drawerSource).not.toContain("@mui/material/Drawer");
     expect(drawerSource).not.toContain("@mui/material/Dialog");
+    expect(source).toContain("@heroui/react");
+    expect(source).toContain("Chip");
+    expect(tagSource).toContain("@heroui/react");
+    expect(tagSource).toContain("Chip");
     expect(tagSource).not.toContain("@mui/material/Chip");
     expect(tagSource).not.toContain("@mui/material/Tooltip");
   });
@@ -212,15 +216,13 @@ describe("Bank details page", () => {
     expect(within(table).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
     expect(table.closest(".bank-transaction-grid")).toHaveClass("bank-transaction-grid-readable");
     expect(await within(table).findByText("云南溯源科技有限公司")).toBeInTheDocument();
-    const tradeTimeChip = within(table).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-chip");
+    const tradeTimeText = within(table).getByText("2026-05-01 10:30:00").closest(".bank-trade-time-text");
     expect(within(table).queryByText("2026-05-01 10:30:00+08:00")).not.toBeInTheDocument();
-    expect(tradeTimeChip).toHaveClass("bank-trade-time-chip-full");
-    expect(tradeTimeChip).toHaveClass("bank-chip-auto-size");
-    expect(tradeTimeChip?.closest(".bank-relation-time-row")).not.toBeNull();
-    expect(tradeTimeChip?.closest(".bank-relation-chip-row")).toBeNull();
+    expect(tradeTimeText?.closest(".bank-counterparty-meta-row")).not.toBeNull();
+    expect(tradeTimeText?.closest(".bank-relation-chip-row")).toBeNull();
     expect(within(table).getByText("有oa").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-has");
     expect(within(table).getByText("无发票").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-none");
-    expect(within(table).getByText("有oa").closest(".bank-relation-chip-row")?.previousElementSibling).toHaveClass("bank-relation-time-row");
+    expect(within(table).getByText("有oa").closest(".bank-counterparty-meta-row")?.querySelector(".bank-trade-time-text")).not.toBeNull();
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-direction-tag-centered");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-chip-auto-size");
     expect(within(table).getByText("工商银行 6386").closest(".bank-source-chip")).toHaveClass("bank-chip-auto-size");
@@ -628,7 +630,7 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
 
-  test("pauses bank detail read model retry while the keep-alive page is inactive", async () => {
+  test("unmounts bank detail retry timers while away and refetches after route remount", async () => {
     const fetchMock = installMockApiFetch({
       bankDetailInitialAccountReadModelStatus: "fresh",
       bankDetailInitialTransactionReadModelStatus: "refreshing",
@@ -640,24 +642,19 @@ describe("Bank details page", () => {
     await within(page).findByText("云南溯源科技有限公司");
     const initialTransactionRequests = requestUrls(fetchMock, "/api/bank-details/transactions").length;
 
-    vi.useFakeTimers();
     fireEvent.click(screen.getByRole("link", { name: "设置" }));
-    expect(screen.getByTestId("page-frame-bank-details")).toHaveAttribute("aria-hidden", "true");
-    expect(screen.getByTestId("page-frame-settings")).toHaveAttribute("aria-hidden", "false");
+    expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("bank-details-page")).not.toBeInTheDocument();
+    vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
 
     expect(requestUrls(fetchMock, "/api/bank-details/transactions")).toHaveLength(initialTransactionRequests);
 
+    vi.useRealTimers();
     fireEvent.click(screen.getByRole("link", { name: "银行明细" }));
-    expect(screen.getByTestId("page-frame-bank-details")).toHaveAttribute("aria-hidden", "false");
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
+    expect(await screen.findByTestId("bank-details-page")).toBeInTheDocument();
 
     expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
   });

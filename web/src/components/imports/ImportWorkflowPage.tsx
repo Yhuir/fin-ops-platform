@@ -1,6 +1,6 @@
 import { Alert, Button, Chip, Tabs } from "@heroui/react";
 import { ArrowLeft, Trash2, UploadCloud } from "lucide-react";
-import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import AppDialog from "../common/AppDialog";
@@ -806,9 +806,24 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [previewDetailTab, setPreviewDetailTab] = useState<"duplicates" | "unimported">("duplicates");
+  const mountedRef = useRef(false);
 
   const title = TITLES[mode];
   const uploadLabel = UPLOAD_LABELS[mode];
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (mode === "etc_invoice") {
+        updateDraft((current) => ({
+          ...current,
+          isPreviewing: false,
+          isConfirming: false,
+        }));
+      }
+    };
+  }, [mode, updateDraft]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1170,6 +1185,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setFeedbackMessage(null);
       try {
         const payload = await previewEtcZipFiles(selectedFiles, selectedEtcTask.taskId);
+        if (!mountedRef.current) {
+          return;
+        }
         updateDraft((current) => ({
           ...current,
           etcPreviewPayload: payload,
@@ -1179,9 +1197,14 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           errorMessage: null,
         }));
       } catch (error) {
+        if (!mountedRef.current) {
+          return;
+        }
         setErrorMessage(resolveImportApiErrorMessage(error, "ETC zip 预览失败，请稍后重试。"));
       } finally {
-        setIsPreviewing(false);
+        if (mountedRef.current) {
+          setIsPreviewing(false);
+        }
       }
       return;
     }

@@ -508,9 +508,6 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
       onClose={requestClose}
     >
       <div className="bank-auto-tag-drawer">
-        <div className="bank-auto-tag-drawer-header">
-          <p className="bank-auto-tag-version">版本 {version}{canSave ? "" : " · 只读"}</p>
-        </div>
         <div className="bank-auto-tag-drawer-toolbar">
           <div className="bank-auto-tag-status-tabs" role="group" aria-label="自动标签规则状态">
             <button

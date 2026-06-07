@@ -6,10 +6,10 @@
 
 - 页面注册表：`web/src/app/pageRegistry.tsx`
 - 路由入口：`web/src/app/router.tsx`
-- 页面保活 host：`web/src/app/PageKeepAliveHost.tsx`
+- 页面路由 host：`web/src/app/PageRouteHost.tsx`
 - 页面运行时激活上下文：`web/src/contexts/PageRuntimeContext.tsx`
 - 页面会话状态：`web/src/contexts/PageSessionStateContext.tsx`
-- 页面滚动与表格会话：`web/src/hooks/usePageScrollSession.ts`、`web/src/hooks/useFinanceTableSession.ts`
+- 表格会话：`web/src/hooks/useFinanceTableSession.ts`
 - 侧边栏：`web/src/components/shell/sidebarItems.ts`（从页面注册表派生）
 - 页面入口：`web/src/pages/*`
 - API client：`web/src/features/*/api.ts`
@@ -60,11 +60,12 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 ## 页面职责边界
 
 - 页面可以决定筛选、排序、分页、空状态、导出列、drawer/dialog 状态。
-- 页面切换时的 UI 现场保留属于前端页面运行时职责：`PageKeepAliveHost` 保留已访问页面实例，`PageRuntimeContext` 暴露 active/inactive 状态，`PageSessionStateContext` 和页面级 hook 保存可序列化 UI 状态。
-- `PageKeepAliveHost` 默认保留 20 个页面实例；当前 17 个注册页面全量 `keepAlive: true`，因此普通页面切换不会因 LRU 淘汰重置已访问业务页。超过上限时按 LRU/TTL 淘汰，用户 scope/session generation 变化时清空缓存。
-- 已保活但 inactive 的页面必须通过 `useActiveFinanceDomainEvent(...)` 或 `PageRuntimeContext` 感知激活状态；inactive 收到 finance domain event 时只记录最后一次 pending event，切回 active 后再走现有 API/read boundary 刷新，不能伪装 read model fresh。
-- 页面会话状态只保存当前浏览器标签页内的可恢复 UI，例如查询、筛选、分页、排序、tab、选中行、展开行、详情 drawer target 和滚动位置；不保存 loading、一次性 toast、失败中的提交或业务事实。
-- 页面级滚动 shell 使用 `usePageScrollSession` 保存 `scrollTop/scrollLeft`。财务表格使用 `FinanceTable` 和 `useFinanceTableSession` 保存分页、排序、过滤、列和选择状态；表格滚动仍通过页面级滚动容器或具体表格容器接入页面会话。
+- 页面切换时 `PageRouteHost` 只挂载当前匹配 route；离开页面会卸载页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU 策略或页面数据 snapshot。返回页面时页面重新 mount，并通过现有 API/read boundary 重新加载数据。
+- 页面注册表不声明保活策略；`AppPageRoute` 只维护 `path`、`pageKey`、`component`、`preload()` 和 `end`。侧栏分组继续从页面注册表派生，不能在侧栏里维护第二份路由事实。
+- `PageRuntimeContext` 仍为当前页面提供 active runtime context，供页面 hook 统一读取当前页面身份；因为旧页面会卸载，inactive 页面不再接收或延迟 replay finance domain event。
+- 页面入口使用 lazy route chunks；`AppPageRoute.preload()` 和 `SidebarItem.preload()` 是 route chunk 预加载入口。侧边栏可以在 hover/focus/touch start 时预加载目标页，但点击导航仍由 React Router `Link` 负责。
+- 页面会话状态只保存当前浏览器标签页内的轻量可恢复 UI，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存滚动位置、列表 rows、read model payload、loading、一次性 toast、失败中的提交、权限事实或业务事实。
+- 财务表格继续使用 `FinanceTable` 和 `useFinanceTableSession` 保存分页、排序、过滤、列和选择状态。表格滚动位置不写入页面 session，返回页面后由浏览器和组件默认布局决定。
 - 页面不能重新定义发票生命周期、银行标签、对象 identity/dedup、项目成本归因、往来状态分类等业务口径。
 - 多页面共享且需要 freshness/backfill 的结果，必须通过 policy/service + read boundary 暴露。
 - 只有一个页面使用且规则简单的派生结果，可以留在页面 service；后续被复用时再上提。

@@ -37,7 +37,7 @@ The page already uses project primitives in some places:
 - `PageScaffold`
 - `StatePanel`
 - `AppDialog`
-- `usePageScrollSession`
+- Lightweight page session state and route remount behavior
 - `useBackgroundJobProgress`
 
 ## User-visible Entrypoints

@@ -1,6 +1,6 @@
-import PageKeepAliveHost from "./PageKeepAliveHost";
+import PageRouteHost from "./PageRouteHost";
 import { appPageRoutes } from "./pageRegistry";
 
 export default function AppRouter() {
-  return <PageKeepAliveHost routes={appPageRoutes} />;
+  return <PageRouteHost routes={appPageRoutes} />;
 }

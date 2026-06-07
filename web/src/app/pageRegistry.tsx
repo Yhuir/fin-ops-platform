@@ -18,33 +18,17 @@ import {
   WalletCards,
   type LucideIcon,
 } from "lucide-react";
-import type { ComponentType } from "react";
+import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
-import ReconciliationWorkbenchPage from "../pages/ReconciliationWorkbenchPage";
-import TaxOffsetPage from "../pages/TaxOffsetPage";
-import CostStatisticsPage from "../pages/CostStatisticsPage";
-import SettingsPage from "../pages/SettingsPage";
-import AppHealthOperationsPage from "../pages/AppHealthOperationsPage";
-import BatchAccountingPage from "../pages/BatchAccountingPage";
-import BankDetailsPage from "../pages/BankDetailsPage";
-import PendingInvoicesPage from "../pages/PendingInvoicesPage";
-import EtcTicketManagementPage from "../pages/EtcTicketManagementPage";
-import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
-import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
-import InputInvoiceUsagePage from "../pages/InputInvoiceUsagePage";
-import OaPendingPaymentsPage from "../pages/OaPendingPaymentsPage";
-import OutputInvoiceCollectionsPage from "../pages/OutputInvoiceCollectionsPage";
-import ImportBankTransactionsPage from "../pages/imports/ImportBankTransactionsPage";
-import ImportInvoicesPage from "../pages/imports/ImportInvoicesPage";
-import ImportEtcInvoicesPage from "../pages/imports/ImportEtcInvoicesPage";
+type AppPageComponent = ComponentType | LazyExoticComponent<ComponentType>;
+type PageModule = { default: ComponentType };
+type PageModuleLoader = () => Promise<PageModule>;
 
 export type AppPageRoute = {
   path: string;
   pageKey: string;
-  component: ComponentType;
-  keepAlive: boolean;
-  sessionVersion: number;
-  maxIdleMs?: number;
+  component: AppPageComponent;
+  preload: () => Promise<void>;
   end?: boolean;
 };
 
@@ -53,6 +37,7 @@ export type SidebarItem = {
   label: string;
   to: string;
   icon: LucideIcon;
+  preload: () => Promise<void>;
   end?: boolean;
   active?: boolean;
 };
@@ -72,143 +57,137 @@ type AppPageDefinition = AppPageRoute & {
   };
 };
 
-const DEFAULT_PAGE_MAX_IDLE_MS = 30 * 60 * 1000;
+function lazyPage(loader: PageModuleLoader): { component: AppPageComponent; preload: () => Promise<void> } {
+  const component = lazy(loader);
+  return {
+    component,
+    preload: () => loader().then(() => undefined),
+  };
+}
+
+const reconciliationWorkbenchPage = lazyPage(() => import("../pages/ReconciliationWorkbenchPage"));
+const taxOffsetPage = lazyPage(() => import("../pages/TaxOffsetPage"));
+const costStatisticsPage = lazyPage(() => import("../pages/CostStatisticsPage"));
+const bankDetailsPage = lazyPage(() => import("../pages/BankDetailsPage"));
+const pendingInvoicesPage = lazyPage(() => import("../pages/PendingInvoicesPage"));
+const inputInvoiceUsagePage = lazyPage(() => import("../pages/InputInvoiceUsagePage"));
+const oaPendingPaymentsPage = lazyPage(() => import("../pages/OaPendingPaymentsPage"));
+const outputInvoiceCollectionsPage = lazyPage(() => import("../pages/OutputInvoiceCollectionsPage"));
+const noOaBankBatchPage = lazyPage(() => import("../pages/NoOaBankBatchPage"));
+const batchAccountingPage = lazyPage(() => import("../pages/BatchAccountingPage"));
+const turnoverLedgerPage = lazyPage(() => import("../pages/TurnoverLedgerPage"));
+const etcTicketManagementPage = lazyPage(() => import("../pages/EtcTicketManagementPage"));
+const settingsPage = lazyPage(() => import("../pages/SettingsPage"));
+const appHealthOperationsPage = lazyPage(() => import("../pages/AppHealthOperationsPage"));
+const importBankTransactionsPage = lazyPage(() => import("../pages/imports/ImportBankTransactionsPage"));
+const importInvoicesPage = lazyPage(() => import("../pages/imports/ImportInvoicesPage"));
+const importEtcInvoicesPage = lazyPage(() => import("../pages/imports/ImportEtcInvoicesPage"));
 
 export const appPageDefinitions: AppPageDefinition[] = [
   {
     path: "/",
     pageKey: "reconciliation-workbench",
-    component: ReconciliationWorkbenchPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: reconciliationWorkbenchPage.component,
+    preload: reconciliationWorkbenchPage.preload,
     end: true,
     sidebar: { group: "finance", label: "关联台", icon: Network },
   },
   {
     path: "/tax-offset",
     pageKey: "tax-offset",
-    component: TaxOffsetPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: taxOffsetPage.component,
+    preload: taxOffsetPage.preload,
     sidebar: { group: "finance", label: "税金抵扣", icon: Calculator },
   },
   {
     path: "/cost-statistics",
     pageKey: "cost-statistics",
-    component: CostStatisticsPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: costStatisticsPage.component,
+    preload: costStatisticsPage.preload,
     sidebar: { group: "finance", label: "成本统计", icon: ChartColumn },
   },
   {
     path: "/bank-details",
     pageKey: "bank-details",
-    component: BankDetailsPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: bankDetailsPage.component,
+    preload: bankDetailsPage.preload,
     sidebar: { group: "finance", label: "银行明细", icon: Landmark },
   },
   {
     path: "/pending-invoices",
     pageKey: "pending-invoices",
-    component: PendingInvoicesPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: pendingInvoicesPage.component,
+    preload: pendingInvoicesPage.preload,
     sidebar: { group: "finance", label: "待找发票", icon: FileQuestion },
   },
   {
     path: "/input-invoice-usage",
     pageKey: "input-invoice-usage",
-    component: InputInvoiceUsagePage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: inputInvoiceUsagePage.component,
+    preload: inputInvoiceUsagePage.preload,
     sidebar: { group: "finance", label: "进项发票使用情况", icon: FileInput },
   },
   {
     path: "/oa-pending-payments",
     pageKey: "oa-pending-payments",
-    component: OaPendingPaymentsPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: oaPendingPaymentsPage.component,
+    preload: oaPendingPaymentsPage.preload,
     sidebar: { group: "finance", label: "OA待付款核对", icon: ClipboardCheck },
   },
   {
     path: "/output-invoice-collections",
     pageKey: "output-invoice-collections",
-    component: OutputInvoiceCollectionsPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: outputInvoiceCollectionsPage.component,
+    preload: outputInvoiceCollectionsPage.preload,
     sidebar: { group: "finance", label: "销项发票收款情况", icon: FileOutput },
   },
   {
     path: "/no-oa-bank-batches",
     pageKey: "no-oa-bank-batches",
-    component: NoOaBankBatchPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: noOaBankBatchPage.component,
+    preload: noOaBankBatchPage.preload,
     sidebar: { group: "finance", label: "免OA流水批量处理", icon: ListChecks },
   },
   {
     path: "/batch-accounting",
     pageKey: "batch-accounting",
-    component: BatchAccountingPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: batchAccountingPage.component,
+    preload: batchAccountingPage.preload,
     sidebar: { group: "finance", label: "批量账务", icon: WalletCards },
   },
   {
     path: "/turnover-ledger",
     pageKey: "turnover-ledger",
-    component: TurnoverLedgerPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: turnoverLedgerPage.component,
+    preload: turnoverLedgerPage.preload,
     sidebar: { group: "finance", label: "外部往来款管理", icon: Handshake },
   },
   {
     path: "/etc-tickets",
     pageKey: "etc-tickets",
-    component: EtcTicketManagementPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: etcTicketManagementPage.component,
+    preload: etcTicketManagementPage.preload,
     sidebar: { group: "finance", label: "ETC票据管理", icon: Ticket },
   },
   {
     path: "/settings",
     pageKey: "settings",
-    component: SettingsPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: settingsPage.component,
+    preload: settingsPage.preload,
     sidebar: { group: "system", label: "设置", icon: Settings },
   },
   {
     path: "/operations/app-health",
     pageKey: "app-health-operations",
-    component: AppHealthOperationsPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: appHealthOperationsPage.component,
+    preload: appHealthOperationsPage.preload,
     sidebar: { group: "system", label: "系统状态", icon: Activity },
   },
   {
     path: "/imports/bank-transactions",
     pageKey: "imports.bank-transactions",
-    component: ImportBankTransactionsPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: importBankTransactionsPage.component,
+    preload: importBankTransactionsPage.preload,
     sidebar: {
       group: "system",
       id: "workbench-bank-import",
@@ -220,10 +199,8 @@ export const appPageDefinitions: AppPageDefinition[] = [
   {
     path: "/imports/invoices",
     pageKey: "imports.invoices",
-    component: ImportInvoicesPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: importInvoicesPage.component,
+    preload: importInvoicesPage.preload,
     sidebar: {
       group: "system",
       id: "workbench-invoice-import",
@@ -235,10 +212,8 @@ export const appPageDefinitions: AppPageDefinition[] = [
   {
     path: "/imports/etc-invoices",
     pageKey: "imports.etc-invoices",
-    component: ImportEtcInvoicesPage,
-    keepAlive: true,
-    sessionVersion: 1,
-    maxIdleMs: DEFAULT_PAGE_MAX_IDLE_MS,
+    component: importEtcInvoicesPage.component,
+    preload: importEtcInvoicesPage.preload,
     sidebar: {
       group: "system",
       id: "workbench-etc-import",
@@ -253,9 +228,7 @@ export const appPageRoutes: AppPageRoute[] = appPageDefinitions.map((definition)
   path: definition.path,
   pageKey: definition.pageKey,
   component: definition.component,
-  keepAlive: definition.keepAlive,
-  sessionVersion: definition.sessionVersion,
-  maxIdleMs: definition.maxIdleMs,
+  preload: definition.preload,
   end: definition.end,
 }));
 
@@ -268,6 +241,7 @@ function sidebarItemFromDefinition(definition: AppPageDefinition): SidebarItem |
     label: definition.sidebar.label,
     to: definition.path,
     icon: definition.sidebar.icon,
+    preload: definition.preload,
     end: definition.end,
     active: definition.sidebar.active,
   };

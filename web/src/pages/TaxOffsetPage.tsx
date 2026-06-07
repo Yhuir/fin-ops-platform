@@ -20,7 +20,6 @@ import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../f
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import type {
   TaxCertifiedImportConfirmedResult,
   TaxMonthData,
@@ -110,8 +109,8 @@ export default function TaxOffsetPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const [planFeedback, setPlanFeedback] = useState<string | null>(null);
-  const outputTableWrapRef = usePageScrollSession<HTMLDivElement>({ pageKey: "tax-offset", scrollKey: "output-table" });
-  const inputTableWrapRef = usePageScrollSession<HTMLDivElement>({ pageKey: "tax-offset", scrollKey: "input-plan-table" });
+  const outputTableWrapRef = useRef<HTMLDivElement | null>(null);
+  const inputTableWrapRef = useRef<HTMLDivElement | null>(null);
   const taxLayoutScrollbarRef = useRef<HTMLDivElement | null>(null);
   const taxLayoutScrollbarInnerRef = useRef<HTMLDivElement | null>(null);
   const isSyncingTaxLayoutScrollRef = useRef(false);

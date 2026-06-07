@@ -142,7 +142,7 @@ All existing overlays are right drawers after migration.
 ## Loading / Empty / Error / Stale / Permission
 
 - Page read model:
-  - `readModelStatus === "refreshing"` schedules retry only while keep-alive page is active.
+  - `readModelStatus === "refreshing"` schedules retry only while the route remains mounted; route unmount cleans up retry timers.
   - Current page intentionally hides old refresh detail copy `进项发票使用情况读模型正在刷新，完成后页面会自动重新加载。`
 - Page loading:
   - `aria-label="进项发票使用情况加载中"` with three skeleton blocks today.

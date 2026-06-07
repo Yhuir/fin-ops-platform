@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import { Chip } from "@heroui/react";
 import { Filter, Tags } from "lucide-react";
 
 import {
@@ -30,7 +31,6 @@ import {
   eventAffectedMonths,
 } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import type {
   BankAutoTagRulesResponse,
   BankAutoTagEditableRule,
@@ -39,6 +39,7 @@ import type {
   BankDetailExportMode,
   BankDetailReadModelStatus,
   BankDetailTransaction,
+  BankTransactionDirection,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
 } from "../features/bankDetails/types";
@@ -437,6 +438,14 @@ function formatMoney(value: string | null) {
 
 function relationTagTone(tag: string) {
   return tag.startsWith("有") ? "has" : "none";
+}
+
+function relationTagColor(tag: string): "success" | "warning" {
+  return tag.startsWith("有") ? "success" : "warning";
+}
+
+function directionTagColor(direction: BankTransactionDirection): "success" | "danger" {
+  return direction === "income" ? "success" : "danger";
 }
 
 function monthIndex(value: string) {
@@ -1431,10 +1440,6 @@ export default function BankDetailsPage() {
   const hasAccountPayloadRef = useRef(false);
   const hasTransactionPayloadRef = useRef(false);
   const [refreshToken, setRefreshToken] = useState(0);
-  const transactionTableWrapRef = usePageScrollSession<HTMLDivElement>({
-    pageKey: "bank-details",
-    scrollKey: "transactions-table",
-  });
   const readModelStatus = combinedReadModelStatus(accountsReadModelStatus, transactionsReadModelStatus);
   const readModelNeedsRefresh = readModelStatus !== "fresh";
   const selectedTransactionAccountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey || null;
@@ -2230,7 +2235,7 @@ export default function BankDetailsPage() {
                 onCloseExportMenu={closeExportMenu}
                 onExport={handleExport}
               />
-              <div ref={transactionTableWrapRef} className="bank-transaction-table-container">
+              <div className="bank-transaction-table-container">
                 <FinanceTable ariaLabel="交易流水" className="bank-transaction-table" minWidth={980}>
                   <FinanceTableHeader>
                     <FinanceTableColumn className="bank-col-counterparty" columnRole="identity" id="counterparty" isRowHeader>对方户名</FinanceTableColumn>
@@ -2280,20 +2285,21 @@ export default function BankDetailsPage() {
                             <span className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}>
                               {row.counterpartyName}
                             </span>
-                            <div className="bank-relation-time-row">
-                              <span className="bank-trade-time-chip bank-trade-time-chip-full bank-chip-auto-size">
-                                <span className="bank-chip-label">{row.tradeTime}</span>
-                              </span>
-                            </div>
-                            <div className="bank-relation-chip-row">
-                              {row.relationTags.map((tag) => (
-                                <span
-                                  key={`${row.id}-${tag}`}
-                                  className={`bank-relation-tag bank-relation-tag-${relationTagTone(tag)} bank-chip-auto-size`}
-                                >
-                                  <span className="bank-chip-label">{tag}</span>
-                                </span>
-                              ))}
+                            <div className="bank-counterparty-meta-row">
+                              <span className="bank-trade-time-text">{row.tradeTime}</span>
+                              <div className="bank-relation-chip-row">
+                                {row.relationTags.map((tag) => (
+                                  <Chip
+                                    key={`${row.id}-${tag}`}
+                                    className={`bank-relation-tag bank-relation-tag-${relationTagTone(tag)} bank-chip-auto-size`}
+                                    color={relationTagColor(tag)}
+                                    size="sm"
+                                    variant="soft"
+                                  >
+                                    <Chip.Label className="bank-chip-label">{tag}</Chip.Label>
+                                  </Chip>
+                                ))}
+                              </div>
                             </div>
                           </div>
                         </FinanceTableCell>
@@ -2311,9 +2317,14 @@ export default function BankDetailsPage() {
                         <FinanceTableCell className="bank-col-amount" columnRole="amount" textValue={formatMoney(row.amount)}>
                           <div className="bank-amount-cell">
                             <div className="bank-amount-line">
-                              <span className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}>
-                                <span className="bank-chip-label">{row.directionLabel}</span>
-                              </span>
+                              <Chip
+                                className={`direction-tag bank-direction-tag-centered bank-chip-auto-size ${row.direction}`}
+                                color={directionTagColor(row.direction)}
+                                size="sm"
+                                variant="soft"
+                              >
+                                <Chip.Label className="bank-chip-label">{row.directionLabel}</Chip.Label>
+                              </Chip>
                               <span className="bank-amount-value">
                                 {formatMoney(row.amount)}
                               </span>

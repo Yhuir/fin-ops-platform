@@ -68,7 +68,7 @@ Each implementation prompt must preserve user-visible entry points: if a menu it
 
 ## Verification Targets
 
-- `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageKeepAliveHost.test.tsx HeroUIPlatformSmoke.test.tsx`
+- `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx PageRouteHost.test.tsx HeroUIPlatformSmoke.test.tsx`
 - `cd web && npm run build`
 - `if rg -n '@mui/' web/src/app/App.tsx web/src/components/shell web/src/app/pageRegistry.tsx; then exit 1; else exit 0; fi`
 - During P013 only, `App.tsx` must contain no direct `@mui/*` imports. A temporary date picker compatibility provider is allowed until `MonthPicker` and page date pickers migrate.

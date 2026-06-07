@@ -13,7 +13,6 @@ import {
   emitFinanceDomainEvent,
 } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { usePageScrollSession } from "../hooks/usePageScrollSession";
 import { ApiClientError } from "../features/apiClient";
 import {
   confirmTurnoverClosure,
@@ -296,10 +295,6 @@ export default function TurnoverLedgerPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportDownloading, setExportDownloading] = useState(false);
   const [toast, setToast] = useState<{ severity: "success" | "error"; message: string } | null>(null);
-  const tableWrapRef = usePageScrollSession<HTMLDivElement>({
-    pageKey: "turnover-ledger",
-    scrollKey: "grouped-table",
-  });
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
@@ -726,7 +721,6 @@ export default function TurnoverLedgerPage() {
               onEdit={handleOpenEditor}
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
-              tableWrapRef={tableWrapRef}
               actionsDisabled={ledgerActionsDisabled}
             />
           </div>

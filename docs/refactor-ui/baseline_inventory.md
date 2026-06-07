@@ -146,7 +146,7 @@ web/src/test/useMuiDataGridPageSession.test.tsx
 
 | 文件 | 分类 | 风险 | 迁移说明 |
 | --- | --- | --- | --- |
-| `web/src/app/App.tsx` | 非关联台平台入口 | high | 依赖 MUI `Box`、`Alert`、`useTheme`、`useMediaQuery` 和 `MuiProviders`；迁移时必须保留 provider 顺序、路由、keep alive、OA embedded、后台任务提示。 |
+| `web/src/app/App.tsx` | 非关联台平台入口 | high | 依赖 MUI `Box`、`Alert`、`useTheme`、`useMediaQuery` 和 `MuiProviders`；迁移时必须保留 provider 顺序、路由、lazy/preload、OA embedded、后台任务提示。 |
 | `web/src/app/MuiProviders.tsx` | 非关联台平台入口 | high | 当前注入 MUI theme、MUI X date locale、CssBaseline；迁移时改为 UI/CSS entry，不再用非关联台 MUI provider。 |
 | `web/src/app/muiTheme.ts` | 非关联台平台入口 | high | 当前包含 MUI TableCell 全局居中和 MUI locale；迁移时废弃非关联台主题，但关联台 legacy 若仍需 MUI theme，必须隔离。 |
 | `web/src/app/pageRegistry.tsx` | App Shell 导航 | high | 侧栏图标来自 `@mui/icons-material`，必须迁到项目 icon primitive，保持页面顺序、label、path、active 语义。 |

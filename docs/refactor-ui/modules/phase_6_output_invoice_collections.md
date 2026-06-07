@@ -29,7 +29,7 @@
 | Receipt preview drawer | `ReceiptPreviewDrawer.tsx` | Right drawer for receipt preview and formal receipt creation. |
 | Receipt settings drawer | `ReceiptSettingsDrawer.tsx` | Admin-only right drawer for receipt number settings. |
 | API/types | `web/src/features/outputInvoiceCollections/api.ts`, `types.ts` | Rows, filter options, details, status rules, receipt history/preview/settings and lifecycle write routes. No migration prompt may change these contracts. |
-| Tests | `web/src/test/OutputInvoiceCollectionsPage.test.tsx` | Route/sidebar, grouped table, filter/sort/pagination, read-model refreshing, keep-alive activation, all workflow drawers and lifecycle writes. |
+| Tests | `web/src/test/OutputInvoiceCollectionsPage.test.tsx` | Route/sidebar, grouped table, filter/sort/pagination, read-model refreshing, route remount cleanup, all workflow drawers and lifecycle writes. |
 
 ## Current MUI Inventory
 

@@ -4,7 +4,7 @@ import { type ComponentType, type ReactNode } from "react";
 import { Link, MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import PageKeepAliveHost from "../app/PageKeepAliveHost";
+import PageRouteHost from "../app/PageRouteHost";
 import type { AppPageRoute } from "../app/pageRegistry";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
@@ -54,8 +54,7 @@ function createRoute(path: string, pageKey: string, Component: ComponentType): A
     path,
     pageKey,
     component: Component,
-    keepAlive: true,
-    sessionVersion: 1,
+    preload: () => Promise.resolve(),
   };
 }
 
@@ -65,7 +64,7 @@ afterEach(() => {
 });
 
 describe("useActiveFinanceDomainEvent", () => {
-  test("handles events immediately while active and replays only the last inactive event on return", async () => {
+  test("handles events while mounted and does not replay events after route unmount", async () => {
     const user = userEvent.setup();
     const handler = vi.fn();
 
@@ -79,7 +78,7 @@ describe("useActiveFinanceDomainEvent", () => {
     }
 
     render(
-      <PageKeepAliveHost
+      <PageRouteHost
         routes={[
           createRoute("/a", "page-a", PageA),
           createRoute("/b", "page-b", PageB),
@@ -106,9 +105,7 @@ describe("useActiveFinanceDomainEvent", () => {
 
     await user.click(screen.getByRole("link", { name: "to a" }));
 
-    await waitFor(() => {
-      expect(handler).toHaveBeenCalledTimes(2);
-    });
-    expect(handler.mock.calls[1][0].detail.action).toBe("inactive-2");
+    await waitFor(() => expect(screen.getByRole("link", { name: "to b" })).toBeInTheDocument());
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });

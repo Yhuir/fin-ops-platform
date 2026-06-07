@@ -107,7 +107,7 @@ describe("Finance operations shell", () => {
     await user.click(screen.getByRole("link", { name: "税金抵扣" }));
 
     expect(
-      screen.getByRole("heading", { name: "税金抵扣计划与试算" }),
+      await screen.findByRole("heading", { name: "税金抵扣计划与试算" }),
     ).toBeInTheDocument();
     expect(document.querySelector(".global-header")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();

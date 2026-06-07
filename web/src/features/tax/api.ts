@@ -360,7 +360,7 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
   const certifiedOutsidePlanRows = payload.certified_outside_plan_rows ?? [];
   const lockedCertifiedInputIds = payload.locked_certified_input_ids ?? [];
 
-  return {
+  const monthData: TaxMonthData = {
     outputInvoices: payload.output_items.map(mapOutputItem),
     inputPlanInvoices: inputPlanItems.map(mapInputItem),
     certifiedMatchedInvoices: certifiedMatchedRows.map(mapCertifiedItem),
@@ -369,12 +369,19 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
     defaultSelectedOutputIds: payload.default_selected_output_ids,
     defaultSelectedInputIds: payload.default_selected_input_ids,
     summary: mapSummary(payload.summary),
-    readModelStatus: payload.read_model_status,
-    readModelScopeKey: payload.read_model_scope_key,
-    readModelGeneratedAt: payload.read_model_generated_at,
     readModelStaleReasons: payload.read_model_stale_reasons ?? [],
     sourceVersions: payload.source_versions ?? {},
   };
+  if (payload.read_model_status !== undefined) {
+    monthData.readModelStatus = payload.read_model_status;
+  }
+  if (payload.read_model_scope_key !== undefined) {
+    monthData.readModelScopeKey = payload.read_model_scope_key;
+  }
+  if (payload.read_model_generated_at !== undefined) {
+    monthData.readModelGeneratedAt = payload.read_model_generated_at;
+  }
+  return monthData;
 }
 
 export async function calculateTaxOffset(params: {

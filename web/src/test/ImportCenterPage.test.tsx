@@ -638,7 +638,7 @@ describe("Import pages", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/preview")).toBe(false);
   });
 
-  test("ETC invoice import keeps preview result when navigating away before preview finishes", async () => {
+  test("ETC invoice import clears in-flight preview state after route unmount", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ etcImportPreviewDelayMs: 80 });
 
@@ -659,8 +659,11 @@ describe("Import pages", () => {
 
     await user.click(screen.getByRole("link", { name: "ETC发票导入" }));
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "ETC导入预览" })).toBeInTheDocument();
-    expect(screen.getByText("etc_import_session_0001")).toBeInTheDocument();
-    expect(screen.getByText("ETC-2026-005")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "开始预览" })).toBeEnabled();
+    });
+    expect(screen.queryByRole("heading", { name: "ETC导入预览" })).not.toBeInTheDocument();
+    expect(screen.queryByText("etc_import_session_0001")).not.toBeInTheDocument();
+    expect(screen.queryByText("ETC-2026-005")).not.toBeInTheDocument();
   });
 });

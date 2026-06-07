@@ -1,3 +1,4 @@
+import { Chip } from "@heroui/react";
 import { useState } from "react";
 
 import { getBankCategoryToneClass, splitBankCategoryLabel } from "./categoryOptions";
@@ -27,8 +28,7 @@ export default function BankCategoryTag({
   const tooltipId = `bank-category-hierarchy-${categoryCode ?? "empty"}-${displayLabel.replace(/\s+/g, "-")}`;
 
   const chip = (
-    <span
-      aria-label={displayLabel}
+    <Chip
       className={[
         "bank-category-tag",
         "bank-chip-auto-size",
@@ -36,15 +36,18 @@ export default function BankCategoryTag({
         compact ? "compact" : "",
         className ?? "",
       ].filter(Boolean).join(" ")}
+      color="success"
+      size={compact ? "sm" : "md"}
+      variant="soft"
     >
-      <span className="bank-category-tag-label">
+      <Chip.Label className="bank-category-tag-label">
         {labelLines.map((line, index) => (
           <span className="bank-category-tag-line" key={`${line}-${index}`}>
             {index === labelLines.length - 1 && count !== undefined ? `${line} ${count}` : line}
           </span>
         ))}
-      </span>
-    </span>
+      </Chip.Label>
+    </Chip>
   );
   if (!hierarchyTooltip || hierarchyParts.length < 2) {
     return chip;

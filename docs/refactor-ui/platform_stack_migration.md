@@ -121,7 +121,7 @@ HeroUI MCP quick start 已核对到以下事实：
 - 保留所有业务 providers 的顺序，除非测试证明可调整。
 - 移除 `MuiProviders` 对非关联台的包裹。
 - 如果必须保留 MUI provider 给冻结关联台内部，必须只在 legacy workbench boundary 包裹，并记录在 `refactor_ui_state.md`。
-- 不改变 `APP_BASE_PATH`、OA embedded mode、router basename、keep alive 行为。
+- 不改变 `APP_BASE_PATH`、OA embedded mode、router basename 或 route-level lazy/preload 行为。
 - 不改变 `MonthProvider` 默认月份逻辑。
 
 ## 图标迁移规则

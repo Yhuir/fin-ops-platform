@@ -15,10 +15,10 @@
 ## 前端结构
 
 - 前端源码位于 `web/src/`。
-- 页面注册表：`web/src/app/pageRegistry.tsx`，集中声明 route、pageKey、keepAlive 和侧边栏元数据。
-- 路由入口：`web/src/app/router.tsx`，通过 `PageKeepAliveHost` 渲染注册页面。
+- 页面注册表：`web/src/app/pageRegistry.tsx`，集中声明 route、pageKey、lazy component、preload 和侧边栏元数据。
+- 路由入口：`web/src/app/router.tsx`，通过 `PageRouteHost` 渲染当前匹配页面；路由切换会卸载上一页。
 - 侧边栏：`web/src/components/shell/sidebarItems.ts`，从页面注册表派生。
-- 页面会话与保活：`web/src/contexts/PageSessionStateContext.tsx`、`web/src/contexts/PageRuntimeContext.tsx`、`web/src/hooks/usePageScrollSession.ts`、`web/src/hooks/useFinanceTableSession.ts`、`web/src/hooks/useActiveFinanceDomainEvent.ts`。
+- 页面会话与路由运行时：`web/src/contexts/PageSessionStateContext.tsx`、`web/src/contexts/PageRuntimeContext.tsx`、`web/src/hooks/useFinanceTableSession.ts`、`web/src/hooks/useActiveFinanceDomainEvent.ts`。
 - 页面入口：`web/src/pages/*`。
 - API client：`web/src/features/*/api.ts`。
 - 跨页刷新提示：`web/src/features/domainEvents.ts`。
@@ -31,11 +31,12 @@
 - `fetchSessionMe()` 必须给 `apiRequestJson` 传入显式 `timeoutMs`，把挂起请求收敛为 `SessionApiError(request_timeout)`。
 - `SessionGate` 的 error 态通过 `SessionProvider.refresh()` 重试，不新增绕过 session state machine 的临时 auth 逻辑。
 
-页面切换保活规则：
+页面切换与轻量会话规则：
 
-- 新页面必须从 `pageRegistry` 注册 route/sidebar/pageKey，并默认接入 `keepAlive`，除非页面明确不需要保留现场。
-- 页面级滚动容器接 `usePageScrollSession`；财务表格分页、排序、过滤、列和选择状态接 `useFinanceTableSession`。
-- 页面订阅 finance domain event 时使用 `useActiveFinanceDomainEvent`，避免 inactive 页面主动重型刷新；切回 active 后仍通过原 API/read model freshness 边界刷新。
+- 新页面必须从 `pageRegistry` 注册 route/sidebar/pageKey，并保持 route-level code splitting 与侧边栏 preload。
+- 路由切换只保留当前页面挂载；不要新增页面 mounted cache、data snapshot 或滚动 snapshot。
+- 筛选、分页、搜索词等轻量 UI 状态接 `usePageSessionState` 或 `useFinanceTableSession`；不要把 read model rows、API payload 或长列表滚动位置写入页面会话。
+- 页面订阅 finance domain event 时使用 `useActiveFinanceDomainEvent`；只有当前挂载页面响应事件，切回页面后仍通过原 API/read model freshness 边界刷新。
 - 不把 UI session 写入后端 API、facts、audit、dirty scope、outbox 或 read model。
 
 ## 新增或修改功能流程
