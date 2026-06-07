@@ -2,7 +2,7 @@
 
 本文档记录后续 UI 迁移的模块顺序、切片边界和验收重点。执行者每次只能选择一个模块或一个明确切片，不能并行推进多个业务模块。
 
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 
 ## 总体顺序
 
@@ -51,7 +51,7 @@ Last updated: 2026-06-07
 
 | 顺序 | 模块 | 路径 | 主要文件 | 风险 | 主要交互 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 税金抵扣 | `/tax-offset` | `TaxOffsetPage.tsx`, `components/tax/*` | medium | 月份选择、表格、认证导入弹窗、结果右侧抽屉。 |
+| 1 | 税金抵扣 | `/tax-offset` | `TaxOffsetPage.tsx`, `components/tax/*` | medium | 月份选择、表格、认证导入弹窗、右侧认证结果工作区。Discovery: `docs/refactor-ui/modules/tax-offset.md`. |
 | 2 | 系统状态 | `/operations/app-health` | `AppHealthOperationsPage.tsx`, `features/appHealth/*` | medium | 状态面板、刷新、健康/worker 信息。 |
 | 3 | 导入页族 | `/imports/*` | `components/imports/ImportWorkflowPage.tsx`, import pages | high | 上传、预览表格、确认、进度、错误、详情预览。 |
 | 4 | 成本统计 | `/cost-statistics` | `CostStatisticsPage.tsx`, `components/cost-statistics/*` | high | DataGrid、月份/范围、详情弹窗、导出弹窗。 |
