@@ -286,3 +286,18 @@ Scope: `/batch-accounting` P080-P084 characterization and UI migration only.
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_batch_accounting.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/test/BatchAccountingPage.test.tsx 和 web/src/app/styles.css。检查当前分支必须是 `refactor-ui`。检查 untracked files、diff、测试结果和文档状态。确认 scope 只包含 BatchAccounting P080-P084：characterization tests, page shell/filters, bank list/summary, OA table, overlays/feedback and final page MUI cleanup。不得包含 backend/API/read model/worker、mock data shape、domain event semantic changes 或关联台内部工作区。运行 `cd web && npx vitest run BatchAccountingPage.test.tsx`、`cd web && npm run build`、no-MUI grep `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`、`git diff --check`、`git status --short --branch`。只允许精确 `git add web/src/pages/BatchAccountingPage.tsx web/src/app/styles.css docs/refactor-ui/modules/phase_6_batch_accounting.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；禁止 `git add .` 和 `git add -A`。提交并 push 到 `origin/refactor-ui`。完成后更新 state/prompt/module docs 和 Push Log，标记 MG verified。
 ```
+
+## MG-P084 Execution Notes
+
+- Status: verified.
+- Scope check: passed; current branch was `refactor-ui...origin/refactor-ui` and worktree was clean before MG docs.
+- Runtime implementation changed in MG docs step: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: passed; 13 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; clean worktree before MG docs.
+- Next prompt generated: `P085-phase-6-turnover-ledger-discovery`.

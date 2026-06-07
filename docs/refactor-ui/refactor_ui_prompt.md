@@ -4811,7 +4811,7 @@ Scope: `/batch-accounting` withdraw dialog, mutation feedback, remaining action 
 ### MG-P084-phase-6-batch-accounting
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `cumulative merge gate`
 - Scope: `/batch-accounting` P080-P084 characterization and UI migration only.
 
@@ -4832,6 +4832,84 @@ Scope: `/batch-accounting` P080-P084 characterization and UI migration only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Exact staging required: yes，no `git add .` or `git add -A`。
+
+#### Execution Notes
+
+- Merge gate status: verified.
+- Scope check: passed；worktree was clean before MG docs and current branch was `refactor-ui...origin/refactor-ui`.
+- Verification:
+  - `cd web && npx vitest run BatchAccountingPage.test.tsx`: passed；13 tests passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|TextField|<Button|<Dialog|<Stack|<Paper|<Box|<Divider' web/src/pages/BatchAccountingPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；clean worktree before MG docs。
+- Next prompt generated: `P085-phase-6-turnover-ledger-discovery`.
+
+### P085-phase-6-turnover-ledger-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `verified`
+- Type: `discovery/planning`
+- Scope: `/turnover-ledger` only.
+
+#### Prompt
+
+```text
+Prompt ID: P085-phase-6-turnover-ledger-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/turnover-ledger` only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx、web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx、web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx、web/src/test/TurnoverLedgerPage.test.tsx、web/src/test/TurnoverLedgerApi.test.ts、web/src/features/turnoverLedger/api.ts 和 web/src/features/turnoverLedger/types.ts。只做 discovery/planning：生成或更新 docs/refactor-ui/modules/phase_6_turnover_ledger.md，记录当前 MUI inventory、用户可见入口、表格/左右双栏排版风险、右侧抽屉和导出弹窗边界、现有测试覆盖、需要新增的 characterization tests、推荐 Micro-JIT 切片队列和 P086 prompt。不得修改 runtime code、tests、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。保留原则：大布局和使用感不变，旧右侧抽屉仍为右侧抽屉，旧导出弹窗仍为弹窗，旧按钮/选择/展开/补充信息/导出入口位置保持等价。运行 `test -f docs/refactor-ui/modules/phase_6_turnover_ledger.md`、`rg -n "P085-phase-6-turnover-ledger-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P086-phase-6-turnover-ledger-characterization-tests" docs/refactor-ui/modules/phase_6_turnover_ledger.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs。完成后提交并 push 到 `origin/refactor-ui`，再写入 Push Log。
+```
+
+#### Review
+
+- Single slice: yes，discovery only。
+- Runtime/test implementation excluded: yes。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Next prompt: P086 characterization tests only after P085 discovery doc and grep pass。
+
+#### Execution Notes
+
+- Discovery doc created: `docs/refactor-ui/modules/phase_6_turnover_ledger.md`.
+- Runtime implementation changed: no.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `test -f docs/refactor-ui/modules/phase_6_turnover_ledger.md`: passed。
+  - `rg -n "P085-phase-6-turnover-ledger-discovery|Current MUI Inventory|User-visible Entrypoints|Recommended Micro-JIT Queue|P086-phase-6-turnover-ledger-characterization-tests" docs/refactor-ui/modules/phase_6_turnover_ledger.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed；only P085/MG docs changed。
+- Next prompt generated: `P086-phase-6-turnover-ledger-characterization-tests`.
+
+### P086-phase-6-turnover-ledger-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: `/turnover-ledger` source-level and behavior guardrails only.
+
+#### Prompt
+
+```text
+Prompt ID: P086-phase-6-turnover-ledger-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/turnover-ledger` source-level and behavior guardrails only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx、web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx、web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx、web/src/test/TurnoverLedgerPage.test.tsx、web/src/test/TurnoverLedgerApi.test.ts、web/src/features/turnoverLedger/api.ts 和 web/src/features/turnoverLedger/types.ts。只修改 `web/src/test/TurnoverLedgerPage.test.tsx`，新增 source-level no-MUI/project primitive contract 和必要的用户可见行为 characterization tests。不得修改 runtime code、API client、backend、read model、worker、domain event semantics 或关联台内部工作区。测试必须覆盖：page shell actions, family tabs, summary cards, grouped table accessible name and row selection, closure right drawer, extra right drawer, export dialog, feedback messages and relevant domain events。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期 source-level contract against current MUI runtime is expected-fail while existing/new behavior tests must pass；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P087 page shell/tabs/summary prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Runtime implementation excluded: yes。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level no-MUI contract should fail until P087-P091 clear runtime MUI surfaces。
 
 ### MG Prompt Template
 
