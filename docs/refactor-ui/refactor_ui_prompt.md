@@ -4378,7 +4378,7 @@ Scope: `/no-oa-bank-batches` page shell actions and filter region only. Do not m
 ### P076-phase-6-no-oa-bank-batches-label-rails
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `LabelRail` and main/sub rail surfaces in `NoOaBankBatchPage.tsx` only, plus necessary styles/tests. Do not migrate transaction region, tag drawer, withdraw dialog or snackbar.
 
@@ -4401,6 +4401,48 @@ Scope: `LabelRail` and main/sub rail surfaces in `NoOaBankBatchPage.tsx` only, p
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract can continue failing for table/overlays until P077-P078。
 - Next prompt: P077 transaction region only after P076 implementation is verified as expected-fail。
+
+#### Execution Notes
+
+- Status: verified as expected-fail.
+- Changed `web/src/pages/NoOaBankBatchPage.tsx` and `web/src/app/styles.css`.
+- Replaced `LabelRail` MUI rail structure with native section/header/button list markup and project rail classes.
+- Preserved `主标签`/`子标签` region names, empty states, `<label> <countMeta>` button names, `aria-pressed`, click and Enter/Space activation, and selection-clearing behavior.
+- Did not modify transaction region, tag drawer, withdraw dialog, snackbar, API client, backend, read model, worker or workbench internals.
+- Verification:
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|main and child label rails"`: expected-fail; 4 selected behavior tests passed and 1 source-level contract failed.
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: expected-fail; 19 behavior tests passed and 1 source-level contract failed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n 'ListItemButton|<List\\b|Mui-selected' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P076 implementation files changed before docs.
+
+### P077-phase-6-no-oa-bank-batches-transaction-region
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: transaction region in `NoOaBankBatchPage.tsx` only: region `流水`, batch cards, batch actions, blocking/detail/audit states, detail dense table, row checkboxes, direction/bank/source tags and amount alignment. Do not migrate tag drawer, withdraw dialog or snackbar.
+
+#### Prompt
+
+```text
+Prompt ID: P077-phase-6-no-oa-bank-batches-transaction-region
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: transaction region in `NoOaBankBatchPage.tsx` only: region `流水`, batch cards, batch actions, blocking/detail/audit states, detail dense table, row checkboxes, direction/bank/source tags and amount alignment. Do not migrate tag drawer, withdraw dialog or snackbar.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：迁移 `流水` region、batch cards and detail table，移除该 slice 的 MUI `Paper`、`Stack`、`Divider`、`Alert`、`Button`、`Box`、`TableContainer`、`Table`、`TableHead`、`TableBody`、`TableRow`、`TableCell`、`Checkbox`、`Chip`、`Typography` 用法，使用 native/project section, card, alert/status, buttons, dense table classes, native checkboxes and project tags。必须保留 region `流水`、标题 fallback `流水`、selected label title `<主标签> / <子标签>`、bucket hint copy、`当前选择账户：...`、loading/empty/detail loading/detail empty/error states、batch account/status/row count/total amount/audit items/blocking reason、按钮 `查看流水`/`全选`/`清空`/`提交内部往来批次`/`撤回批次` 的位置、accessible labels and disabled/mutating behavior、selected batch highlighting、detail table aria-label `<账户>流水`、headers `交易时间`/`对方户名`/`金额`/`摘要/用途/备注`/`分类来源`、select-all aria label `<账户>全选`、row checkbox aria label `选择流水 <transactionId>`、single-account selection guard, `setRegionSelection`, `toggleTransaction`, `handleSubmitBatch`, `setWithdrawTarget`, amount right alignment, direction/bank tags and source labels。不得修改 page shell/filter controls, `LabelRail`, tag drawer, withdraw dialog, snackbar, API client, mock data shape, backend, read model, worker or reconciliation workbench internals。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives|renders tag management|shows batch blocking|clears hidden selected rows|selects transactions|submits selected transaction|submits internal transfer|withdraw"`，source-level contract expected-fail can remain for overlays but transaction behavior tests must pass；运行完整 `cd web && npx vitest run NoOaBankBatchPage.test.tsx` expected-fail only for remaining overlay/source-level contract；运行 `cd web && npm run build`；运行 transaction grep：`if rg -n 'TableContainer|<Table\\b|TableHead|TableBody|TableRow|TableCell|<Checkbox\\b|<Chip\\b|BatchStatusChip' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P078 overlays feedback prompt。
+```
+
+#### Review
+
+- Single slice: yes，transaction region only。
+- Runtime scope excludes tag drawer, withdraw dialog and snackbar: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected failure allowed: yes，source-level contract can continue failing for overlays until P078。
+- Next prompt: P078 overlays feedback only after P077 implementation is verified as expected-fail。
 
 ### MG Prompt Template
 

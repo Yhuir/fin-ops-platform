@@ -14,8 +14,6 @@ import Divider from "@mui/material/Divider";
 import Drawer from "@mui/material/Drawer";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import IconButton from "@mui/material/IconButton";
-import List from "@mui/material/List";
-import ListItemButton from "@mui/material/ListItemButton";
 import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
 import Stack from "@mui/material/Stack";
@@ -268,86 +266,51 @@ type LabelRailProps = {
 
 function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey, onSelect }: LabelRailProps) {
   return (
-    <Paper
-      aria-label={ariaLabel}
-      role="region"
-      variant="outlined"
-      sx={{
-        borderRadius: 1,
-        overflow: "hidden",
-        bgcolor: "background.paper",
-      }}
-    >
-      <Stack spacing={0.25} sx={{ px: 1.5, py: 1.25 }}>
-        <Typography fontWeight={900}>{title}</Typography>
-        <Typography color="text.secondary" variant="caption">{subtitle}</Typography>
-      </Stack>
-      <Divider />
+    <section aria-label={ariaLabel} className="no-oa-bank-batches-rail" role="region">
+      <header className="no-oa-bank-batches-rail__header">
+        <h2 className="no-oa-bank-batches-rail__title">{title}</h2>
+        <p className="no-oa-bank-batches-rail__subtitle">{subtitle}</p>
+      </header>
       {groups.length === 0 ? (
-        <Box sx={{ p: 1.25 }}>
+        <div className="no-oa-bank-batches-rail__empty">
           <StatePanel compact tone="empty" title={emptyTitle} />
-        </Box>
+        </div>
       ) : (
-        <List disablePadding dense>
+        <div className="no-oa-bank-batches-rail__list">
           {groups.map((group) => {
             const selected = selectedKey === group.key;
             const countMeta = formatCountMeta(group.batchCount, group.rowCount);
+            const isEmpty = group.batchCount === 0 && group.rowCount === 0;
             return (
-              <ListItemButton
+              <button
                 aria-label={`${group.label} ${countMeta}`}
                 aria-pressed={selected}
-                component="button"
-                divider
+                className={cx(
+                  "no-oa-bank-batches-rail__item",
+                  selected && "no-oa-bank-batches-rail__item--active",
+                )}
                 key={group.key}
                 onClick={() => onSelect(group.key)}
                 onKeyDown={(event) => handleButtonKeyDown(event, () => onSelect(group.key))}
-                selected={selected}
-                sx={{
-                  width: "100%",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 1.25,
-                  px: 1.5,
-                  py: 1.25,
-                  color: "text.primary",
-                  textAlign: "left",
-                  transition: "background-color 150ms ease, color 150ms ease",
-                  "&.Mui-selected": {
-                    bgcolor: "rgba(23, 105, 170, 0.1)",
-                    color: "primary.dark",
-                  },
-                  "&.Mui-selected:hover": {
-                    bgcolor: "rgba(23, 105, 170, 0.14)",
-                  },
-                  "&:focus-visible": {
-                    outline: "2px solid",
-                    outlineColor: "primary.main",
-                    outlineOffset: -2,
-                  },
-                }}
                 type="button"
               >
-                <Typography
-                  component="span"
-                  fontWeight={selected ? 900 : 800}
-                  sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
-                >
+                <span className="no-oa-bank-batches-rail__item-label">
                   {group.label}
-                </Typography>
-                <Typography
-                  color={group.batchCount === 0 && group.rowCount === 0 ? "text.disabled" : "text.secondary"}
-                  component="span"
-                  variant="caption"
-                  sx={{ flex: "0 0 auto", fontWeight: selected ? 800 : 700 }}
+                </span>
+                <span
+                  className={cx(
+                    "no-oa-bank-batches-rail__item-count",
+                    isEmpty && "no-oa-bank-batches-rail__item-count--empty",
+                  )}
                 >
                   {countMeta}
-                </Typography>
-              </ListItemButton>
+                </span>
+              </button>
             );
           })}
-        </List>
+        </div>
       )}
-    </Paper>
+    </section>
   );
 }
 

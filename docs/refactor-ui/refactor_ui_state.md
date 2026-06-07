@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P076-phase-6-no-oa-bank-batches-label-rails`
+- Current Prompt ID: `P077-phase-6-no-oa-bank-batches-transaction-region`
 - Current MG ID: `MG-P072-phase-6-output-invoice-collections`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；NoOaBankBatches P075 verified as expected-fail，next P076 label rails |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；NoOaBankBatches P076 verified as expected-fail，next P077 transaction region |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 no-OA bank batches label rails migration prompt generated after P075 page shell/filter migration。
-- Files touched in P075:
+- Scope: phase 6 no-OA bank batches transaction region migration prompt generated after P076 label rail migration。
+- Files touched in P076:
   - `web/src/pages/NoOaBankBatchPage.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
-- Verification run: P075 focused tests expected-fail with selected behavior tests passing；full `NoOaBankBatchPage.test.tsx` expected-fail with 19 behavior tests passing；build, targeted grep and diff/status passed。
-- Failures: expected source-level contract failure remains for rails/table/overlays MUI imports/surfaces and missing project rail/table/drawer/dialog targets。
-- Next action: 执行 `P076-phase-6-no-oa-bank-batches-label-rails`。
+- Verification run: P076 focused tests expected-fail with 4 selected behavior tests passing；full `NoOaBankBatchPage.test.tsx` expected-fail with 19 behavior tests passing；build, rail grep and diff/status passed。
+- Failures: expected source-level contract failure remains for transaction table, tag drawer, withdraw dialog and feedback MUI imports/surfaces and missing project table/drawer/dialog targets。
+- Next action: 执行 `P077-phase-6-no-oa-bank-batches-transaction-region`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +95,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P076-phase-6-no-oa-bank-batches-label-rails` | NoOaBankBatches P075 verified as expected-fail；next label rails |
+| page batches | `in_progress` | `P077-phase-6-no-oa-bank-batches-transaction-region` | NoOaBankBatches P076 verified as expected-fail；next transaction region |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives\|renders tag management\|shows batch blocking\|clears hidden selected rows\|main and child label rails"` | expected-fail | 4 selected behavior tests passed; source-level contract failed as expected |
+| 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx` | expected-fail | 19 behavior tests passed; 1 source-level contract failed |
+| 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `if rg -n 'ListItemButton\|<List\\b\|Mui-selected' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi` | passed | LabelRail MUI list/selected residues cleared |
+| 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P076-phase-6-no-oa-bank-batches-label-rails` | `git status --short --branch` | passed | Only P076 implementation files changed before docs |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx -t "targets project primitives\|renders tag management\|shows batch blocking\|clears hidden selected rows\|main and child label rails"` | expected-fail | 4 selected behavior tests passed; source-level contract failed as expected |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx` | expected-fail | 19 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P075-phase-6-no-oa-bank-batches-page-shell-filters` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
