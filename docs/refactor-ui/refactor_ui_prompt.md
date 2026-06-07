@@ -3849,6 +3849,48 @@ Scope: `/output-invoice-collections` discovery only. Do not modify implementatio
 - Workbench internals frozen: required。
 - Next prompt: P066 characterization tests only after P065 discovery is verified.
 
+#### Execution Notes
+
+- Created `docs/refactor-ui/modules/phase_6_output_invoice_collections.md`.
+- Recorded current files, MUI inventory, user-visible entrypoints, API/read model boundary, existing test coverage, slice plan and risks.
+- Implementation/tests/backend/API/read model/worker/workbench unchanged.
+- Next prompt generated: `P066-phase-6-output-invoice-collections-characterization-tests`.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `test -f docs/refactor-ui/modules/phase_6_output_invoice_collections.md`: passed。
+  - `rg -n "P065-phase-6-output-invoice-collections-discovery|Current MUI Inventory|User-visible Entrypoints|P066-phase-6-output-invoice-collections-characterization-tests" docs/refactor-ui/modules/phase_6_output_invoice_collections.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`: passed。
+  - `git diff --check`: passed。
+  - `git status --short --branch`: passed，only P065 docs files changed。
+
+### P066-phase-6-output-invoice-collections-characterization-tests
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `characterization tests`
+- Scope: `/output-invoice-collections` tests only. Do not modify runtime implementation.
+
+#### Prompt
+
+```text
+Prompt ID: P066-phase-6-output-invoice-collections-characterization-tests
+Phase: phase_6_page_batches
+Type: characterization tests
+Scope: `/output-invoice-collections` tests only. Do not modify runtime implementation.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/OutputInvoiceCollectionsPage.tsx、web/src/components/outputInvoiceCollections/*、web/src/features/outputInvoiceCollections/* 和 web/src/test/OutputInvoiceCollectionsPage.test.tsx。只修改 `web/src/test/OutputInvoiceCollectionsPage.test.tsx`：把 “grouped MUI Table” wording 和 MUI/DataGrid/class-based expectations 改成 behavior/project primitive assertions；新增 source-level contracts，锁定 page/table/filter/expandable/drawer files 未来不再依赖 `@mui/*`、`Mui[A-Z]`、`TablePagination`、`TextField`、`Skeleton`、`Chip`、`IconButton`、`TableCell`、`TableRow`、`TableHead`、`TableBody`、`Drawer`、`Dialog`；新增或保留行为断言确保 route/sidebar、page heading、query controls、summary tiles、refresh/status-rules/settings buttons、group headers、10 leaf columns、filter menu labels and operators、sort query, expand/collapse controls, detail right drawer labels, status/reminder/red relation/receipt history/receipt preview/receipt settings right drawers, receipt void/reissue dialogs, empty/loading/error/read-model refreshing behavior and lifecycle write payloads保留。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P067 page shell prompt。
+```
+
+#### Review
+
+- Single slice: yes，tests only。
+- Expected failure allowed: yes，runtime still imports MUI until P067-P072。
+- Must not modify implementation/mock/API/backend/read model/worker/workbench.
+- Source-level contracts should fail on current page/table/filter/drawer files and guide subsequent slices.
+- Next prompt: P067 page shell only after P066 is verified/expected-fail documented.
+
 ### MG Prompt Template
 
 ```text
