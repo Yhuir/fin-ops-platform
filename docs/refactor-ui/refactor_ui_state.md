@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P105-phase-6-settings-oa-manual-search-import-table`
+- Current Prompt ID: `P106-phase-6-settings-closeout`
 - Current MG ID: `MG-P098-phase-6-etc-tickets`
 
 ## Global Invariants
@@ -54,19 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 Settings OA manual search/import table generated after P104 OA rules/data reset migration。
-- Files touched in P104:
-  - `web/src/components/settings/SettingsOaRetentionSection.tsx`
-  - `web/src/components/settings/SettingsOaInvoiceOffsetSection.tsx`
-  - `web/src/components/settings/SettingsDataResetSection.tsx`
-  - `web/src/components/settings/SettingsDataResetDialogs.tsx`
+- Scope: phase 6 Settings closeout generated after P105 OA manual search/import table migration。
+- Files touched in P105:
+  - `web/src/components/settings/OaManualSearchImportTable.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_settings.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: Settings OA/data reset scoped MUI grep passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for OA manual table/settingsDesign；build passed；diff check passed。
+- Verification run: Settings OA manual scoped MUI grep passed；Settings OA manual table tests passed；Settings behavior tests passed；source-level no-MUI/project primitive contract failed as expected only for `settingsDesign.ts`；build passed；diff check passed。
 - Failures: none.
-- Next action: 执行 `P105-phase-6-settings-oa-manual-search-import-table`。
+- Next action: 执行 `P106-phase-6-settings-closeout`。
 
 ## Prompt Lifecycle
 
@@ -98,12 +95,17 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P105-phase-6-settings-oa-manual-search-import-table` | P104 Settings OA rules/data reset verified；next migrate OA manual search/import table |
+| page batches | `in_progress` | `P106-phase-6-settings-closeout` | P105 Settings OA manual search/import table verified；next close out Settings `settingsDesign.ts` |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | scoped OA manual table no-MUI grep | passed | `OaManualSearchImportTable.tsx` has no scoped MUI residue |
+| 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | `cd web && npx vitest run SettingsOaManualSearchImportTable.test.tsx` | passed | 5 tests passed |
+| 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 13 behavior tests passed；source-level contract failed only for `src/components/settings/settingsDesign.ts` |
+| 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P105-phase-6-settings-oa-manual-search-import-table` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | scoped OA/data reset no-MUI grep | passed | OA retention, OA invoice offset, data reset section and dialogs have no scoped MUI residue |
 | 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | `cd web && npx vitest run SettingsPage.test.tsx -t "targets project primitives\|keeps data reset behind impact confirmation\|keeps read-only settings users"` | expected-fail | Selected behavior tests passed；source-level contract failed only for `OaManualSearchImportTable.tsx` and `settingsDesign.ts` |
 | 2026-06-07 | `P104-phase-6-settings-oa-rules-and-data-reset` | `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx` | expected-fail | 12 behavior tests passed；1 source-level contract failed for remaining Settings MUI runtime |

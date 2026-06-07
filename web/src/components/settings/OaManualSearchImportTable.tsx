@@ -1,29 +1,4 @@
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import RefreshIcon from "@mui/icons-material/Refresh";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
-import Collapse from "@mui/material/Collapse";
-import FormControl from "@mui/material/FormControl";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import FormGroup from "@mui/material/FormGroup";
-import FormLabel from "@mui/material/FormLabel";
-import IconButton from "@mui/material/IconButton";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
-import Tooltip from "@mui/material/Tooltip";
-import Typography from "@mui/material/Typography";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppChrome } from "../../contexts/AppChromeContext";
@@ -33,7 +8,6 @@ import {
   searchManualOaImports,
 } from "../../features/workbench/api";
 import type { OaManualSearchFilters, OaManualSearchRow } from "../../features/workbench/types";
-import { settingsButtonSx, settingsTokens } from "./settingsDesign";
 
 const formTypeOptions = [
   { value: "payment_request", label: "支付申请" },
@@ -45,24 +19,11 @@ const statusOptions = [
   { value: "in_progress", label: "进行中" },
 ];
 
-const compactTextFieldSx = {
-  minWidth: { xs: "100%", sm: 180 },
-  "& .MuiInputLabel-root": { color: settingsTokens.textSecondary },
-  "& .MuiOutlinedInput-root": {
-    "&.Mui-focused fieldset": { borderColor: settingsTokens.primary },
-  },
-};
-
 const oaImportCompletionStatusMs = 1200;
 const oaImportPendingStages = [
   { delayMs: 250, percent: 35, label: "解析 OA 附件发票" },
   { delayMs: 900, percent: 70, label: "同步到关联台" },
 ];
-
-const checkboxSx = {
-  color: settingsTokens.textSecondary,
-  "&.Mui-checked": { color: settingsTokens.primary },
-};
 
 function amountToNumber(value: string) {
   const parsed = Number.parseFloat(value.replace(/,/g, ""));
@@ -86,14 +47,14 @@ function importStatusLabel(row: OaManualSearchRow) {
   return "未导入";
 }
 
-function importStatusColor(row: OaManualSearchRow): "default" | "success" | "warning" {
+function importStatusTone(row: OaManualSearchRow) {
   if (row.importStatus === "imported" || row.importStatus === "already_imported") {
     return "success";
   }
   if (!row.canImport) {
     return "warning";
   }
-  return "default";
+  return "neutral";
 }
 
 function nextToggledList(value: string, current: string[]) {
@@ -105,6 +66,10 @@ function nextToggledList(value: string, current: string[]) {
 function mergeUpdatedRows(rows: OaManualSearchRow[], updates: OaManualSearchRow[]) {
   const updateMap = new Map(updates.map((row) => [row.rowId, row]));
   return rows.map((row) => updateMap.get(row.rowId) ?? row);
+}
+
+function pageCount(total: number, pageSize: number) {
+  return Math.max(1, Math.ceil(total / pageSize));
 }
 
 export default function OaManualSearchImportTable() {
@@ -314,318 +279,314 @@ export default function OaManualSearchImportTable() {
     }
   }
 
+  const currentFrom = total === 0 ? 0 : page * pageSize + 1;
+  const currentTo = Math.min(total, (page + 1) * pageSize);
+  const totalPages = pageCount(total, pageSize);
+
   return (
-    <Box
-      component="section"
-      aria-labelledby="oa-manual-search-import-title"
-      sx={{
-        mt: 2,
-        pt: 3,
-        borderTop: `1px solid ${settingsTokens.borderSubtle}`,
-      }}
-    >
-      <Stack spacing={2.5}>
-        <Stack direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "center" }} justifyContent="space-between" spacing={2}>
-          <Box>
-            <Typography id="oa-manual-search-import-title" component="h4" variant="h6" sx={{ color: settingsTokens.textPrimary, fontWeight: 400, fontSize: "16px" }}>
-              OA全量搜索导入
-            </Typography>
-            <Typography component="p" variant="body2" sx={{ color: settingsTokens.textSecondary, mt: 0.5 }}>
-              可按独立条件搜索全量 OA，并手动导入已完成 OA 项。
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Chip label={`已选 ${selectedList.length} 个OA`} size="small" />
-            <Chip label={`金额合计 ${formatCurrency(selectedAmount)}`} size="small" />
-            <Chip label={`预计发票 ${selectedInvoiceCount} 张`} size="small" />
-          </Stack>
-        </Stack>
+    <section aria-labelledby="oa-manual-search-import-title" className="oa-manual-import">
+      <div className="oa-manual-import__header">
+        <div>
+          <h4 id="oa-manual-search-import-title">OA全量搜索导入</h4>
+          <p>可按独立条件搜索全量 OA，并手动导入已完成 OA 项。</p>
+        </div>
+        <div className="oa-manual-import__metrics">
+          <span>已选 {selectedList.length} 个OA</span>
+          <span>金额合计 {formatCurrency(selectedAmount)}</span>
+          <span>预计发票 {selectedInvoiceCount} 张</span>
+        </div>
+      </div>
 
-        <Stack spacing={2}>
-          <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems={{ xs: "stretch", lg: "flex-start" }}>
-            <TextField
-              label="搜索关键字"
-              size="small"
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              sx={{ ...compactTextFieldSx, flex: 1, minWidth: { xs: "100%", lg: 260 } }}
-            />
-            <TextField
-              label="开始日期"
-              type="date"
-              size="small"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.currentTarget.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-              sx={compactTextFieldSx}
-            />
-            <TextField
-              label="结束日期"
-              type="date"
-              size="small"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.currentTarget.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-              sx={compactTextFieldSx}
-            />
-          </Stack>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
-            <FormControl component="fieldset">
-              <FormLabel component="legend" sx={{ color: settingsTokens.textSecondary, fontSize: "14px", mb: 1 }}>搜索表单类型</FormLabel>
-              <FormGroup row>
-                {formTypeOptions.map((option) => (
-                  <FormControlLabel
-                    key={option.value}
-                    control={(
-                      <Checkbox
-                        size="small"
-                        checked={formTypes.includes(option.value)}
-                        onChange={() => setFormTypes((current) => nextToggledList(option.value, current))}
-                        sx={checkboxSx}
+      <div className="oa-manual-import__filters">
+        <label className="settings-field">
+          <span>搜索关键字</span>
+          <input value={query} type="search" onChange={(event) => setQuery(event.currentTarget.value)} />
+        </label>
+        <label className="settings-field settings-field--date">
+          <span>开始日期</span>
+          <input value={dateFrom} type="date" onChange={(event) => setDateFrom(event.currentTarget.value)} />
+        </label>
+        <label className="settings-field settings-field--date">
+          <span>结束日期</span>
+          <input value={dateTo} type="date" onChange={(event) => setDateTo(event.currentTarget.value)} />
+        </label>
+      </div>
+
+      <div className="oa-manual-import__filter-groups">
+        <fieldset className="settings-checkbox-group">
+          <legend>搜索表单类型</legend>
+          <div className="settings-checkbox-list settings-checkbox-list--inline">
+            {formTypeOptions.map((option) => (
+              <label className="settings-checkbox-row" key={option.value}>
+                <input
+                  checked={formTypes.includes(option.value)}
+                  type="checkbox"
+                  onChange={() => setFormTypes((current) => nextToggledList(option.value, current))}
+                />
+                <span>搜索{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset className="settings-checkbox-group">
+          <legend>搜索流程状态</legend>
+          <div className="settings-checkbox-list settings-checkbox-list--inline">
+            {statusOptions.map((option) => (
+              <label className="settings-checkbox-row" key={option.value}>
+                <input
+                  checked={statuses.includes(option.value)}
+                  type="checkbox"
+                  onChange={() => setStatuses((current) => nextToggledList(option.value, current))}
+                />
+                <span>搜索{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+
+      <div className="oa-manual-import__actions">
+        <button className="settings-primary-button" disabled={isLoading} type="button" onClick={() => void runSearch(0, pageSize)}>
+          搜索
+        </button>
+        <button
+          className="settings-secondary-button"
+          type="button"
+          onClick={() => {
+            setQuery("");
+            setDateFrom("");
+            setDateTo("");
+            setFormTypes(formTypeOptions.map((option) => option.value));
+            setStatuses(statusOptions.map((option) => option.value));
+            setRows([]);
+            setTotal(0);
+            setPage(0);
+            setSelectedRows({});
+            setExpandedRows({});
+            setHasSearched(false);
+            setError("");
+          }}
+        >
+          清空
+        </button>
+        <button className="settings-secondary-button" type="button" onClick={() => setSelectedRows({})}>
+          清空选择
+        </button>
+        <button
+          className="settings-primary-button"
+          disabled={selectedImportableRows.length === 0 || isImporting}
+          type="button"
+          onClick={() => void handleImportSelected()}
+        >
+          {isImporting ? "正在导入" : "导入已选OA项"}
+        </button>
+      </div>
+
+      {error ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{error}</div> : null}
+
+      <div className="settings-native-table-shell settings-native-table-shell--scroll">
+        <table className="settings-native-table oa-manual-import__table" aria-label="OA全量搜索导入结果">
+          <thead>
+            <tr>
+              <th scope="col">
+                <input
+                  aria-label="选择当前页可导入OA"
+                  checked={allCurrentPageImportableSelected}
+                  disabled={importablePageRows.length === 0}
+                  type="checkbox"
+                  ref={(element) => {
+                    if (element) {
+                      element.indeterminate = someCurrentPageImportableSelected;
+                    }
+                  }}
+                  onChange={toggleCurrentPageImportable}
+                />
+              </th>
+              <th scope="col" aria-label="展开明细" />
+              <th scope="col">OA编号</th>
+              <th scope="col">申请人</th>
+              <th scope="col">申请日期</th>
+              <th scope="col">表单类型</th>
+              <th scope="col">流程状态</th>
+              <th scope="col">项目摘要</th>
+              <th scope="col">整单金额</th>
+              <th scope="col">附件总数</th>
+              <th scope="col">可导入发票</th>
+              <th scope="col">未识别附件</th>
+              <th scope="col">导入状态</th>
+              <th scope="col">禁用原因</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr>
+                <td className="settings-table-empty" colSpan={15}>正在搜索OA</td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td className="settings-table-empty" colSpan={15}>
+                  {hasSearched ? "没有符合条件的 OA" : "输入条件后点击搜索"}
+                </td>
+              </tr>
+            ) : rows.map((row) => {
+              const expanded = expandedRows[row.rowId] === true;
+              return (
+                <Fragment key={row.rowId}>
+                  <tr className={selectedRows[row.rowId] ? "settings-native-table-row--selected" : undefined}>
+                    <td>
+                      <input
+                        aria-label={`选择 OA ${row.rowId}`}
+                        checked={Boolean(selectedRows[row.rowId])}
+                        disabled={!row.canImport}
+                        title={row.canImport ? undefined : row.disabledReason || "不可导入"}
+                        type="checkbox"
+                        onChange={() => toggleRow(row)}
                       />
-                    )}
-                    label={`搜索${option.label}`}
-                  />
-                ))}
-              </FormGroup>
-            </FormControl>
-            <FormControl component="fieldset">
-              <FormLabel component="legend" sx={{ color: settingsTokens.textSecondary, fontSize: "14px", mb: 1 }}>搜索流程状态</FormLabel>
-              <FormGroup row>
-                {statusOptions.map((option) => (
-                  <FormControlLabel
-                    key={option.value}
-                    control={(
-                      <Checkbox
-                        size="small"
-                        checked={statuses.includes(option.value)}
-                        onChange={() => setStatuses((current) => nextToggledList(option.value, current))}
-                        sx={checkboxSx}
-                      />
-                    )}
-                    label={`搜索${option.label}`}
-                  />
-                ))}
-              </FormGroup>
-            </FormControl>
-          </Stack>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Button variant="contained" onClick={() => void runSearch(0, pageSize)} disabled={isLoading} sx={settingsButtonSx}>
-              搜索
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setQuery("");
-                setDateFrom("");
-                setDateTo("");
-                setFormTypes(formTypeOptions.map((option) => option.value));
-                setStatuses(statusOptions.map((option) => option.value));
-                setRows([]);
-                setTotal(0);
+                    </td>
+                    <td>
+                      <button
+                        aria-label={`${expanded ? "收起" : "展开"} OA ${row.rowId} 明细`}
+                        className="settings-icon-button"
+                        type="button"
+                        onClick={() => setExpandedRows((current) => ({ ...current, [row.rowId]: !expanded }))}
+                      >
+                        {expanded ? <ChevronDown aria-hidden="true" size={16} /> : <ChevronRight aria-hidden="true" size={16} />}
+                      </button>
+                    </td>
+                    <td>{row.oaNo || row.rowId}</td>
+                    <td>{row.applicant}</td>
+                    <td>{row.applicationDate}</td>
+                    <td>{row.formTypeLabel}</td>
+                    <td>
+                      <span className={`settings-selected-tag settings-selected-tag--${row.status === "completed" ? "success" : "warning"}`}>
+                        {row.statusLabel}
+                      </span>
+                    </td>
+                    <td className="oa-manual-import__project">
+                      <strong>{row.projectName}</strong>
+                      <small>{row.reason}</small>
+                    </td>
+                    <td className="settings-table-amount">{row.amount}</td>
+                    <td className="settings-table-amount">{row.attachmentFileCount}</td>
+                    <td className="settings-table-amount">{row.importableInvoiceCount}</td>
+                    <td className="settings-table-amount">{row.unrecognizedAttachmentCount}</td>
+                    <td>
+                      <span className={`settings-selected-tag settings-selected-tag--${importStatusTone(row)}`}>
+                        {importStatusLabel(row)}
+                      </span>
+                    </td>
+                    <td>{row.canImport ? "" : row.disabledReason || "不可导入"}</td>
+                    <td>
+                      <button
+                        aria-label={`刷新 OA ${row.rowId} 附件解析`}
+                        className="settings-icon-button"
+                        disabled={busyRowId === row.rowId}
+                        title="刷新附件解析"
+                        type="button"
+                        onClick={() => void handleRefresh(row)}
+                      >
+                        <RefreshCw aria-hidden="true" size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                  {expanded ? (
+                    <tr>
+                      <td className="oa-manual-import__detail-cell" colSpan={15}>
+                        <table className="settings-native-table oa-manual-import__detail-table" aria-label={`OA ${row.rowId} 明细`}>
+                          <thead>
+                            <tr>
+                              <th scope="col">明细日期</th>
+                              <th scope="col">金额</th>
+                              <th scope="col">费用/付款内容</th>
+                              <th scope="col">项目名称</th>
+                              <th scope="col">申请事由</th>
+                              <th scope="col">明细附件数量</th>
+                              <th scope="col">明细可识别发票</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {row.items.length === 0 ? (
+                              <tr>
+                                <td className="settings-table-empty" colSpan={7}>暂无明细</td>
+                              </tr>
+                            ) : row.items.map((item, index) => (
+                              <tr key={`${row.rowId}-item-${index}`}>
+                                <td>{item.date}</td>
+                                <td className="settings-table-amount">{item.amount}</td>
+                                <td>{item.content}</td>
+                                <td>{item.projectName}</td>
+                                <td>{item.reason}</td>
+                                <td className="settings-table-amount">{item.attachmentFileCount}</td>
+                                <td className="settings-table-amount">{item.importableInvoiceCount}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="settings-table-pagination">
+        <span>{currentFrom}-{currentTo} / {total}</span>
+        <label>
+          每页行数
+          <select
+            value={pageSize}
+            onChange={(event) => {
+              const nextPageSize = Number.parseInt(event.currentTarget.value, 10);
+              if (hasSearched) {
+                void runSearch(0, nextPageSize);
+              } else {
                 setPage(0);
-                setSelectedRows({});
-                setExpandedRows({});
-                setHasSearched(false);
-                setError("");
-              }}
-            >
-              清空
-            </Button>
-            <Button variant="outlined" onClick={() => setSelectedRows({})}>
-              清空选择
-            </Button>
-            <Button
-              variant="contained"
-              onClick={() => void handleImportSelected()}
-              disabled={selectedImportableRows.length === 0 || isImporting}
-              sx={settingsButtonSx}
-            >
-              {isImporting ? "正在导入" : "导入已选OA项"}
-            </Button>
-          </Stack>
-        </Stack>
-
-        {error ? <Alert severity="error">{error}</Alert> : null}
-
-        <TableContainer sx={{ border: `1px solid ${settingsTokens.borderSubtle}` }}>
-          <Table aria-label="OA全量搜索导入结果" size="small">
-            <TableHead sx={{ bgcolor: settingsTokens.layer01 }}>
-              <TableRow>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    size="small"
-                    checked={allCurrentPageImportableSelected}
-                    indeterminate={someCurrentPageImportableSelected}
-                    disabled={importablePageRows.length === 0}
-                    onChange={toggleCurrentPageImportable}
-                    slotProps={{ input: { "aria-label": "选择当前页可导入OA" } }}
-                    sx={checkboxSx}
-                  />
-                </TableCell>
-                <TableCell />
-                <TableCell>OA编号</TableCell>
-                <TableCell>申请人</TableCell>
-                <TableCell>申请日期</TableCell>
-                <TableCell>表单类型</TableCell>
-                <TableCell>流程状态</TableCell>
-                <TableCell>项目摘要</TableCell>
-                <TableCell align="right">整单金额</TableCell>
-                <TableCell align="right">附件总数</TableCell>
-                <TableCell align="right">可导入发票</TableCell>
-                <TableCell align="right">未识别附件</TableCell>
-                <TableCell>导入状态</TableCell>
-                <TableCell>禁用原因</TableCell>
-                <TableCell align="right">操作</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={15} align="center" sx={{ py: 4 }}>
-                    <CircularProgress size={24} aria-label="正在搜索OA" />
-                  </TableCell>
-                </TableRow>
-              ) : rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={15} align="center" sx={{ color: settingsTokens.textSecondary, py: 4 }}>
-                    {hasSearched ? "没有符合条件的 OA" : "输入条件后点击搜索"}
-                  </TableCell>
-                </TableRow>
-              ) : rows.map((row) => {
-                const expanded = expandedRows[row.rowId] === true;
-                return (
-                  <Fragment key={row.rowId}>
-                    <TableRow key={row.rowId} hover selected={Boolean(selectedRows[row.rowId])}>
-                      <TableCell padding="checkbox">
-                        <Tooltip title={row.canImport ? "" : row.disabledReason || "不可导入"}>
-                          <span>
-                            <Checkbox
-                              size="small"
-                              checked={Boolean(selectedRows[row.rowId])}
-                              disabled={!row.canImport}
-                              onChange={() => toggleRow(row)}
-                              slotProps={{ input: { "aria-label": `选择 OA ${row.rowId}` } }}
-                              sx={checkboxSx}
-                            />
-                          </span>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell padding="checkbox">
-                        <IconButton
-                          size="small"
-                          aria-label={`${expanded ? "收起" : "展开"} OA ${row.rowId} 明细`}
-                          onClick={() => setExpandedRows((current) => ({ ...current, [row.rowId]: !expanded }))}
-                        >
-                          {expanded ? <KeyboardArrowDownIcon fontSize="small" /> : <KeyboardArrowRightIcon fontSize="small" />}
-                        </IconButton>
-                      </TableCell>
-                      <TableCell>{row.oaNo || row.rowId}</TableCell>
-                      <TableCell>{row.applicant}</TableCell>
-                      <TableCell>{row.applicationDate}</TableCell>
-                      <TableCell>{row.formTypeLabel}</TableCell>
-                      <TableCell>
-                        <Chip label={row.statusLabel} size="small" color={row.status === "completed" ? "success" : "warning"} variant="outlined" />
-                      </TableCell>
-                      <TableCell sx={{ maxWidth: 260 }}>
-                        <Typography variant="body2" sx={{ color: settingsTokens.textPrimary }}>{row.projectName}</Typography>
-                        <Typography variant="caption" sx={{ color: settingsTokens.textSecondary }}>{row.reason}</Typography>
-                      </TableCell>
-                      <TableCell align="right">{row.amount}</TableCell>
-                      <TableCell align="right">{row.attachmentFileCount}</TableCell>
-                      <TableCell align="right">{row.importableInvoiceCount}</TableCell>
-                      <TableCell align="right">{row.unrecognizedAttachmentCount}</TableCell>
-                      <TableCell>
-                        <Chip label={importStatusLabel(row)} size="small" color={importStatusColor(row)} variant="outlined" />
-                      </TableCell>
-                      <TableCell>{row.canImport ? "" : row.disabledReason || "不可导入"}</TableCell>
-                      <TableCell align="right">
-                        <Tooltip title="刷新附件解析">
-                          <span>
-                            <IconButton
-                              size="small"
-                              aria-label={`刷新 OA ${row.rowId} 附件解析`}
-                              disabled={busyRowId === row.rowId}
-                              onClick={() => void handleRefresh(row)}
-                            >
-                              <RefreshIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow key={`${row.rowId}-details`}>
-                      <TableCell colSpan={15} sx={{ py: 0, bgcolor: settingsTokens.layer01 }}>
-                        <Collapse in={expanded} timeout="auto" unmountOnExit>
-                          <Box sx={{ py: 2 }}>
-                            <Table size="small" aria-label={`OA ${row.rowId} 明细`}>
-                              <TableHead>
-                                <TableRow>
-                                  <TableCell>明细日期</TableCell>
-                                  <TableCell align="right">金额</TableCell>
-                                  <TableCell>费用/付款内容</TableCell>
-                                  <TableCell>项目名称</TableCell>
-                                  <TableCell>申请事由</TableCell>
-                                  <TableCell align="right">明细附件数量</TableCell>
-                                  <TableCell align="right">明细可识别发票</TableCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {row.items.length === 0 ? (
-                                  <TableRow>
-                                    <TableCell colSpan={7} align="center" sx={{ color: settingsTokens.textSecondary }}>
-                                      暂无明细
-                                    </TableCell>
-                                  </TableRow>
-                                ) : row.items.map((item, index) => (
-                                  <TableRow key={`${row.rowId}-item-${index}`}>
-                                    <TableCell>{item.date}</TableCell>
-                                    <TableCell align="right">{item.amount}</TableCell>
-                                    <TableCell>{item.content}</TableCell>
-                                    <TableCell>{item.projectName}</TableCell>
-                                    <TableCell>{item.reason}</TableCell>
-                                    <TableCell align="right">{item.attachmentFileCount}</TableCell>
-                                    <TableCell align="right">{item.importableInvoiceCount}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </Box>
-                        </Collapse>
-                      </TableCell>
-                    </TableRow>
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <TablePagination
-          component="div"
-          count={total}
-          page={page}
-          rowsPerPage={pageSize}
-          rowsPerPageOptions={[10, 20, 50, 100]}
-          labelRowsPerPage="每页行数"
-          labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count}`}
-          onPageChange={(_, nextPage) => {
-            if (hasSearched) {
-              void runSearch(nextPage, pageSize);
-            } else {
-              setPage(nextPage);
-            }
-          }}
-          onRowsPerPageChange={(event) => {
-            const nextPageSize = Number.parseInt(event.target.value, 10);
-            if (hasSearched) {
-              void runSearch(0, nextPageSize);
-            } else {
-              setPage(0);
-              setPageSize(nextPageSize);
-            }
-          }}
-        />
-      </Stack>
-    </Box>
+                setPageSize(nextPageSize);
+              }
+            }}
+          >
+            {[10, 20, 50, 100].map((option) => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+        </label>
+        <div className="settings-table-pagination__actions">
+          <button
+            className="settings-secondary-button"
+            disabled={page <= 0}
+            type="button"
+            onClick={() => {
+              const nextPage = Math.max(0, page - 1);
+              if (hasSearched) {
+                void runSearch(nextPage, pageSize);
+              } else {
+                setPage(nextPage);
+              }
+            }}
+          >
+            上一页
+          </button>
+          <button
+            className="settings-secondary-button"
+            disabled={page + 1 >= totalPages}
+            type="button"
+            onClick={() => {
+              const nextPage = Math.min(totalPages - 1, page + 1);
+              if (hasSearched) {
+                void runSearch(nextPage, pageSize);
+              } else {
+                setPage(nextPage);
+              }
+            }}
+          >
+            下一页
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }

@@ -13341,14 +13341,23 @@ body.column-layout-dragging {
   border-bottom: 0;
 }
 
+.settings-native-table-row--selected {
+  background: var(--fp-primary-soft);
+}
+
 .settings-table-primary {
   font-weight: 700;
 }
 
 .settings-table-code,
-.settings-table-input--code {
+.settings-table-input--code,
+.settings-table-amount {
   font-family: var(--fp-font-data);
   font-variant-numeric: tabular-nums;
+}
+
+.settings-table-amount {
+  text-align: right;
 }
 
 .settings-table-empty {
@@ -13608,6 +13617,24 @@ body.column-layout-dragging {
   border: 1px solid var(--fp-danger);
 }
 
+.settings-selected-tag--success {
+  background: var(--fp-success-soft);
+  color: var(--fp-success);
+  border: 1px solid var(--fp-success);
+}
+
+.settings-selected-tag--warning {
+  background: var(--fp-warning-soft);
+  color: var(--fp-warning);
+  border: 1px solid var(--fp-warning);
+}
+
+.settings-selected-tag--neutral {
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-primary);
+  border: 1px solid var(--fp-border);
+}
+
 .settings-selected-tag-path {
   color: var(--fp-text-secondary);
   font-size: 13px;
@@ -13759,6 +13786,134 @@ body.column-layout-dragging {
   line-height: 1.5;
 }
 
+.oa-manual-import {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--fp-border);
+}
+
+.oa-manual-import__header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.oa-manual-import__header h4 {
+  margin: 0;
+  color: var(--fp-text-primary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.oa-manual-import__header p {
+  margin: 4px 0 0;
+  color: var(--fp-text-secondary);
+  font-size: 14px;
+}
+
+.oa-manual-import__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.oa-manual-import__metrics span {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--fp-tag-height-table);
+  padding: 0 8px;
+  background: var(--fp-surface-muted);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-tag-radius-table);
+  color: var(--fp-text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.oa-manual-import__filters,
+.oa-manual-import__filter-groups,
+.oa-manual-import__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.settings-checkbox-list--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.oa-manual-import__table {
+  min-width: 1500px;
+}
+
+.oa-manual-import__table th:nth-child(9),
+.oa-manual-import__table th:nth-child(10),
+.oa-manual-import__table th:nth-child(11),
+.oa-manual-import__table th:nth-child(12),
+.oa-manual-import__table th:nth-child(15) {
+  text-align: right;
+}
+
+.oa-manual-import__project {
+  max-width: 260px;
+}
+
+.oa-manual-import__project strong,
+.oa-manual-import__project small {
+  display: block;
+}
+
+.oa-manual-import__project small {
+  margin-top: 2px;
+  color: var(--fp-text-secondary);
+}
+
+.oa-manual-import__detail-cell {
+  background: var(--fp-surface-muted);
+  padding: 12px;
+}
+
+.oa-manual-import__detail-table {
+  min-width: 900px;
+  background: var(--fp-surface);
+}
+
+.settings-table-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  color: var(--fp-text-secondary);
+  font-size: 13px;
+}
+
+.settings-table-pagination label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-table-pagination select {
+  min-height: 32px;
+  padding: 4px 8px;
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+}
+
+.settings-table-pagination__actions {
+  display: flex;
+  gap: 8px;
+}
+
 @media (min-width: 768px) {
   .settings-pending-tags-layout {
     grid-template-columns: 240px minmax(0, 1fr);
@@ -13767,6 +13922,11 @@ body.column-layout-dragging {
   .settings-oa-import-layout,
   .settings-data-reset-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oa-manual-import__header {
+    flex-direction: row;
+    align-items: flex-start;
   }
 }
 

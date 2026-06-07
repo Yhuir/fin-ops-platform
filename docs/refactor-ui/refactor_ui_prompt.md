@@ -5798,7 +5798,7 @@ Scope: `/settings` OA retention/import, OA invoice offset, data reset section an
 ### P105-phase-6-settings-oa-manual-search-import-table
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/settings` OA manual search/import table only。
 
@@ -5820,6 +5820,48 @@ Scope: `/settings` OA manual search/import table only.
 - Workbench internals frozen: required。
 - Table and pagination form factor preserved: required。
 - Expected source-level failure allowed: yes，settingsDesign closeout remains after P105。
+
+#### Execution Notes
+
+- Runtime implementation changed:
+  - `OaManualSearchImportTable.tsx` moved from MUI table, pagination, checkbox, collapse, alert, text field, form control, chip, tooltip, icon button and MUI icons to native/project filters, checkboxes, dense tables, pagination controls, expansion rows, status panels, buttons and tags。
+  - The OA manual search/import table keeps the accessible name `OA全量搜索导入结果`, filters, current-page selection, per-row selection, nested detail table, attachment refresh, import action, clear-selection action and global shell status isolation。
+  - `web/src/app/styles.css` added OA manual import filter, toolbar, pagination, selected-row and table alignment classes using existing `--fp-*` tokens。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Verification:
+  - scoped OA manual table no-MUI grep: passed。
+  - `cd web && npx vitest run SettingsOaManualSearchImportTable.test.tsx`: passed；5 tests passed。
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`: expected-fail；13 behavior tests passed, source-level contract failed only for `src/components/settings/settingsDesign.ts`。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `git diff --check`: passed。
+- Next prompt generated: `P106-phase-6-settings-closeout`。
+
+### P106-phase-6-settings-closeout
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: `/settings` closeout for `settingsDesign.ts` only。
+
+#### Prompt
+
+```text
+Prompt ID: P106-phase-6-settings-closeout
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/settings` closeout for `settingsDesign.ts` only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_settings.md、docs/refactor-ui/table_layout_system.md、docs/refactor-ui/test_migration_strategy.md、web/src/components/settings/settingsDesign.ts、web/src/pages/SettingsPage.tsx、web/src/components/settings/*、web/src/test/SettingsPage.test.tsx、web/src/test/SettingsOaManualSearchImportTable.test.tsx 和 web/src/app/styles.css。只处理 Settings closeout：检查 `settingsDesign.ts` 是否仍有 runtime 使用；如果未使用则删除该 MUI theme bridge；如果仍有使用则转换为纯 project token module，必须移除 MUI `createTheme`、`SxProps`、`Theme`、DataGrid theme augmentation、`settingsTheme`、`settingsDataGridSx`、`settingsButtonSx`、`settingsSectionSx` 等 MUI bridge。不得迁移 `MonthPicker`、不得修改 frozen workbench legacy MUI、不得修改 Settings API/client/mock response/backend/read model/worker、权限语义、数据重置语义、OA 手工导入语义或关联台内部工作区。保留 Settings 用户可见行为和 P100-P105 已锁定的 tree, regions, tables, menu, dialogs, OA manual import table form factor。运行 `rg -n "settingsDesign|settingsTokens|settingsTheme|settingsButtonSx|settingsDataGridSx|settingsPageSx|settingsHeaderSx|settingsLayoutSx|settingsNavShellSx|settingsContentSx|settingsSectionSx" web/src` 确认引用边界；运行 full `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx`，必须通过；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|settingsTheme|settingsButtonSx|settingsDataGridSx|settingsSectionSx|<(Alert|Box|Button|Checkbox|Chip|CircularProgress|Collapse|Dialog|FormControl|IconButton|List|Menu|Select|Table|TextField|Tooltip|Typography)\\b' web/src/pages/SettingsPage.tsx web/src/components/settings; then exit 1; else exit 0; fi`，必须通过；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 `MG-P106-phase-6-settings` prompt。
+```
+
+#### Review
+
+- Single slice: yes，only Settings closeout for `settingsDesign.ts`。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- MonthPicker/frozen legacy MUI untouched: required。
+- Expected source-level failure allowed: no，Settings source-level contract must pass after P106。
 
 ### MG Prompt Template
 
