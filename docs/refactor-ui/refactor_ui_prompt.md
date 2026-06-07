@@ -5139,6 +5139,7 @@ Scope: `/turnover-ledger` export dialog, page-level feedback/status surfaces, an
   - `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|<Dialog\\b|<Button|<TextField|<MenuItem|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Stack|<Typography' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx; then exit 1; else exit 0; fi`: passed。
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `git diff --check`: passed。
+- Commit: `8a3eb3cb feat: complete turnover ledger ui migration`, pushed to `origin/refactor-ui`。
 - Next prompt generated: `MG-P091-phase-6-turnover-ledger`。
 
 ### MG-P091-phase-6-turnover-ledger
