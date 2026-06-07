@@ -1,9 +1,26 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
+
+const outputInvoiceCollectionsSourceFiles = [
+  "src/pages/OutputInvoiceCollectionsPage.tsx",
+  "src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx",
+  "src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx",
+  "src/components/outputInvoiceCollections/ExpandableCellText.tsx",
+  "src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx",
+  "src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx",
+  "src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx",
+  "src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx",
+  "src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx",
+  "src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx",
+  "src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx",
+] as const;
 
 const rowsPayload = {
   rows: [
@@ -337,12 +354,62 @@ function rowsRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectio
     .filter((url) => url.pathname === "/api/output-invoice-collections/rows");
 }
 
+function readWebSource(path: string) {
+  return readFileSync(resolve(__dirname, "..", "..", path), "utf8");
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe("Output invoice collections page", () => {
+  test("targets project primitives for page shell, grouped table, filters and drawers", () => {
+    const sourceByPath = Object.fromEntries(outputInvoiceCollectionsSourceFiles.map((path) => [path, readWebSource(path)]));
+    const forbiddenMuiImports = outputInvoiceCollectionsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /from ["']@mui\/|import\s+[^;]*@mui\//.test(source) ? [path] : [];
+    });
+    const forbiddenMuiSelectors = outputInvoiceCollectionsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /\.Mui[A-Z][A-Za-z-]*/.test(source) ? [path] : [];
+    });
+    const forbiddenLegacySurfaces = outputInvoiceCollectionsSourceFiles.flatMap((path) => {
+      const source = sourceByPath[path];
+      return /TablePagination|TextField|Skeleton|Chip|IconButton|TableCell|TableRow|TableHead|TableBody|DialogTitle|DialogContent|DialogActions|CircularProgress|FormControlLabel/.test(source) ? [path] : [];
+    });
+    const missingPrimitiveTargets = [
+      sourceByPath["src/pages/OutputInvoiceCollectionsPage.tsx"].includes("PageScaffold") ? null : "OutputInvoiceCollectionsPage.tsx should keep PageScaffold",
+      sourceByPath["src/pages/OutputInvoiceCollectionsPage.tsx"].includes("StatePanel") ? null : "OutputInvoiceCollectionsPage.tsx should keep project empty/error state primitives",
+      sourceByPath["src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx"].includes("OutputInvoiceCollectionFilterMenu")
+        ? null
+        : "OutputInvoiceCollectionsTable.tsx should preserve filter menu contract",
+      /FinanceTable|output-invoice-collections-table/.test(sourceByPath["src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx"])
+        ? null
+        : "OutputInvoiceCollectionsTable.tsx should use a project table primitive or project table class",
+      sourceByPath["src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx"].includes("AppDrawer") ? null : "Detail drawer should use AppDrawer",
+      sourceByPath["src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx"].includes("AppDrawer") ? null : "Rules drawer should use AppDrawer",
+      sourceByPath["src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx"].includes("AppDrawer") ? null : "Status reminder drawer should use AppDrawer",
+      sourceByPath["src/components/outputInvoiceCollections/RedInvoiceRelationDrawer.tsx"].includes("AppDrawer") ? null : "Red relation drawer should use AppDrawer",
+      sourceByPath["src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx"].includes("AppDrawer") ? null : "Receipt history drawer should use AppDrawer",
+      sourceByPath["src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx"].includes("AppDialog") ? null : "Receipt history void/reissue confirmations should use AppDialog",
+      sourceByPath["src/components/outputInvoiceCollections/ReceiptPreviewDrawer.tsx"].includes("AppDrawer") ? null : "Receipt preview drawer should use AppDrawer",
+      sourceByPath["src/components/outputInvoiceCollections/ReceiptSettingsDrawer.tsx"].includes("AppDrawer") ? null : "Receipt settings drawer should use AppDrawer",
+    ].filter(Boolean);
+
+    expect({
+      forbiddenMuiImports,
+      forbiddenMuiSelectors,
+      forbiddenLegacySurfaces,
+      missingPrimitiveTargets,
+    }).toEqual({
+      forbiddenMuiImports: [],
+      forbiddenMuiSelectors: [],
+      forbiddenLegacySurfaces: [],
+      missingPrimitiveTargets: [],
+    });
+  });
+
   test("uses a standard empty state while read model refresh details stay hidden", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -412,7 +479,7 @@ describe("Output invoice collections page", () => {
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
-  test("adds sidebar route and renders grouped MUI Table layout without fake export", async () => {
+  test("adds sidebar route and renders grouped project table layout without fake export", async () => {
     const user = userEvent.setup();
     const fetchMock = installOutputInvoiceCollectionsFetch();
 
@@ -427,9 +494,9 @@ describe("Output invoice collections page", () => {
 
     const page = await screen.findByTestId("output-invoice-collections-page");
     expect(within(page).getByRole("heading", { name: "销项发票收款情况" })).toBeInTheDocument();
-    expect(document.querySelector(".MuiDataGrid-root")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /导出/ })).not.toBeInTheDocument();
     expect(await within(page).findByText("XSFP-2026-0001")).toBeInTheDocument();
+    expect(within(page).getByRole("table", { name: "销项发票收款情况表" })).toBeInTheDocument();
 
     const headerRows = within(page).getAllByRole("row").slice(0, 2);
     for (const label of ["销项发票", "收款状态", "收入流水", "收据"]) {

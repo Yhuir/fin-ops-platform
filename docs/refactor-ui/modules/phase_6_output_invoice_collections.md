@@ -146,3 +146,39 @@ Scope: `/output-invoice-collections` tests only. Do not modify runtime implement
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/OutputInvoiceCollectionsPage.tsx、web/src/components/outputInvoiceCollections/*、web/src/features/outputInvoiceCollections/* 和 web/src/test/OutputInvoiceCollectionsPage.test.tsx。只修改 `web/src/test/OutputInvoiceCollectionsPage.test.tsx`：把 “grouped MUI Table” wording 和 MUI/DataGrid/class-based expectations 改成 behavior/project primitive assertions；新增 source-level contracts，锁定 page/table/filter/expandable/drawer files 未来不再依赖 `@mui/*`、`Mui[A-Z]`、`TablePagination`、`TextField`、`Skeleton`、`Chip`、`IconButton`、`TableCell`、`TableRow`、`TableHead`、`TableBody`、`Drawer`、`Dialog`；新增或保留行为断言确保 route/sidebar、page heading、query controls、summary tiles、refresh/status-rules/settings buttons、group headers、10 leaf columns、filter menu labels and operators、sort query, expand/collapse controls, detail right drawer labels, status/reminder/red relation/receipt history/receipt preview/receipt settings right drawers, receipt void/reissue dialogs, empty/loading/error/read-model refreshing behavior and lifecycle write payloads保留。不得修改实现、mock、后端、API、read model、worker 或关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`，实现未迁移前 expected-fail 可接受；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P067 page shell prompt。
 ```
+
+## Execution Update: P066 Characterization Tests
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/test/OutputInvoiceCollectionsPage.test.tsx`
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - Renamed the main behavior test away from MUI wording.
+  - Replaced the `.MuiDataGrid-root` absence check with the user-observable table role `销项发票收款情况表`.
+  - Added source-level contracts for page shell, grouped table, filter menu, expandable text and all output invoice collection drawers.
+  - Source-level drawer contracts intentionally allow future `AppDrawer`/`AppDialog` project primitives while forbidding MUI imports and legacy MUI surface names.
+- Verification:
+  - `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`: expected-fail, 5 behavior tests passed and 1 source-level contract failed. Current failure lists page/table/filter/expandable/drawer MUI imports, `.MuiButton-startIcon`, legacy MUI surfaces, missing project table class, missing `AppDrawer` and missing `AppDialog`.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P066 test file changed before docs.
+
+## Current Expected Failures After P066
+
+- `src/pages/OutputInvoiceCollectionsPage.tsx`: still imports MUI page shell/query/summary/loading controls; P067 owns this.
+- `src/components/outputInvoiceCollections/OutputInvoiceCollectionFilterMenu.tsx` and `ExpandableCellText.tsx`: still import MUI menu/filter/expand controls and `.MuiButton-startIcon`; P068 owns this.
+- `src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx`: still imports MUI grouped table/tag/button/pagination controls; P069 owns this.
+- Output invoice collection drawer files still import MUI right drawer/form/table/dialog controls; P070-P072 own these.
+
+## P067 Prompt Draft
+
+```text
+Prompt ID: P067-phase-6-output-invoice-collections-page-shell
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/output-invoice-collections` page shell/actions/query/summary/loading/error only. Do not migrate table, filter menu, expandable text or drawer internals.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_output_invoice_collections.md、web/src/pages/OutputInvoiceCollectionsPage.tsx、web/src/components/outputInvoiceCollections/OutputInvoiceCollectionsTable.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx、web/src/test/OutputInvoiceCollectionsPage.test.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/OutputInvoiceCollectionsPage.tsx`、必要 `web/src/app/styles.css` 和必要测试 expectation：移除 page shell/actions/query/summary/loading/error scope 的 MUI imports/usages，包括 `RefreshOutlinedIcon`、`Alert`、`Box`、`Button`、`MenuItem`、`Paper`、`Skeleton`、`Stack`、`TextField`、`Typography`。使用 project/native toolbar controls、native text/month/select inputs、project summary tiles/loading skeleton/status message and lucide icons。必须保留 `data-testid="output-invoice-collections-page"`、heading `销项发票收款情况`、description、buttons `收款状态规则`/admin-only `收据编号设置`/`刷新`、refresh disabled while refreshing、query labels `关键字`/`查询`/`月份`/`收款状态`、Enter submit、quick status options from backend rules/options, summary labels `销项发票数`/`待收款金额`/`已收金额`/`待出收据数`、loading label `销项发票收款情况加载中`、empty state `当前条件下暂无记录。`、error text, table props and all drawer wiring。不得修改 `OutputInvoiceCollectionsTable.tsx`、filter menu、expandable text、drawer internals、mock/API/read model/worker/backend/关联台。运行 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx -t "targets project primitives|adds sidebar route|uses a standard empty state|pauses read model"`；运行完整 `cd web && npx vitest run OutputInvoiceCollectionsPage.test.tsx`，P068-P072 source contract failures 可以继续 expected-fail，但 `src/pages/OutputInvoiceCollectionsPage.tsx` must disappear from source-level failure lists；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|Skeleton|TextField|MenuItem|Paper|Typography' web/src/pages/OutputInvoiceCollectionsPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P068 filter and expandable prompt。
+```
