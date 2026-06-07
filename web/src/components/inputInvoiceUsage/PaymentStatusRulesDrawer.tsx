@@ -1,24 +1,6 @@
-import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import CircularProgress from "@mui/material/CircularProgress";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
+import AppDrawer from "../common/AppDrawer";
 import type {
   InputInvoiceUsagePaymentStatusRulesResponse,
   SaveInputInvoiceUsagePaymentStatusRulesRequest,
@@ -152,159 +134,158 @@ export default function PaymentStatusRulesDrawer({
       .finally(() => setSaving(false));
   };
 
+  const subtitle = canSave
+    ? "编辑后保存会带版本和幂等键提交，由后端校验并触发刷新"
+    : "按后端权限展示规则和待处理下拉方向";
+
   return (
-    <Drawer
-      anchor="right"
-      open={open}
-      variant="persistent"
+    <AppDrawer
+      className="input-invoice-usage-rules-drawer"
+      closeLabel="关闭支付状态规则抽屉"
       onClose={onClose}
-      transitionDuration={{ enter: 180, exit: 140 }}
-      PaperProps={{
-        "aria-label": open ? "发票与支付状态规则设置" : undefined,
-        role: "presentation",
-        sx: { width: { xs: "100%", sm: "min(820px, 52vw)" }, maxWidth: "100vw" },
-      }}
+      open={open}
+      subtitle={subtitle}
+      title="发票与支付状态规则设置"
+      width="min(820px, 100vw)"
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2.5, py: 1.5 }}>
-          <Box>
-            <Typography component="h2" variant="h6" fontWeight={900}>发票与支付状态规则设置</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {canSave ? "编辑后保存会带版本和幂等键提交，由后端校验并触发刷新" : "按后端权限展示规则和待处理下拉方向"}
-            </Typography>
-          </Box>
-          <IconButton aria-label="关闭支付状态规则抽屉" onClick={onClose}>
-            <CloseOutlinedIcon />
-          </IconButton>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ flex: 1, minHeight: 0, overflow: "auto", p: 2.5 }}>
-          {loading ? (
-            <Stack direction="row" alignItems="center" spacing={1.25}>
-              <CircularProgress aria-label="正在加载支付状态规则" size={22} />
-              <Typography variant="body2" color="text.secondary">正在读取规则</Typography>
-            </Stack>
-          ) : null}
-          {error ? <Alert severity="error">{error}</Alert> : null}
-          {feedback ? <Alert severity="success">{feedback}</Alert> : null}
-          {payload ? (
-            <>
-              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
-                {payload.version !== null && payload.version !== undefined ? (
-                  <Chip size="small" variant="outlined" label={`版本 ${payload.version}`} />
-                ) : null}
-                {payload.readOnly !== false ? <Chip size="small" label="只读" /> : null}
-                {payload.readOnly === false && !canSave ? <Chip size="small" label="无保存权限" color="warning" variant="outlined" /> : null}
-              </Stack>
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small" aria-label="Sheet4 支付状态规则">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>支付状态</TableCell>
-                      <TableCell>规则</TableCell>
-                      <TableCell>优先级</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {draftRules.map((rule, index) => (
-                      <TableRow key={rule.id || rule.code || rule.label}>
-                        <TableCell sx={{ fontWeight: 900 }}>
-                          {canSave ? (
-                            <TextField
-                              label="支付状态"
-                              size="small"
-                              value={rule.label}
+      <div className="input-invoice-usage-drawer-body">
+        {loading ? (
+          <div className="input-invoice-usage-drawer-loading">
+            <span aria-label="正在加载支付状态规则" className="input-invoice-usage-drawer-spinner" role="progressbar" />
+            <span>正在读取规则</span>
+          </div>
+        ) : null}
+        {error ? (
+          <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--error" role="alert">
+            {error}
+          </div>
+        ) : null}
+        {feedback ? (
+          <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--success" role="status">
+            {feedback}
+          </div>
+        ) : null}
+        {payload ? (
+          <>
+            <div className="input-invoice-usage-rules-meta" aria-label="支付状态规则状态">
+              {payload.version !== null && payload.version !== undefined ? (
+                <span className="input-invoice-usage-rules-tag">版本 {payload.version}</span>
+              ) : null}
+              {payload.readOnly !== false ? <span className="input-invoice-usage-rules-tag">只读</span> : null}
+              {payload.readOnly === false && !canSave ? (
+                <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning">无保存权限</span>
+              ) : null}
+            </div>
+            <div className="input-invoice-usage-rules-table-shell">
+              <table aria-label="Sheet4 支付状态规则" className="input-invoice-usage-rules-table">
+                <thead>
+                  <tr>
+                    <th scope="col">支付状态</th>
+                    <th scope="col">规则</th>
+                    <th scope="col">优先级</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftRules.map((rule, index) => (
+                    <tr key={rule.id || rule.code || rule.label}>
+                      <td className="input-invoice-usage-rules-table__status">
+                        {canSave ? (
+                          <label className="input-invoice-usage-rules-field">
+                            <span>支付状态</span>
+                            <input
                               onChange={(event) => updateRule(index, { label: event.target.value }, setDraftRules)}
-                              fullWidth
+                              value={rule.label}
                             />
-                          ) : rule.label}
-                        </TableCell>
-                        <TableCell>
-                          {canSave ? (
-                            <TextField
-                              label="规则"
-                              size="small"
-                              value={rule.description}
+                          </label>
+                        ) : rule.label}
+                      </td>
+                      <td>
+                        {canSave ? (
+                          <label className="input-invoice-usage-rules-field">
+                            <span>规则</span>
+                            <textarea
                               onChange={(event) => updateRule(index, { description: event.target.value }, setDraftRules)}
-                              fullWidth
-                              multiline
-                              minRows={2}
+                              rows={2}
+                              value={rule.description}
                             />
-                          ) : rule.description}
-                        </TableCell>
-                        <TableCell sx={{ width: canSave ? 120 : undefined }}>
-                          {canSave ? (
-                            <TextField
-                              label="优先级"
-                              size="small"
+                          </label>
+                        ) : rule.description}
+                      </td>
+                      <td className="input-invoice-usage-rules-table__priority">
+                        {canSave ? (
+                          <label className="input-invoice-usage-rules-field">
+                            <span>优先级</span>
+                            <input
+                              min={1}
+                              onChange={(event) => updateRule(index, { priority: Number(event.target.value) }, setDraftRules)}
                               type="number"
                               value={rule.priority}
-                              onChange={(event) => updateRule(index, { priority: Number(event.target.value) }, setDraftRules)}
-                              inputProps={{ min: 1 }}
                             />
-                          ) : rule.priority}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {draftRules.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={3}>暂无规则。</TableCell>
-                      </TableRow>
-                    ) : null}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <Paper variant="outlined" sx={{ borderRadius: 1, p: 2 }}>
-                <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1 }}>
-                  待处理下拉方向
-                </Typography>
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  {draftPendingDirections.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary">暂无待处理方向。</Typography>
-                  ) : null}
-                  {draftPendingDirections.map((option, index) => (
-                    canSave ? (
-                      <TextField
-                        key={option.code || index}
-                        label={option.code || `方向 ${index + 1}`}
-                        size="small"
-                        value={option.label}
-                        onChange={(event) => updatePendingDirection(index, event.target.value, setDraftPendingDirections)}
-                      />
-                    ) : (
-                      <Chip key={option.code || option.label} label={option.label} variant="outlined" />
-                    )
+                          </label>
+                        ) : rule.priority}
+                      </td>
+                    </tr>
                   ))}
-                </Stack>
-              </Paper>
-              {canSave ? (
-                <Stack direction="row" justifyContent="flex-end" spacing={1}>
-                  <Button
-                    variant="outlined"
-                    disabled={saving || loading}
-                    onClick={() => {
-                      setDraftRules(cloneRules(payload.rules));
-                      setDraftPendingDirections(payload.pendingDirections.map((item) => ({ ...item })));
-                      setError(null);
-                      setFeedback(null);
-                    }}
-                  >
-                    还原
-                  </Button>
-                  <Button
-                    variant="contained"
-                    disabled={saving || loading || !dirty}
-                    onClick={handleSave}
-                  >
-                    {saving ? "保存中..." : "保存规则"}
-                  </Button>
-                </Stack>
-              ) : null}
-            </>
-          ) : null}
-        </Stack>
-      </Stack>
-    </Drawer>
+                  {draftRules.length === 0 ? (
+                    <tr>
+                      <td colSpan={3}>暂无规则。</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <section className="input-invoice-usage-rules-section">
+              <h3>待处理下拉方向</h3>
+              <div className="input-invoice-usage-rules-directions">
+                {draftPendingDirections.length === 0 ? (
+                  <span className="input-invoice-usage-rules-empty">暂无待处理方向。</span>
+                ) : null}
+                {draftPendingDirections.map((option, index) => (
+                  canSave ? (
+                    <label className="input-invoice-usage-rules-field input-invoice-usage-rules-field--direction" key={option.code || index}>
+                      <span>{option.code || `方向 ${index + 1}`}</span>
+                      <input
+                        onChange={(event) => updatePendingDirection(index, event.target.value, setDraftPendingDirections)}
+                        value={option.label}
+                      />
+                    </label>
+                  ) : (
+                    <span className="input-invoice-usage-rules-tag" key={option.code || option.label}>
+                      {option.label}
+                    </span>
+                  )
+                ))}
+              </div>
+            </section>
+            {canSave ? (
+              <div className="input-invoice-usage-rules-actions">
+                <button
+                  className="input-invoice-usage-button"
+                  disabled={saving || loading}
+                  onClick={() => {
+                    setDraftRules(cloneRules(payload.rules));
+                    setDraftPendingDirections(payload.pendingDirections.map((item) => ({ ...item })));
+                    setError(null);
+                    setFeedback(null);
+                  }}
+                  type="button"
+                >
+                  还原
+                </button>
+                <button
+                  className="input-invoice-usage-button input-invoice-usage-button--primary"
+                  disabled={saving || loading || !dirty}
+                  onClick={handleSave}
+                  type="button"
+                >
+                  {saving ? "保存中..." : "保存规则"}
+                </button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </AppDrawer>
   );
 }
 
