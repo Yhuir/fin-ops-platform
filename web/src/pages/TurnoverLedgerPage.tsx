@@ -1,21 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from "react";
 import { Download } from "lucide-react";
 import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
 import Snackbar from "@mui/material/Snackbar";
-import Stack from "@mui/material/Stack";
-import Tab from "@mui/material/Tab";
-import Tabs from "@mui/material/Tabs";
-import Typography from "@mui/material/Typography";
-import CloseIcon from "@mui/icons-material/Close";
 
+import AppDrawer from "../components/common/AppDrawer";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
@@ -737,34 +725,27 @@ export default function TurnoverLedgerPage() {
         </section>
       </PageScaffold>
 
-      <Drawer
-        anchor="right"
+      <AppDrawer
+        className="turnover-ledger-drawer"
+        closeLabel="关闭外部往来款标签设置"
         open={tagDrawerOpen}
         onClose={() => setTagDrawerOpen(false)}
-        PaperProps={{ sx: { width: { xs: "100%", sm: "520px" }, maxWidth: "100vw" }, role: "dialog", "aria-label": "外部往来款标签设置" }}
+        subtitle={`版本 ${tagSelection.version}`}
+        title="外部往来款标签设置"
+        width={520}
       >
-        <Stack spacing={0} sx={{ height: "100%" }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
-            <Box>
-              <Typography component="h2" variant="h6" fontWeight={900}>外部往来款标签设置</Typography>
-              <Typography color="text.secondary" variant="caption">版本 {tagSelection.version}</Typography>
-            </Box>
-            <IconButton aria-label="关闭外部往来款标签设置" onClick={() => setTagDrawerOpen(false)}>
-              <CloseIcon />
-            </IconButton>
-          </Stack>
-          <Divider />
-          <Stack direction="row" spacing={1} sx={{ p: 2 }}>
-            <Button disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} size="small" variant="outlined">全选</Button>
-            <Button disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set())} size="small" variant="outlined">清空</Button>
-            <Button disabled={tagSaving} onClick={() => void handleSaveTagSelection()} size="small" variant="contained">保存</Button>
-          </Stack>
+        <div className="turnover-ledger-drawer__content">
+          <div className="turnover-ledger-drawer__actions">
+            <button className="turnover-ledger-button" disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} type="button">全选</button>
+            <button className="turnover-ledger-button" disabled={tagSaving} onClick={() => setDraftSelectedTagCodes(new Set())} type="button">清空</button>
+            <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={tagSaving} onClick={() => void handleSaveTagSelection()} type="button">保存</button>
+          </div>
           {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
-            <Alert severity="warning" sx={{ mx: 2, mb: 1 }}>
+            <div className="turnover-ledger-drawer__notice" role="alert">
               已停用或不再属于外部往来款的标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
-            </Alert>
+            </div>
           ) : null}
-          <Stack divider={<Divider flexItem />} sx={{ overflow: "auto" }}>
+          <div className="turnover-ledger-tag-list">
             {tagLoading ? <StatePanel compact tone="loading" title="标签加载中" /> : null}
             {!tagLoading && drawerGroups.length === 0 ? <StatePanel compact tone="empty" title="暂无可用外部往来款标签" /> : null}
             {!tagLoading ? drawerGroups.map((group) => {
@@ -772,12 +753,13 @@ export default function TurnoverLedgerPage() {
               const checkedCount = codes.filter((code) => draftSelectedTagCodes.has(code)).length;
               const allChecked = checkedCount === codes.length && codes.length > 0;
               return (
-                <Box key={group.primaryLabel} sx={{ p: 2 }}>
-                  <FormControlLabel
-                    control={(
-                      <Checkbox
-                        checked={allChecked}
-                        indeterminate={checkedCount > 0 && !allChecked}
+                <fieldset className="turnover-ledger-tag-group" key={group.primaryLabel}>
+                  <label className="turnover-ledger-checkbox-row turnover-ledger-checkbox-row--primary">
+                    <input
+                      aria-checked={checkedCount > 0 && !allChecked ? "mixed" : allChecked}
+                      checked={allChecked}
+                      className="turnover-ledger-checkbox"
+                      type="checkbox"
                         onChange={(event) => {
                           setDraftSelectedTagCodes((current) => {
                             const next = new Set(current);
@@ -791,19 +773,18 @@ export default function TurnoverLedgerPage() {
                             return next;
                           });
                         }}
-                      />
-                    )}
-                    label={<Typography fontWeight={900}>{group.primaryLabel}</Typography>}
-                  />
-                  <Stack sx={{ pl: 4 }}>
+                    />
+                    <span>{group.primaryLabel}</span>
+                  </label>
+                  <div className="turnover-ledger-tag-group__children">
                     {group.tags.map((tag) => {
                       const label = tagSubLabel(tag) || SELF_SUB_LABEL;
                       return (
-                        <FormControlLabel
-                          key={tag.code}
-                          control={(
-                            <Checkbox
-                              checked={draftSelectedTagCodes.has(tag.code)}
+                        <label className="turnover-ledger-checkbox-row" key={tag.code}>
+                          <input
+                            checked={draftSelectedTagCodes.has(tag.code)}
+                            className="turnover-ledger-checkbox"
+                            type="checkbox"
                               onChange={(event) => {
                                 setDraftSelectedTagCodes((current) => {
                                   const next = new Set(current);
@@ -815,88 +796,75 @@ export default function TurnoverLedgerPage() {
                                   return next;
                                 });
                               }}
-                            />
-                          )}
-                          label={label}
-                        />
+                          />
+                          <span>{label}</span>
+                        </label>
                       );
                     })}
-                  </Stack>
-                </Box>
+                  </div>
+                </fieldset>
               );
             }) : null}
-          </Stack>
-        </Stack>
-      </Drawer>
+          </div>
+        </div>
+      </AppDrawer>
 
-      <Drawer
-        anchor="right"
+      <AppDrawer
+        className="turnover-ledger-drawer"
+        closeLabel="关闭确认外部往来闭环"
         open={closureDrawerOpen}
         onClose={() => setClosureDrawerOpen(false)}
-        PaperProps={{ sx: { width: { xs: "100%", sm: "520px" }, maxWidth: "100vw" }, role: "dialog", "aria-label": "确认外部往来闭环" }}
+        subtitle={closureSelection?.groupLabel || "未选择往来组"}
+        title="确认外部往来闭环"
+        width={520}
       >
-        <Stack spacing={0} sx={{ height: "100%" }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
-            <Box>
-              <Typography component="h2" variant="h6" fontWeight={900}>确认外部往来闭环</Typography>
-              <Typography color="text.secondary" variant="caption">{closureSelection?.groupLabel || "未选择往来组"}</Typography>
-            </Box>
-            <IconButton aria-label="关闭确认外部往来闭环" onClick={() => setClosureDrawerOpen(false)}>
-              <CloseIcon />
-            </IconButton>
-          </Stack>
-          <Divider />
-          <Stack spacing={1.5} sx={{ p: 2, overflow: "auto", flex: 1 }}>
+        <div className="turnover-ledger-drawer__content">
+          <div className="turnover-ledger-closure-list">
             {closurePreview.items.map((item) => {
               const { row } = item;
               return (
-                <Paper key={item.bankRowId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-                  <Stack spacing={0.75}>
-                    <Stack direction="row" justifyContent="space-between" spacing={1}>
-                      <Typography fontWeight={900}>{item.directionLabel}</Typography>
-                      <Typography fontWeight={900}>{formatMoney(String(item.amount.toFixed(2)))}</Typography>
-                    </Stack>
-                    <Typography variant="body2">{formatNullable(row.transactionAt || row.borrowDate || row.repaymentDate)}</Typography>
-                    <Typography variant="body2" color="text.secondary">{item.bankRowId}</Typography>
-                    <Typography variant="body2" color="text.secondary">{formatNullable(row.repaymentRemark || row.summaryText)}</Typography>
-                  </Stack>
-                </Paper>
+                <div className="turnover-ledger-closure-card" key={item.bankRowId}>
+                  <div className="turnover-ledger-closure-card__main">
+                    <span>{item.directionLabel}</span>
+                    <span>{formatMoney(String(item.amount.toFixed(2)))}</span>
+                  </div>
+                  <span>{formatNullable(row.transactionAt || row.borrowDate || row.repaymentDate)}</span>
+                  <span className="turnover-ledger-closure-card__muted">{item.bankRowId}</span>
+                  <span className="turnover-ledger-closure-card__muted">{formatNullable(row.repaymentRemark || row.summaryText)}</span>
+                </div>
               );
             })}
-            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-              <Stack spacing={0.75}>
-                <Stack direction="row" justifyContent="space-between">
-                  <Typography color="text.secondary">收入合计</Typography>
-                  <Typography fontWeight={800}>{formatMoney(closurePreview.incomeAmount.toFixed(2))}</Typography>
-                </Stack>
-                <Stack direction="row" justifyContent="space-between">
-                  <Typography color="text.secondary">支出合计</Typography>
-                  <Typography fontWeight={800}>{formatMoney(closurePreview.expenseAmount.toFixed(2))}</Typography>
-                </Stack>
-                <Divider />
-                <Stack direction="row" justifyContent="space-between">
-                  <Typography fontWeight={900}>差额</Typography>
-                  <Typography data-testid="turnover-closure-delta" fontWeight={900}>{formatMoney(closurePreview.delta.toFixed(2))}</Typography>
-                </Stack>
-              </Stack>
-            </Paper>
+            <div className="turnover-ledger-closure-card">
+              <div className="turnover-ledger-closure-card__row">
+                <span>收入合计</span>
+                <span>{formatMoney(closurePreview.incomeAmount.toFixed(2))}</span>
+              </div>
+              <div className="turnover-ledger-closure-card__row">
+                <span>支出合计</span>
+                <span>{formatMoney(closurePreview.expenseAmount.toFixed(2))}</span>
+              </div>
+              <div className="turnover-ledger-closure-card__delta">
+                <span>差额</span>
+                <span data-testid="turnover-closure-delta">{formatMoney(closurePreview.delta.toFixed(2))}</span>
+              </div>
+            </div>
             {!closurePreview.canConfirm ? (
-              <Alert severity="info">只有一收一支且差额为 0.00 的两条流水可以确认闭环。</Alert>
+              <div className="turnover-ledger-drawer__notice" role="alert">只有一收一支且差额为 0.00 的两条流水可以确认闭环。</div>
             ) : null}
-          </Stack>
-          <Divider />
-          <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ p: 2 }}>
-            <Button disabled={closureSubmitting} onClick={() => setClosureDrawerOpen(false)} variant="outlined">取消</Button>
-            <Button
+          </div>
+          <div className="turnover-ledger-drawer__footer">
+            <button className="turnover-ledger-button" disabled={closureSubmitting} onClick={() => setClosureDrawerOpen(false)} type="button">取消</button>
+            <button
+              className="turnover-ledger-button turnover-ledger-button--primary"
               disabled={!closurePreview.canConfirm || closureSubmitting}
               onClick={() => void handleConfirmClosure()}
-              variant="contained"
+              type="button"
             >
               确定
-            </Button>
-          </Stack>
-        </Stack>
-      </Drawer>
+            </button>
+          </div>
+        </div>
+      </AppDrawer>
 
       <TurnoverLedgerExtraDrawer
         open={selectedRow !== null}
