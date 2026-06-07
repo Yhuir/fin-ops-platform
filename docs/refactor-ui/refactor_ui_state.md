@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P090-phase-6-turnover-ledger-extra-drawer`
+- Current Prompt ID: `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout`
 - Current MG ID: `MG-P084-phase-6-batch-accounting`
 
 ## Global Invariants
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 turnover ledger extra drawer prompt generated after P089 tag and closure drawers migration。
-- Files touched in P089:
-  - `web/src/pages/TurnoverLedgerPage.tsx`
+- Scope: phase 6 turnover ledger export dialog and feedback closeout prompt generated after P090 extra drawer migration。
+- Files touched in P090:
+  - `web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx`
   - `web/src/app/styles.css`
   - `docs/refactor-ui/modules/phase_6_turnover_ledger.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: P089 selected tests expected-fail with selected behavior tests passed；full `TurnoverLedgerPage.test.tsx` expected-fail with 11 behavior tests passed and 1 source-level primitive contract failure；build passed；scoped grep passed；diff/status passed。
-- Failures: expected source-level contract now remains for ExtraDrawer and ExportDialog; page still has MUI Alert/Snackbar reserved for feedback closeout.
-- Next action: 执行 `P090-phase-6-turnover-ledger-extra-drawer`。
+- Verification run: P090 selected tests expected-fail with selected behavior tests passed；full `TurnoverLedgerPage.test.tsx` expected-fail with 11 behavior tests passed and 1 source-level primitive contract failure；build passed；scoped grep passed；diff/status passed。
+- Failures: expected source-level contract now remains for ExportDialog, page Alert/Snackbar and over-broad legacy regex false positives reserved for closeout.
+- Next action: 执行 `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout`。
 
 ## Prompt Lifecycle
 
@@ -95,7 +95,7 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P090-phase-6-turnover-ledger-extra-drawer` | TurnoverLedger P089 tag/closure drawers verified；next extra drawer |
+| page batches | `in_progress` | `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout` | TurnoverLedger P090 extra drawer verified；next export dialog and feedback closeout |
 
 ## Verification Log
 
@@ -106,6 +106,11 @@
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `if rg -n '<Drawer\|<IconButton\|CloseIcon\|FormControlLabel\|<Checkbox\|<Button\|<Box\|<Stack\|<Typography\|<Paper\|<Divider' web/src/pages/TurnoverLedgerPage.tsx; then exit 1; else exit 0; fi` | passed | Page-owned drawer MUI/layout residues cleared; page Alert/Snackbar intentionally reserved for feedback closeout |
 | 2026-06-07 | `P089-phase-6-turnover-ledger-tag-and-closure-drawers` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P090-phase-6-turnover-ledger-extra-drawer` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|opens the extra drawer\|shows a business error\|disables turnover write actions"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining ExportDialog/page feedback targets |
+| 2026-06-07 | `P090-phase-6-turnover-ledger-extra-drawer` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
+| 2026-06-07 | `P090-phase-6-turnover-ledger-extra-drawer` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P090-phase-6-turnover-ledger-extra-drawer` | `if rg -n '@mui/\|Mui[A-Z]\|<Drawer\|<IconButton\|CloseIcon\|<Button\|<Chip\|<TextField\|<MenuItem\|<Alert\|<Box\|<Stack\|<Typography\|<Divider' web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx; then exit 1; else exit 0; fi` | passed | Extra drawer MUI residues cleared |
+| 2026-06-07 | `P090-phase-6-turnover-ledger-extra-drawer` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives\|renders grouped\|expands Jia Xiaohua\|confirms a manual zero-difference\|blocks cross-group selection\|shows bank-detail tags"` | expected-fail | Selected behavior tests passed; source-level contract failed as expected for remaining drawer/dialog/feedback targets |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npx vitest run TurnoverLedgerPage.test.tsx` | expected-fail | 11 behavior tests passed; 1 source-level contract failed |
 | 2026-06-07 | `P088-phase-6-turnover-ledger-grouped-table` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |

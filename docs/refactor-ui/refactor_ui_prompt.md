@@ -5054,7 +5054,7 @@ Scope: `/turnover-ledger` page-owned tag settings right drawer and closure right
 ### P090-phase-6-turnover-ledger-extra-drawer
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: `/turnover-ledger` extra info right drawer component only。
 
@@ -5076,6 +5076,50 @@ Scope: `/turnover-ledger` extra info right drawer component only.
 - Backend/API/read model/worker untouched: required。
 - Workbench internals frozen: required。
 - Expected failure allowed: yes，source-level contract remains expected-fail until P091 export dialog and feedback closeout clears remaining surfaces。
+
+#### Execution Notes
+
+- Runtime implementation changed: yes，only `web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx`。
+- CSS changed: yes，only `web/src/app/styles.css` extra drawer classes and button/notice variants。
+- Test implementation changed: no。
+- Backend/API/read model/worker changed: no。
+- Workbench internals changed: no。
+- Migrated `编辑流水补充信息` right drawer from MUI Drawer/layout/buttons/chips/text fields/select/menu items/alerts to `AppDrawer`, native form controls and `turnover-ledger-*` classes。
+- Preserved dialog role/name, subtitle, technical relation ID hiding, loading/error states, overview text, form labels, dirty/save disabled rule, save payload, `确认归并`/`撤销归并` actions and disabled rules。
+- Source-level contract now clears ExtraDrawer MUI import and missing drawer primitive target；remaining expected failures are page Alert/Snackbar, ExportDialog MUI import/dialog target, and over-broad legacy regex matching project primitive names such as `AppDrawer`。
+- Verification:
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|opens the extra drawer|shows a business error|disables turnover write actions"`: expected-fail；selected behavior tests passed and source-level contract failed as expected。
+  - `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: expected-fail；11 behavior tests passed and 1 source-level contract failed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
+  - `if rg -n '@mui/|Mui[A-Z]|<Drawer|<IconButton|CloseIcon|<Button|<Chip|<TextField|<MenuItem|<Alert|<Box|<Stack|<Typography|<Divider' web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+- Next prompt generated: `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout`。
+
+### P091-phase-6-turnover-ledger-export-dialog-feedback-closeout
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor + contract closeout`
+- Scope: `/turnover-ledger` export dialog, page-level feedback/status surfaces, and source-level migration contract false-positive cleanup only。
+
+#### Prompt
+
+```text
+Prompt ID: P091-phase-6-turnover-ledger-export-dialog-feedback-closeout
+Phase: phase_6_page_batches
+Type: extraction/refactor + contract closeout
+Scope: `/turnover-ledger` export dialog, page-level feedback/status surfaces, and source-level migration contract false-positive cleanup only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_turnover_ledger.md、docs/refactor-ui/table_layout_system.md、web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx、web/src/pages/TurnoverLedgerPage.tsx、web/src/components/common/AppDialog.tsx、web/src/test/TurnoverLedgerPage.test.tsx 和 web/src/app/styles.css。迁移 `TurnoverLedgerExportDialog.tsx` 的 MUI Dialog/layout/table/select/alert/buttons 到 `AppDialog`、native/project table/form controls and `turnover-ledger-*` classes；迁移 `TurnoverLedgerPage.tsx` page-level MUI `Alert`/`Snackbar` feedback/status surfaces 到 project/native notice/toast classes。允许只为修正迁移合约 false positive 更新 `web/src/test/TurnoverLedgerPage.test.tsx` 的 source-level no-MUI contract：禁止 `@mui/*` imports、MUI selectors and legacy MUI JSX/import names；不得把 `AppDrawer`/`AppDialog`、文件名中的 `Drawer`/`Dialog` 或项目 primitive class 当成 legacy。不得修改导出 API client、mock response shape、backend、read model、worker、权限语义或关联台内部工作区。保留用户可见行为：旧导出入口仍为 `下载表格` button；旧导出确认仍为 modal dialog `下载往来款台账`；下载范围选项和默认 family behavior 不变；预览 table accessible name `往来款导出预览`、loading/empty/error 文案、summary text、`取消`/`确认下载` buttons and disabled rules 不变；mutation feedback messages and close behavior 不变；只读和 stale read model notices remain visible and semantically announced。运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx -t "targets project primitives|reloads on category updates and downloads a previewed export|opens the extra drawer|shows a business error|disables turnover write actions"`，预期全部通过；运行 `cd web && npx vitest run TurnoverLedgerPage.test.tsx`，预期全部通过；运行 scoped grep `if rg -n '@mui/|Mui[A-Z]|DialogTitle|DialogContent|DialogActions|Snackbar|<Alert\\b|<Dialog\\b|<Button|<TextField|<MenuItem|<Table|TableHead|TableBody|TableRow|TableCell|TableContainer|<Stack|<Typography' web/src/pages/TurnoverLedgerPage.tsx web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx; then exit 1; else exit 0; fi`；运行 `cd web && npm run build`、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 TurnoverLedger cumulative MG prompt。
+```
+
+#### Review
+
+- Single slice: yes，only export dialog, page-level feedback/status surfaces and test contract false-positive cleanup。
+- Runtime implementation limited: yes，does not touch API client, backend, read model or worker。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Expected outcome: TurnoverLedger source-level contract and all behavior tests pass after this closeout。
 
 ### MG Prompt Template
 

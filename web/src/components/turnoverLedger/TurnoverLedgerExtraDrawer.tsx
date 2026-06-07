@@ -1,18 +1,6 @@
-import Alert from "@mui/material/Alert";
 import type { ChangeEvent, ReactNode } from "react";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import MenuItem from "@mui/material/MenuItem";
-import Select, { type SelectChangeEvent } from "@mui/material/Select";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 
+import AppDrawer from "../common/AppDrawer";
 import type {
   TurnoverLedgerExtra,
   TurnoverLedgerGroupedRow,
@@ -22,14 +10,10 @@ import { formatMoney, formatNullable } from "./TurnoverLedgerGroupedTable";
 
 function DetailField({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (
-    <Box>
-      <Typography variant="caption" color="text.secondary" fontWeight={800}>
-        {label}
-      </Typography>
-      <Typography variant="body2" sx={{ mt: 0.25, wordBreak: "break-word" }}>
-        {formatNullable(value)}
-      </Typography>
-    </Box>
+    <div className="turnover-ledger-extra-field">
+      <span className="turnover-ledger-extra-field__label">{label}</span>
+      <span className="turnover-ledger-extra-field__value">{formatNullable(value)}</span>
+    </div>
   );
 }
 
@@ -73,11 +57,7 @@ function flowAmount(row: TurnoverLedgerGroupedRow | null) {
 }
 
 function SectionTitle({ children }: { children: ReactNode }) {
-  return (
-    <Typography variant="subtitle2" fontWeight={900} sx={{ color: "text.primary" }}>
-      {children}
-    </Typography>
-  );
+  return <h3 className="turnover-ledger-extra-section__title">{children}</h3>;
 }
 
 export default function TurnoverLedgerExtraDrawer({
@@ -124,57 +104,59 @@ export default function TurnoverLedgerExtraDrawer({
     detail?.bankRows.map((bankRow) => bankRow.bankAccountLabel).filter(Boolean) ?? []
   );
   const primaryBankRowId = cleanText(row?.sourceBankRowId) || cleanText(row?.bankRowIds?.[0]) || cleanText(detail?.bankRows[0]?.id);
-  const handleTextChange = (field: keyof TurnoverLedgerExtra) => (event: ChangeEvent<HTMLInputElement>) => {
+  const handleTextChange = (field: keyof TurnoverLedgerExtra) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     onExtraChange({ ...extra, [field]: event.target.value });
   };
-  const handleRateTypeChange = (event: SelectChangeEvent) => {
+  const handleRateTypeChange = (event: ChangeEvent<HTMLSelectElement>) => {
     onExtraChange({ ...extra, interestRateType: event.target.value });
   };
 
   return (
-    <Drawer
-      anchor="right"
+    <AppDrawer
+      className="turnover-ledger-drawer"
+      closeLabel="关闭"
       open={open}
+      subtitle={subtitle || "未选择流水"}
+      title="编辑流水补充信息"
+      width={640}
       onClose={onClose}
-      PaperProps={{
-        "aria-label": "编辑流水补充信息",
-        role: "dialog",
-        sx: { width: { xs: "100%", sm: 640 }, maxWidth: "100vw" },
-      }}
+      footer={(
+        <div className="turnover-ledger-extra-footer">
+          <div className="turnover-ledger-extra-footer__group">
+            <button className="turnover-ledger-button" disabled={!canConfirm || mutating || Boolean(error)} onClick={onConfirm} type="button">
+              确认归并
+            </button>
+            <button className="turnover-ledger-button turnover-ledger-button--warning" disabled={!canWithdraw || mutating || Boolean(error)} onClick={onWithdraw} type="button">
+              撤销归并
+            </button>
+          </div>
+          <button className="turnover-ledger-button turnover-ledger-button--primary" disabled={!dirty || saving || !canMutateData || Boolean(error)} onClick={onSave} type="button">
+            保存补充信息
+          </button>
+        </div>
+      )}
     >
-      <Stack sx={{ height: "100%" }}>
-        <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={2} sx={{ px: 2, py: 1.5 }}>
-          <Box sx={{ minWidth: 0 }}>
-            <Typography component="h2" variant="h6" fontWeight={900}>
-              编辑流水补充信息
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, wordBreak: "break-word" }}>
-              {subtitle || "未选择流水"}
-            </Typography>
-          </Box>
-          <Button onClick={onClose}>关闭</Button>
-        </Stack>
-        <Divider />
-        <Stack spacing={2} sx={{ p: 2, overflow: "auto", flex: 1 }}>
+        <div className="turnover-ledger-drawer__content turnover-ledger-extra-drawer__content">
           {loading ? (
-            <Alert severity="info">正在加载关系详情和补充信息。</Alert>
+            <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--info" role="status">正在加载关系详情和补充信息。</div>
           ) : null}
-          {error ? <Alert severity="error">{error}</Alert> : null}
+          {error ? <div className="turnover-ledger-drawer__notice turnover-ledger-drawer__notice--danger" role="alert">{error}</div> : null}
           {relation ? (
             <>
-              <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                <Chip size="small" label={relation.statusLabel || relation.status || "-"} />
-                <Chip size="small" label={flowDirectionLabel(row)} color={flowDirectionLabel(row) === "支" ? "warning" : "success"} variant="outlined" />
-                <Chip size="small" label={formatMoney(flowAmount(row))} variant="outlined" />
+              <div className="turnover-ledger-chip-row turnover-ledger-extra-chip-row">
+                <span className="turnover-ledger-chip turnover-ledger-chip--filled">{relation.statusLabel || relation.status || "-"}</span>
+                <span className={`turnover-ledger-chip turnover-ledger-chip--outline ${flowDirectionLabel(row) === "支" ? "turnover-ledger-chip--expense" : "turnover-ledger-chip--income"}`}>
+                  {flowDirectionLabel(row)}
+                </span>
+                <span className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--amount">{formatMoney(flowAmount(row))}</span>
                 {bankAccountLabels.map((label) => (
-                  <Chip key={label} size="small" label={label} variant="outlined" />
+                  <span className="turnover-ledger-chip turnover-ledger-chip--outline" key={label}>{label}</span>
                 ))}
-              </Stack>
+              </div>
 
-              <Divider />
-              <Stack spacing={1.25}>
+              <section className="turnover-ledger-extra-section">
                 <SectionTitle>流水概览</SectionTitle>
-                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
+                <div className="turnover-ledger-extra-grid">
                   <DetailField label="对方户名" value={counterpartyName} />
                   <DetailField label="往来类别" value={familyLabel} />
                   <DetailField label="流水编号" value={primaryBankRowId} />
@@ -183,116 +165,69 @@ export default function TurnoverLedgerExtraDrawer({
                   <DetailField label="结清发生" value={formatMoney(relation.repaymentAmount)} />
                   <DetailField label="借款天数" value={relation.loanDays} />
                   <DetailField label="应还利息" value={relation.accruedInterest ? formatMoney(relation.accruedInterest) : "-"} />
-                </Box>
+                </div>
                 {(detail?.bankRows ?? []).length > 0 ? (
-                  <Stack spacing={0.75}>
+                  <div className="turnover-ledger-extra-bank-list">
                     {detail?.bankRows.map((bankRow) => (
-                      <Box
-                        key={bankRow.id}
-                        sx={{
-                          p: 1,
-                          border: "1px solid",
-                          borderColor: "divider",
-                          borderRadius: 1,
-                          backgroundColor: "background.default",
-                        }}
-                      >
-                        <Stack spacing={0.65}>
-                          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center">
-                            <Typography variant="body2" fontWeight={900}>{bankRow.id}</Typography>
-                            <Chip size="small" label={bankRow.directionLabel || "-"} />
-                            <Chip size="small" label={formatMoney(bankRow.amount)} variant="outlined" />
-                            <Chip size="small" label={bankRow.bankAccountLabel || "-"} variant="outlined" />
-                          </Stack>
-                          <Typography variant="body2" color="text.secondary">{bankRow.summary || "-"}</Typography>
-                        </Stack>
-                      </Box>
+                      <article className="turnover-ledger-extra-bank-card" key={bankRow.id}>
+                        <div className="turnover-ledger-extra-bank-card__chips">
+                          <strong>{bankRow.id}</strong>
+                          <span className="turnover-ledger-chip turnover-ledger-chip--filled">{bankRow.directionLabel || "-"}</span>
+                          <span className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--amount">{formatMoney(bankRow.amount)}</span>
+                          <span className="turnover-ledger-chip turnover-ledger-chip--outline">{bankRow.bankAccountLabel || "-"}</span>
+                        </div>
+                        <p>{bankRow.summary || "-"}</p>
+                      </article>
                     ))}
-                  </Stack>
+                  </div>
                 ) : null}
-              </Stack>
+              </section>
 
-              <Divider />
-              <Stack spacing={1.25}>
+              <section className="turnover-ledger-extra-section">
                 <SectionTitle>补充信息</SectionTitle>
-                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
-                  <FormControl size="small" fullWidth>
-                    <InputLabel id="turnover-interest-rate-type-label">利率类型</InputLabel>
-                    <Select
-                      labelId="turnover-interest-rate-type-label"
-                      label="利率类型"
-                      value={extra.interestRateType}
-                      onChange={handleRateTypeChange}
-                    >
-                      <MenuItem value="none">不计息</MenuItem>
-                      <MenuItem value="annual">年息</MenuItem>
-                      <MenuItem value="monthly">月息</MenuItem>
-                    </Select>
-                  </FormControl>
-                  <TextField
-                    size="small"
-                    label="利率值"
-                    value={extra.interestRateValue}
-                    onChange={handleTextChange("interestRateValue")}
-                  />
-                  <TextField
-                    size="small"
-                    label="已还利息额"
-                    value={extra.interestPaidAmount}
-                    onChange={handleTextChange("interestPaidAmount")}
-                  />
-                  <TextField
-                    size="small"
-                    label="还利息日期"
-                    value={extra.interestPaidDate ?? ""}
-                    onChange={handleTextChange("interestPaidDate")}
-                    placeholder="YYYY-MM-DD"
-                  />
-                  <TextField
-                    size="small"
-                    label="还利息方式"
-                    value={extra.interestPaymentMethod}
-                    onChange={handleTextChange("interestPaymentMethod")}
-                  />
-                  <TextField
-                    size="small"
-                    label="备注"
-                    value={extra.note}
-                    onChange={handleTextChange("note")}
-                    multiline
-                    minRows={2}
-                    sx={{ gridColumn: { sm: "1 / -1" } }}
-                  />
-                </Box>
-              </Stack>
+                <div className="turnover-ledger-extra-form">
+                  <label className="turnover-ledger-extra-control">
+                    <span>利率类型</span>
+                    <select value={extra.interestRateType} onChange={handleRateTypeChange}>
+                      <option value="none">不计息</option>
+                      <option value="annual">年息</option>
+                      <option value="monthly">月息</option>
+                    </select>
+                  </label>
+                  <label className="turnover-ledger-extra-control">
+                    <span>利率值</span>
+                    <input value={extra.interestRateValue} onChange={handleTextChange("interestRateValue")} type="text" />
+                  </label>
+                  <label className="turnover-ledger-extra-control">
+                    <span>已还利息额</span>
+                    <input value={extra.interestPaidAmount} onChange={handleTextChange("interestPaidAmount")} type="text" />
+                  </label>
+                  <label className="turnover-ledger-extra-control">
+                    <span>还利息日期</span>
+                    <input placeholder="YYYY-MM-DD" value={extra.interestPaidDate ?? ""} onChange={handleTextChange("interestPaidDate")} type="text" />
+                  </label>
+                  <label className="turnover-ledger-extra-control">
+                    <span>还利息方式</span>
+                    <input value={extra.interestPaymentMethod} onChange={handleTextChange("interestPaymentMethod")} type="text" />
+                  </label>
+                  <label className="turnover-ledger-extra-control turnover-ledger-extra-control--wide">
+                    <span>备注</span>
+                    <textarea rows={2} value={extra.note} onChange={handleTextChange("note")} />
+                  </label>
+                </div>
+              </section>
 
-              <Divider />
-              <Stack spacing={1.25}>
+              <section className="turnover-ledger-extra-section">
                 <SectionTitle>操作记录 / 关系操作</SectionTitle>
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  <Chip size="small" variant="outlined" label={`审计记录 ${detail?.auditHistory.length ?? 0} 条`} />
-                  {extra.updatedAt ? <Chip size="small" variant="outlined" label={`更新于 ${extra.updatedAt}`} /> : null}
-                  {extra.updatedBy ? <Chip size="small" variant="outlined" label={`更新人 ${extra.updatedBy}`} /> : null}
-                </Stack>
-              </Stack>
+                <div className="turnover-ledger-chip-row turnover-ledger-extra-chip-row">
+                  <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`审计记录 ${detail?.auditHistory.length ?? 0} 条`}</span>
+                  {extra.updatedAt ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`更新于 ${extra.updatedAt}`}</span> : null}
+                  {extra.updatedBy ? <span className="turnover-ledger-chip turnover-ledger-chip--outline">{`更新人 ${extra.updatedBy}`}</span> : null}
+                </div>
+              </section>
             </>
           ) : null}
-        </Stack>
-        <Divider />
-        <Stack direction="row" spacing={1} justifyContent="space-between" useFlexGap flexWrap="wrap" sx={{ p: 2 }}>
-          <Stack direction="row" spacing={1}>
-            <Button variant="outlined" disabled={!canConfirm || mutating || Boolean(error)} onClick={onConfirm}>
-              确认归并
-            </Button>
-            <Button color="warning" variant="outlined" disabled={!canWithdraw || mutating || Boolean(error)} onClick={onWithdraw}>
-              撤销归并
-            </Button>
-          </Stack>
-          <Button variant="contained" disabled={!dirty || saving || !canMutateData || Boolean(error)} onClick={onSave}>
-            保存补充信息
-          </Button>
-        </Stack>
-      </Stack>
-    </Drawer>
+        </div>
+    </AppDrawer>
   );
 }
