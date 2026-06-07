@@ -4465,7 +4465,7 @@ Scope: transaction region in `NoOaBankBatchPage.tsx` only: region `流水`, batc
 ### P078-phase-6-no-oa-bank-batches-overlays-feedback
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: final `/no-oa-bank-batches` UI migration slice: tag-management right drawer, withdraw dialog, snackbar/feedback, remaining MUI page wrapper/layout imports in `NoOaBankBatchPage.tsx`, plus necessary styles/tests. This is the final runtime cleanup before MG-P078.
 
@@ -4488,6 +4488,47 @@ Scope: final `/no-oa-bank-batches` UI migration slice: tag-management right draw
 - Workbench internals frozen: required。
 - Expected failure allowed: no，page source-level contract should pass after P078。
 - Next prompt: MG-P078 cumulative merge gate only after P078 is verified。
+
+#### Execution Notes
+
+- Status: verified.
+- Changed `web/src/pages/NoOaBankBatchPage.tsx` and `web/src/app/styles.css`.
+- Removed all direct `@mui/*` imports and legacy MUI source surfaces from `NoOaBankBatchPage.tsx`.
+- Replaced final MUI wrapper/layout, tag drawer, withdraw dialog and snackbar surfaces with native/project markup, `AppDialog`, native checkboxes/textarea and project CSS classes.
+- Preserved tag-management right-side shape, labels, version display, inactive warning, group indeterminate semantics, child labels, open/refetch/save/live update behavior, withdraw reason payload, feedback messages and current page shell/filter/rail/transaction behavior.
+- Did not modify API client, backend, read model, worker or workbench internals.
+- Verification:
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: passed; 20 tests passed.
+  - `cd web && npx vitest run NoOaBankBatchApi.test.ts`: passed; 7 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P078 implementation files changed before docs.
+
+### MG-P078-phase-6-no-oa-bank-batches
+
+- Phase: `phase_6_page_batches`
+- Status: `mg_drafted`
+- Type: `cumulative merge gate`
+- Scope: completed `/no-oa-bank-batches` UI migration slices P073-P078 only.
+
+#### Prompt
+
+```text
+Prompt ID: MG-P078-phase-6-no-oa-bank-batches
+Phase: phase_6_page_batches
+Type: cumulative merge gate
+Scope: completed `/no-oa-bank-batches` UI migration slices P073-P078 only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx、web/src/test/NoOaBankBatchApi.test.ts 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 P073-P078 已记录且 P078 后 `NoOaBankBatchPage.tsx` 无 direct MUI import/source residue。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts`；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。确认 scope 只包含 `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`、`docs/refactor-ui/refactor_ui_prompt.md`、`docs/refactor-ui/refactor_ui_state.md`、`web/src/app/styles.css`、`web/src/pages/NoOaBankBatchPage.tsx` 及必要 test docs；禁止 `git add .` 和 `git add -A`，只允许精确 git add。MG 通过后提交并 push 到 `origin/refactor-ui`，再更新 state/prompt/module docs 的 MG execution notes 和 Push Log，标记 MG verified，并从 `refactor-ui` 分支生成下一条 Micro-JIT prompt。
+```
+
+#### Review
+
+- Cumulative boundary reached: yes，P073-P078 completed for `/no-oa-bank-batches`。
+- Scope excludes backend/API/read model/worker and workbench internals: required。
+- Exact staging required: yes。
+- Push required: yes，push to `origin refactor-ui`。
 
 ### MG Prompt Template
 

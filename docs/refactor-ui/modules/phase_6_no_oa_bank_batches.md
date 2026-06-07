@@ -293,3 +293,39 @@ Scope: final `/no-oa-bank-batches` UI migration slice: tag-management right draw
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx、web/src/components/common/AppDrawer.tsx、web/src/components/common/AppDialog.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：迁移标签管理右侧抽屉、撤回确认弹窗、snackbar/feedback 和剩余页面 MUI wrapper/layout，移除 `NoOaBankBatchPage.tsx` 所有 `@mui/*` imports and MUI legacy surfaces (`Alert`, `Box`, `Button`, `Checkbox`, `Dialog*`, `Divider`, `Drawer`, `FormControlLabel`, `IconButton`, `Paper`, `Snackbar`, `Stack`, `TextField`, `Typography`, `CloseIcon`)。使用 `AppDrawer`/`AppDialog` 或 project/native equivalents、native form controls、project buttons/notices/classes and lucide close icon as needed。必须保留 tag drawer 右侧抽屉形态、dialog accessible shape、labels `免OA流水标签管理`/`关闭免OA流水标签管理`/`全选`/`清空`/`保存`、版本显示、inactive selected warning、group checkbox indeterminate semantics、child checkbox labels, tag drawer open/refetch/save payload/live update behavior, withdraw warning copy、撤回原因 field、取消/确认撤回 disabled/mutating behavior and payload, snackbar messages and close behavior, top-level page error/loading/empty behavior, current page shell/filter/rail/transaction behavior。不得修改 API client、mock data shape、backend、read model、worker or reconciliation workbench internals。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx` 必须全部通过；运行 `cd web && npx vitest run NoOaBankBatchApi.test.ts`；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 MG-P078 cumulative merge gate prompt。
 ```
+
+## P078 Execution Notes
+
+- Status: verified.
+- Files changed:
+  - `web/src/pages/NoOaBankBatchPage.tsx`
+  - `web/src/app/styles.css`
+- Behavior preserved:
+  - Tag management remains a right-side dialog surface with title `免OA流水标签管理`, close label `关闭免OA流水标签管理`, version display, `全选`/`清空`/`保存`, inactive selected warning, group indeterminate semantics and child checkbox labels.
+  - Tag drawer open/refetch/save payload and live update behavior remain covered by tests.
+  - Withdraw confirmation keeps title `撤回批次`, warning copy, `撤回原因`, `取消`, `确认撤回`, disabled/mutating behavior and withdraw payload.
+  - Feedback messages keep success/warning/error text, close behavior and 3s auto-hide behavior.
+  - Page shell/filter/rail/transaction behavior remains covered by the full page test.
+- Implementation:
+  - Removed all direct `@mui/*` imports and legacy MUI source surfaces from `NoOaBankBatchPage.tsx`.
+  - Replaced the final MUI wrapper/layout, tag drawer, withdraw dialog and snackbar surfaces with native/project markup, `AppDialog`, native checkboxes/textarea and project CSS classes.
+  - Renamed `snackbar` state to `feedback` so source-level no-MUI contract does not treat business feedback state as a MUI `Snackbar` residue.
+  - Did not modify API client, mock data shape, backend, read model, worker or workbench internals.
+- Verification:
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx`: passed; 20 tests passed.
+  - `cd web && npx vitest run NoOaBankBatchApi.test.ts`: passed; 7 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; only P078 implementation files changed before docs.
+
+## MG-P078 Prompt Draft
+
+```text
+Prompt ID: MG-P078-phase-6-no-oa-bank-batches
+Phase: phase_6_page_batches
+Type: cumulative merge gate
+Scope: completed `/no-oa-bank-batches` UI migration slices P073-P078 only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md、docs/refactor-ui/table_layout_system.md、web/src/pages/NoOaBankBatchPage.tsx、web/src/test/NoOaBankBatchPage.test.tsx、web/src/test/NoOaBankBatchApi.test.ts 和当前 git status/diff。检查当前分支必须是 `refactor-ui`。确认 untracked files、diff scope、测试结果和文档状态；确认 P073-P078 已记录且 P078 后 `NoOaBankBatchPage.tsx` 无 direct MUI import/source residue。运行 `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts`；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 no-MUI grep：`if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。确认 scope 只包含 `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`、`docs/refactor-ui/refactor_ui_prompt.md`、`docs/refactor-ui/refactor_ui_state.md`、`web/src/app/styles.css`、`web/src/pages/NoOaBankBatchPage.tsx` 及必要 test docs；禁止 `git add .` 和 `git add -A`，只允许精确 git add。MG 通过后提交并 push 到 `origin/refactor-ui`，再更新 state/prompt/module docs 的 MG execution notes 和 Push Log，标记 MG verified，并从 `refactor-ui` 分支生成下一条 Micro-JIT prompt。
+```

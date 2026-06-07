@@ -1,25 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { RefreshCw } from "lucide-react";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import Divider from "@mui/material/Divider";
-import Drawer from "@mui/material/Drawer";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Snackbar from "@mui/material/Snackbar";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
-import CloseIcon from "@mui/icons-material/Close";
 
+import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import {
@@ -261,6 +244,35 @@ type LabelRailProps = {
   onSelect: (key: string) => void;
 };
 
+type NativeCheckboxProps = {
+  ariaLabel?: string;
+  checked: boolean;
+  className?: string;
+  indeterminate?: boolean;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+};
+
+function NativeCheckbox({ ariaLabel, checked, className, indeterminate = false, onChange }: NativeCheckboxProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = indeterminate;
+    }
+  }, [indeterminate]);
+
+  return (
+    <input
+      aria-label={ariaLabel}
+      checked={checked}
+      className={className}
+      onChange={onChange}
+      ref={inputRef}
+      type="checkbox"
+    />
+  );
+}
+
 function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey, onSelect }: LabelRailProps) {
   return (
     <section aria-label={ariaLabel} className="no-oa-bank-batches-rail" role="region">
@@ -334,7 +346,7 @@ export default function NoOaBankBatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<NoOaBankBatch | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
-  const [snackbar, setSnackbar] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ severity: "success" | "warning" | "error"; message: string } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const detailTableWrapRef = usePageScrollSession<HTMLDivElement>({
     pageKey: "no-oa-bank-batch",
@@ -356,7 +368,7 @@ export default function NoOaBankBatchPage() {
       })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
-          setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "免OA标签配置加载失败" });
+          setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "免OA标签配置加载失败" });
         }
       })
       .finally(() => setTagLoading(false));
@@ -623,6 +635,14 @@ export default function NoOaBankBatchPage() {
   useActivePageEvent(TAG_SYNC_EVENT, handleCategoryUpdated);
 
   useEffect(() => {
+    if (!feedback) {
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => setFeedback(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [feedback]);
+
+  useEffect(() => {
     let channel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
       channel = new BroadcastChannel(TAG_SYNC_EVENT);
@@ -643,7 +663,7 @@ export default function NoOaBankBatchPage() {
     clearSelection();
     setDetails({});
     setDetailErrors({});
-    setSnackbar({ severity: "success", message });
+    setFeedback({ severity: "success", message });
     loadBatches();
   };
 
@@ -658,7 +678,7 @@ export default function NoOaBankBatchPage() {
         return next;
       }
       if (selectedAccountForSubmit && selectedAccountForSubmit !== row.accountKey) {
-        setSnackbar({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
+        setFeedback({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
         return current;
       }
       setSelectedAccountForSubmit(row.accountKey);
@@ -684,7 +704,7 @@ export default function NoOaBankBatchPage() {
       return;
     }
     if (selectedAccountForSubmit && selectedAccountForSubmit !== account) {
-      setSnackbar({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
+      setFeedback({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
       return;
     }
     setSelectedAccountForSubmit(account);
@@ -703,7 +723,7 @@ export default function NoOaBankBatchPage() {
       });
       handleMutationComplete("选中流水已提交", result);
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "提交选中流水失败" });
+      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "提交选中流水失败" });
     } finally {
       setMutating(false);
     }
@@ -722,7 +742,7 @@ export default function NoOaBankBatchPage() {
       });
       handleMutationComplete("内部往来批次已提交", result);
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "提交内部往来批次失败" });
+      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "提交内部往来批次失败" });
     } finally {
       setMutating(false);
     }
@@ -743,7 +763,7 @@ export default function NoOaBankBatchPage() {
       setWithdrawReason("");
       handleMutationComplete("批次已撤回", result);
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "撤回批次失败" });
+      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "撤回批次失败" });
     } finally {
       setMutating(false);
     }
@@ -761,10 +781,10 @@ export default function NoOaBankBatchPage() {
       setTagDrawerOpen(false);
       setDetails({});
       setDetailErrors({});
-      setSnackbar({ severity: "success", message: "免OA流水标签范围已保存" });
+      setFeedback({ severity: "success", message: "免OA流水标签范围已保存" });
       loadBatches();
     } catch (caught) {
-      setSnackbar({ severity: "error", message: caught instanceof Error ? caught.message : "保存免OA标签范围失败" });
+      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "保存免OA标签范围失败" });
     } finally {
       setMutating(false);
     }
@@ -879,14 +899,7 @@ export default function NoOaBankBatchPage() {
 
       {error ? <StatePanel tone="error" title={error} /> : null}
 
-      <Box
-        sx={{
-          display: "grid",
-          gap: 1.5,
-          gridTemplateColumns: { xs: "1fr", lg: "18% 18% minmax(0, 1fr)" },
-          alignItems: "start",
-        }}
-      >
+      <div className="no-oa-bank-batches-layout">
         <LabelRail
           ariaLabel="主标签"
           emptyTitle="请先在标签管理中选择免OA标签"
@@ -1125,113 +1138,168 @@ export default function NoOaBankBatchPage() {
             }) : null}
           </div>
         </section>
-      </Box>
+      </div>
 
-      <Drawer
-        anchor="right"
-        open={tagDrawerOpen}
-        onClose={() => setTagDrawerOpen(false)}
-        PaperProps={{ sx: { width: { xs: "100%", sm: "520px" }, maxWidth: "100vw" }, role: "dialog", "aria-label": "免OA流水标签管理" }}
-      >
-        <Stack spacing={0} sx={{ height: "100%" }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, py: 1.5 }}>
-            <Box>
-              <Typography component="h2" variant="h6" fontWeight={900}>免OA流水标签管理</Typography>
-              <Typography color="text.secondary" variant="caption">版本 {tagSelection.version}</Typography>
-            </Box>
-            <IconButton aria-label="关闭免OA流水标签管理" onClick={() => setTagDrawerOpen(false)}><CloseIcon /></IconButton>
-          </Stack>
-          <Divider />
-          <Stack direction="row" spacing={1} sx={{ p: 2 }}>
-            <Button onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} size="small" variant="outlined">全选</Button>
-            <Button onClick={() => setDraftSelectedTagCodes(new Set())} size="small" variant="outlined">清空</Button>
-            <Button disabled={mutating} onClick={saveTagSelection} size="small" variant="contained">保存</Button>
-          </Stack>
-          {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
-            <Alert severity="warning" sx={{ mx: 2, mb: 1 }}>
-              已停用标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
-            </Alert>
-          ) : null}
-          <Stack divider={<Divider flexItem />} sx={{ overflow: "auto" }}>
-            {drawerGroups.map((group) => {
-              const codes = group.tags.map((tag) => tag.code);
-              const checkedCount = codes.filter((code) => draftSelectedTagCodes.has(code)).length;
-              const allChecked = checkedCount === codes.length && codes.length > 0;
-              return (
-                <Box key={group.primaryLabel} sx={{ p: 2 }}>
-                  <FormControlLabel
-                    control={(
-                      <Checkbox
-                        checked={allChecked}
-                        indeterminate={checkedCount > 0 && !allChecked}
-                        onChange={(event) => {
-                          setDraftSelectedTagCodes((current) => {
-                            const next = new Set(current);
-                            codes.forEach((code) => {
-                              if (event.target.checked) {
-                                next.add(code);
-                              } else {
-                                next.delete(code);
-                              }
+      {tagDrawerOpen ? (
+        <div className="no-oa-bank-batches-drawer-shell">
+          <button
+            aria-label="关闭免OA流水标签管理"
+            className="no-oa-bank-batches-drawer-shell__backdrop"
+            onClick={() => setTagDrawerOpen(false)}
+            type="button"
+          />
+          <aside aria-label="免OA流水标签管理" className="no-oa-bank-batches-drawer" role="dialog">
+            <header className="no-oa-bank-batches-drawer__header">
+              <div>
+                <h2 className="no-oa-bank-batches-drawer__title">免OA流水标签管理</h2>
+                <p className="no-oa-bank-batches-drawer__subtitle">版本 {tagSelection.version}</p>
+              </div>
+              <button
+                aria-label="关闭免OA流水标签管理"
+                className="no-oa-bank-batches-drawer__close"
+                onClick={() => setTagDrawerOpen(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+            <div className="no-oa-bank-batches-drawer__body">
+              {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
+                <div className="no-oa-bank-batches-notice no-oa-bank-batches-notice--warning" role="alert">
+                  已停用标签不再生效：{tagSelection.inactiveSelectedTagCodes.join("、")}。保存后会清理这些引用。
+                </div>
+              ) : null}
+              <div className="no-oa-bank-batches-drawer__groups">
+                {drawerGroups.map((group) => {
+                  const codes = group.tags.map((tag) => tag.code);
+                  const checkedCount = codes.filter((code) => draftSelectedTagCodes.has(code)).length;
+                  const allChecked = checkedCount === codes.length && codes.length > 0;
+                  return (
+                    <section className="no-oa-bank-batches-drawer__group" key={group.primaryLabel}>
+                      <label className="no-oa-bank-batches-drawer__main-check">
+                        <NativeCheckbox
+                          checked={allChecked}
+                          className="no-oa-bank-batches-checkbox"
+                          indeterminate={checkedCount > 0 && !allChecked}
+                          onChange={(event) => {
+                            setDraftSelectedTagCodes((current) => {
+                              const next = new Set(current);
+                              codes.forEach((code) => {
+                                if (event.target.checked) {
+                                  next.add(code);
+                                } else {
+                                  next.delete(code);
+                                }
+                              });
+                              return next;
                             });
-                            return next;
-                          });
-                        }}
-                      />
-                    )}
-                    label={<Typography fontWeight={900}>{group.primaryLabel}</Typography>}
-                  />
-                  <Stack sx={{ pl: 4 }}>
-                    {group.tags.map((tag) => {
-                      const node = { code: tag.code, label: tag.label, primaryLabel: tagPrimaryLabel(tag), subLabel: tagSubLabel(tag) };
-                      return (
-                        <FormControlLabel
-                          key={tag.code}
-                          control={(
-                            <Checkbox
-                              checked={draftSelectedTagCodes.has(tag.code)}
-                              onChange={(event) => {
-                                setDraftSelectedTagCodes((current) => {
-                                  const next = new Set(current);
-                                  if (event.target.checked) {
-                                    next.add(tag.code);
-                                  } else {
-                                    next.delete(tag.code);
-                                  }
-                                  return next;
-                                });
-                              }}
-                            />
-                          )}
-                          label={node.subLabel ? tagDisplayLabel(node) : SELF_SUB_LABEL}
+                          }}
                         />
-                      );
-                    })}
-                  </Stack>
-                </Box>
-              );
-            })}
-          </Stack>
-        </Stack>
-      </Drawer>
+                        <span>{group.primaryLabel}</span>
+                      </label>
+                      <div className="no-oa-bank-batches-drawer__children">
+                        {group.tags.map((tag) => {
+                          const node = { code: tag.code, label: tag.label, primaryLabel: tagPrimaryLabel(tag), subLabel: tagSubLabel(tag) };
+                          return (
+                            <label className="no-oa-bank-batches-drawer__child-check" key={tag.code}>
+                              <NativeCheckbox
+                                checked={draftSelectedTagCodes.has(tag.code)}
+                                className="no-oa-bank-batches-checkbox"
+                                onChange={(event) => {
+                                  setDraftSelectedTagCodes((current) => {
+                                    const next = new Set(current);
+                                    if (event.target.checked) {
+                                      next.add(tag.code);
+                                    } else {
+                                      next.delete(tag.code);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <span>{node.subLabel ? tagDisplayLabel(node) : SELF_SUB_LABEL}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+            <footer className="no-oa-bank-batches-drawer__footer">
+              <div className="no-oa-bank-batches-drawer__actions">
+                <button
+                  className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+                  onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))}
+                  type="button"
+                >
+                  全选
+                </button>
+                <button
+                  className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+                  onClick={() => setDraftSelectedTagCodes(new Set())}
+                  type="button"
+                >
+                  清空
+                </button>
+                <button
+                  className="no-oa-bank-batches-button no-oa-bank-batches-button--compact no-oa-bank-batches-button--primary"
+                  disabled={mutating}
+                  onClick={saveTagSelection}
+                  type="button"
+                >
+                  保存
+                </button>
+              </div>
+            </footer>
+          </aside>
+        </div>
+      ) : null}
 
-      <Dialog fullWidth maxWidth="xs" onClose={() => setWithdrawTarget(null)} open={Boolean(withdrawTarget)}>
-        <DialogTitle>撤回批次</DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.5} sx={{ pt: 1 }}>
-            <Alert severity="warning">撤回后会取消关联台闭环关系，相关流水回到未配对区域。</Alert>
-            <TextField autoFocus label="撤回原因" multiline minRows={3} onChange={(event) => setWithdrawReason(event.target.value)} value={withdrawReason} />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setWithdrawTarget(null)}>取消</Button>
-          <Button disabled={!withdrawReason.trim() || mutating} onClick={handleConfirmWithdraw} variant="contained">确认撤回</Button>
-        </DialogActions>
-      </Dialog>
+      <AppDialog
+        maxWidth="xs"
+        onClose={() => setWithdrawTarget(null)}
+        open={Boolean(withdrawTarget)}
+        title="撤回批次"
+        actions={(
+          <>
+            <button className="no-oa-bank-batches-button" onClick={() => setWithdrawTarget(null)} type="button">
+              取消
+            </button>
+            <button
+              className="no-oa-bank-batches-button no-oa-bank-batches-button--primary"
+              disabled={!withdrawReason.trim() || mutating}
+              onClick={handleConfirmWithdraw}
+              type="button"
+            >
+              确认撤回
+            </button>
+          </>
+        )}
+      >
+        <div className="no-oa-bank-batches-dialog">
+          <div className="no-oa-bank-batches-notice no-oa-bank-batches-notice--warning" role="alert">
+            撤回后会取消关联台闭环关系，相关流水回到未配对区域。
+          </div>
+          <label className="no-oa-bank-batches-dialog__field">
+            <span>撤回原因</span>
+            <textarea
+              autoFocus
+              onChange={(event) => setWithdrawReason(event.target.value)}
+              rows={3}
+              value={withdrawReason}
+            />
+          </label>
+        </div>
+      </AppDialog>
 
-      <Snackbar autoHideDuration={3000} onClose={() => setSnackbar(null)} open={Boolean(snackbar)}>
-        {snackbar ? <Alert onClose={() => setSnackbar(null)} severity={snackbar.severity} variant="filled">{snackbar.message}</Alert> : undefined}
-      </Snackbar>
+      {feedback ? (
+        <div className={cx("no-oa-bank-batches-toast", `no-oa-bank-batches-toast--${feedback.severity}`)} role="alert">
+          <span>{feedback.message}</span>
+          <button aria-label="关闭提示" onClick={() => setFeedback(null)} type="button">×</button>
+        </div>
+      ) : null}
     </PageScaffold>
   );
 }

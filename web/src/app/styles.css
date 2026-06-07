@@ -3339,6 +3339,13 @@ textarea {
   line-height: 1.3;
 }
 
+.no-oa-bank-batches-layout {
+  display: grid;
+  align-items: start;
+  gap: var(--fp-space-3);
+  grid-template-columns: 18% 18% minmax(0, 1fr);
+}
+
 .no-oa-bank-batches-rail {
   overflow: hidden;
   border: 1px solid var(--fp-border);
@@ -3720,6 +3727,236 @@ textarea {
   font-weight: 700;
 }
 
+.no-oa-bank-batches-drawer-shell {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.no-oa-bank-batches-drawer-shell__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: color-mix(in srgb, var(--fp-text-primary) 28%, transparent);
+  cursor: pointer;
+}
+
+.no-oa-bank-batches-drawer {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(520px, 100vw);
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border-left: 1px solid var(--fp-border);
+  background: var(--fp-surface);
+  box-shadow: var(--fp-shadow-lg);
+}
+
+.no-oa-bank-batches-drawer__header,
+.no-oa-bank-batches-drawer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+  border-bottom: 1px solid var(--fp-border);
+  padding: var(--fp-space-3);
+}
+
+.no-oa-bank-batches-drawer__footer {
+  border-top: 1px solid var(--fp-border);
+  border-bottom: 0;
+}
+
+.no-oa-bank-batches-drawer__title,
+.no-oa-bank-batches-drawer__subtitle {
+  margin: 0;
+}
+
+.no-oa-bank-batches-drawer__title {
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-title);
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.no-oa-bank-batches-drawer__subtitle {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.no-oa-bank-batches-drawer__close {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.no-oa-bank-batches-drawer__close:hover,
+.no-oa-bank-batches-drawer__close:focus-visible {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary-hover);
+  outline: none;
+}
+
+.no-oa-bank-batches-drawer__body {
+  display: grid;
+  gap: var(--fp-space-3);
+  overflow: auto;
+  padding: var(--fp-space-3);
+}
+
+.no-oa-bank-batches-drawer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+  width: 100%;
+}
+
+.no-oa-bank-batches-drawer__groups {
+  display: grid;
+}
+
+.no-oa-bank-batches-drawer__group {
+  display: grid;
+  gap: var(--fp-space-2);
+  border-bottom: 1px solid var(--fp-border);
+  padding: var(--fp-space-3) 0;
+}
+
+.no-oa-bank-batches-drawer__group:first-child {
+  padding-top: 0;
+}
+
+.no-oa-bank-batches-drawer__group:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.no-oa-bank-batches-drawer__main-check,
+.no-oa-bank-batches-drawer__child-check {
+  display: flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+  color: var(--fp-text-primary);
+  cursor: pointer;
+  font-size: var(--fp-text-body);
+  line-height: 1.35;
+}
+
+.no-oa-bank-batches-drawer__main-check {
+  font-weight: 900;
+}
+
+.no-oa-bank-batches-drawer__child-check {
+  font-weight: 700;
+}
+
+.no-oa-bank-batches-drawer__children {
+  display: grid;
+  gap: var(--fp-space-2);
+  padding-left: var(--fp-space-6);
+}
+
+.no-oa-bank-batches-dialog {
+  display: grid;
+  gap: var(--fp-space-3);
+}
+
+.no-oa-bank-batches-dialog__field {
+  display: grid;
+  gap: var(--fp-space-1);
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 850;
+}
+
+.no-oa-bank-batches-dialog__field textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font: inherit;
+  font-size: var(--fp-text-body);
+  font-weight: 650;
+  line-height: 1.45;
+  min-height: 96px;
+  outline: none;
+  padding: var(--fp-space-2) var(--fp-space-3);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.no-oa-bank-batches-dialog__field textarea:focus-visible {
+  border-color: var(--fp-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.no-oa-bank-batches-toast {
+  position: fixed;
+  z-index: 1300;
+  right: var(--fp-space-6);
+  bottom: var(--fp-space-6);
+  display: flex;
+  max-width: min(420px, calc(100vw - var(--fp-space-6) * 2));
+  align-items: center;
+  gap: var(--fp-space-3);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-text-primary);
+  box-shadow: var(--fp-shadow-lg);
+  color: var(--fp-surface);
+  font-size: var(--fp-text-body);
+  font-weight: 800;
+  line-height: 1.4;
+  padding: var(--fp-space-3);
+}
+
+.no-oa-bank-batches-toast--success {
+  background: var(--fp-success);
+}
+
+.no-oa-bank-batches-toast--warning {
+  background: var(--fp-warning);
+}
+
+.no-oa-bank-batches-toast--error {
+  background: var(--fp-danger);
+}
+
+.no-oa-bank-batches-toast button {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--fp-surface) 45%, transparent);
+  border-radius: var(--fp-radius-xs);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+}
+
 @media (max-width: 960px) {
   .no-oa-bank-batches-actions,
   .no-oa-bank-batches-filter,
@@ -3733,6 +3970,10 @@ textarea {
     flex: 1 1 0;
   }
 
+  .no-oa-bank-batches-layout {
+    grid-template-columns: 1fr;
+  }
+
   .no-oa-bank-batches-transactions__header,
   .no-oa-bank-batches-batch__header {
     flex-direction: column;
@@ -3741,6 +3982,11 @@ textarea {
 
   .no-oa-bank-batches-transactions__list {
     max-height: none;
+  }
+
+  .no-oa-bank-batches-toast {
+    right: var(--fp-space-3);
+    bottom: var(--fp-space-3);
   }
 }
 
