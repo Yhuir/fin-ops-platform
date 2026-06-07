@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P055-phase-6-input-invoice-usage-page-shell-toolbar`
+- Current Prompt ID: `P056-phase-6-input-invoice-usage-main-table-and-expandable-cell`
 - Current MG ID: `MG-P052-phase-6-pending-invoices`
 
 ## Global Invariants
@@ -19,7 +19,7 @@
 | API contract untouched | yes | 未修改 AppHealth API client contract 或 backend |
 | Read model / worker untouched | yes | 未修改 read model、worker 或 queue |
 | Reconciliation workbench internals frozen | yes | 当前未改 `ReconciliationWorkbenchPage` 或 `web/src/components/workbench/*` |
-| Non-workbench MUI additions | none | InputInvoiceUsage characterization tests 未修改 runtime UI；P055 将清理 page shell MUI |
+| Non-workbench MUI additions | none | InputInvoiceUsage page shell now has no page-level MUI; P056 will clear main table/expandable cell |
 | User-visible actions preserved | documented | `baseline_inventory.md`、`module_inventory.md` 已要求逐页检查 |
 | Behavior equivalence | documented | 旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗 |
 | HeroUI MCP active | yes | 当前会话已调用 HeroUI MCP quick start、theming、Table/Drawer/Modal docs |
@@ -54,16 +54,16 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 input invoice usage page shell/toolbar prompt generated after P054 characterization tests。
+- Scope: phase 6 input invoice usage main table/expandable cell prompt generated after P055 page shell migration。
 - Files touched:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_input_invoice_usage.md`
-  - `web/src/test/InputInvoiceUsagePage.test.tsx`
-  - `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`
-- Verification run: P054 target tests expected-fail with 19 passed and 2 intended source-level failures。
-- Failures: expected source-level no-MUI failures remain for unimplemented page/table/filter/drawer migration。
-- Next action: 执行 `P055-phase-6-input-invoice-usage-page-shell-toolbar`。
+  - `web/src/pages/InputInvoiceUsagePage.tsx`
+  - `web/src/app/styles.css`
+- Verification run: P055 focused tests expected-fail, full module tests expected-fail, page grep passed, build passed。
+- Failures: expected source-level no-MUI failures remain for unimplemented table/filter/drawer migration。
+- Next action: 执行 `P056-phase-6-input-invoice-usage-main-table-and-expandable-cell`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +95,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `P055-phase-6-input-invoice-usage-page-shell-toolbar` | InputInvoiceUsage P054 characterization tests verified as expected-fail；next page shell toolbar |
+| page batches | `in_progress` | `P056-phase-6-input-invoice-usage-main-table-and-expandable-cell` | InputInvoiceUsage P055 page shell verified as expected-fail；next main table and expandable cell |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P055-phase-6-input-invoice-usage-page-shell-toolbar` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives\|uses a standard empty state\|pauses read model retry\|adds sidebar route\|drops legacy column filters\|loads export preview"` | expected-fail | Five behavior tests passed; only intended source-level table/filter/drawer failure remains |
+| 2026-06-07 | `P055-phase-6-input-invoice-usage-page-shell-toolbar` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx` | expected-fail | 19 passed, 2 intended source-level failures; `InputInvoiceUsagePage.tsx` cleared from failure lists |
+| 2026-06-07 | `P055-phase-6-input-invoice-usage-page-shell-toolbar` | `if rg -n '@mui/\|Mui[A-Z]\|FileDownloadOutlinedIcon\|RefreshOutlinedIcon\|Skeleton\|TextField' web/src/pages/InputInvoiceUsagePage.tsx; then exit 1; else exit 0; fi` | passed | Page shell has no MUI/icon/TextField residue |
+| 2026-06-07 | `P055-phase-6-input-invoice-usage-page-shell-toolbar` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `P055-phase-6-input-invoice-usage-page-shell-toolbar` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `P055-phase-6-input-invoice-usage-page-shell-toolbar` | `git status --short --branch` | passed | Only P055 page/style/docs files changed |
 | 2026-06-07 | `P054-phase-6-input-invoice-usage-characterization-tests` | `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx` | expected-fail | 19 passed, 2 intended source-level failures listing remaining MUI imports/selectors and missing primitive targets |
 | 2026-06-07 | `P054-phase-6-input-invoice-usage-characterization-tests` | `git diff --check` | passed | 无 whitespace error |
 | 2026-06-07 | `P054-phase-6-input-invoice-usage-characterization-tests` | `git status --short --branch` | passed | Only P054 tests and docs files changed |

@@ -1,14 +1,8 @@
-import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
-import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Skeleton from "@mui/material/Skeleton";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
+import { Download, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import InputInvoiceUsageExportDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageExportDrawer";
@@ -308,71 +302,81 @@ export default function InputInvoiceUsagePage() {
   const downloadExport = useCallback(() => downloadInputInvoiceUsageExport(exportRequest), [exportRequest]);
 
   const actions = useMemo(() => (
-    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-      <Button
-        variant="outlined"
+    <PageToolbar className="input-invoice-usage-actions">
+      <button
+        className="input-invoice-usage-button"
         onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "oaReverse" }))}
+        type="button"
       >
         以发票反提 OA
-      </Button>
-      <Button
-        variant="outlined"
+      </button>
+      <button
+        className="input-invoice-usage-button"
         onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
+        type="button"
       >
         发票与支付状态规则设置
-      </Button>
-      <Button
-        startIcon={<FileDownloadOutlinedIcon />}
-        variant="outlined"
+      </button>
+      <button
+        className="input-invoice-usage-button"
         onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
+        type="button"
       >
+        <Download aria-hidden="true" size={16} />
         筛选内容导出
-      </Button>
-      <Button
-        startIcon={<RefreshOutlinedIcon />}
-        variant="contained"
+      </button>
+      <button
+        className="input-invoice-usage-button input-invoice-usage-button--primary"
         disabled={refreshing}
         onClick={() => loadRows("refresh")}
+        type="button"
       >
+        <RefreshCw aria-hidden="true" size={16} />
         刷新
-      </Button>
-    </Stack>
+      </button>
+    </PageToolbar>
   ), [loadRows, refreshing, setQuery]);
   const isEmpty = !loading && !error && rows.length === 0;
 
   return (
     <>
-      <Box data-testid="input-invoice-usage-page" sx={{ minWidth: 0, overflowX: "hidden" }}>
+      <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">
         <PageScaffold
           title="进项发票使用情况"
           description="以进项发票为主对象反查支付状态、OA 和银行流水。"
           actions={actions}
         >
-          <Stack spacing={2} sx={{ minWidth: 0, overflowX: "hidden" }}>
-            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-              <TextField
-                label="关键字"
-                size="small"
-                value={keywordDraft}
-                onChange={(event) => setKeywordDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleKeywordSubmit();
-                  }
-                }}
-                sx={{ width: { xs: "100%", md: 320 } }}
-              />
-              <Button variant="outlined" onClick={handleKeywordSubmit}>
-                查询
-              </Button>
-            </Stack>
-            {error ? <Alert severity="error">{error}</Alert> : null}
+          <div className="input-invoice-usage-content">
+            <PageToolbar
+              className="input-invoice-usage-query-toolbar"
+              left={(
+                <label className="input-invoice-usage-search">
+                  <span>关键字</span>
+                  <input
+                    value={keywordDraft}
+                    onChange={(event) => setKeywordDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        handleKeywordSubmit();
+                      }
+                    }}
+                    type="text"
+                  />
+                </label>
+              )}
+              right={(
+                <button className="input-invoice-usage-button" onClick={handleKeywordSubmit} type="button">
+                  查询
+                </button>
+              )}
+            />
+            {error ? <StatePanel tone="error" compact>{error}</StatePanel> : null}
             {loading ? (
-              <Stack spacing={1.25} aria-label="进项发票使用情况加载中">
-                <Skeleton variant="rounded" height={44} />
-                <Skeleton variant="rounded" height={96} />
-                <Skeleton variant="rounded" height={96} />
-              </Stack>
+              <div aria-label="进项发票使用情况加载中" className="input-invoice-usage-loading" role="status">
+                <span className="input-invoice-usage-loading__bar input-invoice-usage-loading__bar--sm" />
+                <span className="input-invoice-usage-loading__bar" />
+                <span className="input-invoice-usage-loading__bar" />
+              </div>
             ) : (
               <>
                 {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
@@ -390,9 +394,9 @@ export default function InputInvoiceUsagePage() {
                 />
               </>
             )}
-          </Stack>
+          </div>
         </PageScaffold>
-      </Box>
+      </div>
       <InputInvoiceUsageDetailDrawer
         open={Boolean(query.detailTarget)}
         target={query.detailTarget}

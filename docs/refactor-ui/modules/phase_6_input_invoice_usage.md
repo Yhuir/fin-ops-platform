@@ -296,3 +296,48 @@ Scope: `/input-invoice-usage` page shell/actions/search/loading/error only. Do n
 
 读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/test_migration_strategy.md、docs/refactor-ui/table_layout_system.md、web/src/pages/InputInvoiceUsagePage.tsx、web/src/test/InputInvoiceUsagePage.test.tsx、web/src/components/common/PageScaffold.tsx、web/src/components/common/PageToolbar.tsx、web/src/components/common/StatePanel.tsx 和 web/src/app/styles.css。只修改 `web/src/pages/InputInvoiceUsagePage.tsx`、必要 `web/src/app/styles.css` 和必要的 `web/src/test/InputInvoiceUsagePage.test.tsx` expectation：移除 page shell/actions/search/loading/error scope 的 MUI imports/usages，包括 `FileDownloadOutlinedIcon`、`RefreshOutlinedIcon`、`Alert`、`Box`、`Button`、`Skeleton`、`Stack`、`TextField`。使用 existing `PageScaffold`、`PageToolbar` 或等价 project toolbar、native/project buttons、native/project search input、project loading skeleton/status message 和 lucide icons。必须保留 `data-testid="input-invoice-usage-page"`、heading `进项发票使用情况`、description `以进项发票为主对象反查支付状态、OA 和银行流水。`、toolbar buttons `以发票反提 OA`、`发票与支付状态规则设置`、`筛选内容导出`、`刷新`、search input label `关键字`、submit button `查询`、Enter submit、refresh disabled while refreshing、error feedback、loading label `进项发票使用情况加载中`、empty state `当前条件下暂无记录。`、query/page reset and read model retry behavior。不得修改 input invoice usage API/mock/read model/worker/backend/关联台；不得修改 `web/src/components/inputInvoiceUsage/*`。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|uses a standard empty state|pauses read model retry|adds sidebar route|drops legacy column filters|loads export preview"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P056-P060/P061 table/filter/drawer source contract failures 可以继续 expected-fail，但 `src/pages/InputInvoiceUsagePage.tsx` must disappear from the source-level failure list；运行 `cd web && npm run build`；运行 page shell MUI grep：`if rg -n '@mui/|Mui[A-Z]|FileDownloadOutlinedIcon|RefreshOutlinedIcon|Skeleton|TextField' web/src/pages/InputInvoiceUsagePage.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P056 main table and expandable cell prompt。
 ```
+
+## Execution Update: P055 Page Shell / Toolbar
+
+- Status: verified as expected-fail.
+- Files changed:
+  - `web/src/pages/InputInvoiceUsagePage.tsx`
+  - `web/src/app/styles.css`
+- Runtime implementation changed: page shell/actions/search/loading/error only.
+- Input invoice usage table/filter/drawer components changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Implementation:
+  - `InputInvoiceUsagePage.tsx` now uses `PageToolbar` plus native/project buttons and search input.
+  - MUI page-level imports were removed: icons, Alert, Box, Button, Skeleton, Stack and TextField.
+  - Loading state now uses project skeleton markup under `aria-label="进项发票使用情况加载中"`.
+  - Error state now uses `StatePanel tone="error"`.
+  - Toolbar labels, search label, Enter submit, refresh disabled state, empty state and page/session behavior are preserved.
+- Verification:
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|uses a standard empty state|pauses read model retry|adds sidebar route|drops legacy column filters|loads export preview"`: expected-fail. Five behavior tests passed; the only failure is the source-level contract for P056-P060/P061.
+  - `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`: expected-fail, 19 passed and 2 source-level failures. `src/pages/InputInvoiceUsagePage.tsx` no longer appears in the failure lists.
+  - `if rg -n '@mui/|Mui[A-Z]|FileDownloadOutlinedIcon|RefreshOutlinedIcon|Skeleton|TextField' web/src/pages/InputInvoiceUsagePage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+
+## Current Expected Failures After P055
+
+The two source-level failures are expected until P056-P060/P061 complete:
+
+- `src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx`: still imports MUI table/tag/pagination/tooltip/button controls and `.MuiChip-label`/`.MuiTablePagination-*` selectors; P056 owns this.
+- `src/components/inputInvoiceUsage/ExpandableCellText.tsx`: still imports MUI icons/tooltip/button/text layout; P056 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageFilterMenu.tsx`: still imports MUI menu/check/radio/button/icons and `.MuiButton-startIcon`; P057 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx`: still imports MUI Drawer and status/layout components; P058 owns this.
+- `src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx`: still imports MUI Drawer/table/status/action components; P058 owns this.
+- `src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx`: still imports MUI Drawer/table/form/tag/status/action components; P059 owns this.
+- `src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx`: still imports MUI Drawer/table/form/selection/tag/status/action components; P060 owns this.
+
+## P056 Prompt Draft
+
+```text
+Prompt ID: P056-phase-6-input-invoice-usage-main-table-and-expandable-cell
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: `/input-invoice-usage` main dense table and expandable cell only: `InputInvoiceUsageTable.tsx`, `ExpandableCellText.tsx`, necessary `web/src/app/styles.css` and necessary `InputInvoiceUsagePage.test.tsx` expectations. Do not migrate `InputInvoiceUsageFilterMenu` or any input invoice usage drawer/workflow component.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_input_invoice_usage.md、docs/refactor-ui/table_layout_system.md、web/src/components/common/FinanceTable.tsx、web/src/pages/InputInvoiceUsagePage.tsx、web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx、web/src/components/inputInvoiceUsage/ExpandableCellText.tsx、web/src/test/InputInvoiceUsagePage.test.tsx 和 web/src/app/styles.css。只修改本 prompt scope 内文件：移除 `InputInvoiceUsageTable.tsx` 和 `ExpandableCellText.tsx` 的 MUI imports/usages，包括 `InfoOutlinedIcon`、`ExpandLessOutlinedIcon`、`ExpandMoreOutlinedIcon`、`Box`、`Button`、`Chip`、`IconButton`、`Paper`、`Stack`、`Table*`、`TablePagination`、`Tooltip`、`Typography` 和 `.MuiChip-label`/`.MuiTablePagination-*` selectors。使用 `FinanceTable`/project dense table primitives 或 native project table shell、project tags/buttons/tooltips、lucide icons 和 project pagination。必须保留 `aria-label="进项发票使用情况表"`、四个列组 `进项发票`/`支付状态`/`OA`/`流水`、10 列 header、amount right alignment/tabular nums、payment status class or equivalent project class contract、date/status/application/bank direction tags with stable height、detail button labels `查看发票 <invoice> 详情` / `查看OA <applicant/id> 详情` / `查看流水 <counterparty/id> 详情`、long-text expand/collapse labels、empty row `当前条件下没有进项发票使用记录。`、server page/pageSize/total pagination labels `每页行数` and `<from>-<to> / <count>`。不得修改 page shell、filter menu、detail/export/payment-rules/OA-reverse drawers、input invoice usage API/mock/read model/worker/backend/关联台。运行 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx -t "targets project primitives|adds sidebar route"`；运行完整 `cd web && npx vitest run InputInvoiceUsagePage.test.tsx InputInvoiceUsageFiltersAndDrawers.test.tsx`，P057-P060/P061 filter/drawer source contract failures 可以继续 expected-fail，但 `InputInvoiceUsageTable.tsx` and `ExpandableCellText.tsx` must disappear from the source-level failure list；运行 `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 `cd web && npm run build`；运行 table MUI grep：`if rg -n '@mui/|Mui[A-Z]|TablePagination|InfoOutlinedIcon|ExpandLessOutlinedIcon|ExpandMoreOutlinedIcon' web/src/components/inputInvoiceUsage/InputInvoiceUsageTable.tsx web/src/components/inputInvoiceUsage/ExpandableCellText.tsx; then exit 1; else exit 0; fi`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P057 filter menu prompt。
+```
