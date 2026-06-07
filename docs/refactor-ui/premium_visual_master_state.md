@@ -62,7 +62,7 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-000-premium-foundation-discovery`
+`PV-001-shared-premium-foundation`
 
 ### Scope
 
@@ -99,4 +99,4 @@ Each implementation slice must:
 
 | Date | Slice | Commit | Push | Notes |
 | --- | --- | --- | --- | --- |
-| 2026-06-08 | `PV-000-premium-foundation-discovery` | pending | pending | Docs foundation verified locally; commit/push pending. |
+| 2026-06-08 | `PV-000-premium-foundation-discovery` | `2f26c79a` | pushed to `origin/main` | Docs foundation verified and pushed. |
