@@ -13,18 +13,19 @@ import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
 import ListItemText from "@mui/material/ListItemText";
 import Stack from "@mui/material/Stack";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TablePagination from "@mui/material/TablePagination";
-import TableRow from "@mui/material/TableRow";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import FilterListOutlinedIcon from "@mui/icons-material/FilterListOutlined";
 import { Tags } from "lucide-react";
 
+import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../components/common/FinanceTable";
 import StatePanel from "../components/common/StatePanel";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
@@ -381,6 +382,15 @@ type BankDetailsTableToolbarProps = {
   onOpenExportMenu: () => void;
   onCloseExportMenu: () => void;
   onExport: (mode: BankDetailExportMode) => void;
+};
+
+type BankTransactionPaginationProps = {
+  page: number;
+  pageSize: number;
+  total: number;
+  pageSizeOptions: number[];
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 };
 
 function formatDate(date: Date) {
@@ -761,6 +771,67 @@ function BankDetailsTableToolbar({
             onChange={(event) => onSearchKeywordChange(event.target.value)}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function displayedTransactionRange(page: number, pageSize: number, total: number) {
+  if (total <= 0) {
+    return "0-0 / 0";
+  }
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const currentPage = Math.min(Math.max(page, 0), totalPages - 1);
+  const from = currentPage * pageSize + 1;
+  const to = Math.min((currentPage + 1) * pageSize, total);
+  return `${from}-${to} / ${total}`;
+}
+
+function BankTransactionPagination({
+  page,
+  pageSize,
+  total,
+  pageSizeOptions,
+  onPageChange,
+  onPageSizeChange,
+}: BankTransactionPaginationProps) {
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+  const currentPage = Math.min(Math.max(page, 0), totalPages - 1);
+
+  return (
+    <div className="bank-transaction-pagination">
+      <label className="bank-transaction-pagination-size">
+        <span>每页行数</span>
+        <select
+          aria-label="每页行数"
+          value={pageSize}
+          onChange={(event) => onPageSizeChange(Number(event.target.value))}
+        >
+          {pageSizeOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+      <span className="bank-transaction-pagination-range">
+        {displayedTransactionRange(currentPage, pageSize, total)}
+      </span>
+      <div className="bank-transaction-pagination-actions">
+        <button
+          aria-label="上一页"
+          disabled={currentPage <= 0}
+          onClick={() => onPageChange(currentPage - 1)}
+          type="button"
+        >
+          上一页
+        </button>
+        <button
+          aria-label="下一页"
+          disabled={currentPage >= totalPages - 1}
+          onClick={() => onPageChange(currentPage + 1)}
+          type="button"
+        >
+          下一页
+        </button>
       </div>
     </div>
   );
@@ -2191,43 +2262,52 @@ export default function BankDetailsPage() {
                 onCloseExportMenu={closeExportMenu}
                 onExport={handleExport}
               />
-              <TableContainer ref={transactionTableWrapRef} className="bank-transaction-table-container">
-                <Table aria-label="交易流水" className="bank-transaction-table" size="small" stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell className="bank-col-counterparty">对方户名</TableCell>
-                      <TableCell align="center" className="bank-col-type">类型</TableCell>
-                      <TableCell align="right" className="bank-col-amount">金额</TableCell>
-                      <TableCell align="right" className="bank-col-balance">余额</TableCell>
-                      <TableCell className="bank-col-purpose">用途/交易用途</TableCell>
-                      <TableCell className="bank-col-summary">摘要</TableCell>
-                      <TableCell className="bank-col-note">备注/附言/客户附言</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
+              <div ref={transactionTableWrapRef} className="bank-transaction-table-container">
+                <FinanceTable ariaLabel="交易流水" className="bank-transaction-table" minWidth={980}>
+                  <FinanceTableHeader>
+                    <FinanceTableColumn className="bank-col-counterparty" columnRole="identity" id="counterparty" isRowHeader>对方户名</FinanceTableColumn>
+                    <FinanceTableColumn className="bank-col-type" columnRole="status" id="type">类型</FinanceTableColumn>
+                    <FinanceTableColumn className="bank-col-amount" columnRole="amount" id="amount">金额</FinanceTableColumn>
+                    <FinanceTableColumn className="bank-col-balance" columnRole="amount" id="balance">余额</FinanceTableColumn>
+                    <FinanceTableColumn className="bank-col-purpose" columnRole="description" id="purpose">用途/交易用途</FinanceTableColumn>
+                    <FinanceTableColumn className="bank-col-summary" columnRole="description" id="summary">摘要</FinanceTableColumn>
+                    <FinanceTableColumn className="bank-col-note" columnRole="description" id="note">备注/附言/客户附言</FinanceTableColumn>
+                  </FinanceTableHeader>
+                  <FinanceTableBody>
                     {rowLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={7}>
-                          <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 220 }}>
-                            <Typography color="text.secondary">正在加载流水。</Typography>
-                          </Stack>
-                        </TableCell>
-                      </TableRow>
+                      <FinanceTableRow id="loading" className="bank-transaction-state-row" textValue="正在加载流水。">
+                        <FinanceTableCell columnRole="identity" textValue="正在加载流水。">
+                          <span className="bank-transaction-state-message">正在加载流水。</span>
+                        </FinanceTableCell>
+                        <FinanceTableCell columnRole="status" textValue="loading">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="amount" textValue="loading">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="amount" textValue="loading">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="loading">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="loading">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="loading">-</FinanceTableCell>
+                      </FinanceTableRow>
                     ) : null}
                     {!rowLoading && rows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7}>
+                      <FinanceTableRow id="empty" className="bank-transaction-state-row" textValue="当前时间范围内没有流水。">
+                        <FinanceTableCell columnRole="identity" textValue="当前时间范围内没有流水。">
                           <EmptyTransactionOverlay />
-                        </TableCell>
-                      </TableRow>
+                        </FinanceTableCell>
+                        <FinanceTableCell columnRole="status" textValue="empty">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="amount" textValue="empty">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="amount" textValue="empty">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="empty">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="empty">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="empty">-</FinanceTableCell>
+                      </FinanceTableRow>
                     ) : null}
                     {!rowLoading && rows.map((row, index) => (
-                      <TableRow
+                      <FinanceTableRow
                         className={index % 2 === 0 ? "bank-grid-row-even" : "bank-grid-row-odd"}
-                        hover
+                        id={row.id}
                         key={row.id}
+                        textValue={row.counterpartyName}
                       >
-                        <TableCell className="bank-col-counterparty">
+                        <FinanceTableCell className="bank-col-counterparty" columnRole="identity" textValue={row.counterpartyName}>
                           <Stack className="bank-counterparty-cell" justifyContent="center" spacing={0.5} sx={{ minWidth: 0, width: "100%" }}>
                             <Typography
                               className={`bank-counterparty-name ${counterpartyNameDensity(row.counterpartyName)}`}
@@ -2252,8 +2332,8 @@ export default function BankDetailsPage() {
                               ))}
                             </Stack>
                           </Stack>
-                        </TableCell>
-                        <TableCell align="center" className="bank-col-type">
+                        </FinanceTableCell>
+                        <FinanceTableCell className="bank-col-type" columnRole="status" textValue={row.effectiveCategoryLabel || row.autoCategoryLabel || row.categoryResolutionStatus}>
                           <TypeCell
                             row={row}
                             autoTagRules={activeAutoTagRules}
@@ -2263,8 +2343,8 @@ export default function BankDetailsPage() {
                             onRevoke={handleRevokeCategoryConfirmation}
                             onClearAssignment={handleClearCategoryAssignment}
                           />
-                        </TableCell>
-                        <TableCell align="right" className="bank-col-amount">
+                        </FinanceTableCell>
+                        <FinanceTableCell className="bank-col-amount" columnRole="amount" textValue={formatMoney(row.amount)}>
                           <Stack className="bank-amount-cell" alignItems="stretch" justifyContent="center" spacing={0.5} sx={{ width: "100%" }}>
                             <Stack className="bank-amount-line" direction="row" alignItems="center" justifyContent="flex-end" spacing={0.75}>
                               <Chip
@@ -2279,33 +2359,29 @@ export default function BankDetailsPage() {
                             </Stack>
                             <Chip className="bank-source-chip bank-chip-auto-size" label={`${row.bankName} ${row.accountLast4}`} size="small" variant="outlined" />
                           </Stack>
-                        </TableCell>
-                        <TableCell align="right" className="bank-col-balance">
+                        </FinanceTableCell>
+                        <FinanceTableCell className="bank-col-balance" columnRole="amount" textValue={formatMoney(row.balance)}>
                           <Typography component="span" variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>
                             {formatMoney(row.balance)}
                           </Typography>
-                        </TableCell>
-                        <TableCell className="bank-col-purpose"><BankTextCell value={row.purposeText} /></TableCell>
-                        <TableCell className="bank-col-summary"><BankTextCell value={row.summaryText} /></TableCell>
-                        <TableCell className="bank-col-note"><BankTextCell value={row.noteText} /></TableCell>
-                      </TableRow>
+                        </FinanceTableCell>
+                        <FinanceTableCell className="bank-col-purpose" columnRole="description" textValue={row.purposeText}><BankTextCell value={row.purposeText} /></FinanceTableCell>
+                        <FinanceTableCell className="bank-col-summary" columnRole="description" textValue={row.summaryText}><BankTextCell value={row.summaryText} /></FinanceTableCell>
+                        <FinanceTableCell className="bank-col-note" columnRole="description" textValue={row.noteText}><BankTextCell value={row.noteText} /></FinanceTableCell>
+                      </FinanceTableRow>
                     ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <TablePagination
-                className="bank-transaction-pagination"
-                component="div"
-                count={rowCount}
-                labelDisplayedRows={({ from, to, count }) => `${from}-${to} / ${count === -1 ? `超过 ${to}` : count}`}
-                labelRowsPerPage="每页行数"
-                onPageChange={(_event, page) => setPaginationModel((current) => ({ ...current, page }))}
-                onRowsPerPageChange={(event) => {
-                  setPaginationModel({ page: 0, pageSize: Number(event.target.value) });
-                }}
+                  </FinanceTableBody>
+                </FinanceTable>
+              </div>
+              <BankTransactionPagination
                 page={paginationModel.page}
-                rowsPerPage={paginationModel.pageSize}
-                rowsPerPageOptions={[25, 50, 100]}
+                pageSize={paginationModel.pageSize}
+                pageSizeOptions={[25, 50, 100]}
+                total={rowCount}
+                onPageChange={(page) => setPaginationModel((current) => ({ ...current, page }))}
+                onPageSizeChange={(pageSize) => {
+                  setPaginationModel({ page: 0, pageSize });
+                }}
               />
             </Box>
           </section>

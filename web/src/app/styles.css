@@ -9270,14 +9270,75 @@ body.column-layout-dragging {
   overflow-y: auto;
 }
 
-.bank-transaction-pagination.MuiTablePagination-root {
+.bank-transaction-pagination {
+  display: flex;
   flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-height: 48px;
+  padding: 7px 10px;
   border-top: 1px solid var(--bank-border-subtle);
   background: var(--bank-surface);
+  color: var(--bank-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bank-transaction-pagination-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bank-transaction-pagination-size select {
+  min-height: 30px;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--bank-text);
+  font-size: 12px;
+}
+
+.bank-transaction-pagination-range {
+  min-width: 86px;
+  color: var(--bank-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.bank-transaction-pagination-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bank-transaction-pagination-actions button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--bank-border-subtle);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--bank-text);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.bank-transaction-pagination-actions button:hover:not(:disabled),
+.bank-transaction-pagination-actions button:focus-visible {
+  border-color: var(--bank-blue);
+  background: var(--bank-hover);
+  outline: none;
+}
+
+.bank-transaction-pagination-actions button:disabled {
+  color: #a8b3c0;
+  cursor: default;
 }
 
 .bank-transaction-table {
-  table-layout: fixed;
   width: 100%;
   background: var(--bank-surface);
   color: var(--bank-text);
@@ -9730,7 +9791,7 @@ body.column-layout-dragging {
   outline: none;
 }
 
-.bank-transaction-table .MuiTableCell-head {
+.bank-transaction-table .finance-table__column {
   border-bottom: 1px solid var(--bank-border);
   background: #e8eef6;
   color: var(--bank-text);
@@ -9739,7 +9800,7 @@ body.column-layout-dragging {
   line-height: 1.2;
 }
 
-.bank-transaction-table .MuiTableCell-root {
+.bank-transaction-table .finance-table__cell {
   padding: 8px 7px;
   border-bottom-color: var(--bank-border-subtle);
   border-right: 1px solid rgba(113, 128, 150, 0.18);
@@ -9752,12 +9813,13 @@ body.column-layout-dragging {
   white-space: normal;
 }
 
-.bank-transaction-table .MuiTableCell-root:last-child {
+.bank-transaction-table .finance-table__cell:last-child {
   border-right: 0;
 }
 
-.bank-transaction-table .MuiTableCell-stickyHeader {
-  background: #e8eef6;
+.bank-transaction-state-row .finance-table__cell {
+  min-height: 220px;
+  color: var(--bank-text-secondary);
 }
 
 .bank-counterparty-cell,
@@ -9795,19 +9857,16 @@ body.column-layout-dragging {
   white-space: normal;
 }
 
-.bank-transaction-grid .bank-grid-row-even,
-.bank-transaction-table .MuiTableBody-root .MuiTableRow-root:nth-of-type(odd) {
+.bank-transaction-grid .bank-grid-row-even {
   background: #ffffff;
 }
 
-.bank-transaction-grid .bank-grid-row-odd,
-.bank-transaction-table .MuiTableBody-root .MuiTableRow-root:nth-of-type(even) {
+.bank-transaction-grid .bank-grid-row-odd {
   background: #f7f8fa;
 }
 
 .bank-transaction-grid .bank-grid-row-even:hover,
-.bank-transaction-grid .bank-grid-row-odd:hover,
-.bank-transaction-table .MuiTableBody-root .MuiTableRow-hover:hover {
+.bank-transaction-grid .bank-grid-row-odd:hover {
   background: var(--bank-hover);
 }
 

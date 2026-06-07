@@ -2648,7 +2648,7 @@ Scope: 迁移 BankDetails 页面壳、账户列表、顶部工具栏、日期筛
 ### P043-phase-6-bank-details-transaction-table
 
 - Phase: `phase_6_page_batches`
-- Status: `approved_for_execution`
+- Status: `verified`
 - Type: `extraction/refactor`
 - Scope: 迁移 BankDetails 交易流水表格和分页；不迁移 category filter Popper、TypeCell、BankCategoryTag、internal transfer tooltip 或 AutoTagRulesDrawer。
 
@@ -2672,6 +2672,53 @@ Scope: 迁移 BankDetails 交易流水表格和分页；不迁移 category filte
 - Preserves old table behavior: yes，headers、loading/empty、row layout、server pagination and page size options are explicit。
 - Excludes category/type/tag/drawer surfaces: yes，reserved for P044/P045。
 - Verification defined: focused table/pagination tests, full expected-fail target set, build, MUI import grep, diff check, status。
+
+#### Execution Notes
+
+- Replaced BankDetails transaction table MUI `Table`/`TableContainer`/`TableHead`/`TableBody`/`TableRow`/`TableCell` usage with `FinanceTable` primitives.
+- Replaced MUI `TablePagination` with a BankDetails project pagination bar preserving `每页行数`, `1-100 / 299`, `上一页`, `下一页` and `pageSizeOptions={[25, 50, 100]}`.
+- Preserved the original seven headers, accessible table name `交易流水`, loading text `正在加载流水。`, empty text `当前时间范围内没有流水。`, TypeCell placement, counterparty/time/relation stack, amount/direction/source stack, balance formatting and server pagination state.
+- Left category filter Popper, TypeCell menu internals, BankCategoryTag/internal transfer tooltip and AutoTagRulesDrawer unchanged for P044/P045.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `if rg -n '@mui/material/(Table|TableBody|TableCell|TableContainer|TableHead|TablePagination|TableRow)' web/src/pages/BankDetailsPage.tsx; then exit 1; else exit 0; fi`: passed。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx -t "交易流水|pagination|searches current account|loads all accounts|uses Chinese labels"`: passed, 4 passed / 34 skipped。
+  - `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`: expected-fail with 48 passed and 4 failures. Remaining failures are assigned to P044 category popovers and P045 auto tag drawer。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind generated CSS minifier warnings and chunk size warning。
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 15 tests。
+  - `if rg -n '@mui/material/(Table|TableBody|TableCell|TableContainer|TableHead|TablePagination|TableRow)|bank-transaction-pagination\.MuiTablePagination|bank-transaction-table .*MuiTable|\.bank-transaction-table .*MuiTable' web/src/pages/BankDetailsPage.tsx web/src/app/styles.css; then exit 1; else exit 0; fi`: passed。
+  - `git diff --check`: passed。
+
+### P044-phase-6-bank-details-category-popovers
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `extraction/refactor`
+- Scope: 迁移 BankDetails category filter Popper、TypeCell category confirmation/assignment Popper、BankCategoryTag 和 internal transfer tooltip；不迁移 AutoTagRulesDrawer。
+
+#### Prompt
+
+```text
+Prompt ID: P044-phase-6-bank-details-category-popovers
+Phase: phase_6_page_batches
+Type: extraction/refactor
+Scope: 迁移 BankDetails category filter Popper、TypeCell category confirmation/assignment Popper、BankCategoryTag 和 internal transfer tooltip；不迁移 AutoTagRulesDrawer。
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/modules/phase_6_bank_details.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BankDetailsPage.tsx、web/src/features/bankDetails/BankCategoryTag.tsx、web/src/test/BankDetailsPage.test.tsx 和 web/src/app/styles.css。只修改 BankDetailsPage.tsx、BankCategoryTag.tsx、必要 styles.css 和必要 BankDetails test expectations：移除 BankDetailsPage 中 category filter、TypeCell 和 internal transfer tooltip 相关的 MUI Popper/MenuList/List/ListItem/ListItemButton/ListItemText/IconButton/Paper/Divider/Button/Tooltip/Box/Typography/Stack 依赖中属于本切片的用法；使用 project/native popover/menu/button/tooltip/tag markup 或 HeroUI primitives 保留旧点击触发、Escape/外部点击关闭、`银行明细标签筛选` menu、`标签筛选：...` trigger、三列 dense hierarchy、`aria-current`、`data-level`、`待确认`/`待分类` staged save flow、`取消`/`保存`/`保存中`、third-level external turnover choices、`撤销`、`对应内部往来流水` tooltip rows 和 BankCategoryTag hierarchy tooltip。不得修改后端、API、read model、worker、mock、AutoTagRulesDrawer 或关联台。运行 `cd web && npx vitest run BankDetailsPage.test.tsx -t "category|internal transfer|manual classification|needs-confirmation|external turnover|targets project table|dense three-column"`；运行完整 `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx`，P045 drawer failures 可以继续 expected-fail，但 P044 category/tag/popper failures 必须清除；运行 `cd web && npm run build`；运行 BankDetails category/tooltip MUI residue grep、`git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成 P045 auto tag drawer prompt。
+```
+
+#### Review
+
+- Single slice: yes。
+- Runtime scope limited to category filter, TypeCell category popovers, BankCategoryTag and internal transfer tooltip: yes。
+- Backend/API/read model/worker untouched: yes。
+- Workbench internals frozen: yes。
+- Preserves old overlay shape: yes，category filter and TypeCell remain click popovers/menus, internal transfer remains tooltip。
+- Excludes AutoTagRulesDrawer: yes，reserved for P045。
+- Verification defined: focused category/tooltip tests, full expected-fail target set, build, MUI residue grep, diff check, status。
 
 ### MG Prompt Template
 
