@@ -4509,7 +4509,7 @@ Scope: final `/no-oa-bank-batches` UI migration slice: tag-management right draw
 ### MG-P078-phase-6-no-oa-bank-batches
 
 - Phase: `phase_6_page_batches`
-- Status: `mg_drafted`
+- Status: `mg_verified`
 - Type: `cumulative merge gate`
 - Scope: completed `/no-oa-bank-batches` UI migration slices P073-P078 only.
 
@@ -4530,6 +4530,48 @@ Scope: completed `/no-oa-bank-batches` UI migration slices P073-P078 only.
 - Scope excludes backend/API/read model/worker and workbench internals: required。
 - Exact staging required: yes。
 - Push required: yes，push to `origin refactor-ui`。
+
+#### Execution Notes
+
+- Status: mg_verified.
+- Worktree before MG docs update: clean on `refactor-ui`.
+- Scope checked: P073-P078 `/no-oa-bank-batches` only.
+- Runtime result: `NoOaBankBatchPage.tsx` has no direct MUI import or legacy MUI source residue.
+- Backend/API/read model/worker and workbench internals unchanged.
+- Verification:
+  - `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts`: passed; 27 tests passed.
+  - `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed; 15 tests passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
+  - `if rg -n '@mui/|Mui[A-Z]|RefreshOutlinedIcon|CloseIcon|ToggleButton|TextField|TableCell|TableRow|TableHead|TableBody|Drawer\\b|DialogTitle|DialogContent|DialogActions|Snackbar|Chip|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi`: passed.
+  - `git diff --check`: passed.
+  - `git status --short --branch`: passed; clean before MG docs update.
+- Next prompt generated: `P079-phase-6-batch-accounting-discovery`.
+
+### P079-phase-6-batch-accounting-discovery
+
+- Phase: `phase_6_page_batches`
+- Status: `approved_for_execution`
+- Type: `discovery/planning`
+- Scope: `/batch-accounting` only. Do not modify runtime implementation or tests.
+
+#### Prompt
+
+```text
+Prompt ID: P079-phase-6-batch-accounting-discovery
+Phase: phase_6_page_batches
+Type: discovery/planning
+Scope: `/batch-accounting` only. Do not modify runtime implementation or tests.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/module_inventory.md、docs/refactor-ui/baseline_inventory.md、docs/refactor-ui/table_layout_system.md、web/src/pages/BatchAccountingPage.tsx、web/src/features/batchAccounting/api.ts、web/src/features/batchAccounting/types.ts、web/src/test/BatchAccountingPage.test.tsx、docs/app-architecture/pages.md 和当前 git status。只做 discovery/planning：梳理 `/batch-accounting` 当前 MUI imports/usages、用户可见入口、表格/双栏选择/提交/撤回弹窗/Snackbar/状态提示、API/read model 边界、现有测试覆盖和迁移风险。必须重点记录这些用户可见入口并保持行为等价：route `/batch-accounting`、sidebar label `批量账务`、page heading `日常报销批量账务管理`、description、年份字段 `银行年份`/`OA 年份`、状态切换 `未提交`/`已提交`、region `批量账务流水`、OA/relation detail region、bank row accessible names、OA row checkboxes、金额一致/差异提示、提交按钮、撤回批次弹窗、feedback messages、loading/empty/error states and stale/refresh behavior if present。不得修改页面实现、测试实现、mock、API client、backend、read model、worker 或关联台内部工作区。若该模块需要跨后续切片复用的入口矩阵和测试策略，创建 `docs/refactor-ui/modules/phase_6_batch_accounting.md`；否则直接在现有文档记录。运行 `test -f docs/refactor-ui/modules/phase_6_batch_accounting.md`；运行 `rg -n "P079-phase-6-batch-accounting-discovery|Current MUI Inventory|User-visible Entrypoints|P080-phase-6-batch-accounting-characterization-tests" docs/refactor-ui/modules/phase_6_batch_accounting.md docs/refactor-ui/refactor_ui_prompt.md docs/refactor-ui/refactor_ui_state.md`；运行 `git diff --check`、`git status --short --branch`。更新 state/prompt/module docs，生成且只生成下一条 `P080-phase-6-batch-accounting-characterization-tests` prompt。
+```
+
+#### Review
+
+- Single slice: yes，discovery only。
+- Runtime/test implementation excluded: required。
+- Backend/API/read model/worker untouched: required。
+- Workbench internals frozen: required。
+- Next prompt: P080 characterization tests only after P079 is verified。
 
 ### MG Prompt Template
 

@@ -8,7 +8,7 @@
 - Status: `in_progress`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P078-phase-6-no-oa-bank-batches`
+- Current Prompt ID: `P079-phase-6-batch-accounting-discovery`
 - Current MG ID: `MG-P078-phase-6-no-oa-bank-batches`
 
 ## Global Invariants
@@ -36,7 +36,7 @@
 | `phase_3_primitives` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P006-P010 primitives verified，MG-P010 已 push；common 目录已无 MUI import |
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
-| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments and OutputInvoiceCollections MG verified；NoOaBankBatches P078 verified，next MG-P078 |
+| `phase_6_page_batches` | `in_progress` | 2026-06-07 |  | `pending` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections and NoOaBankBatches MG verified；next BatchAccounting P079 discovery |
 | `phase_7_mui_containment` | `pending` |  |  |  | 非关联台无 MUI，关联台隔离 |
 | `phase_8_full_verification` | `pending` |  |  |  | 全量验证 |
 | `phase_9_closeout` | `pending` |  |  |  | 文档收口和后续计划 |
@@ -54,16 +54,14 @@
 
 ## Active Checkpoint
 
-- Scope: phase 6 no-OA bank batches cumulative merge gate generated after P078 overlays/feedback migration。
-- Files touched in P078:
-  - `web/src/pages/NoOaBankBatchPage.tsx`
-  - `web/src/app/styles.css`
+- Scope: phase 6 batch accounting discovery prompt generated after MG-P078 NoOaBankBatches。
+- Files touched in MG-P078:
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
   - `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
-- Verification run: P078 full `NoOaBankBatchPage.test.tsx` passed；`NoOaBankBatchApi.test.ts` passed；build, no-MUI grep and diff/status passed。
+- Verification run: MG-P078 cumulative NoOaBankBatches page/API, table/common/HeroUI smoke, build, no-MUI grep and diff/status passed。
 - Failures: none for NoOaBankBatches page/runtime source contract。
-- Next action: 执行 `MG-P078-phase-6-no-oa-bank-batches`。
+- Next action: 执行 `P079-phase-6-batch-accounting-discovery`。
 
 ## Prompt Lifecycle
 
@@ -95,12 +93,18 @@
 | primitives | `verified` | `P010-phase-3-page-layout-primitives` | P006-P010 verified，MG-P010 已 push，common 目录已无 MUI import |
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
-| page batches | `in_progress` | `MG-P078-phase-6-no-oa-bank-batches` | NoOaBankBatches P078 verified；next cumulative MG |
+| page batches | `in_progress` | `P079-phase-6-batch-accounting-discovery` | NoOaBankBatches MG verified；next BatchAccounting discovery |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts` | passed | 27 tests passed |
+| 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `cd web && npx vitest run TableAlignmentStyles.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 15 tests passed |
+| 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
+| 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `if rg -n '@mui/\|Mui[A-Z]\|RefreshOutlinedIcon\|CloseIcon\|ToggleButton\|TextField\|TableCell\|TableRow\|TableHead\|TableBody\|Drawer\\b\|DialogTitle\|DialogContent\|DialogActions\|Snackbar\|Chip\|IconButton' web/src/pages/NoOaBankBatchPage.tsx; then exit 1; else exit 0; fi` | passed | NoOaBankBatchPage has no direct MUI import/legacy source residue |
+| 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `git diff --check` | passed | 无 whitespace error |
+| 2026-06-07 | `MG-P078-phase-6-no-oa-bank-batches` | `git status --short --branch` | passed | Clean worktree before MG docs update |
 | 2026-06-07 | `P078-phase-6-no-oa-bank-batches-overlays-feedback` | `cd web && npx vitest run NoOaBankBatchPage.test.tsx` | passed | 20 tests passed |
 | 2026-06-07 | `P078-phase-6-no-oa-bank-batches-overlays-feedback` | `cd web && npx vitest run NoOaBankBatchApi.test.ts` | passed | 7 tests passed |
 | 2026-06-07 | `P078-phase-6-no-oa-bank-batches-overlays-feedback` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning |
