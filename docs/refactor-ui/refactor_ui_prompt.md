@@ -6399,6 +6399,61 @@ Scope: final UI migration documentation/status/push closeout only.
   - `git diff --check`
 - Next prompt generated: none. UI migration workflow is closed out on `refactor-ui`; next step is optional review/PR/manual browser QA.
 
+### P116-phase-9-post-closeout-audit-fix
+
+- Phase: `phase_9_closeout`
+- Status: `verified`
+- Type: `post-closeout audit/fix`
+- Scope: close the gaps found by the post-migration codebase audit: one App shell async assertion, current fact-source MUI wording, no-MUI verification, full frontend tests, build and browser smoke.
+
+#### Prompt
+
+```text
+Prompt ID: P116-phase-9-post-closeout-audit-fix
+Phase: phase_9_closeout
+Type: post-closeout audit/fix
+Scope: closeout verification gap only.
+
+读取 docs/refactor-ui/refactor_ui_state.md、docs/refactor-ui/refactor_ui_prompt.md、docs/refactor-ui/README.md、docs/refactor-ui/platform_stack_migration.md、docs/refactor-ui/modules/phase_8_full_verification.md、docs/refactor-ui/workbench_migration_state.md、DESIGN.md、PRODUCT.md、docs/dev/codebase-development.md、docs/app-architecture/pages.md、web/src/test/App.test.tsx、web/src/test/WorkbenchSelection.test.tsx、web/src/pages/ReconciliationWorkbenchPage.tsx 和当前 git status。先执行 root-cause debugging：确认 `App.test.tsx` 的 OA incomplete warning 失败是否由异步工作台数据渲染等待不足导致，参考已通过的 `WorkbenchSelection.test.tsx` 页面级 OA warning 测试。只允许修改该 App 测试的等待边界，不改业务 runtime 渲染、backend、API contract、read model、worker、权限语义或业务状态机。同步更新当前事实源文档：DESIGN、platform stack、dev entry、app architecture、refactor README/state/prompt，说明全 app runtime/package 已无 MUI/Emotion；历史 prompt/state/module 文档中的 MUI 迁移记录可保留为执行日志，不作为当前架构事实。运行 targeted red-green：`cd web && npx vitest run App.test.tsx -t "keeps global status independent while warning when OA data is incomplete"`。运行 no-MUI scans：runtime source、package/lockfile、`npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled`。运行 platform smoke：`cd web && npx vitest run MuiContainment.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`。运行 full frontend suite：`cd web && npm test -- --run`。运行 build：`cd web && npm run build`。启动本地 Vite dev server 并用 headless Chrome 做首屏 smoke，记录 App Shell、左侧导航、关联台三栏是否可见、JS runtime errors 和 404 等限制。运行 `git diff --check`、`git status --short --branch`。更新 state/prompt docs 的 execution notes、verification log、remaining risks。最终回复必须写明完成内容、验证命令、是否 push、下一步。
+```
+
+#### Review
+
+- Single slice: yes，post-closeout audit/fix only。
+- Runtime business UI changes: no。
+- Backend/API/read model/worker untouched: required。
+- Workbench structure untouched: required。
+- User-visible behavior preserved: yes，测试仍断言同一 OA warning 文案。
+- Docs scope: current fact-source wording only；历史 prompt/module execution logs are not mass-rewritten。
+- Verification defined: targeted App test、no-MUI scans、platform smoke、full frontend suite、build、browser smoke、diff check/status。
+
+#### Execution Notes
+
+- Root cause confirmed: `App.test.tsx` waited for the global status indicator and then synchronously queried the OA incomplete warning, while the workbench page-level behavior test waits for the warning itself. The business runtime already renders the warning after workbench data loads.
+- Updated `App.test.tsx` to wait for the existing OA warning text with `findByText`, preserving the same expected copy and business behavior.
+- Updated current fact-source docs to reflect the completed all-app no-MUI state:
+  - `DESIGN.md`
+  - `docs/dev/codebase-development.md`
+  - `docs/app-architecture/pages.md`
+  - `docs/refactor-ui/README.md`
+  - `docs/refactor-ui/platform_stack_migration.md`
+  - `docs/refactor-ui/modules/phase_8_full_verification.md`
+- Historical prompt/state/module docs still contain MUI strings as execution logs and no-MUI negative assertions; they are not current architecture facts.
+- Browser smoke rendered App Shell, sidebar navigation and the workbench tri-pane at `http://127.0.0.1:4173/` using system Chrome. One resource `404` remains as a residual smoke finding; no JS runtime crash was captured.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run App.test.tsx -t "keeps global status independent while warning when OA data is incomplete"`: passed, 1 selected test.
+  - runtime no-MUI grep: passed, no runtime source MUI/Emotion imports, providers, theme or `.Mui` residue.
+  - package no-MUI grep: passed, no package/lockfile `@mui/*` or `@emotion/*` entries.
+  - `cd web && npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled`: `(empty)`, expected absent result.
+  - `cd web && npx vitest run MuiContainment.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 3 files / 15 tests.
+  - `cd web && npm test -- --run`: passed, 63 files / 619 tests.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and Vite chunk-size warning.
+  - headless Chrome smoke at `http://127.0.0.1:4173/`: rendered App Shell/sidebar/workbench; one resource `404`; no JS runtime crash captured.
+
 ### MG Prompt Template
 
 ```text

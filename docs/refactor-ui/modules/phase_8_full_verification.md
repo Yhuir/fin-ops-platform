@@ -47,7 +47,7 @@ These warnings were observed during verification and are not introduced as phase
 
 - Browser/manual visual smoke was not run in P114. The automated suite covers major routes and interactions, but phase 9 should record this as a residual risk unless a browser smoke is added before closeout.
 - Bundle splitting remains outside the UI migration scope. The current build passes but reports chunk-size warning.
-- Frozen workbench internal MUI remains intentionally allowed and should not be removed in this migration unless a separate workbench-specific plan is approved.
+- Workbench internal MUI was removed by the subsequent workbench-specific migration and P116 post-closeout audit. Historical phase 8 notes remain useful for understanding why P114 did not treat workbench MUI as a blocker at that moment.
 
 ## Next Prompt
 

@@ -246,7 +246,7 @@ describe("Finance operations shell", () => {
     const statusIndicator = await screen.findByRole("status", { name: "系统状态正常" }, { timeout: WORKBENCH_RENDER_TIMEOUT });
     expect(statusIndicator).toHaveClass("ok");
     expect(statusIndicator.textContent).toBe("");
-    expect(screen.getByText("OA 连接失败，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
+    expect(await screen.findByText("OA 连接失败，本次结果未包含完整 OA 数据。")).toBeInTheDocument();
   });
 
   test("navigates to the standalone settings page from the shell sidebar", async () => {

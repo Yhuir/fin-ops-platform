@@ -8,7 +8,7 @@
 - Status: `completed`
 - Branch: `refactor-ui`
 - Last Updated: `2026-06-07`
-- Current Prompt ID: `P115-phase-9-closeout`
+- Current Prompt ID: `P116-phase-9-post-closeout-audit-fix`
 - Current MG ID: `MG-P113-phase-7-mui-containment`
 
 ## Global Invariants
@@ -18,8 +18,8 @@
 | Backend untouched | yes | 当前 AppHealth discovery 切片只修改重构文档 |
 | API contract untouched | yes | 未修改 AppHealth API client contract 或 backend |
 | Read model / worker untouched | yes | 未修改 read model、worker 或 queue |
-| Reconciliation workbench internals frozen | yes | 当前未改 `ReconciliationWorkbenchPage` 或 `web/src/components/workbench/*` |
-| Non-workbench MUI additions | none | InputInvoiceUsage page/table/filter/detail/export/payment-rules/OA-reverse surfaces now have no scoped MUI |
+| Reconciliation workbench structure preserved | yes | 关联台内部工作区已迁出 MUI runtime，但三栏工作区结构和交互保持原业务体感 |
+| MUI/Emotion runtime residue | none | 当前全 app runtime/package no-MUI scans are required by P116 |
 | User-visible actions preserved | documented | `baseline_inventory.md`、`module_inventory.md` 已要求逐页检查 |
 | Behavior equivalence | documented | 旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗 |
 | HeroUI MCP active | yes | 当前会话已调用 HeroUI MCP quick start、theming、Table/Drawer/Modal docs |
@@ -37,9 +37,9 @@
 | `phase_4_shell` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | `phase_5_table_system` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P021 已 push；FinanceTable primitives/session/AppHealth pilot complete |
 | `phase_6_page_batches` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | PendingInvoices、InputInvoiceUsage、OaPendingPayments、OutputInvoiceCollections、NoOaBankBatches、BatchAccounting、TurnoverLedger、ETC tickets and Settings MG verified |
-| `phase_7_mui_containment` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P113 verified；non-workbench runtime no-MUI contract passed；frozen workbench legacy isolated |
+| `phase_7_mui_containment` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | MG-P113 verified；non-workbench runtime no-MUI contract passed |
 | `phase_8_full_verification` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P114 full verification passed: source contract, full Vitest, build, diff check |
-| `phase_9_closeout` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P115 closeout completed; final docs/status/risk register updated |
+| `phase_9_closeout` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P116 post-closeout audit/fix completed; full suite, build, no-MUI scans and browser smoke recorded |
 
 ## Status Values
 
@@ -54,14 +54,24 @@
 
 ## Active Checkpoint
 
-- Scope: phase 9 closeout after P114 full verification。
+- Scope: P116 post-closeout audit/fix after codebase inspection found one App test waiting gap and stale current fact-source wording。
 - Files touched in P115:
   - `docs/refactor-ui/README.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: final non-workbench runtime MUI grep, closeout smoke tests, `cd web && npm run build`, `git diff --check` passed。
-- Failures: none.
-- Next action: optional PR/review; browser/manual visual QA remains a documented residual risk.
+- Files touched in P116:
+  - `web/src/test/App.test.tsx`
+  - `DESIGN.md`
+  - `docs/dev/codebase-development.md`
+  - `docs/app-architecture/pages.md`
+  - `docs/refactor-ui/README.md`
+  - `docs/refactor-ui/platform_stack_migration.md`
+  - `docs/refactor-ui/modules/phase_8_full_verification.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+- Verification run: P116 targeted App test, runtime/package no-MUI scans, platform smoke, full frontend suite, build and headless Chrome smoke passed or recorded as noted。
+- Failures: none blocking。
+- Next action: optional review/PR; remaining warnings are recorded residual risks rather than UI migration blockers.
 
 ## Prompt Lifecycle
 
@@ -94,14 +104,23 @@
 | app shell | `verified` | `P015-phase-4-status-indicator` | P011-P015 verified，MG-P015 已 push；shell 目录已无 MUI import |
 | table system | `verified` | `P021-phase-5-app-health-table-pilot-refactor` | MG-P021 pushed；Phase 5 completed |
 | page batches | `verified` | `MG-P106-phase-6-settings` | Phase 6 page modules completed through Settings MG |
-| mui containment | `verified` | `MG-P113-phase-7-mui-containment` | Phase 7 completed; MUI limited to frozen workbench internals and test-only legacy provider/helper |
+| mui containment | `verified` | `MG-P113-phase-7-mui-containment` | Phase 7 completed; non-workbench no-MUI contract established |
 | full verification | `verified` | `P114-phase-8-full-verification` | Source greps, full Vitest, build and diff check passed; residual warnings documented |
-| closeout | `verified` | `P115-phase-9-closeout` | Final docs/status/risk register completed |
+| workbench MUI migration | `verified` | `P-WB010-closeout` | Workbench runtime, CSS hooks, test provider and MUI/Emotion dependencies removed |
+| closeout | `verified` | `P116-phase-9-post-closeout-audit-fix` | Post-closeout audit/fix completed; full suite/browser smoke/docs facts updated |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | `cd web && npx vitest run App.test.tsx -t "keeps global status independent while warning when OA data is incomplete"` | passed | 1 selected App shell OA warning test passed after waiting for async page warning |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | runtime no-MUI grep | passed | No runtime source MUI/Emotion imports, providers, theme, `.Mui` or `useMui` residue |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | package no-MUI grep | passed | No package/lockfile `@mui/*` or `@emotion/*` entries |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | `cd web && npm ls @mui/material @mui/icons-material @mui/x-data-grid @mui/x-date-pickers @emotion/react @emotion/styled` | passed | Command exits 1 with `(empty)`, expected because packages are absent |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | `cd web && npx vitest run MuiContainment.test.ts CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 3 files / 15 tests passed |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | `cd web && npm test -- --run` | passed | 63 files / 619 tests passed |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk-size warning |
+| 2026-06-07 | `P116-phase-9-post-closeout-audit-fix` | headless Chrome smoke at `http://127.0.0.1:4173/` | passed with note | App Shell/sidebar/workbench tri-pane rendered; one resource 404 captured; no JS runtime crash captured |
 | 2026-06-07 | `P115-phase-9-closeout` | `git status --short --branch` | passed | Clean on `refactor-ui...origin/refactor-ui` before closeout docs update |
 | 2026-06-07 | `P115-phase-9-closeout` | final non-workbench runtime MUI grep chain | passed | No non-workbench runtime MUI imports/providers/theme, DataGrid or date-picker residue |
 | 2026-06-07 | `P115-phase-9-closeout` | `cd web && npx vitest run MuiContainment.test.ts DesignTokens.test.ts TableLayoutTokens.test.ts TableAlignmentStyles.test.ts HeroUIPlatformSmoke.test.tsx CommonMuiComponents.test.tsx SessionGate.test.tsx` | passed | 7 files / 29 tests passed |

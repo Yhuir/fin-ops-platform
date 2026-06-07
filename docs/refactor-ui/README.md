@@ -22,7 +22,7 @@
 
 - 不修改后端功能。
 - 不修改 API contract、read model、worker、queue、权限语义或业务状态机。
-- 不迁移关联台内部工作区。`ReconciliationWorkbenchPage` 和 `web/src/components/workbench/*` 的三栏工作台、专用交互和内部弹窗暂时冻结。
+- 不重排关联台内部工作区。`ReconciliationWorkbenchPage` 和 `web/src/components/workbench/*` 的三栏工作台、专用交互和内部弹窗保持原业务体感；其 runtime 已在专项迁移中迁出 MUI。
 - 不引入 TanStack Table、TanStack Virtual 或新的通用表格状态库。
 - 不使用 Tailwind/HeroUI 默认外观替代项目设计系统。
 
@@ -31,9 +31,9 @@
 - React 19。
 - HeroUI v3。
 - Tailwind CSS v4。
-- HeroUI Table 作为非关联台表格基础。
+- HeroUI Table 和项目 `FinanceTable` 作为表格基础。
 - 项目本地 UI primitives 承载产品规则，例如 `FinanceTable`、`FinanceTag`、`AmountCell`、`StatePanel`、`AppDialog`。
-- MUI 短期保留，仅允许冻结的关联台内部工作区继续使用。
+- MUI/Emotion 不再作为 frontend runtime 或 package dependency；历史 prompt/state 中的 MUI 字样只代表迁移执行记录或 no-MUI negative assertions。
 
 ## 文档事实源
 
@@ -107,9 +107,10 @@ phase 只有在该阶段所有必要 prompt 和 MG 都 verified 后才能进入�
 5. `phase_4_shell`：迁移 App Shell，保留左侧菜单、顶部栏、页面容器、路由、权限入口和关联台外层 wrapper。
 6. `phase_5_table_system`：落地 `FinanceTable`、表格 cell primitives、分页、loading/empty/error、列角色、金额和 tag 对齐规则。
 7. `phase_6_page_batches`：按 `module_inventory.md` 的页面队列逐模块迁移非关联台页面。每个页面必须先 discovery，再 characterization tests，再迁移实现，再 MG。
-8. `phase_7_mui_containment`：清理非关联台 `@mui/*`，只允许冻结的关联台内部工作区继续使用 MUI，并记录隔离边界。
-9. `phase_8_full_verification`：运行全量前端测试、build、关键页面 smoke、桌面/紧凑屏/OA embedded/关联台 wrapper 验证。
-10. `phase_9_closeout`：收口文档、剩余风险、关联台后续计划、最终 MUI containment 说明和可交接状态。
+8. `phase_7_mui_containment`：清理非关联台 `@mui/*`、MUI provider/theme、MUI X DataGrid/date-picker 等残留，并建立 no-MUI contract。
+9. `workbench_migration`：在专项状态机下迁移关联台内部工作区，移除最后的 MUI/Emotion runtime 和依赖残留。
+10. `phase_8_full_verification`：运行全量前端测试、build、关键页面 smoke、桌面/紧凑屏/OA embedded/关联台 wrapper 验证。
+11. `phase_9_closeout`：收口文档、剩余风险、最终 no-MUI 说明和可交接状态。
 
 不得跳过平台栈、primitives 或表格系统直接迁页面；否则会把 token、overlay、表格、测试迁移和 MUI containment 风险分散到业务模块里。
 
@@ -124,9 +125,10 @@ phase 只有在该阶段所有必要 prompt 和 MG 都 verified 后才能进入�
 | `phase_4_shell` | App Shell 迁移 | 非关联台和关联台外壳均可进入 |
 | `phase_5_table_system` | HeroUI Table 和表格排版系统落地 | 典型表格切片通过 |
 | `phase_6_page_batches` | 按模块迁移非关联台页面 | 每个模块独立 MG |
-| `phase_7_mui_containment` | 非关联台清理 MUI，关联台隔离说明 | 非关联台无 `@mui/*` |
+| `phase_7_mui_containment` | 非关联台清理 MUI 并建立 no-MUI contract | 非关联台无 `@mui/*` |
+| `workbench_migration` | 关联台内部工作区迁出 MUI | 全 app runtime/package 无 MUI/Emotion |
 | `phase_8_full_verification` | 全量前端测试、build、关键页面验收 | 可推送完成状态 |
-| `phase_9_closeout` | 文档收口、剩余关联台后续计划 | 最终状态记录 |
+| `phase_9_closeout` | 文档收口、剩余风险和最终 no-MUI 说明 | 最终状态记录 |
 
 ## 遗漏防线
 

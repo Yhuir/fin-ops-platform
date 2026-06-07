@@ -104,7 +104,7 @@ components:
 
 `fin-ops-platform` is a task-focused finance operations system. The interface must feel like a reliable ledger and audit workbench: dense, readable, predictable, and calm under operational pressure. Visual polish comes from alignment, stable rhythm, precise data formatting, and consistent state language rather than decoration.
 
-The system uses React 19, HeroUI v3, and Tailwind CSS v4 for new non-workbench UI. MUI is a legacy dependency that remains only for the frozen reconciliation workbench internals until that surface is migrated separately. New non-workbench code must not introduce `@mui/*` imports.
+The system uses React 19, HeroUI v3, and Tailwind CSS v4 across the frontend runtime. MUI and Emotion are no longer product UI dependencies; runtime source must not introduce `@mui/*`, `@emotion/*`, app-level MUI providers, MUI themes, MUI X DataGrid, or MUI X date-picker code.
 
 Design serves repeated work: importing files, reviewing financial records, comparing OA/bank/invoice facts, handling exceptions, exporting ledgers, and checking system health. Preserve the existing high-level layout and user-visible actions. If an old screen has a refresh button, export button, filter menu, confirmation dialog, drawer, or permission-disabled action, the migrated screen must keep an equivalent action in the same information hierarchy.
 
@@ -291,7 +291,7 @@ Use project primitives instead of ad hoc nested spans.
 - **Fields:** Labels above fields for dialogs and drawers; compact inline labels only in dense toolbars.
 - **Validation:** Error text appears directly under the field. Do not rely only on red borders.
 - **Selects:** Use HeroUI Select for option sets. Preserve existing option labels and disabled states.
-- **Month/Date:** Replace MUI pickers with a HeroUI-compatible month/date component. Month selection must keep current business month behavior.
+- **Month/Date:** Use project-native month/date primitives compatible with HeroUI/Tailwind styling. Month selection must keep current business month behavior.
 - **Read-only:** Read-only values should look like values, not disabled inputs, unless an input affordance is required.
 
 ### Drawers
@@ -324,8 +324,8 @@ Use one state component for loading, empty, error, stale, refreshing, permission
 
 - **Do** keep the product dense, calm, and task-first.
 - **Do** preserve all existing user-visible actions during migration.
-- **Do** use HeroUI v3 and Tailwind CSS v4 for new non-workbench UI.
-- **Do** keep MUI only inside the frozen reconciliation workbench internals until that surface is migrated separately.
+- **Do** use HeroUI v3 and Tailwind CSS v4 for frontend UI.
+- **Do** keep the whole app runtime free of MUI/Emotion dependencies.
 - **Do** define reusable product primitives before migrating pages in bulk.
 - **Do** use table column roles to determine alignment and formatting.
 - **Do** right-align amounts, balances, totals, and deltas.
@@ -333,13 +333,13 @@ Use one state component for loading, empty, error, stale, refreshing, permission
 - **Do** keep income and expense tags equal in size and aligned in cell stacks.
 - **Do** keep destructive actions confirmed and loading-safe.
 - **Do** test loading, empty, error, permission, stale, and refreshing states.
-- **Do** document any temporary MUI containment in the UI refactor state log.
+- **Do** document and fix any accidental MUI/Emotion reintroduction in the UI refactor state log or a focused follow-up prompt.
 
 ### Don't:
 
-- **Don't** add new `@mui/*` imports outside the frozen workbench internals.
+- **Don't** add new `@mui/*` or `@emotion/*` imports anywhere in frontend runtime or tests, except negative no-MUI contract strings.
 - **Don't** change backend behavior, API contracts, read models, workers, permissions, or business state machines as part of UI migration.
-- **Don't** migrate `ReconciliationWorkbenchPage` internals or `web/src/components/workbench/*` in this pass.
+- **Don't** reintroduce MUI inside `ReconciliationWorkbenchPage` internals or `web/src/components/workbench/*`.
 - **Don't** remove or hide existing buttons, filters, import/export actions, confirmation flows, drawers, dialogs, or permission controls.
 - **Don't** change an old right-side drawer into a modal, inline panel, card, or route.
 - **Don't** change an old modal dialog into a drawer.

@@ -20,12 +20,11 @@ HeroUI MCP quick start 已核对到以下事实：
 - HeroUI v3 不需要全局 Provider wrapper。
 - HeroUI theming 使用 CSS variables、BEM classes、Tailwind v4 `@theme`。
 
-## 迁移目标
+## 当前平台目标
 
-- 非关联台 React UI 迁到 React 19 + HeroUI v3 + Tailwind CSS v4。
-- 非关联台不再新增 `@mui/*` imports。
-- MUI 短期只为冻结关联台内部工作区保留。
-- App Shell 迁移到 HeroUI/Tailwind，但继续包住关联台内部工作区。
+- 全 app React UI runtime 使用 React 19 + HeroUI v3 + Tailwind CSS v4。
+- 全 app runtime 和 package 依赖不再包含 `@mui/*` 或 `@emotion/*`。
+- App Shell 和关联台内部工作区都已迁出 MUI runtime。
 - 不引入 TanStack Table、TanStack Virtual 或新的通用表格状态库。
 
 ## 当前依赖快照
@@ -34,16 +33,15 @@ HeroUI MCP quick start 已核对到以下事实：
 
 ```json
 {
-  "@emotion/react": "^11.14.0",
-  "@emotion/styled": "^11.14.1",
-  "@mui/icons-material": "^7.3.10",
-  "@mui/material": "^7.3.10",
-  "@mui/x-data-grid": "^8.28.2",
-  "@mui/x-date-pickers": "^8.28.4",
+  "@heroui/react": "3.1.0",
+  "@heroui/styles": "3.1.0",
+  "@tailwindcss/vite": "4.3.0",
   "dayjs": "^1.11.20",
-  "react": "^18.3.1",
-  "react-dom": "^18.3.1",
-  "react-is": "18.3.1"
+  "lucide-react": "^1.17.0",
+  "react": "19.2.7",
+  "react-dom": "19.2.7",
+  "react-is": "19.2.7",
+  "tailwindcss": "4.3.0"
 }
 ```
 
@@ -57,7 +55,7 @@ HeroUI MCP quick start 已核对到以下事实：
 | `@heroui/react`, `@heroui/styles` | 新增 | 按 HeroUI MCP quick start 安装。 |
 | `tailwindcss`, `@tailwindcss/vite` | 新增 | Vite 项目按 Tailwind 官方 Vite guide 使用 plugin。 |
 | `lucide-react` | 新增候选 | HeroUI 不提供项目图标库；非关联台迁出 MUI icons 时优先使用 lucide icon primitive。若执行者选择其他图标库，必须先更新本文并说明理由。 |
-| `@mui/*`, `@emotion/*` | 暂不立即删除 | 直到 `phase_7_mui_containment` 证明非关联台无 MUI 后，只为关联台 legacy 保留或拆出。 |
+| `@mui/*`, `@emotion/*` | 已删除 | 不再作为 frontend package 或 runtime dependency。 |
 | `dayjs` | 暂保留 | 月份格式、日期格式和业务 formatter 可能继续使用；移除需单独证明。 |
 
 ## 平台栈 Micro-JIT 顺序
@@ -76,7 +74,7 @@ HeroUI MCP quick start 已核对到以下事实：
    - 建立或调整 UI style entry，不迁移页面。
 4. `provider/CSS entry migration`
    - 移除非关联台 `MuiProviders` wrapper。
-   - 如果冻结关联台仍需要 MUI theme，建立 legacy boundary，避免全 app 继续包 MUI provider。
+- 不再建立 MUI provider/theme legacy boundary；如发现 MUI provider/theme 需求，必须先生成 focused prompt 解释为何不可用 HeroUI/Tailwind/project primitives 替代。
    - HeroUI v3 不需要 Provider，不能凭记忆添加全局 HeroUIProvider。
 5. `smoke`
    - 只渲染一个小的 HeroUI Button smoke 或专用 platform smoke，确认 styles 生效。
@@ -150,12 +148,12 @@ HeroUI MCP quick start 已核对到以下事实：
 cd web && npm run build
 cd web && npm run test -- App.test.tsx CommonMuiComponents.test.tsx MonthPicker.test.tsx
 rg -n "@import \"tailwindcss\";\\n@import \"@heroui/styles\";" web/src web
-rg -n "@mui|MuiDataGrid|muiTheme|useMuiDataGrid|\\.Mui" web/src
+if rg -n "from ['\\\"]@mui/|import\\s+[^;]*@mui/|from ['\\\"]@emotion/|import\\s+[^;]*@emotion/|@mui/|@emotion/|Mui[A-Z]|\\.Mui|muiTheme|MuiProviders|useMui" web/src --glob '!**/*.test.ts' --glob '!**/*.test.tsx'; then exit 1; else exit 0; fi
 ```
 
 说明：
 
-- 最后一条 `rg` 不要求平台栈阶段清零；它用于确认 MUI 仍被 containment 记录。
+- 最后一条 `rg` 当前必须清零；历史 prompt/state 中的 MUI 字样只作为迁移执行记录保留。
 - 若没有修改实现，只补文档，不运行前端 build/test。
 
 ## 平台栈验收
@@ -165,6 +163,6 @@ rg -n "@mui|MuiDataGrid|muiTheme|useMuiDataGrid|\\.Mui" web/src
 - CSS import 顺序符合 HeroUI quick start。
 - HeroUI Button smoke 显示且样式生效。
 - App Shell、设置页、导入页、关联台 wrapper 可以进入。
-- 非关联台新增代码没有 `@mui/*` imports。
-- 关联台内部没有被迁移或重排。
-- `refactor_ui_state.md` 记录所有 legacy MUI containment。
+- frontend runtime 没有 `@mui/*`、`@emotion/*`、MUI provider/theme、MUI X DataGrid 或 MUI X date-picker residue。
+- 关联台内部没有被重排；三栏工作区交互和结构保持原业务体感。
+- `refactor_ui_state.md` 记录最终 no-MUI contract、known warnings 和剩余风险。
