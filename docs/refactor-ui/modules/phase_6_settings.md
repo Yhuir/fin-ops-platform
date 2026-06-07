@@ -484,3 +484,4 @@ Scope: `/settings` P099-P106 migration only.
 - Result:
   - Settings module is ready to leave Phase 6.
   - Next Micro-JIT prompt moves to Phase 7 MUI containment discovery.
+- Commit: `2a30a7b0 docs: verify settings mg and add mui containment discovery`, pushed to `origin/refactor-ui`.
