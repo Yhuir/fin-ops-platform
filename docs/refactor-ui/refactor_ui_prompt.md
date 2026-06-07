@@ -5093,6 +5093,7 @@ Scope: `/turnover-ledger` extra info right drawer component only.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning。
   - `if rg -n '@mui/|Mui[A-Z]|<Drawer|<IconButton|CloseIcon|<Button|<Chip|<TextField|<MenuItem|<Alert|<Box|<Stack|<Typography|<Divider' web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx; then exit 1; else exit 0; fi`: passed。
   - `git diff --check`: passed。
+- Commit: `30fde5ad feat: migrate turnover ledger extra drawer`, pushed to `origin/refactor-ui`。
 - Next prompt generated: `P091-phase-6-turnover-ledger-export-dialog-feedback-closeout`。
 
 ### P091-phase-6-turnover-ledger-export-dialog-feedback-closeout
