@@ -95,6 +95,43 @@ class EtcOADetectionServiceTests(unittest.TestCase):
         self.assertEqual(result.reason, "oa_marker_missing")
         self.assertEqual(result.candidates[0]["oaRowId"], "oa-pay-001")
 
+    def test_marker_missing_after_deadline_is_timeout(self) -> None:
+        context = detection_context()
+        assert context.oa_detection_deadline_at is not None
+
+        result = EtcOADetectionService().detect(
+            context,
+            [candidate(reason="ETC批量提交\n未写入稳定业务标记")],
+            now=context.oa_detection_deadline_at + timedelta(days=3),
+        )
+
+        self.assertEqual(result.status, "timeout")
+        self.assertEqual(result.reason, "oa_detection_deadline_exceeded")
+        self.assertEqual(result.candidates[0]["oaRowId"], "oa-pay-001")
+
+    def test_valid_candidate_created_after_deadline_is_detected(self) -> None:
+        context = detection_context()
+        assert context.oa_detection_deadline_at is not None
+
+        result = EtcOADetectionService().detect(
+            context,
+            [
+                candidate(
+                    created_at=context.oa_detection_deadline_at + timedelta(days=3),
+                    reason=(
+                        "ETC批量提交\n"
+                        "business_batch_id=etc_business_batch_0001\n"
+                        "etc_batch_id=etc_20260519_001"
+                    ),
+                )
+            ],
+            now=context.oa_detection_deadline_at + timedelta(days=3, minutes=5),
+        )
+
+        self.assertEqual(result.status, "detected")
+        self.assertEqual(result.reason, "unique_candidate_detected")
+        self.assertEqual(result.oa_row_id, "oa-pay-001")
+
     def test_amount_mismatch_is_conflict(self) -> None:
         result = EtcOADetectionService().detect(
             detection_context(),

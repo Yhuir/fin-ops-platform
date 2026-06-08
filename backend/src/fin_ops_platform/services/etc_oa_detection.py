@@ -135,8 +135,7 @@ class EtcOADetectionService:
     @staticmethod
     def detection_window(context: EtcOADetectionContext) -> tuple[datetime | None, datetime | None]:
         start = context.oa_draft_created_at - timedelta(days=1) if context.oa_draft_created_at else None
-        end = context.oa_detection_deadline_at + timedelta(days=1) if context.oa_detection_deadline_at else None
-        return start, end
+        return start, None
 
     def _candidate_rejection_reason(
         self,
@@ -304,12 +303,12 @@ class EtcOADetectionService:
         return not expected_user and not expected_org
 
     def _within_detection_window(self, context: EtcOADetectionContext, candidate: _PreparedCandidate) -> bool:
-        start, end = self.detection_window(context)
-        if start is None or end is None:
+        start, _end = self.detection_window(context)
+        if start is None:
             return True
         if candidate.created_at is None:
             return False
-        return start <= candidate.created_at <= end
+        return start <= candidate.created_at
 
     @staticmethod
     def _candidate_created_at(payload: dict[str, Any]) -> datetime | None:

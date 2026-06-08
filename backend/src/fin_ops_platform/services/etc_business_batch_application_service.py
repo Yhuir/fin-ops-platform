@@ -303,7 +303,7 @@ class EtcBusinessBatchApplicationService:
             invoice_count=int(invoice_summary.get("count", 0) or 0) if isinstance(invoice_summary, dict) else 0,
             owner_user_id=str(payload.get("ownerUserId") or "").strip() or None,
             owner_org_id=str(payload.get("ownerOrgId") or "").strip() or None,
-            oa_draft_created_at=getattr(batch, "updated_at", None),
+            oa_draft_created_at=getattr(batch, "oa_detection_started_at", None) or getattr(batch, "updated_at", None),
             oa_detection_deadline_at=getattr(batch, "oa_detection_deadline_at", None),
             oa_detection_final_retry_until=getattr(batch, "oa_detection_final_retry_until", None),
         )
@@ -319,9 +319,10 @@ class EtcBusinessBatchApplicationService:
             )
         detector = EtcOADetectionService()
         start, end = detector.detection_window(context)
-        if start is None or end is None:
-            now = datetime.now(UTC)
+        now = datetime.now(UTC)
+        if start is None:
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if end is None:
             end = now
         result = detector.detect_with_adapter(
             context,

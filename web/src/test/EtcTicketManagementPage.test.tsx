@@ -1309,6 +1309,55 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByTestId("etc-batch-row-etc-business-refresh-detected-001")).not.toBeInTheDocument();
   });
 
+  test("refreshes timed-out OA detection and moves a late valid OA submission to the submitted list", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const timeoutBatch = businessBatchFixture({
+      businessBatchId: "etc-business-refresh-timeout-detected-001",
+      status: "oa_detection_timeout",
+      version: 8,
+      oaDetectionStatus: "timeout",
+      oaDetectionReason: "oa_detection_deadline_exceeded",
+    });
+    const detectedBatch = {
+      ...timeoutBatch,
+      status: "oa_submitted",
+      version: 9,
+      oaRowId: "oa-row-refresh-timeout-detected-001",
+      oaProcessStatus: "in_progress",
+      oaDetectionStatus: "detected",
+      oaDetectionReason: "unique_candidate_detected",
+      invoiceItems: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 1, submitted: 0 },
+      items: [timeoutBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
+      ...timeoutBatch,
+      invoiceItems: [],
+    } as never);
+    const refreshOaStatus = vi.spyOn(etcApi, "refreshEtcBusinessBatchOaStatus").mockResolvedValue(detectedBatch as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
+    expect(within(oaStatusPanel).getByRole("button", { name: "刷新检测" })).toBeEnabled();
+    expect(within(oaStatusPanel).getByRole("button", { name: "异常处理" })).toBeInTheDocument();
+
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "刷新检测" }));
+
+    await waitFor(() => {
+      expect(refreshOaStatus).toHaveBeenCalledWith("etc-business-refresh-timeout-detected-001", { expectedVersion: 8 });
+    });
+    await waitFor(() => expect(within(page).getByRole("button", { name: "未提交 0" })).toBeInTheDocument());
+    expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-batch-row-etc-business-refresh-timeout-detected-001")).not.toBeInTheDocument();
+  });
+
   test("surfaces OA detection refresh errors and keeps the batch actionable", async () => {
     const user = userEvent.setup();
     installMockApiFetch();

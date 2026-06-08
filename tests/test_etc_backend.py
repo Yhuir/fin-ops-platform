@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 import json
@@ -607,6 +607,119 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual(invoice.status, EtcInvoiceStatus.SUBMITTED)
             self.assertEqual(projection_repository.calls[0]["business_batch_id"], batch.business_batch_id)
             self.assertEqual(projection_repository.calls[0]["external_etc_batch_id"], drafted["externalEtcBatchId"])
+            self.assertIn(["etc_invoice_0001"], changed_batches)
+            self.assertIn((["2026-02"], "etc_business_oa_status_detected"), refreshes)
+
+    def test_timeout_business_batch_refresh_detects_late_valid_oa_candidate(self) -> None:
+        from fin_ops_platform.services.etc_business_batch_application_service import (
+            EtcBusinessBatchActor,
+            EtcBusinessBatchApplicationService,
+        )
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter
+
+        class ReconciliationTasks:
+            def get_task(self, task_id: str) -> object:
+                raise KeyError(task_id)
+
+        class ProjectionRepository:
+            def __init__(self, etc_service: EtcService) -> None:
+                self._etc_service = etc_service
+                self.calls: list[dict[str, object]] = []
+
+            def list_etc_oa_detection_candidates(self, **kwargs: object) -> list[dict[str, object]]:
+                self.calls.append(dict(kwargs))
+                target = self._etc_service.get_business_batch(str(kwargs["business_batch_id"]))
+                if target.oa_detection_deadline_at is None:
+                    return []
+                late_candidate_created_at = target.updated_at
+                created_to = kwargs.get("created_to")
+                if created_to is not None and created_to < late_candidate_created_at:
+                    return []
+                payload = self._etc_service.business_batch_payload(target)
+                invoice_summary = payload["invoiceSummary"]
+                return [
+                    {
+                        "oa_row_id": "oa-pay-etc-late-001",
+                        "form_id": "2",
+                        "amount": str(invoice_summary["amount"]),
+                        "invoice_count": int(invoice_summary["count"]),
+                        "applicant_user_id": "user-001",
+                        "owner_org_id": "org-001",
+                        "created_at": late_candidate_created_at,
+                        "process_status": "in_progress",
+                        "reason": (
+                            "ETC批量提交\n"
+                            f"business_batch_id={target.business_batch_id}\n"
+                            f"etc_batch_id={target.external_etc_batch_id}"
+                        ),
+                        "detail_fields": {"表单ID": "2", "流程状态": "进行中"},
+                    }
+                ]
+
+        with TemporaryDirectory() as temp_dir:
+            etc_service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            projection_repository = ProjectionRepository(etc_service)
+            changed_batches: list[list[str]] = []
+            refreshes: list[tuple[list[str], str]] = []
+            application_service = EtcBusinessBatchApplicationService(
+                etc_service=etc_service,
+                reconciliation_task_service=ReconciliationTasks(),
+                oa_client_factory=lambda _headers: FakeEtcOAClient(),
+                oa_adapter_provider=lambda: PostgresOAProjectionAdapter(projection_repository),
+                sync_etc_invoices_to_canonical_invoices=lambda invoices: changed_batches.append(
+                    [invoice.id for invoice in invoices]
+                )
+                or ["2026-02"],
+                refresh_after_etc_invoice_sync=lambda months, reason: refreshes.append((list(months), reason)),
+            )
+            actor = EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True)
+            batch = etc_service.create_business_batch(
+                task_id="ETC-TASK-LATE-OA",
+                owner_user_id="user-001",
+                owner_org_id="org-001",
+            )
+            preview = etc_service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = etc_service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            draft_payload = application_service.create_oa_draft_payload(
+                batch.business_batch_id,
+                expected_version=batch.version,
+                actor=actor,
+                headers={},
+            )
+            drafted = draft_payload["businessBatch"]
+
+            stored_batch = etc_service._business_batches[str(drafted["businessBatchId"])]
+            stored_batch.oa_detection_deadline_at = stored_batch.updated_at - timedelta(days=3)
+            stored_batch.oa_detection_final_retry_until = stored_batch.updated_at - timedelta(days=2)
+            timed_out = etc_service.apply_business_batch_oa_detection_result(
+                str(drafted["businessBatchId"]),
+                expected_version=int(drafted["version"]),
+                detection_status="timeout",
+                reason="oa_detection_deadline_exceeded",
+                candidates=[],
+            )
+
+            refreshed_payload = application_service.refresh_oa_status_payload(
+                timed_out.business_batch_id,
+                expected_version=timed_out.version,
+                actor=actor,
+            )
+
+            refreshed = refreshed_payload["businessBatch"]
+            invoice = etc_service.list_invoices_by_ids(["etc_invoice_0001"])[0]
+            self.assertEqual(refreshed["status"], EtcBusinessBatchStatus.OA_SUBMITTED.value)
+            self.assertEqual(refreshed["oaRowId"], "oa-pay-etc-late-001")
+            self.assertEqual(refreshed["oaDetectionReason"], "unique_candidate_detected")
+            self.assertEqual(invoice.status, EtcInvoiceStatus.SUBMITTED)
+            self.assertGreaterEqual(projection_repository.calls[0]["created_to"], timed_out.updated_at)
             self.assertIn(["etc_invoice_0001"], changed_batches)
             self.assertIn((["2026-02"], "etc_business_oa_status_detected"), refreshes)
 
