@@ -13,6 +13,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
     PostgresReadModelRepository,
 )
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.runtime_worker_handlers import _RuntimeWorkerDerivedLifecycle
 from fin_ops_platform.services.workbench_reconciliation_models import (
@@ -598,6 +599,15 @@ class WorkbenchWriteConnection:
         return 1
 
 
+class EtcStateWriteConnection:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple]] = []
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.executed.append((" ".join(sql.lower().split()), params))
+        return 1
+
+
 class StaleWorkbenchWriteConnection(WorkbenchWriteConnection):
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
@@ -712,6 +722,92 @@ class EtcSummaryProjectionConnection(WorkbenchProjectionSettingsConnection):
                 },
             ]
         return super().fetch_all(sql, params)
+
+
+class EtcBusinessSummaryProjectionConnection(WorkbenchProjectionSettingsConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "with submitted_batches as" in normalized and "from app.invoices invoices" in normalized:
+            return []
+        if "from app.etc_business_batches" in normalized and "join app.etc_invoices etc_invoices" in normalized:
+            self.business_summary_query = normalized
+            return [
+                {
+                    "external_etc_batch_id": "etc_20260520_001",
+                    "business_batch_id": "etc_business_batch_0004",
+                    "business_invoice_count": 0,
+                    "business_total_amount": "0.00",
+                    "business_batch_payload": {
+                        "business_batch_id": "etc_business_batch_0004",
+                        "submission_batch_id": "etc_20260520_001",
+                        "invoice_ids": ["ETC001", "ETC002"],
+                    },
+                    "submission_batch_payload": {
+                        "etc_batch_id": "etc_20260520_001",
+                        "oa_total_amount": "1673.30",
+                        "total_amount": "1673.30",
+                        "etc_invoice_amount": "27.14",
+                        "etc_invoice_count": 37,
+                    },
+                    "row_id": "ETC001",
+                    "invoice_type": "进项发票",
+                    "invoice_no": "ETC001",
+                    "digital_invoice_no": "ETC001",
+                    "invoice_date": "2026-05-20",
+                    "counterparty_name": "高速公路通行费",
+                    "seller_name": "高速公路通行费",
+                    "buyer_name": "云南溯源科技",
+                    "amount": "13.57",
+                    "total_with_tax": "13.57",
+                    "status": "submitted",
+                    "workbench_visibility": "hidden_after_etc_submission",
+                    "raw_payload": {},
+                },
+                {
+                    "external_etc_batch_id": "etc_20260520_001",
+                    "business_batch_id": "etc_business_batch_0004",
+                    "business_invoice_count": 0,
+                    "business_total_amount": "0.00",
+                    "business_batch_payload": {
+                        "business_batch_id": "etc_business_batch_0004",
+                        "submission_batch_id": "etc_20260520_001",
+                        "invoice_ids": ["ETC001", "ETC002"],
+                    },
+                    "submission_batch_payload": {
+                        "etc_batch_id": "etc_20260520_001",
+                        "oa_total_amount": "1673.30",
+                        "total_amount": "1673.30",
+                        "etc_invoice_amount": "27.14",
+                        "etc_invoice_count": 37,
+                    },
+                    "row_id": "ETC002",
+                    "invoice_type": "进项发票",
+                    "invoice_no": "ETC002",
+                    "digital_invoice_no": "ETC002",
+                    "invoice_date": "2026-05-20",
+                    "counterparty_name": "高速公路通行费",
+                    "seller_name": "高速公路通行费",
+                    "buyer_name": "云南溯源科技",
+                    "amount": "13.57",
+                    "total_with_tax": "13.57",
+                    "status": "submitted",
+                    "workbench_visibility": "hidden_after_etc_submission",
+                    "raw_payload": {},
+                },
+            ]
+        return super().fetch_all(sql, params)
+
+
+class WorkbenchScopeShardEtcConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from app.etc_business_batches" in normalized and "from app.etc_invoices" in normalized:
+            return [{"scope_key": "2026-05"}]
+        return []
 
 
 class CandidateSnapshotRecorder:
@@ -979,6 +1075,73 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["invoice_bank_relation"]["label"], "已关联ETC发票")
         self.assertEqual(summary_row["etc_invoice_count"], 2)
         self.assertEqual(summary_row["total_with_tax"], "144.50")
+
+    def test_sql_projection_creates_open_etc_summary_from_submitted_business_batch(self) -> None:
+        connection = EtcBusinessSummaryProjectionConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._open_etc_invoice_summary_rows("2026-05")
+
+        self.assertEqual(len(rows), 1)
+        summary_row = rows[0]
+        self.assertEqual(summary_row["source_kind"], "etc_invoice_summary")
+        self.assertEqual(summary_row["etc_batch_id"], "etc_20260520_001")
+        self.assertEqual(summary_row["total_with_tax"], "1,673.30")
+        self.assertEqual(summary_row["amount"], "1,673.30")
+        self.assertEqual(summary_row["etc_invoice_count"], 37)
+        self.assertEqual(summary_row["invoice_bank_relation"]["code"], "pending_oa_bank_match")
+        self.assertIn("ETC001", summary_row["detail_fields"]["发票清单"])
+        self.assertIn("ETC002", summary_row["detail_fields"]["发票清单"])
+        self.assertIn("business_batches.scope_month = %s::date", connection.business_summary_query)
+        self.assertNotIn("etc_invoices.scope_month = %s::date", connection.business_summary_query)
+
+    def test_sql_projection_scope_shards_include_etc_business_sources(self) -> None:
+        connection = WorkbenchScopeShardEtcConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        shards = builder.list_workbench_scope_shards("all")
+
+        self.assertEqual(shards, ["2026-05"])
+        query = connection.fetch_all_calls[0][0]
+        self.assertIn("from app.etc_business_batches", query)
+        self.assertIn("from app.etc_invoices", query)
+
+    def test_etc_state_repository_persists_business_batch_reported_submission_amount(self) -> None:
+        connection = EtcStateWriteConnection()
+        repository = PostgresOpsTaxEtcRepository(connection)
+
+        repository.save_etc_state({
+            "batches": {
+                "etc_20260520_001": {
+                    "status": "submitted_confirmed",
+                    "issue_start_date": "2026-05-20",
+                    "invoice_ids": ["ETC001", "ETC002"],
+                    "oa_total_amount": "1673.30",
+                    "total_amount": "1673.30",
+                    "etc_invoice_amount": "27.14",
+                    "etc_invoice_count": 37,
+                }
+            },
+            "business_batches": {
+                "etc_business_batch_0004": {
+                    "status": "manually_marked_submitted",
+                    "submission_batch_id": "etc_20260520_001",
+                    "invoice_ids": ["ETC001", "ETC002"],
+                    "created_at": "2026-05-20T09:00:00+08:00",
+                }
+            },
+        })
+
+        business_batch_writes = [
+            params
+            for sql, params in connection.executed
+            if "insert into app.etc_business_batches" in sql
+        ]
+        self.assertEqual(len(business_batch_writes), 1)
+        params = business_batch_writes[0]
+        self.assertEqual(params[4], "2026-05-01")
+        self.assertEqual(params[5], 37)
+        self.assertEqual(params[6], "1673.30")
 
     def test_repository_reads_workbench_snapshot_and_dirty_status_without_state_fallback(self) -> None:
         connection = WorkbenchSqlReadConnection(

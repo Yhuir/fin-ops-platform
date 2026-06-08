@@ -16402,6 +16402,16 @@ class Application:
                 batch_by_external_batch_id[external_batch_id] = batch
             invoices_by_external_batch_id[external_batch_id].append(invoice)
 
+        for business_batch in self._submitted_etc_business_batches():
+            external_batch_id = self._external_etc_batch_id_for_business_batch(business_batch)
+            if not external_batch_id:
+                continue
+            batch_by_external_batch_id[external_batch_id] = self._business_batch_summary_proxy(business_batch)
+            if external_batch_id not in invoices_by_external_batch_id:
+                invoices_by_external_batch_id[external_batch_id] = self._existing_etc_invoices_by_ids(
+                    [str(invoice_id) for invoice_id in list(getattr(business_batch, "invoice_ids", []) or [])]
+                )
+
         return {
             external_batch_id: self._build_etc_invoice_summary_row(
                 external_batch_id,
@@ -16411,6 +16421,52 @@ class Application:
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
         }
+
+    def _submitted_etc_business_batches(self) -> list[object]:
+        submitted_statuses = {
+            EtcBusinessBatchStatus.OA_SUBMITTED.value,
+            EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
+            EtcBusinessBatchStatus.CLOSED.value,
+        }
+        return [
+            batch for batch in self._etc_service.list_business_batches()
+            if str(getattr(batch, "status", "") or "").strip() in submitted_statuses
+        ]
+
+    @staticmethod
+    def _external_etc_batch_id_for_business_batch(batch: object) -> str:
+        return (
+            str(getattr(batch, "external_etc_batch_id", "") or "").strip()
+            or str(getattr(batch, "submission_batch_id", "") or "").strip()
+            or str(getattr(batch, "business_batch_id", "") or "").strip()
+        )
+
+    def _business_batch_summary_proxy(self, batch: object) -> object:
+        payload = self._etc_service.business_batch_payload(batch)
+        invoice_summary = payload.get("invoiceSummary") if isinstance(payload.get("invoiceSummary"), dict) else {}
+        amount = (
+            self._decimal_from_value(invoice_summary.get("amount")) if isinstance(invoice_summary, dict) else None
+        ) or Decimal("0.00")
+        count = 0
+        if isinstance(invoice_summary, dict):
+            try:
+                count = int(invoice_summary.get("count", 0) or 0)
+            except (TypeError, ValueError):
+                count = 0
+        display_count_text = (
+            str(invoice_summary.get("displayCountText") or "").strip()
+            if isinstance(invoice_summary, dict)
+            else ""
+        )
+        return SimpleNamespace(
+            business_batch_id=str(getattr(batch, "business_batch_id", "") or ""),
+            reconciliation_task_id=str(getattr(batch, "task_id", "") or ""),
+            oa_total_amount=amount,
+            total_amount=amount,
+            etc_invoice_amount=amount,
+            etc_invoice_count=count,
+            display_count_text=display_count_text or None,
+        )
 
     def _etc_supplement_summary_rows_by_external_batch_id(self) -> dict[str, list[dict[str, object]]]:
         rows: dict[str, list[dict[str, object]]] = {}
@@ -16448,6 +16504,7 @@ class Application:
             (
                 self._decimal_from_value(getattr(invoice, "total_with_tax", None))
                 or self._decimal_from_value(getattr(invoice, "amount", None))
+                or self._decimal_from_value(getattr(invoice, "total_amount", None))
                 or Decimal("0.00")
             )
             for invoice in sorted_invoices
@@ -16459,9 +16516,9 @@ class Application:
             or invoice_total_amount
         )
         issue_dates = [
-            str(getattr(invoice, "invoice_date", "") or "").strip()
+            str(getattr(invoice, "invoice_date", "") or getattr(invoice, "issue_date", "") or "").strip()
             for invoice in sorted_invoices
-            if str(getattr(invoice, "invoice_date", "") or "").strip()
+            if str(getattr(invoice, "invoice_date", "") or getattr(invoice, "issue_date", "") or "").strip()
         ]
         seller_names = [
             str(getattr(invoice, "seller_name", "") or getattr(getattr(invoice, "counterparty", None), "name", "") or "").strip()
@@ -16469,7 +16526,10 @@ class Application:
         ]
         seller_names = [name for name in seller_names if name]
         first_seller_name = seller_names[0] if seller_names else "ETC发票"
-        count = len(sorted_invoices)
+        try:
+            count = int(getattr(batch, "etc_invoice_count", None) or len(sorted_invoices))
+        except (TypeError, ValueError):
+            count = len(sorted_invoices)
         title = f"ETC发票 {count} 张"
         issue_range = self._date_range_label(issue_dates)
         invoice_lines = [
@@ -16623,12 +16683,18 @@ class Application:
         return f"{normalized[0]} 至 {normalized[-1]}"
 
     def _etc_invoice_summary_line(self, invoice: object) -> str:
-        invoice_no = str(getattr(invoice, "digital_invoice_no", "") or getattr(invoice, "invoice_no", "") or "—")
-        issue_date = str(getattr(invoice, "invoice_date", "") or "—")
+        invoice_no = str(
+            getattr(invoice, "digital_invoice_no", "")
+            or getattr(invoice, "invoice_no", "")
+            or getattr(invoice, "invoice_number", "")
+            or "—"
+        )
+        issue_date = str(getattr(invoice, "invoice_date", "") or getattr(invoice, "issue_date", "") or "—")
         seller_name = str(getattr(invoice, "seller_name", "") or getattr(getattr(invoice, "counterparty", None), "name", "") or "—")
         amount = (
             self._decimal_from_value(getattr(invoice, "total_with_tax", None))
             or self._decimal_from_value(getattr(invoice, "amount", None))
+            or self._decimal_from_value(getattr(invoice, "total_amount", None))
             or Decimal("0.00")
         )
         return f"{issue_date} ｜ {invoice_no} ｜ {seller_name} ｜ {self._format_money(amount)}"

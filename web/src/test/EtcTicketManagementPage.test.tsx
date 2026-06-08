@@ -1201,12 +1201,14 @@ describe("ETC ticket management page", () => {
       oaDetectionReason: "用户确认 OA 草稿已提交。",
       invoiceItems: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [linkedBusinessBatch],
+    const fetchReconciliationTasks = vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
+      .mockResolvedValueOnce({ items: [importedTask] } as never)
+      .mockResolvedValue({ items: [] } as never);
+    const fetchBusinessBatches = vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: { active: query.status === "submitted" ? 0 : 1, submitted: query.status === "submitted" ? 1 : 0 },
+      items: query.status === "submitted" ? [submittedBatch] : [linkedBusinessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
+    } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
       ...linkedBusinessBatch,
       invoiceItems: [],
@@ -1240,9 +1242,14 @@ describe("ETC ticket management page", () => {
       });
     });
     expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetchReconciliationTasks).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(fetchBusinessBatches).toHaveBeenCalledWith(expect.objectContaining({ status: "submitted" }));
+    });
     await waitFor(() => expect(within(page).getByRole("radio", { name: "未提交 0" })).toBeInTheDocument());
-    expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
-    expect(within(page).queryByTestId("etc-batch-row-etc-business-linked-001")).not.toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByTestId("etc-batch-row-etc-business-linked-001")).toHaveTextContent("人工确认已提交");
+    expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-imported-business-linked-001")).not.toBeInTheDocument();
   });
 
   test("keeps a task-scoped business batch visible after manual OA submission and submitted-tab reload", async () => {

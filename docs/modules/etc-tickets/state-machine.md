@@ -39,4 +39,5 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-09 | Workbench SQL projection 将已提交 ETC 业务批次作为 `etc_invoice_summary` 一等来源，repository 持久化业务批次上报金额和数量 | ETC 人工已提交批次、关联台 open 区 summary、Postgres read model | `tests.test_workbench_sql_runtime`；`tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-08 | ETC 页面统一为单个业务批次链路；人工确认已提交后闭环对账任务并投影 `etc_invoice_summary` | ETC 批次、关联台 open 区、人工确认 API | `tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx` |

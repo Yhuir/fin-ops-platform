@@ -85,6 +85,14 @@ class WorkbenchSqlProjectionBuilder:
                 select distinct to_char(invoice_month, 'YYYY-MM') as scope_key
                 from app.invoices
                 where invoice_month is not null
+                union
+                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+                from app.etc_business_batches
+                where scope_month is not null
+                union
+                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+                from app.etc_invoices
+                where scope_month is not null
             ) scopes
             where scope_key is not null
             order by scope_key desc
@@ -1438,14 +1446,100 @@ class WorkbenchSqlProjectionBuilder:
         )
         invoices_by_external_batch_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
         batch_payload_by_external_batch_id: dict[str, dict[str, Any]] = {}
-        for row in rows:
+
+        def append_summary_source_row(row: dict[str, Any], *, batch_payload: dict[str, Any] | None = None) -> None:
             external_batch_id = str(row.get("external_etc_batch_id") or "").strip()
             if not external_batch_id:
-                continue
-            invoices_by_external_batch_id[external_batch_id].append(row)
+                return
+            existing_keys = {
+                self._etc_invoice_summary_invoice_identity(existing)
+                for existing in invoices_by_external_batch_id[external_batch_id]
+            }
+            invoice_key = self._etc_invoice_summary_invoice_identity(row)
+            if invoice_key not in existing_keys:
+                invoices_by_external_batch_id[external_batch_id].append(row)
+            if batch_payload:
+                existing_payload = batch_payload_by_external_batch_id.get(external_batch_id, {})
+                batch_payload_by_external_batch_id[external_batch_id] = {**existing_payload, **batch_payload}
+
+        for row in rows:
             batch_payload = row_payload(row, "batch_payload")
-            if isinstance(batch_payload, dict):
-                batch_payload_by_external_batch_id[external_batch_id] = batch_payload
+            append_summary_source_row(row, batch_payload=batch_payload if isinstance(batch_payload, dict) else None)
+
+        business_rows = self._connection.fetch_all(
+            f"""
+            with submitted_business_batches as (
+                select
+                    business_batch_id,
+                    task_id,
+                    status,
+                    scope_month,
+                    invoice_count as business_invoice_count,
+                    total_amount as business_total_amount,
+                    coalesce(raw_payload->'normalized_payload', '{{}}'::jsonb) as business_batch_payload,
+                    coalesce(
+                        nullif(raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                        nullif(raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                        nullif(raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                        nullif(raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                        business_batch_id
+                    ) as external_etc_batch_id,
+                    coalesce(
+                        nullif(raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                        nullif(raw_payload->'normalized_payload'->>'submissionBatchId', '')
+                    ) as submission_batch_id
+                from app.etc_business_batches
+                where status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+            ),
+            submitted_batches as (
+                select
+                    submission_batch_id,
+                    raw_payload->'normalized_payload' as submission_batch_payload
+                from app.etc_submission_batches
+            )
+            select
+                business_batches.external_etc_batch_id,
+                business_batches.business_batch_id,
+                business_batches.business_invoice_count,
+                business_batches.business_total_amount,
+                business_batches.business_batch_payload,
+                submitted_batches.submission_batch_payload,
+                coalesce(etc_invoices.legacy_mongo_id, etc_invoices.etc_invoice_id, etc_invoices.id::text) as row_id,
+                '进项发票' as invoice_type,
+                etc_invoices.invoice_no,
+                etc_invoices.invoice_code,
+                etc_invoices.invoice_no as digital_invoice_no,
+                etc_invoices.invoice_date,
+                etc_invoices.seller_name as counterparty_name,
+                etc_invoices.seller_name,
+                etc_invoices.buyer_name,
+                etc_invoices.amount,
+                null as tax_rate,
+                etc_invoices.tax_amount,
+                etc_invoices.total_with_tax,
+                etc_invoices.status,
+                'hidden_after_etc_submission' as workbench_visibility,
+                etc_invoices.raw_payload
+            from submitted_business_batches business_batches
+            left join submitted_batches
+              on submitted_batches.submission_batch_id = business_batches.submission_batch_id
+            join app.etc_invoices etc_invoices
+              on exists (
+                  select 1
+                  from jsonb_array_elements_text(coalesce(business_batches.business_batch_payload->'invoice_ids', '[]'::jsonb)) invoice_ids(invoice_id)
+                  where invoice_ids.invoice_id = etc_invoices.etc_invoice_id
+                     or invoice_ids.invoice_id = coalesce(etc_invoices.legacy_mongo_id, '')
+              )
+            where {" and ".join(self._etc_business_summary_filters(normalized_month, normalized_external_batch_ids))}
+            order by business_batches.external_etc_batch_id, etc_invoices.invoice_date, row_id
+            """,
+            tuple(self._etc_business_summary_params(normalized_month, normalized_external_batch_ids)),
+        )
+        for row in business_rows:
+            append_summary_source_row(
+                row,
+                batch_payload=self._etc_business_summary_batch_payload(row),
+            )
         return {
             external_batch_id: self._build_etc_invoice_summary_row(
                 external_batch_id,
@@ -1455,6 +1549,65 @@ class WorkbenchSqlProjectionBuilder:
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
         }
+
+    @staticmethod
+    def _etc_business_summary_filters(month: str, external_batch_ids: set[str]) -> list[str]:
+        filters = ["etc_invoices.status <> 'deleted'"]
+        if month:
+            filters.append("business_batches.scope_month = %s::date")
+        if external_batch_ids:
+            filters.append("business_batches.external_etc_batch_id = any(%s)")
+        return filters
+
+    @staticmethod
+    def _etc_business_summary_params(month: str, external_batch_ids: set[str]) -> list[Any]:
+        params: list[Any] = []
+        if month:
+            params.append(month_start(month))
+        if external_batch_ids:
+            params.append(sorted(external_batch_ids))
+        return params
+
+    @staticmethod
+    def _etc_invoice_summary_invoice_identity(row: dict[str, Any]) -> str:
+        for key in ("digital_invoice_no", "invoice_no", "row_id"):
+            value = str(row.get(key) or "").strip()
+            if value:
+                return f"{key}:{value}"
+        return f"row:{id(row)}"
+
+    @staticmethod
+    def _etc_business_summary_batch_payload(row: dict[str, Any]) -> dict[str, Any]:
+        business_payload = row_payload(row, "business_batch_payload")
+        submission_payload = row_payload(row, "submission_batch_payload")
+        payload: dict[str, Any] = {}
+        if isinstance(submission_payload, dict):
+            payload.update(submission_payload)
+        if isinstance(business_payload, dict):
+            payload.update(business_payload)
+        amount = (
+            _nonzero_decimal_or_none(payload.get("oa_total_amount"))
+            or _nonzero_decimal_or_none(payload.get("total_amount"))
+            or _nonzero_decimal_or_none(row.get("business_total_amount"))
+            or _nonzero_decimal_or_none(payload.get("etc_invoice_amount"))
+            or _nonzero_decimal_or_none(
+                (submission_payload or {}).get("oa_total_amount") if isinstance(submission_payload, dict) else None
+            )
+            or _nonzero_decimal_or_none(
+                (submission_payload or {}).get("total_amount") if isinstance(submission_payload, dict) else None
+            )
+        )
+        if amount is not None:
+            payload["oa_total_amount"] = str(amount)
+            payload["total_amount"] = str(amount)
+        count = (
+            _int_or_none(payload.get("etc_invoice_count"))
+            or _int_or_none(row.get("business_invoice_count"))
+            or _int_or_none(payload.get("invoice_count"))
+        )
+        if count is not None:
+            payload["etc_invoice_count"] = count
+        return payload
 
     def _build_etc_invoice_summary_row(
         self,
@@ -1621,6 +1774,13 @@ def _decimal_or_none(value: object) -> Decimal | None:
         return Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _nonzero_decimal_or_none(value: object) -> Decimal | None:
+    parsed = _decimal_or_none(value)
+    if parsed is None or parsed == Decimal("0.00"):
+        return None
+    return parsed
 
 
 def _money_text(value: Decimal) -> str:

@@ -778,13 +778,17 @@ export default function EtcTicketManagementPage() {
   const [oaActionLoading, setOaActionLoading] = useState(false);
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
 
-  const loadBatches = useCallback(async (signal?: AbortSignal) => {
+  const loadBatches = useCallback(async (
+    signal?: AbortSignal,
+    statusOverride?: "unsubmitted" | "submitted",
+  ) => {
     setLoading(true);
     setBatchListError(null);
     setActionError(null);
+    const effectiveStatus = statusOverride ?? activeStatus;
     try {
       const payload = await fetchEtcBusinessBatches({
-        status: activeStatus === "submitted" ? "submitted" : "active",
+        status: effectiveStatus === "submitted" ? "submitted" : "active",
         month,
         plate: plate.trim(),
         keyword: keyword.trim(),
@@ -1904,6 +1908,7 @@ export default function EtcTicketManagementPage() {
         expectedVersion: target.version,
       });
       mergeBusinessBatch(result, target.status);
+      const nextStatus = decision === "submitted" ? "submitted" : "unsubmitted";
       if (result.taskId) {
         setLocallySubmittedTaskIds((current) => {
           const next = new Set(current);
@@ -1919,8 +1924,16 @@ export default function EtcTicketManagementPage() {
         }
       }
       emitEtcBusinessDomainUpdated({ source: "etc_business_batch_manual_oa_status" });
+      if (decision === "submitted") {
+        setActiveStatus("submitted");
+        setSelectedBatchId(result.businessBatchId);
+      }
       setDraftResult(null);
       setCreateDialogOpen(false);
+      await Promise.all([
+        loadReconciliationTasks(),
+        loadBatches(undefined, nextStatus),
+      ]);
     } catch (caught) {
       setActionError(formatEtcUiErrorMessage(caught, "人工处理失败。"));
     } finally {
