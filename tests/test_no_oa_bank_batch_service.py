@@ -395,7 +395,7 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         batch = self.assert_single_batch(batches, "conflict")
         self.assertEqual(batch["conflict_code"], "missing_internal_transfer_counterpart")
 
-    def test_internal_transfer_occupied_by_active_relation_generates_conflict(self) -> None:
+    def test_internal_transfer_occupied_by_active_relation_is_excluded_from_unsubmitted_candidates(self) -> None:
         rows = [
             bank_row("transfer-out", category_code="internal_transfer", debit_amount="500.00"),
             bank_row(
@@ -407,14 +407,78 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
                 account_no="6222000000003847",
             ),
         ]
-        active_relations = [{"case_id": "CASE-1", "status": "active", "row_ids": ["transfer-out"]}]
+        active_relations = [
+            {
+                "case_id": "CASE-1",
+                "status": "active",
+                "row_ids": ["transfer-out", "transfer-in"],
+                "row_types": ["bank", "bank"],
+                "relation_mode": "manual_confirmed",
+            }
+        ]
         service = NoOaBankBatchService()
 
         batches = service.build_batches(rows, categories_for(rows), active_relations, {})
 
-        batch = self.assert_single_batch(batches, "conflict")
-        self.assertEqual(batch["conflict_code"], "row_occupied_by_active_relation")
-        self.assertEqual(batch["conflict_reason"], "已有未撤回关联占用，请先处理原关联。")
+        self.assertEqual(batches, [])
+        self.assertEqual(service.list_batches({"bucket": "unsubmitted"}), [])
+
+    def test_submitted_internal_transfer_with_active_non_no_oa_relation_does_not_duplicate_as_unsubmitted_conflict(self) -> None:
+        rows = [
+            bank_row("transfer-out", category_code="internal_transfer", debit_amount="500.00"),
+            bank_row(
+                "transfer-in",
+                category_code="internal_transfer",
+                credit_amount="500.00",
+                account_key="BOCOM:3847",
+                bank_name="交行",
+                account_no="6222000000003847",
+                pay_receive_time="2026-03-10T10:00:00",
+            ),
+        ]
+        batch_key = "internal_transfer:2026-03:500.00:transfer-in:transfer-out"
+        batch_id = NoOaBankBatchService._batch_id(batch_key)
+        service = NoOaBankBatchService.from_snapshot(
+            {
+                "batches": {
+                    batch_id: {
+                        "batch_id": batch_id,
+                        "batch_key": batch_key,
+                        "batch_type": "internal_transfer",
+                        "batch_label": "内部往来款",
+                        "scope_month": "2026-03",
+                        "account_key": "",
+                        "status": "submitted",
+                        "row_ids": ["transfer-in", "transfer-out"],
+                        "row_count": 2,
+                        "total_amount": "500.00",
+                        "income_row_ids": ["transfer-in"],
+                        "expense_row_ids": ["transfer-out"],
+                        "relation_case_id": batch_id,
+                        "submitted_by": "finance-user",
+                        "submitted_at": "2026-05-15T10:00:00+00:00",
+                        "version": 2,
+                    }
+                }
+            }
+        )
+        active_relations = [
+            {
+                "case_id": "manual-internal-transfer",
+                "status": "active",
+                "row_ids": ["transfer-in", "transfer-out"],
+                "row_types": ["bank", "bank"],
+                "relation_mode": "manual_confirmed",
+                "month_scope": "2026-03",
+            }
+        ]
+
+        batches = service.build_batches(rows, categories_for(rows), active_relations, {})
+
+        self.assertEqual([batch["status"] for batch in batches], ["submitted"])
+        self.assertEqual(batches[0]["batch_id"], batch_id)
+        self.assertEqual(service.list_batches({"bucket": "unsubmitted"}), [])
+        self.assertEqual([batch["batch_id"] for batch in service.list_batches({"bucket": "submitted"})], [batch_id])
 
     def test_submitted_internal_transfer_no_oa_relation_does_not_rebuild_as_conflict(self) -> None:
         rows = [

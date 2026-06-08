@@ -151,7 +151,6 @@ export default function PendingInvoiceRulesDrawer({
     <PendingInvoiceDrawerFrame
       open={open}
       title={title}
-      subtitle={payload ? `版本 ${payload.version}` : undefined}
       closeLabel="关闭规则抽屉"
       width={1280}
       contentSx={{ p: 2 }}

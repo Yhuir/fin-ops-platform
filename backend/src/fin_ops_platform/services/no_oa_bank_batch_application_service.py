@@ -231,6 +231,34 @@ class NoOaBankBatchApplicationService:
             raise
         return result
 
+    def submit_internal_transfer_rows_from_workbench(
+        self,
+        *,
+        row_ids: list[str],
+        actor: str,
+        note: str | None,
+    ) -> dict[str, object]:
+        previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_service.snapshot()
+        try:
+            bank_rows, categories_by_transaction_id = self.refresh_batches()
+            batch = self._internal_transfer_batch_for_workbench_rows(
+                bank_rows=bank_rows,
+                categories_by_transaction_id=categories_by_transaction_id,
+                row_ids=row_ids,
+            )
+            submitted = self._no_oa_bank_batch_service.submit_batch(
+                str(batch["batch_id"]),
+                actor=actor,
+                expected_version=int(batch.get("version") or 1),
+                note=note,
+            )
+            result = self._mutation_result(submitted, status="submitted", persist=True)
+        except Exception:
+            self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
+            raise
+        return result
+
     def withdraw_batch(
         self,
         batch_id: str,
@@ -821,6 +849,71 @@ class NoOaBankBatchApplicationService:
             }
             if "missing_internal_transfer_counterpart" in conflict_codes:
                 raise ValueError("no_oa_bank_batch_selection_internal_transfer_requires_pair")
+            raise ValueError("no_oa_bank_batch_selection_internal_transfer_conflict")
+        raise ValueError("no_oa_bank_batch_selection_internal_transfer_requires_pair")
+
+    def _internal_transfer_batch_for_workbench_rows(
+        self,
+        *,
+        bank_rows: list[dict[str, object]],
+        categories_by_transaction_id: dict[str, dict[str, object]],
+        row_ids: list[str],
+    ) -> dict[str, object]:
+        rows_by_id = {
+            str(row.get("id") or "").strip(): row
+            for row in bank_rows
+            if str(row.get("id") or "").strip()
+        }
+        selected_row_ids = [
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        ]
+        if not selected_row_ids:
+            raise ValueError("no_oa_bank_batch_selection_empty")
+        if len(set(selected_row_ids)) != len(selected_row_ids):
+            raise ValueError("no_oa_bank_batch_selection_duplicate_rows")
+        selected_rows = [rows_by_id.get(row_id) for row_id in selected_row_ids]
+        if any(row is None for row in selected_rows):
+            raise ValueError("no_oa_bank_batch_selection_unknown_row")
+        batch_types = [
+            NoOaBankBatchService._category_code(row, categories_by_transaction_id)
+            for row in selected_rows
+            if isinstance(row, dict)
+        ]
+        if not batch_types or any(batch_type != "internal_transfer" for batch_type in batch_types):
+            raise ValueError("no_oa_bank_batch_selection_internal_transfer_conflict")
+
+        refreshed = self._no_oa_bank_batch_service.build_batches(
+            bank_rows,
+            categories_by_transaction_id,
+            self._workbench_relation_active_relations_for_bank_rows(bank_rows),
+            self.no_oa_bank_batch_source_versions(),
+            eligible_batch_types=self.selected_tag_codes(),
+        )
+        selected_set = set(selected_row_ids)
+        matching_drafts = [
+            batch for batch in refreshed
+            if str(batch.get("batch_type") or "") == "internal_transfer"
+            and str(batch.get("status") or "") == "draft"
+            and set(str(item) for item in list(batch.get("row_ids") or [])) == selected_set
+        ]
+        if matching_drafts:
+            return dict(matching_drafts[0])
+
+        conflict_batches = [
+            batch for batch in refreshed
+            if str(batch.get("batch_type") or "") == "internal_transfer"
+            and selected_set.intersection(str(item) for item in list(batch.get("row_ids") or []))
+        ]
+        conflict_codes = {
+            str(batch.get("conflict_code") or "").strip()
+            for batch in conflict_batches
+            if str(batch.get("conflict_code") or "").strip()
+        }
+        if "missing_internal_transfer_counterpart" in conflict_codes:
+            raise ValueError("no_oa_bank_batch_selection_internal_transfer_requires_pair")
+        if conflict_batches:
             raise ValueError("no_oa_bank_batch_selection_internal_transfer_conflict")
         raise ValueError("no_oa_bank_batch_selection_internal_transfer_requires_pair")
 

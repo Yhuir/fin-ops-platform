@@ -156,6 +156,7 @@ export default function OaReverseWorkspaceDrawer({
   const rejected = preview ? rejectedInvoices(preview) : [];
   const canCreateBatch = Boolean(
     preview
+    && !batch
     && createBatch
     && preview.previewId
     && preview.canCreateDraft
@@ -163,6 +164,7 @@ export default function OaReverseWorkspaceDrawer({
     && (preview.permissions?.canCreateBatch ?? true),
   );
   const canCreateDraft = Boolean(batch && createDraft && (batch.canCreateDraft ?? true) && !batch.oaDraftUrl);
+  const canConfirmSubmission = Boolean(batch && manualStatus && batch.oaDraftUrl && (batch.canConfirmSubmission ?? batch.status === "oa_draft_created"));
   const canRefreshStatus = Boolean(batch && refreshStatus && (batch.canRefreshStatus ?? true));
   const canRevoke = Boolean(batch && revokeDraft && batch.oaDraftUrl && (batch.canRevoke ?? true));
   const canManualFallback = Boolean(batch && manualStatus && isManualFallbackStatus(batch.status, batch.oaDetectionStatus) && (batch.canManualStatus ?? true));
@@ -213,7 +215,7 @@ export default function OaReverseWorkspaceDrawer({
         expectedVersion: batch.version,
         idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-draft"),
       }),
-      "OA 草稿已创建，等待外部 OA 投影检测。",
+      "OA 草稿已创建，请在 OA 页面处理后选择提交状态。",
     );
   };
 
@@ -256,6 +258,22 @@ export default function OaReverseWorkspaceDrawer({
         reason: manualReason,
       }),
       "人工状态已记录。",
+    );
+  };
+
+  const handleSubmissionDecision = (decision: "submitted" | "not_submitted") => {
+    if (!batch || !manualStatus) {
+      return;
+    }
+    runBatchAction(
+      `submissionDecision:${decision}`,
+      () => manualStatus(batch.batchId, {
+        expectedVersion: batch.version,
+        idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-submission-decision"),
+        decision,
+        reason: decision === "submitted" ? "用户确认已在 OA 提交" : "用户确认暂未提交 OA",
+      }),
+      decision === "submitted" ? "已记录 OA 提交确认，可刷新 OA 状态。" : "已记录暂未提交 OA。",
     );
   };
 
@@ -460,6 +478,26 @@ export default function OaReverseWorkspaceDrawer({
                   <a className="input-invoice-usage-button" href={batch.oaDraftUrl} rel="noreferrer" target="_blank">
                     打开 OA 草稿
                   </a>
+                ) : null}
+                {canConfirmSubmission ? (
+                  <>
+                    <button
+                      className="input-invoice-usage-button input-invoice-usage-button--primary"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => handleSubmissionDecision("submitted")}
+                      type="button"
+                    >
+                      {actionLoading === "submissionDecision:submitted" ? "记录中..." : "我已在 OA 提交"}
+                    </button>
+                    <button
+                      className="input-invoice-usage-button"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => handleSubmissionDecision("not_submitted")}
+                      type="button"
+                    >
+                      {actionLoading === "submissionDecision:not_submitted" ? "记录中..." : "暂未提交 OA"}
+                    </button>
+                  </>
                 ) : null}
                 {canRefreshStatus ? (
                   <button

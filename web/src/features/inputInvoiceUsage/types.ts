@@ -272,6 +272,7 @@ export type InputInvoiceUsageOaReverseBatch = {
   idempotentReplay?: boolean;
   auditEventId?: string | null;
   canCreateDraft?: boolean;
+  canConfirmSubmission?: boolean;
   canRevoke?: boolean;
   canRefreshStatus?: boolean;
   canManualStatus?: boolean;

@@ -265,19 +265,22 @@ describe("WorkbenchZone", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  test("keeps pane search as a fixed icon control with an unclipped viewport popover", () => {
+  test("keeps pane search as a stable header icon control without Tailwind fixed positioning", () => {
     const workbenchStyles = readFileSync(resolve(__dirname, "../app/styles.css"), "utf8");
+    const workbenchSearchSource = readFileSync(resolve(__dirname, "../components/workbench/WorkbenchPaneSearch.tsx"), "utf8");
     const searchRule = workbenchStyles.match(/\.pane-search\s*\{[^}]*\}/s)?.[0] ?? "";
     const openSearchRule = workbenchStyles.match(/\.pane-search\.open\s*\{[^}]*\}/s)?.[0] ?? "";
     const popoverRule = workbenchStyles.match(/\.pane-search-popover\s*\{[^}]*\}/s)?.[0] ?? "";
-    const toggleButtonRule = workbenchStyles.match(/\.pane-search-toggle-btn\.fixed\s*\{[^}]*\}/s)?.[0] ?? "";
+    const toggleButtonRule = workbenchStyles.match(/\.pane-search-toggle-btn--header-control\s*\{[^}]*\}/s)?.[0] ?? "";
 
     expect(searchRule).toMatch(/width:\s*30px;/);
     expect(searchRule).toMatch(/flex:\s*0 0 30px;/);
     expect(openSearchRule).not.toMatch(/width:\s*236px;/);
     expect(openSearchRule).not.toMatch(/flex-basis:\s*236px;/);
+    expect(workbenchSearchSource).not.toContain("pane-search-toggle-btn fixed");
     expect(toggleButtonRule).toMatch(/width:\s*30px;/);
     expect(toggleButtonRule).toMatch(/flex:\s*0 0 30px;/);
+    expect(toggleButtonRule).toMatch(/position:\s*static;/);
     expect(popoverRule).toMatch(/position:\s*fixed;/);
   });
 

@@ -228,24 +228,36 @@ export default function OaPendingPaymentsTable({
                   <MultiLineValue value={combinedBankSummaryRemark(row)} />
                 </td>
                 <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
-                  <span className="oa-pending-payments-inline-row">
-                    <span className="oa-pending-payments-invoice-type-chip">进</span>
-                    <TextLine strong value={row.invoice.digitalInvoiceNo} />
-                    <DetailButton
-                      disabled={!invoiceDetailTarget(row)}
-                      label={invoiceDetailLabel(row)}
-                      onClick={() => {
-                        const target = invoiceDetailTarget(row);
-                        if (target) {
-                          onOpenDetail(target);
-                        }
-                      }}
-                    />
-                  </span>
-                  <TextLine value={row.invoice.sellerName} />
-                  <span className="oa-pending-payments-tag-row">
-                    <TableTag>{row.invoice.invoiceDate || "开票日期为空"}</TableTag>
-                  </span>
+                  {hasInvoice(row) ? (
+                    <>
+                      <span className="oa-pending-payments-inline-row">
+                        <span className="oa-pending-payments-invoice-type-chip">进</span>
+                        <TextLine strong value={row.invoice.digitalInvoiceNo} />
+                        {invoiceDetailTarget(row) ? (
+                          <DetailButton
+                            disabled={false}
+                            label={invoiceDetailLabel(row)}
+                            onClick={() => {
+                              const target = invoiceDetailTarget(row);
+                              if (target) {
+                                onOpenDetail(target);
+                              }
+                            }}
+                          />
+                        ) : null}
+                      </span>
+                      <TextLine value={row.invoice.sellerName} />
+                      {row.invoice.invoiceDate ? (
+                        <span className="oa-pending-payments-tag-row">
+                          <TableTag>{row.invoice.invoiceDate}</TableTag>
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="oa-pending-payments-empty-invoice-cell">
+                      <EmptyValue />
+                    </span>
+                  )}
                 </td>
                 <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
                   <TextLine numeric strong value={row.invoice.totalWithTax} />
@@ -674,6 +686,17 @@ function invoiceDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTa
     return { kind: "relationList", id: row.id, rowId: row.id, relationKind: "invoice" };
   }
   return null;
+}
+
+function hasInvoice(row: OaPendingPaymentRow): boolean {
+  return Boolean(
+    row.invoice.primaryInvoiceId
+    || row.invoice.digitalInvoiceNo
+    || row.invoice.sellerName
+    || row.invoice.invoiceDate
+    || row.invoice.totalWithTax
+    || row.invoice.relationCount > 0,
+  );
 }
 
 function bankDetailLabel(row: OaPendingPaymentRow): string {

@@ -23,6 +23,27 @@
 - `/api/app-health*`：健康状态。
 - `/api/operations/app-health-dashboard`：管理员只读运维观测 Dashboard。
 
+## 日常报销批量账务管理 API
+
+`GET /api/batch-accounting?bank_year=YYYY&oa_year=YYYY&bucket=unsubmitted|submitted`
+
+响应字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `summary.unsubmitted_count` | 当前筛选下未提交候选银行流水数量。 |
+| `summary.submitted_count` | 当前银行年份下已提交批量账务关系数量。 |
+| `summary.bank_year` / `summary.oa_year` | 后端实际使用的银行流水年份和 OA 单据年份。 |
+| `bank_rows` | 当前 bucket 的银行流水列表。 |
+| `oa_rows` | `unsubmitted` bucket 的可选 OA 日常报销单据列表。 |
+| `relations_by_bank_row_id` | `submitted` bucket 中按银行流水 ID 索引的已提交关系详情。 |
+| `read_model_status` | 关联台 relation read model 读取状态。非 fresh 时页面不能把空 rows 当作“全部未提交”。 |
+| `read_model_stale_reasons` | relation read model 非 fresh 原因，按后端返回顺序去重。 |
+| `read_model_scope_keys` | 发生非 fresh、已入队刷新或带 stale reason 的 relation read model scope。 |
+| `refresh_enqueued` | relation read model refresh 是否已入队。 |
+
+`read_model_status` 的优先级按后端聚合：`unavailable > schema_mismatch > missing > failed > stale > refreshing > fresh`。接口仍返回当前可用 payload；前端需要展示刷新/陈旧状态并避免在非 fresh 时把缺失关系误解释成真实未提交。
+
 ## 待找发票规则 API
 
 `GET /api/pending-invoices/rules?direction=expense|income`
@@ -159,9 +180,15 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 | `bucket` | `unsubmitted`、`submitted`、`withdrawn` 或 `all`。 |
 | `account_key` | 银行账户筛选。 |
 
-响应中的 `summary.categories[*]` 和 `batches[*]` 需要携带 `category_primary_label`、`category_sub_label`、`category_label_path`，供前端构造主/子标签三栏。候选批次只来自当前保存的免 OA 标签准入范围；已提交历史批次即使标签不再准入也继续返回。
+响应中的 `summary.categories[*]` 和 `batches[*]` 需要携带 `category_primary_label`、`category_sub_label`、`category_label_path`，供前端构造主/子标签三栏。未提交候选批次只来自当前保存的免 OA 标签准入范围，且必须排除已被关联台 active relation 占用的银行流水；已提交历史批次即使标签不再准入也继续返回。
 
 当接口命中 SQL read model 且发现 source version 陈旧时，响应会携带 `read_model_status="stale"` 与 `read_model_stale_reasons`，并返回当前可用数据。前端需要像银行明细页一样显示读模型刷新/陈旧状态并自动重试，直到后续响应恢复 `read_model_status="fresh"`。未返回 `read_model_status` 时按 `fresh` 处理。
+
+`POST /api/workbench/actions/confirm-link`
+
+关联台确认两条银行流水时，如果选中流水当前分类全部为 `internal_transfer`，后端必须委托免 OA 批次统一提交入口：刷新免 OA 候选、找到完全匹配这组 `row_ids` 的内部往来 draft batch，并按批次提交。成功响应仍保持关联台 `confirm_link` 兼容结构，但最终事实必须是一个 `status=submitted` 的内部往来免 OA 批次，以及一条 `relation_mode=no_oa_bank_batch` 的 Workbench active pair relation；关联台已配对区消费该 relation，免 OA 已提交区域消费同一批次。
+
+如果选中银行流水中只有部分为 `internal_transfer`，接口返回 `400 no_oa_bank_batch_selection_internal_transfer_conflict`，不得静默写入 `manual_confirmed`。非内部往来的银行-only 平衡确认保持原有关联台普通确认语义，可写入 `relation_mode=manual_confirmed`。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 
@@ -580,6 +607,9 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 - `seller_name` 的前端列名为 `销方名称`。`bank_account` 展示为银行名称加账号后四位；`bank_direction` 原始值保持后端事实值，前端展示为 `收入` 或 `支出` chip。
 - 发票号码列表头只提供开票日期排序，不提供下拉筛选。排序通过 `sort_field=invoice_date` 和 `sort_direction` 提交。
 - 支付状态列表只展示状态标签；规则原因和自动闭环解释不在列表行内展示。
+- 反提 OA 工作流按 `preview -> create batch -> create OA draft -> user submission confirmation -> OA projection refresh` 推进。创建 OA 草稿只表示外部 OA 草稿已生成，状态为 `oa_draft_created`，不得直接等同于已提交 OA 流程。
+- 进项发票反提 OA 草稿使用支付申请 form `2` 的标准草稿 payload：顶层包含 `formId`、`isDraft`、`data`，`data.userName`/`data.applicant` 来自用户选择的目标 OA 申请人，`data.cause` 必须包含本地反提批次 ID，供 OA 投影回扫识别。
+- 用户在 OA 页面处理草稿后，前端必须让用户选择 `submitted` 或 `not_submitted`。`submitted` 进入 `oa_submission_detecting`，随后才允许刷新 OA 投影状态；`not_submitted` 只记录本地暂未提交，保留本地草稿链接。撤销本地草稿绑定只清除本地 `oaDraftId`/`oaDraftUrl`，不代表调用 OA 删除外部草稿。
 
 ## OA 待付款 API
 

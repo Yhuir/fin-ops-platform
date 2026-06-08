@@ -1946,6 +1946,13 @@ textarea {
   padding: 0 var(--fp-space-1);
 }
 
+.oa-pending-payments-empty-invoice-cell {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+}
+
 .oa-pending-payments-detail-button {
   display: inline-flex;
   flex: 0 0 auto;
@@ -7332,6 +7339,20 @@ textarea {
   padding: 0;
 }
 
+.pending-invoice-drawer .finance-drawer__header {
+  min-height: 0;
+  align-items: center;
+  padding: 10px var(--fp-space-4);
+}
+
+.pending-invoice-drawer .finance-drawer__heading {
+  gap: 0;
+}
+
+.pending-invoice-drawer .finance-drawer__footer {
+  padding: var(--fp-space-3) var(--fp-space-4);
+}
+
 .pending-invoice-drawer__body,
 .pending-invoice-detail-body {
   display: grid;
@@ -7341,7 +7362,7 @@ textarea {
 }
 
 .pending-invoice-drawer__body {
-  padding: var(--fp-space-4);
+  padding: var(--fp-space-3);
 }
 
 .pending-invoice-drawer-actions {
@@ -8741,6 +8762,10 @@ textarea {
 }
 
 .finance-drawer {
+  display: flex;
+  max-height: 100vh;
+  min-height: 0;
+  flex-direction: column;
   height: 100%;
   width: min(100vw, var(--finance-drawer-width, 420px));
   border-radius: 0;
@@ -8790,6 +8815,7 @@ textarea {
 }
 
 .finance-drawer__header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -8834,6 +8860,7 @@ textarea {
 }
 
 .finance-drawer__footer {
+  flex: 0 0 auto;
   border-top: 1px solid var(--fp-border);
   padding: var(--fp-space-4);
 }
@@ -12599,7 +12626,8 @@ body.column-layout-dragging {
   white-space: nowrap;
 }
 
-.pane-search-toggle-btn.fixed {
+.pane-search-toggle-btn--header-control {
+  position: static;
   width: 30px;
   min-width: 0;
   flex: 0 0 30px;

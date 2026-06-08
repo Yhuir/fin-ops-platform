@@ -507,6 +507,79 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
 
+  test("pauses submission when relation read model is not fresh", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({
+      ...unsubmittedPayload,
+      read_model_status: "missing",
+      read_model_stale_reasons: ["read_model_missing"],
+      read_model_scope_keys: ["2026-01"],
+      refresh_enqueued: true,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+    expect(await screen.findByText("关联台关系读模型 missing，正在刷新。")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
+    expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/batch-accounting/submit",
+      expect.anything(),
+    );
+  });
+
+  test("clears cached bank and OA selection when refreshed bank rows disappear", async () => {
+    const user = userEvent.setup();
+    let getCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
+        getCount += 1;
+        if (getCount === 1) {
+          return jsonResponse(unsubmittedPayload);
+        }
+        return jsonResponse({
+          summary: {
+            unsubmitted_count: 0,
+            submitted_count: 1,
+          },
+          bank_rows: [],
+          oa_rows: unsubmittedPayload.oa_rows,
+          read_model_status: "fresh",
+        });
+      }
+      return jsonResponse({
+        success: true,
+        relation_id: "CASE-SHOULD-NOT-SUBMIT",
+        affected_months: [],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    expect(await screen.findByText("当前年份暂无批量账务流水")).toBeInTheDocument();
+    expect(screen.getByText("银行流水金额 0.00")).toBeInTheDocument();
+    expect(screen.getByText("已选 OA 0 项")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/batch-accounting/submit";
+    })).toBe(false);
+  });
+
   test("keeps selected bank and OA rows when changing only the OA year", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();

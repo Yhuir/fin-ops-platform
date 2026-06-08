@@ -16,6 +16,7 @@
 | 目录 | 用途 |
 | --- | --- |
 | `app-architecture/` | 当前 app 架构、页面、运行时调用链、页面间影响关系 |
+| `modules/` | 按页面和关键功能域组织的维护入口、状态机、测试矩阵和实施记录 |
 | `product-specs/` | 面向产品和业务的需求、口径、验收标准 |
 | `architecture/` | 系统边界、数据模型、持久化、部署形态 |
 | `dev/` | 开发者入口、接口契约、测试、本地运行 |
@@ -67,6 +68,14 @@
 1. `app-architecture/pages.md`
 2. `app-architecture/runtime-and-ownership.md`
 3. `app-architecture/docs-maintenance.md`
+4. `modules/README.md`
+
+### 页面和功能模块维护
+
+1. `modules/README.md`
+2. 按目标页面或功能域读取对应 `modules/<module>/README.md`
+3. 按影响范围继续读取该模块下的 `state-machine.md`、`tests.md`、`implementation-notes.md`
+4. 如模块文档链接到产品、架构、开发或运维长期事实源，以长期事实源为准并同步维护
 
 ### UI 平台迁移
 

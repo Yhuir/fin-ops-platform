@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from hashlib import sha256
@@ -10,6 +10,7 @@ from threading import RLock
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
+from fin_ops_platform.services.etc_service import EtcOAFormFieldMapping
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
@@ -25,6 +26,7 @@ DEFAULT_OA_FORM_ID = 2
 
 class InputInvoiceUsageOaReverseStatus(str, Enum):
     DRAFT = "draft"
+    OA_DRAFT_CREATED = "oa_draft_created"
     OA_DRAFT_FAILED = "oa_draft_failed"
     OA_SUBMISSION_DETECTING = "oa_submission_detecting"
     OA_DETECTED = "oa_detected"
@@ -41,6 +43,10 @@ DETECTION_STATUSES = {
     InputInvoiceUsageOaReverseStatus.OA_DETECTION_MISSING.value,
     InputInvoiceUsageOaReverseStatus.OA_DETECTION_CONFLICT.value,
     InputInvoiceUsageOaReverseStatus.OA_DETECTION_UNAVAILABLE.value,
+}
+
+SUBMISSION_CONFIRMABLE_STATUSES = {
+    InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value,
 }
 
 MANUAL_FALLBACK_STATUSES = {
@@ -430,8 +436,8 @@ class InputInvoiceUsageOaReverseService:
         if batch.oa_draft_id is None:
             self._mark_draft_failed(batch, actor_id=actor_id, before_status=before_status, reason="OA draft response did not include draft id.")
             raise InputInvoiceUsageOaReverseInvalidTransitionError("OA draft response did not include draft id.", code="oa_reverse_draft_response_invalid")
-        batch.status = InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value
-        batch.oa_detection_status = "pending"
+        batch.status = InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value
+        batch.oa_detection_status = "draft_created"
         batch.oa_detection_reason = None
         batch.oa_detection_error = None
         batch.operation_idempotency["create_oa_draft"] = normalized_key
@@ -460,7 +466,11 @@ class InputInvoiceUsageOaReverseService:
         self._assert_version(batch, expected_version)
         if batch.status == InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value and not batch.oa_draft_id:
             return self.batch_payload(batch)
-        if batch.status not in DETECTION_STATUSES | {InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value}:
+        if batch.status not in DETECTION_STATUSES | SUBMISSION_CONFIRMABLE_STATUSES | {
+            InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value,
+            InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value,
+            InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
+        }:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("current status does not allow revoking the OA draft.")
         before_status = batch.status
         revoked_payload = {
@@ -539,26 +549,40 @@ class InputInvoiceUsageOaReverseService:
     ) -> dict[str, object]:
         self._assert_mutation_permission(can_mutate)
         normalized_key = _required_text(idempotency_key, "idempotencyKey")
-        normalized_reason = _required_text(reason, "reason")
         normalized_decision = str(decision or "").strip().lower()
         if normalized_decision not in {"submitted", "not_submitted"}:
             raise InputInvoiceUsageOaReverseInvalidTransitionError("decision must be submitted or not_submitted.", code="invalid_manual_oa_reverse_decision")
         batch = self._get_batch(batch_id)
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            if batch.status in SUBMISSION_CONFIRMABLE_STATUSES:
+                normalized_reason = "用户确认已在 OA 提交" if normalized_decision == "submitted" else "用户确认暂未提交 OA"
+            else:
+                normalized_reason = _required_text(reason, "reason")
         if self._is_operation_replay(batch, f"manual_oa_status:{normalized_decision}", normalized_key):
             return self.batch_payload(batch)
         self._assert_version(batch, expected_version)
-        if batch.status not in MANUAL_FALLBACK_STATUSES:
+        if batch.status not in MANUAL_FALLBACK_STATUSES | SUBMISSION_CONFIRMABLE_STATUSES:
             raise InputInvoiceUsageOaReverseInvalidTransitionError(
-                "manual OA status is allowed only for detection exception states.",
+                "manual OA status is allowed only after draft creation or for detection exception states.",
                 code="invalid_manual_oa_reverse_status",
             )
         before_status = batch.status
-        if normalized_decision == "submitted":
+        if normalized_decision == "submitted" and batch.status in SUBMISSION_CONFIRMABLE_STATUSES:
+            batch.status = InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value
+            batch.oa_process_status = "submitted_pending_detection"
+            batch.oa_detection_status = "user_confirmed_submitted"
+            event_type = "oa_reverse_user_confirmed_submitted"
+        elif normalized_decision == "submitted":
             batch.status = InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_SUBMITTED.value
             batch.oa_row_id = str(candidate_oa_row_id or "").strip() or None
             batch.oa_process_status = "manual_without_oa_row" if batch.oa_row_id is None else "in_progress"
             batch.oa_detection_status = "manual_submitted"
             event_type = "oa_reverse_manual_status_submitted"
+        elif batch.status in SUBMISSION_CONFIRMABLE_STATUSES:
+            batch.status = InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value
+            batch.oa_detection_status = "user_confirmed_not_submitted"
+            event_type = "oa_reverse_user_confirmed_not_submitted"
         else:
             batch.status = InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_NOT_SUBMITTED.value
             batch.oa_detection_status = "manual_not_submitted"
@@ -600,6 +624,11 @@ class InputInvoiceUsageOaReverseService:
             "updatedBy": batch.updated_by,
             "createdAt": _datetime_to_iso(batch.created_at),
             "updatedAt": _datetime_to_iso(batch.updated_at),
+            "canCreateDraft": _can_create_oa_draft(batch),
+            "canConfirmSubmission": _can_confirm_submission(batch),
+            "canRevoke": _can_revoke_oa_draft(batch),
+            "canRefreshStatus": batch.status in DETECTION_STATUSES,
+            "canManualStatus": batch.status in MANUAL_FALLBACK_STATUSES,
         }
 
     def _rows_for_preview_payload(self, payload: dict[str, Any]) -> tuple[list[dict[str, object]], list[str]]:
@@ -679,7 +708,38 @@ class InputInvoiceUsageOaReverseService:
 
     @staticmethod
     def _build_oa_draft_payload(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:
+        mapping = EtcOAFormFieldMapping.from_environment()
+        total_with_tax = str(batch.preview_summary.get("totalWithTax") or "")
+        invoice_numbers = [
+            str(row.get("invoiceNo") or row.get("displayNo") or row.get("invoiceNumber") or "").strip()
+            for row in list(batch.invoice_display_rows or [])
+            if str(row.get("invoiceNo") or row.get("displayNo") or row.get("invoiceNumber") or "").strip()
+        ]
+        cause_parts = [
+            "进项发票反提 OA",
+            f"input_invoice_usage_oa_reverse_batch_id={batch.batch_id}",
+            f"发票数={len(batch.invoice_ids)}",
+        ]
+        if invoice_numbers:
+            cause_parts.append(f"发票号码={';'.join(invoice_numbers[:20])}")
+        data = {
+            mapping.applicant: batch.target_applicant_name,
+            "applicant": batch.target_applicant_name,
+            "targetApplicantCode": batch.target_applicant_code,
+            mapping.application_date: date.today().isoformat(),
+            mapping.category: mapping.category_value,
+            mapping.payment_proof: mapping.payment_proof_value,
+            mapping.project_name: mapping.project_name_value,
+            mapping.amount: total_with_tax,
+            "invoiceCount": len(batch.invoice_ids),
+            "invoice_count": len(batch.invoice_ids),
+            "inputInvoiceUsageOaReverseBatchId": batch.batch_id,
+            mapping.cause: "；".join(cause_parts),
+        }
         return {
+            "formId": batch.oa_form_id,
+            "isDraft": True,
+            "data": data,
             "source": "input_invoice_usage_oa_reverse",
             "batchId": batch.batch_id,
             "targetApplicant": {
@@ -814,6 +874,31 @@ def _copy_batch(batch: InputInvoiceUsageOaReverseBatch | None) -> InputInvoiceUs
         oa_detection_payload=dict(batch.oa_detection_payload or {}),
         audit_events=[dict(event) for event in list(batch.audit_events or [])],
     )
+
+
+def _can_create_oa_draft(batch: InputInvoiceUsageOaReverseBatch) -> bool:
+    if batch.oa_draft_id:
+        return False
+    return batch.status in {
+        InputInvoiceUsageOaReverseStatus.DRAFT.value,
+        InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value,
+        InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value,
+        InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
+    }
+
+
+def _can_confirm_submission(batch: InputInvoiceUsageOaReverseBatch) -> bool:
+    return bool(batch.oa_draft_id) and batch.status in SUBMISSION_CONFIRMABLE_STATUSES
+
+
+def _can_revoke_oa_draft(batch: InputInvoiceUsageOaReverseBatch) -> bool:
+    if not batch.oa_draft_id:
+        return False
+    return batch.status in DETECTION_STATUSES | SUBMISSION_CONFIRMABLE_STATUSES | {
+        InputInvoiceUsageOaReverseStatus.OA_DRAFT_FAILED.value,
+        InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value,
+        InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
+    }
 
 
 def _batch_to_storage(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:

@@ -10,6 +10,8 @@
 | `runtime-and-ownership.md` | 运行时调用链、dirty/outbox、read model refresh、worker、SSE/App Health 和模块 owner。 |
 | `docs-maintenance.md` | 文档维护规则、删除归档规则和核心设计原则。 |
 
+页面或功能域的日常维护入口在 `../modules/`。修改或新增功能前，先按 `../modules/README.md` 定位目标模块，再回到本目录和其他长期事实源校验页面、API、read model、worker 和跨页面影响关系。
+
 ## 当前代码事实源
 
 - 前端页面注册表：`web/src/app/pageRegistry.tsx`

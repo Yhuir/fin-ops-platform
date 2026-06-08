@@ -181,6 +181,88 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(revoked["oaDetectionPayload"]["revokedOaDraftId"], "oa-draft-001")
         self.assertIn((["2026-05"], "input_invoice_usage_oa_reverse_draft_revoked"), invalidations)
 
+    def test_create_oa_draft_uses_selected_applicant_form_data_and_waits_for_user_submission_choice(self) -> None:
+        client = FakeOaDraftClient()
+        service = self._service(
+            invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
+            oa_client=client,
+        )
+        preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "zhou_jieying"}, can_create_draft=True)
+        batch = service.create_batch(
+            {
+                "invoiceIds": ["inv-1"],
+                "targetApplicantCode": "zhou_jieying",
+                "expectedPreviewHash": preview["previewHash"],
+                "idempotencyKey": "create-key-selected-applicant",
+            },
+            actor_id="login-user",
+            can_mutate=True,
+        )
+
+        drafted = service.create_oa_draft(
+            str(batch["batchId"]),
+            expected_version=int(batch["version"]),
+            idempotency_key="draft-key-selected-applicant",
+            actor_id="login-user",
+            can_mutate=True,
+        )
+
+        self.assertEqual(drafted["status"], "oa_draft_created")
+        self.assertEqual(drafted["oaDetectionStatus"], "draft_created")
+        self.assertTrue(drafted["canConfirmSubmission"])
+        self.assertFalse(drafted["canRefreshStatus"])
+        request_payload = client.requests[0]["payload"]
+        form_data = request_payload["data"]
+        self.assertEqual(request_payload["formId"], 2)
+        self.assertIs(request_payload["isDraft"], True)
+        self.assertEqual(form_data["userName"], "周洁莹")
+        self.assertEqual(form_data["applicant"], "周洁莹")
+        self.assertIn(str(batch["batchId"]), form_data["cause"])
+
+        confirmed = service.manual_oa_status(
+            str(batch["batchId"]),
+            decision="submitted",
+            reason="",
+            expected_version=int(drafted["version"]),
+            idempotency_key="confirm-submitted-key",
+            actor_id="login-user",
+            can_mutate=True,
+        )
+
+        self.assertEqual(confirmed["status"], InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value)
+        self.assertEqual(confirmed["oaDetectionStatus"], "user_confirmed_submitted")
+        self.assertTrue(confirmed["canRefreshStatus"])
+
+    def test_user_can_mark_created_oa_draft_not_submitted_without_releasing_local_binding(self) -> None:
+        service = self._service(
+            invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
+            oa_client=FakeOaDraftClient(),
+        )
+        batch = self._create_batch(service, ["inv-1"])
+        drafted = service.create_oa_draft(
+            str(batch["batchId"]),
+            expected_version=int(batch["version"]),
+            idempotency_key="draft-key-1",
+            actor_id="user-1",
+            can_mutate=True,
+        )
+
+        marked = service.manual_oa_status(
+            str(batch["batchId"]),
+            decision="not_submitted",
+            reason="",
+            expected_version=int(drafted["version"]),
+            idempotency_key="confirm-not-submitted-key",
+            actor_id="user-1",
+            can_mutate=True,
+        )
+
+        self.assertEqual(marked["status"], InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value)
+        self.assertEqual(marked["oaDetectionStatus"], "user_confirmed_not_submitted")
+        self.assertEqual(marked["oaDraftId"], "oa-draft-001")
+        self.assertEqual(marked["oaDraftUrl"], "https://oa.example/drafts/oa-draft-001")
+        self.assertTrue(marked["canRevoke"])
+
     def test_status_refresh_without_evidence_does_not_create_relation_or_complete_batch(self) -> None:
         relation_calls: list[object] = []
         service = self._service(
@@ -197,10 +279,19 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             actor_id="user-1",
             can_mutate=True,
         )
+        confirmed = service.manual_oa_status(
+            str(batch["batchId"]),
+            decision="submitted",
+            reason="用户确认已在 OA 提交",
+            expected_version=int(drafted["version"]),
+            idempotency_key="confirm-submitted-key-1",
+            actor_id="user-1",
+            can_mutate=True,
+        )
 
         refreshed = service.refresh_oa_status(
             str(batch["batchId"]),
-            expected_version=int(drafted["version"]),
+            expected_version=int(confirmed["version"]),
             actor_id="user-1",
             can_mutate=True,
         )
@@ -231,10 +322,19 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             actor_id="user-1",
             can_mutate=True,
         )
+        confirmed = service.manual_oa_status(
+            str(batch["batchId"]),
+            decision="submitted",
+            reason="用户确认已在 OA 提交",
+            expected_version=int(drafted["version"]),
+            idempotency_key="confirm-submitted-key-2",
+            actor_id="user-1",
+            can_mutate=True,
+        )
 
         refreshed = service.refresh_oa_status(
             str(batch["batchId"]),
-            expected_version=int(drafted["version"]),
+            expected_version=int(confirmed["version"]),
             actor_id="user-1",
             can_mutate=True,
         )

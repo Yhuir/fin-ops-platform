@@ -2774,7 +2774,35 @@ class Application:
             cancel_link_uow=self._workbench_cancel_link_unit_of_work(),
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
             consume_reconciliation_decisions_in_transaction=self._consume_workbench_reconciliation_decisions_in_transaction,
+            bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
+            submit_internal_transfer_rows_from_workbench=lambda **kwargs: (
+                self._no_oa_bank_batch_application_service().submit_internal_transfer_rows_from_workbench(**kwargs)
+            ),
         )
+
+    def _bank_transaction_category_codes_for_workbench_row_ids(self, row_ids: list[str]) -> dict[str, str]:
+        no_oa_service = self._no_oa_bank_batch_application_service()
+        rows = no_oa_service.no_oa_bank_transaction_rows_by_ids(row_ids)
+        categories_by_transaction_id = no_oa_service.effective_categories_for_rows(rows)
+        rows_by_id = {
+            str(row.get("id") or "").strip(): row
+            for row in rows
+            if str(row.get("id") or "").strip()
+        }
+        codes: dict[str, str] = {}
+        for row_id in [str(item).strip() for item in list(row_ids or []) if str(item).strip()]:
+            manual_category = self._bank_transaction_category_service.get(row_id)
+            manual_category_code = str(manual_category.get("category_code") or "").strip()
+            if manual_category_code:
+                codes[row_id] = manual_category_code
+                continue
+            row = rows_by_id.get(row_id)
+            if not isinstance(row, dict):
+                continue
+            category_code = NoOaBankBatchService._category_code(row, categories_by_transaction_id)
+            if category_code:
+                codes[row_id] = category_code
+        return codes
 
     def _workbench_confirm_link_unit_of_work(self) -> WorkbenchWriteUnitOfWork | None:
         override = getattr(self, "_workbench_confirm_link_uow_override", None)

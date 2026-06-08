@@ -259,6 +259,54 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(by_code["social_security"]["total_amount"], "0.00")
         self.assertEqual(by_code["internal_transfer"]["total_amount"], "0.00")
 
+    def test_unsubmitted_list_excludes_internal_transfer_rows_occupied_by_active_relation(self) -> None:
+        app = self._app_with_transactions(
+            [
+                bank_transaction(
+                    "transfer-out",
+                    category_code="internal_transfer",
+                    direction=TransactionDirection.OUTFLOW,
+                    amount="500.00",
+                    account_no="6222000000008106",
+                    bank_name="建行",
+                    account_last4="8106",
+                    trade_time="2026-03-10T09:00:00",
+                ),
+                bank_transaction(
+                    "transfer-in",
+                    category_code="internal_transfer",
+                    direction=TransactionDirection.INFLOW,
+                    amount="500.00",
+                    account_no="6222000000003847",
+                    bank_name="交行",
+                    account_last4="3847",
+                    trade_time="2026-03-10T10:00:00",
+                ),
+            ],
+            categories={"transfer-out": "internal_transfer", "transfer-in": "internal_transfer"},
+            selected_tag_codes=["internal_transfer"],
+        )
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="manual-internal-transfer",
+            row_ids=["transfer-out", "transfer-in"],
+            row_types=["bank", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="finance-user",
+            month_scope="2026-03",
+        )
+        app._workbench_relation_facade = FakeNoOaRelationFacade(
+            app._workbench_pair_relation_service.list_active_relations()
+        )
+
+        payload = self._list_batches(app, "?bucket=unsubmitted")
+
+        self.assertEqual(payload["batches"], [])
+        internal_transfer_summary = next(
+            category for category in payload["summary"]["categories"] if category["code"] == "internal_transfer"
+        )
+        self.assertEqual(internal_transfer_summary["total"], 0)
+        self.assertEqual(internal_transfer_summary["conflict"], 0)
+
     def test_detail_returns_batch_and_serialized_rows(self) -> None:
         app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
         batch_id = self._list_batches(app)["batches"][0]["batch_id"]

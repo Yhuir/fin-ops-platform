@@ -128,7 +128,7 @@ function WorkbenchPaneSearch({
       <button
         ref={buttonRef}
         aria-label={buttonAriaLabel}
-        className={`pane-tool-btn pane-search-toggle-btn fixed${open || hasAppliedValue ? " active" : ""}${showAppliedSummary ? " summary" : ""}`}
+        className={`pane-tool-btn pane-search-toggle-btn pane-search-toggle-btn--header-control${open || hasAppliedValue ? " active" : ""}${showAppliedSummary ? " summary" : ""}`}
         type="button"
         onClick={() => {
           syncPopoverPosition();

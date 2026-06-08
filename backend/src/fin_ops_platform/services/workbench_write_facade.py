@@ -12,6 +12,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
 )
+from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
@@ -126,6 +127,8 @@ class WorkbenchWriteFacade:
         cancel_link_uow: Any | None = None,
         persist_pair_relations_in_transaction: Callable[..., None] | None = None,
         consume_reconciliation_decisions_in_transaction: Callable[..., int] | None = None,
+        bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
+        submit_internal_transfer_rows_from_workbench: Callable[..., dict[str, object]] | None = None,
     ) -> None:
         self._pair_relation_service = pair_relation_service
         self._exception_service = exception_service
@@ -169,6 +172,8 @@ class WorkbenchWriteFacade:
         self._cancel_link_uow = cancel_link_uow
         self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._consume_reconciliation_decisions_in_transaction = consume_reconciliation_decisions_in_transaction
+        self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
+        self._submit_internal_transfer_rows_from_workbench = submit_internal_transfer_rows_from_workbench
 
     def confirm_link(
         self,
@@ -224,6 +229,27 @@ class WorkbenchWriteFacade:
         resolved_case_id = case_id or self._next_case_id()
         before_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
         selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=False)
+        internal_transfer_status = self._bank_only_internal_transfer_confirm_status(
+            row_ids=row_ids,
+            row_types=row_types,
+            selected_rows=selected_rows,
+        )
+        if internal_transfer_status == "mixed":
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "no_oa_bank_batch_selection_internal_transfer_conflict",
+                    "message": "内部往来流水必须与对应内部往来流水一起提交。",
+                },
+            )
+        if internal_transfer_status == "all":
+            return self._confirm_internal_transfer_rows_via_no_oa_batch(
+                row_ids=row_ids,
+                month=month,
+                actor_id=actor_id,
+                note=note,
+                amount_check=amount_check,
+            )
         history_before_relations = self._merge_relation_snapshots(
             before_relations,
             self._synthetic_existing_case_relations(
@@ -419,6 +445,97 @@ class WorkbenchWriteFacade:
             )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
         return WorkbenchWriteResult(HTTPStatus.OK, self._confirm_link_response_payload(result))
+
+    def _bank_only_internal_transfer_confirm_status(
+        self,
+        *,
+        row_ids: list[str],
+        row_types: list[str],
+        selected_rows: list[dict[str, object]],
+    ) -> str:
+        if not row_ids or set(row_types) != {"bank"}:
+            return "none"
+        categories_by_row_id: dict[str, str] = {}
+        if self._bank_transaction_category_codes_for_row_ids is not None:
+            categories_by_row_id.update(self._bank_transaction_category_codes_for_row_ids(row_ids))
+        for row in selected_rows:
+            if not isinstance(row, dict) or str(row.get("type") or "") != "bank":
+                continue
+            row_id = str(row.get("id") or row.get("row_id") or "").strip()
+            if not row_id or categories_by_row_id.get(row_id):
+                continue
+            category_code = str(row.get("category_code") or row.get("effective_category_code") or "").strip()
+            if category_code:
+                categories_by_row_id[row_id] = category_code
+        selected_codes = [str(categories_by_row_id.get(row_id) or "").strip() for row_id in row_ids]
+        has_internal_transfer = any(code == "internal_transfer" for code in selected_codes)
+        if not has_internal_transfer:
+            return "none"
+        return "all" if all(code == "internal_transfer" for code in selected_codes) else "mixed"
+
+    def _confirm_internal_transfer_rows_via_no_oa_batch(
+        self,
+        *,
+        row_ids: list[str],
+        month: str,
+        actor_id: str | None,
+        note: str,
+        amount_check: dict[str, object],
+    ) -> WorkbenchWriteResult:
+        if self._submit_internal_transfer_rows_from_workbench is None:
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "no_oa_bank_batch_internal_transfer_submit_unavailable",
+                    "message": "内部往来免OA提交入口不可用。",
+                },
+            )
+        try:
+            result = self._submit_internal_transfer_rows_from_workbench(
+                row_ids=list(row_ids),
+                actor=_normalize_actor_id(actor_id),
+                note=note or None,
+            )
+        except ValueError as exc:
+            error_code = str(exc).strip() or "invalid_no_oa_bank_batch_request"
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {"error": error_code, "message": error_code},
+            )
+        except NoOaBankBatchPersistenceError as exc:
+            return WorkbenchWriteResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": exc.error_code,
+                    "message": str(exc) or "免OA流水批次保存失败，请稍后重试。",
+                },
+            )
+        batch = dict(result.get("batch") or {})
+        relation = dict(result.get("pair_relation") or {})
+        case_id = str(relation.get("case_id") or batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+        affected_row_ids = [
+            str(row_id).strip()
+            for row_id in list(batch.get("row_ids") or row_ids)
+            if str(row_id).strip()
+        ]
+        affected_months = [
+            str(month_value).strip()
+            for month_value in list(result.get("affected_months") or [month])
+            if str(month_value).strip()
+        ]
+        return WorkbenchWriteResult(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "action": "confirm_link",
+                "month": month,
+                "case_id": case_id,
+                "affected_row_ids": affected_row_ids,
+                "affected_months": affected_months,
+                "amount_check": amount_check,
+                "message": f"已确认 {len(affected_row_ids)} 条记录关联。",
+            },
+        )
 
     @staticmethod
     def _confirm_link_response_payload(result: dict[str, object]) -> dict[str, object]:

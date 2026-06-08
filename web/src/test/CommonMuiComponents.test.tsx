@@ -193,6 +193,10 @@ describe("common MUI components", () => {
   });
 
   test("defines right drawer slide motion with reduced-motion safeguards", () => {
+    expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*display:\s*flex/s);
+    expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*flex-direction:\s*column/s);
+    expect(appStyles).toMatch(/\.finance-drawer\s*\{[^}]*max-height:\s*100vh/s);
+    expect(appStyles).toMatch(/\.finance-drawer__body\s*\{[^}]*overflow:\s*auto/s);
     expect(appStyles).toMatch(/--finance-drawer-enter-duration:\s*220ms;/);
     expect(appStyles).toMatch(/--finance-drawer-exit-duration:\s*170ms;/);
     expect(appStyles).toMatch(/@keyframes finance-drawer-slide-in/);

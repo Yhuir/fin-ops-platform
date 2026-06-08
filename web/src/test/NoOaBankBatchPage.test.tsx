@@ -134,10 +134,10 @@ const listPayload = {
       total_amount: "30000.00",
       tag_counts: { internal_transfer: 3 },
       direction_counts: { income: 1, expense: 2 },
-      conflict_reason: "已有未撤回关联占用，请先处理原关联。",
+      conflict_reason: "内部往来存在多解，不能自动形成可提交批次。",
       can_submit: false,
       can_withdraw: false,
-      blocked_reason: "已有未撤回关联占用，请先处理原关联。",
+      blocked_reason: "内部往来存在多解，不能自动形成可提交批次。",
       version: 1,
     },
     {
@@ -473,7 +473,7 @@ describe("NoOaBankBatchPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
 
-    expect(await screen.findByText("已有未撤回关联占用，请先处理原关联。")).toBeInTheDocument();
+    expect(await screen.findByText("内部往来存在多解，不能自动形成可提交批次。")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "已提交 1" }));
     expect(await screen.findByText("人工成本")).toBeInTheDocument();
@@ -792,7 +792,7 @@ describe("NoOaBankBatchPage", () => {
     }
   });
 
-  test("shows occupied active relation context for internal transfer conflicts", async () => {
+  test("shows relation context for internal transfer conflicts", async () => {
     const user = userEvent.setup();
     installFetchMock();
     renderPage();
@@ -801,7 +801,7 @@ describe("NoOaBankBatchPage", () => {
     await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 5条" }));
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    expect(await within(transactionRegion).findByText("已有未撤回关联占用，请先处理原关联。")).toBeInTheDocument();
+    expect(await within(transactionRegion).findByText("内部往来存在多解，不能自动形成可提交批次。")).toBeInTheDocument();
     expect(await within(transactionRegion).findByText("云南溯源科技有限公司")).toBeInTheDocument();
     expect(within(transactionRegion).getByText("关联 case-active-001")).toBeInTheDocument();
     expect(within(transactionRegion).getByText("OA 1")).toBeInTheDocument();

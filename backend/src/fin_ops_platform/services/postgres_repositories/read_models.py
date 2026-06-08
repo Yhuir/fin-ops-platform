@@ -5719,48 +5719,60 @@ class PostgresReadModelRepository:
         oa_start = f"{resolved_oa_year}-01-01"
         bank_rows = self._connection.fetch_all(
             """
-            select row_id, source_kind, status, payload, raw_payload
-            from read_model.workbench_rows
-            where scope_key <> 'all'
-              and source_kind = 'bank'
+            select r.row_id, r.source_kind, r.status, r.payload, r.raw_payload
+            from read_model.workbench_rows r
+            join read_model.workbench_generations gen
+              on gen.generation_id = r.generation_id
+             and gen.scope_key = r.scope_key
+             and gen.status = 'active'
+            where r.scope_key <> 'all'
+              and r.source_kind = 'bank'
               and (
-                    counterparty_name = %s
-                    or payload->>'counterparty_name' = %s
-                    or payload->>'counterparty_name_raw' = %s
+                    r.counterparty_name = %s
+                    or r.payload->>'counterparty_name' = %s
+                    or r.payload->>'counterparty_name_raw' = %s
                   )
               and (
-                    scope_month >= %s::date
-                    and scope_month < (%s::date + interval '1 year')
+                    r.scope_month >= %s::date
+                    and r.scope_month < (%s::date + interval '1 year')
                   )
-            order by coalesce(payload->>'trade_time', payload->>'pay_receive_time', payload->>'txn_date', '') desc, row_id
+            order by coalesce(r.payload->>'trade_time', r.payload->>'pay_receive_time', r.payload->>'txn_date', '') desc, r.row_id
             """,
             ("批量账务集中处理", "批量账务集中处理", "批量账务集中处理", bank_start, bank_start),
         )
         oa_rows = self._connection.fetch_all(
             """
-            select row_id, source_kind, status, payload, raw_payload
-            from read_model.workbench_rows
-            where scope_key <> 'all'
-              and source_kind = 'oa'
+            select r.row_id, r.source_kind, r.status, r.payload, r.raw_payload
+            from read_model.workbench_rows r
+            join read_model.workbench_generations gen
+              on gen.generation_id = r.generation_id
+             and gen.scope_key = r.scope_key
+             and gen.status = 'active'
+            where r.scope_key <> 'all'
+              and r.source_kind = 'oa'
               and (
-                    scope_month >= %s::date
-                    and scope_month < (%s::date + interval '1 year')
+                    r.scope_month >= %s::date
+                    and r.scope_month < (%s::date + interval '1 year')
                   )
-            order by coalesce(payload->>'apply_time', payload->>'application_time', payload->>'application_date', payload->>'created_at', '') desc, row_id
+            order by coalesce(r.payload->>'apply_time', r.payload->>'application_time', r.payload->>'application_date', r.payload->>'created_at', '') desc, r.row_id
             """,
             (oa_start, oa_start),
         )
         invoice_rows = self._connection.fetch_all(
             """
-            select row_id, source_kind, status, payload, raw_payload
-            from read_model.workbench_rows
-            where scope_key <> 'all'
-              and source_kind = 'oa_attachment_invoice'
+            select r.row_id, r.source_kind, r.status, r.payload, r.raw_payload
+            from read_model.workbench_rows r
+            join read_model.workbench_generations gen
+              on gen.generation_id = r.generation_id
+             and gen.scope_key = r.scope_key
+             and gen.status = 'active'
+            where r.scope_key <> 'all'
+              and r.source_kind = 'oa_attachment_invoice'
               and (
-                    scope_month >= %s::date
-                    and scope_month < (%s::date + interval '1 year')
+                    r.scope_month >= %s::date
+                    and r.scope_month < (%s::date + interval '1 year')
                   )
-            order by row_id
+            order by r.row_id
             """,
             (oa_start, oa_start),
         )

@@ -26,6 +26,10 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
   bankRows: [],
   oaRows: [],
   relationsByBankRowId: {},
+  readModelStatus: "fresh",
+  readModelStaleReasons: [],
+  readModelScopeKeys: [],
+  refreshEnqueued: false,
 };
 
 function currentYear() {
@@ -225,6 +229,11 @@ export default function BatchAccountingPage() {
   const bankAmountCents = selectedBankRow ? parseMoneyCents(selectedBankRow.amount) : 0;
   const selectedOaTotalCents = selectedOaRows.reduce((total, row) => total + parseMoneyCents(row.amount), 0);
   const differenceCents = bankAmountCents - selectedOaTotalCents;
+  const readModelStatus = payload.readModelStatus || "fresh";
+  const readModelNeedsRefresh = readModelStatus !== "fresh";
+  const readModelStatusMessage = payload.refreshEnqueued
+    ? `关联台关系读模型 ${readModelStatus}，正在刷新。`
+    : `关联台关系读模型 ${readModelStatus}，请刷新后再处理。`;
   const isAmountMismatch = bucket === "unsubmitted"
     && Boolean(selectedBankRow)
     && selectedOaRows.length > 0
@@ -235,8 +244,9 @@ export default function BatchAccountingPage() {
     && isValidYear(bankYear)
     && isValidYear(oaYear)
     && !mutating
+    && !readModelNeedsRefresh
     && (differenceCents === 0 || differenceNote.trim().length > 0);
-  const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating;
+  const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating && !readModelNeedsRefresh;
 
   const loadData = useCallback((signal?: AbortSignal) => {
     if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
@@ -277,6 +287,20 @@ export default function BatchAccountingPage() {
     loadData(controller.signal);
     return () => controller.abort();
   }, [loadData]);
+
+  useEffect(() => {
+    setSelectedBankRowId((current) => {
+      if (current && payload.bankRows.some((row) => row.id === current)) {
+        return current;
+      }
+      const nextBankRowId = payload.bankRows[0]?.id ?? null;
+      if (current !== nextBankRowId) {
+        setSelectedOaRowIds(new Set());
+        setDifferenceNote("");
+      }
+      return nextBankRowId;
+    });
+  }, [payload.bankRows]);
 
   useEffect(() => {
     if (!feedback) {
@@ -406,6 +430,11 @@ export default function BatchAccountingPage() {
       </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
+      {!error && readModelNeedsRefresh ? (
+        <StatePanel tone="warning" title={readModelStatusMessage}>
+          <span>{payload.readModelStaleReasons.join("、") || "等待关联台关系读模型恢复 fresh 后再提交或撤回。"}</span>
+        </StatePanel>
+      ) : null}
 
       <div className="batch-accounting-layout">
         <section aria-label="批量账务流水" className="batch-accounting-bank-panel" role="region">

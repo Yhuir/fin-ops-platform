@@ -685,7 +685,8 @@ describe("Pending invoices page", () => {
     expect(css).toMatch(/\.pending-invoices-sort-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoices-table-zone-header-grid\s*{[^}]*grid-template-columns:\s*14fr 10fr 11fr 11fr 11fr 10fr 7fr 11fr 15fr/s);
     expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-row-menu-trigger,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.pending-invoice-drawer__body\s*{[^}]*padding:\s*var\(--fp-space-4\)/s);
+    expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__header\s*{[^}]*padding:\s*10px var\(--fp-space-4\)/s);
+    expect(css).toMatch(/\.pending-invoice-drawer__body\s*{[^}]*padding:\s*var\(--fp-space-3\)/s);
     expect(css).toMatch(/\.pending-invoice-metric-grid\s*{[^}]*gap:\s*var\(--fp-space-2\)/s);
     expect(css).toMatch(/\.pending-invoice-manual-dialog\s*{[^}]*gap:\s*var\(--fp-space-3\)/s);
   });
@@ -902,6 +903,7 @@ describe("Pending invoices page", () => {
 
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
     expect(await screen.findByRole("heading", { name: "支出待找发票规则设置" })).toBeInTheDocument();
+    expect(screen.queryByText(/版本\s+\d+/)).not.toBeInTheDocument();
     expect(screen.getByText("需要开票")).toBeInTheDocument();
     expect(screen.getAllByText("手续费").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "保存规则" }));

@@ -226,7 +226,7 @@ describe("Workbench pane display model", () => {
 
     const oaSearchInput = within(openOaPane).getByRole("searchbox", { name: "搜索 OA" });
     expect(oaSearchInput.closest(".pane-search-popover")).not.toBeNull();
-    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "fixed");
+    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "pane-search-toggle-btn--header-control");
     fireEvent.change(oaSearchInput, { target: { value: "陈涛" } });
 
     await waitFor(() => {
@@ -234,7 +234,7 @@ describe("Workbench pane display model", () => {
     });
     expect(within(openZone).getAllByText((content) => content.includes("智能工厂设备商")).length).toBeGreaterThan(1);
     expect(oaSearchInput.closest(".pane-search-field")).not.toBeNull();
-    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "fixed");
+    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "pane-search-toggle-btn--header-control");
     expect(within(openOaPane).getByRole("button", { name: "清空搜索 OA" })).toBeInTheDocument();
 
     fireEvent.click(within(openOaPane).getByRole("button", { name: "收起搜索 OA" }));

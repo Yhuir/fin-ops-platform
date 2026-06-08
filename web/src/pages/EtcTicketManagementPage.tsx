@@ -19,7 +19,6 @@ import StatePanel from "../components/common/StatePanel";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
-  confirmEtcBatchSubmitted,
   confirmEtcReconciliationTask,
   createEtcBusinessBatchOaDraft,
   createEtcReconciliationTask,
@@ -35,11 +34,11 @@ import {
   fetchEtcReconciliationTask,
   manualEtcBusinessBatchOaStatus,
   fetchEtcReconciliationTasks,
-  markEtcBatchNotSubmitted,
   patchEtcReconciliationItem,
   refreshEtcBusinessBatchOaStatus,
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
+  revokeEtcBusinessBatchOaDraft,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
   uploadEtcTicketRootFiles,
@@ -224,6 +223,46 @@ function businessBatchTone(status: EtcBusinessBatchStatus): "default" | "primary
 
 function isSubmittedBusinessStatus(status: EtcBusinessBatchStatus) {
   return status === "oa_submitted" || status === "manually_marked_submitted" || status === "closed";
+}
+
+function businessBatchListBucket(status: EtcBusinessBatchStatus): "unsubmitted" | "submitted" | null {
+  if (isSubmittedBusinessStatus(status)) {
+    return "submitted";
+  }
+  if (status === "deleted" || status === "superseded") {
+    return null;
+  }
+  return "unsubmitted";
+}
+
+function businessBatchBelongsToBatchStatus(status: EtcBusinessBatchStatus, activeStatus: EtcBatchStatus) {
+  const bucket = businessBatchListBucket(status);
+  const currentBucket = activeStatus === "submitted" ? "submitted" : "unsubmitted";
+  return bucket === currentBucket;
+}
+
+function transitionBusinessBatchCounts(
+  counts: EtcBatchCounts,
+  previousStatus: EtcBusinessBatchStatus | null,
+  nextStatus: EtcBusinessBatchStatus,
+): EtcBatchCounts {
+  const previousBucket = previousStatus ? businessBatchListBucket(previousStatus) : null;
+  const nextBucket = businessBatchListBucket(nextStatus);
+  if (previousBucket === nextBucket) {
+    return counts;
+  }
+  const nextCounts = { ...counts };
+  if (previousBucket === "submitted") {
+    nextCounts.submitted = Math.max(0, nextCounts.submitted - 1);
+  } else if (previousBucket === "unsubmitted") {
+    nextCounts.unsubmitted = Math.max(0, nextCounts.unsubmitted - 1);
+  }
+  if (nextBucket === "submitted") {
+    nextCounts.submitted += 1;
+  } else if (nextBucket === "unsubmitted") {
+    nextCounts.unsubmitted += 1;
+  }
+  return nextCounts;
 }
 
 function isOaDetectionStatus(status: EtcBusinessBatchStatus) {
@@ -596,11 +635,13 @@ export default function EtcTicketManagementPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [taskImportDetailLoading, setTaskImportDetailLoading] = useState(false);
   const [taskImportDetailError, setTaskImportDetailError] = useState<string | null>(null);
+  const [batchListError, setBatchListError] = useState<string | null>(null);
+  const [taskListError, setTaskListError] = useState<string | null>(null);
+  const [batchDetailError, setBatchDetailError] = useState<string | null>(null);
   const [taskActionLoading, setTaskActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [taskPanelExpanded, setTaskPanelExpanded] = useState(true);
   const [batchDetailPanelExpanded, setBatchDetailPanelExpanded] = useState(true);
-  const [revokeDialogOpen, setRevokeDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [removeImportedInvoicesDialogOpen, setRemoveImportedInvoicesDialogOpen] = useState(false);
   const [removeImportedInvoicesSubmitting, setRemoveImportedInvoicesSubmitting] = useState(false);
@@ -611,10 +652,14 @@ export default function EtcTicketManagementPage() {
   const [manualOaPanelOpen, setManualOaPanelOpen] = useState(false);
   const [manualOaReason, setManualOaReason] = useState("");
   const [oaActionLoading, setOaActionLoading] = useState(false);
+  const [revokeOaDraftTarget, setRevokeOaDraftTarget] = useState<EtcBusinessBatchDetail | EtcBusinessBatchSummary | null>(null);
+  const [revokeOaDraftReason, setRevokeOaDraftReason] = useState("");
+  const [revokeOaDraftSubmitting, setRevokeOaDraftSubmitting] = useState(false);
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
 
   const loadBatches = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
+    setBatchListError(null);
     setActionError(null);
     try {
       const payload = await fetchEtcBusinessBatches({
@@ -636,7 +681,7 @@ export default function EtcTicketManagementPage() {
       });
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-        setActionError(caught instanceof Error ? caught.message : "ETC业务批次加载失败。");
+        setBatchListError(caught instanceof Error ? caught.message : "ETC业务批次加载失败。");
       }
     } finally {
       setLoading(false);
@@ -645,6 +690,7 @@ export default function EtcTicketManagementPage() {
 
   const loadReconciliationTasks = useCallback(async (signal?: AbortSignal) => {
     setTaskLoading(true);
+    setTaskListError(null);
     try {
       const payload = await fetchEtcReconciliationTasks(signal);
       setReconciliationTasks(payload.items);
@@ -656,7 +702,7 @@ export default function EtcTicketManagementPage() {
       });
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-        setActionError(caught instanceof Error ? caught.message : "ETC对账任务加载失败。");
+        setTaskListError(caught instanceof Error ? caught.message : "ETC对账任务加载失败。");
       }
     } finally {
       setTaskLoading(false);
@@ -682,14 +728,17 @@ export default function EtcTicketManagementPage() {
     if (!selectedBatchId) {
       setBatchDetail(null);
       setBusinessBatchDetail(null);
+      setBatchDetailError(null);
       return undefined;
     }
     const controller = new AbortController();
     setDetailLoading(true);
+    setBatchDetailError(null);
     setActionError(null);
     void fetchEtcBusinessBatchDetail(selectedBatchId, controller.signal)
       .then((detail) => {
         if (!controller.signal.aborted) {
+          setBatchDetailError(null);
           setBusinessBatchDetail(detail);
           setBatchDetail(businessBatchToBatchDetail(detail));
         }
@@ -706,9 +755,10 @@ export default function EtcTicketManagementPage() {
             setSelectedBatchId((current) => (current === selectedBatchId ? "" : current));
             setBatchDetail(null);
             setBusinessBatchDetail(null);
+            setBatchDetailError(null);
             return;
           }
-          setActionError(caught instanceof Error ? caught.message : "ETC业务批次明细加载失败。");
+          setBatchDetailError(caught instanceof Error ? caught.message : "ETC业务批次明细加载失败。");
         }
       })
       .finally(() => {
@@ -1180,7 +1230,6 @@ export default function EtcTicketManagementPage() {
     && (selectedTaskImportBatchSelected
       ? selectedTaskImportBatchCanSubmit
       : currentBusinessBatch !== null && canCreateOaDraft(currentBusinessBatch.status) && !detailLoading);
-  const canRevokeCurrentBatch = activeStatus === "submitted" && Boolean(selectedBatchId) && !detailLoading;
   const currentOaActionBatch = useMemo(() => {
     if (draftResult?.batchId) {
       return businessBatches.find((batch) => batch.businessBatchId === draftResult.batchId) ?? currentBusinessBatch;
@@ -1230,8 +1279,14 @@ export default function EtcTicketManagementPage() {
   }, []);
 
   const mergeBusinessBatch = useCallback((batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => {
+    const previousBatch = businessBatches.find((item) => item.businessBatchId === batch.businessBatchId) ?? null;
+    setCounts((current) => transitionBusinessBatchCounts(current, previousBatch?.status ?? null, batch.status));
+    const belongsToCurrentStatus = businessBatchBelongsToBatchStatus(batch.status, activeStatus);
     setBusinessBatches((current) => {
       const exists = current.some((item) => item.businessBatchId === batch.businessBatchId);
+      if (!belongsToCurrentStatus) {
+        return current.filter((item) => item.businessBatchId !== batch.businessBatchId);
+      }
       if (!exists) {
         return [batch, ...current];
       }
@@ -1240,16 +1295,23 @@ export default function EtcTicketManagementPage() {
     setBatches((current) => {
       const mapped = businessBatchToBatchSummary(batch);
       const exists = current.some((item) => item.id === mapped.id);
+      if (!belongsToCurrentStatus) {
+        return current.filter((item) => item.id !== mapped.id);
+      }
       if (!exists) {
         return [mapped, ...current];
       }
       return current.map((item) => (item.id === mapped.id ? mapped : item));
     });
-    if ("invoiceItems" in batch) {
+    if (!belongsToCurrentStatus) {
+      setSelectedBatchId((current) => (current === batch.businessBatchId ? "" : current));
+      setBusinessBatchDetail((current) => (current?.businessBatchId === batch.businessBatchId ? null : current));
+      setBatchDetail((current) => (current?.id === batch.businessBatchId ? null : current));
+    } else if ("invoiceItems" in batch) {
       setBusinessBatchDetail(batch);
       setBatchDetail(businessBatchToBatchDetail(batch));
     }
-  }, []);
+  }, [activeStatus, businessBatches]);
 
   const handleStatusChange = (nextStatus: EtcBatchStatus) => {
     if (nextStatus === activeStatus) {
@@ -1675,23 +1737,6 @@ export default function EtcTicketManagementPage() {
     }
   };
 
-  const handleResultConfirmation = async (submitted: boolean) => {
-    if (!draftResult?.batchId) {
-      return;
-    }
-    setActionError(null);
-    if (submitted) {
-      await confirmEtcBatchSubmitted(draftResult.batchId);
-    } else {
-      await markEtcBatchNotSubmitted(draftResult.batchId);
-    }
-    emitEtcBusinessDomainUpdated({ source: submitted ? "etc_batch_submitted" : "etc_batch_mark_not_submitted" });
-    setCreateDialogOpen(false);
-    setDraftResult(null);
-    await loadBatches();
-    await loadReconciliationTasks();
-  };
-
   const resolveOaActionBatch = (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
     if (draftResult?.batchId) {
       return businessBatches.find((item) => item.businessBatchId === draftResult.batchId) ?? batch ?? currentOaActionBatch;
@@ -1728,6 +1773,44 @@ export default function EtcTicketManagementPage() {
     }
   };
 
+  const openRevokeOaDraftDialog = (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => {
+    setActionError(null);
+    setRevokeOaDraftTarget(batch);
+    setRevokeOaDraftReason("");
+  };
+
+  const closeRevokeOaDraftDialog = () => {
+    if (revokeOaDraftSubmitting) {
+      return;
+    }
+    setRevokeOaDraftTarget(null);
+    setRevokeOaDraftReason("");
+  };
+
+  const handleRevokeOaDraft = async () => {
+    const target = resolveOaActionBatch(revokeOaDraftTarget);
+    const reason = revokeOaDraftReason.trim();
+    if (!target || !reason) {
+      return;
+    }
+    setRevokeOaDraftSubmitting(true);
+    setActionError(null);
+    try {
+      const result = await revokeEtcBusinessBatchOaDraft(target.businessBatchId, {
+        expectedVersion: target.version,
+        reason,
+      });
+      mergeBusinessBatch(result);
+      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_draft_revoke" });
+      setRevokeOaDraftTarget(null);
+      setRevokeOaDraftReason("");
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "OA 草稿撤销失败。");
+    } finally {
+      setRevokeOaDraftSubmitting(false);
+    }
+  };
+
   const handleManualBusinessBatchOaStatus = async (
     decision: "submitted" | "not_submitted",
     batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null,
@@ -1760,17 +1843,6 @@ export default function EtcTicketManagementPage() {
     }
   };
 
-  const handleRevoke = async () => {
-    if (!selectedBatchId) {
-      return;
-    }
-    setActionError(null);
-    await markEtcBatchNotSubmitted(selectedBatchId);
-    emitEtcBusinessDomainUpdated({ source: "etc_batch_revoke_submitted" });
-    setRevokeDialogOpen(false);
-    await loadBatches();
-  };
-
   const renderOaStatusPanel = (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => (
     <section className="etc-oa-status-panel" aria-label="OA草稿与检测状态">
       <div className="etc-oa-status-header">
@@ -1797,6 +1869,15 @@ export default function EtcTicketManagementPage() {
           >
             <RefreshCw aria-hidden="true" size={16} />
             刷新检测
+          </button>
+          <button
+            type="button"
+            className="etc-secondary-action etc-secondary-action--warning"
+            disabled={oaActionLoading}
+            onClick={() => openRevokeOaDraftDialog(batch)}
+          >
+            <RotateCcw aria-hidden="true" size={16} />
+            撤销草稿
           </button>
           {isManualOaFallbackStatus(batch.status) ? (
             <button
@@ -2082,7 +2163,8 @@ export default function EtcTicketManagementPage() {
                 <div className="etc-reconciliation-task-list" role="region" aria-label="ETC对账任务列表">
                   <p className="etc-list-eyebrow">对账任务</p>
                   {taskLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
-                  {!taskLoading && reconciliationTasks.length === 0 ? (
+                  {taskListError ? <StatePanel tone="error" compact>{taskListError}</StatePanel> : null}
+                  {!taskLoading && !taskListError && reconciliationTasks.length === 0 ? (
                     <StatePanel tone="empty" compact>暂无任务。</StatePanel>
                   ) : null}
                   <ul className="etc-list" aria-label="ETC对账任务">
@@ -2130,7 +2212,8 @@ export default function EtcTicketManagementPage() {
                 </div>
               ) : null}
               {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
-              {!loading && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
+              {batchListError ? <StatePanel tone="error" compact>{batchListError}</StatePanel> : null}
+              {!loading && !batchListError && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
               <ul className="etc-batch-list" aria-label="ETC批次列表">
                 {visibleBatches.map((batch) => {
                   const deletable = canDeleteBatch(batch);
@@ -2623,17 +2706,6 @@ export default function EtcTicketManagementPage() {
                         <p>{batchOaLabel(selectedBatch)}</p>
                       ) : null}
                     </div>
-                    {activeStatus === "submitted" ? (
-                      <button
-                        type="button"
-                        className="etc-secondary-action etc-secondary-action--warning"
-                        disabled={!canRevokeCurrentBatch}
-                        onClick={() => setRevokeDialogOpen(true)}
-                      >
-                        <RotateCcw aria-hidden="true" size={16} />
-                        撤销提交状态
-                      </button>
-                    ) : null}
                   </div>
 
                   {selectedBusinessBatch && isOaDetectionStatus(selectedBusinessBatch.status) ? renderOaStatusPanel(selectedBusinessBatch) : null}
@@ -2670,7 +2742,9 @@ export default function EtcTicketManagementPage() {
                   <hr className="etc-section-separator" />
 
                           {detailLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
-                          {renderEtcInvoiceTable(
+                          {batchDetailError ? (
+                            <StatePanel tone="error" compact>{batchDetailError}</StatePanel>
+                          ) : renderEtcInvoiceTable(
                             invoiceRows,
                             {
                               ariaLabel: "ETC发票明细",
@@ -2815,6 +2889,50 @@ export default function EtcTicketManagementPage() {
         </AppDialog>
 
         <AppDialog
+          open={Boolean(revokeOaDraftTarget)}
+          title="撤销OA草稿"
+          description="撤销会释放本地 ETC 发票占用；如果 OA 已进入流程，后端会拒绝撤销。"
+          onClose={closeRevokeOaDraftDialog}
+          actions={
+            <>
+              <button
+                type="button"
+                className="etc-secondary-action"
+                onClick={closeRevokeOaDraftDialog}
+                disabled={revokeOaDraftSubmitting}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="etc-secondary-action etc-secondary-action--warning"
+                onClick={() => void handleRevokeOaDraft()}
+                disabled={revokeOaDraftSubmitting || !revokeOaDraftReason.trim()}
+              >
+                {revokeOaDraftSubmitting ? "正在撤销..." : "确认撤销"}
+              </button>
+            </>
+          }
+        >
+          <div className="etc-dialog-stack">
+            <div className="etc-dialog-detail-list">
+              <p>批次：{revokeOaDraftTarget?.externalEtcBatchId || revokeOaDraftTarget?.businessBatchId || "-"}</p>
+              <p>版本：v{revokeOaDraftTarget?.version ?? "-"}</p>
+            </div>
+            <label className="etc-dialog-field">
+              <span>撤销原因</span>
+              <textarea
+                value={revokeOaDraftReason}
+                onChange={(event) => setRevokeOaDraftReason(event.target.value)}
+                disabled={revokeOaDraftSubmitting}
+                rows={3}
+                required
+              />
+            </label>
+          </div>
+        </AppDialog>
+
+        <AppDialog
           open={removeImportedInvoicesDialogOpen}
           title="移除发票"
           description="清空本任务下已导入发票，任务可重新导入。"
@@ -2853,19 +2971,6 @@ export default function EtcTicketManagementPage() {
             </div>
           ) : null}
         </AppDialog>
-
-        <AppDialog
-          open={revokeDialogOpen}
-          title="撤销提交状态"
-          description="只修改内部批次状态，不撤回 OA 流程。"
-          onClose={() => setRevokeDialogOpen(false)}
-          actions={
-            <>
-              <button type="button" className="etc-secondary-action" onClick={() => setRevokeDialogOpen(false)}>取消</button>
-              <button type="button" className="etc-secondary-action etc-secondary-action--warning" onClick={handleRevoke}>确认撤销</button>
-            </>
-          }
-        />
 
         <AppDialog
           open={createDialogOpen}

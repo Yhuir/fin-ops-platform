@@ -54,6 +54,10 @@ export type BatchAccountingResponse = {
   bankRows: BatchAccountingBankRow[];
   oaRows: BatchAccountingOaRow[];
   relationsByBankRowId: Record<string, BatchAccountingRelationBucket>;
+  readModelStatus: string;
+  readModelStaleReasons: string[];
+  readModelScopeKeys: string[];
+  refreshEnqueued: boolean;
 };
 
 export type FetchBatchAccountingRequest = {

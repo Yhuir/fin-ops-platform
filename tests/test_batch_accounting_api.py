@@ -123,6 +123,33 @@ class FakeBatchRelationFacade:
         }
 
 
+class NonFreshBatchRelationFacade(FakeBatchRelationFacade):
+    def __init__(
+        self,
+        *,
+        status: str,
+        stale_reasons: list[str],
+        read_model_scope_keys: list[str] | None = None,
+        refresh_enqueued: bool = True,
+    ) -> None:
+        super().__init__(None)
+        self._status = status
+        self._stale_reasons = stale_reasons
+        self._read_model_scope_keys = read_model_scope_keys or ["2026-01"]
+        self._refresh_enqueued = refresh_enqueued
+
+    def _payload(self) -> dict[str, object]:
+        return {
+            "status": self._status,
+            "rows": [],
+            "groups": [],
+            "source_versions": {},
+            "read_model_scope_keys": list(self._read_model_scope_keys),
+            "refresh_enqueued": self._refresh_enqueued,
+            "stale_reasons": list(self._stale_reasons),
+        }
+
+
 class BatchAccountingApiTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -321,6 +348,52 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
         self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
 
+    def test_unsubmitted_list_deduplicates_sql_read_model_rows_by_row_id(self) -> None:
+        duplicate_payload = self._grouped_payload()
+        group = duplicate_payload["open"]["groups"][0]
+        group["bank_rows"] = [group["bank_rows"][0], {**group["bank_rows"][0], "version": 2}]
+        group["oa_rows"] = [
+            {
+                "id": "oa-exp-ba-001",
+                "type": "oa",
+                "applicant": "刘晨",
+                "apply_time": "2026-01-06",
+                "amount": "700.00",
+                "apply_type": "日常报销",
+            },
+            {
+                "id": "oa-exp-ba-001",
+                "type": "oa",
+                "applicant": "刘晨",
+                "apply_time": "2026-01-06",
+                "amount": "700.00",
+                "apply_type": "日常报销",
+            },
+        ]
+
+        class SqlReadModel:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, str]] = []
+
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str, oa_year: str) -> dict[str, object]:
+                self.calls.append((bank_year, oa_year))
+                return duplicate_payload
+
+        app = build_application()
+        sql_read_model = SqlReadModel()
+        app._workbench_sql_read_repository = sql_read_model
+        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("SQL loader should be used"))
+        payload_patcher.start()
+        self.addCleanup(payload_patcher.stop)
+
+        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(sql_read_model.calls, [("2026", "2026")])
+        self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
+        self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003"])
+
     def test_unsubmitted_list_does_not_run_legacy_relation_repair(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
         repair_patcher = patch.object(
@@ -403,6 +476,24 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["bank_rows"], [])
         self.assertEqual(payload["summary"]["unsubmitted_count"], 0)
+
+    def test_unsubmitted_list_exposes_relation_read_model_missing_status(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        app._workbench_relation_facade = NonFreshBatchRelationFacade(
+            status="missing",
+            stale_reasons=["read_model_missing"],
+            read_model_scope_keys=["2026-01"],
+            refresh_enqueued=True,
+        )
+
+        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["read_model_status"], "missing")
+        self.assertEqual(payload["read_model_stale_reasons"], ["read_model_missing"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
+        self.assertIs(payload["refresh_enqueued"], True)
 
     def test_submit_amount_mismatch_requires_difference_note(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -884,6 +975,24 @@ class BatchAccountingApiTests(unittest.TestCase):
         month_calls = [call for call in facade.calls if call.get("month") == "2026-01"]
         self.assertTrue(month_calls)
         self.assertIn({"row_ids": ["txn_imported_202601_batch_001"], "require_fresh": False, "reason": "batch_accounting_submitted_relations"}, facade.calls)
+
+    def test_submitted_list_exposes_relation_read_model_stale_status(self) -> None:
+        app, _payload_patcher = self._app_with_grouped_payload()
+        app._workbench_relation_facade = NonFreshBatchRelationFacade(
+            status="stale",
+            stale_reasons=["dirty_scope:2026-01"],
+            read_model_scope_keys=["2026-01"],
+            refresh_enqueued=True,
+        )
+
+        response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=submitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertEqual(payload["read_model_stale_reasons"], ["dirty_scope:2026-01"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-01"])
+        self.assertIs(payload["refresh_enqueued"], True)
 
     def test_submitted_list_exposes_mismatch_note_and_amount_check(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

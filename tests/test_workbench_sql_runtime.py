@@ -396,6 +396,28 @@ class WorkbenchGenerationStatsConnection(ActiveWorkbenchGenerationConnection):
         return super().fetch_one(sql, params)
 
 
+class BatchAccountingActiveGenerationConnection(WorkbenchSqlReadConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.workbench_rows" in normalized:
+            return [
+                {
+                    "row_id": "txn_imported_202601_batch_001",
+                    "source_kind": "bank",
+                    "status": "open",
+                    "payload": {
+                        "id": "txn_imported_202601_batch_001",
+                        "type": "bank",
+                        "counterparty_name": "批量账务集中处理",
+                        "trade_time": "2026-01-07 15:54:00",
+                        "debit_amount": "1200.00",
+                    },
+                }
+            ]
+        return []
+
+
 class WorkbenchGenerationRetentionConnection(WorkbenchSqlReadConnection):
     def __init__(self) -> None:
         super().__init__()
@@ -1251,6 +1273,22 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(page["read_model_version"], "gen-active")
         self.assertTrue(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
         self.assertTrue(any("r.generation_id = g.generation_id" in sql for sql, _params in all_queries))
+
+    def test_batch_accounting_loader_reads_only_active_workbench_generations(self) -> None:
+        connection = BatchAccountingActiveGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.load_batch_accounting_workbench_payload(bank_year="2026", oa_year="2026")
+
+        self.assertEqual(payload["open"]["groups"][0]["bank_rows"][0]["id"], "txn_imported_202601_batch_001")
+        workbench_row_queries = [
+            sql for sql, _params in connection.fetch_all_calls if "from read_model.workbench_rows" in sql
+        ]
+        self.assertEqual(len(workbench_row_queries), 3)
+        for sql in workbench_row_queries:
+            self.assertIn("join read_model.workbench_generations", sql)
+            self.assertIn("status = 'active'", sql)
+            self.assertIn("generation_id", sql)
 
     def test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation(self) -> None:
         connection = SwitchingActiveWorkbenchGenerationConnection()

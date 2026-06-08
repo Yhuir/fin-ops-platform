@@ -79,6 +79,14 @@ type ApiResponse = {
   oaRows?: ApiOaRow[] | null;
   relations_by_bank_row_id?: ApiRelationsByBankRowId | null;
   relationsByBankRowId?: ApiRelationsByBankRowId | null;
+  read_model_status?: string | null;
+  readModelStatus?: string | null;
+  read_model_stale_reasons?: string[] | null;
+  readModelStaleReasons?: string[] | null;
+  read_model_scope_keys?: string[] | null;
+  readModelScopeKeys?: string[] | null;
+  refresh_enqueued?: boolean | null;
+  refreshEnqueued?: boolean | null;
 };
 
 type ApiRelationValue = ApiOaRow[] | {
@@ -241,6 +249,10 @@ export async function fetchBatchAccounting({
     bankRows: Array.isArray(payload.bank_rows ?? payload.bankRows) ? (payload.bank_rows ?? payload.bankRows ?? []).map(mapBankRow) : [],
     oaRows: Array.isArray(payload.oa_rows ?? payload.oaRows) ? (payload.oa_rows ?? payload.oaRows ?? []).map(mapOaRow) : [],
     relationsByBankRowId: mapRelations(payload.relations_by_bank_row_id ?? payload.relationsByBankRowId),
+    readModelStatus: text(payload.read_model_status ?? payload.readModelStatus, "fresh"),
+    readModelStaleReasons: stringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
+    readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
+    refreshEnqueued: Boolean(payload.refresh_enqueued ?? payload.refreshEnqueued),
   };
 }
 

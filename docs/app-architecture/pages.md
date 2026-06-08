@@ -57,6 +57,8 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | `settings` | `/settings` | OA identity/state store/settings refresh runtime dependencies |
 | `app_health_operations` | `/operations/app-health` | runtime health dependencies、workers、queue、state store |
 
+`batch_accounting` 页面依赖 workbench relation read model 判定已提交/未提交。`GET /api/batch-accounting` 必须透出 relation read model 的 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`；页面不能在 relation read model 非 fresh 时把空关系结果当作真实“全部未提交”。
+
 ## 页面职责边界
 
 - 页面可以决定筛选、排序、分页、空状态、导出列、drawer/dialog 状态。

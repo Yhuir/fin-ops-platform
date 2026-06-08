@@ -130,7 +130,7 @@ function TaxTableSearch({
       <button
         ref={buttonRef}
         aria-label={buttonAriaLabel}
-        className={`pane-tool-btn pane-search-toggle-btn fixed${open || hasAppliedValue ? " active" : ""}${hasAppliedValue && !open ? " summary" : ""}`}
+        className={`pane-tool-btn pane-search-toggle-btn pane-search-toggle-btn--header-control${open || hasAppliedValue ? " active" : ""}${hasAppliedValue && !open ? " summary" : ""}`}
         type="button"
         onClick={() => {
           syncPopoverPosition();

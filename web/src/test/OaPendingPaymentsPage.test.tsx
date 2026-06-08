@@ -147,6 +147,58 @@ const rowsPayload = {
         detailMode: "list",
       },
     },
+    {
+      id: "oa-payment-row-003",
+      oa: {
+        id: "oa-003",
+        applicantName: "王五",
+        applicationType: "付款",
+        projectName: "未关联发票项目",
+        amount: "18200.00",
+        detailAvailable: true,
+      },
+      paymentStatus: {
+        code: "paid",
+        label: "已支付",
+        reason: "支出流水合计等于 OA 金额",
+      },
+      bankTransaction: {
+        primaryBankTransactionId: "bank-004",
+        accountDetailNo: "no-invoice-bank",
+        enterpriseSerialNo: "",
+        voucherKind: "电子转账凭证",
+        voucherNo: "no-invoice-voucher",
+        bankName: "交通银行",
+        accountNo: "622200003847",
+        accountLast4: "3847",
+        directionLabel: "支出",
+        accountName: "云南溯源科技有限公司",
+        tradeTime: "20260107 09:50:25",
+        debitAmount: "18200.00",
+        creditAmount: "0.00",
+        balance: "111698.00",
+        currency: "人民币元",
+        counterpartyName: "无发票供应商",
+        counterpartyAccountNo: "2502124119024521404",
+        counterpartyBankName: "交通银行昆明支行",
+        bookedDate: "20260107",
+        summary: "货款",
+        remark: "",
+        relationCount: 1,
+        hasMultiple: false,
+        detailMode: "single",
+      },
+      invoice: {
+        primaryInvoiceId: null,
+        digitalInvoiceNo: "",
+        sellerName: "",
+        invoiceDate: "",
+        totalWithTax: "",
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+      },
+    },
   ],
   pagination: { page: 1, pageSize: 20, total: 51 },
   summary: { rowCount: 51 },
@@ -512,6 +564,13 @@ describe("OA pending payments page", () => {
     expect(within(page).getByText("建设银行 1234")).toBeInTheDocument();
     expect(within(page).getByText(/补充流水摘要/)).toBeInTheDocument();
     expect(within(page).getByText(/补充流水备注/)).toBeInTheDocument();
+    const noInvoiceRow = within(page).getByRole("row", { name: /王五/ });
+    const noInvoiceCell = noInvoiceRow.querySelector(".oa-pending-payments-empty-invoice-cell");
+    expect(noInvoiceCell).not.toBeNull();
+    expect(noInvoiceCell).toHaveTextContent("-");
+    expect(within(noInvoiceRow).queryByText("进")).not.toBeInTheDocument();
+    expect(within(noInvoiceRow).queryByText("开票日期为空")).not.toBeInTheDocument();
+    expect(within(noInvoiceRow).queryByRole("button", { name: /查看发票/ })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
@@ -623,6 +682,7 @@ describe("OA pending payments page", () => {
 
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
     await screen.findByText("待找发票规则设置");
+    expect(screen.queryByText(/版本\s+\d+/)).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/pending-invoices/rules" && url.searchParams.get("direction") === "expense";

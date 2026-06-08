@@ -125,7 +125,6 @@ class NoOaBankBatchService:
             categories,
         )
         occupied_row_ids = self._active_relation_row_ids(effective_active_relations)
-        no_oa_occupied_row_ids = self._active_no_oa_relation_row_ids(effective_active_relations)
         relation_backed_submitted_batches = self._relation_backed_submitted_batches(
             effective_active_relations,
             rows,
@@ -140,7 +139,6 @@ class NoOaBankBatchService:
                 rows,
                 categories,
                 occupied_row_ids,
-                no_oa_occupied_row_ids,
                 source_version_payload,
                 eligible_types,
             )
@@ -1634,7 +1632,6 @@ class NoOaBankBatchService:
         rows: list[dict[str, Any]],
         categories: dict[str, dict[str, Any]],
         occupied_row_ids: set[str],
-        no_oa_occupied_row_ids: set[str],
         source_versions: dict[str, Any],
         eligible_batch_types: set[str],
     ) -> dict[str, dict[str, Any]]:
@@ -1644,7 +1641,7 @@ class NoOaBankBatchService:
             row
             for row in rows
             if self._row_id(row)
-            and self._row_id(row) not in no_oa_occupied_row_ids
+            and self._row_id(row) not in occupied_row_ids
             and self._category_code(row, categories) == "internal_transfer"
         ]
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -1660,21 +1657,6 @@ class NoOaBankBatchService:
             sorted_rows = sorted(group_rows, key=self._row_id)
             row_ids = [self._row_id(row) for row in sorted_rows]
             batch_key = f"internal_transfer:{scope_month}:{amount_text}:{':'.join(row_ids)}"
-            occupied = sorted(row_id for row_id in row_ids if row_id in occupied_row_ids)
-            if occupied:
-                batches[self._batch_id(batch_key)] = self._conflict_batch(
-                    batch_key=batch_key,
-                    scope_month=scope_month,
-                    rows=sorted_rows,
-                    row_ids=row_ids,
-                    total_amount=Decimal(amount_text),
-                    source_versions=source_versions,
-                    conflict_code="row_occupied_by_active_relation",
-                    conflict_reason="已有未撤回关联占用，请先处理原关联。",
-                    evidence={"occupied_row_ids": occupied},
-                )
-                continue
-
             inflows = [row for row in sorted_rows if self._direction(row) == "inflow"]
             outflows = [row for row in sorted_rows if self._direction(row) == "outflow"]
             if not inflows or not outflows:

@@ -54,6 +54,7 @@ cd web && npm run build
 - 安全和权限：`SECURITY.md`
 - 文档地图：`docs/index.md`
 - 当前 app 架构：`docs/app-architecture/README.md`
+- 页面和功能模块维护：`docs/modules/README.md`
 - 产品规格：`docs/product-specs/index.md`
 - 开发文档：`docs/dev/index.md`
 - 运维文档：`docs/operations/index.md`

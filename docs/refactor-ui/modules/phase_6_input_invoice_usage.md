@@ -703,3 +703,16 @@ Scope: completed `/input-invoice-usage` page batch P053-P060.
   - Build passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check` passed.
 - Next prompt: `P061-phase-6-oa-pending-payments-discovery`.
+
+## Main Update: InputInvoiceUsage OA Reverse Submission Confirmation
+
+- Status: implemented on `main`.
+- Scope:
+  - Backend OA reverse service now separates external OA draft creation from user-confirmed OA submission.
+  - Frontend OA reverse drawer now asks the user to choose `我已在 OA 提交` or `暂未提交 OA` after `创建 OA 草稿`.
+- Runtime contract:
+  - `创建 OA 草稿` creates an external OA draft and returns `oa_draft_created` with `oaDetectionStatus=draft_created`; it does not enter OA projection detection yet.
+  - The OA draft payload uses payment request form data (`formId`, `isDraft`, `data`) and writes the selected target applicant into `data.userName`/`data.applicant`.
+  - Choosing `我已在 OA 提交` records local user confirmation and transitions to `oa_submission_detecting`; only then can the drawer call `刷新 OA 状态`.
+  - Choosing `暂未提交 OA` records `not_submitted` while preserving `oaDraftId`/`oaDraftUrl`.
+  - `撤销本地草稿绑定` remains a local release operation; it clears local draft metadata and does not delete the external OA draft.

@@ -74,7 +74,185 @@ class PairSnapshotRelationFacade:
         }
 
 
+class FailingConfirmLinkUow:
+    def run(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("internal transfer confirm-link must be submitted through no-OA, not workbench UoW")
+
+
 class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
+    def _enable_no_oa_tags(self, app: object, tag_codes: list[str]) -> None:
+        selection = app._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
+        app._app_settings_service.update_no_oa_bank_batch_tag_selection(
+            {
+                "expected_version": selection["version"],
+                "selected_tag_codes": tag_codes,
+            },
+            actor_id="tester",
+        )
+
+    def _app_with_balanced_bank_rows(
+        self,
+        *,
+        category_codes: list[str],
+        summaries: list[str] | None = None,
+    ) -> tuple[object, list[str]]:
+        app = build_application()
+        row_summaries = summaries or ["内部往来支出", "内部往来收入"]
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="workbench-balanced-bank-rows.xlsx",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "account_no": "62220001",
+                    "account_name": "云南溯源科技有限公司建设银行基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 09:15:00",
+                    "pay_receive_time": "2026-02-03 09:15:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "50000.00",
+                    "credit_amount": "",
+                    "summary": row_summaries[0],
+                },
+                {
+                    "account_no": "62220002",
+                    "account_name": "云南溯源科技有限公司招商银行一般户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 10:02:00",
+                    "pay_receive_time": "2026-02-03 10:02:00",
+                    "counterparty_name": "云南溯源科技有限公司",
+                    "debit_amount": "",
+                    "credit_amount": "50000.00",
+                    "summary": row_summaries[1],
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        row_ids = [transaction.id for transaction in app._import_service.list_transactions()]
+        app._bank_transaction_category_service.apply_updates(
+            [
+                {"transaction_id": row_id, "category_code": category_code}
+                for row_id, category_code in zip(row_ids, category_codes, strict=True)
+            ],
+            actor="tester",
+        )
+        self._enable_no_oa_tags(app, sorted(set(category_codes)))
+        app._invalidate_workbench_read_models()
+        return app, row_ids
+
+    def _post_confirm_link(self, app: object, row_ids: list[str]):
+        return app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link",
+            body=json.dumps(
+                {
+                    "month": "2026-02",
+                    "row_ids": row_ids,
+                    "case_id": "CASE-WORKBENCH-INTERNAL-TRANSFER",
+                    "note": "关联台确认内部往来",
+                }
+            ),
+        )
+
+    def test_workbench_confirm_internal_transfer_bank_rows_submits_no_oa_batch(self) -> None:
+        app, row_ids = self._app_with_balanced_bank_rows(
+            category_codes=["internal_transfer", "internal_transfer"]
+        )
+        app._workbench_confirm_link_uow_override = FailingConfirmLinkUow()
+
+        response = self._post_confirm_link(app, row_ids)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_ids[0])
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "no_oa_bank_batch")
+        self.assertCountEqual(relation["row_ids"], row_ids)
+
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        submitted = app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+        internal_transfer_batches = [
+            batch for batch in submitted
+            if batch["batch_type"] == "internal_transfer"
+            and set(batch["row_ids"]) == set(row_ids)
+        ]
+        self.assertEqual(len(internal_transfer_batches), 1)
+        self.assertEqual(internal_transfer_batches[0]["status"], "submitted")
+
+        unsubmitted = app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
+        self.assertFalse(
+            any(set(batch.get("row_ids") or []).intersection(row_ids) for batch in unsubmitted)
+        )
+
+        app._invalidate_workbench_read_models()
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        paired_group = next(
+            group for group in payload["paired"]["groups"]
+            if group.get("relation_mode") == "no_oa_bank_batch"
+        )
+        self.assertEqual(paired_group["display_mode"], "collapsed_summary")
+        self.assertCountEqual(
+            [row["id"] for row in paired_group["collapsed_rows"]["bank"]],
+            row_ids,
+        )
+
+    def test_workbench_confirm_non_internal_bank_only_rows_keeps_manual_relation(self) -> None:
+        app, row_ids = self._app_with_balanced_bank_rows(
+            category_codes=["fee", "fee"],
+            summaries=["手续费支出", "手续费退回"],
+        )
+
+        response = self._post_confirm_link(app, row_ids)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_ids[0])
+        self.assertIsNotNone(relation)
+        assert relation is not None
+        self.assertEqual(relation["relation_mode"], "manual_confirmed")
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        app._no_oa_bank_batch_application_service().refresh_batches()
+        submitted = app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+        self.assertEqual(submitted, [])
+
+    def test_workbench_confirm_mixed_internal_transfer_bank_rows_rejects_no_oa_conflict(self) -> None:
+        app, row_ids = self._app_with_balanced_bank_rows(
+            category_codes=["internal_transfer", "fee"]
+        )
+
+        response = self._post_confirm_link(app, row_ids)
+
+        self.assertEqual(response.status_code, 400, response.body)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "no_oa_bank_batch_selection_internal_transfer_conflict")
+        self.assertEqual(app._workbench_pair_relation_service.list_active_relations(), [])
+
+    def test_application_service_submits_internal_transfer_rows_from_workbench_via_batch_submit(self) -> None:
+        app, row_ids = self._app_with_balanced_bank_rows(
+            category_codes=["internal_transfer", "internal_transfer"]
+        )
+        application_service = app._no_oa_bank_batch_application_service()
+        submit_from_workbench = getattr(
+            application_service,
+            "submit_internal_transfer_rows_from_workbench",
+            None,
+        )
+        self.assertTrue(
+            callable(submit_from_workbench),
+            "NoOaBankBatchApplicationService must expose submit_internal_transfer_rows_from_workbench.",
+        )
+
+        result = submit_from_workbench(
+            row_ids=row_ids,
+            actor="finance-user",
+            note="关联台确认内部往来",
+        )
+
+        self.assertEqual(result["batch"]["status"], "submitted")
+        self.assertEqual(result["batch"]["batch_type"], "internal_transfer")
+        self.assertEqual(set(result["batch"]["row_ids"]), set(row_ids))
+        self.assertEqual(result["pair_relation"]["relation_mode"], "no_oa_bank_batch")
+
     def test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh(self) -> None:
         class StaleNoOaReadRepository:
             def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:

@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from urllib.parse import quote
 
@@ -35,6 +36,15 @@ class StaticOAProjection:
 
     def create_draft(self) -> None:
         self.write_calls.append("create_draft")
+
+
+class FakeOaDraftClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
+        self.requests.append({"form_id": form_id, "payload": payload})
+        return "oa-draft-api-001", "https://oa.example.test/drafts/oa-draft-api-001"
 
 
 class InputInvoiceUsageApiTests(unittest.TestCase):
@@ -253,6 +263,71 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         failed_payload = json.loads(failed_response.body)
         self.assertEqual(failed_payload["status"], "oa_draft_failed")
         self.assertEqual(failed_payload["version"], 2)
+
+    def test_oa_reverse_draft_route_creates_draft_then_waits_for_user_submission_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            client = FakeOaDraftClient()
+            app._etc_service = SimpleNamespace(oa_client=client)
+            self._install_service(
+                app,
+                invoices=[self._invoice("inv-preview", "3001", "预览供应商", total_with_tax="99.72")],
+                oa_projection=StaticOAProjection([]),
+            )
+            preview_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/preview",
+                body=json.dumps(
+                    {
+                        "source": "explicitSelection",
+                        "invoiceIds": ["inv-preview"],
+                        "targetApplicantCode": "zhou_jieying",
+                    }
+                ),
+            )
+            preview_payload = json.loads(preview_response.body)
+            batch_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/batches",
+                body=json.dumps(
+                    {
+                        "invoiceIds": ["inv-preview"],
+                        "targetApplicantCode": "zhou_jieying",
+                        "expectedPreviewHash": preview_payload["previewHash"],
+                        "idempotencyKey": "oa-reverse-create-api-1",
+                    }
+                ),
+            )
+            batch_payload = json.loads(batch_response.body)
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/input-invoice-usage/oa-reverse/batches/{batch_payload['batchId']}/oa-draft",
+                body=json.dumps({"expectedVersion": 1, "idempotencyKey": "oa-reverse-draft-api-1"}),
+            )
+            draft_payload = json.loads(draft_response.body)
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/input-invoice-usage/oa-reverse/batches/{batch_payload['batchId']}/manual-oa-status",
+                body=json.dumps(
+                    {
+                        "decision": "submitted",
+                        "expectedVersion": draft_payload["version"],
+                        "idempotencyKey": "oa-reverse-submit-confirm-api-1",
+                    }
+                ),
+            )
+
+        self.assertEqual(draft_response.status_code, 200)
+        self.assertEqual(draft_payload["status"], "oa_draft_created")
+        self.assertEqual(draft_payload["oaDetectionStatus"], "draft_created")
+        self.assertTrue(draft_payload["canConfirmSubmission"])
+        self.assertFalse(draft_payload["canRefreshStatus"])
+        self.assertEqual(client.requests[0]["payload"]["data"]["userName"], "周洁莹")
+        self.assertEqual(confirm_response.status_code, 200)
+        confirmed_payload = json.loads(confirm_response.body)
+        self.assertEqual(confirmed_payload["status"], "oa_submission_detecting")
+        self.assertEqual(confirmed_payload["oaDetectionStatus"], "user_confirmed_submitted")
+        self.assertTrue(confirmed_payload["canRefreshStatus"])
 
     def test_export_preview_and_download_use_current_input_invoice_usage_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
