@@ -556,8 +556,6 @@ class PostgresOAProjectionRepository:
         if not marker_texts:
             return []
         patterns = [f"%{marker}%" for marker in marker_texts]
-        start_month = month_start(created_from)
-        end_month = month_start(created_to)
         bounded_limit = max(1, min(200, int(limit or 50)))
         rows = self._connection.fetch_all(
             """
@@ -577,12 +575,6 @@ class PostgresOAProjectionRepository:
                     or oa.raw_payload::text ilike any(%s::text[])
                   )
               and (
-                    %s::date is null
-                    or %s::date is null
-                    or oa.scope_month is null
-                    or oa.scope_month between %s::date and %s::date
-                  )
-              and (
                     oa.form_id in ('2', 'payment_request')
                     or oa.normalized_payload->'detail_fields'->>'表单ID' = '2'
                     or oa.normalized_payload->>'apply_type' = '支付申请'
@@ -590,7 +582,7 @@ class PostgresOAProjectionRepository:
             order by oa.application_date desc nulls last, oa.row_id
             limit %s
             """,
-            (patterns, patterns, start_month, end_month, start_month, end_month, bounded_limit),
+            (patterns, patterns, bounded_limit),
         )
         return [
             self._etc_oa_detection_candidate_from_row(row)

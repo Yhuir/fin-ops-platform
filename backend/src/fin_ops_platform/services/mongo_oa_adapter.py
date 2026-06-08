@@ -2279,16 +2279,26 @@ class MongoOAAdapter(OAAdapter):
             return []
 
         marker_clauses: list[dict[str, Any]] = []
+        marker_fields = (
+            "data.cause",
+            "data.remark",
+            "data.expenseContent",
+            "data.expense_content",
+            "data.费用内容",
+            "data.事由",
+            "data.comments",
+            "data.description",
+            "data.detail_fields.费用内容",
+            "data.detail_fields.事由",
+        )
         for marker in (
             f"business_batch_id={normalized_business_batch_id}" if normalized_business_batch_id else "",
             f"etc_batch_id={normalized_external_batch_id}" if normalized_external_batch_id else "",
         ):
             if marker:
-                marker_clauses.append({"data.cause": {"$regex": re.escape(marker), "$options": "i"}})
-                marker_clauses.append({"data.remark": {"$regex": re.escape(marker), "$options": "i"}})
+                for field in marker_fields:
+                    marker_clauses.append({field: {"$regex": re.escape(marker), "$options": "i"}})
 
-        date_from = created_from.date().isoformat()
-        date_to = created_to.date().isoformat()
         query: dict[str, Any] = {
             "$and": [
                 {"form_id": self._form_id_query_value(self._settings.payment_request_form_id)},
@@ -2299,13 +2309,6 @@ class MongoOAAdapter(OAAdapter):
                         {"data.process_status": {"$in": [1, "1", "进行中"]}},
                         {"data.流程状态": "进行中"},
                         {"processStatus": {"$in": [1, "1", "进行中"]}},
-                    ]
-                },
-                {
-                    "$or": [
-                        {"data.applicationDate": {"$gte": date_from, "$lte": date_to}},
-                        {"data.ApplicationDate": {"$gte": date_from, "$lte": date_to}},
-                        {"modifiedTime": {"$gte": created_from.isoformat(), "$lte": created_to.isoformat()}},
                     ]
                 },
             ]
@@ -2332,7 +2335,17 @@ class MongoOAAdapter(OAAdapter):
                     "project_name": self._first_text(data, "projectName"),
                     "created_at": self._first_text(data, "applicationDate", "ApplicationDate") or document.get("modifiedTime"),
                     "process_status": self.canonical_process_status(data),
-                    "reason": self._first_text(data, "cause", "remark"),
+                    "reason": self._first_text(
+                        data,
+                        "cause",
+                        "remark",
+                        "expenseContent",
+                        "expense_content",
+                        "费用内容",
+                        "事由",
+                        "comments",
+                        "description",
+                    ),
                     "detail_fields": {
                         "OA单号": self._payment_form_no(data, document),
                         "表单ID": self._settings.payment_request_form_id,

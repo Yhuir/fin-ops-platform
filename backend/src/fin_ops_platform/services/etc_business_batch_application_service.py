@@ -20,6 +20,7 @@ from fin_ops_platform.services.etc_service import (
 
 
 ETC_BUSINESS_OA_DETECTION_EVENT_TYPE = "etc_business.oa_detection.refresh"
+ETC_OA_MARKER_LOOKUP_START_AT = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,7 +321,9 @@ class EtcBusinessBatchApplicationService:
         detector = EtcOADetectionService()
         start, end = detector.detection_window(context)
         now = datetime.now(UTC)
-        if start is None:
+        if context.business_batch_id or context.external_etc_batch_id:
+            start = ETC_OA_MARKER_LOOKUP_START_AT
+        elif start is None:
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         if end is None:
             end = now

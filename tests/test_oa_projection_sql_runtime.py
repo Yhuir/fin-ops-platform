@@ -122,6 +122,7 @@ class OAProjectionConnection:
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
+        self.executed.append((normalized, params))
         if "distinct to_char" in normalized:
             return [{"month": row["month"]} for row in self.rows]
         if "from app.oa_applications" not in normalized:
@@ -241,6 +242,55 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(detection_result.status, "detected")
         self.assertEqual(detection_result.oa_row_id, "oa-pay-etc-001")
+
+    def test_postgres_oa_projection_repository_marker_lookup_ignores_local_detection_month_window(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        payload = etc_oa_projection_payload()
+        payload.update(
+            {
+                "id": "oa-pay-etc-004",
+                "amount": "1673.30",
+                "invoiceCount": 37,
+                "invoice_count": 37,
+                "applicant": "杨丽萍",
+                "owner_org_id": "org-001",
+                "created_at": "2026-05-20T09:00:00",
+                "reason": (
+                    "ETC批量提交 "
+                    "etc_batch_id=etc_20260520_001 "
+                    "business_batch_id=etc_business_batch_0004"
+                ),
+            }
+        )
+        detail_fields = dict(payload.get("detail_fields") or {})
+        detail_fields.update({"申请日期": "2026-05-20", "ETC发票数量": "37"})
+        payload["detail_fields"] = detail_fields
+        connection = OAProjectionConnection(
+            rows=[
+                {
+                    "row_id": "oa-pay-etc-004",
+                    "month": "2026-05",
+                    "normalized_payload": payload,
+                    "raw_payload": {"normalized_payload": payload},
+                }
+            ]
+        )
+        repository = PostgresOAProjectionRepository(connection)
+
+        candidates = repository.list_etc_oa_detection_candidates(
+            business_batch_id="etc_business_batch_0004",
+            external_etc_batch_id="etc_20260520_001",
+            created_from=datetime(2026, 6, 7, 0, 0, 0),
+            created_to=datetime(2026, 6, 8, 19, 0, 0),
+            limit=50,
+        )
+
+        self.assertEqual([candidate["oa_row_id"] for candidate in candidates], ["oa-pay-etc-004"])
+        executed_sql = connection.executed[-1][0]
+        self.assertNotIn("scope_month between", executed_sql)
+        self.assertEqual(candidates[0]["amount"], "1673.30")
+        self.assertEqual(candidates[0]["invoice_count"], 37)
 
     def test_postgres_oa_projection_adapter_delegates_etc_oa_detection_candidates(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter

@@ -132,6 +132,20 @@ class EtcOADetectionServiceTests(unittest.TestCase):
         self.assertEqual(result.reason, "unique_candidate_detected")
         self.assertEqual(result.oa_row_id, "oa-pay-001")
 
+    def test_valid_marker_candidate_created_before_local_detection_window_is_detected(self) -> None:
+        context = detection_context()
+        assert context.oa_draft_created_at is not None
+
+        result = EtcOADetectionService().detect(
+            context,
+            [candidate(created_at=context.oa_draft_created_at - timedelta(days=10))],
+            now=context.oa_detection_deadline_at + timedelta(days=1) if context.oa_detection_deadline_at else None,
+        )
+
+        self.assertEqual(result.status, "detected")
+        self.assertEqual(result.reason, "unique_candidate_detected")
+        self.assertEqual(result.oa_row_id, "oa-pay-001")
+
     def test_amount_mismatch_is_conflict(self) -> None:
         result = EtcOADetectionService().detect(
             detection_context(),

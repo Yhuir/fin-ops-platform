@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 import json
@@ -722,6 +722,116 @@ class EtcServiceTests(unittest.TestCase):
             self.assertGreaterEqual(projection_repository.calls[0]["created_to"], timed_out.updated_at)
             self.assertIn(["etc_invoice_0001"], changed_batches)
             self.assertIn((["2026-02"], "etc_business_oa_status_detected"), refreshes)
+
+    def test_timeout_business_batch_refresh_detects_historical_marker_oa_before_local_detection_window(self) -> None:
+        from fin_ops_platform.services.etc_business_batch_application_service import (
+            EtcBusinessBatchActor,
+            EtcBusinessBatchApplicationService,
+        )
+
+        class ReconciliationTasks:
+            def get_task(self, task_id: str) -> object:
+                raise KeyError(task_id)
+
+        class MarkerFirstProjectionRepository:
+            def __init__(self, etc_service: EtcService) -> None:
+                self._etc_service = etc_service
+                self.calls: list[dict[str, object]] = []
+                self.historical_oa_created_at = datetime(2026, 5, 20, 9, 0, 0, tzinfo=UTC)
+
+            def list_etc_oa_detection_candidates(self, **kwargs: object) -> list[dict[str, object]]:
+                self.calls.append(dict(kwargs))
+                created_from = kwargs.get("created_from")
+                if created_from is not None and created_from > self.historical_oa_created_at:
+                    return []
+                target = self._etc_service.get_business_batch(str(kwargs["business_batch_id"]))
+                payload = self._etc_service.business_batch_payload(target)
+                invoice_summary = payload["invoiceSummary"]
+                return [
+                    {
+                        "oa_row_id": "oa-pay-etc-historical-004",
+                        "form_id": "2",
+                        "amount": str(invoice_summary["amount"]),
+                        "invoice_count": int(invoice_summary["count"]),
+                        "applicant_user_id": "user-001",
+                        "owner_org_id": "org-001",
+                        "created_at": self.historical_oa_created_at,
+                        "process_status": "in_progress",
+                        "reason": (
+                            "ETC批量提交 "
+                            f"etc_batch_id={target.external_etc_batch_id} "
+                            f"business_batch_id={target.business_batch_id}"
+                        ),
+                        "detail_fields": {"表单ID": "2", "流程状态": "进行中"},
+                    }
+                ]
+
+        with TemporaryDirectory() as temp_dir:
+            etc_service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            projection_repository = MarkerFirstProjectionRepository(etc_service)
+            refreshes: list[tuple[list[str], str]] = []
+            application_service = EtcBusinessBatchApplicationService(
+                etc_service=etc_service,
+                reconciliation_task_service=ReconciliationTasks(),
+                oa_client_factory=lambda _headers: FakeEtcOAClient(),
+                oa_adapter_provider=lambda: projection_repository,
+                sync_etc_invoices_to_canonical_invoices=lambda _invoices: ["2026-05"],
+                refresh_after_etc_invoice_sync=lambda months, reason: refreshes.append((list(months), reason)),
+            )
+            actor = EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True)
+            batch = etc_service.create_business_batch(
+                task_id="ETC-TASK-HISTORICAL-OA",
+                owner_user_id="user-001",
+                owner_org_id="org-001",
+            )
+            preview = etc_service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [
+                    UploadedEtcZipFile(
+                        "invoices.zip",
+                        zip_bytes(
+                            {
+                                "xml/ETC001.xml": etc_xml("ETC001", issue_date="2026-05-20", total_amount="1673.30"),
+                                "pdf/ETC001.pdf": fake_pdf("ETC001"),
+                            }
+                        ),
+                    )
+                ],
+                expected_version=batch.version,
+            )
+            batch, _result = etc_service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            draft_payload = application_service.create_oa_draft_payload(
+                batch.business_batch_id,
+                expected_version=batch.version,
+                actor=actor,
+                headers={},
+            )
+            drafted = draft_payload["businessBatch"]
+            stored_batch = etc_service._business_batches[str(drafted["businessBatchId"])]
+            stored_batch.external_etc_batch_id = "etc_20260520_001"
+            timed_out = etc_service.apply_business_batch_oa_detection_result(
+                str(drafted["businessBatchId"]),
+                expected_version=int(drafted["version"]),
+                detection_status="timeout",
+                reason="oa_detection_deadline_exceeded",
+                candidates=[],
+            )
+
+            refreshed_payload = application_service.refresh_oa_status_payload(
+                timed_out.business_batch_id,
+                expected_version=timed_out.version,
+                actor=actor,
+            )
+
+            refreshed = refreshed_payload["businessBatch"]
+            self.assertEqual(refreshed["status"], EtcBusinessBatchStatus.OA_SUBMITTED.value)
+            self.assertEqual(refreshed["oaRowId"], "oa-pay-etc-historical-004")
+            self.assertLessEqual(projection_repository.calls[0]["created_from"], projection_repository.historical_oa_created_at)
+            self.assertIn((["2026-05"], "etc_business_oa_status_detected"), refreshes)
 
     def test_parse_real_world_etc_xml_shape(self) -> None:
         parsed = parse_etc_xml(real_etc_xml())

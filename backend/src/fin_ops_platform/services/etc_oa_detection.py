@@ -303,6 +303,8 @@ class EtcOADetectionService:
         return not expected_user and not expected_org
 
     def _within_detection_window(self, context: EtcOADetectionContext, candidate: _PreparedCandidate) -> bool:
+        if candidate.marker in {"business_batch_id", "external_etc_batch_id"}:
+            return True
         start, _end = self.detection_window(context)
         if start is None:
             return True

@@ -66,6 +66,7 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 - 按 `oa_detection_next_run_at` 调度，不立即无界扫描历史数据。
 - 每个 `businessBatchId` 同一时刻只能有一个运行中检测任务。
 - `oa_detection_timeout` 不再自动高频轮询；用户任意时间点击刷新检测时，只触发一次即时检测。只要 OA adapter 找到带 ETC 稳定标记且金额、发票数、组织和流程状态都合法的候选，就推进到 `oa_submitted`。
+- ETC 专用 OA 查询以 `business_batch_id` / `etc_batch_id` 稳定标记为事实入口，不用本地 `oa_detection_started_at` 或 30 分钟 deadline 排除历史 OA；deadline 只用于未找到候选时的状态提示。
 - OA 检测 adapter 查询超时、权限失败或 projection 不可用时进入 `oa_detection_unavailable`，写 `oa_detection_error` 和审计。
 - 后台推进状态时必须校验批次 `version`，不能覆盖用户刚执行的人工兜底或撤销草稿。
 
