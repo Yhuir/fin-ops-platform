@@ -55,14 +55,14 @@ Last updated: 2026-06-08
 | 23 | `PV-023-turnover-ledger-premium-visual` | verified | 外部往来款管理 premium visual slice。 |
 | 24 | `PV-024-etc-tickets-discovery` | verified | `/etc-tickets` premium visual discovery。 |
 | 25 | `PV-025-etc-tickets-premium-visual` | verified | ETC 票据管理 premium visual slice。 |
-| 26 | `PV-026-settings-discovery` | pending | `/settings` premium visual discovery。 |
+| 26 | `PV-026-settings-discovery` | verified | `/settings` premium visual discovery。 |
 | 27 | `PV-027-settings-premium-visual` | pending | 设置 premium visual slice。 |
 | 28 | `PV-028-app-wide-smoothness-audit` | pending | 全 app interaction smoothness audit。 |
 | 29 | `MG-PV-final-premium-visual-closeout` | pending | 全量验证、smoke、commit/push closeout。 |
 
 ## Current Slice
 
-`PV-026-settings-discovery`
+`PV-027-settings-premium-visual`
 
 ### Scope
 
@@ -73,17 +73,19 @@ Last updated: 2026-06-08
 - `web/src/components/settings/*`
 - `web/src/test/SettingsPage.test.tsx`
 - `web/src/test/SettingsOaManualSearchImportTable.test.tsx`
+- `web/src/app/styles.css`
 
 ### Verification
 
-Required for PV-026:
+Required for PV-027:
 
+- `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- `git status --short --branch`
-
-PV-026 is discovery-only and must not change runtime code.
+- Browser smoke `/settings`: tree navigation, one section switch, save action/read-only feedback or data reset dialog, OA manual import table or dense table surface, and no top-level horizontal overflow.
 
 ## Execution Rules
 
@@ -136,3 +138,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-023-turnover-ledger-premium-visual` | `c133ecc5` | pushed to `origin/main` | Turnover ledger premium visual polish verified; PV-024 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-024-etc-tickets-discovery` | `664173c6` | pushed to `origin/main` | ETC tickets premium discovery verified; PV-025 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-025-etc-tickets-premium-visual` | `75defcb9` | pushed to `origin/main` | ETC tickets premium visual polish verified; PV-026 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-026-settings-discovery` | current commit | pending push | Settings premium discovery verified; PV-027 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |

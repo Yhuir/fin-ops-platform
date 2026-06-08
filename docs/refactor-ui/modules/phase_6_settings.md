@@ -485,3 +485,94 @@ Scope: `/settings` P099-P106 migration only.
   - Settings module is ready to leave Phase 6.
   - Next Micro-JIT prompt moves to Phase 7 MUI containment discovery.
 - Commit: `2a30a7b0 docs: verify settings mg and add mui containment discovery`, pushed to `origin/refactor-ui`.
+
+## PV-026 Premium Visual Discovery
+
+- Prompt ID: `PV-026-settings-discovery`
+- Status: `verified`
+- Scope:
+  - `/settings` route, Settings tree navigation, Settings content panel, project status settings, bank account mappings, pending invoice tag mapping, OA import/retention settings, OA invoice offset rules, access accounts, data reset dialogs, OA manual search/import table and related feedback states.
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Current Code Facts
+
+- Current non-workbench Settings runtime has already migrated out of MUI:
+  - `SettingsPage.tsx` and `web/src/components/settings/*` have no `@mui/*` or Emotion imports.
+  - Source-level Settings tests already guard project primitive usage, tree semantics, native table semantics and data reset dialog names.
+- Previous `P099-P106` entries in this file are platform migration history. They prove Settings left the MUI platform, but they do not prove this new premium visual pass is complete.
+- The Settings page uses:
+  - `SettingsPageContent` as the route content container.
+  - `SettingsTreeNav` for the left Settings tree.
+  - Native/project buttons, inputs, checkboxes, menus, tables, dialogs and tags.
+  - `OaManualSearchImportTable` for the largest dense table surface.
+
+### Functional Equivalence Boundaries
+
+PV-027 must preserve all user-visible entrypoints and workflows:
+
+- Existing Settings tree remains a tree navigation, not a tab strip or card list.
+- Existing Settings sections remain in the same positions and keep their current labels and affordances.
+- Existing setting forms remain forms; field labels, validation, disabled/read-only behavior and save flow must not change.
+- Existing tables remain dense tables, including OA manual search import and nested OA detail rows.
+- Existing menus remain menus, including pending invoice tag selection.
+- Existing data reset flow remains modal dialogs with impact confirmation, OA password review and job progress.
+- Existing OA manual import workflow, staged shell status updates, attachment refresh, selection, pagination and import behavior must not change.
+
+### Premium Visual Gaps
+
+- `web/src/app/styles.css` contains two generations of Settings styling:
+  - newer tokenized `.settings-*` rules around the route/tree/table/dialog system;
+  - older hard-coded Settings project/bank/checkbox/data-reset rules that still use values such as `#102a43`, `#486581`, `#e7edf5`, `#fbfdff`, `#ffffff`, `#f0fff4`, `#fff5f5`, `#9f1d1d` and `#0f4c81`.
+- Several controls lack the motion-token treatment used by the premium sample:
+  - tree item hover/selected;
+  - save/primary/secondary/danger/icon buttons;
+  - menu items;
+  - table row hover/selected;
+  - form input focus;
+  - data reset action cards;
+  - OA manual import pagination/actions.
+- Some Settings regions still feel like migration-era surfaces rather than the bank-details premium direction:
+  - project columns and rows;
+  - bank mapping rows;
+  - data reset cards;
+  - pending invoice tag selector;
+  - OA manual import filters/metrics/table.
+- Layout should stay compact and operational. PV-027 must avoid large card redesigns or dashboard-style metrics.
+
+### Table And List Treatment Required
+
+- Settings table cells must keep `13px` dense rhythm, compact padding and no top-level horizontal overflow.
+- Amount/count/date columns must remain right-aligned or tabular where applicable.
+- OA manual import table must preserve its wide scroll containment and nested detail table.
+- Tags for role/status/source/import status must keep stable table tag height and radius.
+- Project names, bank names, project codes, usernames, OA numbers, reasons, tag paths and descriptions must truncate or wrap predictably without changing row height unexpectedly.
+- Selected/expanded/active states must not change table/list dimensions.
+
+### Interaction Smoothness Required
+
+- PV-027 should use `docs/refactor-ui/interaction_smoothness.md` tokens:
+  - `--motion-fast`;
+  - `--ease-out-quart`;
+  - compositor-friendly hover/press feedback.
+- Do not add route transition animations.
+- Do not block Settings tree switching, OA manual table search, pagination, dialog open/close or menu open/close with decorative animations.
+- Use reduced-motion-safe CSS only.
+
+### Test And Smoke Implications
+
+- Existing `SettingsPage.test.tsx` covers no-MUI source contract, tree/panel behavior, read-only save disabling, data reset dialogs and pending invoice tag behavior.
+- Existing `SettingsOaManualSearchImportTable.test.tsx` covers search, selection, expansion, refresh, import, shell status staging and pagination/filter behavior.
+- PV-027 should add a CSS contract to `SettingsPage.test.tsx` for:
+  - compact tree/content/table/dialog treatment;
+  - motion-token usage;
+  - tokenized old hard-coded Settings colors;
+  - stable table/tag sizing;
+  - OA manual import table scroll containment;
+  - no layout-shift hover/selected states.
+- Browser smoke should cover `/settings`: tree navigation, save action visibility, one section switch, OA manual import table or data reset dialog, and no top-level horizontal overflow.
+
+### Next Prompt
+
+Next unique prompt: `PV-027-settings-premium-visual`.

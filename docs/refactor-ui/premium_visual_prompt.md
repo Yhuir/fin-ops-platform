@@ -1456,7 +1456,11 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-026-settings-discovery
+
+### Status
+
+verified
 
 `PV-026-settings-discovery`
 
@@ -1479,5 +1483,58 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_settings.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Added `PV-026 Premium Visual Discovery` to `docs/refactor-ui/modules/phase_6_settings.md`.
+- Confirmed current `/settings` non-workbench runtime has already migrated out of MUI:
+  - `SettingsPage.tsx` and `web/src/components/settings/*` have no `@mui/*` or Emotion imports;
+  - existing Settings source-level tests already guard project primitive usage.
+- Reframed earlier `P099-P106` records as platform migration history, not as the current premium visual completion evidence.
+- Preserved current Settings functionality as mandatory PV-027 constraints: Settings tree, section forms, project/bank/access/pending-invoice/OA/data-reset sections, OA manual import table, menus, dialogs, feedback and loading/empty/error states.
+- Identified premium visual gaps in older hard-coded Settings CSS, missing motion-token contracts and migration-era project/bank/data-reset/OA manual table rhythm.
+- No runtime code or tests changed because PV-026 is discovery-only.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-026 because this slice only documents discovery and the next prompt.
+
+## Next Prompt Draft
+
+`PV-027-settings-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_settings.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/SettingsPage.tsx`、`web/src/components/settings/*`、`web/src/app/styles.css`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx` 和当前 `git status`。本切片只做 `/settings` premium visual implementation，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+实现要求：
+
+- 保留所有当前功能和用户可见入口：Settings tree navigation、设置内容区、保存设置、只读提示、项目状态、银行账户、待找发票筛选、OA导入设置、冲账规则、访问账户、数据重置、数据重置双阶段 dialogs、OA 手工搜索导入表、menus、forms、feedback/status/loading/empty/error states。
+- 不做大 card 设计，不制造大留白；Settings 仍是 tree + dense panel + dense table/form 的管理界面，不改成 dashboard cards。
+- 旧 tree 仍为 tree，旧表单仍为表单，旧 table 仍为 native dense table，旧弹窗仍为 modal dialog，旧 menu 仍为 menu；OA 手工导入 workflow、selection、pagination、attachment refresh、import status publishing and save/data-reset payloads 不改变。
+- 将 Settings 旧硬编码颜色和固定/缺失 transition 尽量替换或覆盖为 Ledger Calm tokens、`color-mix(...)`、`--motion-fast`、`--ease-out-quart`。
+- Tighten tree item rows、content header/save area、project columns/rows、bank mapping rows、pending invoice tag selector/menu、checkbox groups、data reset cards/dialog content、OA manual import filters/metrics/table/pagination，使其接近银行明细/no-OA/batch-accounting/turnover/ETC premium direction，但不改变 workflow shape。
+- 表格与列表必须保持 compact operational rhythm：金额/数量/日期列 right-align/tabular nums；status/source/role/import tags 高度稳定；长项目名、银行名、项目代码、用户名、OA 编号、申请事由、tag path 和说明需要截断或可读换行，不得撑乱行高。
+- `OA全量搜索导入结果` 仍保持 wide scroll containment 和 nested detail table；selected/expanded/active states 不得改变列表项或表格行尺寸。
+- 增加或更新 `SettingsPage.test.tsx` 的 CSS contract：锁定 compact tree/content/table/dialog treatment、motion-token usage、old Settings hard-coded color replacement、amount/count alignment、stable tags、OA manual table containment and no layout-shift rules。
+
+验证：
+
+- `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 浏览器 smoke `/settings`：确认 tree navigation、one section switch、save action/read-only feedback or data reset dialog、OA manual import table or dense table surface and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_settings.md`，精确 staging，commit 并 push 到 `origin/main`。
