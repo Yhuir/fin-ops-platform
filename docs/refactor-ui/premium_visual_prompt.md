@@ -1272,7 +1272,13 @@ Notes:
 
 - Code tests were not run for PV-022 because this slice only documents discovery and the next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-023-turnover-ledger-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-023-turnover-ledger-premium-visual`
 
@@ -1300,3 +1306,60 @@ Notes:
 - 浏览器 smoke `/turnover-ledger`：确认 heading/actions、family tabs、summary metrics、grouped table、row selection or edit drawer, export dialog, feedback path or status notice and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_turnover_ledger.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Polished `/turnover-ledger` without changing React logic, API calls, read-model status handling, flow selection, drawer/dialog behavior, relation mutation behavior, export behavior, route/session behavior or workbench internals.
+- Tightened summary cards, family tabs, grouped table panel, sticky table treatment, closure cards, extra drawer controls, export preview table and toast surface.
+- Standardized table chips and amount pills to stable table tag sizing and tabular amount alignment.
+- Replaced turnover ledger fixed/legacy local treatments with motion tokens and Ledger Calm token-based surfaces where this slice touched them.
+- Added CSS contract coverage in `TurnoverLedgerPage.test.tsx` for compact summary/table/drawer/dialog treatment, motion-token usage, amount alignment, stable chips, selected/group row treatment, export table containment and toast token usage.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run TurnoverLedgerPage.test.tsx`
+- `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4184/turnover-ledger`
+
+Browser smoke result:
+
+- Verified heading, grouped ledger table, tag right drawer and export dialog.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/turnover-ledger-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
+
+## Next Prompt Draft
+
+`PV-024-etc-tickets-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_etc_tickets.md`、`web/src/pages/EtcTicketManagementPage.tsx`、`web/src/features/etc/api.ts`、`web/src/features/etc/types.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcOaNavigation.test.ts` 和当前 `git status`。本切片只做 `/etc-tickets` premium visual discovery，不改运行时代码，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_6_etc_tickets.md` 追加 `PV-024 Premium Visual Discovery`，并明确该模块旧 `P092-P098` 是平台迁移历史，不能直接替代本轮 premium visual 事实。
+- 确认当前 `/etc-tickets` 是否已经迁出 MUI；用 source/runtime grep 区分历史文档中的 MUI inventory 和当前代码事实。
+- 清点当前用户可见入口：route/sidebar、page heading、`导入发票`、`提交OA`、status segmented controls、月份/车牌/信用卡任务筛选、`ETC批次列表区`、`ETC批次列表`、`ETC对账任务列表`、upload/drop blocks、`ETC对账工作区`、`ETC双侧核对明细`、人工核对处理、批次详情、发票明细表、导入任务发票表、删除/撤销/上传/创建 OA/检测 dialogs、feedback/status/loading/empty/error states。
+- 标明哪些元素必须功能等价保留：旧列表仍为列表，旧对账明细仍为表格，旧上传仍为 file/drop control，旧弹窗仍为弹窗，旧 OA workflow/检测/撤销/确认行为不改变。
+- 列出 ETC 表格和列表排版要求：金额右对齐、tabular nums；车牌/日期/状态/tag 稳定高度；长摘要、发票号、来源文件、OA 草稿信息必须截断或可读换行，不得撑乱行高；selection/expanded/active states 不改变列表项或表格行尺寸。
+- 列出 interaction smoothness 要求：status controls、filters、list rows、upload blocks、table rows、row selection、expand controls、dialog controls、OA actions、feedback close 都使用 motion tokens，不增加页面切换动画，不阻塞路由跳转。
+- 对比当前测试覆盖，指出本轮 premium visual 是否需要新增 CSS contract 或浏览器 smoke 重点。
+- 生成下一条唯一 prompt：`PV-025-etc-tickets-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_etc_tickets.md`，精确 staging，commit 并 push 到 `origin/main`。

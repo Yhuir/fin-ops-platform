@@ -52,8 +52,8 @@ Last updated: 2026-06-08
 | 20 | `PV-020-batch-accounting-discovery` | verified | `/batch-accounting` discovery。 |
 | 21 | `PV-021-batch-accounting-premium-visual` | verified | 批量账务 premium visual slice。 |
 | 22 | `PV-022-turnover-ledger-discovery` | verified | `/turnover-ledger` discovery。 |
-| 23 | `PV-023-turnover-ledger-premium-visual` | pending | 外部往来款管理 premium visual slice。 |
-| 24 | `PV-024-etc-tickets-discovery` | pending | `/etc-tickets` discovery。 |
+| 23 | `PV-023-turnover-ledger-premium-visual` | verified | 外部往来款管理 premium visual slice。 |
+| 24 | `PV-024-etc-tickets-discovery` | pending | `/etc-tickets` premium visual discovery。 |
 | 25 | `PV-025-etc-tickets-premium-visual` | pending | ETC 票据管理 premium visual slice。 |
 | 26 | `PV-026-settings-discovery` | pending | `/settings` discovery。 |
 | 27 | `PV-027-settings-premium-visual` | pending | 设置 premium visual slice。 |
@@ -62,31 +62,30 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-023-turnover-ledger-premium-visual`
+`PV-024-etc-tickets-discovery`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/modules/phase_6_turnover_ledger.md`
-- `web/src/pages/TurnoverLedgerPage.tsx`
-- `web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx`
-- `web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx`
-- `web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx`
-- `web/src/app/styles.css`
-- `web/src/test/TurnoverLedgerPage.test.tsx`
+- `docs/refactor-ui/modules/phase_6_etc_tickets.md`
+- `web/src/pages/EtcTicketManagementPage.tsx`
+- `web/src/features/etc/api.ts`
+- `web/src/features/etc/types.ts`
+- `web/src/test/EtcTicketManagementPage.test.tsx`
+- `web/src/test/EtcApi.test.ts`
+- `web/src/test/EtcOaNavigation.test.ts`
 
 ### Verification
 
-Required for PV-023:
+Required for PV-024:
 
-- `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- Browser smoke `/turnover-ledger`: heading/actions, family tabs, summary metrics, grouped table, row selection or edit drawer, export dialog, feedback path or status notice, and no top-level horizontal overflow.
+- `git status --short --branch`
+
+PV-024 is discovery-only. Code tests are not required unless discovery adds or changes characterization tests, which this prompt does not request.
 
 ## Execution Rules
 
@@ -136,3 +135,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-020-batch-accounting-discovery` | `b2e24824` | pushed to `origin/main` | Batch accounting premium discovery verified; PV-021 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-021-batch-accounting-premium-visual` | `d4bb8b4a` | pushed to `origin/main` | Batch accounting premium visual polish verified; PV-022 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-022-turnover-ledger-discovery` | `d9b663ad` | pushed to `origin/main` | Turnover ledger premium discovery verified; PV-023 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-023-turnover-ledger-premium-visual` | current commit | pending push to `origin/main` | Turnover ledger premium visual polish verified; PV-024 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |

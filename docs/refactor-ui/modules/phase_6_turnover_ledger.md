@@ -336,3 +336,45 @@ Scope: TurnoverLedger P085-P091 only.
   - `git diff --check`: passed.
   - `git status --short --branch`: clean before MG docs update.
 - Next prompt generated: `P092-phase-6-etc-tickets-discovery`.
+
+## PV-023 Premium Visual Execution
+
+- Status: verified.
+- Runtime implementation changed: yes, only `web/src/app/styles.css`.
+- Test implementation changed: yes, only `web/src/test/TurnoverLedgerPage.test.tsx`.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Preserved all current `/turnover-ledger` functionality and user-visible entrypoints:
+  - page actions, family tabs, summary metrics;
+  - `往来款左右双栏台账` grouped table;
+  - flow selection, tag right drawer, closure right drawer, extra right drawer;
+  - export dialog, read-only/stale notices, feedback/toast, loading/empty/error states.
+- Premium visual work:
+  - tightened summary cards, tabs, grouped table panel and sticky table treatment without changing layout shape;
+  - standardized table chips and amount pills to table tag radius/height and tabular amount alignment;
+  - replaced turnover-ledger fixed/legacy local treatments with Ledger Calm `color-mix(...)` token surfaces where this slice touched them;
+  - added motion-token hover/press/focus treatment for page buttons, tabs, expand controls, table buttons, checkboxes, form controls and toast close;
+  - tightened closure cards, extra form controls and export preview table containment.
+- Added a CSS contract test that locks compact summary/table/drawer/dialog treatment, motion-token usage, amount alignment, stable chips, selected/group row treatment and export/toast token usage.
+
+Verification:
+
+- `cd web && npx vitest run TurnoverLedgerPage.test.tsx`: passed, 13 tests.
+- `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`: passed, 31 tests.
+- `cd web && npx tsc -b --pretty false`: passed.
+- `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings.
+- `git diff --check`: passed.
+- Forbidden page-cache/snapshot guard grep: passed.
+- Non-workbench runtime MUI grep: passed.
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4184/turnover-ledger`: passed.
+
+Browser smoke result:
+
+- Verified heading, grouped ledger table, tag right drawer and export dialog.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/turnover-ledger-premium-smoke.png`.
+
+Notes:
+
+- This was a premium visual treatment on top of the earlier P086-P091 platform migration. It did not change React state flow, API payloads, read model status handling, domain events, relation mutation behavior or export behavior.
+- Next prompt generated in `docs/refactor-ui/premium_visual_prompt.md`: `PV-024-etc-tickets-discovery`.

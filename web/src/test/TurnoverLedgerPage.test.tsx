@@ -55,6 +55,16 @@ function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
 
+function cssRule(styles: string, selector: string, containing?: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = Array.from(styles.matchAll(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\n\\}`, "gm")));
+  const match = containing ? matches.find((candidate) => candidate[1].includes(containing)) : matches.at(-1);
+  if (!match) {
+    throw new Error(`Missing CSS rule for ${selector}`);
+  }
+  return match[1];
+}
+
 function requestUrls(fetchMock: ReturnType<typeof installTurnoverLedgerFetch>, pathname: string) {
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
@@ -907,6 +917,83 @@ describe("Turnover ledger page", () => {
       forbiddenLegacySurfaces: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("keeps premium compact summary, grouped table, drawers, export dialog, and interaction CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const buttonRule = cssRule(styles, ".turnover-ledger-button", "transition");
+    const tabRule = cssRule(styles, ".turnover-ledger-tabs__tab");
+    const summaryCardRule = cssRule(styles, ".turnover-ledger-summary-card");
+    const panelRule = cssRule(styles, ".turnover-ledger-table-panel__inner");
+    const tableWrapRule = cssRule(styles, ".turnover-ledger-table-wrap");
+    const tableCellRule = cssRule(styles, ".turnover-ledger-table th,\n.turnover-ledger-table td");
+    const tableHeaderRule = cssRule(styles, ".turnover-ledger-table th");
+    const stickyCellRule = cssRule(styles, ".turnover-sticky-left-cell");
+    const groupStartRule = cssRule(styles, ".turnover-group-start-row > td");
+    const summaryRowRule = cssRule(styles, ".turnover-summary-row > td");
+    const expandButtonRule = cssRule(styles, ".turnover-ledger-expand-button");
+    const chipRule = cssRule(styles, ".turnover-ledger-chip");
+    const amountRule = cssRule(
+      styles,
+      ".turnover-amount-income,\n.turnover-amount-expense,\n.turnover-amount-neutral,\n.turnover-amount-empty",
+    );
+    const tableButtonRule = cssRule(styles, ".turnover-ledger-table-button");
+    const checkboxRule = cssRule(styles, ".turnover-ledger-checkbox");
+    const checkboxRowRule = cssRule(styles, ".turnover-ledger-checkbox-row");
+    const closureCardRule = cssRule(styles, ".turnover-ledger-closure-card");
+    const extraControlRule = cssRule(
+      styles,
+      ".turnover-ledger-extra-control input,\n.turnover-ledger-extra-control select,\n.turnover-ledger-extra-control textarea",
+    );
+    const exportWrapRule = cssRule(styles, ".turnover-ledger-export-dialog__table-wrap");
+    const exportCellRule = cssRule(
+      styles,
+      ".turnover-ledger-export-dialog__table th,\n.turnover-ledger-export-dialog__table td",
+    );
+    const exportHeaderRule = cssRule(styles, ".turnover-ledger-export-dialog__table th");
+    const exportMoneyRule = cssRule(styles, ".turnover-ledger-export-dialog__money-cell");
+    const toastRule = cssRule(styles, ".turnover-ledger-toast", "box-shadow");
+    const toastButtonRule = cssRule(styles, ".turnover-ledger-toast button");
+
+    expect(buttonRule).toContain("--motion-fast");
+    expect(buttonRule).toContain("--ease-out-quart");
+    expect(tabRule).toContain("--motion-fast");
+    expect(summaryCardRule).toContain("min-height: 96px");
+    expect(summaryCardRule).toContain("var(--fp-space-2) var(--fp-space-3)");
+    expect(panelRule).toContain("var(--fp-space-2)");
+    expect(tableWrapRule).toContain("calc(100vh - 244px)");
+    expect(tableCellRule).toContain("--motion-fast");
+    expect(tableHeaderRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(stickyCellRule).toContain("color-mix(in srgb, var(--fp-primary-soft)");
+    expect(groupStartRule).toContain("color-mix(in srgb, var(--fp-primary)");
+    expect(summaryRowRule).toContain("color-mix(in srgb, var(--fp-primary-soft)");
+    expect(expandButtonRule).toContain("--motion-fast");
+    expect(chipRule).toContain("min-height: var(--fp-tag-height-table)");
+    expect(chipRule).toContain("border-radius: var(--fp-tag-radius-table)");
+    expect(amountRule).toContain("justify-content: flex-end");
+    expect(amountRule).toContain("font-variant-numeric: tabular-nums");
+    expect(amountRule).toContain("border-radius: var(--fp-tag-radius-table)");
+    expect(tableButtonRule).toContain("--motion-fast");
+    expect(checkboxRule).toContain("--motion-fast");
+    expect(checkboxRowRule).toContain("--motion-fast");
+    expect(closureCardRule).toContain("var(--fp-space-2) var(--fp-space-3)");
+    expect(extraControlRule).toContain("--motion-fast");
+    expect(exportWrapRule).toContain("calc(100vh - 280px)");
+    expect(exportCellRule).toContain("--motion-fast");
+    expect(exportHeaderRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(exportMoneyRule).toContain("text-align: right");
+    expect(exportMoneyRule).toContain("font-variant-numeric: tabular-nums");
+    expect(toastRule).toContain("border-radius: var(--fp-radius-sm)");
+    expect(toastRule).toContain("box-shadow: var(--fp-shadow-popover)");
+    expect(toastRule).not.toContain("--fp-shadow-lg");
+    expect(toastButtonRule).toContain("--motion-fast");
+    expect([
+      tableHeaderRule,
+      stickyCellRule,
+      summaryRowRule,
+      amountRule,
+      exportHeaderRule,
+    ].join("\n")).not.toMatch(/#d8e8f8|#eef8f0|#fff5eb|#f3f5fb/i);
   });
 
   test("renders grouped MUI table with collapsed summary rows, sticky left cells, and no status column", async () => {
