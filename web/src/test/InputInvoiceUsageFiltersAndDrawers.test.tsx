@@ -379,6 +379,7 @@ describe("Input invoice usage workflow drawers", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "正在加载反提 OA 预览" })).toBeInTheDocument();
+    expect(screen.queryByText("候选数、合计、拒绝原因和目标申请人均以后端返回为准")).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(loadPreview).toHaveBeenCalledWith({

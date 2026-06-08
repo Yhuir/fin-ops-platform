@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 import unittest
+from urllib.parse import quote
 
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.server import Application, build_application
@@ -16,6 +17,10 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    OA_PENDING_PAYMENT_FILTER_FIELDS,
+    _oa_pending_payment_read_model_record,
+)
 from fin_ops_platform.services.invoice_usage_collection_source_versions import oa_pending_payment_source_versions
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -153,6 +158,85 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(json.loads(invalid_sort.body)["error"]["code"], "invalid_sort_field")
         self.assertEqual(missing_oa.status_code, 404)
         self.assertEqual(json.loads(missing_oa.body)["error"]["code"], "oa_not_found")
+
+    def test_live_query_bank_account_and_direction_filter_options_and_and_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            matching_bank = BankTransaction(
+                id="bank-account-api",
+                account_no="622200001234",
+                txn_direction=TransactionDirection.OUTFLOW,
+                counterparty_name_raw="API供应商",
+                amount=Decimal("100.00"),
+                signed_amount=Decimal("-100.00"),
+                txn_date="2026-05-21",
+                trade_time="2026-05-21 10:00:00",
+                imported_bank_name="建设银行",
+                imported_bank_last4="1234",
+            )
+            other_bank = BankTransaction(
+                id="bank-other-api",
+                account_no="622200009999",
+                txn_direction=TransactionDirection.OUTFLOW,
+                counterparty_name_raw="其他供应商",
+                amount=Decimal("200.00"),
+                signed_amount=Decimal("-200.00"),
+                txn_date="2026-05-22",
+                trade_time="2026-05-22 10:00:00",
+                imported_bank_name="工商银行",
+                imported_bank_last4="9999",
+            )
+            pair_service = WorkbenchPairRelationService()
+            pair_service.create_active_relation(
+                case_id="case-account-api",
+                row_ids=["oa-account-api", "bank-account-api"],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+            pair_service.create_active_relation(
+                case_id="case-other-api",
+                row_ids=["oa-other-api", "bank-other-api"],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+            service = OaPendingPaymentQueryService(
+                import_service=ImportNormalizationService(existing_transactions=[matching_bank, other_bank]),
+                relation_facade=FakeRelationFacade(pair_service.list_active_relations()),
+                oa_projection=StaticOAProjection([
+                    self._oa("oa-account-api", "张三", "100.00"),
+                    self._oa("oa-other-api", "李四", "200.00"),
+                ]),
+            )
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(service)
+            filters = quote(json.dumps([
+                {"field": "bank_account", "operator": "in", "values": ["建设银行 1234"]},
+                {"field": "bank_direction", "operator": "in", "values": ["outflow"]},
+            ], ensure_ascii=False))
+            mismatch_filters = quote(json.dumps([
+                {"field": "bank_account", "operator": "in", "values": ["建设银行 1234"]},
+                {"field": "bank_direction", "operator": "in", "values": ["inflow"]},
+            ], ensure_ascii=False))
+
+            filter_response = app.handle_request("GET", "/api/oa-pending-payments/filter-options")
+            rows_response = app.handle_request("GET", f"/api/oa-pending-payments/rows?filters={filters}")
+            mismatch_response = app.handle_request("GET", f"/api/oa-pending-payments/rows?filters={mismatch_filters}")
+
+        fields = {field["field"]: field for field in json.loads(filter_response.body)["fields"]}
+        self.assertEqual(filter_response.status_code, 200)
+        self.assertEqual(fields["bank_account"]["label"], "银行账户")
+        self.assertIn({"value": "建设银行 1234", "label": "建设银行 1234", "count": 1}, fields["bank_account"]["options"])
+        self.assertEqual(fields["bank_direction"]["label"], "收支")
+        self.assertIn({"value": "outflow", "label": "支出", "count": 2}, fields["bank_direction"]["options"])
+        self.assertEqual(rows_response.status_code, 200)
+        rows_payload = json.loads(rows_response.body)
+        self.assertEqual(rows_payload["pagination"]["total"], 1)
+        self.assertEqual(rows_payload["rows"][0]["oa"]["applicantName"], "张三")
+        self.assertEqual(mismatch_response.status_code, 200)
+        self.assertEqual(json.loads(mismatch_response.body)["pagination"]["total"], 0)
 
     def test_production_rows_repository_unavailable_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()
@@ -387,6 +471,14 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertIn("oa_pending_payment_bank_import_fact_schema_version", versions)
         self.assertIn("oa_pending_payment_input_invoice_import_fact_schema_version", versions)
         self.assertIn("oa_projection_sync_version", versions)
+
+    def test_sql_read_model_records_expose_bank_account_and_direction_filters(self) -> None:
+        record = _oa_pending_payment_read_model_record(_read_model_row(), "2026-05")
+
+        self.assertIn("bank_account", OA_PENDING_PAYMENT_FILTER_FIELDS)
+        self.assertIn("bank_direction", OA_PENDING_PAYMENT_FILTER_FIELDS)
+        self.assertEqual(record["bank_account"], "建设银行 1234")
+        self.assertEqual(record["bank_direction"], "outflow")
 
     @staticmethod
     def _oa(oa_id: str, applicant: str, amount: str) -> OAApplicationRecord:

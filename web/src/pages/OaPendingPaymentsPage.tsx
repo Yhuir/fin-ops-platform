@@ -1,4 +1,4 @@
-import { RefreshCw, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -57,7 +57,7 @@ export default function OaPendingPaymentsPage() {
   const [filterOptions, setFilterOptions] = useState<Record<string, OaPendingPaymentFilterOption[]>>({});
   const [keywordDraft, setKeywordDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -146,17 +146,6 @@ export default function OaPendingPaymentsPage() {
     setQuery((current) => ({ ...current, page: 1, filters: current.filters.filter((filter) => filter.field !== field) }));
   }, []);
 
-  const applyPaymentStatusFilter = useCallback((statusCode: string) => {
-    setQuery((current) => {
-      const filters = current.filters.filter((filter) => filter.field !== "payment_status");
-      return {
-        ...current,
-        page: 1,
-        filters: statusCode ? [...filters, { field: "payment_status", operator: "in", values: [statusCode] }] : filters,
-      };
-    });
-  }, []);
-
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
   const saveExpensePendingInvoiceRules = useCallback(
@@ -175,17 +164,8 @@ export default function OaPendingPaymentsPage() {
         <SlidersHorizontal aria-hidden="true" size={16} />
         支出流水无需开票规则设置
       </button>
-      <button
-        className="oa-pending-payments-button oa-pending-payments-button--primary"
-        disabled={refreshing}
-        onClick={() => loadRows("refresh")}
-        type="button"
-      >
-        <RefreshCw aria-hidden="true" size={16} />
-        刷新
-      </button>
     </div>
-  ), [loadRows, refreshing]);
+  ), []);
   const isEmpty = !loading && !error && rows.length === 0;
 
   return (
@@ -197,20 +177,6 @@ export default function OaPendingPaymentsPage() {
               className="oa-pending-payments-query"
               left={(
                 <div className="oa-pending-payments-query__grid">
-                  <label className="oa-pending-payments-field oa-pending-payments-field--search">
-                    <span>全页面检索</span>
-                    <input
-                      aria-label="全页面检索"
-                      value={keywordDraft}
-                      onChange={(event) => setKeywordDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          handleKeywordSubmit();
-                        }
-                      }}
-                    />
-                  </label>
-                  <button className="oa-pending-payments-button" onClick={handleKeywordSubmit} type="button">查询</button>
                   <label className="oa-pending-payments-field">
                     <span>月份</span>
                     <input
@@ -218,37 +184,6 @@ export default function OaPendingPaymentsPage() {
                       value={query.month}
                       onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
                     />
-                  </label>
-                  <label className="oa-pending-payments-field">
-                    <span>交易开始</span>
-                    <input
-                      type="date"
-                      value={query.tradeDateFrom}
-                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, tradeDateFrom: event.target.value }))}
-                    />
-                  </label>
-                  <label className="oa-pending-payments-field">
-                    <span>交易结束</span>
-                    <input
-                      type="date"
-                      value={query.tradeDateTo}
-                      onChange={(event) => setQuery((current) => ({ ...current, page: 1, tradeDateTo: event.target.value }))}
-                    />
-                  </label>
-                  <label className="oa-pending-payments-field">
-                    <span>支付状态</span>
-                    <select
-                      value={query.filters.find((filter) => filter.field === "payment_status")?.values?.[0] ?? ""}
-                      onChange={(event) => applyPaymentStatusFilter(event.target.value)}
-                    >
-                      <option value="">全部</option>
-                      <option value="unpaid">未支付</option>
-                      <option value="paid">已支付</option>
-                      <option value="merged_paid">合并支付</option>
-                      <option value="partially_paid">支付少了</option>
-                      <option value="overpaid">支付多了</option>
-                      <option value="pending_review">待核对</option>
-                    </select>
                   </label>
                 </div>
               )}
@@ -272,9 +207,12 @@ export default function OaPendingPaymentsPage() {
                   page={query.page}
                   pageSize={query.pageSize}
                   total={total || summary.rowCount}
+                  keywordDraft={keywordDraft}
                   filterConfigs={filterConfigs}
                   filterOptions={filterOptions}
                   filters={query.filters}
+                  onKeywordDraftChange={setKeywordDraft}
+                  onKeywordSubmit={handleKeywordSubmit}
                   onFilterApply={handleFilterApply}
                   onFilterClear={handleFilterClear}
                   onSortChange={handleSortChange}

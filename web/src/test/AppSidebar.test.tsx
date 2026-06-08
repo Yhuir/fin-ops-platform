@@ -21,21 +21,53 @@ function renderSidebar(expanded = false) {
   );
 }
 
+function renderEmbeddedSidebar(expanded = true) {
+  return render(
+    <MemoryRouter initialEntries={["/fin-ops/workbench"]}>
+      <AppSidebar
+        embedded={true}
+        expanded={expanded}
+        isCompact={false}
+        mobileOpen={false}
+        onCloseMobile={() => undefined}
+        onToggleExpanded={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+}
+
 describe("AppSidebar shell contract", () => {
   const appSidebarSource = readFileSync("src/components/shell/AppSidebar.tsx", "utf8");
   const appStyles = readFileSync("src/app/styles.css", "utf8");
 
   test("keeps the desktop rail fixed and uses compact navigation row rhythm", () => {
     const sidebarRule = appStyles.match(/\.app-sidebar\s*\{[^}]*\}/s)?.[0] ?? "";
+    const brandRule = appStyles.match(/\.app-sidebar-brand\s*\{[^}]*\}/s)?.[0] ?? "";
     const itemRule = appStyles.match(/\.app-sidebar-item\s*\{[^}]*\}/s)?.[0] ?? "";
     const linkRule = appStyles.match(/\.app-sidebar-link\s*\{[^}]*\}/s)?.[0] ?? "";
+    const iconRule = appStyles.match(/\.app-sidebar-link-icon\s*\{[^}]*\}/s)?.[0] ?? "";
+    const iconSvgRule = appStyles.match(/\.app-sidebar-link-icon svg\s*\{[^}]*\}/s)?.[0] ?? "";
 
     expect(sidebarRule).toMatch(/position:\s*sticky;/);
     expect(sidebarRule).toMatch(/top:\s*0;/);
     expect(sidebarRule).toMatch(/height:\s*100dvh;/);
-    expect(itemRule).toMatch(/min-height:\s*36px;/);
-    expect(linkRule).toMatch(/min-height:\s*36px;/);
-    expect(linkRule).toMatch(/font-size:\s*14px;/);
+    expect(brandRule).toMatch(/min-height:\s*52px;/);
+    expect(itemRule).toMatch(/min-height:\s*30px;/);
+    expect(linkRule).toMatch(/min-height:\s*30px;/);
+    expect(linkRule).toMatch(/font-size:\s*13px;/);
+    expect(iconRule).toMatch(/width:\s*26px;/);
+    expect(iconRule).toMatch(/min-width:\s*26px;/);
+    expect(iconSvgRule).toMatch(/width:\s*15px;/);
+    expect(iconSvgRule).toMatch(/height:\s*15px;/);
+    expect(appSidebarSource).toMatch(/size=\{15\}/);
+  });
+
+  test("does not render the OA embedded layout explanation card", () => {
+    renderEmbeddedSidebar(true);
+
+    expect(screen.queryByText("OA 嵌入模式默认折叠，避免占用工作台宽度。")).not.toBeInTheDocument();
+    expect(appSidebarSource).not.toContain("OA 嵌入模式默认折叠");
+    expect(appStyles).not.toMatch(/\.app-sidebar-embedded-note\s*\{/);
   });
 
   test("keeps the status icon mark free of decorative gradient backgrounds", () => {
@@ -82,8 +114,8 @@ describe("AppSidebar shell contract", () => {
     expect(linkLabelRule).toMatch(/opacity[^;]*var\(--app-sidebar-content-motion\)/);
     expect(linkLabelRule).toMatch(/transform[^;]*var\(--app-sidebar-content-motion\)/);
     expect(collapsedLinkLabelRule).toMatch(/max-width:\s*0;/);
-    expect(collapsedGroupRule).toMatch(/width:\s*38px;/);
-    expect(collapsedListRule).toMatch(/width:\s*38px;/);
+    expect(collapsedGroupRule).toMatch(/width:\s*34px;/);
+    expect(collapsedListRule).toMatch(/width:\s*34px;/);
     expect(appSidebarSource).not.toMatch(/Tooltip\.Trigger/);
     expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
     expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.app-sidebar/);

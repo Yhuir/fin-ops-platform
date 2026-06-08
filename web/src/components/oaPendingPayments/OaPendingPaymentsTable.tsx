@@ -1,5 +1,6 @@
-import { ArrowUpDown, Info } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, Info, Search } from "lucide-react";
 import type { MutableRefObject, ReactNode } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 import {
   EmptyValue,
@@ -7,7 +8,6 @@ import {
   FinanceStatusTag,
   type FinanceTone,
 } from "../common/FinanceTable";
-import InputInvoiceUsageFilterMenu from "../inputInvoiceUsage/InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "../inputInvoiceUsage/InputInvoiceUsageFilterMenu";
 import type {
   OaPendingPaymentDetailTarget,
@@ -18,15 +18,20 @@ import type {
   OaPendingPaymentSortDirection,
 } from "../../features/oaPendingPayments/types";
 
+type OaColumnFilterValue = InputInvoiceUsageFilterValue;
+
 type OaPendingPaymentsTableProps = {
   rows: OaPendingPaymentRow[];
   page: number;
   pageSize: number;
   total: number;
+  keywordDraft: string;
   filterConfigs: OaPendingPaymentFieldConfig[];
   filterOptions: Record<string, OaPendingPaymentFilterOption[]>;
   filters: OaPendingPaymentFilter[];
-  onFilterApply: (filter: { field: string; operator: string; value?: string | null; values?: string[] }) => void;
+  onKeywordDraftChange: (value: string) => void;
+  onKeywordSubmit: () => void;
+  onFilterApply: (filter: OaColumnFilterValue) => void;
   onFilterClear: (field: string) => void;
   onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
   onPageChange: (page: number) => void;
@@ -35,26 +40,39 @@ type OaPendingPaymentsTableProps = {
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
+type OaColumnFilterField = {
+  field: string;
+  label: string;
+};
+
 type OaPendingPaymentColumn = {
   id: string;
   label: string;
   align?: "left" | "right";
-  field?: string;
-  filterable?: boolean;
-  sortable?: boolean;
+  filterFields?: OaColumnFilterField[];
+  sortField?: string;
+  sortLabel?: string;
   group: "oa" | "status" | "bank" | "invoice";
 };
 
 const columns: OaPendingPaymentColumn[] = [
-  { id: "oaApplicant", label: "OA申请人", field: "oa_applicant", filterable: true, group: "oa" },
-  { id: "projectName", label: "项目名称", group: "oa" },
+  { id: "oaApplicant", label: "OA申请人", filterFields: [{ field: "oa_applicant", label: "OA申请人" }], sortField: "oa_applicant", group: "oa" },
+  { id: "projectName", label: "项目名称", filterFields: [{ field: "oa_project_name", label: "项目名称" }], group: "oa" },
   { id: "oaAmount", label: "金额", align: "right", group: "oa" },
-  { id: "paymentStatus", label: "支付状态", group: "status" },
-  { id: "bankCounterparty", label: "对方户名/交易时间", field: "bank_trade_time", sortable: true, group: "bank" },
-  { id: "bankAmountAccount", label: "金额/账户", align: "right", group: "bank" },
+  { id: "paymentStatus", label: "支付状态", filterFields: [{ field: "payment_status", label: "支付状态" }], sortField: "payment_status", group: "status" },
+  { id: "bankCounterparty", label: "对方户名/交易时间", filterFields: [{ field: "bank_counterparty_name", label: "对方户名" }], sortField: "bank_trade_time", sortLabel: "交易时间", group: "bank" },
+  {
+    id: "bankAmountAccount",
+    label: "金额/账户",
+    align: "right",
+    filterFields: [
+      { field: "bank_account", label: "银行账户" },
+      { field: "bank_direction", label: "收支" },
+    ],
+    group: "bank",
+  },
   { id: "bankSummaryRemark", label: "摘要/备注", group: "bank" },
-  { id: "invoiceNoParty", label: "发票号码/发票方", group: "invoice" },
-  { id: "invoiceDate", label: "日期", group: "invoice" },
+  { id: "invoiceNoParty", label: "发票号码/发票方", filterFields: [{ field: "seller_name", label: "发票方" }], sortField: "invoice_date", sortLabel: "开票日期", group: "invoice" },
   { id: "totalWithTax", label: "价税合计", align: "right", group: "invoice" },
 ];
 
@@ -67,9 +85,12 @@ export default function OaPendingPaymentsTable({
   page,
   pageSize,
   total,
+  keywordDraft,
   filterConfigs,
   filterOptions,
   filters,
+  onKeywordDraftChange,
+  onKeywordSubmit,
   onFilterApply,
   onFilterClear,
   onSortChange,
@@ -78,10 +99,29 @@ export default function OaPendingPaymentsTable({
   onOpenDetail,
   tableWrapRef,
 }: OaPendingPaymentsTableProps) {
-  const configsByField = new Map(filterConfigs.map((config) => [config.field, config]));
+  const configsByField = useMemo(() => new Map(filterConfigs.map((config) => [config.field, config])), [filterConfigs]);
 
   return (
-    <div className="oa-pending-payments-table-frame">
+    <div className="oa-pending-payments-table-frame" data-testid="oa-pending-payments-table-frame">
+      <div className="oa-pending-payments-table-toolbar">
+        <label className="oa-pending-payments-table-search">
+          <Search aria-hidden="true" size={15} strokeWidth={2.2} />
+          <input
+            aria-label="搜索OA待付款核对"
+            placeholder="搜索 OA / 流水 / 发票"
+            value={keywordDraft}
+            onChange={(event) => onKeywordDraftChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                onKeywordSubmit();
+              }
+            }}
+          />
+        </label>
+        <button className="oa-pending-payments-button oa-pending-payments-table-search-button" onClick={onKeywordSubmit} type="button">
+          查询
+        </button>
+      </div>
       <div ref={tableWrapRef} className="oa-pending-payments-table-shell" data-testid="oa-pending-payments-table-shell">
         <table aria-label="OA待付款核对表格" className="oa-pending-payments-table">
           <colgroup>
@@ -94,47 +134,31 @@ export default function OaPendingPaymentsTable({
               <GroupHeader group="oa" label="OA情况" span={3} />
               <GroupHeader group="status" label="支付状态" span={1} />
               <GroupHeader group="bank" label="支出流水" span={3} />
-              <GroupHeader group="invoice" label="发票情况" span={3} />
+              <GroupHeader group="invoice" label="发票情况" span={2} />
             </tr>
             <tr>
-              {columns.map((column) => {
-                const field = column.field;
-                const config = field ? configsByField.get(field) : undefined;
-                const currentFilter = field
-                  ? (filters.find((filter) => filter.field === field) as InputInvoiceUsageFilterValue | undefined)
-                  : undefined;
-                return (
-                  <th
-                    className={cx(
-                      "oa-pending-payments-table-sub-header",
-                      `oa-pending-payments-table-sub-header--${column.group}`,
-                      column.align === "right" && "oa-pending-payments-table-cell--amount",
-                      ["status", "bank", "invoice"].includes(column.group) && firstColumnInGroup(column.id) && "oa-pending-payments-table-cell--left-border",
-                    )}
-                    key={column.id}
-                    scope="col"
-                  >
-                    {column.filterable && config ? (
-                      <InputInvoiceUsageFilterMenu
-                        currentFilter={currentFilter}
-                        fieldConfig={config}
-                        onApply={onFilterApply}
-                        onClear={onFilterClear}
-                        onSort={(direction) => field && onSortChange(field, direction)}
-                        options={field ? filterOptions[field] ?? [] : []}
-                      />
-                    ) : column.sortable && field ? (
-                      <SortButton
-                        label={column.label}
-                        sortLabel={column.id === "bankCounterparty" ? "交易时间" : column.label}
-                        onClick={() => onSortChange(field)}
-                      />
-                    ) : (
-                      <span>{column.label}</span>
-                    )}
-                  </th>
-                );
-              })}
+              {columns.map((column) => (
+                <th
+                  className={cx(
+                    "oa-pending-payments-table-sub-header",
+                    `oa-pending-payments-table-sub-header--${column.group}`,
+                    column.align === "right" && "oa-pending-payments-table-cell--amount",
+                    ["status", "bank", "invoice"].includes(column.group) && firstColumnInGroup(column.id) && "oa-pending-payments-table-cell--left-border",
+                  )}
+                  key={column.id}
+                  scope="col"
+                >
+                  <HeaderCell
+                    column={column}
+                    configsByField={configsByField}
+                    filterOptions={filterOptions}
+                    filters={filters}
+                    onFilterApply={onFilterApply}
+                    onFilterClear={onFilterClear}
+                    onSortChange={onSortChange}
+                  />
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -205,6 +229,7 @@ export default function OaPendingPaymentsTable({
                 </td>
                 <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
                   <span className="oa-pending-payments-inline-row">
+                    <span className="oa-pending-payments-invoice-type-chip">进</span>
                     <TextLine strong value={row.invoice.digitalInvoiceNo} />
                     <DetailButton
                       disabled={!invoiceDetailTarget(row)}
@@ -217,11 +242,10 @@ export default function OaPendingPaymentsTable({
                       }}
                     />
                   </span>
-                  <span className="oa-pending-payments-cell-caption">进项发票方名称</span>
                   <TextLine value={row.invoice.sellerName} />
-                </td>
-                <td className="oa-pending-payments-table-cell" data-column-role="date">
-                  <TextLine value={row.invoice.invoiceDate} />
+                  <span className="oa-pending-payments-tag-row">
+                    <TableTag>{row.invoice.invoiceDate || "开票日期为空"}</TableTag>
+                  </span>
                 </td>
                 <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
                   <TextLine numeric strong value={row.invoice.totalWithTax} />
@@ -242,6 +266,172 @@ export default function OaPendingPaymentsTable({
   );
 }
 
+function HeaderCell({
+  column,
+  configsByField,
+  filterOptions,
+  filters,
+  onFilterApply,
+  onFilterClear,
+  onSortChange,
+}: {
+  column: OaPendingPaymentColumn;
+  configsByField: Map<string, OaPendingPaymentFieldConfig>;
+  filterOptions: Record<string, OaPendingPaymentFilterOption[]>;
+  filters: OaPendingPaymentFilter[];
+  onFilterApply: (filter: OaColumnFilterValue) => void;
+  onFilterClear: (field: string) => void;
+  onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
+}) {
+  return (
+    <span className="oa-pending-payments-header-control">
+      <span className="oa-pending-payments-header-control__label">{column.label}</span>
+      {column.sortField ? (
+        <SortButton
+          label={column.sortLabel ?? column.label}
+          onClick={() => column.sortField && onSortChange(column.sortField)}
+        />
+      ) : null}
+      {column.filterFields ? (
+        <OaColumnFilterMenu
+          columnLabel={column.label}
+          configsByField={configsByField}
+          fieldRefs={column.filterFields}
+          filterOptions={filterOptions}
+          filters={filters}
+          onApply={onFilterApply}
+          onClear={onFilterClear}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function OaColumnFilterMenu({
+  columnLabel,
+  fieldRefs,
+  configsByField,
+  filterOptions,
+  filters,
+  onApply,
+  onClear,
+}: {
+  columnLabel: string;
+  fieldRefs: OaColumnFilterField[];
+  configsByField: Map<string, OaPendingPaymentFieldConfig>;
+  filterOptions: Record<string, OaPendingPaymentFilterOption[]>;
+  filters: OaPendingPaymentFilter[];
+  onApply: (filter: OaColumnFilterValue) => void;
+  onClear: (field: string) => void;
+}) {
+  const menuId = useId();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string[]>>(() => selectedValuesByField(filters, fieldRefs));
+  const active = fieldRefs.some((fieldRef) => selectedValues(filters, fieldRef.field).length > 0);
+
+  useEffect(() => {
+    if (open) {
+      setDraft(selectedValuesByField(filters, fieldRefs));
+    }
+  }, [fieldRefs, filters, open]);
+
+  const toggleValue = (field: string, value: string) => {
+    setDraft((current) => {
+      const values = current[field] ?? [];
+      const nextValues = values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+      return { ...current, [field]: nextValues };
+    });
+  };
+
+  const apply = () => {
+    fieldRefs.forEach((fieldRef) => {
+      onClear(fieldRef.field);
+    });
+    fieldRefs.forEach((fieldRef) => {
+      const values = draft[fieldRef.field] ?? [];
+      if (values.length > 0) {
+        onApply({ field: fieldRef.field, operator: "in", values });
+      }
+    });
+    setOpen(false);
+  };
+
+  const clear = () => {
+    fieldRefs.forEach((fieldRef) => {
+      onClear(fieldRef.field);
+    });
+    setDraft({});
+    setOpen(false);
+  };
+
+  return (
+    <span className="oa-pending-payments-column-filter">
+      <button
+        aria-controls={open ? menuId : undefined}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`筛选 ${columnLabel}`}
+        className={cx(
+          "oa-pending-payments-column-filter__trigger",
+          active && "oa-pending-payments-column-filter__trigger--active",
+        )}
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <Filter aria-hidden="true" size={13} strokeWidth={2.4} />
+      </button>
+      {open ? (
+        <div
+          aria-label={`${columnLabel}筛选`}
+          className="oa-pending-payments-column-filter__panel"
+          id={menuId}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          role="menu"
+        >
+          <div className="oa-pending-payments-column-filter__title">{columnLabel}</div>
+          {fieldRefs.map((fieldRef) => {
+            const config = configsByField.get(fieldRef.field);
+            const options = filterOptions[fieldRef.field] ?? [];
+            const selected = new Set(draft[fieldRef.field] ?? []);
+            return (
+              <div className="oa-pending-payments-column-filter__section" key={fieldRef.field}>
+                <div className="oa-pending-payments-column-filter__section-title">{fieldRef.label}</div>
+                {config && config.mode !== "enum_multi" ? (
+                  <DisabledChoice>该字段暂不支持枚举筛选</DisabledChoice>
+                ) : null}
+                {options.length === 0 ? <DisabledChoice>暂无可选项</DisabledChoice> : null}
+                {options.map((option) => (
+                  <button
+                    key={option.value}
+                    aria-checked={selected.has(option.value)}
+                    className="oa-pending-payments-column-filter__item"
+                    onClick={() => toggleValue(fieldRef.field, option.value)}
+                    role="menuitemcheckbox"
+                    type="button"
+                  >
+                    <span aria-hidden="true" className="oa-pending-payments-column-filter__checkmark">
+                      {selected.has(option.value) ? "✓" : ""}
+                    </span>
+                    <span>{fieldRef.label}：{optionLabel(option)}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+          <div className="oa-pending-payments-column-filter__actions">
+            <button onClick={clear} type="button">清除</button>
+            <button className="oa-pending-payments-column-filter__apply" onClick={apply} type="button">应用筛选</button>
+          </div>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
 function GroupHeader({ label, span, group }: { label: string; span: number; group: "oa" | "status" | "bank" | "invoice" }) {
   return (
     <th
@@ -258,16 +448,15 @@ function GroupHeader({ label, span, group }: { label: string; span: number; grou
   );
 }
 
-function SortButton({ label, sortLabel, onClick }: { label: string; sortLabel: string; onClick: () => void }) {
+function SortButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
-      aria-label={`${sortLabel} 排序`}
+      aria-label={`${label} 排序`}
       className="oa-pending-payments-sort-button"
       onClick={onClick}
       type="button"
     >
-      <ArrowUpDown aria-hidden="true" size={14} strokeWidth={2.3} />
-      <span>{label}</span>
+      <ArrowUpDown aria-hidden="true" size={13} strokeWidth={2.3} />
     </button>
   );
 }
@@ -313,6 +502,14 @@ function MultiLineValue({ value }: { value: string }) {
 
 function TableTag({ children }: { children: ReactNode }) {
   return <span className="oa-pending-payments-table-tag">{children}</span>;
+}
+
+function DisabledChoice({ children }: { children: ReactNode }) {
+  return (
+    <div aria-disabled="true" className="oa-pending-payments-column-filter__item oa-pending-payments-column-filter__item--disabled" role="menuitem">
+      {children}
+    </div>
+  );
 }
 
 function DetailButton({
@@ -376,6 +573,34 @@ function PaginationControls({
   );
 }
 
+function selectedValuesByField(filters: OaPendingPaymentFilter[], fieldRefs: OaColumnFilterField[]) {
+  return fieldRefs.reduce<Record<string, string[]>>((accumulator, fieldRef) => {
+    accumulator[fieldRef.field] = selectedValues(filters, fieldRef.field);
+    return accumulator;
+  }, {});
+}
+
+function selectedValues(filters: OaPendingPaymentFilter[], field: string) {
+  const filter = filters.find((item) => item.field === field);
+  if (!filter) {
+    return [];
+  }
+  if (Array.isArray(filter.values)) {
+    return filter.values;
+  }
+  if (Array.isArray(filter.value)) {
+    return filter.value.map(String);
+  }
+  if (typeof filter.value === "string" && filter.value) {
+    return [filter.value];
+  }
+  return [];
+}
+
+function optionLabel(option: OaPendingPaymentFilterOption) {
+  return option.count === undefined ? option.label : `${option.label} ${option.count}`;
+}
+
 function displayedRange(page: number, pageSize: number, total: number) {
   if (total <= 0) {
     return "0-0 / 0";
@@ -396,6 +621,9 @@ function bankAmount(row: OaPendingPaymentRow): string {
 }
 
 function bankAccountLabel(row: OaPendingPaymentRow): string {
+  if (row.bankTransaction.bankAccount) {
+    return row.bankTransaction.bankAccount;
+  }
   const bankName = row.bankTransaction.bankName || "银行";
   const last4 = row.bankTransaction.accountLast4 || accountLast4(row.bankTransaction.accountNo);
   return [bankName, last4].filter(Boolean).join(" ") || "-";

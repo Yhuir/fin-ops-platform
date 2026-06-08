@@ -29,7 +29,6 @@ function isSidebarItemActive(pathname: string, search: string, to: string, end?:
 }
 
 export default function AppSidebar({
-  embedded,
   isCompact,
   mobileOpen,
   expanded,
@@ -95,7 +94,7 @@ export default function AppSidebar({
                     onTouchStart={prefetchRoute}
                   >
                     <span className="app-sidebar-link-icon">
-                      <Icon aria-hidden="true" size={18} strokeWidth={2} />
+                      <Icon aria-hidden="true" size={15} strokeWidth={2} />
                     </span>
                     <span className="app-sidebar-link-label" aria-hidden={!showExpandedContent}>
                       <span className="app-sidebar-link-label-text">{item.label}</span>
@@ -113,12 +112,6 @@ export default function AppSidebar({
           </section>
         ))}
       </nav>
-
-      {embedded ? (
-        <div className="app-sidebar-embedded-note" aria-hidden={!showExpandedContent}>
-          OA 嵌入模式默认折叠，避免占用工作台宽度。
-        </div>
-      ) : null}
     </div>
   );
 

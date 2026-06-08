@@ -33,6 +33,8 @@ FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "payment_status": {"label": "支付状态", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
     "bank_trade_time": {"label": "交易时间", "mode": "date", "operators": {"between", "equals"}, "sortable": True},
     "bank_name": {"label": "支出银行", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
+    "bank_account": {"label": "银行账户", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
+    "bank_direction": {"label": "收支", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
     "bank_counterparty_name": {"label": "对方户名", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
     "bank_summary": {"label": "摘要", "mode": "text", "operators": {"contains"}, "sortable": True},
     "invoice_no": {"label": "数电发票号码", "mode": "text", "operators": {"contains", "equals"}, "sortable": True},
@@ -467,6 +469,7 @@ class OaPendingPaymentQueryService:
             "bankName": primary.get("bankName", ""),
             "accountNo": primary.get("accountNo", ""),
             "accountLast4": primary.get("accountLast4", ""),
+            "bankAccount": primary.get("bankAccount", ""),
             "accountName": primary.get("accountName", ""),
             "tradeTime": primary.get("tradeTime", ""),
             "debitAmount": primary.get("debitAmount", ""),
@@ -505,6 +508,7 @@ class OaPendingPaymentQueryService:
             "bankName": bank.imported_bank_name or "",
             "accountNo": bank.account_no or "",
             "accountLast4": bank.imported_bank_last4 or str(bank.account_no or "")[-4:],
+            "bankAccount": _bank_account_label(bank),
             "accountName": bank.account_name or "",
             "tradeTime": bank.trade_time or bank.txn_date or "",
             "debitAmount": _debit_amount(bank),
@@ -758,6 +762,8 @@ class OaPendingPaymentQueryService:
             "payment_status": payment.get("code"),
             "bank_trade_time": bank.get("tradeTime"),
             "bank_name": bank.get("bankName"),
+            "bank_account": bank.get("bankAccount"),
+            "bank_direction": bank.get("direction"),
             "bank_counterparty_name": bank.get("counterpartyName"),
             "bank_summary": bank.get("summary"),
             "invoice_no": invoice.get("digitalInvoiceNo"),
@@ -778,7 +784,12 @@ class OaPendingPaymentQueryService:
                 continue
             key = str(value)
             counts[key] = counts.get(key, 0) + 1
-            labels[key] = row["paymentStatus"]["label"] if field == "payment_status" else key
+            if field == "payment_status":
+                labels[key] = row["paymentStatus"]["label"]
+            elif field == "bank_direction":
+                labels[key] = _bank_direction_option_label(key)
+            else:
+                labels[key] = key
         return [{"value": value, "label": labels[value], "count": counts[value]} for value in sorted(counts)]
 
     @staticmethod
@@ -858,6 +869,16 @@ def _bank_direction(transaction: BankTransaction) -> str:
 
 def _bank_direction_label(transaction: BankTransaction) -> str:
     return "支出" if _bank_direction(transaction) == "outflow" else "收入"
+
+
+def _bank_direction_option_label(value: str) -> str:
+    return "支出" if value == "outflow" else "收入" if value == "inflow" else value
+
+
+def _bank_account_label(transaction: BankTransaction) -> str:
+    bank_name = str(transaction.imported_bank_name or "").strip()
+    account_last4 = str(transaction.imported_bank_last4 or str(transaction.account_no or "")[-4:]).strip()
+    return " ".join(part for part in [bank_name, account_last4] if part)
 
 
 def _debit_amount(transaction: BankTransaction) -> str:

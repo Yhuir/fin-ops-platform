@@ -590,6 +590,7 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 - rows、filter-options 和详情接口使用同一 SQL read model 或同一 query service 事实源。
 - 响应必须表达 `read_model_status`、stale/refreshing 详情和必要的 refresh job。
 - 详情接口返回 OA、付款流水、发票、候选关系和异常原因。
+- `filterConfig`/`filter-options` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
 - 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
 
 ### 工作台 read model 刷新状态

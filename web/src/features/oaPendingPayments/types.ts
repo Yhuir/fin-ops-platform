@@ -48,6 +48,8 @@ export type OaPendingPaymentBankTransaction = {
   bankName: string;
   accountNo?: string;
   accountLast4?: string;
+  bankAccount?: string;
+  direction?: string;
   directionLabel?: string;
   accountName: string;
   tradeTime: string;
@@ -74,6 +76,8 @@ export type OaPendingPaymentBankTransactionSummary = {
   bankName?: string;
   accountNo?: string;
   accountLast4?: string;
+  bankAccount?: string;
+  direction?: string;
   directionLabel?: string;
   tradeTime?: string;
   amount?: string;

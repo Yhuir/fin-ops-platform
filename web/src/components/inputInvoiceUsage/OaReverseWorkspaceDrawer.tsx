@@ -265,7 +265,6 @@ export default function OaReverseWorkspaceDrawer({
       closeLabel="关闭以发票反提 OA 工作流"
       onClose={onClose}
       open={open}
-      subtitle="候选数、合计、拒绝原因和目标申请人均以后端返回为准"
       title="以发票反提 OA"
       modal={false}
       width="min(920px, 100vw)"

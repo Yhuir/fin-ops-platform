@@ -156,6 +156,8 @@ OA_PENDING_PAYMENT_FILTER_FIELDS = {
     "payment_status": ("payment_status", "text", {"in"}),
     "bank_trade_time": ("bank_trade_time", "date", {"between", "equals"}),
     "bank_name": ("bank_name", "text", {"contains", "in"}),
+    "bank_account": ("bank_account", "text", {"in"}),
+    "bank_direction": ("bank_direction", "text", {"in"}),
     "bank_counterparty_name": ("bank_counterparty_name", "text", {"contains", "in"}),
     "bank_summary": ("bank_summary", "text", {"contains"}),
     "invoice_no": ("invoice_no", "text", {"contains", "equals"}),
@@ -1407,7 +1409,7 @@ class PostgresReadModelRepository:
                     insert into read_model.oa_pending_payment_rows(
                         row_id, scope_key, scope_month, oa_id, oa_applicant, oa_application_type,
                         oa_project_name, oa_amount, payment_status, payment_status_label,
-                        bank_transaction_id, bank_trade_time, bank_amount, bank_paid_total, bank_name,
+                        bank_transaction_id, bank_trade_time, bank_amount, bank_paid_total, bank_name, bank_account, bank_direction,
                         bank_counterparty_name, bank_summary, invoice_id, invoice_no,
                         invoice_date, seller_name, invoice_total_with_tax, searchable_text,
                         source_versions, payload, raw_payload
@@ -1416,7 +1418,8 @@ class PostgresReadModelRepository:
                         %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_applicant)s,
                         %(oa_application_type)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
                         %(payment_status_label)s, %(bank_transaction_id)s, %(bank_trade_time)s::timestamptz,
-                        %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_counterparty_name)s, %(bank_summary)s,
+                        %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_account)s, %(bank_direction)s,
+                        %(bank_counterparty_name)s, %(bank_summary)s,
                         %(invoice_id)s, %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s,
                         %(invoice_total_with_tax)s, %(searchable_text)s, %(source_versions)s,
                         %(payload)s, %(raw_payload)s
@@ -1435,6 +1438,8 @@ class PostgresReadModelRepository:
                         bank_amount = excluded.bank_amount,
                         bank_paid_total = excluded.bank_paid_total,
                         bank_name = excluded.bank_name,
+                        bank_account = excluded.bank_account,
+                        bank_direction = excluded.bank_direction,
                         bank_counterparty_name = excluded.bank_counterparty_name,
                         bank_summary = excluded.bank_summary,
                         invoice_id = excluded.invoice_id,
@@ -7405,6 +7410,15 @@ def _bank_account_label(bank: dict[str, Any]) -> str | None:
     return value or None
 
 
+def _bank_direction_from_payload(bank: dict[str, Any]) -> str | None:
+    direction_label = text(bank.get("directionLabel"))
+    if direction_label == "支出":
+        return "outflow"
+    if direction_label == "收入":
+        return "inflow"
+    return None
+
+
 def _output_invoice_collection_read_model_record(row: dict[str, Any], scope_key: str) -> dict[str, Any]:
     payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
     invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
@@ -7463,6 +7477,8 @@ def _oa_pending_payment_read_model_record(row: dict[str, Any], scope_key: str) -
         "bank_amount": decimal_text(bank.get("amount") or bank.get("debitAmount")),
         "bank_paid_total": decimal_text(bank.get("paidTotal") or bank.get("amount") or bank.get("debitAmount")),
         "bank_name": text(bank.get("bankName")),
+        "bank_account": text(bank.get("bankAccount")) or _bank_account_label(bank),
+        "bank_direction": text(bank.get("direction")) or _bank_direction_from_payload(bank),
         "bank_counterparty_name": text(bank.get("counterpartyName")),
         "bank_summary": text(bank.get("summary")),
         "invoice_id": text(invoice.get("primaryInvoiceId")),
