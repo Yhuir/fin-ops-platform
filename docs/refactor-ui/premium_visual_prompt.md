@@ -1394,7 +1394,11 @@ Notes:
 
 - Code tests were not run for PV-024 because this slice only documents discovery and the next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-025-etc-tickets-premium-visual
+
+### Status
+
+verified
 
 `PV-025-etc-tickets-premium-visual`
 
@@ -1422,3 +1426,58 @@ Notes:
 - 浏览器 smoke `/etc-tickets`：确认 heading/filters、batch/task lists、upload area、reconciliation workspace/table、one dialog open/close and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_etc_tickets.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Polished `/etc-tickets` through ETC-scoped CSS only, preserving current React structure, user-visible entrypoints, OA workflow, upload/delete/revoke/manual reconciliation behavior, route/session behavior and all API/read-model contracts.
+- Tightened filter bar, left batch/task/source lists, upload blocks, reconciliation workspace, manual review panel, OA status panel, import attempts, invoice tables, dialog controls, action buttons, tags and feedback surfaces.
+- Replaced or covered ETC local hard-coded color/fixed-transition treatments with Ledger Calm tokens, `color-mix(...)`, `--motion-fast` and `--ease-out-quart`.
+- Added CSS contract coverage in `EtcTicketManagementPage.test.tsx` for compact list/panel/upload/table/dialog treatment, motion-token usage, amount alignment, stable tags, token colors and reconciliation row stability.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run EtcTicketManagementPage.test.tsx`
+- `cd web && npx vitest run EtcTicketManagementPage.test.tsx EtcApi.test.ts EtcOaNavigation.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with Vite preview at `http://127.0.0.1:4185/etc-tickets`
+
+Browser smoke result:
+
+- Verified heading, list/upload/table surfaces, one delete dialog and no top-level horizontal overflow.
+- Screenshot: `/tmp/etc-tickets-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
+
+## Next Prompt Draft
+
+`PV-026-settings-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_settings.md`、`web/src/pages/SettingsPage.tsx`、`web/src/components/settings/*`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx` 和当前 `git status`。本切片只做 `/settings` premium visual discovery，不改运行时代码，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_6_settings.md` 追加 `PV-026 Premium Visual Discovery`，并明确旧 `P099-P106` 是 Settings 平台迁移历史，不能直接替代本轮 premium visual 事实。
+- 确认当前 `/settings` 是否已经迁出 MUI；用 source/runtime grep 区分历史文档中的 MUI inventory 和当前代码事实。
+- 清点当前用户可见入口：route/sidebar、page heading、module navigation/tree、设置分区、region panels、table/list controls、OA 手工搜索导入表、dialogs、menus、forms、feedback/status/loading/empty/error states。
+- 标明哪些元素必须功能等价保留：旧 tree 仍为导航 tree，旧设置表单仍为表单，旧 table 仍为 dense table，旧弹窗仍为 modal dialog，旧 menu 仍为 menu，OA 手工导入 workflow 不改变。
+- 列出 Settings 表格和列表排版要求：金额/数量/日期列对齐；状态/tag 高度稳定；长名称、编码、说明、路径、OA 单据信息必须截断或可读换行，不得撑乱行高；selected/expanded/active states 不改变列表项或表格行尺寸。
+- 列出 interaction smoothness 要求：module nav、tree rows、menu items、form controls、table rows、dialog controls、OA manual import actions and feedback close 都使用 motion tokens，不增加页面切换动画，不阻塞路由跳转。
+- 对比当前测试覆盖，指出本轮 premium visual 是否需要新增 CSS contract 或浏览器 smoke 重点。
+- 生成下一条唯一 prompt：`PV-027-settings-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_settings.md`，精确 staging，commit 并 push 到 `origin/main`。

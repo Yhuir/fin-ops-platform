@@ -21023,3 +21023,371 @@ body.column-layout-dragging {
     min-height: auto;
   }
 }
+
+.etc-page {
+  gap: var(--fp-space-3);
+}
+
+.etc-detail-heading h2,
+.etc-section-heading h3,
+.etc-panel-heading h2,
+.etc-source-file-heading h3,
+.etc-reconciliation-table-toolbar h3,
+.etc-oa-status-header strong {
+  color: var(--fp-text-primary);
+}
+
+.etc-detail-heading p,
+.etc-list-eyebrow,
+.etc-source-file-id,
+.etc-source-issue__header,
+.etc-upload-drop-content,
+.etc-manual-review-card span:last-child,
+.etc-manual-review-label,
+.etc-manual-review-field > span,
+.etc-dialog-field,
+.etc-detail-metrics span,
+.etc-plate-summary-item span,
+.etc-import-attempt-row span {
+  color: var(--fp-text-secondary);
+}
+
+.etc-filter-bar,
+.etc-batch-list-panel,
+.etc-batch-detail-panel,
+.etc-reconciliation-workspace,
+.etc-manual-review-panel,
+.etc-oa-status-panel,
+.etc-import-attempts {
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: color-mix(in srgb, var(--fp-surface-muted) 36%, var(--fp-surface));
+}
+
+.etc-filter-bar {
+  padding: var(--fp-space-2) var(--fp-space-3);
+}
+
+.etc-page-action-link,
+.etc-primary-action,
+.etc-secondary-action,
+.etc-danger-action,
+.etc-icon-action,
+.etc-status-segmented__button,
+.etc-list-row-button,
+.etc-file-picker,
+.etc-upload-drop-box,
+.etc-reconciliation-description-toggle,
+.etc-inline-icon-action {
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
+}
+
+.etc-page-action-link:active,
+.etc-primary-action:active:not(:disabled),
+.etc-secondary-action:active:not(:disabled),
+.etc-danger-action:active:not(:disabled),
+.etc-icon-action:active:not(:disabled),
+.etc-status-segmented__button:active,
+.etc-list-row-button:active,
+.etc-file-picker:active,
+.etc-upload-drop-box:active,
+.etc-inline-icon-action:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.etc-page-action-link,
+.etc-secondary-action {
+  border-color: color-mix(in srgb, var(--fp-primary) 28%, var(--fp-border));
+  background: var(--fp-surface);
+  color: var(--fp-primary);
+}
+
+.etc-page-action-link:hover,
+.etc-page-action-link:focus-visible,
+.etc-secondary-action:hover,
+.etc-secondary-action:focus-visible,
+.etc-status-segmented__button:hover,
+.etc-status-segmented__button:focus-visible,
+.etc-list-row-button:hover,
+.etc-list-row-button:focus-visible,
+.etc-list-row-button[data-selected="true"],
+.etc-icon-action:hover,
+.etc-icon-action:focus-visible,
+.etc-inline-icon-action:hover,
+.etc-inline-icon-action:focus-visible {
+  border-color: var(--fp-primary);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
+  color: var(--fp-primary-hover);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
+}
+
+.etc-primary-action {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary);
+  color: var(--fp-surface);
+}
+
+.etc-primary-action:hover,
+.etc-primary-action:focus-visible {
+  border-color: var(--fp-primary-hover);
+  background: var(--fp-primary-hover);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.etc-danger-action {
+  border-color: var(--fp-danger);
+  background: var(--fp-danger);
+  color: var(--fp-surface);
+}
+
+.etc-danger-action:hover,
+.etc-danger-action:focus-visible {
+  border-color: color-mix(in srgb, var(--fp-danger) 82%, black);
+  background: color-mix(in srgb, var(--fp-danger) 82%, black);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-danger) 18%, transparent);
+}
+
+.etc-secondary-action--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 42%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning-soft) 74%, var(--fp-surface));
+  color: var(--fp-warning);
+}
+
+.etc-secondary-action--warning:hover,
+.etc-secondary-action--warning:focus-visible {
+  border-color: var(--fp-warning);
+  background: color-mix(in srgb, var(--fp-warning-soft) 88%, var(--fp-surface));
+  color: color-mix(in srgb, var(--fp-warning) 82%, black);
+}
+
+.etc-icon-action--danger,
+.etc-icon-action--danger:hover,
+.etc-icon-action--danger:focus-visible {
+  color: var(--fp-danger);
+}
+
+.etc-primary-action:disabled,
+.etc-secondary-action:disabled,
+.etc-danger-action:disabled,
+.etc-icon-action:disabled {
+  border-color: var(--fp-border);
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-disabled);
+}
+
+.etc-status-segmented {
+  border-color: color-mix(in srgb, var(--fp-primary) 32%, var(--fp-border));
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.etc-status-segmented__button {
+  color: var(--fp-primary);
+}
+
+.etc-status-segmented__button + .etc-status-segmented__button {
+  border-left-color: color-mix(in srgb, var(--fp-primary) 28%, var(--fp-border));
+}
+
+.etc-status-segmented__button[data-active="true"] {
+  background: var(--fp-primary);
+  color: var(--fp-surface);
+}
+
+.etc-filter-field input,
+.etc-manual-review-field input,
+.etc-manual-review-field select,
+.etc-dialog-field textarea {
+  border-color: var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    background-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.etc-filter-field input:focus,
+.etc-manual-review-field input:focus,
+.etc-manual-review-field select:focus,
+.etc-dialog-field textarea:focus {
+  border-color: var(--fp-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
+}
+
+.etc-reconciliation-task-row,
+.etc-batch-row,
+.etc-source-file-row,
+.etc-detail-metrics > div,
+.etc-reconciliation-metrics > div,
+.etc-plate-summary-item,
+.etc-manual-review-card,
+.etc-supplement-upload-target,
+.etc-import-attempt-row {
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.etc-reconciliation-task-row,
+.etc-batch-row,
+.etc-source-file-row {
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    background-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.etc-batch-row.submitted {
+  background: color-mix(in srgb, var(--fp-surface-muted) 70%, var(--fp-surface));
+}
+
+.etc-count-tag,
+.etc-status-tag {
+  min-height: var(--fp-tag-height-table);
+  border-color: color-mix(in srgb, var(--fp-primary) 28%, var(--fp-border));
+  border-radius: var(--fp-tag-radius-table);
+  background: color-mix(in srgb, var(--fp-primary-soft) 78%, var(--fp-surface));
+  color: var(--fp-primary);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.etc-status-tag--success {
+  border-color: color-mix(in srgb, var(--fp-success) 38%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-success-soft) 72%, var(--fp-surface));
+  color: var(--fp-success);
+}
+
+.etc-status-tag--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 42%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning-soft) 76%, var(--fp-surface));
+  color: var(--fp-warning);
+}
+
+.etc-status-tag--error {
+  border-color: color-mix(in srgb, var(--fp-danger) 38%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-danger-soft) 76%, var(--fp-surface));
+  color: var(--fp-danger);
+}
+
+.etc-source-issue {
+  border-color: color-mix(in srgb, var(--fp-warning) 42%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning-soft) 76%, var(--fp-surface));
+}
+
+.etc-source-issue--error {
+  border-color: color-mix(in srgb, var(--fp-danger) 38%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-danger-soft) 76%, var(--fp-surface));
+}
+
+.etc-file-picker {
+  border-color: color-mix(in srgb, var(--fp-primary) 30%, var(--fp-border));
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-primary);
+}
+
+.etc-file-picker:hover,
+.etc-file-picker:focus-within {
+  border-color: var(--fp-primary);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
+  color: var(--fp-primary-hover);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
+}
+
+.etc-file-picker--disabled,
+.etc-upload-drop-box[aria-disabled="true"],
+.etc-manual-review-field input:disabled,
+.etc-manual-review-field select:disabled,
+.etc-dialog-field textarea:disabled {
+  border-color: var(--fp-border);
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-disabled);
+}
+
+.etc-upload-drop-box {
+  min-height: 96px;
+  border-color: var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: color-mix(in srgb, var(--fp-surface-muted) 40%, var(--fp-surface));
+  color: var(--fp-text-primary);
+}
+
+.etc-upload-drop-box:hover,
+.etc-upload-drop-box:focus-visible,
+.etc-upload-drop-box.dragging {
+  border-color: var(--fp-primary);
+  background: color-mix(in srgb, var(--fp-primary-soft) 68%, var(--fp-surface));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 15%, transparent);
+}
+
+.etc-invoice-table-container,
+.etc-reconciliation-table-container {
+  border-color: var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+}
+
+.etc-invoice-table th,
+.etc-reconciliation-table th {
+  background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
+  color: var(--fp-text-secondary);
+}
+
+.etc-invoice-table th,
+.etc-invoice-table td,
+.etc-reconciliation-table th,
+.etc-reconciliation-table td {
+  border-bottom-color: var(--fp-border);
+  color: var(--fp-text-primary);
+  transition: background-color var(--motion-fast) var(--ease-out-quart);
+}
+
+.etc-invoice-money-column,
+.etc-invoice-tax-column,
+.etc-invoice-money-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.etc-reconciliation-table-row[data-highlight="missing"] > td,
+.etc-reconciliation-table-row[data-highlight="extra"] > td {
+  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
+}
+
+.etc-reconciliation-table-row[data-highlight="matched"] > td,
+.etc-reconciliation-table-row[data-highlight="manual"] > td,
+.etc-reconciliation-table-row[data-highlight="covered"] > td {
+  background: color-mix(in srgb, var(--fp-success-soft) 70%, var(--fp-surface));
+}
+
+.etc-reconciliation-select-column input {
+  accent-color: var(--fp-primary);
+}
+
+.etc-reconciliation-divider {
+  border-left-color: var(--fp-border-strong);
+}
+
+.etc-reconciliation-money {
+  color: var(--fp-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.etc-reconciliation-description-toggle {
+  color: var(--fp-primary);
+}
+
+.etc-inline-icon-action {
+  border-color: color-mix(in srgb, var(--fp-primary) 28%, var(--fp-border));
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-primary);
+}

@@ -578,3 +578,27 @@ Scope: `/etc-tickets` P092-P098 migration closeout only.
   - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings and chunk size warning.
   - `git diff --check`: passed.
   - `git status --short --branch`: passed; clean before MG docs update.
+
+## PV-025 Premium Visual Execution
+
+- Prompt ID: `PV-025-etc-tickets-premium-visual`
+- Status: `verified`
+- Runtime implementation changed:
+  - `web/src/app/styles.css` adds an ETC-scoped premium visual override layer for the page shell, filter bar, batch/task/source lists, upload controls, reconciliation workspace, manual review panel, OA status panel, import attempts, invoice tables, dialog controls, action buttons, tags and status surfaces.
+  - The slice keeps the existing `/etc-tickets` React structure and business behavior intact. No API calls, payloads, OA workflow, deletion/revoke/manual reconciliation behavior, upload behavior, route/session behavior, backend, read model, worker or workbench internals changed.
+  - ETC local hard-coded colors and fixed local transitions were replaced or covered by Ledger Calm tokens, `color-mix(...)`, `--motion-fast` and `--ease-out-quart` where this slice touched them.
+  - Amount cells remain right-aligned and tabular; status/count tags use stable table tag sizing; reconciliation rows keep stable row sizing and selected/checked/hover states do not change row width.
+- Test implementation changed:
+  - `web/src/test/EtcTicketManagementPage.test.tsx` adds a CSS contract test for compact list/panel/upload/table/dialog treatment, motion-token usage, amount alignment, stable tags, token colors and reconciliation row stability.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx`: passed; 43 tests passed.
+  - `cd web && npx vitest run EtcTicketManagementPage.test.tsx EtcApi.test.ts EtcOaNavigation.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`: passed; 69 tests passed.
+  - `cd web && npx tsc -b --pretty false`: passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings.
+  - `git diff --check`: passed.
+  - Forbidden page-cache/snapshot guard grep: passed.
+  - Non-workbench runtime MUI/emotion grep: passed.
+  - Browser smoke at `/etc-tickets`: passed; verified heading, list/upload/table surfaces, one delete dialog and no top-level horizontal overflow.
+  - Screenshot: `/tmp/etc-tickets-premium-smoke.png`.

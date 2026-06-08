@@ -12,8 +12,18 @@ const etcTicketSourceFiles = [
   "src/pages/EtcTicketManagementPage.tsx",
 ] as const;
 
-function readWebSource(path: (typeof etcTicketSourceFiles)[number]) {
+function readWebSource(path: string) {
   return readFileSync(resolve(__dirname, "..", path.replace(/^src\//, "")), "utf8");
+}
+
+function cssRule(styles: string, selector: string, containing?: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = Array.from(styles.matchAll(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\n\\}`, "gm")));
+  const match = containing ? matches.find((candidate) => candidate[1].includes(containing)) : matches.at(-1);
+  if (!match) {
+    throw new Error(`Missing CSS rule for ${selector}`);
+  }
+  return match[1];
 }
 
 afterEach(() => {
@@ -60,6 +70,69 @@ describe("ETC ticket management page", () => {
       forbiddenLegacySurfaces: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("keeps premium ETC list, upload, table, dialog, and motion CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const surfaceRule = cssRule(
+      styles,
+      ".etc-filter-bar,\n.etc-batch-list-panel,\n.etc-batch-detail-panel,\n.etc-reconciliation-workspace,\n.etc-manual-review-panel,\n.etc-oa-status-panel,\n.etc-import-attempts",
+    );
+    const controlMotionRule = cssRule(
+      styles,
+      ".etc-page-action-link,\n.etc-primary-action,\n.etc-secondary-action,\n.etc-danger-action,\n.etc-icon-action,\n.etc-status-segmented__button,\n.etc-list-row-button,\n.etc-file-picker,\n.etc-upload-drop-box,\n.etc-reconciliation-description-toggle,\n.etc-inline-icon-action",
+      "--motion-fast",
+    );
+    const filterInputRule = cssRule(
+      styles,
+      ".etc-filter-field input,\n.etc-manual-review-field input,\n.etc-manual-review-field select,\n.etc-dialog-field textarea",
+    );
+    const rowSurfaceRule = cssRule(
+      styles,
+      ".etc-reconciliation-task-row,\n.etc-batch-row,\n.etc-source-file-row,\n.etc-detail-metrics > div,\n.etc-reconciliation-metrics > div,\n.etc-plate-summary-item,\n.etc-manual-review-card,\n.etc-supplement-upload-target,\n.etc-import-attempt-row",
+    );
+    const tagRule = cssRule(styles, ".etc-count-tag,\n.etc-status-tag");
+    const uploadRule = cssRule(styles, ".etc-upload-drop-box", "min-height: 96px");
+    const invoiceCellRule = cssRule(styles, ".etc-invoice-table th,\n.etc-invoice-table td,\n.etc-reconciliation-table th,\n.etc-reconciliation-table td");
+    const invoiceMoneyRule = cssRule(styles, ".etc-invoice-money-column,\n.etc-invoice-tax-column,\n.etc-invoice-money-cell");
+    const reconciliationBlockRule = cssRule(styles, ".etc-reconciliation-table-block");
+    const reconciliationHighlightRule = cssRule(
+      styles,
+      ".etc-reconciliation-table-row[data-highlight=\"matched\"] > td,\n.etc-reconciliation-table-row[data-highlight=\"manual\"] > td,\n.etc-reconciliation-table-row[data-highlight=\"covered\"] > td",
+    );
+    const reconciliationMoneyRule = cssRule(styles, ".etc-reconciliation-money");
+    const inlineActionRule = cssRule(styles, ".etc-inline-icon-action");
+
+    expect(surfaceRule).toContain("var(--fp-border)");
+    expect(surfaceRule).toContain("var(--fp-radius-sm)");
+    expect(surfaceRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(controlMotionRule).toContain("--motion-fast");
+    expect(controlMotionRule).toContain("--ease-out-quart");
+    expect(filterInputRule).toContain("var(--fp-border)");
+    expect(filterInputRule).toContain("--motion-fast");
+    expect(rowSurfaceRule).toContain("var(--fp-surface)");
+    expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
+    expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
+    expect(uploadRule).toContain("min-height: 96px");
+    expect(invoiceCellRule).toContain("--motion-fast");
+    expect(invoiceMoneyRule).toContain("text-align: right");
+    expect(invoiceMoneyRule).toContain("font-variant-numeric: tabular-nums");
+    expect(reconciliationBlockRule).toContain("--etc-reconciliation-row-height: 32px");
+    expect(reconciliationHighlightRule).toContain("var(--fp-success-soft)");
+    expect(reconciliationMoneyRule).toContain("font-variant-numeric: tabular-nums");
+    expect(inlineActionRule).toContain("var(--fp-primary)");
+    expect([
+      surfaceRule,
+      controlMotionRule,
+      filterInputRule,
+      rowSurfaceRule,
+      tagRule,
+      uploadRule,
+      invoiceCellRule,
+      invoiceMoneyRule,
+      reconciliationHighlightRule,
+      inlineActionRule,
+    ].join("\n")).not.toMatch(/0\.16s ease|#2563eb|#dbe3ef|#f9fbfe|#eff6ff|#fef2f2|#fffbeb|#172033/i);
   });
 
   test("refreshes batch list when ETC import background job completes", async () => {
