@@ -48,7 +48,7 @@ Last updated: 2026-06-08
 | 16 | `PV-016-output-invoice-collections-discovery` | verified | `/output-invoice-collections` discovery。 |
 | 17 | `PV-017-output-invoice-collections-premium-visual` | verified | 销项发票收款 premium visual slice。 |
 | 18 | `PV-018-no-oa-bank-batches-discovery` | verified | `/no-oa-bank-batches` discovery。 |
-| 19 | `PV-019-no-oa-bank-batches-premium-visual` | pending | 免 OA 流水批量处理 premium visual slice。 |
+| 19 | `PV-019-no-oa-bank-batches-premium-visual` | verified | 免 OA 流水批量处理 premium visual slice。 |
 | 20 | `PV-020-batch-accounting-discovery` | pending | `/batch-accounting` discovery。 |
 | 21 | `PV-021-batch-accounting-premium-visual` | pending | 批量账务 premium visual slice。 |
 | 22 | `PV-022-turnover-ledger-discovery` | pending | `/turnover-ledger` discovery。 |
@@ -62,28 +62,26 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-019-no-oa-bank-batches-premium-visual`
+`PV-020-batch-accounting-discovery`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`
-- `web/src/pages/NoOaBankBatchPage.tsx`
-- `web/src/app/styles.css`
-- `web/src/test/NoOaBankBatchPage.test.tsx`
+- `docs/refactor-ui/modules/phase_6_batch_accounting.md`
+- `web/src/pages/BatchAccountingPage.tsx`
+- `web/src/features/batchAccounting/api.ts`
+- `web/src/features/batchAccounting/types.ts`
+- `web/src/test/BatchAccountingPage.test.tsx`
 
 ### Verification
 
-Required for PV-019:
+Required for PV-020:
 
-- `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- Browser smoke `/no-oa-bank-batches`: heading, filter region, status segmented controls, rails, transaction table, tag drawer, withdraw dialog or submitted workflow entry, and no top-level horizontal overflow.
+- `git status --short --branch`
 
 ## Execution Rules
 

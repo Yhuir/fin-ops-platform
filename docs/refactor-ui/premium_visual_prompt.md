@@ -1035,7 +1035,13 @@ Notes:
 
 - Code tests were not run for PV-018 because this slice only documents discovery and next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-019-no-oa-bank-batches-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-019-no-oa-bank-batches-premium-visual`
 
@@ -1064,3 +1070,60 @@ Notes:
 - 浏览器 smoke `/no-oa-bank-batches`：确认 heading、filter region、status segmented controls、main/sub rails、transaction batch/table、tag drawer open/close、withdraw dialog or submitted workflow entry and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_no_oa_bank_batches.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Polished `/no-oa-bank-batches` without changing React logic, API calls, read-model polling, selection guards, tag drawer workflow, withdraw workflow or route/session behavior.
+- Tightened the existing three-zone no-OA layout: main/sub rails, transaction region, selected batch state, batch row padding, detail table header treatment, tag sizing, drawer grouping and toast surface.
+- Replaced no-OA page-local fixed-duration transitions with `--motion-fast` / `--ease-out-quart` motion tokens for buttons, segmented controls, inputs, rail items, batch rows, table cells, drawer close, withdraw textarea and toast close.
+- Replaced no-OA page-local unstable visual tokens with Ledger Calm tokens: `--fp-surface-muted`, `--fp-tag-height-table`, `--fp-tag-radius-table`, `--fp-shadow-drawer` and `--fp-shadow-popover`.
+- Added CSS contract coverage in `NoOaBankBatchPage.test.tsx` for compact rails/list/table treatment, motion-token usage, amount alignment, tag stability and token-based no-OA surfaces.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run NoOaBankBatchPage.test.tsx`
+- `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4182/no-oa-bank-batches`
+
+Browser smoke result:
+
+- Verified heading, filter region, status segmented controls, main/sub rails, transaction region, `建设银行8106流水` table, tag drawer open/close and submitted-bucket withdraw dialog.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/no-oa-bank-batches-premium-smoke.png`.
+
+Notes:
+
+- Playwright bundled browser was not installed in the local cache, so the smoke used system Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`.
+- `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
+
+## Next Prompt Draft
+
+`PV-020-batch-accounting-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_batch_accounting.md`、`web/src/pages/BatchAccountingPage.tsx`、`web/src/features/batchAccounting/api.ts`、`web/src/features/batchAccounting/types.ts`、相关 `web/src/test/*BatchAccounting*` 测试和当前 `git status`。本切片只做 `/batch-accounting` premium visual discovery，不改运行时代码，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_6_batch_accounting.md` 追加 `PV-020 Premium Visual Discovery`，并确认 `docs/refactor-ui/module_inventory.md` 已链接该模块文档。
+- 清点 `/batch-accounting` 当前用户可见入口：route/sidebar、page heading、`刷新`、status segmented controls、`流水年份`、`OA年份`、`搜索OA内容`、`清空搜索`、`批量账务流水` region、bank row list、amount summary、`差额说明`、`查看金额不一致差额说明`、`可关联OA项`/`已关联OA项` table、OA row checkbox、submit action、withdraw dialog、feedback/toast、loading/empty/error states。
+- 标明哪些元素必须功能等价保留：旧 bank row 仍是可选择列表，旧 OA/relation area 仍是表格，旧撤回仍是 dialog，旧 feedback 仍可关闭/自动消失，旧 table/search/selection/submit/withdraw behavior 不改变。
+- 列出表格和列表排版要求：银行流水金额和 OA 金额右对齐、tabular nums；状态/方向/金额不一致 tag 稳定高度；OA 申请人/项目/事由长文本可读且不撑乱表格；selected bank row 和 selected OA rows 不改变行高。
+- 列出 interaction smoothness 要求：refresh/status/year/search/bank row/OA checkbox/table row/submit/withdraw/dialog/toast 都使用 motion tokens，不增加页面切换动画，不阻塞路由跳转。
+- 对比旧 `P079-P084` 迁移记录，区分已完成平台迁移和本轮 premium visual 仍需提升的点。
+- 生成下一条唯一 prompt：`PV-021-batch-accounting-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_batch_accounting.md`，精确 staging，commit 并 push 到 `origin/main`。

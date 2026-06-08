@@ -224,6 +224,13 @@ function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
 
+function cssRule(source: string, selector: string) {
+  const normalizedSelector = selector.replace(/\\n/g, "\n");
+  const escapedSelector = normalizedSelector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "m"));
+  return match?.[1] ?? "";
+}
+
 function renderPage() {
   return render(
     <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
@@ -339,6 +346,54 @@ describe("NoOaBankBatchPage", () => {
       forbiddenLegacySurfaces: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("keeps premium compact rails, transaction table, and interaction CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const buttonRule = cssRule(styles, ".no-oa-bank-batches-button");
+    const segmentRule = cssRule(styles, ".no-oa-bank-batches-segment__button");
+    const inputRule = cssRule(styles, ".no-oa-bank-batches-field input");
+    const railRule = cssRule(styles, ".no-oa-bank-batches-rail");
+    const railItemRule = cssRule(styles, ".no-oa-bank-batches-rail__item");
+    const transactionRule = cssRule(styles, ".no-oa-bank-batches-transactions");
+    const transactionListRule = cssRule(styles, ".no-oa-bank-batches-transactions__list");
+    const batchRule = cssRule(styles, ".no-oa-bank-batches-batch");
+    const selectedBatchRule = cssRule(styles, ".no-oa-bank-batches-batch--selected");
+    const tableWrapRule = cssRule(styles, ".no-oa-bank-batches-table-wrap");
+    const tableCellRule = cssRule(styles, ".no-oa-bank-batches-table th,\\n.no-oa-bank-batches-table td");
+    const tableHeadRule = cssRule(styles, ".no-oa-bank-batches-table th");
+    const amountRule = cssRule(styles, ".no-oa-bank-batches-table .no-oa-bank-batches-table__amount");
+    const tagRule = cssRule(styles, ".no-oa-bank-batches-status,\\n.no-oa-bank-batches-tag");
+    const drawerRule = cssRule(styles, ".no-oa-bank-batches-drawer");
+    const drawerCloseRule = cssRule(styles, ".no-oa-bank-batches-drawer__close");
+    const textareaRule = cssRule(styles, ".no-oa-bank-batches-dialog__field textarea");
+    const toastRule = cssRule(styles, ".no-oa-bank-batches-toast");
+    const toastButtonRule = cssRule(styles, ".no-oa-bank-batches-toast button");
+
+    expect(buttonRule).toContain("var(--motion-fast)");
+    expect(segmentRule).toContain("var(--motion-fast)");
+    expect(inputRule).toContain("var(--motion-fast)");
+    expect(railItemRule).toContain("var(--motion-fast)");
+    expect(batchRule).toContain("var(--motion-fast)");
+    expect(tableCellRule).toContain("var(--motion-fast)");
+    expect(drawerCloseRule).toContain("var(--motion-fast)");
+    expect(textareaRule).toContain("var(--motion-fast)");
+    expect(toastButtonRule).toContain("var(--motion-fast)");
+
+    expect(railRule).toContain("border-radius: var(--fp-radius-sm)");
+    expect(transactionRule).toContain("border-radius: var(--fp-radius-sm)");
+    expect(transactionListRule).toContain("max-height: calc(100vh - 214px)");
+    expect(selectedBatchRule).toContain("inset 3px 0 0 var(--fp-primary)");
+    expect(tableWrapRule).toContain("border-radius: var(--fp-radius-sm)");
+    expect(tableHeadRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(amountRule).toContain("text-align: right");
+    expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
+    expect(tagRule).toContain("background: var(--fp-surface-muted)");
+    expect(drawerRule).toContain("box-shadow: var(--fp-shadow-drawer)");
+    expect(toastRule).toContain("box-shadow: var(--fp-shadow-popover)");
+    expect(tagRule).not.toContain("--fp-bg-muted");
+    expect(drawerRule).not.toContain("--fp-shadow-lg");
+    expect(toastRule).not.toContain("--fp-shadow-lg");
   });
 
   test("renders tag management and the three-column main/sub/transaction layout", async () => {

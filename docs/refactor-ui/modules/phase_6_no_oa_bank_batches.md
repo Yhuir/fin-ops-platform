@@ -86,6 +86,48 @@
 - Do not convert the batch list into large cards or a dashboard.
 - Do not touch the frozen reconciliation workbench internals.
 
+## PV-019 Premium Visual Execution
+
+- Prompt ID: `PV-019-no-oa-bank-batches-premium-visual`
+- Type: premium visual implementation
+- Status: verified
+- Scope: `/no-oa-bank-batches` only.
+- Runtime implementation changed: yes, only shared stylesheet rules for `no-oa-bank-batches-*`.
+- Test implementation changed: yes, only `web/src/test/NoOaBankBatchPage.test.tsx`.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Implementation Summary
+
+- Preserved the original route, page heading, actions, status segmented controls, month/account filters, main/sub rails, transaction region, batch list, detail table, selected-row submit, internal-transfer submit, tag-management right drawer, withdraw dialog, feedback states and read-model retry behavior.
+- Tightened the existing three-zone operational layout without converting batch rows into large cards.
+- Changed local no-OA hover/focus/press treatments to motion-token based transitions using `--motion-fast` and `--ease-out-quart`.
+- Standardized no-OA tags and table headers on Ledger Calm tokens: `--fp-surface-muted`, `--fp-tag-height-table`, `--fp-tag-radius-table`, `--fp-shadow-drawer` and `--fp-shadow-popover`.
+- Locked compact rail/list/table and token usage with a CSS contract test.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run NoOaBankBatchPage.test.tsx`
+- `cd web && npx vitest run NoOaBankBatchPage.test.tsx NoOaBankBatchApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- forbidden keepalive/snapshot/scroll-session grep over runtime docs and module docs
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4182/no-oa-bank-batches`
+
+Browser smoke result:
+
+- Verified heading, filter region, status segmented controls, main/sub rails, transaction region, `建设银行8106流水` table, tag drawer open/close and submitted-bucket withdraw dialog.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/no-oa-bank-batches-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
+
 ## Current MUI Inventory
 
 | File | Current MUI usage | Target |
