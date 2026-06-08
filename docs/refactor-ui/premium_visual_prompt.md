@@ -1574,7 +1574,11 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-028-app-wide-smoothness-audit
+
+### Status
+
+verified
 
 `PV-028-app-wide-smoothness-audit`
 
@@ -1601,3 +1605,52 @@ Notes:
 - `git status --short --branch`
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_8_full_verification.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Added `PV-028 App-wide Smoothness Audit` to `docs/refactor-ui/modules/phase_8_full_verification.md`.
+- Confirmed non-workbench runtime MUI/Emotion guard passes.
+- Confirmed removed page-cache/snapshot guard passes.
+- Confirmed no route-level decorative page transition and no `transition: all` risk in current scan output.
+- Identified remaining fixed transition/animation declarations as mostly loading/spinner/status animations, shell/status tooltip timings, frozen/historical workbench/zone styling, or older ETC/Settings declarations covered by later premium overrides.
+- No runtime code or tests changed because PV-028 is audit-only.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-028 because this slice only documents audit findings and the final MG prompt.
+
+## Next Prompt Draft
+
+`MG-PV-final-premium-visual-closeout`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/modules/phase_8_full_verification.md`、所有 premium-touched module docs、`web/src/app/styles.css`、相关页面和测试文件以及当前 `git status`。本切片是最终 cumulative merge gate。只允许修正文档状态、明显验证脚本/测试命令记录或 final closeout 所需的极小 scope；不得展开新的视觉 redesign，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+MG 要求：
+
+- 检查当前分支必须是 `main` 且与 `origin/main` 同步或只包含本 MG 允许的精确 diff。
+- 检查 untracked files、diff scope、docs state、latest prompt state and push log。
+- 确认 premium visual 完成页面清单与 `premium_visual_master_state.md` 一致。
+- 运行最终 targeted verification：
+  - `cd web && npx vitest run BankDetailsPage.test.tsx TaxOffsetPage.test.tsx AppHealthOperationsPage.test.tsx ImportCenterPage.test.tsx CostStatisticsPage.test.tsx PendingInvoicesPage.test.tsx InputInvoiceUsagePage.test.tsx OaPendingPaymentsPage.test.tsx OutputInvoiceCollectionsPage.test.tsx NoOaBankBatchPage.test.tsx BatchAccountingPage.test.tsx TurnoverLedgerPage.test.tsx EtcTicketManagementPage.test.tsx SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+  - `cd web && npx tsc -b --pretty false`
+  - `cd web && npm run build`
+  - `git diff --check`
+  - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+  - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Run browser smoke for representative pages:
+  - `/bank-details`: premium sample shell/table/drawer or popover path, no top-level horizontal overflow.
+  - `/etc-tickets`: list/upload/table/dialog path, no top-level horizontal overflow.
+  - `/settings`: tree navigation, section switch, data reset dialog and OA manual import table path, no top-level horizontal overflow.
+- Update `docs/refactor-ui/modules/phase_8_full_verification.md` with `MG-PV-final-premium-visual-closeout` execution notes.
+- Update `docs/refactor-ui/premium_visual_master_state.md` and `docs/refactor-ui/premium_visual_prompt.md`, mark final MG verified and record exact commit/push state.
+- Use exact `git add` only. Do not use `git add .` or `git add -A`.
+- Commit and push to `origin/main`.

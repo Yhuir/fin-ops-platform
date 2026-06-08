@@ -54,3 +54,79 @@ These warnings were observed during verification and are not introduced as phase
 Generate and execute one closeout prompt only:
 
 - `P115-phase-9-closeout`
+
+## PV-028 App-wide Smoothness Audit
+
+- Prompt ID: `PV-028-app-wide-smoothness-audit`
+- Status: `verified`
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Completed Premium Visual Scope
+
+The premium visual pass now has verified module records for:
+
+- Bank Details premium sample.
+- Tax Offset.
+- App Health / System Status.
+- Import pages family.
+- Cost Statistics.
+- Pending Invoices.
+- Input Invoice Usage.
+- OA Pending Payments.
+- Output Invoice Collections.
+- No-OA Bank Batches.
+- Batch Accounting.
+- Turnover Ledger.
+- ETC Tickets.
+- Settings.
+
+### Audit Results
+
+- Non-workbench runtime MUI/Emotion scan: passed.
+- Removed page-cache/snapshot architecture guard: passed.
+- App-wide premium CSS contract coverage exists for the major page families, including motion tokens, table row rhythm, stable tags, tabular amounts and key drawer/dialog/table controls.
+- Build/test warnings known from earlier phases remain non-blocking:
+  - React Router v7 future-flag test warnings.
+  - Node localstorage-file warning in the test environment.
+  - HeroUI/Tailwind CSS minifier warnings for generated selectors.
+  - Current Vite CSS/JS chunk size warnings.
+
+### Motion And Smoothness Findings
+
+- Remaining raw animation declarations are mostly expected loading/spinner/status animations. They are not route transitions and do not block navigation.
+- Remaining fixed-duration transition declarations fall into three groups:
+  - Shell/status tooltip and status indicators that predate the premium visual pass.
+  - Frozen or historical workbench/zone styling that is outside this non-workbench premium scope.
+  - Older ETC/Settings declarations that are covered by later premium override rules using motion tokens.
+- No route-level decorative page transition was found in the scan.
+- No `transition: all` risk was found in current scan output.
+
+### Final MG Requirements
+
+The final merge gate should not expand into another visual redesign. It should verify and close:
+
+- Full frontend targeted tests for all premium-touched pages.
+- Type check and production build.
+- Non-workbench runtime MUI/Emotion guard.
+- Removed page-cache/snapshot guard.
+- Diff/scope/untracked-file check.
+- Browser smoke coverage for the representative premium surfaces already used in this run:
+  - Bank Details sample.
+  - ETC Tickets.
+  - Settings.
+- Documentation state consistency:
+  - `premium_visual_master_state.md` current slice and push log.
+  - `premium_visual_prompt.md` completed prompt and final MG prompt.
+  - Module docs for the latest slices.
+
+### Backlog, Not MG Blockers
+
+- Global shell/status tooltip colors and timings can be folded into a future shell-specific polish slice.
+- Workbench/zone historical CSS should stay outside this premium closeout unless a separate workbench visual pass is requested.
+- Bundle splitting and HeroUI/Tailwind minifier warnings remain technical debt but are not blockers for this UI polish closeout.
+
+## MG-PV-final-premium-visual-closeout Prompt Draft
+
+Next unique prompt: `MG-PV-final-premium-visual-closeout`.

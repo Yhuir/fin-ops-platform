@@ -57,12 +57,12 @@ Last updated: 2026-06-08
 | 25 | `PV-025-etc-tickets-premium-visual` | verified | ETC 票据管理 premium visual slice。 |
 | 26 | `PV-026-settings-discovery` | verified | `/settings` premium visual discovery。 |
 | 27 | `PV-027-settings-premium-visual` | verified | 设置 premium visual slice。 |
-| 28 | `PV-028-app-wide-smoothness-audit` | pending | 全 app interaction smoothness audit。 |
+| 28 | `PV-028-app-wide-smoothness-audit` | verified | 全 app interaction smoothness audit。 |
 | 29 | `MG-PV-final-premium-visual-closeout` | pending | 全量验证、smoke、commit/push closeout。 |
 
 ## Current Slice
 
-`PV-028-app-wide-smoothness-audit`
+`MG-PV-final-premium-visual-closeout`
 
 ### Scope
 
@@ -77,14 +77,16 @@ Last updated: 2026-06-08
 
 ### Verification
 
-Required for PV-028:
+Required for final MG:
 
+- `cd web && npx vitest run BankDetailsPage.test.tsx TaxOffsetPage.test.tsx AppHealthOperationsPage.test.tsx ImportCenterPage.test.tsx CostStatisticsPage.test.tsx PendingInvoicesPage.test.tsx InputInvoiceUsagePage.test.tsx OaPendingPaymentsPage.test.tsx OutputInvoiceCollectionsPage.test.tsx NoOaBankBatchPage.test.tsx BatchAccountingPage.test.tsx TurnoverLedgerPage.test.tsx EtcTicketManagementPage.test.tsx SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
-
-PV-028 is audit/discovery-only and must not change runtime code.
+- Browser smoke representative pages: `/bank-details`, `/etc-tickets`, `/settings`.
 
 ## Execution Rules
 
@@ -139,3 +141,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-025-etc-tickets-premium-visual` | `75defcb9` | pushed to `origin/main` | ETC tickets premium visual polish verified; PV-026 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-026-settings-discovery` | `8094685e` | pushed to `origin/main` | Settings premium discovery verified; PV-027 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-027-settings-premium-visual` | `4f708c0c` | pushed to `origin/main` | Settings premium visual polish verified; PV-028 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-028-app-wide-smoothness-audit` | current commit | pending push | App-wide smoothness audit verified; final MG prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
