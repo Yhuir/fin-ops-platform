@@ -136,4 +136,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-021-batch-accounting-premium-visual` | `d4bb8b4a` | pushed to `origin/main` | Batch accounting premium visual polish verified; PV-022 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-022-turnover-ledger-discovery` | `d9b663ad` | pushed to `origin/main` | Turnover ledger premium discovery verified; PV-023 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-023-turnover-ledger-premium-visual` | `c133ecc5` | pushed to `origin/main` | Turnover ledger premium visual polish verified; PV-024 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
-| 2026-06-08 | `PV-024-etc-tickets-discovery` | current commit | pending push to `origin/main` | ETC tickets premium discovery verified; PV-025 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-024-etc-tickets-discovery` | `664173c6` | pushed to `origin/main` | ETC tickets premium discovery verified; PV-025 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
