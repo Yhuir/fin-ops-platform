@@ -212,6 +212,7 @@ class EtcBusinessBatchApplicationService:
             EtcBusinessBatchStatus.OA_SUBMITTED.value,
             EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
         }:
+            self._record_reconciliation_task_submitted(batch, actor=actor)
             self._sync_invoices(batch, "etc_business_oa_status_detected")
         return {"businessBatch": self.business_batch_payload(batch)}
 
@@ -240,6 +241,8 @@ class EtcBusinessBatchApplicationService:
             expected_version=expected_version,
             candidate_oa_row_id=candidate_oa_row_id,
         )
+        if str(decision or "").strip().lower() == "submitted":
+            self._record_reconciliation_task_submitted(batch, actor=actor)
         self._sync_invoices(batch, "etc_business_manual_oa_status")
         return {"businessBatch": self.business_batch_payload(batch)}
 
@@ -392,6 +395,19 @@ class EtcBusinessBatchApplicationService:
         changed_months = self._sync_etc_invoices_to_canonical_invoices(invoices)
         if self._refresh_after_etc_invoice_sync is not None:
             self._refresh_after_etc_invoice_sync(changed_months, reason=reason)
+
+    def _record_reconciliation_task_submitted(self, batch: EtcBusinessBatch, *, actor: EtcBusinessBatchActor) -> None:
+        submission_batch_id = str(getattr(batch, "submission_batch_id", "") or "").strip()
+        if not submission_batch_id:
+            return
+        reconciliation_task = self._get_reconciliation_task(str(getattr(batch, "task_id", "") or ""))
+        if reconciliation_task is None:
+            return
+        self._reconciliation_task_service.record_oa_submitted_confirmed(
+            task_id=str(getattr(reconciliation_task, "task_id")),
+            oa_draft_batch_id=submission_batch_id,
+            actor=actor.actor_id,
+        )
 
     def _matches_list_filters(self, batch: EtcBusinessBatch, *, month: str, plate: str, keyword: str) -> bool:
         invoices = self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))

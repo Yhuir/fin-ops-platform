@@ -355,7 +355,18 @@ function manualHighlight(resolution: string) {
 }
 
 function formatTaskTitle(task: EtcReconciliationTask) {
-  return task.title || `对账任务 ${task.taskId}`;
+  const title = (task.title || "").trim()
+    .replace(/ETC\s*对账批次/g, "ETC批次")
+    .replace(/ETC\s*对账/g, "ETC批次")
+    .replace(/对账任务/g, "批次");
+  return title || "ETC批次";
+}
+
+function formatEtcUiErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : fallback;
+  return message
+    .replace(/ETC对账任务/g, "ETC批次流程")
+    .replace(/对账任务/g, "批次");
 }
 
 function taskCountText(task: Pick<EtcReconciliationTask, "etcInvoiceCount" | "supplementCount">) {
@@ -533,6 +544,47 @@ function businessBatchToBatchDetail(batch: EtcBusinessBatchDetail): EtcBatchDeta
   };
 }
 
+function reconciliationTaskToBatchSummary(task: EtcReconciliationTask): EtcBatchSummary {
+  const invoiceCount = task.importedInvoiceCount > 0 ? task.importedInvoiceCount : task.etcInvoiceCount;
+  const totalAmount = Number(task.oaTotalAmount) > 0
+    ? task.oaTotalAmount
+    : Number(task.importedInvoiceAmount) > 0
+      ? task.importedInvoiceAmount
+      : task.etcInvoiceAmount;
+  const plateSummary = task.vehiclePlates.map((plateNumber) => ({
+    plateNumber,
+    invoiceCount: 0,
+    totalAmount: "0.00",
+  }));
+  return {
+    id: task.taskId,
+    etcBatchId: formatTaskTitle(task),
+    externalBatchId: formatTaskTitle(task),
+    status: task.status === "closed" ? "submitted" : "unsubmitted",
+    sourceType: "reconciliation_task",
+    invoiceCount,
+    totalAmount: totalAmount || "0.00",
+    taxAmount: "0.00",
+    issueStartDate: task.periodStart,
+    issueEndDate: task.periodEnd,
+    passageStartDate: task.periodStart,
+    passageEndDate: task.periodEnd,
+    plateCount: task.vehiclePlates.length,
+    plateSummary,
+    linkedOaRowId: "",
+    linkedOaCaseId: "",
+    linkedOaApplicant: "",
+    linkedOaApplyDate: "",
+    linkedOaAmount: task.oaTotalAmount,
+    amountDelta: task.approvedDelta,
+    etcInvoiceCount: task.etcInvoiceCount,
+    supplementCount: task.supplementCount,
+    supplementAmount: task.supplementAmount,
+    displayCountText: taskCountText(task),
+    note: reconciliationStatusLabel(task.status),
+  };
+}
+
 const DESCRIPTION_EXPANSION_UNITS = 12;
 
 function estimatedDescriptionUnits(text: string) {
@@ -673,7 +725,7 @@ export default function EtcTicketManagementPage() {
       });
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-        setBatchListError(caught instanceof Error ? caught.message : "ETC业务批次加载失败。");
+        setBatchListError(formatEtcUiErrorMessage(caught, "ETC业务批次加载失败。"));
       }
     } finally {
       setLoading(false);
@@ -694,7 +746,7 @@ export default function EtcTicketManagementPage() {
       });
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-        setTaskListError(caught instanceof Error ? caught.message : "ETC对账任务加载失败。");
+        setTaskListError(formatEtcUiErrorMessage(caught, "ETC批次流程加载失败。"));
       }
     } finally {
       setTaskLoading(false);
@@ -750,7 +802,7 @@ export default function EtcTicketManagementPage() {
             setBatchDetailError(null);
             return;
           }
-          setBatchDetailError(caught instanceof Error ? caught.message : "ETC业务批次明细加载失败。");
+          setBatchDetailError(formatEtcUiErrorMessage(caught, "ETC业务批次明细加载失败。"));
         }
       })
       .finally(() => {
@@ -794,7 +846,7 @@ export default function EtcTicketManagementPage() {
     () => reconciliationTasks.find((task) => task.taskId === selectedTaskId) ?? null,
     [reconciliationTasks, selectedTaskId],
   );
-  const taskImportBatchIds = useMemo(() => {
+  const taskImportedBatchIds = useMemo(() => {
     const ids = new Set<string>();
     reconciliationTasks.forEach((task) => {
       if (task.etcBatchId) {
@@ -806,40 +858,29 @@ export default function EtcTicketManagementPage() {
     });
     return ids;
   }, [reconciliationTasks]);
-  const activeTaskIds = useMemo(
-    () => new Set(reconciliationTasks.map((task) => task.taskId).filter(Boolean)),
-    [reconciliationTasks],
+  const businessBatchTaskIds = useMemo(
+    () => new Set(businessBatches.map((batch) => batch.taskId).filter(Boolean)),
+    [businessBatches],
   );
-  const taskImportBatchIdByTaskId = useMemo(
-    () => new Map(
-      reconciliationTasks
-        .filter((task) => task.taskId && task.importBatchId)
-        .map((task) => [task.taskId, task.importBatchId] as const),
-    ),
-    [reconciliationTasks],
+  const taskOnlyBatches = useMemo(
+    () => activeStatus === "unsubmitted"
+      ? reconciliationTasks
+        .filter((task) => !businessBatchTaskIds.has(task.taskId))
+        .map(reconciliationTaskToBatchSummary)
+      : [],
+    [activeStatus, businessBatchTaskIds, reconciliationTasks],
   );
-  const taskScopedBusinessBatchIds = useMemo(
-    () => new Set(
-      businessBatches
-        .filter((batch) => {
-          if (!batch.taskId || !activeTaskIds.has(batch.taskId)) {
-            return false;
-          }
-          const taskImportBatchId = taskImportBatchIdByTaskId.get(batch.taskId);
-          return Boolean(taskImportBatchId && batch.importBatchIds.includes(taskImportBatchId));
-        })
-        .map((batch) => batch.businessBatchId),
+  const visibleBusinessBatchSummaries = useMemo(
+    () => batches.filter((batch) =>
+      !taskImportedBatchIds.has(batch.id)
+      && !taskImportedBatchIds.has(batch.etcBatchId)
+      && !taskImportedBatchIds.has(batch.externalBatchId)
     ),
-    [activeTaskIds, businessBatches, taskImportBatchIdByTaskId],
+    [batches, taskImportedBatchIds],
   );
   const visibleBatches = useMemo(
-    () => batches.filter((batch) =>
-      !taskImportBatchIds.has(batch.id)
-      && !taskImportBatchIds.has(batch.etcBatchId)
-      && !taskImportBatchIds.has(batch.externalBatchId)
-      && !taskScopedBusinessBatchIds.has(batch.id)
-    ),
-    [batches, taskImportBatchIds, taskScopedBusinessBatchIds],
+    () => [...taskOnlyBatches, ...visibleBusinessBatchSummaries],
+    [taskOnlyBatches, visibleBusinessBatchSummaries],
   );
   const selectedTaskBusinessBatch = useMemo(
     () => selectedTask
@@ -888,7 +929,7 @@ export default function EtcTicketManagementPage() {
       })
       .catch((caught) => {
         if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-          setTaskImportDetailError(caught instanceof Error ? caught.message : "已导入发票加载失败。");
+          setTaskImportDetailError(formatEtcUiErrorMessage(caught, "已导入发票加载失败。"));
         }
       })
       .finally(() => {
@@ -900,14 +941,19 @@ export default function EtcTicketManagementPage() {
   }, [selectedTaskBusinessBatch, selectedTaskImportBatchId]);
 
   useEffect(() => {
-    if (batches.length === 0) {
+    if (batches.length === 0 && selectedBatchId) {
+      setSelectedBatchId("");
+      setBatchDetail(null);
+      setBusinessBatchDetail(null);
       return;
     }
     if (visibleBatches.some((batch) => batch.id === selectedBatchId)) {
       return;
     }
+    const firstBusinessBatch = visibleBatches.find((batch) => batch.sourceType !== "reconciliation_task");
     setBatchDetail(null);
-    setSelectedBatchId(visibleBatches[0]?.id ?? "");
+    setBusinessBatchDetail(null);
+    setSelectedBatchId(firstBusinessBatch?.id ?? "");
   }, [batches.length, selectedBatchId, visibleBatches]);
   const ticketRootManualSources = useMemo(
     () => (selectedTask?.sourceFiles ?? []).filter(isManualTicketRootSource),
@@ -1016,18 +1062,18 @@ export default function EtcTicketManagementPage() {
       return "导入中，不能删除";
     }
     if (task.status === "closed") {
-      return "已关闭任务不能删除";
+      return "已关闭批次不能删除";
     }
     return "当前状态不能删除";
   };
   const deleteTaskDescription = (task: EtcReconciliationTask) => {
     if (task.status === "imported") {
-      return "将删除该任务及未进入 OA 的数据，并一并删除已导入发票。";
+      return "将删除该批次及未进入 OA 的数据，并一并删除已导入发票。";
     }
     if (task.status === "ready_for_import") {
-      return "将删除该任务及未进入 OA 的数据。";
+      return "将删除该批次及未进入 OA 的数据。";
     }
-    return "将删除该任务、上传文件和核对结果。已进入 OA 的数据不能删除。";
+    return "将删除该批次、上传文件和核对结果。已进入 OA 的数据不能删除。";
   };
   const businessBatchForBatchSummary = (batch: EtcBatchSummary) =>
     businessBatches.find((item) => item.businessBatchId === batch.id) ?? null;
@@ -1321,7 +1367,7 @@ export default function EtcTicketManagementPage() {
       const task = await action();
       mergeReconciliationTask(task);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "ETC对账任务操作失败。");
+      setActionError(formatEtcUiErrorMessage(caught, "ETC批次操作失败。"));
     } finally {
       setTaskActionLoading(false);
     }
@@ -1428,7 +1474,7 @@ export default function EtcTicketManagementPage() {
       setSupplementUploadNote("");
       setSelectedCardItemId(supplementUploadCard.itemId);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "补充凭证上传失败。");
+      setActionError(formatEtcUiErrorMessage(caught, "补充凭证上传失败。"));
     } finally {
       setSupplementUploadSubmitting(false);
     }
@@ -1546,7 +1592,7 @@ export default function EtcTicketManagementPage() {
       mergeReconciliationTask(task);
       setRemoveImportedInvoicesDialogOpen(false);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "移除发票失败。");
+      setActionError(formatEtcUiErrorMessage(caught, "移除发票失败。"));
     } finally {
       setRemoveImportedInvoicesSubmitting(false);
     }
@@ -1698,7 +1744,7 @@ export default function EtcTicketManagementPage() {
       }
       setDeleteTarget(null);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "删除失败。");
+      setActionError(formatEtcUiErrorMessage(caught, "删除失败。"));
     } finally {
       setDeleteSubmitting(false);
     }
@@ -1723,7 +1769,7 @@ export default function EtcTicketManagementPage() {
         oaDraftUrl: result.oaDraftUrl,
       });
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "OA 草稿创建失败。");
+      setActionError(formatEtcUiErrorMessage(caught, "OA 草稿创建失败。"));
     } finally {
       setDraftCreating(false);
     }
@@ -1769,7 +1815,7 @@ export default function EtcTicketManagementPage() {
       setDraftResult(null);
       setCreateDialogOpen(false);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "人工处理失败。");
+      setActionError(formatEtcUiErrorMessage(caught, "人工处理失败。"));
     } finally {
       setOaActionLoading(false);
     }
@@ -2051,93 +2097,71 @@ export default function EtcTicketManagementPage() {
                   </button>
                 ) : null}
               </div>
-              {activeStatus === "unsubmitted" ? (
-                <div className="etc-reconciliation-task-list" role="region" aria-label="ETC对账任务列表">
-                  <p className="etc-list-eyebrow">对账任务</p>
-                  {taskLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
-                  {taskListError ? <StatePanel tone="error" compact>{taskListError}</StatePanel> : null}
-                  {!taskLoading && !taskListError && reconciliationTasks.length === 0 ? (
-                    <StatePanel tone="empty" compact>暂无任务。</StatePanel>
-                  ) : null}
-                  <ul className="etc-list" aria-label="ETC对账任务">
-                    {reconciliationTasks.map((task) => {
-                      const deletable = canDeleteTask(task);
-                      const taskTitle = formatTaskTitle(task);
-                      return (
-                        <li
-                          key={task.taskId}
-                          className="etc-reconciliation-task-row"
-                          data-testid={`etc-reconciliation-task-row-${task.taskId}`}
-                        >
-                          <button
-                            type="button"
-                            className="etc-list-row-button"
-                            aria-label={`查看对账任务 ${taskTitle}`}
-                            aria-current={selectedTaskId === task.taskId ? "true" : undefined}
-                            data-selected={selectedTaskId === task.taskId ? "true" : undefined}
-                            onClick={() => setSelectedTaskId(task.taskId)}
-                          >
-                            <span className="etc-row-title">
-                              <strong>{formatShortDateRange(task.periodStart, task.periodEnd)}</strong>
-                              <span className="etc-status-tag">{reconciliationStatusLabel(task.status)}</span>
-                            </span>
-                            <span className="etc-batch-fields">
-                              <span>{taskTitle}</span>
-                              <span>{taskCountText(task)}</span>
-                              <span>{task.vehiclePlates.join("、") || "未记录车牌"}</span>
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            className="etc-icon-action etc-icon-action--danger"
-                            aria-label={deletable ? `删除任务 ${taskTitle}` : deleteTaskDisabledReason(task)}
-                            title={deletable ? "删除任务" : deleteTaskDisabledReason(task)}
-                            disabled={!deletable || deleteSubmitting}
-                            onClick={(event) => openDeleteTaskDialog(task, event)}
-                          >
-                            <Trash2 aria-hidden="true" size={16} />
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : null}
               {loading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
               {batchListError ? <StatePanel tone="error" compact>{batchListError}</StatePanel> : null}
               {!loading && !batchListError && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
               <ul className="etc-batch-list" aria-label="ETC批次列表">
                 {visibleBatches.map((batch) => {
-                  const deletable = canDeleteBatch(batch);
+                  const taskRow = batch.sourceType === "reconciliation_task"
+                    ? reconciliationTasks.find((task) => task.taskId === batch.id) ?? null
+                    : null;
+                  const deletable = taskRow ? canDeleteTask(taskRow) : canDeleteBatch(batch);
                   const batchTitle = batch.externalBatchId || batch.etcBatchId;
                   const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
+                  const rowLinkedTask = taskRow ?? (
+                    businessBatch?.taskId
+                      ? reconciliationTasks.find((task) => task.taskId === businessBatch.taskId) ?? null
+                      : null
+                  );
+                  const selected = taskRow ? selectedTaskId === taskRow.taskId : selectedBatchId === batch.id;
+                  const rowStartDate = rowLinkedTask?.periodStart ?? batch.passageStartDate;
+                  const rowEndDate = rowLinkedTask?.periodEnd ?? batch.passageEndDate;
+                  const rowCountText = rowLinkedTask
+                    ? taskCountText(rowLinkedTask)
+                    : batch.displayCountText || taskCountText({ etcInvoiceCount: batch.etcInvoiceCount, supplementCount: batch.supplementCount });
+                  const rowAmount = rowLinkedTask && Number(rowLinkedTask.oaTotalAmount) > 0
+                    ? rowLinkedTask.oaTotalAmount
+                    : batch.totalAmount;
+                  const rowAmountText = rowLinkedTask
+                    ? `金额 ${formatMoney(rowAmount)} 元`
+                    : `${batch.invoiceCount} 张 / ${formatMoney(batch.totalAmount)} 元`;
                   return (
                     <li
                       key={batch.id}
                       className={`etc-batch-row ${batch.status}`}
-                      data-testid={`etc-batch-row-${batch.id}`}
+                      data-testid={taskRow ? `etc-reconciliation-task-row-${taskRow.taskId}` : `etc-batch-row-${batch.id}`}
                     >
                       <button
                         type="button"
                         className="etc-list-row-button"
                         aria-label={`查看ETC批次 ${batchTitle}`}
-                        aria-current={selectedBatchId === batch.id ? "true" : undefined}
-                        data-selected={selectedBatchId === batch.id ? "true" : undefined}
+                        aria-current={selected ? "true" : undefined}
+                        data-selected={selected ? "true" : undefined}
                         onClick={() => {
+                          if (taskRow) {
+                            setSelectedTaskId(taskRow.taskId);
+                            setSelectedBatchId("");
+                            setBatchDetail(null);
+                            setBusinessBatchDetail(null);
+                            return;
+                          }
                           setBatchDetail(null);
                           setSelectedBatchId(batch.id);
+                          if (businessBatch?.taskId) {
+                            setSelectedTaskId(businessBatch.taskId);
+                          }
                         }}
                       >
                         <span className="etc-row-title">
-                          <strong>{formatShortDateRange(batch.passageStartDate, batch.passageEndDate)}</strong>
+                          <strong>{formatShortDateRange(rowStartDate, rowEndDate)}</strong>
                           <span className={`etc-status-tag etc-status-tag--${businessBatch ? businessBatchTone(businessBatch.status) : (batch.status === "submitted" ? "success" : "primary")}`}>
                             {businessBatch ? businessBatchStatusLabel(businessBatch.status) : batchStatusLabel(batch.status)}
                           </span>
                         </span>
                         <span className="etc-batch-fields">
                           <span>{batchTitle}</span>
-                          <span>{batch.displayCountText || taskCountText({ etcInvoiceCount: batch.etcInvoiceCount, supplementCount: batch.supplementCount })}</span>
-                          <span>{batch.invoiceCount} 张 / {formatMoney(batch.totalAmount)} 元</span>
+                          <span>{rowCountText}</span>
+                          <span>{rowAmountText}</span>
                           {businessBatch?.importAttempts.length ? <span>导入记录 {businessBatch.importAttempts.length} 次</span> : <span>{batch.plateCount} 个车牌</span>}
                           {batch.status === "submitted" && batchOaLabel(batch) ? <span>{batchOaLabel(batch)}</span> : null}
                         </span>
@@ -2145,10 +2169,16 @@ export default function EtcTicketManagementPage() {
                       <button
                         type="button"
                         className="etc-icon-action etc-icon-action--danger"
-                        aria-label={deletable ? `删除批次 ${batchTitle}` : deleteBatchDisabledReason(batch)}
-                        title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}
+                        aria-label={deletable ? `删除批次 ${batchTitle}` : taskRow ? deleteTaskDisabledReason(taskRow) : deleteBatchDisabledReason(batch)}
+                        title={deletable ? "删除批次" : taskRow ? deleteTaskDisabledReason(taskRow) : deleteBatchDisabledReason(batch)}
                         disabled={!deletable || deleteSubmitting}
-                        onClick={(event) => openDeleteBatchDialog(batch, event)}
+                        onClick={(event) => {
+                          if (taskRow) {
+                            openDeleteTaskDialog(taskRow, event);
+                            return;
+                          }
+                          openDeleteBatchDialog(batch, event);
+                        }}
                       >
                         <Trash2 aria-hidden="true" size={16} />
                       </button>
@@ -2159,12 +2189,13 @@ export default function EtcTicketManagementPage() {
             </section>
 
             <div className="etc-right-column">
-              <section className="etc-reconciliation-workspace" aria-label="ETC对账工作区">
+              {activeStatus === "unsubmitted" ? (
+              <section className="etc-reconciliation-workspace" aria-label="ETC批次流程">
                 <div className="etc-reconciliation-workspace-content">
                   <div className="etc-detail-heading">
                     <div>
-                      <h2>对账任务</h2>
-                      <p>{selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧任务，或新建批次。"}</p>
+                      <h2>批次流程</h2>
+                      <p>{selectedTask ? `${formatTaskTitle(selectedTask)} / v${selectedTask.version}` : "选择左侧批次，或新建批次。"}</p>
                     </div>
                     <div className="etc-section-actions">
                       {selectedTask && selectedTask.status === "ready_for_import" ? (
@@ -2188,14 +2219,16 @@ export default function EtcTicketManagementPage() {
                         onClick={() => setTaskPanelExpanded((current) => !current)}
                       >
                         {taskPanelExpanded ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
-                        {taskPanelExpanded ? "折叠任务" : "展开任务"}
+                        {taskPanelExpanded ? "折叠流程" : "展开流程"}
                       </button>
                     </div>
                   </div>
 
                   {taskPanelExpanded ? (
                     <div id="etc-reconciliation-task-content">
-                      {selectedTask ? (
+                      {taskLoading ? <StatePanel tone="loading" compact>加载中。</StatePanel> : null}
+                      {taskListError ? <StatePanel tone="error" compact>{taskListError}</StatePanel> : null}
+                      {!taskLoading && !taskListError && selectedTask ? (
                         <div className="etc-reconciliation-task-content">
                           <div className="etc-upload-blocks" aria-label="ETC对账文件上传">
                             <div className="etc-upload-drop-grid" aria-label="ETC导入动作">
@@ -2263,13 +2296,15 @@ export default function EtcTicketManagementPage() {
                                         ) : null}
                                         {sourceFile.hasBlockingIssue ? <span className="etc-status-tag etc-status-tag--error">blocking</span> : null}
                                       </div>
-                                      <span className="etc-source-file-id">{sourceFile.fileId}</span>
+                            {sourceSummary ? (
+                              <span className="etc-source-file-id">{sourceSummary.dateRange}</span>
+                            ) : null}
                                     </div>
                                     <button
                                       type="button"
                                       className="etc-icon-action etc-icon-action--danger"
-                                      aria-label={taskIsMutable ? `删除源文件 ${sourceFile.originalName}` : "已确认/已导入任务不能删除源文件"}
-                                      title={taskIsMutable ? "删除源文件" : "已确认/已导入任务不能删除源文件"}
+                                      aria-label={taskIsMutable ? `删除源文件 ${sourceFile.originalName}` : "已确认/已导入批次不能删除源文件"}
+                                      title={taskIsMutable ? "删除源文件" : "已确认/已导入批次不能删除源文件"}
                                       disabled={!taskIsMutable || taskActionLoading || deleteSubmitting}
                                       onClick={(event) => openDeleteSourceFileDialog(sourceFile, event)}
                                     >
@@ -2554,13 +2589,14 @@ export default function EtcTicketManagementPage() {
                       </section>
                       ) : null}
                     </div>
-                  ) : (
-                    <StatePanel tone="empty">暂无任务。</StatePanel>
-                  )}
+                  ) : !taskLoading && !taskListError ? (
+                    <StatePanel tone="empty">暂无批次流程。</StatePanel>
+                  ) : null}
                     </div>
                   ) : null}
                 </div>
               </section>
+              ) : null}
 
               <section className="etc-batch-detail-panel" aria-label="ETC批次详情">
                 <div className="etc-batch-detail-content">
@@ -2600,7 +2636,15 @@ export default function EtcTicketManagementPage() {
                     </div>
                   </div>
 
-                  {selectedBusinessBatch && isOaDetectionStatus(selectedBusinessBatch.status) ? renderOaStatusPanel(selectedBusinessBatch) : null}
+                  {selectedBusinessBatch
+                    && isOaDetectionStatus(selectedBusinessBatch.status)
+                    && (
+                      activeStatus !== "unsubmitted"
+                      || !selectedTaskBusinessBatch
+                      || selectedTaskBusinessBatch.businessBatchId !== selectedBusinessBatch.businessBatchId
+                    )
+                    ? renderOaStatusPanel(selectedBusinessBatch)
+                    : null}
 
                   <div className="etc-detail-metrics" aria-label="批次指标">
                     <div>
@@ -2733,7 +2777,7 @@ export default function EtcTicketManagementPage() {
 
         <AppDialog
           open={Boolean(deleteTarget)}
-          title={deleteTarget?.kind === "task" ? "删除任务" : deleteTarget?.kind === "sourceFile" ? "删除源文件" : "删除批次"}
+          title={deleteTarget?.kind === "task" ? "删除批次" : deleteTarget?.kind === "sourceFile" ? "删除源文件" : "删除批次"}
           description={deleteTarget?.kind === "task"
             ? deleteTaskDescription(deleteTarget.item)
             : deleteTarget?.kind === "sourceFile"
@@ -2755,7 +2799,7 @@ export default function EtcTicketManagementPage() {
         >
           {deleteTarget?.kind === "task" ? (
             <div className="etc-dialog-detail-list">
-              <p>任务：{formatTaskTitle(deleteTarget.item)}</p>
+              <p>批次：{formatTaskTitle(deleteTarget.item)}</p>
               <p>期间：{formatDateRange(deleteTarget.item.periodStart, deleteTarget.item.periodEnd)}</p>
               <p>数量：{taskCountText(deleteTarget.item)}</p>
               {deleteTarget.item.status === "imported" || deleteTarget.item.hasImportedInvoices ? (
@@ -2767,7 +2811,7 @@ export default function EtcTicketManagementPage() {
             <div className="etc-dialog-detail-list">
               <p>文件：{deleteTarget.item.originalName || deleteTarget.item.fileId}</p>
               <p>类型：{sourceKindLabel(deleteTarget.item.sourceKind)}</p>
-              <p>任务：{formatTaskTitle(deleteTarget.task)}</p>
+              <p>批次：{formatTaskTitle(deleteTarget.task)}</p>
               <p>版本：v{deleteTarget.task.version}</p>
             </div>
           ) : deleteTarget?.kind === "batch" ? (
@@ -2783,7 +2827,7 @@ export default function EtcTicketManagementPage() {
         <AppDialog
           open={removeImportedInvoicesDialogOpen}
           title="移除发票"
-          description="清空本任务下已导入发票，任务可重新导入。"
+          description="清空本批次下已导入发票，批次可重新导入。"
           onClose={() => {
             if (!removeImportedInvoicesSubmitting) {
               setRemoveImportedInvoicesDialogOpen(false);
@@ -2812,7 +2856,7 @@ export default function EtcTicketManagementPage() {
         >
           {selectedTask ? (
             <div className="etc-dialog-detail-list">
-              <p>任务：{formatTaskTitle(selectedTask)}</p>
+              <p>批次：{formatTaskTitle(selectedTask)}</p>
               <p>期间：{formatDateRange(selectedTask.periodStart, selectedTask.periodEnd)}</p>
               <p>已导入：{importedInvoiceCount} 张</p>
               <p>版本：v{selectedTask.version}</p>

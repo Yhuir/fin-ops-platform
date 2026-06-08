@@ -16325,6 +16325,17 @@ class Application:
                     case_id = self._case_id_for_group(group)
                     if case_id:
                         row["case_id"] = case_id
+                    tags = list(row.get("tags") or [])
+                    if "已关联ETC发票" not in tags:
+                        tags.append("已关联ETC发票")
+                    row["tags"] = tags
+                    if section == "paired":
+                        row["status"] = "paired"
+                        row["invoice_bank_relation"] = {
+                            "code": "fully_linked",
+                            "label": "已关联ETC发票",
+                            "tone": "success",
+                        }
                     invoice_rows.append(row)
                     appended_external_batch_ids.add(external_batch_id)
                 for supplement_row in supplement_rows:
@@ -16336,7 +16347,9 @@ class Application:
                         row["case_id"] = case_id
                     invoice_rows.append(row)
                     appended_external_batch_ids.add(external_batch_id)
-        missing_external_batch_ids = set(supplement_rows_by_external_batch_id) - appended_external_batch_ids
+        missing_external_batch_ids = (
+            set(summary_rows_by_external_batch_id) | set(supplement_rows_by_external_batch_id)
+        ) - appended_external_batch_ids
         if not missing_external_batch_ids:
             return
         open_section = payload.setdefault("open", {"groups": []})
@@ -16371,6 +16384,7 @@ class Application:
         batches_by_internal_id = {batch.id: batch for batch in self._etc_service.list_batches()}
         batches_by_external_id = {batch.etc_batch_id: batch for batch in batches_by_internal_id.values()}
         invoices_by_external_batch_id: dict[str, list[object]] = defaultdict(list)
+        batch_by_external_batch_id: dict[str, object] = {}
         invoices = self._import_service.list_invoices()
         if not invoices:
             list_submitted_etc_invoices = getattr(self._state_store, "list_submitted_etc_invoices", None)
@@ -16384,10 +16398,16 @@ class Application:
                 continue
             batch = batches_by_internal_id.get(submission_batch_id) or batches_by_external_id.get(submission_batch_id)
             external_batch_id = batch.etc_batch_id if batch is not None else submission_batch_id
+            if batch is not None:
+                batch_by_external_batch_id[external_batch_id] = batch
             invoices_by_external_batch_id[external_batch_id].append(invoice)
 
         return {
-            external_batch_id: self._build_etc_invoice_summary_row(external_batch_id, invoices)
+            external_batch_id: self._build_etc_invoice_summary_row(
+                external_batch_id,
+                invoices,
+                batch=batch_by_external_batch_id.get(external_batch_id),
+            )
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
         }
@@ -16410,7 +16430,13 @@ class Application:
             ]
         return rows
 
-    def _build_etc_invoice_summary_row(self, external_batch_id: str, invoices: list[object]) -> dict[str, object]:
+    def _build_etc_invoice_summary_row(
+        self,
+        external_batch_id: str,
+        invoices: list[object],
+        *,
+        batch: object | None = None,
+    ) -> dict[str, object]:
         sorted_invoices = sorted(
             invoices,
             key=lambda invoice: (
@@ -16418,13 +16444,19 @@ class Application:
                 str(getattr(invoice, "digital_invoice_no", "") or getattr(invoice, "invoice_no", "") or ""),
             ),
         )
-        total_amount = sum(
+        invoice_total_amount = sum(
             (
                 self._decimal_from_value(getattr(invoice, "total_with_tax", None))
                 or self._decimal_from_value(getattr(invoice, "amount", None))
                 or Decimal("0.00")
             )
             for invoice in sorted_invoices
+        )
+        total_amount = (
+            self._decimal_from_value(getattr(batch, "oa_total_amount", None))
+            or self._decimal_from_value(getattr(batch, "total_amount", None))
+            or self._decimal_from_value(getattr(batch, "etc_invoice_amount", None))
+            or invoice_total_amount
         )
         issue_dates = [
             str(getattr(invoice, "invoice_date", "") or "").strip()
@@ -16462,8 +16494,8 @@ class Application:
             "tax_amount": "—",
             "total_with_tax": self._format_money(total_amount),
             "invoice_type": "进项发票",
-            "invoice_bank_relation": {"code": "etc_invoice_summary", "label": "已关联ETC发票", "tone": "success"},
-            "tags": ["ETC", "已关联ETC发票"],
+            "invoice_bank_relation": {"code": "pending_oa_bank_match", "label": "待匹配OA/流水", "tone": "warn"},
+            "tags": ["ETC", "ETC批量提交"],
             "etc_batch_id": external_batch_id,
             "etc_invoice_count": count,
             "available_actions": ["detail"],

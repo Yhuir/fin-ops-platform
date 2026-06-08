@@ -3101,6 +3101,114 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "manually_marked_submitted")
         self.assertEqual(payload["oaProcessStatus"], "manual_without_oa_row")
 
+    def test_etc_business_manual_submitted_closes_the_linked_reconciliation_task(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
+            self.assertEqual(preview_response.status_code, 200)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            business_batches = json.loads(
+                app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
+            )["data"]["items"]
+            business_batch = business_batches[0]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": business_batch["version"]}),
+            )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
+
+            manual_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{drafted['businessBatchId']}/manual-oa-status",
+                json.dumps({
+                    "decision": "submitted",
+                    "reason": "用户确认 OA 草稿已提交。",
+                    "expectedVersion": drafted["version"],
+                }),
+            )
+            manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
+            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+            active_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=active").body)["data"]
+            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
+
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertEqual(manual_payload["status"], "manually_marked_submitted")
+        self.assertEqual(task_payload["status"], "closed")
+        self.assertEqual(task_payload["oaDraftStatus"], "submitted_confirmed")
+        self.assertIsNotNone(task_payload["submittedConfirmedAt"])
+        self.assertEqual(active_batches["total"], 0)
+        self.assertEqual(submitted_batches["total"], 1)
+        self.assertEqual(submitted_batches["items"][0]["businessBatchId"], manual_payload["businessBatchId"])
+
+    def test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
+            self.assertEqual(preview_response.status_code, 200)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            business_batch = json.loads(
+                app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
+            )["data"]["items"][0]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": business_batch["version"]}),
+            )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
+            submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
+            submission_batch.total_amount = Decimal("1673.30")
+            submission_batch.oa_total_amount = Decimal("1673.30")
+            submission_batch.etc_invoice_amount = Decimal("27.14")
+            submission_batch.etc_invoice_count = 2
+            submission_batch.display_count_text = "ETC票 2 + 补充凭证 0"
+
+            manual_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{drafted['businessBatchId']}/manual-oa-status",
+                json.dumps({
+                    "decision": "submitted",
+                    "reason": "用户确认 OA 草稿已提交。",
+                    "expectedVersion": drafted["version"],
+                }),
+            )
+            workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+            open_invoice_rows = [
+                row
+                for group in workbench_payload["open"]["groups"]
+                for row in group["invoice_rows"]
+            ]
+            summary_rows = [row for row in open_invoice_rows if row.get("source_kind") == "etc_invoice_summary"]
+            scattered_etc_rows = [row for row in open_invoice_rows if row.get("source_kind") == "etc_invoice"]
+
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertEqual(scattered_etc_rows, [])
+        self.assertEqual(len(summary_rows), 1)
+        summary_row = summary_rows[0]
+        self.assertEqual(summary_row["total_with_tax"], "1,673.30")
+        self.assertEqual(summary_row["amount"], "1,673.30")
+        self.assertEqual(summary_row["etc_invoice_count"], 2)
+        self.assertEqual(summary_row["invoice_bank_relation"]["code"], "pending_oa_bank_match")
+        detail_response = app.handle_request("GET", f"/api/workbench/rows/{summary_row['id']}")
+        detail_payload = json.loads(detail_response.body)
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn("ETC001", detail_payload["row"]["detail_fields"]["发票清单"])
+        self.assertIn("ETC002", detail_payload["row"]["detail_fields"]["发票清单"])
+
     def test_etc_business_batch_delete_is_idempotent_for_stale_business_ids(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -3816,7 +3924,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(confirm_response.body)["error"], "preview_stale")
         self.assertEqual(json.loads(query_response.body)["total"], 0)
 
-    def test_confirmed_etc_submission_hides_scatter_invoice_from_workbench(self) -> None:
+    def test_confirmed_etc_submission_replaces_scatter_invoice_with_open_summary_in_workbench(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
@@ -3850,7 +3958,11 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(len(before_invoice_rows), 1)
         self.assertEqual(before_invoice_rows[0]["source_kind"], "etc_invoice")
         self.assertIn("ETC", before_invoice_rows[0]["tags"])
-        self.assertEqual(after_invoice_rows, [])
+        self.assertEqual(len(after_invoice_rows), 1)
+        self.assertEqual(after_invoice_rows[0]["source_kind"], "etc_invoice_summary")
+        self.assertEqual(after_invoice_rows[0]["total_with_tax"], "13.07")
+        self.assertEqual(after_invoice_rows[0]["invoice_bank_relation"]["code"], "pending_oa_bank_match")
+        self.assertIn("ETC批量提交", after_invoice_rows[0]["tags"])
         self.assertEqual(canonical_invoice.workbench_visibility, "hidden_after_etc_submission")
 
     def test_confirmed_etc_submission_renders_folded_invoice_summary_for_matching_oa(self) -> None:

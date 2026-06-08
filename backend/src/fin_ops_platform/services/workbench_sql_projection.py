@@ -211,6 +211,8 @@ class WorkbenchSqlProjectionBuilder:
             rows[str(row["id"])] = row
         for row in self._invoice_rows(month):
             rows[str(row["id"])] = row
+        for row in self._open_etc_invoice_summary_rows(month):
+            rows[str(row["id"])] = row
         return rows
 
     def _oa_projection_rows(self, month: str) -> list[dict[str, Any]]:
@@ -1060,6 +1062,10 @@ class WorkbenchSqlProjectionBuilder:
                         "label": "已关联ETC发票",
                         "tone": "success",
                     }
+                    tags = list(row.get("tags") or [])
+                    if "已关联ETC发票" not in tags:
+                        tags.append("已关联ETC发票")
+                    row["tags"] = tags
                     if relation_amount_check:
                         row["relation_amount_check"] = deepcopy(relation_amount_check)
                     working_rows_by_id[str(row["id"])] = row
@@ -1355,16 +1361,54 @@ class WorkbenchSqlProjectionBuilder:
         }
         if not external_batch_ids:
             return {}
-        rows = self._connection.fetch_all(
+        return self._etc_invoice_summary_rows(external_batch_ids=external_batch_ids)
+
+    def _open_etc_invoice_summary_rows(self, month: str) -> list[dict[str, Any]]:
+        return list(self._etc_invoice_summary_rows(month=month).values())
+
+    def _etc_invoice_summary_rows(
+        self,
+        *,
+        month: str | None = None,
+        external_batch_ids: set[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        normalized_external_batch_ids = {
+            str(external_batch_id).strip()
+            for external_batch_id in set(external_batch_ids or set())
+            if str(external_batch_id).strip()
+        }
+        filters = [
+            "invoices.status <> 'deleted'",
             """
+            (
+                invoices.workbench_visibility = 'hidden_after_etc_submission'
+             or invoices.raw_payload->'normalized_payload'->>'workbench_visibility' = 'hidden_after_etc_submission'
+             or invoices.raw_payload->'normalized_payload'->>'etc_submission_status' = 'submitted'
+            )
+            """,
+        ]
+        params: list[Any] = []
+        normalized_month = str(month or "").strip()
+        if normalized_month:
+            filters.append("invoices.invoice_month = %s::date")
+            params.append(month_start(normalized_month))
+        if normalized_external_batch_ids:
+            filters.append("submitted_batches.external_etc_batch_id = any(%s)")
+            params.append(sorted(normalized_external_batch_ids))
+        where_clause = "\n              and ".join(filters)
+        rows = self._connection.fetch_all(
+            f"""
             with submitted_batches as (
                 select
                     submission_batch_id,
-                    coalesce(raw_payload->'normalized_payload'->>'etc_batch_id', submission_batch_id) as external_etc_batch_id
+                    coalesce(nullif(raw_payload->'normalized_payload'->>'etc_batch_id', ''), submission_batch_id) as external_etc_batch_id,
+                    raw_payload->'normalized_payload' as batch_payload
                 from app.etc_submission_batches
+                where status in ('submitted_confirmed', 'submitted', 'closed')
             )
             select
                 submitted_batches.external_etc_batch_id,
+                submitted_batches.batch_payload,
                 coalesce(invoices.legacy_mongo_id, invoices.id::text) as row_id,
                 invoices.invoice_type,
                 invoices.invoice_no,
@@ -1387,30 +1431,46 @@ class WorkbenchSqlProjectionBuilder:
             join submitted_batches
               on submitted_batches.submission_batch_id = coalesce(invoices.raw_payload->'normalized_payload'->>'etc_submission_batch_id', '')
               or submitted_batches.external_etc_batch_id = coalesce(invoices.raw_payload->'normalized_payload'->>'etc_submission_batch_id', '')
-            where submitted_batches.external_etc_batch_id = any(%s)
-              and invoices.status <> 'deleted'
-              and (
-                    invoices.workbench_visibility = 'hidden_after_etc_submission'
-                 or invoices.raw_payload->'normalized_payload'->>'workbench_visibility' = 'hidden_after_etc_submission'
-                 or invoices.raw_payload->'normalized_payload'->>'etc_submission_status' = 'submitted'
-              )
+            where {where_clause}
             order by submitted_batches.external_etc_batch_id, invoices.invoice_date, row_id
             """,
-            (sorted(external_batch_ids),),
+            tuple(params),
         )
         invoices_by_external_batch_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        batch_payload_by_external_batch_id: dict[str, dict[str, Any]] = {}
         for row in rows:
             external_batch_id = str(row.get("external_etc_batch_id") or "").strip()
-            if external_batch_id:
-                invoices_by_external_batch_id[external_batch_id].append(row)
+            if not external_batch_id:
+                continue
+            invoices_by_external_batch_id[external_batch_id].append(row)
+            batch_payload = row_payload(row, "batch_payload")
+            if isinstance(batch_payload, dict):
+                batch_payload_by_external_batch_id[external_batch_id] = batch_payload
         return {
-            external_batch_id: self._build_etc_invoice_summary_row(external_batch_id, invoices)
+            external_batch_id: self._build_etc_invoice_summary_row(
+                external_batch_id,
+                invoices,
+                batch_payload=batch_payload_by_external_batch_id.get(external_batch_id),
+            )
             for external_batch_id, invoices in invoices_by_external_batch_id.items()
             if invoices
         }
 
-    def _build_etc_invoice_summary_row(self, external_batch_id: str, invoices: list[dict[str, Any]]) -> dict[str, Any]:
-        total_amount = sum((_decimal_value(row.get("total_with_tax") or row.get("amount")) for row in invoices), Decimal("0.00"))
+    def _build_etc_invoice_summary_row(
+        self,
+        external_batch_id: str,
+        invoices: list[dict[str, Any]],
+        *,
+        batch_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        invoice_total_amount = sum((_decimal_value(row.get("total_with_tax") or row.get("amount")) for row in invoices), Decimal("0.00"))
+        batch_payload = batch_payload if isinstance(batch_payload, dict) else {}
+        total_amount = (
+            _decimal_or_none(batch_payload.get("oa_total_amount"))
+            or _decimal_or_none(batch_payload.get("total_amount"))
+            or _decimal_or_none(batch_payload.get("etc_invoice_amount"))
+            or invoice_total_amount
+        )
         issue_dates = [_date_text(row.get("invoice_date")) for row in invoices if _date_text(row.get("invoice_date"))]
         seller_names = [
             str(row.get("seller_name") or row.get("counterparty_name") or "").strip()
@@ -1418,7 +1478,7 @@ class WorkbenchSqlProjectionBuilder:
             if str(row.get("seller_name") or row.get("counterparty_name") or "").strip()
         ]
         first_seller_name = seller_names[0] if seller_names else "ETC发票"
-        count = len(invoices)
+        count = _int_or_none(batch_payload.get("etc_invoice_count")) or len(invoices)
         title = f"ETC发票 {count} 张"
         issue_range = _date_range_label(issue_dates)
         total_amount_text = _money_text(total_amount)
@@ -1441,8 +1501,8 @@ class WorkbenchSqlProjectionBuilder:
             "tax_amount": "—",
             "total_with_tax": total_amount_text,
             "invoice_type": "进项发票",
-            "invoice_bank_relation": {"code": "etc_invoice_summary", "label": "已关联ETC发票", "tone": "success"},
-            "tags": ["ETC", "已关联ETC发票"],
+            "invoice_bank_relation": {"code": "pending_oa_bank_match", "label": "待匹配OA/流水", "tone": "warn"},
+            "tags": ["ETC", "ETC批量提交"],
             "etc_batch_id": external_batch_id,
             "etc_invoice_count": count,
             "available_actions": ["detail"],
@@ -1554,6 +1614,15 @@ def _decimal_value(value: object) -> Decimal:
         return Decimal("0.00")
 
 
+def _decimal_or_none(value: object) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value).replace(",", "")).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return None
+
+
 def _money_text(value: Decimal) -> str:
     return f"{value.quantize(Decimal('0.01')):,.2f}"
 
@@ -1591,6 +1660,15 @@ def _int_value(value: object, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _int_or_none(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_formal_attachment_invoice_evidence(evidence: dict[str, Any]) -> bool:

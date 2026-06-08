@@ -263,6 +263,18 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "提交OA" })).not.toBeInTheDocument();
   });
 
+  test("renders a unified ETC batch workflow list without a separate reconciliation task list", async () => {
+    installMockApiFetch();
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
+    expect(within(page).queryByRole("region", { name: "ETC对账任务列表" })).not.toBeInTheDocument();
+    expect(within(page).queryByText("对账任务")).not.toBeInTheDocument();
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("ETC-2026-03-A");
+  });
+
   test("shows business batch load errors without rendering a real empty batch state", async () => {
     installMockApiFetch();
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockRejectedValue(new Error("业务批次服务不可用，请稍后重试。"));
@@ -276,14 +288,14 @@ describe("ETC ticket management page", () => {
 
   test("shows reconciliation task load errors without rendering a real empty task state", async () => {
     installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockRejectedValue(new Error("对账任务服务繁忙，请稍后重试。"));
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockRejectedValue(new Error("批次流程服务繁忙，请稍后重试。"));
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const taskRegion = await within(page).findByRole("region", { name: "ETC对账任务列表" });
-    expect(await within(taskRegion).findByText("对账任务服务繁忙，请稍后重试。")).toBeInTheDocument();
-    expect(within(taskRegion).queryByText("暂无任务。")).not.toBeInTheDocument();
+    const workflowRegion = await within(page).findByRole("region", { name: "ETC批次流程" });
+    expect(await within(workflowRegion).findByText("批次流程服务繁忙，请稍后重试。")).toBeInTheDocument();
+    expect(within(workflowRegion).queryByText("暂无批次流程。")).not.toBeInTheDocument();
   });
 
   test("shows business batch detail load errors without rendering detail as truly empty", async () => {
@@ -306,12 +318,12 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-task-001")).toBeInTheDocument();
+    expect(await within(page).findByTestId("etc-reconciliation-task-row-etc_task_ready_001")).toBeInTheDocument();
     await user.click(within(page).getByRole("button", { name: "新建批次" }));
 
     await waitFor(() => expect(createTask).toHaveBeenCalledWith({ title: "新建ETC对账批次" }));
     expect(await within(page).findByText("新建 ETC 对账批次失败，请稍后重试。")).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-reconciliation-task-row-etc-recon-task-001")).toBeInTheDocument();
+    expect(within(page).getByTestId("etc-reconciliation-task-row-etc_task_ready_001")).toBeInTheDocument();
   });
 
   test("deletes an unsubmitted ETC batch through confirmation and refreshes the list", async () => {
@@ -633,23 +645,23 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-task-001");
-    await user.click(within(row).getByRole("button", { name: "删除任务 2026-02 ETC 对账" }));
+    const row = await within(page).findByTestId("etc-reconciliation-task-row-etc_task_ready_001");
+    await user.click(within(row).getByRole("button", { name: "删除批次 2026-03 ETC批次" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
-    expect(dialog).toHaveTextContent("2026-02 ETC 对账");
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
+    expect(dialog).toHaveTextContent("2026-03 ETC批次");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/reconciliation-tasks/etc-recon-task-001",
+        "/api/etc/reconciliation-tasks/etc_task_ready_001",
         expect.objectContaining({
           method: "DELETE",
-          body: JSON.stringify({ expectedVersion: 3 }),
+          body: JSON.stringify({ expectedVersion: 7 }),
         }),
       );
     });
-    expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-task-001")).not.toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-reconciliation-task-row-etc_task_ready_001")).not.toBeInTheDocument();
   });
 
   test("keeps the task delete dialog and row when reconciliation task deletion fails", async () => {
@@ -689,20 +701,20 @@ describe("ETC ticket management page", () => {
     };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [task] } as never);
     vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(task as never);
-    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockRejectedValue(new Error("删除任务失败，请刷新后重试。") as never);
+    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockRejectedValue(new Error("删除批次失败，请刷新后重试。") as never);
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-delete-fail-001");
-    await user.click(within(row).getByRole("button", { name: "删除任务 2026-04 ETC 删除失败" }));
+    await user.click(within(row).getByRole("button", { name: "删除批次 2026-04 ETC 删除失败" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => expect(deleteTask).toHaveBeenCalledWith("etc-recon-delete-fail-001", 4));
-    expect(await within(page).findByText("删除任务失败，请刷新后重试。")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "删除任务" })).toBeInTheDocument();
+    expect(await within(page).findByText("删除批次失败，请刷新后重试。")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "删除批次" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-reconciliation-task-row-etc-recon-delete-fail-001")).toBeInTheDocument();
   });
 
@@ -758,15 +770,15 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-delete-refresh-hangs-001");
-    await user.click(within(row).getByRole("button", { name: "删除任务 2026-02 ETC 对账" }));
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    await user.click(within(row).getByRole("button", { name: "删除批次 2026-02 ETC批次" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
       expect(deleteTask).toHaveBeenCalledWith("etc-recon-delete-refresh-hangs-001", 3);
     });
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "删除任务" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "删除批次" })).not.toBeInTheDocument();
     });
     expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-delete-refresh-hangs-001")).not.toBeInTheDocument();
     expect(screen.queryByText("正在删除...")).not.toBeInTheDocument();
@@ -867,10 +879,10 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001");
-    await user.click(within(row).getByRole("button", { name: "删除任务 2026-03 ETC 已导入" }));
+    await user.click(within(row).getByRole("button", { name: "删除批次 2026-03 ETC 已导入" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
-    expect(dialog).toHaveTextContent("将删除该任务及未进入 OA 的数据");
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
+    expect(dialog).toHaveTextContent("将删除该批次及未进入 OA 的数据");
     expect(dialog).toHaveTextContent("一并删除已导入发票");
     expect(dialog.textContent).toContain("重新确认并导入 ZIP");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
@@ -881,7 +893,7 @@ describe("ETC ticket management page", () => {
     await waitFor(() => {
       expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-imported-delete-001")).not.toBeInTheDocument();
     });
-    expect(within(page).getByText("选择左侧任务，或新建批次。")).toBeInTheDocument();
+    expect(within(page).getByText("选择左侧批次，或新建批次。")).toBeInTheDocument();
     expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
   });
 
@@ -929,11 +941,11 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: "删除任务 2026-03 ETC 已建草稿" });
+    const deleteButton = await within(page).findByRole("button", { name: "删除批次 2026-03 ETC 已建草稿" });
     expect(deleteButton).toBeEnabled();
     await user.click(deleteButton);
 
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
@@ -985,11 +997,11 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: "删除任务 2026-03 ETC 外部批次链路" });
+    const deleteButton = await within(page).findByRole("button", { name: "删除批次 2026-03 ETC 外部批次链路" });
     expect(deleteButton).toBeEnabled();
     await user.click(deleteButton);
 
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
@@ -1078,20 +1090,23 @@ describe("ETC ticket management page", () => {
       ...linkedBusinessBatch,
       invoiceItems: [],
     } as never);
-    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
+    const deleteBusinessBatch = vi.spyOn(etcApi, "deleteEtcBusinessBatch").mockResolvedValue(undefined as never);
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: "删除任务 新建ETC对账批次" });
+    const deleteButton = await within(page).findByRole("button", { name: "删除批次 ETC-2026-LINKED" });
     expect(deleteButton).toBeEnabled();
     await user.click(deleteButton);
 
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
-      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-business-linked-001", 13);
+      expect(deleteBusinessBatch).toHaveBeenCalledWith("etc-business-linked-001", {
+        expectedVersion: 8,
+        reason: "用户在 ETC 页面删除未提交业务批次。",
+      });
     });
   });
 
@@ -1215,6 +1230,85 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByTestId("etc-batch-row-etc-business-linked-001")).not.toBeInTheDocument();
   });
 
+  test("keeps a task-scoped business batch visible after manual OA submission and submitted-tab reload", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const importedTask = {
+      taskId: "etc-recon-imported-business-linked-001",
+      status: "imported",
+      version: 6,
+      title: "3.28-4.27",
+      periodStart: "2026-03-28",
+      periodEnd: "2026-04-27",
+      statementPeriodStart: "2026-03-28",
+      statementPeriodEnd: "2026-04-27",
+      oaTotalAmount: "1673.30",
+      etcInvoiceAmount: "1673.30",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 37,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云A361HX", "云A516HJ", "云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "etc-import-business-linked-001",
+      etcBatchId: "",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 37,
+      importedInvoiceAmount: "1673.30",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    const linkedBusinessBatch = businessBatchFixture({
+      businessBatchId: "etc-business-linked-001",
+      taskId: "etc-recon-imported-business-linked-001",
+      status: "oa_submission_detecting",
+      version: 8,
+      importBatchIds: ["etc-import-business-linked-001"],
+      submissionBatchId: "etc-submission-linked-001",
+      externalEtcBatchId: "ETC-2026-LINKED",
+      oaDraftId: "oa-draft-linked-001",
+      oaDraftUrl: "https://oa.example.test/draft/oa-draft-linked-001",
+      invoiceSummary: { count: 37, amount: "1673.30" },
+      invoiceIds: [],
+    });
+    const submittedBatch = {
+      ...linkedBusinessBatch,
+      status: "manually_marked_submitted",
+      version: 9,
+      oaProcessStatus: "manual_without_oa_row",
+      invoiceItems: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: { active: query.status === "submitted" ? 0 : 1, submitted: query.status === "submitted" ? 1 : 0 },
+      items: query.status === "submitted" ? [submittedBatch] : [linkedBusinessBatch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never));
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((businessBatchId: string) => Promise.resolve({
+      ...(businessBatchId === "etc-business-linked-001" ? linkedBusinessBatch : submittedBatch),
+      invoiceItems: [],
+    } as never));
+    vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(submittedBatch as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const oaStatusPanel = await within(page).findByRole("region", { name: "OA提交确认" });
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
+    await waitFor(() => expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument());
+
+    await user.click(within(page).getByRole("button", { name: "已提交 1" }));
+
+    expect(await within(page).findByTestId("etc-batch-row-etc-business-linked-001")).toBeInTheDocument();
+    expect(within(page).getByTestId("etc-batch-row-etc-business-linked-001")).toHaveTextContent("人工确认已提交");
+  });
+
   test("manually confirms a draft-created business batch as not submitted", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -1318,8 +1412,9 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("button", { name: "新建批次" })).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-reconciliation-task-row-etc-recon-task-001")).toHaveTextContent("2.27-2.28");
-    expect(within(page).getByTestId("etc-reconciliation-task-row-etc-recon-task-001")).toHaveTextContent("ETC票 2 + 补充凭证 1");
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("2.27-2.28");
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("ETC票 2 + 补充凭证 1");
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("金额 120.00 元");
 
     expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
@@ -1327,7 +1422,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByLabelText("上传信用卡账单")).toBeInTheDocument();
     expect(within(page).queryByLabelText("上传补充凭证")).not.toBeInTheDocument();
     expect(within(page).getByLabelText("上传票根网")).toBeInTheDocument();
-    expect(within(page).getByRole("region", { name: "ETC对账工作区" })).toBeInTheDocument();
+    expect(within(page).getByRole("region", { name: "ETC批次流程" })).toBeInTheDocument();
     expect(within(page).getByLabelText("ETC对账文件上传")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "确认对账" })).toBeDisabled();
@@ -1370,7 +1465,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByText("2026-02 ETC 对账 / v3")).toBeInTheDocument();
+    expect(await within(page).findByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
     const uploadBox = await within(page).findByLabelText("上传信用卡账单");
     const input = uploadBox.querySelector('input[type="file"]');
     if (!(input instanceof HTMLInputElement)) {
@@ -1391,7 +1486,7 @@ describe("ETC ticket management page", () => {
     const formData = request.body as FormData;
     expect(formData.get("expectedVersion")).toBe("3");
     expect((formData.getAll("files") as File[])[0]).toMatchObject({ name: "ccb-statement.pdf", type: "application/pdf" });
-    expect(await within(page).findByText("2026-02 ETC 对账 / v4")).toBeInTheDocument();
+    expect(await within(page).findByText("2026-02 ETC批次 / v4")).toBeInTheDocument();
   });
 
   test("surfaces credit-card statement upload errors and keeps the existing task version", async () => {
@@ -1415,7 +1510,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByText("2026-02 ETC 对账 / v3")).toBeInTheDocument();
+    expect(await within(page).findByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
     const uploadBox = await within(page).findByLabelText("上传信用卡账单");
     const input = uploadBox.querySelector('input[type="file"]');
     if (!(input instanceof HTMLInputElement)) {
@@ -1425,7 +1520,7 @@ describe("ETC ticket management page", () => {
     await user.upload(input, new File(["bad pdf"], "bad-statement.pdf", { type: "application/pdf" }));
 
     expect(await within(page).findByText("信用卡账单解析失败，请检查 PDF 文件。")).toBeInTheDocument();
-    expect(within(page).getByText("2026-02 ETC 对账 / v3")).toBeInTheDocument();
+    expect(within(page).getByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
   });
 
   test("uploads a supplement from an unmatched card row with a delta note", async () => {
@@ -1623,7 +1718,7 @@ describe("ETC ticket management page", () => {
     );
     expect(uploadSupplement.mock.calls[0]?.[2][0]).toMatchObject({ name: "parking.pdf" });
     expect(screen.getByRole("dialog", { name: "上传补充凭证" })).toBeInTheDocument();
-    expect(within(page).getByText("2026-03 ETC 对账 / v5")).toBeInTheDocument();
+    expect(within(page).getByText("2026-03 ETC批次 / v5")).toBeInTheDocument();
   });
 
   test("uploads ticket-root TXT files through the ticket-root files endpoint", async () => {
@@ -1712,7 +1807,7 @@ describe("ETC ticket management page", () => {
     await user.upload(txtInput, new File(["交易日期,入账金额"], "ccb-statement.txt", { type: "text/plain" }));
 
     expect(await within(page).findByText("检测到信用卡账单内容，请上传到信用卡账单入口。")).toBeInTheDocument();
-    expect(within(page).getByText("2026-02 ETC 对账 / v3")).toBeInTheDocument();
+    expect(within(page).getByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
   });
 
   test("shows source file context, deletes a mutable source file, and fresh tasks do not inherit old issues", async () => {
@@ -1807,11 +1902,11 @@ describe("ETC ticket management page", () => {
 
     await user.click(within(page).getByRole("button", { name: "新建批次" }));
     await waitFor(() => expect(createTask).toHaveBeenCalledWith({ title: "新建ETC对账批次" }));
-    await waitFor(() => expect(within(page).getByText("新建ETC对账批次 / v1")).toBeInTheDocument());
+    await waitFor(() => expect(within(page).getByText("新建ETC批次 / v1")).toBeInTheDocument());
     expect(within(page).queryByText("票根网-成功.pdf")).not.toBeInTheDocument();
     expect(within(page).queryByText(/票根网通行项缺少车牌号/)).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("button", { name: "查看对账任务 2026-04 ETC 对账" }));
+    await user.click(within(page).getByRole("button", { name: "查看ETC批次 2026-04 ETC批次" }));
     await waitFor(() => expect(within(page).getAllByText("票根网-失败.pdf").length).toBeGreaterThanOrEqual(1));
     await user.click(within(page).getByRole("button", { name: "删除源文件 票根网-失败.pdf" }));
     const dialog = await screen.findByRole("dialog", { name: "删除源文件" });
@@ -2497,12 +2592,12 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByText("2026-02 ETC 对账 / v3")).toBeInTheDocument();
+    expect(await within(page).findByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
     await user.click(within(page).getByRole("button", { name: "全选配对项" }));
     await user.click(within(page).getByRole("button", { name: "确认对账" }));
 
-    expect(await within(page).findByText("对账任务版本已变化，请刷新后重试。")).toBeInTheDocument();
-    expect(within(page).getByText("2026-02 ETC 对账 / v3")).toBeInTheDocument();
+    expect(await within(page).findByText("批次版本已变化，请刷新后重试。")).toBeInTheDocument();
+    expect(within(page).getByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "确认对账" })).toBeEnabled();
   });
 
@@ -2731,9 +2826,9 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByText("2026-03 ETC 已导入 / v9")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除发票" })).not.toBeInTheDocument());
 
-    await user.click(within(page).getByRole("button", { name: "折叠任务" }));
+    await user.click(within(page).getByRole("button", { name: "折叠流程" }));
     expect(within(page).queryByText("已导入发票")).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "展开任务" })).toHaveAttribute("aria-expanded", "false");
+    expect(within(page).getByRole("button", { name: "展开流程" })).toHaveAttribute("aria-expanded", "false");
 
     expect(within(page).getByRole("region", { name: "ETC批次详情" })).toBeInTheDocument();
     await user.click(within(page).getByRole("button", { name: "折叠详情" }));
@@ -3079,10 +3174,10 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: /删除任务 2026-03 ETC 已导入/ });
+    const deleteButton = await within(page).findByRole("button", { name: /删除批次 2026-03 ETC 已导入/ });
     expect(deleteButton).toBeEnabled();
     await user.click(deleteButton);
-    const dialog = await screen.findByRole("dialog", { name: "删除任务" });
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     expect(dialog).toHaveTextContent("将一并删除已导入发票");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -3349,7 +3444,7 @@ describe("ETC ticket management page", () => {
 
     expect(await within(page).findByText("匹配服务暂不可用，请稍后重试。")).toBeInTheDocument();
     expect(within(table).getByTestId("etc-reconciliation-row-card-item-missing")).toHaveTextContent("高速通行费");
-    expect(within(page).getByText("2026-02 ETC 对账 / v3")).toBeInTheDocument();
+    expect(within(page).getByText("2026-02 ETC批次 / v3")).toBeInTheDocument();
   });
 
   test("manual reconciliation accepts a suggested ticket instead of directly marking an item included", async () => {

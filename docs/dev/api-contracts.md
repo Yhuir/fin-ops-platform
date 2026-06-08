@@ -674,6 +674,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。
 - ETC 页面创建 OA 草稿后使用 `POST /api/etc/business-batches/{id}/manual-oa-status` 确认 `submitted` 或 `not_submitted`；前端不再调用 `/oa-status/refresh`。
 - `/oa-status/refresh` 仅作为后端 legacy 兼容入口保留，不得作为新的 ETC 页面交互入口扩展。
+- `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并在关联台 open 区投影一条 `source_kind=etc_invoice_summary` 的折叠汇总发票行。该行金额优先使用业务批次上报金额，不使用散票合计覆盖；散票继续作为折叠明细，不直接散落展示。
+- `etc_invoice_summary` 在没有 OA 和银行流水三项完全匹配前必须保持 open/pending 状态，关系标签显示待匹配 OA/流水；只有关联台普通配对逻辑确认三项关系后，才进入已配对区。
 
 ## AppHealth 运维 Dashboard API
 
