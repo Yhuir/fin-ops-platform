@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict
+from datetime import datetime
 from http import HTTPStatus
 from unittest.mock import patch
 import unittest
@@ -30,6 +31,34 @@ def oa_record(row_id: str = "oa-pay-001", month: str = "2026-05") -> OAApplicati
         relation_tone="warn",
         detail_fields={"申请日期": f"{month}-02"},
     )
+
+
+def etc_oa_projection_payload() -> dict[str, object]:
+    payload = asdict(oa_record(row_id="oa-pay-etc-001", month="2026-05"))
+    payload.update(
+        {
+            "amount": "53.84",
+            "reason": "ETC批量提交\nbusiness_batch_id=etc_business_batch_0001\netc_batch_id=etc_20260519_001",
+            "invoiceCount": 2,
+            "invoice_count": 2,
+            "applicant": "user-001",
+            "owner_org_id": "org-001",
+            "created_at": "2026-05-19T09:05:00",
+            "process_status": "in_progress",
+        }
+    )
+    detail_fields = dict(payload.get("detail_fields") or {})
+    detail_fields.update(
+        {
+            "表单ID": "2",
+            "流程状态": "进行中",
+            "申请日期": "2026-05-19",
+            "ETC发票数量": "2",
+            "部门ID": "org-001",
+        }
+    )
+    payload["detail_fields"] = detail_fields
+    return payload
 
 
 def oa_record_with_structured_attachments(row_id: str = "oa-exp-structured", month: str = "2026-05") -> OAApplicationRecord:
@@ -144,6 +173,101 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual([record.id for record in records], ["oa-pay-001"])
         self.assertEqual(records[0].project_name, "玉烟维护项目")
+
+    def test_postgres_oa_projection_repository_lists_etc_oa_detection_candidates(self) -> None:
+        from fin_ops_platform.services.etc_oa_detection import EtcOADetectionContext, EtcOADetectionService
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        payload = etc_oa_projection_payload()
+        connection = OAProjectionConnection(
+            rows=[
+                {
+                    "row_id": "oa-pay-etc-001",
+                    "month": "2026-05",
+                    "normalized_payload": payload,
+                    "raw_payload": {"normalized_payload": payload},
+                },
+                {
+                    "row_id": "oa-pay-other",
+                    "month": "2026-05",
+                    "normalized_payload": {
+                        **payload,
+                        "id": "oa-pay-other",
+                        "reason": "ETC批量提交\nbusiness_batch_id=etc_business_batch_other\netc_batch_id=etc_other",
+                    },
+                    "raw_payload": {
+                        "normalized_payload": {
+                            **payload,
+                            "id": "oa-pay-other",
+                            "reason": "ETC批量提交\nbusiness_batch_id=etc_business_batch_other\netc_batch_id=etc_other",
+                        }
+                    },
+                }
+            ]
+        )
+        repository = PostgresOAProjectionRepository(connection)
+
+        candidates = repository.list_etc_oa_detection_candidates(
+            business_batch_id="etc_business_batch_0001",
+            external_etc_batch_id="etc_20260519_001",
+            created_from=datetime(2026, 5, 18, 0, 0, 0),
+            created_to=datetime(2026, 5, 20, 0, 0, 0),
+            limit=50,
+        )
+
+        self.assertEqual(len(candidates), 1)
+        candidate = candidates[0]
+        self.assertEqual(candidate["oa_row_id"], "oa-pay-etc-001")
+        self.assertEqual(candidate["form_id"], "2")
+        self.assertEqual(candidate["amount"], "53.84")
+        self.assertEqual(candidate["invoice_count"], 2)
+        self.assertEqual(candidate["process_status"], "in_progress")
+        self.assertEqual(candidate["created_at"], "2026-05-19T09:05:00")
+        self.assertIn("business_batch_id=etc_business_batch_0001", candidate["reason"])
+        self.assertIn("etc_batch_id=etc_20260519_001", candidate["reason"])
+        self.assertEqual(candidate["detail_fields"]["表单ID"], "2")
+        detection_result = EtcOADetectionService().detect(
+            EtcOADetectionContext(
+                business_batch_id="etc_business_batch_0001",
+                external_etc_batch_id="etc_20260519_001",
+                amount="53.84",
+                invoice_count=2,
+                owner_user_id="user-001",
+                owner_org_id="org-001",
+                oa_draft_created_at=datetime(2026, 5, 19, 9, 0, 0),
+                oa_detection_deadline_at=datetime(2026, 5, 19, 9, 30, 0),
+            ),
+            candidates,
+        )
+        self.assertEqual(detection_result.status, "detected")
+        self.assertEqual(detection_result.oa_row_id, "oa-pay-etc-001")
+
+    def test_postgres_oa_projection_adapter_delegates_etc_oa_detection_candidates(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter
+
+        class ProjectionRepository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_etc_oa_detection_candidates(self, **kwargs: object) -> list[dict[str, object]]:
+                self.calls.append(dict(kwargs))
+                return [{"oa_row_id": "oa-pay-etc-001"}]
+
+        repository = ProjectionRepository()
+        adapter = PostgresOAProjectionAdapter(repository)
+
+        candidates = adapter.list_etc_oa_detection_candidates(
+            business_batch_id="etc_business_batch_0001",
+            external_etc_batch_id="etc_20260519_001",
+            created_from=datetime(2026, 5, 18, 0, 0, 0),
+            created_to=datetime(2026, 5, 20, 0, 0, 0),
+            limit=10,
+        )
+
+        self.assertEqual(candidates, [{"oa_row_id": "oa-pay-etc-001"}])
+        self.assertEqual(repository.calls[0]["business_batch_id"], "etc_business_batch_0001")
+        self.assertEqual(repository.calls[0]["external_etc_batch_id"], "etc_20260519_001")
+        self.assertEqual(repository.calls[0]["limit"], 10)
 
     def test_postgres_oa_projection_repository_writes_structured_items_and_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository

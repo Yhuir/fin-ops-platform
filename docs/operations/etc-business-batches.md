@@ -9,7 +9,7 @@
 - App Mongo detailed collections 已创建 `etc_business_batches` 集合，且满足同一 `task_id` 只有一个 active 批次的存储层约束。
 - 如果 Mongo 支持 partial unique index，检查 `unique(task_id, active=true)` 已存在；如果不支持，检查 `task_active_key` 唯一索引已存在，且非 active 批次不会保留该 key。
 - 生产部署不得使用本地 state 文件模式承载该功能；如启动参数声明 `FINOPS_STORAGE_MODE=local_state`，只能用于单进程本地开发。
-- OA Mongo 只读账号可查询支付申请表单，具备 form id、processStatus、createdAt 的可用索引或等价查询路径。
+- OA 检测 adapter 可查询支付申请表单；生产可使用直连 Mongo adapter 或 PostgreSQL OA projection adapter，且需具备 form id、processStatus、createdAt 与 ETC 稳定标记的可用查询路径。
 - 后端配置了 OA 检测查询超时，避免后台任务因慢查询阻塞。
 
 ## 迁移 dry-run
@@ -66,10 +66,10 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 - 按 `oa_detection_next_run_at` 调度，不立即无界扫描历史数据。
 - 每个 `businessBatchId` 同一时刻只能有一个运行中检测任务。
 - `oa_detection_timeout` 不再自动高频轮询；用户点击刷新检测且未超过 `oa_detection_final_retry_until` 时，只触发一次即时检测。
-- Mongo 查询超时或权限失败进入 `oa_detection_unavailable`，写 `oa_detection_error` 和审计。
+- OA 检测 adapter 查询超时、权限失败或 projection 不可用时进入 `oa_detection_unavailable`，写 `oa_detection_error` 和审计。
 - 后台推进状态时必须校验批次 `version`，不能覆盖用户刚执行的人工兜底或撤销草稿。
 
-运维排查时优先按 `businessBatchId` 查后台任务、审计事件和 OA Mongo 查询日志，再按 `requestId` 查单次 API 调用。
+运维排查时优先按 `businessBatchId` 查后台任务、审计事件和 OA 检测 adapter 查询日志或 OA projection 同步状态，再按 `requestId` 查单次 API 调用。
 
 ## 回滚
 

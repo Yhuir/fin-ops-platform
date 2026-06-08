@@ -512,6 +512,104 @@ class EtcServiceTests(unittest.TestCase):
                     expected_version=detected.version,
                 )
 
+    def test_business_batch_application_refresh_uses_postgres_oa_projection_adapter(self) -> None:
+        from fin_ops_platform.services.etc_business_batch_application_service import (
+            EtcBusinessBatchActor,
+            EtcBusinessBatchApplicationService,
+        )
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter
+
+        class ReconciliationTasks:
+            def get_task(self, task_id: str) -> object:
+                raise KeyError(task_id)
+
+        class ProjectionRepository:
+            def __init__(self, etc_service: EtcService) -> None:
+                self._etc_service = etc_service
+                self.calls: list[dict[str, object]] = []
+
+            def list_etc_oa_detection_candidates(self, **kwargs: object) -> list[dict[str, object]]:
+                self.calls.append(dict(kwargs))
+                target = self._etc_service.get_business_batch(str(kwargs["business_batch_id"]))
+                payload = self._etc_service.business_batch_payload(target)
+                invoice_summary = payload["invoiceSummary"]
+                return [
+                    {
+                        "oa_row_id": "oa-pay-etc-001",
+                        "form_id": "2",
+                        "amount": str(invoice_summary["amount"]),
+                        "invoice_count": int(invoice_summary["count"]),
+                        "applicant_user_id": "user-001",
+                        "owner_org_id": "org-001",
+                        "created_at": target.updated_at,
+                        "process_status": "in_progress",
+                        "reason": (
+                            "ETC批量提交\n"
+                            f"business_batch_id={target.business_batch_id}\n"
+                            f"etc_batch_id={target.external_etc_batch_id}"
+                        ),
+                        "detail_fields": {"表单ID": "2", "流程状态": "进行中"},
+                    }
+                ]
+
+        with TemporaryDirectory() as temp_dir:
+            etc_service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            projection_repository = ProjectionRepository(etc_service)
+            changed_batches: list[list[str]] = []
+            refreshes: list[tuple[list[str], str]] = []
+            application_service = EtcBusinessBatchApplicationService(
+                etc_service=etc_service,
+                reconciliation_task_service=ReconciliationTasks(),
+                oa_client_factory=lambda _headers: FakeEtcOAClient(),
+                oa_adapter_provider=lambda: PostgresOAProjectionAdapter(projection_repository),
+                sync_etc_invoices_to_canonical_invoices=lambda invoices: changed_batches.append(
+                    [invoice.id for invoice in invoices]
+                )
+                or ["2026-02"],
+                refresh_after_etc_invoice_sync=lambda months, reason: refreshes.append((list(months), reason)),
+            )
+            actor = EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True)
+            batch = etc_service.create_business_batch(
+                task_id="ETC-TASK-SQL",
+                owner_user_id="user-001",
+                owner_org_id="org-001",
+            )
+            preview = etc_service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = etc_service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            draft_payload = application_service.create_oa_draft_payload(
+                batch.business_batch_id,
+                expected_version=batch.version,
+                actor=actor,
+                headers={},
+            )
+            drafted = draft_payload["businessBatch"]
+
+            refreshed_payload = application_service.refresh_oa_status_payload(
+                batch.business_batch_id,
+                expected_version=int(drafted["version"]),
+                actor=actor,
+            )
+
+            refreshed = refreshed_payload["businessBatch"]
+            invoice = etc_service.list_invoices_by_ids(["etc_invoice_0001"])[0]
+            self.assertEqual(refreshed["status"], EtcBusinessBatchStatus.OA_SUBMITTED.value)
+            self.assertEqual(refreshed["oaRowId"], "oa-pay-etc-001")
+            self.assertEqual(refreshed["oaDetectionReason"], "unique_candidate_detected")
+            self.assertNotEqual(refreshed["oaDetectionReason"], "oa_detector_not_configured")
+            self.assertEqual(invoice.status, EtcInvoiceStatus.SUBMITTED)
+            self.assertEqual(projection_repository.calls[0]["business_batch_id"], batch.business_batch_id)
+            self.assertEqual(projection_repository.calls[0]["external_etc_batch_id"], drafted["externalEtcBatchId"])
+            self.assertIn(["etc_invoice_0001"], changed_batches)
+            self.assertIn((["2026-02"], "etc_business_oa_status_detected"), refreshes)
+
     def test_parse_real_world_etc_xml_shape(self) -> None:
         parsed = parse_etc_xml(real_etc_xml())
 
