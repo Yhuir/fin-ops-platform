@@ -3539,10 +3539,11 @@ describe("ETC ticket management page", () => {
     expect(patchItem).not.toHaveBeenCalled();
   });
 
-  test("submitted business batches do not expose the legacy internal revoke action", async () => {
+  test("submitted business batches use local reset deletion instead of the legacy internal revoke action", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     const legacyMarkNotSubmitted = vi.spyOn(etcApi, "markEtcBatchNotSubmitted");
+    const deleteBusinessBatch = vi.spyOn(etcApi, "deleteEtcBusinessBatch");
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
@@ -3552,7 +3553,25 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "提交OA" })).not.toBeInTheDocument();
     expect(within(page).getAllByText("OA已提交").length).toBeGreaterThanOrEqual(1);
     expect(within(page).queryByRole("button", { name: "撤销提交状态" })).not.toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "OA已提交，不能删除" })).toBeDisabled();
+
+    const row = within(page).getByTestId("etc-batch-row-etc-batch-submitted-01");
+    const deleteButton = within(row).getByRole("button", { name: "删除批次 ETC-HIST-2026-01" });
+    expect(deleteButton).toBeEnabled();
+    await user.click(deleteButton);
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
+    expect(dialog).toHaveTextContent("释放 ETC 发票");
+    expect(dialog).toHaveTextContent("OA 草稿和已提交记录不会删除");
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(deleteBusinessBatch).toHaveBeenCalledWith("etc-batch-submitted-01", {
+        expectedVersion: 7,
+        reason: "用户在 ETC 页面删除已提交业务批次并释放发票。",
+      });
+    });
+    await waitFor(() => {
+      expect(within(page).queryByTestId("etc-batch-row-etc-batch-submitted-01")).not.toBeInTheDocument();
+    });
     expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
   });
 

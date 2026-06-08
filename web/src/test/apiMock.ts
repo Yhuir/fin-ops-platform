@@ -538,12 +538,18 @@ function createEtcInvoiceStore() {
         oa_draft_url: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
       };
     },
-    deleteBatch(batchId: string) {
+    deleteBatch(batchId: string, options: { allowSubmitted?: boolean } = {}) {
       const batch = batches.find((item) => item.id === batchId);
-      if (!batch || batch.status !== "unsubmitted") {
+      if (!batch || (batch.status !== "unsubmitted" && !options.allowSubmitted)) {
         return false;
       }
+      const invoiceIds = new Set(getBatchInvoiceIds(batch));
       batches = batches.filter((item) => item.id !== batchId);
+      if (options.allowSubmitted) {
+        invoices = invoices.map((invoice) =>
+          invoiceIds.has(invoice.id) ? { ...invoice, status: "unsubmitted" as const } : invoice
+        );
+      }
       return true;
     },
     previewZip(fileNames: string[], blockingIssues: Array<Record<string, unknown>> = []) {
@@ -6929,9 +6935,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           : jsonResponse({ status: 404, body: { ok: false, data: null, error: { code: "business_batch_not_found", message: "ETC业务批次不存在。" } } });
       }
       if (!segment && method === "DELETE") {
-        const deleted = etcInvoiceStore.deleteBatch(businessBatchId);
+        const beforeDelete = etcInvoiceStore.businessBatchDetail(businessBatchId);
+        const deleted = etcInvoiceStore.deleteBatch(businessBatchId, { allowSubmitted: true });
         if (deleted || businessBatchId.startsWith("etc_business_batch_")) {
-          return jsonResponse({ body: { ok: true, data: { deleted: true, businessBatchId, kind: "business_batch" }, error: null } });
+          const kind = beforeDelete?.status === "oa_submitted" ? "submitted_business_batch_reset" : "business_batch";
+          return jsonResponse({ body: { ok: true, data: { deleted: true, businessBatchId, kind }, error: null } });
         }
         return jsonResponse({ status: 409, body: { ok: false, data: null, error: { code: "invalid_status_transition", message: "ETC业务批次不能删除。" } } });
       }

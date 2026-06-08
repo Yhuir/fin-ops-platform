@@ -1096,8 +1096,11 @@ export default function EtcTicketManagementPage() {
     return Boolean(task.oaDraftBatchId?.trim() || task.submittedConfirmedAt?.trim());
   }
   const businessBatchDeleteBlockReason = (batch: EtcBusinessBatchSummary) => {
-    if (isSubmittedBusinessStatus(batch.status) || batch.oaProcessStatus === "in_progress") {
-      return "OA已提交，不能删除";
+    if (isSubmittedBusinessStatus(batch.status)) {
+      return "";
+    }
+    if (batch.oaProcessStatus === "in_progress") {
+      return "OA处理中，不能删除";
     }
     if (batch.status === "importing" || batch.status === "oa_draft_creating") {
       return "处理中，不能删除";
@@ -1171,6 +1174,13 @@ export default function EtcTicketManagementPage() {
   };
   const businessBatchForBatchSummary = (batch: EtcBatchSummary) =>
     businessBatches.find((item) => item.businessBatchId === batch.id) ?? null;
+  const deleteBatchDescription = (target: Extract<DeleteTarget, { kind: "batch" }>) => {
+    const businessBatch = businessBatchForBatchSummary(target.item);
+    if (businessBatch && isSubmittedBusinessStatus(businessBatch.status)) {
+      return "将删除本地批次记录并释放 ETC 发票，OA 草稿和已提交记录不会删除。";
+    }
+    return "将删除该未提交批次。已提交或已关联 OA 的批次不能删除。";
+  };
   const batchDeletePlan = (batch: EtcBatchSummary): BatchDeletePlan => {
     const businessBatch = businessBatchForBatchSummary(batch);
     if (businessBatch || isBusinessBatchSource(batch)) {
@@ -1765,7 +1775,9 @@ export default function EtcTicketManagementPage() {
       }
       payload = {
         expectedVersion: latestBusinessBatch.version,
-        reason: payload.reason,
+        reason: isSubmittedBusinessStatus(latestBusinessBatch.status)
+          ? "用户在 ETC 页面删除已提交业务批次并释放发票。"
+          : payload.reason,
       };
     } catch (caught) {
       if (!isEtcBusinessBatchNotFoundError(caught, plan.batchId)) {
@@ -2977,7 +2989,9 @@ export default function EtcTicketManagementPage() {
             ? deleteTaskDescription(deleteTarget.item)
             : deleteTarget?.kind === "sourceFile"
               ? "将删除该上传源文件及其解析结果、解析错误和解析产物。"
-              : "将删除该未提交批次。已提交或已关联 OA 的批次不能删除。"}
+              : deleteTarget?.kind === "batch"
+                ? deleteBatchDescription(deleteTarget)
+                : ""}
           onClose={() => {
             if (!deleteSubmitting) {
               setDeleteTarget(null);

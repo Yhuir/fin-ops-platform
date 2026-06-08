@@ -396,13 +396,13 @@ class EtcServiceTests(unittest.TestCase):
                 1,
             )
 
-    def test_business_batch_delete_rejects_submitted_batch(self) -> None:
+    def test_business_batch_delete_resets_submitted_batch_and_releases_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
             batch = service.create_business_batch(task_id="ETC-TASK-001")
             preview = service.preview_business_batch_import_zips(
                 batch.business_batch_id,
-                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001", "ETC002"]))],
                 expected_version=batch.version,
             )
             batch, _result = service.confirm_business_batch_import(
@@ -420,8 +420,35 @@ class EtcServiceTests(unittest.TestCase):
                 expected_version=drafted.version,
             )
 
-            with self.assertRaises(EtcBusinessBatchInvalidTransitionError):
-                service.delete_business_batch(batch.business_batch_id, expected_version=submitted.version)
+            deleted = service.delete_business_batch(
+                batch.business_batch_id,
+                expected_version=submitted.version,
+                reason="用户确认删除已提交批次并释放 ETC 发票。",
+            )
+            invoices = service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
+            submission_batch = service._batches[str(submitted.submission_batch_id)]
+            import_batch = service.list_import_batches()[0]
+            deleted_batch = service._business_batches[batch.business_batch_id]
+
+            self.assertEqual(
+                deleted,
+                {
+                    "deleted": True,
+                    "businessBatchId": batch.business_batch_id,
+                    "kind": "submitted_business_batch_reset",
+                    "releasedInvoiceCount": 2,
+                    "submissionBatchId": submitted.submission_batch_id,
+                },
+            )
+            self.assertEqual(service.list_business_batches(), [])
+            self.assertEqual(deleted_batch.status, EtcBusinessBatchStatus.DELETED.value)
+            self.assertIsNone(deleted_batch.task_active_key)
+            self.assertIn("submitted_business_batch_reset", [event["event_type"] for event in deleted_batch.audit_events])
+            self.assertEqual(submission_batch.status, "not_submitted")
+            self.assertIsNone(import_batch.submission_batch_id)
+            self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.UNSUBMITTED})
+            self.assertEqual({invoice.current_batch_id for invoice in invoices}, {None})
+            self.assertEqual({invoice.last_batch_id for invoice in invoices}, {submitted.submission_batch_id})
 
     def test_business_batch_delete_is_idempotent_and_hides_deleted_batch(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3208,6 +3235,90 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertIn("ETC001", detail_payload["row"]["detail_fields"]["发票清单"])
         self.assertIn("ETC002", detail_payload["row"]["detail_fields"]["发票清单"])
+
+    def test_submitted_etc_business_batch_delete_releases_summary_without_reopening_task_or_oa(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
+            self.assertEqual(preview_response.status_code, 200)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            business_batch = json.loads(
+                app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
+            )["data"]["items"][0]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": business_batch["version"]}),
+            )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
+            submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
+            submission_batch.total_amount = Decimal("1673.30")
+            submission_batch.oa_total_amount = Decimal("1673.30")
+            submission_batch.etc_invoice_amount = Decimal("27.14")
+            submission_batch.etc_invoice_count = 2
+            submission_batch.display_count_text = "ETC票 2 + 补充凭证 0"
+            manual_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{drafted['businessBatchId']}/manual-oa-status",
+                json.dumps({
+                    "decision": "submitted",
+                    "reason": "用户确认 OA 草稿已提交。",
+                    "expectedVersion": drafted["version"],
+                }),
+            )
+            manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
+            before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+            before_rows = [
+                row
+                for group in before_workbench["open"]["groups"]
+                for row in group["invoice_rows"]
+            ]
+
+            delete_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/business-batches/{manual_payload['businessBatchId']}",
+                json.dumps({
+                    "expectedVersion": manual_payload["version"],
+                    "reason": "用户删除已提交 ETC 批次并释放发票。",
+                }),
+            )
+            after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
+            after_rows = [
+                row
+                for group in after_workbench["open"]["groups"]
+                for row in group["invoice_rows"]
+            ]
+            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
+            active_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=active").body)["data"]
+            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+            canonical_invoices = {invoice.digital_invoice_no: invoice for invoice in app._import_service.list_invoices()}
+            etc_invoices = app._etc_service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
+
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertEqual(len([row for row in before_rows if row.get("source_kind") == "etc_invoice_summary"]), 1)
+        self.assertEqual(delete_response.status_code, 200)
+        delete_payload = json.loads(delete_response.body)["data"]
+        self.assertEqual(delete_payload["kind"], "submitted_business_batch_reset")
+        self.assertEqual(delete_payload["releasedInvoiceCount"], 2)
+        self.assertEqual(submitted_batches["total"], 0)
+        self.assertEqual(active_batches["total"], 0)
+        self.assertEqual(task_payload["status"], "closed")
+        self.assertEqual(task_payload["oaDraftStatus"], "submitted_confirmed")
+        self.assertIsNotNone(task_payload["submittedConfirmedAt"])
+        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
+        scattered_etc_rows = [row for row in after_rows if row.get("source_kind") == "etc_invoice"]
+        self.assertEqual(len(scattered_etc_rows), 2)
+        self.assertEqual({invoice.workbench_visibility for invoice in canonical_invoices.values()}, {"visible"})
+        self.assertEqual({invoice.etc_submission_status for invoice in canonical_invoices.values()}, {"unsubmitted"})
+        self.assertEqual({invoice.status for invoice in etc_invoices}, {EtcInvoiceStatus.UNSUBMITTED})
+        self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
 
     def test_etc_business_batch_delete_is_idempotent_for_stale_business_ids(self) -> None:
         with TemporaryDirectory() as temp_dir:

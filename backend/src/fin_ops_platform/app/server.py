@@ -103,6 +103,7 @@ from fin_ops_platform.services.cost_statistics_runtime_service import CostStatis
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_service import (
+    ETC_BUSINESS_BATCH_SUBMITTED_STATUSES,
     EtcBatchDeleteError,
     EtcBatchNotFoundError,
     EtcBusinessBatchActiveExistsError,
@@ -6150,23 +6151,17 @@ class Application:
         try:
             batch = self._etc_service.get_business_batch(business_batch_id)
             expected_version = self._optional_int(payload.get("expectedVersion") or payload.get("expected_version"))
-            if str(getattr(batch, "submission_batch_id", "") or "").strip() or str(getattr(batch, "oa_draft_id", "") or "").strip():
+            if (
+                str(getattr(batch, "status", "")) not in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES
+                and (
+                    str(getattr(batch, "submission_batch_id", "") or "").strip()
+                    or str(getattr(batch, "oa_draft_id", "") or "").strip()
+                )
+            ):
                 batch = self._refresh_etc_business_batch_before_delete(
                     business_batch_id,
                     expected_version=expected_version,
                 )
-                if str(getattr(batch, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
-                    changed_months = self._sync_etc_invoices_to_canonical_invoices(
-                        self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
-                    )
-                    self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_delete_detected_submitted")
-                    return self._etc_business_response(
-                        HTTPStatus.CONFLICT,
-                        None,
-                        code="oa_already_submitted",
-                        message="OA 已进入进行中，不能删除批次。",
-                        details={"businessBatch": self._etc_service.business_batch_payload(batch)},
-                    )
                 expected_version = int(getattr(batch, "version", 0) or 0)
             invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
             import_batch_ids = [
@@ -6186,6 +6181,17 @@ class Application:
                 expected_version=expected_version,
                 reason=str(payload.get("reason") or "").strip() or None,
             )
+            if result.get("kind") == "submitted_business_batch_reset":
+                refreshed_invoices = self._existing_etc_invoices_by_ids(invoice_ids)
+                changed_months.extend(self._etc_invoice_changed_months(refreshed_invoices))
+                changed_months.extend(self._sync_etc_invoices_to_canonical_invoices(refreshed_invoices))
+                if changed_months:
+                    self._refresh_after_etc_invoice_sync(
+                        sorted(set(changed_months)),
+                        reason="etc_submitted_business_batch_reset",
+                    )
+                    self._persist_state()
+                return self._etc_business_response(HTTPStatus.OK, result)
             canonical_deleted = 0
             for import_batch_id in import_batch_ids:
                 canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(import_batch_id)

@@ -111,6 +111,12 @@ ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES = {
     *ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES,
 }
 
+ETC_BUSINESS_BATCH_SUBMITTED_STATUSES = {
+    EtcBusinessBatchStatus.OA_SUBMITTED.value,
+    EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
+    EtcBusinessBatchStatus.CLOSED.value,
+}
+
 
 class EtcServiceError(RuntimeError):
     pass
@@ -1150,12 +1156,11 @@ class EtcService:
             if batch.status == EtcBusinessBatchStatus.DELETED.value:
                 return {"deleted": True, "businessBatchId": normalized_id, "kind": "business_batch"}
             self._assert_business_batch_version(batch, expected_version)
-            if batch.status in {
-                EtcBusinessBatchStatus.OA_SUBMITTED.value,
-                EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
-                EtcBusinessBatchStatus.CLOSED.value,
-            }:
-                raise EtcBusinessBatchInvalidTransitionError("submitted or closed ETC business batch cannot be deleted.")
+            if batch.status in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
+                return self._reset_submitted_business_batch_for_delete(
+                    batch,
+                    reason=str(reason or "").strip() or None,
+                )
             if batch.submission_batch_id and batch.submission_batch_id in self._batches:
                 self._delete_submission_batch(self._batches[batch.submission_batch_id])
             for invoice_id in list(batch.invoice_ids):
@@ -1182,6 +1187,67 @@ class EtcService:
             )
             self._persist()
             return {"deleted": True, "businessBatchId": normalized_id, "kind": "business_batch"}
+
+    def _reset_submitted_business_batch_for_delete(
+        self,
+        batch: EtcBusinessBatch,
+        *,
+        reason: str | None,
+    ) -> dict[str, object]:
+        now = datetime.now(UTC)
+        before_status = batch.status
+        submission_batch_id = str(batch.submission_batch_id or "").strip() or None
+        linked_batch_ids = {
+            value
+            for value in {
+                batch.business_batch_id,
+                submission_batch_id,
+                str(batch.external_etc_batch_id or "").strip() or None,
+            }
+            if value
+        }
+        released_count = 0
+        released_last_batch_id = submission_batch_id or str(batch.external_etc_batch_id or "").strip() or batch.business_batch_id
+        for invoice_id in list(batch.invoice_ids):
+            invoice = self._invoices.get(invoice_id)
+            if invoice is None:
+                continue
+            changed = invoice.status == EtcInvoiceStatus.SUBMITTED or str(invoice.current_batch_id or "").strip() in linked_batch_ids
+            invoice.status = EtcInvoiceStatus.UNSUBMITTED
+            invoice.current_batch_id = None
+            invoice.last_batch_id = released_last_batch_id
+            invoice.updated_at = now
+            if changed:
+                released_count += 1
+
+        if submission_batch_id and (submission_batch := self._batches.get(submission_batch_id)) is not None:
+            submission_batch.status = EtcBatchStatus.NOT_SUBMITTED.value
+
+        for import_batch in self._import_batches_for_invoices(
+            [self._invoices[invoice_id] for invoice_id in list(batch.invoice_ids) if invoice_id in self._invoices]
+        ):
+            if str(import_batch.submission_batch_id or "").strip() in linked_batch_ids:
+                import_batch.submission_batch_id = None
+                import_batch.updated_at = now
+
+        batch.status = EtcBusinessBatchStatus.DELETED.value
+        batch.task_active_key = None
+        self._bump_business_batch_version(
+            batch,
+            event_type="submitted_business_batch_reset",
+            before_status=before_status,
+            after_status=EtcBusinessBatchStatus.DELETED.value,
+            reason=reason,
+            submission_batch_id=submission_batch_id,
+        )
+        self._persist()
+        return {
+            "deleted": True,
+            "businessBatchId": batch.business_batch_id,
+            "kind": "submitted_business_batch_reset",
+            "releasedInvoiceCount": released_count,
+            "submissionBatchId": submission_batch_id,
+        }
 
     def business_batch_payload(self, batch_or_id: EtcBusinessBatch | str) -> dict[str, object]:
         batch = self._get_business_batch_mutable(batch_or_id) if isinstance(batch_or_id, str) else batch_or_id

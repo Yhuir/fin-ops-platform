@@ -1650,6 +1650,7 @@ class WorkbenchSqlProjectionBuilder:
             "digital_invoice_no": title,
             "issue_date": issue_range or "—",
             "amount": total_amount_text,
+            "amount_value": str(total_amount),
             "tax_rate": "—",
             "tax_amount": "—",
             "total_with_tax": total_amount_text,

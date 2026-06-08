@@ -1088,6 +1088,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["etc_batch_id"], "etc_20260520_001")
         self.assertEqual(summary_row["total_with_tax"], "1,673.30")
         self.assertEqual(summary_row["amount"], "1,673.30")
+        self.assertEqual(summary_row["amount_value"], "1673.30")
         self.assertEqual(summary_row["etc_invoice_count"], 37)
         self.assertEqual(summary_row["invoice_bank_relation"]["code"], "pending_oa_bank_match")
         self.assertIn("ETC001", summary_row["detail_fields"]["发票清单"])
@@ -3870,7 +3871,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                                                 "source_kind": "bank_transaction",
                                                 "status": "open",
                                                 "counterparty_name": "供应商A",
-                                                "amount": "100.00",
+                                                "amount": "1,000.00",
+                                                "amount_value": "1000.00",
                                             }
                                         ]
                                     }
@@ -3889,6 +3891,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("insert into read_model.workbench_generations", sql)
         self.assertIn("insert into read_model.workbench_rows", sql)
         self.assertIn("on conflict (generation_id, scope_key, row_id)", sql)
+        row_write = next(params for statement, params in connection.executed if "insert into read_model.workbench_rows" in statement)
+        self.assertEqual(row_write[9], "1000.00")
+        group_row_write = next(
+            params for statement, params in connection.executed if "insert into read_model.workbench_group_rows" in statement
+        )
+        self.assertIn("1000.00", group_row_write[14])
 
     def test_repository_does_not_delete_generation_rows_when_scope_snapshot_is_absent(self) -> None:
         connection = WorkbenchWriteConnection()

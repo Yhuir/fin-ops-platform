@@ -5042,7 +5042,12 @@ class PostgresReadModelRepository:
                             text(row.get("project_id")),
                             text(row.get("project_name") or row.get("project")),
                             text(row.get("counterparty_name") or row.get("counterparty") or row.get("supplier_name")),
-                            decimal_text(row.get("amount") or row.get("amount_with_tax") or row.get("invoice_amount")),
+                            decimal_text(
+                                row.get("amount_value")
+                                or row.get("amount")
+                                or row.get("amount_with_tax")
+                                or row.get("invoice_amount")
+                            ),
                             text(row.get("object_identity_key")),
                             text(row.get("object_identity_kind")),
                             text(row.get("object_identity_source")),
@@ -9099,6 +9104,7 @@ def _workbench_date_from_text(value: str | None) -> str | None:
 def _searchable_row_text(row: dict[str, Any], pane_id: str) -> str:
     values = [text(row.get("id") or row.get("row_id")), text(row.get("label")), text(row.get("status"))]
     values.extend(text(value) for value in _workbench_row_column_values(row, pane_id).values())
+    values.append(text(row.get("amount_value")))
     tags = row.get("tags")
     if isinstance(tags, list):
         values.extend(text(tag) for tag in tags)

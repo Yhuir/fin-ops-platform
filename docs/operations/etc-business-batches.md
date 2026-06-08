@@ -70,6 +70,18 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 
 运维排查时优先按 `businessBatchId` 查业务批次状态、审计事件、提交批次和 manual status API `requestId`。
 
+## 已提交批次本地删除
+
+已提交业务批次的 `DELETE /api/etc/business-batches/{id}` 是本地 reset 操作，不是 OA 撤销：
+
+- 请求必须携带当前 `expectedVersion` 和删除原因；前端必须显示二次确认框。
+- 后端将业务批次标记为 `deleted` 并写入 `submitted_business_batch_reset` 审计事件。
+- 绑定的 ETC 发票恢复为 `unsubmitted`，`current_batch_id` 清空，canonical invoice 同步为 `workbench_visibility=visible`，关联台 open 区不再生成该批次的 `etc_invoice_summary`。
+- 旧 OA 草稿、OA 流程、已闭环 ETC 对账任务、原始导入来源和 source files 不删除、不重开、不清空。
+- 删除后 submitted bucket 不再显示该业务批次；散票会留在关联台未配对区，等待未来 OA 和银行流水按普通配对规则闭环。
+
+排查时如果用户反馈“删除已提交批次后 1673 汇总仍存在”，优先检查 canonical ETC 发票是否仍为 `hidden_after_etc_submission` 或 `etc_submission_status=submitted`，再重跑对应 Workbench read model refresh。
+
 ## 回滚
 
 第一阶段不删除 `EtcImportBatch` 和 `EtcBatch`，回滚策略是关闭新业务批次读写入口并恢复旧 API 展示。
