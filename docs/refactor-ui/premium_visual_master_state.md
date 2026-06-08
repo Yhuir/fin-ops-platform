@@ -135,4 +135,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-022-turnover-ledger-discovery` | `d9b663ad` | pushed to `origin/main` | Turnover ledger premium discovery verified; PV-023 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-023-turnover-ledger-premium-visual` | `c133ecc5` | pushed to `origin/main` | Turnover ledger premium visual polish verified; PV-024 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-024-etc-tickets-discovery` | `664173c6` | pushed to `origin/main` | ETC tickets premium discovery verified; PV-025 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
-| 2026-06-08 | `PV-025-etc-tickets-premium-visual` | current commit | pending push | ETC tickets premium visual polish verified; PV-026 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-025-etc-tickets-premium-visual` | `75defcb9` | pushed to `origin/main` | ETC tickets premium visual polish verified; PV-026 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
