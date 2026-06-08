@@ -210,14 +210,16 @@ export default function AppStatusIndicator() {
           role="status"
           tabIndex={0}
           onClick={openPopover}
-          onFocus={openPopover}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               closePopover();
+              return;
+            }
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openPopover();
             }
           }}
-          onMouseEnter={openPopover}
-          onMouseLeave={scheduleClose}
         >
           <svg className="app-sidebar-brand-status-icon" viewBox="0 0 100 100" aria-hidden="true">
             <circle className="app-sidebar-brand-status-track" cx="50" cy="50" r="37" />

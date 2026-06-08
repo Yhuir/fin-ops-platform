@@ -71,7 +71,10 @@ PENDING_INVOICE_FILTER_FIELDS = {
     "trade_date": {"between"},
     "bank_name": {"in", "contains"},
     "account_name": {"in", "contains"},
+    "bank_account": {"in", "contains"},
     "counterparty_name": {"contains", "in"},
+    "transaction_tag": {"contains", "in"},
+    "direction": {"in"},
     "amount": {"between", "eq"},
     "summary_remark": {"contains"},
     "status_code": {"in"},
@@ -79,6 +82,7 @@ PENDING_INVOICE_FILTER_FIELDS = {
     "seller_name": {"contains", "in"},
     "invoice_total": {"between", "eq"},
     "oa_applicant": {"contains", "in"},
+    "oa_application_type": {"contains", "in"},
     "project_name": {"contains", "in"},
 }
 PENDING_INVOICE_SORT_EXPRESSIONS = {
@@ -110,6 +114,8 @@ INPUT_INVOICE_USAGE_FILTER_FIELDS = {
     "bank_trade_time": ("bank_trade_time", "date", {"between", "equals"}),
     "bank_amount": ("bank_amount", "money", {"between", "equals"}),
     "bank_name": ("bank_name", "text", {"in"}),
+    "bank_account": ("bank_account", "text", {"in"}),
+    "bank_direction": ("bank_direction", "text", {"in"}),
     "bank_summary": ("bank_summary", "text", {"contains"}),
 }
 INPUT_INVOICE_USAGE_SORT_EXPRESSIONS = {
@@ -1630,7 +1636,7 @@ class PostgresReadModelRepository:
                         specific_business_type, taxable_item_name, payment_status, payment_status_label,
                         collection_status, collection_status_label, collected_amount, pending_amount,
                         oa_applicant, oa_application_type, oa_project_name, bank_counterparty_name, bank_trade_time,
-                        bank_amount, bank_name, bank_summary, receipt_status, receipt_status_label,
+                        bank_amount, bank_name, bank_account, bank_direction, bank_summary, receipt_status, receipt_status_label,
                         oa_relation_count, bank_relation_count, red_invoice_relation_count, searchable_text,
                         source_versions, generated_at, cache_status, payload, raw_payload
                     )
@@ -1641,7 +1647,8 @@ class PostgresReadModelRepository:
                         %(specific_business_type)s, %(taxable_item_name)s, %(payment_status)s, %(payment_status_label)s,
                         %(collection_status)s, %(collection_status_label)s, %(collected_amount)s, %(pending_amount)s,
                         %(oa_applicant)s, %(oa_application_type)s, %(oa_project_name)s, %(bank_counterparty_name)s,
-                        %(bank_trade_time)s::timestamptz, %(bank_amount)s, %(bank_name)s, %(bank_summary)s,
+                        %(bank_trade_time)s::timestamptz, %(bank_amount)s, %(bank_name)s, %(bank_account)s,
+                        %(bank_direction)s, %(bank_summary)s,
                         %(receipt_status)s, %(receipt_status_label)s, %(oa_relation_count)s, %(bank_relation_count)s,
                         %(red_invoice_relation_count)s, %(searchable_text)s, %(source_versions)s,
                         coalesce(%(generated_at)s::timestamptz, now()), %(cache_status)s, %(payload)s, %(raw_payload)s
@@ -1675,6 +1682,8 @@ class PostgresReadModelRepository:
                         bank_trade_time = excluded.bank_trade_time,
                         bank_amount = excluded.bank_amount,
                         bank_name = excluded.bank_name,
+                        bank_account = excluded.bank_account,
+                        bank_direction = excluded.bank_direction,
                         bank_summary = excluded.bank_summary,
                         receipt_status = excluded.receipt_status,
                         receipt_status_label = excluded.receipt_status_label,
@@ -1837,8 +1846,12 @@ class PostgresReadModelRepository:
             where.append("direction = %s")
             params.append(normalized_direction)
         if normalized_filter != "all":
-            where.append("filter_group = %s")
-            params.append(normalized_filter)
+            clause, clause_params = _pending_invoice_visible_filter_clause(
+                direction=normalized_direction,
+                filter_name=normalized_filter,
+            )
+            where.append(clause)
+            params.extend(clause_params)
         if date_from:
             where.append("trade_date >= %s::date")
             params.append(date_from)
@@ -7375,12 +7388,21 @@ def _input_invoice_usage_read_model_record(row: dict[str, Any], scope_key: str) 
             "bank_trade_time": text(bank.get("tradeTime")),
             "bank_amount": decimal_text(bank.get("amount")),
             "bank_name": text(bank.get("bankName")),
+            "bank_account": text(bank.get("bankAccount")) or _bank_account_label(bank),
+            "bank_direction": text(bank.get("direction")),
             "bank_summary": text(bank.get("summary")),
             "oa_relation_count": int_value(oa.get("relationCount"), 0),
             "bank_relation_count": int_value(bank.get("relationCount"), 0),
         }
     )
     return record
+
+
+def _bank_account_label(bank: dict[str, Any]) -> str | None:
+    bank_name = text(bank.get("bankName"))
+    account_last4 = text(bank.get("accountLast4"))
+    value = " ".join(part for part in [bank_name, account_last4] if part)
+    return value or None
 
 
 def _output_invoice_collection_read_model_record(row: dict[str, Any], scope_key: str) -> dict[str, Any]:
@@ -7525,6 +7547,8 @@ def _base_invoice_relation_record(payload: dict[str, Any], scope_key: str) -> di
         "bank_trade_time": None,
         "bank_amount": None,
         "bank_name": None,
+        "bank_account": None,
+        "bank_direction": None,
         "bank_summary": None,
         "receipt_status": None,
         "receipt_status_label": None,
@@ -7590,11 +7614,52 @@ def _pending_invoice_filter_expression(field: str) -> str:
         return "coalesce(payload->'bank_transaction'->>'bank_name', '')"
     if field == "account_name":
         return "coalesce(payload->'bank_transaction'->>'account_name', '')"
+    if field == "bank_account":
+        return (
+            "(trim(concat_ws(' ', "
+            "nullif(coalesce(payload->'bank_transaction'->>'bank_short_name', payload->'bank_transaction'->>'bank_name', ''), ''), "
+            "nullif(coalesce(payload->'bank_transaction'->>'account_last4', ''), '')"
+            ")))"
+        )
+    if field == "transaction_tag":
+        return (
+            "(coalesce(payload->'bank_transaction'->>'effective_tag_label_path', '') || ' ' || "
+            "coalesce(payload->'bank_transaction'->>'effective_tag_primary_label', '') || ' / ' || "
+            "coalesce(payload->'bank_transaction'->>'effective_tag_sub_label', '') || ' ' || "
+            "coalesce(payload->'bank_transaction'->>'effective_tag_label', ''))"
+        )
+    if field == "direction":
+        return "direction"
     if field == "summary_remark":
         return "(coalesce(payload->'bank_transaction'->>'summary', '') || ' ' || coalesce(payload->'bank_transaction'->>'remark', ''))"
     if field == "rule_group":
         return "filter_group"
+    if field == "oa_application_type":
+        return "coalesce(payload->'oa'->'primary'->>'application_type', '')"
     return PENDING_INVOICE_SORT_EXPRESSIONS.get(field, field)
+
+
+def _pending_invoice_visible_filter_clause(*, direction: str, filter_name: str) -> tuple[str, list[Any]]:
+    normalized_filter = text(filter_name) or "all"
+    normalized_direction = text(direction) or "expense"
+    if normalized_filter == "requires_invoice":
+        status_codes = (
+            ["cash_income", "income_pending_invoice", "income_invoiced"]
+            if normalized_direction == "income"
+            else ["paid_invoiced", "paid_pending_invoice", "paid_pending_future_invoice", "invoice_not_fully_paid"]
+        )
+        return ("filter_group = %s and status_code = any(%s)", [normalized_filter, status_codes])
+    elif normalized_filter == "bank_statement_as_invoice":
+        status_codes = ["bank_statement_as_invoice"]
+    elif normalized_filter == "no_invoice_required":
+        status_codes = ["income_no_invoice_required"] if normalized_direction == "income" else ["no_invoice_required"]
+        return ("filter_group = %s and status_code = any(%s)", [normalized_filter, status_codes])
+    elif normalized_filter == "cash_income":
+        status_codes = ["cash_income"]
+        return ("filter_group = %s and status_code = any(%s)", [normalized_filter, status_codes])
+    else:
+        return ("true", [])
+    return ("status_code = any(%s)", [status_codes])
 
 
 def _pending_invoice_order_sql(*, sort_field: str | None, sort_direction: str | None) -> str:

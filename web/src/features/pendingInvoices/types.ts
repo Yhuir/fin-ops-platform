@@ -51,8 +51,8 @@ export type PendingInvoiceSortDirection = "asc" | "desc";
 
 export type PendingInvoiceColumnFilter =
   | { field: "trade_date"; operator: "between"; value: { from?: string; to?: string } }
-  | { field: "bank_name" | "account_name" | "counterparty_name" | "seller_name" | "oa_applicant" | "project_name"; operator: "contains"; value: string }
-  | { field: "bank_name" | "account_name" | "counterparty_name" | "seller_name" | "oa_applicant" | "project_name" | "status_code" | "rule_group"; operator: "in"; values: string[] }
+  | { field: "bank_name" | "account_name" | "bank_account" | "counterparty_name" | "transaction_tag" | "seller_name" | "oa_applicant" | "oa_application_type" | "project_name"; operator: "contains"; value: string }
+  | { field: "bank_name" | "account_name" | "bank_account" | "counterparty_name" | "transaction_tag" | "direction" | "seller_name" | "oa_applicant" | "oa_application_type" | "project_name" | "status_code" | "rule_group"; operator: "in"; values: string[] }
   | { field: "amount" | "invoice_total"; operator: "between"; value: { min?: string; max?: string } }
   | { field: "amount" | "invoice_total"; operator: "eq"; value: string }
   | { field: "summary_remark"; operator: "contains"; value: string };
@@ -294,6 +294,8 @@ export type PendingInvoiceRelationDetail = {
     debitAmount: string;
   };
   relatedInvoices: PendingInvoiceSummary[];
+  relatedOa: PendingInvoiceOaSummary[];
+  relationCaseIds: string[];
   paymentRows: Array<{
     id: string;
     tradeTime: string;

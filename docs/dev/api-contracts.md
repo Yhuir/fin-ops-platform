@@ -562,10 +562,24 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 契约要求：
 
 - 列表响应必须包含 rows、summary、filters、read model 状态和可解释的状态字段。
-- filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项。
-- 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限。
+- filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项；表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
+- `filters` 支持四区表字段：`counterparty_name`、`transaction_tag`、`bank_account`、`direction`、`seller_name`、`oa_applicant`、`oa_application_type`、`project_name` 等；SQL read model 和 query service 必须保持同一字段语义。
+- 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限；关系详情必须能表达同一关系中的全部付款流水、发票、OA 和 relation case id。
 - 写入类接口需要返回 affected months/objects、version 或 job，供页面局部刷新和跨页事件使用。
 - 导出字段应与当前筛选和权限一致，不能绕过列表口径。
+
+## 进项发票使用情况 API
+
+`/api/input-invoice-usage*` 维护进项发票、付款状态、OA 和银行流水的列表、详情、筛选、导出、支付规则和反提 OA 工作流。
+
+契约要求：
+
+- rows、filter-options 和详情接口必须使用同一 SQL read model 或同一 query service 事实源；read model stale/refreshing 时必须通过 `read_model_status` 表达，不得把旧数据伪装成 fresh。
+- 表头筛选通过 `filters` JSON 提交。字段之间按 AND 组合，同一字段内多值按 IN 组合；两列组合筛选仍按字段 AND 组合，例如 `oa_applicant` + `oa_application_type`、`bank_account` + `bank_direction`。
+- filter-options 必须由后端返回，前端不能根据当前页 rows 推导全局选项。当前页面可筛选字段包括 `seller_name`、`payment_status`、`oa_applicant`、`oa_application_type`、`oa_project_name`、`bank_counterparty_name`、`bank_account`、`bank_direction`。
+- `seller_name` 的前端列名为 `销方名称`。`bank_account` 展示为银行名称加账号后四位；`bank_direction` 原始值保持后端事实值，前端展示为 `收入` 或 `支出` chip。
+- 发票号码列表头只提供开票日期排序，不提供下拉筛选。排序通过 `sort_field=invoice_date` 和 `sort_direction` 提交。
+- 支付状态列表只展示状态标签；规则原因和自动闭环解释不在列表行内展示。
 
 ## OA 待付款 API
 

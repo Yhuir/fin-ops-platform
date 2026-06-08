@@ -204,6 +204,10 @@ type ApiRelationDetail = {
     amount: string | null;
   }> | null;
   related_invoices?: ApiInvoiceSummary[] | null;
+  invoice_summaries?: ApiInvoiceSummary[] | null;
+  related_oa?: ApiOaSummary[] | null;
+  oa_summaries?: ApiOaSummary[] | null;
+  relation_case_ids?: unknown[] | null;
   payment_rows?: Array<Partial<{
     id: string | null;
     trade_time: string | null;
@@ -767,7 +771,9 @@ function mapRelationDetail(payload: ApiRelationDetail): PendingInvoiceRelationDe
       tradeTime: displayDateTime(payload.transaction_summary?.trade_time),
       debitAmount: stringValue(payload.transaction_summary?.debit_amount, stringValue(payload.transaction_summary?.amount)),
     },
-    relatedInvoices: (payload.related_invoices ?? []).map(mapInvoice).filter(hasInvoiceIdentity),
+    relatedInvoices: (payload.related_invoices ?? payload.invoice_summaries ?? []).map(mapInvoice).filter(hasInvoiceIdentity),
+    relatedOa: (payload.related_oa ?? payload.oa_summaries ?? []).map(mapOa).filter((item) => item.id || item.applicant || item.projectName),
+    relationCaseIds: stringList(payload.relation_case_ids),
     paymentRows: (payload.payment_rows ?? []).map((row) => ({
       id: stringValue(row.id),
       tradeTime: displayDateTime(row.trade_time),

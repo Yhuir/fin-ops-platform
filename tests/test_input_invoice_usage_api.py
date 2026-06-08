@@ -109,6 +109,76 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertTrue(json.loads(oa_response.body)["detailAvailable"])
         self.assertEqual(json.loads(relation_response.body)["kind"], "oa")
 
+    def test_bank_filter_options_and_invoice_date_sort_are_http_contract_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            invoice = self._invoice("inv-bank-filter", "2101", "筛选供应商甲", invoice_date="2026-05-22")
+            other_invoice = self._invoice("inv-bank-other", "2102", "筛选供应商乙", invoice_date="2026-05-10")
+            bank = self._bank("bank-filter", "100.00", bank_name="交通银行", account_last4="3847")
+            other_bank = self._bank("bank-other", "100.00", bank_name="招商银行", account_last4="0011")
+            pair_service = WorkbenchPairRelationService()
+            pair_service.create_active_relation(
+                case_id="case-bank-filter",
+                row_ids=[invoice.id, "oa-bank-filter", bank.id],
+                row_types=["invoice", "oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+            pair_service.create_active_relation(
+                case_id="case-bank-other",
+                row_ids=[other_invoice.id, "oa-bank-other", other_bank.id],
+                row_types=["invoice", "oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+            self._install_service(
+                app,
+                invoices=[invoice, other_invoice],
+                transactions=[bank, other_bank],
+                pair_service=pair_service,
+                oa_projection=StaticOAProjection(
+                    [
+                        self._oa("oa-bank-filter", "樊祖芳", "100.00", apply_type="支付申请"),
+                        self._oa("oa-bank-other", "王会计", "100.00", apply_type="报销"),
+                    ]
+                ),
+            )
+
+            filter_response = app.handle_request("GET", "/api/input-invoice-usage/filter-options")
+            filters = quote(
+                json.dumps(
+                    [
+                        {"field": "bank_account", "operator": "in", "values": ["交通银行 3847"]},
+                        {"field": "bank_direction", "operator": "in", "values": ["outflow"]},
+                        {"field": "oa_applicant", "operator": "in", "values": ["樊祖芳"]},
+                        {"field": "oa_application_type", "operator": "in", "values": ["支付申请"]},
+                    ]
+                )
+            )
+            rows_response = app.handle_request(
+                "GET",
+                f"/api/input-invoice-usage/rows?filters={filters}&sort_field=invoice_date&sort_direction=desc",
+            )
+
+        filter_payload = json.loads(filter_response.body)
+        fields = {field["field"]: field for field in filter_payload["fields"]}
+        bank_account_options = fields["bank_account"]["options"]
+        bank_direction_options = fields["bank_direction"]["options"]
+        rows_payload = json.loads(rows_response.body)
+
+        self.assertEqual(filter_response.status_code, 200)
+        self.assertEqual(rows_response.status_code, 200)
+        self.assertIn("bank_account", fields)
+        self.assertIn("bank_direction", fields)
+        self.assertIn({"value": "交通银行 3847", "label": "交通银行 3847", "count": 1}, bank_account_options)
+        self.assertIn({"value": "outflow", "label": "支出", "count": 2}, bank_direction_options)
+        self.assertEqual(rows_payload["pagination"]["total"], 1)
+        self.assertEqual(rows_payload["rows"][0]["invoiceId"], "inv-bank-filter")
+        self.assertEqual(rows_payload["rows"][0]["bankTransactions"]["bankAccount"], "交通银行 3847")
+        self.assertEqual(rows_payload["rows"][0]["bankTransactions"]["directionLabel"], "支出")
+
     def test_oa_reverse_preview_batch_and_missing_client_draft_routes_are_formal_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -290,6 +360,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         seller_name: str,
         *,
         total_with_tax: str = "100.00",
+        invoice_date: str = "2026-05-20",
     ) -> Invoice:
         counterparty = Counterparty(
             id=f"cp-{invoice_id}",
@@ -304,7 +375,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             counterparty=counterparty,
             amount=Decimal(total_with_tax),
             signed_amount=Decimal(total_with_tax),
-            invoice_date="2026-05-20",
+            invoice_date=invoice_date,
             seller_name=seller_name,
             buyer_name="云南溯源科技有限公司",
             seller_tax_no="91530000SELLER",
@@ -316,7 +387,13 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _bank(transaction_id: str, amount: str) -> BankTransaction:
+    def _bank(
+        transaction_id: str,
+        amount: str,
+        *,
+        bank_name: str = "中国银行",
+        account_last4: str = "1234",
+    ) -> BankTransaction:
         return BankTransaction(
             id=transaction_id,
             account_no="622200001234",
@@ -326,12 +403,12 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             signed_amount=-Decimal(amount),
             txn_date="2026-05-21",
             trade_time="2026-05-21 10:00:00",
-            imported_bank_name="中国银行",
-            imported_bank_last4="1234",
+            imported_bank_name=bank_name,
+            imported_bank_last4=account_last4,
         )
 
     @staticmethod
-    def _oa(oa_id: str, applicant: str, amount: str) -> OAApplicationRecord:
+    def _oa(oa_id: str, applicant: str, amount: str, *, apply_type: str = "报销") -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
             month="2026-05",
@@ -339,7 +416,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             case_id=f"OA-{oa_id}",
             applicant=applicant,
             project_name="项目名称",
-            apply_type="报销",
+            apply_type=apply_type,
             amount=amount,
             counterparty_name="供应商",
             reason="费用报销",

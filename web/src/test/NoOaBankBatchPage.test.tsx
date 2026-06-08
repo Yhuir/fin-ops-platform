@@ -134,10 +134,10 @@ const listPayload = {
       total_amount: "30000.00",
       tag_counts: { internal_transfer: 3 },
       direction_counts: { income: 1, expense: 2 },
-      conflict_reason: "存在多解",
+      conflict_reason: "已有未撤回关联占用，请先处理原关联。",
       can_submit: false,
       can_withdraw: false,
-      blocked_reason: "存在多解",
+      blocked_reason: "已有未撤回关联占用，请先处理原关联。",
       version: 1,
     },
     {
@@ -216,6 +216,38 @@ const feeDetailPayload = {
   ],
 };
 
+const conflictTransferDetailPayload = {
+  batch: listPayload.batches[3],
+  tag_counts: { internal_transfer: 3 },
+  direction_counts: { income: 1, expense: 2 },
+  rows: [
+    {
+      transaction_id: "transfer-row-occupied",
+      trade_time: "2026-05-04 15:30:42",
+      counterparty_name: "云南溯源科技有限公司",
+      direction: "income",
+      direction_label: "收",
+      amount: "30000.00",
+      bank_name: "光大银行",
+      account_last4: "8826",
+      account_key: "ceb:8826",
+      summary: "本公司账户",
+      purpose: "",
+      remark: "",
+      category_code: "internal_transfer",
+      category_label: "内部往来款",
+      category_primary_label: "往来",
+      category_sub_label: "内部往来款",
+      category_label_path: ["往来", "内部往来款"],
+      category_source: "auto",
+      relation_status: "linked",
+      relation_case_ids: ["case-active-001"],
+      linked_oa_count: 1,
+      linked_invoice_count: 0,
+    },
+  ],
+};
+
 const noOaBankBatchSourceFiles = [
   "src/pages/NoOaBankBatchPage.tsx",
 ] as const;
@@ -272,7 +304,7 @@ function installFetchMock(payload = listPayload) {
       return jsonResponse({ batch: payload.batches[2], tag_counts: { salary: 8 }, direction_counts: { expense: 8 }, rows: [] });
     }
     if (url.pathname === "/api/no-oa-bank-batches/batch-conflict-transfer") {
-      return jsonResponse({ batch: payload.batches[3], tag_counts: { internal_transfer: 3 }, direction_counts: { income: 1, expense: 2 }, rows: [] });
+      return jsonResponse(conflictTransferDetailPayload);
     }
     if (url.pathname === "/api/no-oa-bank-batches/batch-draft-transfer") {
       return jsonResponse({ batch: payload.batches[4], tag_counts: { internal_transfer: 2 }, direction_counts: { income: 1, expense: 1 }, rows: [] });
@@ -350,6 +382,7 @@ describe("NoOaBankBatchPage", () => {
 
   test("keeps premium compact rails, transaction table, and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
+    const filterRule = cssRule(styles, ".no-oa-bank-batches-filter");
     const buttonRule = cssRule(styles, ".no-oa-bank-batches-button");
     const segmentRule = cssRule(styles, ".no-oa-bank-batches-segment__button");
     const inputRule = cssRule(styles, ".no-oa-bank-batches-field input");
@@ -365,11 +398,14 @@ describe("NoOaBankBatchPage", () => {
     const amountRule = cssRule(styles, ".no-oa-bank-batches-table .no-oa-bank-batches-table__amount");
     const tagRule = cssRule(styles, ".no-oa-bank-batches-status,\\n.no-oa-bank-batches-tag");
     const drawerRule = cssRule(styles, ".no-oa-bank-batches-drawer");
+    const drawerGroupsRule = cssRule(styles, ".no-oa-bank-batches-drawer__groups");
     const drawerCloseRule = cssRule(styles, ".no-oa-bank-batches-drawer__close");
     const textareaRule = cssRule(styles, ".no-oa-bank-batches-dialog__field textarea");
     const toastRule = cssRule(styles, ".no-oa-bank-batches-toast");
     const toastButtonRule = cssRule(styles, ".no-oa-bank-batches-toast button");
 
+    expect(filterRule).toContain("grid-template-columns");
+    expect(filterRule).toContain("align-items: end");
     expect(buttonRule).toContain("var(--motion-fast)");
     expect(segmentRule).toContain("var(--motion-fast)");
     expect(inputRule).toContain("var(--motion-fast)");
@@ -389,14 +425,16 @@ describe("NoOaBankBatchPage", () => {
     expect(amountRule).toContain("text-align: right");
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
     expect(tagRule).toContain("background: var(--fp-surface-muted)");
+    expect(drawerRule).toContain("min(960px, 92vw)");
     expect(drawerRule).toContain("box-shadow: var(--fp-shadow-drawer)");
+    expect(drawerGroupsRule).toContain("repeat(auto-fit, minmax(260px, 1fr))");
     expect(toastRule).toContain("box-shadow: var(--fp-shadow-popover)");
     expect(tagRule).not.toContain("--fp-bg-muted");
     expect(drawerRule).not.toContain("--fp-shadow-lg");
     expect(toastRule).not.toContain("--fp-shadow-lg");
   });
 
-  test("renders tag management and the three-column main/sub/transaction layout", async () => {
+  test("renders tag management and compact main/sub/transaction layout without account search or debug fields", async () => {
     installFetchMock();
     renderPage();
 
@@ -405,7 +443,8 @@ describe("NoOaBankBatchPage", () => {
     expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
     expect(screen.getByLabelText("月份")).toBeInTheDocument();
-    expect(screen.getByLabelText("银行账户")).toBeInTheDocument();
+    expect(screen.queryByLabelText("银行账户")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("精确账户键，如 建设银行:8106")).not.toBeInTheDocument();
 
     const primaryRegion = screen.getByRole("region", { name: "主标签" });
     await waitFor(() => {
@@ -423,25 +462,28 @@ describe("NoOaBankBatchPage", () => {
     expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
     expect(within(transactionRegion).getByRole("checkbox", { name: "建设银行8106全选" })).toBeInTheDocument();
     expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 bank-row-001" })).toBeInTheDocument();
-    expect(within(transactionRegion).getByText("自动")).toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("分类来源")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("自动")).not.toBeInTheDocument();
   });
 
-  test("shows batch blocking reasons and audit metadata", async () => {
+  test("shows batch blocking reasons without default audit metadata", async () => {
     installFetchMock();
     renderPage();
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
 
-    expect(await screen.findByText("存在多解")).toBeInTheDocument();
+    expect(await screen.findByText("已有未撤回关联占用，请先处理原关联。")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "已提交 1" }));
-    expect(await screen.findByText(/提交人：finance-user/)).toBeInTheDocument();
-    expect(screen.getByText(/版本：2/)).toBeInTheDocument();
+    expect(await screen.findByText("人工成本")).toBeInTheDocument();
+    expect(screen.queryByText(/提交人：finance-user/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/版本：2/)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "历史 1" }));
-    expect(await screen.findByText(/撤回人：finance-user/)).toBeInTheDocument();
-    expect(screen.getByText(/版本：3/)).toBeInTheDocument();
+    expect(await screen.findByText("费用")).toBeInTheDocument();
+    expect(screen.queryByText(/撤回人：finance-user/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/版本：3/)).not.toBeInTheDocument();
   });
 
   test("clears hidden selected rows when changing label scope", async () => {
@@ -484,6 +526,7 @@ describe("NoOaBankBatchPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "免OA流水标签管理" }));
     const drawer = screen.getByRole("dialog", { name: "免OA流水标签管理" });
+    expect(within(drawer).queryByText("版本 3")).not.toBeInTheDocument();
     await user.click(within(drawer).getByRole("button", { name: "清空" }));
     expect(within(drawer).getByRole("checkbox", { name: "费用" })).not.toBeChecked();
     await user.click(within(drawer).getByRole("checkbox", { name: "费用" }));
@@ -658,7 +701,7 @@ describe("NoOaBankBatchPage", () => {
     await user.click(await screen.findByRole("button", { name: "查看中国银行7001流水" }));
     await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-002" }));
 
-    expect(await screen.findByText("请先清空已选银行区域，再选择其他银行流水。")).toBeInTheDocument();
+    expect(await screen.findByText("请先清空当前选择，再选择其他流水。")).toBeInTheDocument();
     expect(screen.getByText("已选 1 条")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "选择流水 bank-row-002" })).not.toBeChecked();
 
@@ -747,6 +790,22 @@ describe("NoOaBankBatchPage", () => {
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }
+  });
+
+  test("shows occupied active relation context for internal transfer conflicts", async () => {
+    const user = userEvent.setup();
+    installFetchMock();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "往来 2批 · 5条" }));
+    await user.click(await screen.findByRole("button", { name: "内部往来款 2批 · 5条" }));
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    expect(await within(transactionRegion).findByText("已有未撤回关联占用，请先处理原关联。")).toBeInTheDocument();
+    expect(await within(transactionRegion).findByText("云南溯源科技有限公司")).toBeInTheDocument();
+    expect(within(transactionRegion).getByText("关联 case-active-001")).toBeInTheDocument();
+    expect(within(transactionRegion).getByText("OA 1")).toBeInTheDocument();
+    expect(within(transactionRegion).getByText("发票 0")).toBeInTheDocument();
   });
 
   test("refreshes tag selection, list, and detail cache after bank transaction category updates", async () => {

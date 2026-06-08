@@ -128,6 +128,10 @@ describe("global app status indicator", () => {
 
     await user.hover(indicator);
 
+    expect(screen.queryByText("运行状态")).not.toBeInTheDocument();
+
+    await user.click(indicator);
+
     expect(await screen.findByText("运行状态")).toBeInTheDocument();
     expect(document.querySelector(".MuiPopover-root")).not.toBeInTheDocument();
     const statusDialog = screen.getByRole("dialog", { name: "全局运行状态" });
@@ -181,11 +185,11 @@ describe("global app status indicator", () => {
 
     const indicator = await screen.findByRole("status", { name: "后台任务处理中" });
 
-    await user.hover(indicator);
+    await user.click(indicator);
 
     expect(await screen.findByRole("link", { name: "App Health" })).toBeInTheDocument();
 
-    await user.unhover(indicator);
+    await user.unhover(screen.getByRole("dialog", { name: "全局运行状态" }));
 
     await waitFor(() => {
       expect(screen.queryByText("全局运行状态")).not.toBeInTheDocument();

@@ -289,6 +289,76 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 50, "total": 0})
         self.assertEqual(payload["refresh_status"], "fresh")
 
+    def test_input_repository_uses_native_bank_account_and_direction_columns(self) -> None:
+        connection = InvoiceReadModelConnection(
+            input_rows=[
+                {
+                    "payload": {
+                        "id": "input_invoice_usage_row_1",
+                        "invoiceId": "invoice-1",
+                        "invoice": {"invoiceNo": "1001", "totalWithTax": "118.00"},
+                        "paymentStatus": {"code": "pending", "label": "待处理"},
+                        "oa": {"relationCount": 1},
+                        "bankTransactions": {"relationCount": 1},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_input_invoice_usage_rows(
+            month="2026-05",
+            filters='[{"field":"bank_account","operator":"in","values":["交通银行 3847"]},{"field":"bank_direction","operator":"in","values":["outflow"]}]',
+            sort_field="bank_account",
+            sort_direction="asc",
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("bank_account", executed_sql)
+        self.assertIn("bank_direction", executed_sql)
+        self.assertIn("bank_account asc", executed_sql)
+
+    def test_input_repository_save_persists_bank_account_and_direction_columns(self) -> None:
+        connection = WriteRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_input_invoice_usage_rows(
+            scope_key="2026-05",
+            rows=[
+                {
+                    "id": "input_invoice_usage_row_1",
+                    "invoiceId": "invoice-1",
+                    "invoice": {"invoiceNo": "1001", "invoiceDate": "2026-05-21", "totalWithTax": "118.00"},
+                    "paymentStatus": {"code": "pending", "label": "待处理"},
+                    "oa": {"relationCount": 1},
+                    "bankTransactions": {
+                        "primaryBankTransactionId": "bank-1",
+                        "tradeTime": "2026-05-21 10:00:00",
+                        "amount": "118.00",
+                        "direction": "outflow",
+                        "directionLabel": "支出",
+                        "bankName": "交通银行",
+                        "accountLast4": "3847",
+                        "bankAccount": "交通银行 3847",
+                        "relationCount": 1,
+                    },
+                }
+            ],
+            source_versions=input_invoice_usage_source_versions(),
+        )
+
+        insert_calls = [(sql, params) for sql, params in connection.executed if "insert into read_model.input_invoice_usage_rows" in sql]
+        self.assertEqual(len(insert_calls), 1)
+        sql, params = insert_calls[0]
+        self.assertIn("bank_account", sql)
+        self.assertIn("bank_direction", sql)
+        self.assertEqual(params["bank_account"], "交通银行 3847")
+        self.assertEqual(params["bank_direction"], "outflow")
+
     def test_output_repository_uses_native_columns_for_filters_and_sort(self) -> None:
         connection = InvoiceReadModelConnection(
             output_rows=[

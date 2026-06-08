@@ -70,9 +70,11 @@ export type InputInvoiceUsageBankSummary = {
   counterpartyName: string;
   tradeTime: string;
   amount: string;
+  direction: string;
   directionLabel: string;
   bankName: string;
   accountLast4: string;
+  bankAccount: string;
   summary: string;
   remark: string;
   detailAvailable: boolean;

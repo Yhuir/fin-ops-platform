@@ -16,6 +16,7 @@ import {
   downloadPendingInvoiceExport,
   fetchPendingInvoiceCandidates,
   fetchPendingInvoiceExportPreview,
+  fetchPendingInvoiceFilterOptions,
   fetchPendingInvoiceObjectDetail,
   fetchPendingInvoiceRelationDetail,
   fetchPendingInvoiceRows,
@@ -31,6 +32,8 @@ import type {
   ManualPendingInvoiceResult,
   PendingInvoiceDirection,
   PendingInvoiceFilter,
+  PendingInvoiceColumnFilter,
+  PendingInvoiceFilterField,
   PendingInvoiceObjectDetailTarget,
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
@@ -124,6 +127,8 @@ export default function PendingInvoicesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [keyword, setKeyword] = useState("");
+  const [columnFilters, setColumnFilters] = useState<PendingInvoiceColumnFilter[]>([]);
+  const [columnFilterFields, setColumnFilterFields] = useState<PendingInvoiceFilterField[]>([]);
   const [sortField, setSortField] = useState<PendingInvoiceSortField>("trade_date");
   const [sortDirection, setSortDirection] = useState<PendingInvoiceSortDirection>("desc");
   const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>(null);
@@ -148,9 +153,10 @@ export default function PendingInvoicesPage() {
     keyword,
     page,
     pageSize,
+    filters: columnFilters,
     sortField,
     sortDirection,
-  }), [direction, filter, keyword, page, pageSize, sortDirection, sortField]);
+  }), [columnFilters, direction, filter, keyword, page, pageSize, sortDirection, sortField]);
 
   const loadRows = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -188,6 +194,26 @@ export default function PendingInvoicesPage() {
     loadRows(controller.signal);
     return () => controller.abort();
   }, [loadRows, refreshToken]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchPendingInvoiceFilterOptions({
+      direction,
+      filter,
+      keyword,
+      filters: columnFilters,
+      sortField,
+      sortDirection,
+      signal: controller.signal,
+    })
+      .then((payload) => setColumnFilterFields(payload.fields))
+      .catch((caught) => {
+        if (!isAbortLikeError(caught)) {
+          setColumnFilterFields([]);
+        }
+      });
+    return () => controller.abort();
+  }, [columnFilters, direction, filter, keyword, sortDirection, sortField, refreshToken]);
 
   useEffect(() => {
     pageActiveRef.current = active;
@@ -263,8 +289,13 @@ export default function PendingInvoicesPage() {
   }), [sortDirection, sortField]);
   const exportDisabled = Boolean(readModelStatus && readModelStatus !== "fresh");
 
-  const handleSortChange = useCallback((field: PendingInvoiceSortField) => {
+  const handleSortChange = useCallback((field: PendingInvoiceSortField, nextDirection?: PendingInvoiceSortDirection) => {
     setPage(1);
+    if (nextDirection) {
+      setSortField(field);
+      setSortDirection(nextDirection);
+      return;
+    }
     if (field === sortField) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
       return;
@@ -349,6 +380,24 @@ export default function PendingInvoicesPage() {
   const handleDirectionChange = useCallback((nextDirection: PendingInvoiceDirection) => {
     setDirection(nextDirection);
     setFilter("all");
+    setColumnFilters([]);
+    setPage(1);
+  }, []);
+
+  const handleApplyColumnFilters = useCallback((nextFilters: PendingInvoiceColumnFilter[]) => {
+    setColumnFilters((current) => {
+      const fields = new Set(nextFilters.map((item) => item.field));
+      return [
+        ...current.filter((item) => !fields.has(item.field)),
+        ...nextFilters,
+      ];
+    });
+    setPage(1);
+  }, []);
+
+  const handleClearColumnFilters = useCallback((fields: string[]) => {
+    const fieldSet = new Set(fields);
+    setColumnFilters((current) => current.filter((item) => !fieldSet.has(item.field)));
     setPage(1);
   }, []);
 
@@ -440,7 +489,7 @@ export default function PendingInvoicesPage() {
   return (
     <div className="pending-invoices-page" data-testid="pending-invoices-page">
       <PageScaffold
-        actions={(
+        description={(
           <div aria-label="待找发票流水范围" className="pending-invoices-direction-segment" role="group">
             {([
               ["all", `全部 ${summaryCounts.all}`],
@@ -459,6 +508,24 @@ export default function PendingInvoicesPage() {
             ))}
           </div>
         )}
+        actions={(
+          <div className="pending-invoices-toolbar-actions pending-invoices-toolbar-actions--primary">
+            <button className="pending-invoices-button" onClick={() => handleOpenRules("expense")} type="button">
+              支出待找发票规则设置
+            </button>
+            <button className="pending-invoices-button" onClick={() => handleOpenRules("income")} type="button">
+              收入待找发票规则设置
+            </button>
+            <button
+              className="pending-invoices-button pending-invoices-button--primary"
+              disabled={exportDisabled}
+              onClick={() => setActiveDrawer("export")}
+              type="button"
+            >
+              筛选内容导出
+            </button>
+          </div>
+        )}
         className="pending-invoices-page__scaffold"
         title="待找发票"
       >
@@ -474,20 +541,6 @@ export default function PendingInvoicesPage() {
           )}
           right={(
             <div className="pending-invoices-toolbar-actions">
-              <button className="pending-invoices-button" onClick={() => handleOpenRules("expense")} type="button">
-                支出待找发票规则设置
-              </button>
-              <button className="pending-invoices-button" onClick={() => handleOpenRules("income")} type="button">
-                收入待找发票规则设置
-              </button>
-              <button
-                className="pending-invoices-button pending-invoices-button--primary"
-                disabled={exportDisabled}
-                onClick={() => setActiveDrawer("export")}
-                type="button"
-              >
-                筛选内容导出
-              </button>
               <input
                 aria-label="搜索流水"
                 className="pending-invoices-search"
@@ -512,6 +565,10 @@ export default function PendingInvoicesPage() {
           rows={rows}
           config={tableConfig}
           onSortChange={handleSortChange}
+          filterFields={columnFilterFields}
+          columnFilters={columnFilters}
+          onApplyColumnFilters={handleApplyColumnFilters}
+          onClearColumnFilters={handleClearColumnFilters}
           onOpenRelation={handleOpenRelation}
           onOpenInvoicePicker={handleOpenInvoicePicker}
           onOpenManualInvoice={setDialogRow}

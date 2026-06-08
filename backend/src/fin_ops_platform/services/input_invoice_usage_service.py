@@ -34,7 +34,7 @@ OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "invoice_no": {"label": "发票号码", "mode": "text", "operators": {"contains", "equals"}, "sortable": True},
     "invoice_date": {"label": "开票日期", "mode": "date", "operators": {"between", "equals"}, "sortable": True},
-    "seller_name": {"label": "销方", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
+    "seller_name": {"label": "销方名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
     "seller_tax_no": {"label": "销方识别号", "mode": "text", "operators": {"contains", "equals"}, "sortable": True},
     "total_with_tax": {"label": "价税合计", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
     "amount": {"label": "不含税金额", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
@@ -50,6 +50,8 @@ FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "bank_trade_time": {"label": "交易时间", "mode": "date", "operators": {"between", "equals"}, "sortable": True},
     "bank_amount": {"label": "流水金额", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
     "bank_name": {"label": "支付银行", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
+    "bank_account": {"label": "银行账户", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
+    "bank_direction": {"label": "收支", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
     "bank_summary": {"label": "摘要", "mode": "text", "operators": {"contains"}, "sortable": True},
 }
 
@@ -512,8 +514,10 @@ class InputInvoiceUsageQueryService:
             "tradeTime": primary.get("tradeTime", ""),
             "amount": primary.get("amount", ""),
             "direction": primary.get("direction", ""),
+            "directionLabel": primary.get("directionLabel", ""),
             "bankName": primary.get("bankName", ""),
             "accountLast4": primary.get("accountLast4", ""),
+            "bankAccount": primary.get("bankAccount", ""),
             "summary": primary.get("summary", ""),
             "remark": primary.get("remark", ""),
             "relationCount": len(public_summaries),
@@ -539,8 +543,10 @@ class InputInvoiceUsageQueryService:
             "tradeTime": bank.trade_time or bank.txn_date or "",
             "amount": _money(bank.amount),
             "direction": _bank_direction(bank),
+            "directionLabel": _bank_direction_label(bank),
             "bankName": bank.imported_bank_name or "",
             "accountLast4": bank.imported_bank_last4 or str(bank.account_no or "")[-4:],
+            "bankAccount": _bank_account_label(bank),
             "summary": bank.summary or "",
             "remark": bank.remark or "",
             "relationCaseId": relation.get("case_id", ""),
@@ -791,6 +797,8 @@ class InputInvoiceUsageQueryService:
             "bank_trade_time": bank.get("tradeTime"),
             "bank_amount": bank.get("amount"),
             "bank_name": bank.get("bankName"),
+            "bank_account": bank.get("bankAccount"),
+            "bank_direction": bank.get("direction"),
             "bank_summary": bank.get("summary"),
         }
         return values.get(field)
@@ -807,7 +815,12 @@ class InputInvoiceUsageQueryService:
                 continue
             key = str(value)
             counts[key] = counts.get(key, 0) + 1
-            labels[key] = row["paymentStatus"]["label"] if field == "payment_status" else key
+            if field == "payment_status":
+                labels[key] = row["paymentStatus"]["label"]
+            elif field == "bank_direction":
+                labels[key] = "支出" if key == "outflow" else "收入" if key == "inflow" else key
+            else:
+                labels[key] = key
         return [{"value": value, "label": labels[value], "count": counts[value]} for value in sorted(counts)]
 
     @staticmethod
@@ -924,6 +937,16 @@ def _within_cent(left: Decimal, right: Decimal) -> bool:
 def _bank_direction(transaction: BankTransaction) -> str:
     value = getattr(transaction.txn_direction, "value", str(transaction.txn_direction))
     return "outflow" if "outflow" in value else "inflow"
+
+
+def _bank_direction_label(transaction: BankTransaction) -> str:
+    return "支出" if _bank_direction(transaction) == "outflow" else "收入"
+
+
+def _bank_account_label(transaction: BankTransaction) -> str:
+    bank_name = str(transaction.imported_bank_name or "").strip()
+    account_last4 = str(transaction.imported_bank_last4 or str(transaction.account_no or "")[-4:]).strip()
+    return " ".join(part for part in [bank_name, account_last4] if part)
 
 
 def _sortable_time(value: str | None) -> float:

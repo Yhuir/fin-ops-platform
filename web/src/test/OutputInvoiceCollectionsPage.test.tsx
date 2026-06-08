@@ -76,8 +76,8 @@ const rowsPayload = {
         amount: "5000.00",
         direction: "inflow",
         directionLabel: "收入",
-        bankName: "工商银行",
-        accountLast4: "6386",
+        bankName: "建设银行",
+        accountLast4: "8106",
         summary: "客户回款摘要内容很长很长用于验证折叠展示",
         remark: "银行备注",
         relationCount: 1,
@@ -91,8 +91,8 @@ const rowsPayload = {
             amount: "5000.00",
             direction: "inflow",
             directionLabel: "收入",
-            bankName: "工商银行",
-            accountLast4: "6386",
+            bankName: "建设银行",
+            accountLast4: "8106",
             summary: "客户回款摘要内容很长很长用于验证折叠展示",
             remark: "银行备注",
           },
@@ -306,7 +306,7 @@ function installOutputInvoiceCollectionsFetch() {
           amount: "5000.00",
           amountUppercase: "人民币伍仟元整",
           remark: "销项发票 XSFP-2026-0001",
-          bankName: "工商银行",
+          bankName: "建设银行",
           canCreateFormalReceipt: false,
         },
       });
@@ -352,6 +352,12 @@ function rowsRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectio
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
     .filter((url) => url.pathname === "/api/output-invoice-collections/rows");
+}
+
+function statusRulesRequests(fetchMock: ReturnType<typeof installOutputInvoiceCollectionsFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === "/api/output-invoice-collections/status-rules");
 }
 
 function readWebSource(path: string) {
@@ -428,8 +434,10 @@ describe("Output invoice collections page", () => {
     const filterApply = cssRule(styles, ".output-invoice-collection-filter-menu__apply");
     const expandableButton = cssRule(styles, ".output-invoice-collection-expandable-cell-text__button");
     const tableShell = cssRule(styles, ".output-invoice-collections-table-shell");
+    const table = cssRule(styles, ".output-invoice-collections-table");
     const tableCells = cssRule(styles, ".output-invoice-collections-table-cell");
     const tableAction = cssRule(styles, ".output-invoice-collections-table-action");
+    const tableActionIcon = cssRule(styles, ".output-invoice-collections-table-action--icon");
     const sortButton = cssRule(styles, ".output-invoice-collections-sort-button");
     const paginationButton = cssRule(styles, ".output-invoice-collections-pagination-actions button");
     const drawerButton = cssRule(styles, ".output-invoice-collection-drawer__button");
@@ -451,8 +459,12 @@ describe("Output invoice collections page", () => {
     expect(expandableButton).toContain("var(--motion-fast)");
     expect(tableShell).toContain("min-height: 320px");
     expect(tableShell).toContain("max-height: calc(100vh - 214px)");
+    expect(table).toContain("min-width: 1240px");
+    expect(table).not.toContain("min-width: 1680px");
     expect(tableCells).toContain("transition: background-color var(--motion-fast)");
     expect(tableAction).toContain("var(--motion-fast)");
+    expect(tableActionIcon).toContain("width: 26px");
+    expect(tableActionIcon).toContain("padding: 0");
     expect(sortButton).toContain("var(--motion-fast)");
     expect(paginationButton).toContain("var(--motion-fast)");
     expect(drawerButton).toContain("var(--motion-fast)");
@@ -546,8 +558,35 @@ describe("Output invoice collections page", () => {
 
     const page = await screen.findByTestId("output-invoice-collections-page");
     expect(within(page).getByRole("heading", { name: "销项发票收款情况" })).toBeInTheDocument();
+    expect(within(page).queryByText("以销项发票为主对象查看收款状态、收入流水和收据预览。")).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
+    expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
+    expect(within(page).queryByLabelText("收款状态")).not.toBeInTheDocument();
+    for (const label of ["销项发票数", "待收款金额", "已收金额", "待出收据数"]) {
+      expect(within(page).queryByText(label)).not.toBeInTheDocument();
+    }
     expect(within(page).queryByRole("button", { name: /导出/ })).not.toBeInTheDocument();
     expect(await within(page).findByText("XSFP-2026-0001")).toBeInTheDocument();
+    expect(statusRulesRequests(fetchMock)).toHaveLength(0);
+
+    await user.type(within(page).getByRole("searchbox", { name: "搜索销项发票收款情况" }), "客户科技");
+    await user.click(within(page).getByRole("button", { name: "查询" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      expect(request?.searchParams.get("keyword")).toBe("客户科技");
+    });
+    await user.clear(within(page).getByRole("searchbox", { name: "搜索销项发票收款情况" }));
+    await user.keyboard("{Enter}");
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      expect(request?.searchParams.get("keyword")).toBeNull();
+    });
+    fireEvent.input(within(page).getByLabelText("月份"), { target: { value: "2026-05" } });
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      expect(request?.searchParams.get("month")).toBe("2026-05");
+    });
+
     expect(within(page).getByRole("table", { name: "销项发票收款情况表" })).toBeInTheDocument();
 
     const headerRows = within(page).getAllByRole("row").slice(0, 2);
@@ -558,25 +597,38 @@ describe("Output invoice collections page", () => {
       "发票号码",
       "购方",
       "价税合计",
-      "税额/税率",
       "业务/货物劳务",
       "收款状态",
       "付款方/日期",
       "收款金额",
-      "银行/摘要",
+      "摘要",
       "收据情况",
     ]) {
       expect(within(headerRows[1]).getAllByText(label)).toHaveLength(1);
     }
+    expect(within(headerRows[1]).getByText("税额/税率")).toBeInTheDocument();
+    expect(within(headerRows[1]).queryByRole("columnheader", { name: "税额/税率" })).not.toBeInTheDocument();
+    expect(within(headerRows[1]).queryByText("银行/摘要")).not.toBeInTheDocument();
     const bodyRows = within(page).getAllByRole("row").slice(2);
     expect(bodyRows.some((row) => within(row).queryByText("发票号码"))).toBe(false);
     expect(bodyRows.some((row) => within(row).queryByText("付款方/日期"))).toBe(false);
+    expect(bodyRows.some((row) => within(row).queryByText("银行/摘要"))).toBe(false);
 
     expect(within(page).getAllByText("云南客户科技有限公司").length).toBeGreaterThan(0);
+    expect(within(page).getByText("698.81 / 6%")).toBeInTheDocument();
+    const amountCell = within(page).getByText("5,000.00").closest('[data-column-role="amount"]');
+    expect(amountCell).not.toBeNull();
+    const amountTags = within(amountCell as HTMLElement).getAllByText(/收入|建设银行 8106/).map((element) => element.textContent);
+    expect(amountTags).toEqual(["收入", "建设银行 8106"]);
+    expect(within(page).queryByText("建设银行 8106")).toBeInTheDocument();
     expect(
       within(page).getAllByText("待收款，已收部分款")
         .some((element) => element.closest(".output-invoice-collection-status-cell")),
     ).toBe(true);
+    expect(within(page).queryByText("存在收入流水，但收入流水合计小于发票价税合计。")).not.toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "查看发票 XSFP-2026-0001 详情" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "查看流水 云南客户科技有限公司 详情" })).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
     expect(within(page).getAllByRole("button", { name: "已出收据" }).length).toBeGreaterThan(0);
     expect(within(page).getAllByRole("button", { name: "待出收据" }).length).toBeGreaterThan(0);
 
@@ -649,10 +701,12 @@ describe("Output invoice collections page", () => {
 
     const page = await screen.findByTestId("output-invoice-collections-page");
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBe(1));
+    expect(statusRulesRequests(fetchMock)).toHaveLength(0);
 
     await user.click(within(page).getByRole("button", { name: "收款状态规则" }));
     expect(await screen.findByLabelText("收款状态规则")).toBeInTheDocument();
     expect(await screen.findByText("收入流水金额小于销项发票金额")).toBeInTheDocument();
+    expect(statusRulesRequests(fetchMock)).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /保存|提交/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "关闭收款状态规则" }));

@@ -334,6 +334,12 @@ class SearchPendingSqlProjectionBuilder:
                 ),
                 status_override=row.get("income_status_override") if isinstance(row.get("income_status_override"), dict) else None,
             )
+            if filter_name != "all" and not _pending_invoice_status_matches_filter(
+                direction=direction,
+                filter_name=filter_name,
+                status_code=str(status_payload.get("code") or ""),
+            ):
+                continue
             available_actions = pending_invoice_available_actions(status_payload, can_create_invoice=can_create_invoice)
             bank_transaction = {
                 "id": transaction_id,
@@ -658,6 +664,27 @@ def _status_label(status: str) -> str:
 
 def _filter_group_for_category(category_code: str, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
     return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
+
+
+def _pending_invoice_status_matches_filter(*, direction: str, filter_name: str, status_code: str) -> bool:
+    if filter_name == "requires_invoice":
+        expected = {"cash_income", "income_pending_invoice"} if direction == "income" else {
+            "paid_invoiced",
+            "paid_pending_invoice",
+            "paid_pending_future_invoice",
+            "invoice_not_fully_paid",
+        }
+        if direction == "income":
+            expected.add("income_invoiced")
+    elif filter_name == "bank_statement_as_invoice":
+        expected = {"bank_statement_as_invoice"}
+    elif filter_name == "no_invoice_required":
+        expected = {"income_no_invoice_required"} if direction == "income" else {"no_invoice_required"}
+    elif filter_name == "cash_income":
+        expected = {"cash_income"}
+    else:
+        return True
+    return status_code in expected
 
 
 def _pending_invoice_category_payload_from_bank_tag_row(row: dict[str, Any]) -> dict[str, object]:

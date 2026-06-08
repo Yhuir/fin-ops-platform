@@ -236,6 +236,10 @@ describe("no OA bank batch API", () => {
             category_code: "fee",
             category_label: "手续费",
             category_source: "auto",
+            relation_status: "linked",
+            relation_case_ids: ["case-no-oa-001"],
+            linked_oa_count: 2,
+            linked_invoice_count: 1,
           },
         ],
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
@@ -262,6 +266,10 @@ describe("no OA bank batch API", () => {
       categorySource: "auto",
       categoryCode: "fee",
       categoryLabel: "手续费",
+      relationStatus: "linked",
+      relationCaseIds: ["case-no-oa-001"],
+      linkedOaCount: 2,
+      linkedInvoiceCount: 1,
     });
     expect(detail.tagCounts).toEqual({ fee: 1 });
     expect(detail.directionCounts).toEqual({ expense: 1 });

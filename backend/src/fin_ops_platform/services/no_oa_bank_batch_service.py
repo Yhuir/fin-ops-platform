@@ -1670,7 +1670,7 @@ class NoOaBankBatchService:
                     total_amount=Decimal(amount_text),
                     source_versions=source_versions,
                     conflict_code="row_occupied_by_active_relation",
-                    conflict_reason="内部往来流水已被 active relation 占用。",
+                    conflict_reason="已有未撤回关联占用，请先处理原关联。",
                     evidence={"occupied_row_ids": occupied},
                 )
                 continue

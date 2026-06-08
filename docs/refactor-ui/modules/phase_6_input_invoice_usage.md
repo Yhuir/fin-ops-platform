@@ -28,8 +28,36 @@
 - Do not change backend, API contracts, read models, workers, mocks, permissions or business state machines.
 - Do not change reconciliation workbench internals.
 - Do not redesign the workflow. Existing right drawers remain right drawers; no drawer becomes a dialog, inline panel or route.
-- Do not add new user-visible table filters to `/input-invoice-usage` just because `InputInvoiceUsageFilterMenu` exists. It is currently covered as a component and used by `OaPendingPaymentsTable`, not wired into the input invoice usage page table.
+- Do not add filter fields beyond the backend `/api/input-invoice-usage/filter-options` contract. The page now has explicit product-approved column filters and must not derive options from current page rows.
 - Do not parallelize this module with other page modules.
+
+## 2026-06-08 Product Update
+
+This module now includes a product-approved optimization of `/input-invoice-usage` focused on toolbar placement, table density, sticky two-row headers, zone coloring, row copy cleanup and backend-driven column filtering.
+
+Updated page facts:
+
+- The page title remains `进项发票使用情况`; explanatory description copy such as `以进项发票为主对象反查支付状态、OA 和银行流水。` is removed from the visible page.
+- The query toolbar is right-aligned above the table. `以发票反提 OA` sits immediately left of search and uses an accent button treatment. The manual `刷新` button is removed.
+- Search no longer displays the visible label `关键字`; it keeps a keyword input with accessible label `进项发票使用情况搜索`, placeholder search text, submit button `查询`, Enter submit, trim and page reset behavior.
+- The main table keeps four group headers `进项发票` / `支付状态` / `OA` / `流水`, with sticky first and second header rows inside the table scroll shell.
+- The table viewport is taller than the previous premium slice, with group-specific background tints and stronger separators between the four zones.
+- The `销方` column is now labeled `销方名称`.
+- The payment-status list cell shows only the status tag; explanatory reason text such as automatic-closure copy is hidden in the list.
+- OA row detail is an icon-only info button beside the applicant name instead of a text `详情` button.
+- Bank amount rows show an income/expense chip before the bank account chip. Raw values such as `outflow` must not appear in the UI; show `支出`/`收入` and account text such as `交通银行 3847`.
+- Header text and body cells are vertically centered; header labels are horizontally and vertically centered.
+
+Column filter and sort facts:
+
+- `发票号码` does not show a filter dropdown. It provides an invoice-date sort icon and submits `sort_field=invoice_date`.
+- `销方名称` filters by `seller_name`.
+- `支付状态` filters by `payment_status`.
+- `OA申请人` opens a two-column filter over `oa_applicant` and `oa_application_type`; selected fields combine with AND.
+- `项目名称` filters by `oa_project_name`.
+- `对方户名` filters by `bank_counterparty_name`.
+- `金额` opens a two-column filter over `bank_account` and `bank_direction`; selected fields combine with AND.
+- In every field, multiple selected values for the same field use IN semantics.
 
 ## Current MUI Inventory
 
@@ -53,12 +81,12 @@
 | Route/sidebar | link `进项发票使用情况`, href `/input-invoice-usage` | Same route and sidebar link |
 | Page root | `data-testid="input-invoice-usage-page"` | Keep root contract |
 | Page title | heading `进项发票使用情况` | Same heading and page purpose |
-| Description | `以进项发票为主对象反查支付状态、OA 和银行流水。` | Preserve unless copy docs are explicitly updated |
-| OA reverse workflow | button `以发票反提 OA` | Same toolbar position and right drawer |
+| Description | none | Keep the page free of explanatory description copy |
+| OA reverse workflow | button `以发票反提 OA` | Keep immediately left of search; opens the same right drawer |
 | Rules workflow | button `发票与支付状态规则设置` | Same toolbar position and right drawer |
 | Export workflow | button `筛选内容导出` | Same toolbar position and right drawer |
-| Refresh | button `刷新`; disabled while refreshing | Same manual reload behavior |
-| Search | input label `关键字`; submit button `查询`; Enter submits | Same page reset and keyword trim behavior |
+| Refresh | none | Manual refresh button is removed; read model retry remains automatic |
+| Search | accessible input label `进项发票使用情况搜索`; submit button `查询`; Enter submits | No visible `关键字`; same page reset and keyword trim behavior |
 | Loading | region label `进项发票使用情况加载中` | Same loading semantic contract |
 | Empty | page empty state `当前条件下暂无记录。`; table empty row `当前条件下没有进项发票使用记录。` | Same copy and placement intent |
 | Error | API error text in page status area | Same visible failure feedback |
@@ -76,7 +104,7 @@
   - `流水`
 - Column headers:
   - `发票号码`
-  - `销方`
+  - `销方名称`
   - `价税合计` / `不含税/税率税额`
   - `货物或应税劳务名称`
   - `支付状态`
@@ -90,9 +118,9 @@
   - Amount columns right aligned with tabular numbers.
   - Payment status column visual emphasis and class contract `input-invoice-usage-payment-cell` unless P054 replaces it with an equivalent project class contract.
   - Invoice number detail icon button label `查看发票 <invoice> 详情`.
-  - OA detail text button label `查看OA <applicant/id> 详情` when `detailAvailable` is true.
+  - OA detail icon button label `查看OA <applicant/id> 详情` when `detailAvailable` is true.
   - Bank detail text button label `查看流水 <counterparty/id> 详情` when `detailAvailable` is true.
-  - Date/status/application type/bank direction tags with stable height and no row jump.
+  - Date/status/application type/bank account and direction tags with stable height and no row jump.
   - Expand/collapse labels such as `展开 <preview>` and `收起 <preview>`.
   - Empty row copy `当前条件下没有进项发票使用记录。`
   - No DataGrid.
@@ -239,17 +267,17 @@ Current user-visible entrypoint matrix:
 | --- | --- | --- |
 | Route | `/input-invoice-usage` inside App Shell | Same route and sidebar link. |
 | Page root | `data-testid="input-invoice-usage-page"` | Preserve root contract. |
-| Header actions | `以发票反提 OA`, `发票与支付状态规则设置`, `筛选内容导出`, `刷新` | Same toolbar positions, disabled refresh while refreshing. |
-| Search | label `关键字`, button `查询`, Enter submits | Same trim/page reset behavior. |
+| Header actions | `发票与支付状态规则设置`, `筛选内容导出`; query toolbar action `以发票反提 OA` | OA reverse sits left of search with accent treatment; manual refresh is removed. |
+| Search | accessible label `进项发票使用情况搜索`, button `查询`, Enter submits | No visible `关键字`; same trim/page reset behavior. |
 | Main table | `进项发票使用情况表` | Dense table remains table; no card conversion. |
 | Table groups | `进项发票`, `支付状态`, `OA`, `流水` | Same group geometry and boundaries. |
-| Detail buttons | `查看发票 <invoice> 详情`, `查看OA <applicant/id> 详情`, `查看流水 <counterparty/id> 详情` | Same labels and disabled/unavailable behavior. |
+| Detail buttons | `查看发票 <invoice> 详情`, icon-only `查看OA <applicant/id> 详情`, `查看流水 <counterparty/id> 详情` | Same accessible labels and disabled/unavailable behavior. |
 | Expandable text | `展开 <preview>` / `收起 <preview>` | Same labels, row-local expansion state. |
 | Detail drawer | `发票详情`, `银行流水详情`, `OA详情`, `关联明细` | Right drawer remains right drawer; preserve lazy load and unavailable OA detail behavior. |
 | Export drawer | `进项发票使用情况导出`, title `筛选内容导出` | Right drawer remains right drawer; preserve preview/download/success behavior. |
 | Payment rules drawer | `发票与支付状态规则设置` | Right drawer remains right drawer; preserve read-only/edit/versioned save/conflict behavior. |
 | OA reverse drawer | `以发票反提 OA 工作流` | Right drawer remains right drawer; preserve preview, candidate selection, batch/draft/status/revoke/manual fallback. |
-| Shared filter menu | `筛选 <field label>` | Preserve external consumer contract in `OaPendingPaymentsTable`; do not add new page filters without product prompt. |
+| Shared filter menu | `筛选 <field label>` | Preserve external consumer contract in `OaPendingPaymentsTable`; `/input-invoice-usage` mounts backend-driven approved filters only. |
 | States | loading skeleton, empty state, read-model refreshing retry, drawer loading/error/success/unavailable states | Same copy, roles and non-blocking behavior. |
 
 Table and layout requirements for PV-013:
@@ -273,7 +301,7 @@ Premium visual opportunities for PV-013:
 Non-scope for PV-013:
 
 - Do not change input invoice usage API calls, request/response shape, read model retry behavior, page session state, detail endpoints, export semantics, payment rules save/conflict semantics or OA reverse backend workflow.
-- Do not add new column filters to `/input-invoice-usage`; the shared filter menu remains documented because `OaPendingPaymentsTable` consumes it.
+- Do not add additional column filters beyond the product-approved backend filter-options contract; the shared filter menu remains documented because `OaPendingPaymentsTable` also consumes it.
 - Do not change right drawers into dialogs, inline panels or routes.
 - Do not change workbench internals or backend code.
 

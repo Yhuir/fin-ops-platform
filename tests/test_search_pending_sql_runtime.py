@@ -887,6 +887,84 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("status_code", executed_sql)
         self.assertIn("seller_name asc", executed_sql)
 
+    def test_pending_invoice_repository_filters_status_groups_by_visible_status(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-statement-paid",
+                        "bank_transaction": {"id": "txn-statement-paid"},
+                        "invoice_acquisition_status": {"code": "paid_invoiced"},
+                        "filter_group": "bank_statement_as_invoice",
+                    },
+                    "missing_invoice": False,
+                    "can_create_invoice": False,
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="bank_statement_as_invoice",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            page=1,
+            page_size=50,
+        )
+
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("status_code", executed_sql)
+        self.assertNotIn("filter_group = %s", executed_sql)
+
+    def test_pending_invoice_repository_supports_new_column_filter_fields_as_and_clauses(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-filtered",
+                        "bank_transaction": {
+                            "id": "txn-filtered",
+                            "bank_short_name": "光大",
+                            "account_last4": "8826",
+                            "effective_tag_label_path": ["项目开销", "员工报销"],
+                        },
+                        "oa": {"primary": {"application_type": "支付申请"}},
+                    },
+                    "missing_invoice": True,
+                    "can_create_invoice": True,
+                }
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        repository.list_pending_invoice_rows(
+            direction="all",
+            filter="all",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            filters=json.dumps(
+                [
+                    {"field": "bank_account", "operator": "in", "values": ["光大 8826"]},
+                    {"field": "transaction_tag", "operator": "in", "values": ["项目开销 / 员工报销"]},
+                    {"field": "direction", "operator": "in", "values": ["expense"]},
+                    {"field": "oa_application_type", "operator": "in", "values": ["支付申请"]},
+                ],
+                ensure_ascii=False,
+            ),
+            page=1,
+            page_size=50,
+        )
+
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("bank_short_name", executed_sql)
+        self.assertIn("effective_tag_label_path", executed_sql)
+        self.assertIn("direction", executed_sql)
+        self.assertIn("application_type", executed_sql)
+        self.assertIn(" and ", executed_sql)
+
     def test_pending_invoice_api_miss_enqueues_refresh_without_sync_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -1502,6 +1580,45 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["货款", "设备采购"])
         self.assertEqual(payload["bank_transaction"]["effective_tag_label_path"], ["货款", "设备采购"])
         self.assertEqual(requires_rows, [])
+
+    def test_pending_invoice_sql_projection_excludes_already_invoiced_rows_from_statement_filter(self) -> None:
+        relation_facade = FakeWorkbenchRelationReadFacade(
+            {
+                "status": "fresh",
+                "rows": [
+                    {
+                        "row_id": "txn-equipment",
+                        "row_type": "bank_transaction",
+                        "relation_status": "linked",
+                        "group_ids": ["case-equipment-paid"],
+                        "linked_oa": [],
+                        "linked_bank_transactions": [{"id": "txn-equipment", "amount": "118.00", "direction": "outflow"}],
+                        "linked_input_invoices": [
+                            {
+                                "id": "inv-equipment",
+                                "invoice_no": "INV-EQUIPMENT",
+                                "seller_name": "设备供应商",
+                                "total_with_tax": "118.00",
+                                "relation_case_id": "case-equipment-paid",
+                            }
+                        ],
+                        "linked_output_invoices": [],
+                    }
+                ],
+                "source_versions": {"workbench_relation_schema_version": 1},
+            }
+        )
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=PendingEffectiveCategoryProjectionConnection(),
+            workbench_relation_read_facade=relation_facade,
+        )
+
+        statement_rows = builder._pending_invoice_rows(direction="expense", filter_name="bank_statement_as_invoice", month="2026-05")
+        all_rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        self.assertEqual(statement_rows, [])
+        statuses = {row["payload"]["id"]: row["payload"]["invoice_acquisition_status"]["code"] for row in all_rows}
+        self.assertEqual(statuses["txn-equipment"], "paid_invoiced")
 
     def test_pending_invoice_sql_projection_emits_income_output_statuses(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingIncomeProjectionConnection())

@@ -329,6 +329,69 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(bank_detail["remark"], "银行备注")
         self.assertFalse(oa_detail["detailAvailable"])
 
+    def test_oa_and_bank_two_column_filters_are_and_filters_with_display_options(self) -> None:
+        vendor = self._counterparty("vendor", "供应商")
+        target = self._invoice("inv-target", "9401", vendor, total_with_tax="100.00")
+        same_applicant_wrong_type = self._invoice("inv-wrong-type", "9402", vendor, total_with_tax="100.00")
+        same_account_wrong_direction = self._invoice("inv-wrong-direction", "9403", vendor, total_with_tax="100.00")
+        target_bank = self._bank_transaction(
+            "bank-target",
+            "100.00",
+            bank_name="交通银行",
+            account_last4="3847",
+            direction=TransactionDirection.OUTFLOW,
+        )
+        wrong_direction_bank = self._bank_transaction(
+            "bank-wrong-direction",
+            "100.00",
+            bank_name="交通银行",
+            account_last4="3847",
+            direction=TransactionDirection.INFLOW,
+        )
+        wrong_type_bank = self._bank_transaction(
+            "bank-wrong-type",
+            "100.00",
+            bank_name="交通银行",
+            account_last4="3847",
+            direction=TransactionDirection.OUTFLOW,
+        )
+        oa_records = [
+            self._oa("oa-target", "樊祖芳", "100.00", apply_type="支付申请"),
+            self._oa("oa-wrong-type", "樊祖芳", "100.00", apply_type="报销"),
+            self._oa("oa-wrong-direction", "樊祖芳", "100.00", apply_type="支付申请"),
+        ]
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-target", [target.id, "oa-target", target_bank.id], amount_matched=True)
+        self._relation(pair_service, "case-wrong-type", [same_applicant_wrong_type.id, "oa-wrong-type", wrong_type_bank.id], amount_matched=True)
+        self._relation(pair_service, "case-wrong-direction", [same_account_wrong_direction.id, "oa-wrong-direction", wrong_direction_bank.id], amount_matched=True)
+        service = self._service(
+            invoices=[same_account_wrong_direction, same_applicant_wrong_type, target],
+            transactions=[wrong_direction_bank, wrong_type_bank, target_bank],
+            pair_service=pair_service,
+            oa_projection=StaticOAProjection(oa_records),
+        )
+
+        payload = service.list_rows(
+            page_size=20,
+            filters=[
+                {"field": "oa_applicant", "operator": "in", "values": ["樊祖芳"]},
+                {"field": "oa_application_type", "operator": "in", "values": ["支付申请"]},
+                {"field": "bank_account", "operator": "in", "values": ["交通银行 3847"]},
+                {"field": "bank_direction", "operator": "in", "values": ["outflow"]},
+            ],
+        )
+        options = service.filter_options()
+
+        self.assertEqual([row["invoiceId"] for row in payload["rows"]], ["inv-target"])
+        bank = payload["rows"][0]["bankTransactions"]
+        self.assertEqual(bank["bankAccount"], "交通银行 3847")
+        self.assertEqual(bank["direction"], "outflow")
+        self.assertEqual(bank["directionLabel"], "支出")
+        fields = {field["field"]: field for field in options["fields"]}
+        self.assertIn({"value": "交通银行 3847", "label": "交通银行 3847", "count": 3}, fields["bank_account"]["options"])
+        self.assertIn({"value": "outflow", "label": "支出", "count": 2}, fields["bank_direction"]["options"])
+        self.assertIn({"value": "inflow", "label": "收入", "count": 1}, fields["bank_direction"]["options"])
+
     @staticmethod
     def _counterparty(counterparty_id: str, name: str) -> Counterparty:
         return Counterparty(id=counterparty_id, name=name, normalized_name=name, counterparty_type="supplier")
@@ -388,14 +451,18 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         trade_time: str = "2026-05-21 10:00:00",
         summary: str | None = None,
         remark: str | None = None,
+        bank_name: str = "中国银行",
+        account_last4: str = "1234",
+        direction: TransactionDirection = TransactionDirection.OUTFLOW,
     ) -> BankTransaction:
+        signed_amount = -Decimal(amount) if direction == TransactionDirection.OUTFLOW else Decimal(amount)
         return BankTransaction(
             id=transaction_id,
-            account_no="622200001234",
-            txn_direction=TransactionDirection.OUTFLOW,
+            account_no=f"62220000{account_last4}",
+            txn_direction=direction,
             counterparty_name_raw="供应商",
             amount=Decimal(amount),
-            signed_amount=-Decimal(amount),
+            signed_amount=signed_amount,
             txn_date=trade_time[:10],
             trade_time=trade_time,
             currency="CNY",
@@ -404,21 +471,28 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             booked_date=trade_time[:10],
             summary=summary,
             remark=remark,
-            imported_bank_name="中国银行",
-            imported_bank_last4="1234",
+            imported_bank_name=bank_name,
+            imported_bank_last4=account_last4,
             bank_text_fields=[{"label": "摘要", "value": summary or ""}],
         )
 
     @staticmethod
-    def _oa(oa_id: str, applicant: str, amount: str) -> OAApplicationRecord:
+    def _oa(
+        oa_id: str,
+        applicant: str,
+        amount: str,
+        *,
+        apply_type: str = "报销",
+        project_name: str | None = None,
+    ) -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
             month="2026-05",
             section="进行中",
             case_id=f"OA-{oa_id}",
             applicant=applicant,
-            project_name=f"{applicant}项目",
-            apply_type="报销",
+            project_name=project_name or f"{applicant}项目",
+            apply_type=apply_type,
             amount=amount,
             counterparty_name="供应商",
             reason="费用报销",

@@ -44,7 +44,10 @@ PENDING_INVOICE_FILTER_FIELDS: dict[str, set[str]] = {
     "trade_date": {"between"},
     "bank_name": {"in", "contains"},
     "account_name": {"in", "contains"},
+    "bank_account": {"in", "contains"},
     "counterparty_name": {"contains", "in"},
+    "transaction_tag": {"contains", "in"},
+    "direction": {"in"},
     "amount": {"between", "eq"},
     "summary_remark": {"contains"},
     "status_code": {"in"},
@@ -52,6 +55,7 @@ PENDING_INVOICE_FILTER_FIELDS: dict[str, set[str]] = {
     "seller_name": {"contains", "in"},
     "invoice_total": {"between", "eq"},
     "oa_applicant": {"contains", "in"},
+    "oa_application_type": {"contains", "in"},
     "project_name": {"contains", "in"},
 }
 PENDING_INVOICE_SORT_FIELDS = {
@@ -983,11 +987,25 @@ class PendingInvoiceQueryService:
         payment_summary = invoices.get("payment_summary") if isinstance(invoices.get("payment_summary"), dict) else {}
         oa = row.get("oa") if isinstance(row.get("oa"), dict) else {}
         primary_oa = oa.get("primary") if isinstance(oa.get("primary"), dict) else {}
+        tag_path = bank.get("effective_tag_label_path") if isinstance(bank.get("effective_tag_label_path"), list) else []
+        transaction_tag = " / ".join(str(item).strip() for item in tag_path if str(item).strip()) or " / ".join(
+            str(item or "").strip() for item in (bank.get("effective_tag_primary_label"), bank.get("effective_tag_sub_label")) if str(item or "").strip()
+        ) or bank.get("effective_tag_label") or bank.get("effective_tag_code")
+        bank_account = " ".join(
+            str(item or "").strip()
+            for item in (bank.get("bank_short_name") or bank.get("bank_name"), bank.get("account_last4"))
+            if str(item or "").strip()
+        )
+        debit = _decimal_from_text(bank.get("debit_amount"))
+        credit = _decimal_from_text(bank.get("credit_amount"))
         mapping = {
             "trade_date": bank.get("trade_date") or str(bank.get("trade_time") or "")[:10],
             "bank_name": bank.get("bank_name"),
             "account_name": bank.get("account_name"),
+            "bank_account": bank_account,
             "counterparty_name": bank.get("counterparty_name"),
+            "transaction_tag": transaction_tag,
+            "direction": "income" if credit > 0 and debit <= 0 else "expense",
             "amount": bank.get("amount"),
             "summary_remark": " ".join(str(part or "") for part in (bank.get("summary"), bank.get("remark"))),
             "status_code": status.get("code"),
@@ -995,6 +1013,7 @@ class PendingInvoiceQueryService:
             "seller_name": primary_invoice.get("seller_name"),
             "invoice_total": payment_summary.get("invoice_total"),
             "oa_applicant": primary_oa.get("applicant") or row.get("oa_applicant"),
+            "oa_application_type": primary_oa.get("application_type"),
             "project_name": primary_oa.get("project_name"),
         }
         return mapping.get(field)
@@ -1138,7 +1157,10 @@ class PendingInvoiceQueryService:
             {"field": "trade_date", "label": "交易日期", "operators": ["between"]},
             {"field": "bank_name", "label": "银行", "operators": ["in", "contains"]},
             {"field": "account_name", "label": "账户", "operators": ["in", "contains"]},
+            {"field": "bank_account", "label": "银行账户", "operators": ["in", "contains"]},
             {"field": "counterparty_name", "label": "对方户名", "operators": ["contains", "in"]},
+            {"field": "transaction_tag", "label": "流水标签", "operators": ["contains", "in"]},
+            {"field": "direction", "label": "收支", "operators": ["in"]},
             {"field": "amount", "label": "金额", "operators": ["between", "eq"]},
             {"field": "summary_remark", "label": "摘要/备注", "operators": ["contains"]},
             {"field": "status_code", "label": "发票获取状态", "operators": ["in"]},
@@ -1146,6 +1168,7 @@ class PendingInvoiceQueryService:
             {"field": "seller_name", "label": "销方", "operators": ["contains", "in"]},
             {"field": "invoice_total", "label": "发票金额", "operators": ["between", "eq"]},
             {"field": "oa_applicant", "label": "OA申请人", "operators": ["contains", "in"]},
+            {"field": "oa_application_type", "label": "OA类型", "operators": ["contains", "in"]},
             {"field": "project_name", "label": "项目", "operators": ["contains", "in"]},
         ]
 

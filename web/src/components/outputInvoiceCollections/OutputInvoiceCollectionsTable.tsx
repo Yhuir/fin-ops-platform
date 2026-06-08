@@ -1,4 +1,4 @@
-import { ArrowUpDown } from "lucide-react";
+import { ArrowUpDown, Info } from "lucide-react";
 import type { MutableRefObject, ReactNode } from "react";
 
 import type {
@@ -38,6 +38,7 @@ type OutputInvoiceCollectionsTableProps = {
 type OutputInvoiceCollectionColumn = {
   id: string;
   label: string;
+  subLabel?: string;
   align?: "left" | "right" | "center";
   field?: string;
   extraFilters?: Array<{ field: string; label: string }>;
@@ -47,13 +48,12 @@ type OutputInvoiceCollectionColumn = {
 const columns: OutputInvoiceCollectionColumn[] = [
   { id: "invoiceNo", label: "发票号码", field: "invoice_no", extraFilters: [{ field: "invoice_date", label: "开票日期" }], group: "invoice" },
   { id: "buyer", label: "购方", field: "buyer_name", group: "invoice" },
-  { id: "totalWithTax", label: "价税合计", field: "total_with_tax", align: "right", group: "invoice" },
-  { id: "taxAmount", label: "税额/税率", field: "tax_amount", align: "right", group: "invoice" },
+  { id: "totalWithTax", label: "价税合计", subLabel: "税额/税率", field: "total_with_tax", align: "right", group: "invoice" },
   { id: "business", label: "业务/货物劳务", field: "taxable_item_name", group: "invoice" },
   { id: "collectionStatus", label: "收款状态", field: "collection_status", group: "status" },
   { id: "bankCounterparty", label: "付款方/日期", field: "bank_counterparty_name", group: "bank" },
   { id: "bankAmount", label: "收款金额", field: "bank_amount", align: "right", group: "bank" },
-  { id: "bankSummary", label: "银行/摘要", field: "bank_summary", group: "bank" },
+  { id: "bankSummary", label: "摘要", field: "bank_summary", group: "bank" },
   { id: "receiptStatus", label: "收据情况", field: "receipt_status", group: "receipt" },
 ];
 
@@ -67,7 +67,7 @@ const defaultFilterConfigs: Record<string, OutputInvoiceCollectionFilterFieldCon
   collection_status: { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
   bank_counterparty_name: { field: "bank_counterparty_name", label: "付款方/日期", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
   bank_amount: { field: "bank_amount", label: "收款金额", mode: "money", sortable: true, operators: ["between", "equals"] },
-  bank_summary: { field: "bank_summary", label: "银行/摘要", mode: "text", sortable: true, operators: ["contains"] },
+  bank_summary: { field: "bank_summary", label: "摘要", mode: "text", sortable: true, operators: ["contains"] },
   receipt_status: { field: "receipt_status", label: "收据情况", mode: "enum_multi", sortable: true, operators: ["in"] },
 };
 
@@ -113,7 +113,7 @@ export default function OutputInvoiceCollectionsTable({
           </colgroup>
           <thead>
             <tr>
-              <GroupHeader group="invoice" label="销项发票" span={5} />
+              <GroupHeader group="invoice" label="销项发票" span={4} />
               <GroupHeader group="status" label="收款状态" span={1} />
               <GroupHeader group="bank" label="收入流水" span={3} />
               <GroupHeader group="receipt" label="收据" span={1} />
@@ -181,6 +181,9 @@ export default function OutputInvoiceCollectionsTable({
                         />
                       ) : null;
                     })}
+                    {column.subLabel ? (
+                      <span className="output-invoice-collections-table-header-sub-label">{column.subLabel}</span>
+                    ) : null}
                   </span>
                 </th>
               ))}
@@ -232,10 +235,9 @@ function OutputInvoiceCollectionDataRow({
 }) {
   const invoiceNo = displayInvoiceNo(row);
   const invoiceCellExpanded = expandedCells.has(`${row.id}:invoice-business`);
-  const statusCellExpanded = expandedCells.has(`${row.id}:collection-status`);
-  const bankNameCellExpanded = expandedCells.has(`${row.id}:bank-name`);
   const bankSummaryCellExpanded = expandedCells.has(`${row.id}:bank-summary`);
   const bank = row.bank.primary;
+  const bankAccountLabel = bank ? accountLabel(bank.bankName, bank.accountLast4) : "";
 
   return (
     <tr className="output-invoice-collections-table-row">
@@ -244,10 +246,11 @@ function OutputInvoiceCollectionDataRow({
           <TextLine strong value={invoiceNo} />
           <ActionButton
             ariaLabel={`查看发票 ${invoiceNo} 详情`}
+            iconOnly
             onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
             tone="plain"
           >
-            详情
+            <Info aria-hidden="true" size={14} strokeWidth={2.3} />
           </ActionButton>
         </span>
         <span className="output-invoice-collections-tag-row">
@@ -260,10 +263,7 @@ function OutputInvoiceCollectionDataRow({
       </td>
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" data-column-role="amount">
         <TextLine numeric strong value={formatMoney(row.invoice.totalWithTax)} />
-      </td>
-      <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--amount output-invoice-collections-table-cell--small-border" data-column-role="amount">
-        <TextLine numeric strong value={formatMoney(row.invoice.taxAmount)} />
-        <TextLine muted value={row.invoice.taxRate || "—"} />
+        <TextLine muted numeric value={taxSummary(row.invoice.taxAmount, row.invoice.taxRate)} />
       </td>
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="description">
         <TextLine strong value={row.invoice.specificBusinessType} />
@@ -280,12 +280,6 @@ function OutputInvoiceCollectionDataRow({
           <span className="output-invoice-collections-table-text output-invoice-collections-table-text--muted output-invoice-collections-table-text--numeric">
             已收 {formatMoney(row.collectionStatus.collectedAmount)} / 待收 {formatMoney(row.collectionStatus.pendingAmount)}
           </span>
-          <ExpandableCellText
-            expanded={statusCellExpanded}
-            onToggle={() => onToggleCellExpand(row.id, "collection-status")}
-            text={row.collectionStatus.reason}
-            threshold={24}
-          />
           <span className="output-invoice-collections-action-row">
             <ActionButton onClick={() => onOpenWorkflow({ kind: "collectionStatus", rowId: row.id })} tone="outline">
               状态/提醒
@@ -300,7 +294,7 @@ function OutputInvoiceCollectionDataRow({
         {bank ? (
           <>
             <ExpandableCellText
-              expanded={bankNameCellExpanded}
+              expanded={expandedCells.has(`${row.id}:bank-name`)}
               onToggle={() => onToggleCellExpand(row.id, "bank-name")}
               text={bank.counterpartyName}
             />
@@ -309,10 +303,11 @@ function OutputInvoiceCollectionDataRow({
               {bank.detailAvailable ? (
                 <ActionButton
                   ariaLabel={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
+                  iconOnly
                   onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
                   tone="plain"
                 >
-                  详情
+                  <Info aria-hidden="true" size={14} strokeWidth={2.3} />
                 </ActionButton>
               ) : null}
             </span>
@@ -326,6 +321,7 @@ function OutputInvoiceCollectionDataRow({
             <span className="output-invoice-collections-tag-row output-invoice-collections-tag-row--right">
               {row.bank.hasMultiple ? <FinanceTag tone="info">多笔</FinanceTag> : null}
               <FinanceTag tone={bank.directionLabel === "收入" ? "success" : "neutral"}>{bank.directionLabel || "收入"}</FinanceTag>
+              {bankAccountLabel ? <FinanceTag>{bankAccountLabel}</FinanceTag> : null}
             </span>
           </>
         ) : <EmptyValue />}
@@ -333,7 +329,6 @@ function OutputInvoiceCollectionDataRow({
       <td className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" data-column-role="description">
         {bank ? (
           <>
-            <TextLine strong value={`${bank.bankName || "—"} ${bank.accountLast4 || ""}`.trim()} />
             <ExpandableCellText
               expanded={bankSummaryCellExpanded}
               onToggle={() => onToggleCellExpand(row.id, "bank-summary")}
@@ -437,20 +432,27 @@ function ActionButton({
   onClick,
   ariaLabel,
   tone,
+  iconOnly = false,
   disabled = false,
 }: {
   children: ReactNode;
   onClick: () => void;
   ariaLabel?: string;
   tone: "plain" | "outline" | "primary";
+  iconOnly?: boolean;
   disabled?: boolean;
 }) {
   return (
     <button
       aria-label={ariaLabel}
-      className={`output-invoice-collections-table-action output-invoice-collections-table-action--${tone}`}
+      className={cx(
+        "output-invoice-collections-table-action",
+        `output-invoice-collections-table-action--${tone}`,
+        iconOnly && "output-invoice-collections-table-action--icon",
+      )}
       disabled={disabled}
       onClick={onClick}
+      title={ariaLabel}
       type="button"
     >
       {children}
@@ -509,6 +511,18 @@ function displayedRange(page: number, pageSize: number, total: number) {
 
 function firstColumnInGroup(columnId: string) {
   return columnId === "collectionStatus" || columnId === "bankCounterparty" || columnId === "receiptStatus";
+}
+
+function accountLabel(bankName: string, accountLast4: string) {
+  return [bankName, accountLast4].filter(Boolean).join(" ").trim();
+}
+
+function taxSummary(taxAmount: string, taxRate: string) {
+  const amount = formatMoney(taxAmount);
+  if (amount === "—" && !taxRate) {
+    return "";
+  }
+  return [amount, taxRate].filter((value) => value && value !== "—").join(" / ");
 }
 
 function displayInvoiceNo(row: OutputInvoiceCollectionRow) {

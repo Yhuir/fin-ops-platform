@@ -62,8 +62,8 @@ const rowsPayload = {
       oa: {
         primary: {
           id: "oa-001",
-          applicant: "陈秀云",
-          applicationType: "报销",
+          applicant: "樊祖芳",
+          applicationType: "支付申请",
           projectName: "云南省内项目名称很长很长需要换行显示并可展开",
           detailAvailable: true,
         },
@@ -78,9 +78,9 @@ const rowsPayload = {
           counterpartyName: "云南银行交易对方户名很长很长需要换行显示",
           tradeTime: "2026-05-03 10:30:00",
           amount: "12345.67",
-          directionLabel: "支",
-          bankName: "工商银行",
-          accountLast4: "6386",
+          directionLabel: "outflow",
+          bankName: "交通银行",
+          accountLast4: "3847",
           summary: "项目付款摘要内容很长很长用于验证折叠展示",
           remark: "备注内容很长很长用于验证摘要备注列的展开控制",
           detailAvailable: true,
@@ -130,12 +130,68 @@ function installInputInvoiceUsageFetch() {
       return new Response(JSON.stringify({
         fields: [
           {
+            field: "seller_name",
+            label: "销方名称",
+            mode: "enum_multi",
+            sortable: true,
+            operators: ["in", "contains"],
+            options: [{ value: "云南长文本供应商科技发展有限公司第一分公司", label: "云南长文本供应商科技发展有限公司第一分公司", count: 1 }],
+          },
+          {
             field: "payment_status",
             label: "支付状态",
             mode: "enum_multi",
             sortable: true,
             operators: ["in"],
             options: [{ value: "pending", label: "待处理", count: 1 }],
+          },
+          {
+            field: "oa_applicant",
+            label: "OA申请人",
+            mode: "enum_multi",
+            sortable: true,
+            operators: ["in"],
+            options: [{ value: "樊祖芳", label: "樊祖芳", count: 1 }],
+          },
+          {
+            field: "oa_application_type",
+            label: "类型",
+            mode: "enum_multi",
+            sortable: true,
+            operators: ["in", "equals"],
+            options: [{ value: "支付申请", label: "支付申请", count: 1 }],
+          },
+          {
+            field: "oa_project_name",
+            label: "项目名称",
+            mode: "enum_multi",
+            sortable: true,
+            operators: ["in", "contains"],
+            options: [{ value: "云南省内项目名称很长很长需要换行显示并可展开", label: "云南省内项目名称很长很长需要换行显示并可展开", count: 1 }],
+          },
+          {
+            field: "bank_counterparty_name",
+            label: "对方户名",
+            mode: "enum_multi",
+            sortable: true,
+            operators: ["in", "contains"],
+            options: [{ value: "云南银行交易对方户名很长很长需要换行显示", label: "云南银行交易对方户名很长很长需要换行显示", count: 1 }],
+          },
+          {
+            field: "bank_account",
+            label: "银行账户",
+            mode: "enum_multi",
+            sortable: true,
+            operators: ["in"],
+            options: [{ value: "交通银行 3847", label: "交通银行 3847", count: 1 }],
+          },
+          {
+            field: "bank_direction",
+            label: "收支",
+            mode: "enum_multi",
+            sortable: true,
+            operators: ["in"],
+            options: [{ value: "outflow", label: "支出", count: 1 }],
           },
         ],
       }), {
@@ -243,11 +299,16 @@ describe("Input invoice usage page", () => {
     const filterTrigger = cssRule(styles, ".input-invoice-usage-filter-menu__trigger");
     const groupInvoice = cssRule(styles, ".input-invoice-usage-table-group-header--invoice");
     const groupPayment = cssRule(styles, ".input-invoice-usage-table-group-header--payment,\\n.input-invoice-usage-table-cell--payment");
+    const groupOa = cssRule(styles, ".input-invoice-usage-table-group-header--oa");
     const groupBank = cssRule(styles, ".input-invoice-usage-table-group-header--bank");
+    const stickyGroupHeader = cssRule(styles, ".input-invoice-usage-table thead tr:first-child th");
+    const stickySubHeader = cssRule(styles, ".input-invoice-usage-table thead tr:nth-child(2) th");
+    const strongSeparator = cssRule(styles, ".input-invoice-usage-table-cell--strong-separator");
+    const compositeFilter = cssRule(styles, ".input-invoice-usage-filter-menu__panel--composite");
 
     expect(tableFrame).toContain("border-radius: var(--fp-radius-sm)");
-    expect(tableShell).toContain("max-height: calc(100vh - 188px)");
-    expect(tableShell).toContain("min-height: 300px");
+    expect(tableShell).toContain("max-height: calc(100vh - 150px)");
+    expect(tableShell).toContain("min-height: 360px");
     expect(button).toContain("var(--motion-fast)");
     expect(button).toContain("var(--ease-out-quart)");
     expect(tableAction).toContain("var(--motion-fast)");
@@ -257,7 +318,14 @@ describe("Input invoice usage page", () => {
     expect(filterTrigger).toContain("var(--motion-fast)");
     expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
     expect(groupPayment).toContain("color-mix(in srgb, var(--fp-warning-soft)");
+    expect(groupOa).toContain("color-mix(in srgb, var(--fp-info-soft)");
     expect(groupBank).toContain("color-mix(in srgb, var(--fp-primary-soft)");
+    expect(stickyGroupHeader).toContain("position: sticky");
+    expect(stickyGroupHeader).toContain("top: 0");
+    expect(stickySubHeader).toContain("position: sticky");
+    expect(stickySubHeader).toContain("top: 38px");
+    expect(strongSeparator).toContain("border-left: 2px solid");
+    expect(compositeFilter).toContain("grid-template-columns: repeat(2, minmax(160px, 1fr))");
   });
 
   test("uses a standard empty state while read model refresh details stay hidden", async () => {
@@ -358,9 +426,13 @@ describe("Input invoice usage page", () => {
 
     const page = await screen.findByTestId("input-invoice-usage-page");
     expect(within(page).getByRole("heading", { name: "进项发票使用情况" })).toBeInTheDocument();
+    expect(within(page).queryByText("以进项发票为主对象反查支付状态、OA 和银行流水。")).not.toBeInTheDocument();
+    expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
     expect(within(page).queryByRole("grid")).not.toBeInTheDocument();
     expect(await within(page).findByRole("table", { name: "进项发票使用情况表" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("input-invoice-usage-button--accent");
+    expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
 
     const headerRows = within(page).getAllByRole("row").slice(0, 2);
     for (const label of ["进项发票", "支付状态", "OA", "流水"]) {
@@ -368,7 +440,7 @@ describe("Input invoice usage page", () => {
     }
     for (const label of [
       "发票号码",
-      "销方",
+      "销方名称",
       "价税合计",
       "不含税/税率税额",
       "货物或应税劳务名称",
@@ -381,8 +453,13 @@ describe("Input invoice usage page", () => {
     ]) {
       expect(within(headerRows[1]).getAllByText(label)).toHaveLength(1);
     }
-    expect(within(headerRows[1]).queryByRole("button", { name: /排序/ })).not.toBeInTheDocument();
-    expect(within(headerRows[1]).queryByRole("button", { name: /筛选/ })).not.toBeInTheDocument();
+    expect(within(headerRows[1]).getByRole("button", { name: "按开票日期排序" })).toBeInTheDocument();
+    expect(within(headerRows[1]).getByRole("button", { name: "筛选 销方名称" })).toBeInTheDocument();
+    expect(within(headerRows[1]).getByRole("button", { name: "筛选 支付状态" })).toBeInTheDocument();
+    expect(within(headerRows[1]).getByRole("button", { name: "筛选 OA申请人" })).toBeInTheDocument();
+    expect(within(headerRows[1]).getByRole("button", { name: "筛选 项目名称" })).toBeInTheDocument();
+    expect(within(headerRows[1]).getByRole("button", { name: "筛选 对方户名" })).toBeInTheDocument();
+    expect(within(headerRows[1]).getByRole("button", { name: "筛选 金额" })).toBeInTheDocument();
     const bodyRows = within(page).getAllByRole("row").slice(2);
     expect(bodyRows.some((row) => within(row).queryByText("发票号码"))).toBe(false);
     expect(bodyRows.some((row) => within(row).queryByText("对方户名"))).toBe(false);
@@ -399,9 +476,52 @@ describe("Input invoice usage page", () => {
     const invoiceCell = firstRowCells[0];
     expect(invoiceCell).toBeTruthy();
     expect(within(invoiceCell as HTMLElement).queryByText("详情")).not.toBeInTheDocument();
+    const oaCell = firstRowCells[5] as HTMLElement;
+    expect(within(oaCell).getByText("樊祖芳")).toBeInTheDocument();
+    expect(within(oaCell).getByRole("button", { name: "查看OA 樊祖芳 详情" })).toBeInTheDocument();
+    expect(within(oaCell).queryByText("详情")).not.toBeInTheDocument();
+    expect(within(page).queryByText("规则不能自动闭环，需要财务复核后处理")).not.toBeInTheDocument();
     expect(within(page).getByText("2026-05-03 10:30:00")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "查看流水 云南银行交易对方户名很长很长需要换行显示 详情" })).toBeInTheDocument();
+    expect(within(page).queryByText(/outflow/)).not.toBeInTheDocument();
+    expect(within(page).getByText("支出")).toBeInTheDocument();
+    expect(within(page).getByText("交通银行 3847")).toBeInTheDocument();
     expect(within(page).getByText("待处理").closest(".input-invoice-usage-payment-cell")).toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: "按开票日期排序" }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      expect(request?.searchParams.get("sort_field")).toBe("invoice_date");
+      expect(request?.searchParams.get("sort_direction")).toBe("asc");
+    });
+
+    await user.click(within(page).getByRole("button", { name: "筛选 销方名称" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /云南长文本供应商科技发展有限公司第一分公司/ }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
+      expect(filters).toContainEqual({ field: "seller_name", operator: "in", values: ["云南长文本供应商科技发展有限公司第一分公司"] });
+    });
+
+    await user.click(within(page).getByRole("button", { name: "筛选 OA申请人" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /樊祖芳/ }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /支付申请/ }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
+      expect(filters).toContainEqual({ field: "oa_applicant", operator: "in", values: ["樊祖芳"] });
+      expect(filters).toContainEqual({ field: "oa_application_type", operator: "in", values: ["支付申请"] });
+    });
+
+    await user.click(within(page).getByRole("button", { name: "筛选 金额" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /交通银行 3847/ }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: /支出/ }));
+    await waitFor(() => {
+      const request = rowsRequests(fetchMock).at(-1);
+      const filters = JSON.parse(decodeURIComponent(request?.searchParams.get("filters") ?? "[]"));
+      expect(filters).toContainEqual({ field: "bank_account", operator: "in", values: ["交通银行 3847"] });
+      expect(filters).toContainEqual({ field: "bank_direction", operator: "in", values: ["outflow"] });
+    });
 
     await user.click(within(page).getByRole("button", { name: /展开.*货物或应税劳务名称/ }));
     expect(within(page).getByRole("button", { name: /收起.*货物或应税劳务名称/ })).toBeInTheDocument();
@@ -418,7 +538,7 @@ describe("Input invoice usage page", () => {
     });
   });
 
-  test("drops legacy column filters and sort from restored table state", async () => {
+  test("restores column filters and sort from table session state", async () => {
     const fetchMock = installInputInvoiceUsageFetch();
     const storageKey = buildPageSessionStorageKey({
       userScope: "101",
@@ -451,9 +571,11 @@ describe("Input invoice usage page", () => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(0);
     });
     const request = rowsRequests(fetchMock)[0];
-    expect(request.searchParams.has("filters")).toBe(false);
-    expect(request.searchParams.has("sort_field")).toBe(false);
-    expect(request.searchParams.has("sort_direction")).toBe(false);
+    expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([
+      { field: "payment_status", operator: "in", values: ["pending"] },
+    ]);
+    expect(request.searchParams.get("sort_field")).toBe("invoice_no");
+    expect(request.searchParams.get("sort_direction")).toBe("asc");
   });
 
   test("loads export preview and downloads the current filtered result set", async () => {

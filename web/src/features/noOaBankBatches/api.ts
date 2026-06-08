@@ -171,6 +171,14 @@ type ApiNoOaBankBatchDetailRow = {
   categoryLabelPath?: unknown[] | null;
   category_source?: string | null;
   categorySource?: string | null;
+  relation_status?: string | null;
+  relationStatus?: string | null;
+  relation_case_ids?: unknown[] | null;
+  relationCaseIds?: unknown[] | null;
+  linked_oa_count?: number | null;
+  linkedOaCount?: number | null;
+  linked_invoice_count?: number | null;
+  linkedInvoiceCount?: number | null;
 };
 
 type ApiNoOaBankBatchDetail = {
@@ -354,6 +362,10 @@ function mapDetailRow(row: ApiNoOaBankBatchDetailRow = {}): NoOaBankBatchDetailR
       ? categoryLabelPath.map((item: unknown) => String(item).trim()).filter(Boolean)
       : [],
     categorySource: text(row.category_source ?? row.categorySource),
+    relationStatus: text(row.relation_status ?? row.relationStatus, "unlinked"),
+    relationCaseIds: unknownStringList(row.relation_case_ids ?? row.relationCaseIds),
+    linkedOaCount: numberValue(row.linked_oa_count ?? row.linkedOaCount),
+    linkedInvoiceCount: numberValue(row.linked_invoice_count ?? row.linkedInvoiceCount),
   };
 }
 

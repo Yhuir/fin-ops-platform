@@ -108,16 +108,6 @@ function directionTagLabel(row: { direction?: string; directionLabel?: string })
   return row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-");
 }
 
-function sourceLabel(source: string) {
-  if (source === "auto") {
-    return "自动";
-  }
-  if (source === "manual") {
-    return "人工";
-  }
-  return source || "-";
-}
-
 function canWithdraw(batch: NoOaBankBatch) {
   return batch.canWithdraw || batch.status === "submitted";
 }
@@ -216,14 +206,19 @@ function formatCountMeta(batchCount: number, rowCount: number) {
   return `${batchCount}批 · ${rowCount}条`;
 }
 
-function bucketWorkHint(bucket: NoOaBankBatchStatusBucket) {
-  if (bucket === "submitted") {
-    return "已提交批次保留撤回入口。";
+function batchNoticeText(batch: NoOaBankBatch, reason: string) {
+  if (batch.status === "stale") {
+    return "分类已变更，需复核";
   }
-  if (bucket === "withdrawn") {
-    return "已撤回批次只读展示。";
+  return reason;
+}
+
+function relationContextLabels(row: NoOaBankBatchDetailRow) {
+  if (row.relationStatus !== "linked" && row.relationCaseIds.length === 0) {
+    return [];
   }
-  return "每次只能选择同一银行区域内的流水提交。";
+  const relationLabel = row.relationCaseIds[0] ? `关联 ${row.relationCaseIds[0]}` : "已有未撤回关联";
+  return [relationLabel, `OA ${row.linkedOaCount}`, `发票 ${row.linkedInvoiceCount}`];
 }
 
 type LabelRailGroup = {
@@ -235,7 +230,7 @@ type LabelRailGroup = {
 
 type LabelRailProps = {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   ariaLabel: string;
   emptyTitle: string;
   groups: LabelRailGroup[];
@@ -277,7 +272,7 @@ function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey
     <section aria-label={ariaLabel} className="no-oa-bank-batches-rail" role="region">
       <header className="no-oa-bank-batches-rail__header">
         <h2 className="no-oa-bank-batches-rail__title">{title}</h2>
-        <p className="no-oa-bank-batches-rail__subtitle">{subtitle}</p>
+        {subtitle ? <p className="no-oa-bank-batches-rail__subtitle">{subtitle}</p> : null}
       </header>
       {groups.length === 0 ? (
         <div className="no-oa-bank-batches-rail__empty">
@@ -326,7 +321,6 @@ export default function NoOaBankBatchPage() {
   const { active } = useOptionalPageActivation("no-oa-bank-batches");
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
-  const [accountKey, setAccountKey] = useState("");
   const [payload, setPayload] = useState<NoOaBankBatchesResponse>(EMPTY_BATCHES);
   const [tagSelection, setTagSelection] = useState<NoOaBankBatchTagSelection>(EMPTY_TAG_SELECTION);
   const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
@@ -387,7 +381,6 @@ export default function NoOaBankBatchPage() {
     fetchNoOaBankBatches({
       month,
       bucket,
-      accountKey: accountKey.trim(),
       signal,
     })
       .then((nextPayload) => {
@@ -418,7 +411,7 @@ export default function NoOaBankBatchPage() {
           }
         }
       });
-  }, [accountKey, bucket, clearSelection, month]);
+  }, [bucket, clearSelection, month]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -428,7 +421,7 @@ export default function NoOaBankBatchPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const batchQueryKey = JSON.stringify({ accountKey: accountKey.trim(), bucket, month });
+    const batchQueryKey = JSON.stringify({ bucket, month });
     if (batchQueryKeyRef.current !== batchQueryKey) {
       batchQueryKeyRef.current = batchQueryKey;
       setDetails({});
@@ -437,7 +430,7 @@ export default function NoOaBankBatchPage() {
     }
     loadBatches(controller.signal);
     return () => controller.abort();
-  }, [accountKey, bucket, loadBatches, month, refreshToken]);
+  }, [bucket, loadBatches, month, refreshToken]);
 
   useEffect(() => {
     if (!active || !readModelNeedsRefresh || loading || backgroundRefreshing) {
@@ -673,7 +666,7 @@ export default function NoOaBankBatchPage() {
         return next;
       }
       if (selectedAccountForSubmit && selectedAccountForSubmit !== row.accountKey) {
-        setFeedback({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
+        setFeedback({ severity: "warning", message: "请先清空当前选择，再选择其他流水。" });
         return current;
       }
       setSelectedAccountForSubmit(row.accountKey);
@@ -699,7 +692,7 @@ export default function NoOaBankBatchPage() {
       return;
     }
     if (selectedAccountForSubmit && selectedAccountForSubmit !== account) {
-      setFeedback({ severity: "warning", message: "请先清空已选银行区域，再选择其他银行流水。" });
+      setFeedback({ severity: "warning", message: "请先清空当前选择，再选择其他流水。" });
       return;
     }
     setSelectedAccountForSubmit(account);
@@ -810,7 +803,6 @@ export default function NoOaBankBatchPage() {
   return (
     <PageScaffold
       title="免OA流水批量处理"
-      description="按月份、主子标签和银行账户确认免 OA 银行流水批次。"
       actions={(
         <div className="no-oa-bank-batches-actions">
           <button
@@ -871,10 +863,6 @@ export default function NoOaBankBatchPage() {
           <span>月份</span>
           <input onChange={(event) => setMonth(event.target.value)} type="month" value={month} />
         </label>
-        <label className="no-oa-bank-batches-field no-oa-bank-batches-field--account">
-          <span>银行账户</span>
-          <input onChange={(event) => setAccountKey(event.target.value)} placeholder="精确账户键，如 建设银行:8106" type="text" value={accountKey} />
-        </label>
           {bucket === "unsubmitted" ? (
             <button
               className="no-oa-bank-batches-button no-oa-bank-batches-button--primary"
@@ -910,7 +898,6 @@ export default function NoOaBankBatchPage() {
             setSelectedPrimaryLabel(primaryLabel);
           }}
           selectedKey={selectedPrimaryLabel}
-          subtitle="来自银行明细自动标签"
           title="主标签"
         />
 
@@ -929,7 +916,6 @@ export default function NoOaBankBatchPage() {
             setSelectedSubKey(subKey);
           }}
           selectedKey={selectedSubKey}
-          subtitle={selectedPrimaryLabel || "请选择主标签"}
           title="子标签"
         />
 
@@ -939,15 +925,7 @@ export default function NoOaBankBatchPage() {
               <h2 className="no-oa-bank-batches-transactions__title">
                 {selectedPrimaryLabel && selectedSubKey ? `${selectedPrimaryLabel} / ${selectedSubKey}` : "流水"}
               </h2>
-              <p className="no-oa-bank-batches-transactions__hint">
-                {bucketWorkHint(bucket)}
-              </p>
             </div>
-            {selectedAccountForSubmit ? (
-              <span className="no-oa-bank-batches-transactions__account">
-                当前选择账户：{selectedAccountForSubmit}
-              </span>
-            ) : null}
           </header>
           <div className="no-oa-bank-batches-transactions__list">
             {loading ? <StatePanel compact tone="loading" title="流水加载中" /> : null}
@@ -960,13 +938,6 @@ export default function NoOaBankBatchPage() {
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
               const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
               const blockingReason = batch.blockedReason || batch.conflictReason;
-              const auditItems = [
-                batch.version !== null && batch.version !== undefined ? `版本：${batch.version}` : "",
-                batch.submittedBy ? `提交人：${batch.submittedBy}` : "",
-                batch.submittedAt ? `提交时间：${batch.submittedAt}` : "",
-                batch.withdrawnBy ? `撤回人：${batch.withdrawnBy}` : "",
-                batch.withdrawnAt ? `撤回时间：${batch.withdrawnAt}` : "",
-              ].filter(Boolean);
               return (
                 <section
                   className={cx(
@@ -1047,13 +1018,8 @@ export default function NoOaBankBatchPage() {
                         )}
                         role="alert"
                       >
-                        {blockingReason}
+                        {batchNoticeText(batch, blockingReason)}
                       </div>
-                    ) : null}
-                    {auditItems.length > 0 ? (
-                      <p className="no-oa-bank-batches-batch__audit">
-                        {auditItems.join(" · ")}
-                      </p>
                     ) : null}
                     {selected && detailErrors[batch.batchId] ? (
                       <div className="no-oa-bank-batches-notice no-oa-bank-batches-notice--error" role="alert">
@@ -1082,7 +1048,6 @@ export default function NoOaBankBatchPage() {
                               <th scope="col">对方户名</th>
                               <th className="no-oa-bank-batches-table__amount" scope="col">金额</th>
                               <th scope="col">摘要/用途/备注</th>
-                              <th scope="col">分类来源</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1118,9 +1083,15 @@ export default function NoOaBankBatchPage() {
                                   <div className="no-oa-bank-batches-summary-cell">
                                     <span>{row.summary || "-"}</span>
                                     <span>{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</span>
+                                    {relationContextLabels(row).length > 0 ? (
+                                      <div className="no-oa-bank-batches-relation-cell">
+                                        {relationContextLabels(row).map((label) => (
+                                          <span className="no-oa-bank-batches-tag" key={label}>{label}</span>
+                                        ))}
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </td>
-                                <td>{sourceLabel(row.categorySource)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1147,7 +1118,6 @@ export default function NoOaBankBatchPage() {
             <header className="no-oa-bank-batches-drawer__header">
               <div>
                 <h2 className="no-oa-bank-batches-drawer__title">免OA流水标签管理</h2>
-                <p className="no-oa-bank-batches-drawer__subtitle">版本 {tagSelection.version}</p>
               </div>
               <button
                 aria-label="关闭免OA流水标签管理"

@@ -113,6 +113,10 @@ export type NoOaBankBatchDetailRow = {
   categorySubLabel: string;
   categoryLabelPath: string[];
   categorySource: string;
+  relationStatus: string;
+  relationCaseIds: string[];
+  linkedOaCount: number;
+  linkedInvoiceCount: number;
 };
 
 export type NoOaBankBatchDetail = {

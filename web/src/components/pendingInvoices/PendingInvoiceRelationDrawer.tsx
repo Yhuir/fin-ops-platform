@@ -84,17 +84,53 @@ export default function PendingInvoiceRelationDrawer({
           </section>
           <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-invoices-title">
             <h3 className="pending-invoice-panel__title" id="pending-invoice-related-invoices-title">已关联发票</h3>
-            <div className="pending-invoice-list">
-              {detail.relatedInvoices.length === 0 ? <p className="pending-invoice-empty">暂无关联发票。</p> : null}
-              {detail.relatedInvoices.map((invoice) => (
-                <div className="pending-invoice-list__item" key={invoice.id || invoice.digitalInvoiceNo}>
-                  <div className="pending-invoice-list__primary">{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</div>
-                  <div className="pending-invoice-list__secondary">
-                    {invoice.sellerName || "-"} · {formatMoney(invoice.totalWithTax)}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <table aria-label="已关联发票" className="pending-invoice-simple-table">
+              <thead>
+                <tr>
+                  <th scope="col">号码</th>
+                  <th scope="col">对方</th>
+                  <th scope="col">开票日期</th>
+                  <th className="pending-invoice-simple-table__amount" scope="col">价税合计</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.relatedInvoices.length === 0 ? (
+                  <tr><td colSpan={4}>暂无关联发票。</td></tr>
+                ) : detail.relatedInvoices.map((invoice) => (
+                  <tr key={invoice.id || invoice.digitalInvoiceNo || invoice.invoiceNo}>
+                    <td>{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</td>
+                    <td>{invoice.sellerName || invoice.buyerName || "-"}</td>
+                    <td>{invoice.issueDate || "-"}</td>
+                    <td className="pending-invoice-simple-table__amount">{formatMoney(invoice.totalWithTax)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+          <section className="pending-invoice-panel" aria-labelledby="pending-invoice-related-oa-title">
+            <h3 className="pending-invoice-panel__title" id="pending-invoice-related-oa-title">已关联 OA</h3>
+            <table aria-label="已关联 OA" className="pending-invoice-simple-table">
+              <thead>
+                <tr>
+                  <th scope="col">申请人</th>
+                  <th scope="col">类型</th>
+                  <th scope="col">项目</th>
+                  <th scope="col">关系</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.relatedOa.length === 0 ? (
+                  <tr><td colSpan={4}>暂无关联 OA。</td></tr>
+                ) : detail.relatedOa.map((oa) => (
+                  <tr key={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`}>
+                    <td>{oa.applicant || "-"}</td>
+                    <td>{oa.applicationType || "-"}</td>
+                    <td>{oa.projectName || "-"}</td>
+                    <td>{oa.relationCaseId || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </section>
           <section className="pending-invoice-panel">
             <table aria-label="历史支付流水" className="pending-invoice-simple-table">

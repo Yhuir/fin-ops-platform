@@ -335,6 +335,15 @@ describe("pending invoices and tag settings API mapping", () => {
         return new Response(JSON.stringify({
           transaction_summary: { id: "txn_001", counterparty_name: "云南供应商", trade_time: "2026-05-02", debit_amount: "1200.00" },
           related_invoices: [{ id: "inv_001", digital_invoice_no: "DIG-001", seller_name: "云南供应商", total_with_tax: "2000.00" }],
+          related_oa: [
+            { id: "oa_001", applicant: "杨丽萍", application_type: "支付申请", project_name: "云南溯源项目", relation_case_id: "case_001", detail_available: true },
+            { id: "oa_002", applicant: "刘晓宇", application_type: "日常报销", project_name: "云南溯源项目二期", relation_case_id: "case_002", detail_available: true },
+          ],
+          oa_summaries: [
+            { id: "oa_001", applicant: "杨丽萍", application_type: "支付申请", project_name: "云南溯源项目", relation_case_id: "case_001", detail_available: true },
+            { id: "oa_002", applicant: "刘晓宇", application_type: "日常报销", project_name: "云南溯源项目二期", relation_case_id: "case_002", detail_available: true },
+          ],
+          relation_case_ids: ["case_001", "case_002"],
           payment_rows: [{ id: "txn_001", trade_time: "2026-05-02", debit_amount: "1200.00", relation_case_id: "case_001" }],
           paid_total: "1200.00",
           invoice_total: "2000.00",
@@ -453,6 +462,11 @@ describe("pending invoices and tag settings API mapping", () => {
       paidTotal: "1200.00",
       invoiceTotal: "2000.00",
       availableActions: ["attach_existing_invoice"],
+      relatedOa: [
+        { id: "oa_001", applicant: "杨丽萍", applicationType: "支付申请", projectName: "云南溯源项目" },
+        { id: "oa_002", applicant: "刘晓宇", applicationType: "日常报销", projectName: "云南溯源项目二期" },
+      ],
+      relationCaseIds: ["case_001", "case_002"],
     });
 
     const detail = await api().fetchPendingInvoiceObjectDetail({ kind: "invoice", id: "inv_001", rowId: "txn_001" });

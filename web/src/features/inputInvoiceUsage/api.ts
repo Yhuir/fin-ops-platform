@@ -57,6 +57,27 @@ function camelOrSnake(source: Record<string, unknown>, camel: string, snake: str
   return source[camel] ?? source[snake];
 }
 
+function bankDirectionLabel(value: unknown) {
+  const text = stringValue(value).trim();
+  if (text === "outflow" || text === "支" || text === "支出") {
+    return "支出";
+  }
+  if (text === "inflow" || text === "收" || text === "收入") {
+    return "收入";
+  }
+  return text;
+}
+
+function bankAccountLabel(raw: Record<string, unknown>) {
+  const explicit = stringValue(camelOrSnake(raw, "bankAccount", "bank_account")).trim();
+  if (explicit) {
+    return explicit;
+  }
+  const bankName = stringValue(camelOrSnake(raw, "bankName", "bank_name")).trim();
+  const accountLast4 = stringValue(camelOrSnake(raw, "accountLast4", "account_last4")).trim();
+  return [bankName, accountLast4].filter(Boolean).join(" ");
+}
+
 function unwrapData<T>(payload: T | { data?: T }): T {
   if (payload && typeof payload === "object" && "data" in payload) {
     const data = (payload as { data?: T }).data;
@@ -164,9 +185,11 @@ function mapBank(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][numbe
     counterpartyName,
     tradeTime,
     amount,
-    directionLabel: stringValue(camelOrSnake(raw, "directionLabel", "direction_label") ?? raw.direction),
+    direction: stringValue(raw.direction),
+    directionLabel: bankDirectionLabel(camelOrSnake(raw, "directionLabel", "direction_label") ?? raw.direction),
     bankName: stringValue(camelOrSnake(raw, "bankName", "bank_name")),
     accountLast4: stringValue(camelOrSnake(raw, "accountLast4", "account_last4")),
+    bankAccount: bankAccountLabel(raw),
     summary: stringValue(raw.summary),
     remark: stringValue(raw.remark),
     detailAvailable: booleanValue(camelOrSnake(raw, "detailAvailable", "detail_available")),

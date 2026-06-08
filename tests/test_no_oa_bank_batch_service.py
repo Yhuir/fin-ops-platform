@@ -414,6 +414,7 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
 
         batch = self.assert_single_batch(batches, "conflict")
         self.assertEqual(batch["conflict_code"], "row_occupied_by_active_relation")
+        self.assertEqual(batch["conflict_reason"], "已有未撤回关联占用，请先处理原关联。")
 
     def test_submitted_internal_transfer_no_oa_relation_does_not_rebuild_as_conflict(self) -> None:
         rows = [

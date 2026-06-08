@@ -1,4 +1,3 @@
-import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -190,15 +189,6 @@ export default function OutputInvoiceCollectionsPage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<OutputInvoiceCollectionRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState({
-    invoiceCount: 0,
-    totalWithTax: "0.00",
-    collectedAmount: "0.00",
-    pendingAmount: "0.00",
-    pendingCollectionCount: 0,
-    partialCollectionCount: 0,
-    receiptPendingCount: 0,
-  });
   const [filterConfigs, setFilterConfigs] = useState<OutputInvoiceCollectionFilterFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OutputInvoiceCollectionFilterOption[]>>({});
   const [statusRulesPayload, setStatusRulesPayload] = useState<OutputInvoiceCollectionStatusRulesResponse | null>(null);
@@ -245,28 +235,15 @@ export default function OutputInvoiceCollectionsPage() {
         filters: query.filters,
         signal,
       }),
-      fetchOutputInvoiceCollectionStatusRules(signal).catch(() => null),
     ])
-      .then(([payload, optionsPayload, rulesPayload]) => {
+      .then(([payload, optionsPayload]) => {
         if (requestId !== requestIdRef.current) {
           return;
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
-        setSummary(payload.summary ?? {
-          invoiceCount: payload.pagination.total,
-          totalWithTax: "0.00",
-          collectedAmount: "0.00",
-          pendingAmount: "0.00",
-          pendingCollectionCount: 0,
-          partialCollectionCount: 0,
-          receiptPendingCount: 0,
-        });
         setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
         setFilterOptions(filterOptionsByField(optionsPayload.fields));
-        if (rulesPayload) {
-          setStatusRulesPayload(rulesPayload);
-        }
         setReadModelStatus(
           payload.readModelStatus === "refreshing" || optionsPayload.readModelStatus === "refreshing"
             ? "refreshing"
@@ -279,15 +256,6 @@ export default function OutputInvoiceCollectionsPage() {
         }
         setRows([]);
         setTotal(0);
-        setSummary({
-          invoiceCount: 0,
-          totalWithTax: "0.00",
-          collectedAmount: "0.00",
-          pendingAmount: "0.00",
-          pendingCollectionCount: 0,
-          partialCollectionCount: 0,
-          receiptPendingCount: 0,
-        });
         setFilterConfigs([]);
         setFilterOptions({});
         setReadModelStatus("");
@@ -396,9 +364,23 @@ export default function OutputInvoiceCollectionsPage() {
     setQuery((current) => ({ ...current, detailTarget: null }));
   }, [setQuery]);
 
-  const handleOpenWorkflow = useCallback((target: NonNullable<OutputInvoiceCollectionWorkflow>) => {
+  const ensureStatusRulesLoaded = useCallback(async () => {
+    if (statusRulesPayload) {
+      return;
+    }
+    try {
+      setStatusRulesPayload(await fetchOutputInvoiceCollectionStatusRules());
+    } catch {
+      // Status/reminder can still open with the row's current status as a local fallback.
+    }
+  }, [statusRulesPayload]);
+
+  const handleOpenWorkflow = useCallback(async (target: NonNullable<OutputInvoiceCollectionWorkflow>) => {
+    if (target.kind === "collectionStatus") {
+      await ensureStatusRulesLoaded();
+    }
     setQuery((current) => ({ ...current, activeWorkflow: target }));
-  }, [setQuery]);
+  }, [ensureStatusRulesLoaded, setQuery]);
 
   const handleCloseWorkflow = useCallback(() => {
     setQuery((current) => ({ ...current, activeWorkflow: null }));
@@ -435,27 +417,14 @@ export default function OutputInvoiceCollectionsPage() {
       .map((rule) => ({ code: rule.id || rule.code || "", label: rule.label }))
       .filter((option) => option.code);
   }, [statusRulesPayload]);
-  const quickCollectionStatusOptions = useMemo(() => {
-    const options = filterOptions.collection_status ?? [];
-    if (options.length > 0) {
-      return options.map((option) => ({ code: option.value, label: option.label }));
+  const collectionStatusOptions = useMemo(() => {
+    if (manualStatusOptions.length > 0) {
+      return manualStatusOptions;
     }
-    return (statusRulesPayload?.rules ?? [])
-      .filter((rule) => rule.id || rule.code)
-      .map((rule) => ({ code: rule.id || rule.code || "", label: rule.label }))
-      .filter((option) => option.code);
-  }, [filterOptions.collection_status, statusRulesPayload]);
-
-  const applyQuickStatusFilter = useCallback((statusCode: string) => {
-    setQuery((current) => {
-      const filters = current.filters.filter((filter) => filter.field !== "collection_status");
-      return {
-        ...current,
-        page: 1,
-        filters: statusCode ? [...filters, { field: "collection_status", operator: "in", values: [statusCode] }] : filters,
-      };
-    });
-  }, [setQuery]);
+    const code = collectionStatusRow?.collectionStatus.manualOverride?.statusCode || collectionStatusRow?.collectionStatus.code || "";
+    const label = collectionStatusRow?.collectionStatus.label || code;
+    return code ? [{ code, label }] : [];
+  }, [collectionStatusRow, manualStatusOptions]);
 
   const handleLifecycleChanged = useCallback(() => {
     loadRows("refresh");
@@ -479,17 +448,8 @@ export default function OutputInvoiceCollectionsPage() {
           收据编号设置
         </button>
       ) : null}
-      <button
-        className="output-invoice-collections-button output-invoice-collections-button--primary"
-        disabled={refreshing}
-        onClick={() => loadRows("refresh")}
-        type="button"
-      >
-        <RefreshCw aria-hidden="true" size={16} strokeWidth={2.3} />
-        刷新
-      </button>
     </div>
-  ), [canAdminAccess, handleOpenWorkflow, loadRows, refreshing]);
+  ), [canAdminAccess, handleOpenWorkflow]);
   const isEmpty = !loading && !error && rows.length === 0;
 
   return (
@@ -497,31 +457,11 @@ export default function OutputInvoiceCollectionsPage() {
     <div className="output-invoice-collections-page" data-testid="output-invoice-collections-page">
       <PageScaffold
         title="销项发票收款情况"
-        description="以销项发票为主对象查看收款状态、收入流水和收据预览。"
         actions={actions}
       >
         <div className="output-invoice-collections-content">
           <PageToolbar className="output-invoice-collections-query">
             <div className="output-invoice-collections-query__grid">
-              <label className="output-invoice-collections-field output-invoice-collections-field--keyword">
-                <span>关键字</span>
-                <input
-                  value={keywordDraft}
-                  onChange={(event) => setKeywordDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      handleKeywordSubmit();
-                    }
-                  }}
-                />
-              </label>
-              <button
-                className="output-invoice-collections-button"
-                onClick={handleKeywordSubmit}
-                type="button"
-              >
-                查询
-              </button>
               <label className="output-invoice-collections-field">
                 <span>月份</span>
                 <input
@@ -530,26 +470,29 @@ export default function OutputInvoiceCollectionsPage() {
                   onChange={(event) => setQuery((current) => ({ ...current, page: 1, month: event.target.value }))}
                 />
               </label>
-              <label className="output-invoice-collections-field">
-                <span>收款状态</span>
-                <select
-                  value={query.filters.find((filter) => filter.field === "collection_status")?.values?.[0] ?? ""}
-                  onChange={(event) => applyQuickStatusFilter(event.target.value)}
+              <div className="output-invoice-collections-search-cluster">
+                <input
+                  aria-label="搜索销项发票收款情况"
+                  className="output-invoice-collections-search-input"
+                  type="search"
+                  value={keywordDraft}
+                  onChange={(event) => setKeywordDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleKeywordSubmit();
+                    }
+                  }}
+                />
+                <button
+                  className="output-invoice-collections-button output-invoice-collections-button--primary"
+                  onClick={handleKeywordSubmit}
+                  type="button"
                 >
-                  <option value="">全部</option>
-                  {quickCollectionStatusOptions.map((option) => (
-                    <option key={option.code} value={option.code}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
+                  查询
+                </button>
+              </div>
             </div>
           </PageToolbar>
-          <div className="output-invoice-collections-summary">
-            <SummaryTile label="销项发票数" value={String(summary.invoiceCount)} />
-            <SummaryTile label="待收款金额" value={formatMoney(summary.pendingAmount)} />
-            <SummaryTile label="已收金额" value={formatMoney(summary.collectedAmount)} />
-            <SummaryTile label="待出收据数" value={String(summary.receiptPendingCount)} />
-          </div>
           {error ? <div className="output-invoice-collections-alert" role="alert">{error}</div> : null}
           {loading ? (
             <div className="output-invoice-collections-loading" aria-label="销项发票收款情况加载中">
@@ -619,7 +562,7 @@ export default function OutputInvoiceCollectionsPage() {
     <CollectionStatusReminderDrawer
       open={query.activeWorkflow?.kind === "collectionStatus"}
       row={collectionStatusRow}
-      statusOptions={manualStatusOptions}
+      statusOptions={collectionStatusOptions}
       onSaveStatus={(rowId, payload) => updateOutputInvoiceCollectionStatus(rowId, payload).then(() => handleLifecycleChanged())}
       onSaveReminder={(rowId, payload) => updateOutputInvoiceCollectionReminder(rowId, payload).then(() => handleLifecycleChanged())}
       onClearStatus={(rowId, expectedVersion) => updateOutputInvoiceCollectionStatus(rowId, {
@@ -644,22 +587,5 @@ export default function OutputInvoiceCollectionsPage() {
       onClose={handleCloseWorkflow}
     />
     </>
-  );
-}
-
-function formatMoney(value: string) {
-  const parsed = Number(String(value ?? "").replace(/,/g, ""));
-  if (!Number.isFinite(parsed)) {
-    return value || "0.00";
-  }
-  return parsed.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function SummaryTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="output-invoice-collections-summary-tile">
-      <span className="output-invoice-collections-summary-tile__label">{label}</span>
-      <strong className="output-invoice-collections-summary-tile__value">{value}</strong>
-    </div>
   );
 }

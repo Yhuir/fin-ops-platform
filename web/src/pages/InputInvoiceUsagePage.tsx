@@ -1,4 +1,4 @@
-import { Download, RefreshCw } from "lucide-react";
+import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
@@ -15,6 +15,7 @@ import {
   downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
   fetchInputInvoiceUsageExportPreview,
+  fetchInputInvoiceUsageFilterOptions,
   fetchInputInvoiceUsageInvoiceDetail,
   fetchInputInvoiceUsageOaDetail,
   fetchInputInvoiceUsagePaymentStatusRules,
@@ -27,12 +28,16 @@ import {
   refreshInputInvoiceUsageOaReverseStatus,
   revokeInputInvoiceUsageOaReverseDraft,
   saveInputInvoiceUsagePaymentStatusRules,
+  nextSortDirection,
 } from "../features/inputInvoiceUsage/api";
 import type {
   InputInvoiceUsageDetailTarget,
   InputInvoiceUsageFilter,
+  InputInvoiceUsageFilterFieldConfig,
+  InputInvoiceUsageFilterOption,
   InputInvoiceUsageQuery,
   InputInvoiceUsageRow,
+  InputInvoiceUsageSortDirection,
 } from "../features/inputInvoiceUsage/types";
 
 const initialQuery: InputInvoiceUsageQuery = {
@@ -102,9 +107,39 @@ function restoreQuery(raw: unknown): InputInvoiceUsageQuery {
     ...raw,
     page: Math.max(1, raw.page),
     pageSize: [20, 50, 100].includes(raw.pageSize) ? raw.pageSize : initialQuery.pageSize,
-    filters: [],
-    sortField: "",
-    sortDirection: "",
+  };
+}
+
+function filterOptionsByField(fields: Array<InputInvoiceUsageFilterFieldConfig & { options?: InputInvoiceUsageFilterOption[] }>) {
+  return fields.reduce<Record<string, InputInvoiceUsageFilterOption[]>>((accumulator, field) => {
+    accumulator[field.field] = field.options ?? [];
+    return accumulator;
+  }, {});
+}
+
+function filterConfigsFromOptions(fields: Array<InputInvoiceUsageFilterFieldConfig & { options?: InputInvoiceUsageFilterOption[] }>) {
+  return fields.map(({ options: _options, ...field }) => field);
+}
+
+function normalizeFilterValue(filter: {
+  field: string;
+  operator: string;
+  value?: string | null;
+  values?: string[];
+}): InputInvoiceUsageFilter | null {
+  if (filter.operator === "in") {
+    const values = Array.from(new Set((filter.values ?? []).map((value) => String(value).trim()).filter(Boolean)));
+    return values.length > 0 ? { field: filter.field, operator: "in", values } : null;
+  }
+  if (filter.operator === "equals") {
+    const value = String(filter.value ?? "").trim();
+    return value ? { field: filter.field, operator: "equals", value } : null;
+  }
+  return {
+    field: filter.field,
+    operator: filter.operator as InputInvoiceUsageFilter["operator"],
+    value: filter.value ?? null,
+    values: filter.values,
   };
 }
 
@@ -128,10 +163,13 @@ export default function InputInvoiceUsagePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [readModelStatus, setReadModelStatus] = useState("");
+  const [filterConfigs, setFilterConfigs] = useState<InputInvoiceUsageFilterFieldConfig[]>([]);
+  const [filterOptions, setFilterOptions] = useState<Record<string, InputInvoiceUsageFilterOption[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     setKeywordDraft(query.keyword);
@@ -158,14 +196,27 @@ export default function InputInvoiceUsagePage() {
       sortDirection: query.sortDirection,
       signal,
     };
-    fetchInputInvoiceUsageRows(request)
-      .then((payload) => {
+    Promise.all([
+      fetchInputInvoiceUsageRows(request),
+      fetchInputInvoiceUsageFilterOptions({
+        keyword: query.keyword,
+        invoiceDateFrom: query.invoiceDateFrom,
+        invoiceDateTo: query.invoiceDateTo,
+        month: query.month,
+        filters: query.filters,
+        signal,
+      }),
+    ])
+      .then(([payload, optionsPayload]) => {
         if (requestId !== requestIdRef.current) {
           return;
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
-        setReadModelStatus(payload.readModelStatus || "");
+        setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
+        setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
+        setReadModelStatus(payload.readModelStatus || optionsPayload.readModelStatus || "");
+        hasLoadedRef.current = true;
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -196,7 +247,7 @@ export default function InputInvoiceUsagePage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    loadRows("reset", controller.signal);
+    loadRows(hasLoadedRef.current ? "refresh" : "reset", controller.signal);
     return () => controller.abort();
   }, [loadRows]);
 
@@ -222,6 +273,32 @@ export default function InputInvoiceUsagePage() {
 
   const handlePageSizeChange = useCallback((pageSize: number) => {
     setQuery((current) => ({ ...current, page: 1, pageSize }));
+  }, [setQuery]);
+
+  const handleSortChange = useCallback((field: string, direction?: InputInvoiceUsageSortDirection) => {
+    setQuery((current) => ({
+      ...current,
+      page: 1,
+      sortField: field,
+      sortDirection: direction ?? nextSortDirection(current.sortField, current.sortDirection, field),
+    }));
+  }, [setQuery]);
+
+  const handleFilterApply = useCallback((filter: {
+    field: string;
+    operator: string;
+    value?: string | null;
+    values?: string[];
+  }) => {
+    const normalized = normalizeFilterValue(filter);
+    setQuery((current) => {
+      const filters = current.filters.filter((item) => item.field !== filter.field);
+      return { ...current, page: 1, filters: normalized ? [...filters, normalized] : filters };
+    });
+  }, [setQuery]);
+
+  const handleFilterClear = useCallback((field: string) => {
+    setQuery((current) => ({ ...current, page: 1, filters: current.filters.filter((filter) => filter.field !== field) }));
   }, [setQuery]);
 
   const handleToggleCellExpand = useCallback((rowId: string, cellId: string) => {
@@ -300,13 +377,6 @@ export default function InputInvoiceUsagePage() {
     <PageToolbar className="input-invoice-usage-actions">
       <button
         className="input-invoice-usage-button"
-        onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "oaReverse" }))}
-        type="button"
-      >
-        以发票反提 OA
-      </button>
-      <button
-        className="input-invoice-usage-button"
         onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
         type="button"
       >
@@ -320,17 +390,8 @@ export default function InputInvoiceUsagePage() {
         <Download aria-hidden="true" size={16} />
         筛选内容导出
       </button>
-      <button
-        className="input-invoice-usage-button input-invoice-usage-button--primary"
-        disabled={refreshing}
-        onClick={() => loadRows("refresh")}
-        type="button"
-      >
-        <RefreshCw aria-hidden="true" size={16} />
-        刷新
-      </button>
     </PageToolbar>
-  ), [loadRows, refreshing, setQuery]);
+  ), [setQuery]);
   const isEmpty = !loading && !error && rows.length === 0;
 
   return (
@@ -338,31 +399,38 @@ export default function InputInvoiceUsagePage() {
       <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">
         <PageScaffold
           title="进项发票使用情况"
-          description="以进项发票为主对象反查支付状态、OA 和银行流水。"
           actions={actions}
         >
           <div className="input-invoice-usage-content">
             <PageToolbar
               className="input-invoice-usage-query-toolbar"
-              left={(
-                <label className="input-invoice-usage-search">
-                  <span>关键字</span>
-                  <input
-                    value={keywordDraft}
-                    onChange={(event) => setKeywordDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        handleKeywordSubmit();
-                      }
-                    }}
-                    type="text"
-                  />
-                </label>
-              )}
               right={(
-                <button className="input-invoice-usage-button" onClick={handleKeywordSubmit} type="button">
-                  查询
-                </button>
+                <div className="input-invoice-usage-query-actions">
+                  <button
+                    className="input-invoice-usage-button input-invoice-usage-button--accent"
+                    onClick={() => setQuery((current) => ({ ...current, activeWorkflow: "oaReverse" }))}
+                    type="button"
+                  >
+                    以发票反提 OA
+                  </button>
+                  <label className="input-invoice-usage-search">
+                    <input
+                      aria-label="进项发票使用情况搜索"
+                      placeholder="搜索发票、销方、OA、流水"
+                      value={keywordDraft}
+                      onChange={(event) => setKeywordDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          handleKeywordSubmit();
+                        }
+                      }}
+                      type="text"
+                    />
+                  </label>
+                  <button className="input-invoice-usage-button" onClick={handleKeywordSubmit} type="button">
+                    查询
+                  </button>
+                </div>
               )}
             />
             {error ? <StatePanel tone="error" compact>{error}</StatePanel> : null}
@@ -380,9 +448,17 @@ export default function InputInvoiceUsagePage() {
                   page={query.page}
                   pageSize={query.pageSize}
                   total={total}
+                  filterConfigs={filterConfigs}
+                  filterOptions={filterOptions}
+                  filters={query.filters}
+                  sortField={query.sortField}
+                  sortDirection={query.sortDirection}
                   expandedCells={expandedCells}
                   onToggleCellExpand={handleToggleCellExpand}
                   onOpenDetail={handleOpenDetail}
+                  onFilterApply={handleFilterApply}
+                  onFilterClear={handleFilterClear}
+                  onSortChange={handleSortChange}
                   onPageChange={handlePageChange}
                   onPageSizeChange={handlePageSizeChange}
                 />
