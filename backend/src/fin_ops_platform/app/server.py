@@ -5802,7 +5802,10 @@ class Application:
             batches = [
                 batch for batch in batches
                 if any(
-                    str(getattr(invoice, "issue_date", "") or getattr(invoice, "passage_start_date", "") or "").startswith(month)
+                    any(
+                        str(getattr(invoice, field, "") or "").startswith(month)
+                        for field in ("issue_date", "passage_start_date", "passage_end_date")
+                    )
                     for invoice in self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
                 )
             ]

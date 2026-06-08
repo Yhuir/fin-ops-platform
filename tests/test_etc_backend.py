@@ -91,18 +91,22 @@ def etc_xml(
     invoice_number: str,
     *,
     issue_date: str = "2026-02-27",
+    passage_start_date: str | None = None,
+    passage_end_date: str | None = None,
     plate_number: str = "云ADA0381",
     total_amount: str = "13.07",
     seller_name: str = "云南高速公路联网收费管理有限公司",
     buyer_name: str = "云南溯源科技有限公司",
 ) -> bytes:
     amount_without_tax = (Decimal(total_amount) - Decimal("0.39")).quantize(Decimal("0.01"))
+    passage_start = passage_start_date or issue_date
+    passage_end = passage_end_date or issue_date
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <Invoice>
   <InvoiceNumber>{invoice_number}</InvoiceNumber>
   <IssueDate>{issue_date}</IssueDate>
-  <PassageStartDate>{issue_date}</PassageStartDate>
-  <PassageEndDate>{issue_date}</PassageEndDate>
+  <PassageStartDate>{passage_start}</PassageStartDate>
+  <PassageEndDate>{passage_end}</PassageEndDate>
   <PlateNumber>{plate_number}</PlateNumber>
   <VehicleType>一型客车</VehicleType>
   <AmountWithoutTax>{amount_without_tax}</AmountWithoutTax>
@@ -3174,6 +3178,82 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(active_batches["total"], 0)
         self.assertEqual(submitted_batches["total"], 1)
         self.assertEqual(submitted_batches["items"][0]["businessBatchId"], manual_payload["businessBatchId"])
+
+    def test_etc_business_batch_submitted_list_counts_use_filtered_passage_month(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": "ETC-TASK-PASSAGE-MONTH", "ownerUserId": "alice", "ownerOrgId": "finance"}),
+            )
+            self.assertEqual(create_response.status_code, 201)
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+            body, headers = multipart(
+                {
+                    "etc.zip": zip_bytes(
+                        {
+                            "xml/ETC-PASSAGE-APRIL.xml": etc_xml(
+                                "ETC-PASSAGE-APRIL",
+                                issue_date="2026-05-20",
+                                passage_start_date="2026-03-28",
+                                passage_end_date="2026-04-27",
+                                total_amount="1673.30",
+                            ),
+                            "pdf/ETC-PASSAGE-APRIL.pdf": fake_pdf("ETC-PASSAGE-APRIL"),
+                        }
+                    )
+                },
+                fields={"expectedVersion": str(created["version"])},
+            )
+            preview_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
+                body,
+                headers,
+            )
+            preview_payload = json.loads(preview_response.body)["data"]
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
+                json.dumps({
+                    "sessionId": preview_payload["sessionId"],
+                    "expectedVersion": preview_payload["businessBatch"]["version"],
+                }),
+            )
+            business_batch = json.loads(confirm_response.body)["data"]["businessBatch"]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": business_batch["version"]}),
+            )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
+            manual_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{drafted['businessBatchId']}/manual-oa-status",
+                json.dumps({
+                    "decision": "submitted",
+                    "reason": "用户确认 OA 草稿已提交。",
+                    "expectedVersion": drafted["version"],
+                }),
+            )
+            april_payload = json.loads(
+                app.handle_request("GET", "/api/etc/business-batches?status=submitted&month=2026-04").body
+            )["data"]
+            june_payload = json.loads(
+                app.handle_request("GET", "/api/etc/business-batches?status=submitted&month=2026-06").body
+            )["data"]
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertEqual(april_payload["counts"], {"active": 0, "submitted": 1})
+        self.assertEqual(april_payload["total"], 1)
+        self.assertEqual(april_payload["items"][0]["businessBatchId"], business_batch["businessBatchId"])
+        self.assertEqual(june_payload["counts"], {"active": 0, "submitted": 0})
+        self.assertEqual(june_payload["total"], 0)
+        self.assertEqual(june_payload["items"], [])
 
     def test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

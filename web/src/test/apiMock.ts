@@ -473,18 +473,22 @@ function createEtcInvoiceStore() {
     },
     listBusinessBatches({ status, month, plate, keyword }: { status?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
       const normalizedStatus = status === "active" ? "unsubmitted" : status === "submitted" ? "submitted" : null;
-      const normalizedKeyword = String(keyword ?? "").trim();
-      const normalizedPlate = String(plate ?? "").trim();
-      const rows = batches
+      const normalizedKeyword = String(keyword ?? "").trim().toLowerCase();
+      const normalizedPlate = String(plate ?? "").trim().toLowerCase();
+      const filteredBatches = batches
         .filter((batch) => {
-          if (normalizedStatus && batch.status !== normalizedStatus) {
-            return false;
-          }
           const items = invoicesForBatch(batch);
-          if (month && !items.some((invoice) => invoice.issue_date.startsWith(month))) {
+          if (
+            month
+            && !items.some((invoice) => [
+              invoice.issue_date,
+              invoice.passage_start_date,
+              invoice.passage_end_date,
+            ].some((value) => String(value ?? "").startsWith(month)))
+          ) {
             return false;
           }
-          if (normalizedPlate && !items.some((invoice) => invoice.plate_number.includes(normalizedPlate))) {
+          if (normalizedPlate && !items.some((invoice) => invoice.plate_number.toLowerCase().includes(normalizedPlate))) {
             return false;
           }
           if (normalizedKeyword) {
@@ -492,19 +496,21 @@ function createEtcInvoiceStore() {
               "etc_batch_id" in batch ? batch.etc_batch_id : batch.etcBatchId,
               "external_batch_id" in batch ? batch.external_batch_id : batch.externalBatchId,
               ...items.map((invoice) => `${invoice.invoice_number} ${invoice.seller_name} ${invoice.plate_number}`),
-            ].join(" ");
+            ].join(" ").toLowerCase();
             return searchable.includes(normalizedKeyword);
           }
           return true;
-        })
+        });
+      const rows = filteredBatches
+        .filter((batch) => !normalizedStatus || batch.status === normalizedStatus)
         .map((batch) => hydrateBusinessBatch(batch))
         .filter(Boolean);
       return {
         ok: true,
         data: {
           counts: {
-            active: batches.filter((batch) => batch.status !== "submitted").length,
-            submitted: batches.filter((batch) => batch.status === "submitted").length,
+            active: filteredBatches.filter((batch) => batch.status !== "submitted").length,
+            submitted: filteredBatches.filter((batch) => batch.status === "submitted").length,
           },
           items: cloneJson(rows),
           pagination: {

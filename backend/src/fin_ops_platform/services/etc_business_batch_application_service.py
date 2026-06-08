@@ -412,7 +412,10 @@ class EtcBusinessBatchApplicationService:
     def _matches_list_filters(self, batch: EtcBusinessBatch, *, month: str, plate: str, keyword: str) -> bool:
         invoices = self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
         if month and not any(
-            str(getattr(invoice, "issue_date", "") or getattr(invoice, "passage_start_date", "") or "").startswith(month)
+            any(
+                str(getattr(invoice, field, "") or "").startswith(month)
+                for field in ("issue_date", "passage_start_date", "passage_end_date")
+            )
             for invoice in invoices
         ):
             return False

@@ -278,6 +278,38 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "提交OA" })).not.toBeInTheDocument();
   });
 
+  test("business batch tab counts use the same month filter as the visible list", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
+
+    fireEvent.change(within(page).getByLabelText("月份"), { target: { value: "2026-04" } });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/etc/business-batches?status=active&month=2026-04&page=1&page_size=100",
+        expect.objectContaining({ method: "GET" }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
+    });
+    expect(within(page).queryByRole("radio", { name: "已提交 1" })).not.toBeInTheDocument();
+
+    await user.click(within(page).getByRole("radio", { name: "已提交 0" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/etc/business-batches?status=submitted&month=2026-04&page=1&page_size=100",
+        expect.objectContaining({ method: "GET" }),
+      );
+    });
+    expect(within(page).getByRole("radio", { name: "已提交 0" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByText("无匹配批次。")).toBeInTheDocument();
+  });
+
   test("renders a unified ETC batch workflow list without a separate reconciliation task list", async () => {
     installMockApiFetch();
 
