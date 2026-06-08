@@ -106,6 +106,11 @@ ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES = {
     EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
 }
 
+ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES = {
+    EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value,
+    *ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES,
+}
+
 
 class EtcServiceError(RuntimeError):
     pass
@@ -1090,9 +1095,9 @@ class EtcService:
             self._assert_business_batch_version(batch, expected_version)
             if normalized_decision == "submitted":
                 before_status = batch.status
-                if before_status not in ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES:
+                if before_status not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
                     raise EtcBusinessBatchInvalidTransitionError(
-                        "manual submitted decision is allowed only after OA detection timed out, conflicted, or became unavailable.",
+                        "manual submitted decision is allowed only after an OA draft is created and waiting for confirmation.",
                         code="invalid_manual_status",
                     )
                 now = datetime.now(UTC)

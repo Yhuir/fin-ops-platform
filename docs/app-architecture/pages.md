@@ -26,7 +26,7 @@
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出流水、进项发票、规则建议、人工关系 | 进项导入、关系确认/撤回、规则变更 |
 | OA 待付款核对 | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending payments routes/query service | OA 待付款、付款流水、进项发票、SQL read model | OA 导入、银行流水导入、发票关系变化 |
 | 税金抵扣 / 发票使用 | tax offset / invoice usage pages | invoice usage/read model routes | 已认证发票、使用状态、销项收款、ETC 发票 | 发票导入、认证状态、收款关系、backfill/refresh |
-| ETC 业务批次 | ETC pages/components | ETC business batch routes/service | ETC 票据、OA 自动检测、人工业务批次、导入草稿 | ETC 导入、OA 匹配、人工确认/撤销 |
+| ETC 业务批次 | ETC pages/components | ETC business batch routes/service | ETC 票据、人工业务批次、导入草稿、OA 提交确认 | ETC 导入、OA 草稿创建、人工提交确认 |
 | 成本统计 | cost statistics page | cost routes/query service | 项目、费用、发票、核销关系 | 项目范围变化、发票/流水关系变化 |
 | 设置 / 账户 / 项目 | settings pages | settings/account/project routes | 用户、角色、项目状态、规则配置 | 配置保存、权限变化、数据重置 |
 | App Health | shell/status components | app health routes、runtime queue、worker registry | queue、read model freshness、worker 状态、cache 状态 | worker heartbeat、refresh job、后台任务 |
@@ -53,7 +53,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | `no_oa_bank_batches` | `/no-oa-bank-batches` | `no_oa_bank_batch`、no-OA worker |
 | `batch_accounting` | `/batch-accounting` | workbench relation read model |
 | `turnover_ledger` | `/turnover-ledger` | `turnover_ledger`、turnover ledger worker |
-| `etc_tickets` | `/etc-tickets` | ETC OA detection worker、ETC import jobs |
+| `etc_tickets` | `/etc-tickets` | ETC import jobs、ETC business batch manual OA status |
 | `settings` | `/settings` | OA identity/state store/settings refresh runtime dependencies |
 | `app_health_operations` | `/operations/app-health` | runtime health dependencies、workers、queue、state store |
 

@@ -122,7 +122,7 @@ from fin_ops_platform.services.etc_service import (
     EtcServiceError,
     UploadedEtcZipFile,
 )
-from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
+from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchActor, EtcBusinessBatchApplicationService
 from fin_ops_platform.services.etc_oa_detection import FallbackEtcOADetectionCandidateAdapter
 import fin_ops_platform.services.etc_document_parsers as etc_document_parsers
 from fin_ops_platform.services.etc_document_parsers import (
@@ -525,7 +525,6 @@ class Application:
             return
         self._initialize_runtime_services(self._runtime_bootstrap_state())
         self._recover_interrupted_cost_statistics_cache_warmup_jobs()
-        self._recover_pending_etc_business_oa_detection_loops()
         self._schedule_startup_workbench_matching_stale_scan()
         if (
             os.getenv("FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR", "").strip() not in {"1", "true", "yes"}
@@ -6041,7 +6040,6 @@ class Application:
             self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
         )
         self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_oa_draft_created")
-        self._schedule_etc_business_oa_detection_loop(batch.business_batch_id)
         return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
 
     def _handle_api_etc_business_oa_draft_revoke(self, business_batch_id: str, body: str | bytes | None) -> Response:
@@ -6131,44 +6129,17 @@ class Application:
         decision = str(payload.get("decision") or "").strip()
         candidate_oa_row_id = str(payload.get("candidateOaRowId") or payload.get("candidate_oa_row_id") or "").strip() or None
         try:
-            checked = self._refresh_etc_business_batch_oa_detection(business_batch_id, expected_version=expected_version)
-            if str(getattr(checked, "status", "")) == EtcBusinessBatchStatus.OA_SUBMITTED.value:
-                changed_months = self._sync_etc_invoices_to_canonical_invoices(
-                    self._existing_etc_invoices_by_ids(list(getattr(checked, "invoice_ids", []) or [])),
-                )
-                self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_manual_oa_status_auto_detected")
-                return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(checked)})
-            if decision == "submitted" and candidate_oa_row_id is not None:
-                latest_payload = self._etc_service.business_batch_payload(checked)
-                audit_events = list(latest_payload.get("auditEvents") or [])
-                candidate_rows = [
-                    str(candidate.get("oaRowId") or "").strip()
-                    for event in reversed(audit_events)
-                    if isinstance(event, dict)
-                    for candidate in list(event.get("candidates") or [])
-                    if isinstance(candidate, dict)
-                ]
-                if candidate_oa_row_id not in candidate_rows:
-                    return self._etc_business_response(
-                        HTTPStatus.BAD_REQUEST,
-                        None,
-                        code="invalid_manual_oa_candidate",
-                        message="人工确认的 OA 行未通过本次批次检测候选校验。",
-                    )
-            batch = self._etc_service.manual_business_batch_oa_status(
+            payload_result = self._etc_business_application_service().manual_oa_status_payload(
                 business_batch_id,
                 decision=decision,
                 reason=str(payload.get("reason") or "").strip(),
-                expected_version=int(getattr(checked, "version")),
+                expected_version=expected_version,
                 candidate_oa_row_id=candidate_oa_row_id,
+                actor=EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True),
             )
         except Exception as error:
             return self._etc_business_error_response(error)
-        changed_months = self._sync_etc_invoices_to_canonical_invoices(
-            self._existing_etc_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])),
-        )
-        self._refresh_after_etc_invoice_sync(changed_months, reason="etc_business_manual_oa_status")
-        return self._etc_business_response(HTTPStatus.OK, {"businessBatch": self._etc_service.business_batch_payload(batch)})
+        return self._etc_business_response(HTTPStatus.OK, payload_result)
 
     def _handle_api_etc_business_batch_delete(self, business_batch_id: str, body: str | bytes | None) -> Response:
         payload: dict[str, object] = {}

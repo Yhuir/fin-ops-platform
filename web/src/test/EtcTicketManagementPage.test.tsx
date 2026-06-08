@@ -1095,7 +1095,7 @@ describe("ETC ticket management page", () => {
     });
   });
 
-  test("revokes an OA draft for a task-linked business batch through the business-batch API", async () => {
+  test("manually confirms a draft-created business batch as submitted without OA detection refresh", async () => {
     const user = userEvent.setup();
     const openMock = vi.fn();
     vi.stubGlobal("open", openMock);
@@ -1163,6 +1163,14 @@ describe("ETC ticket management page", () => {
       createdAt: "2026-05-19T09:00:00+08:00",
       updatedAt: "2026-05-19T09:00:00+08:00",
     };
+    const submittedBatch = {
+      ...linkedBusinessBatch,
+      status: "manually_marked_submitted",
+      version: 9,
+      oaProcessStatus: "manual_without_oa_row",
+      oaDetectionReason: "用户确认 OA 草稿已提交。",
+      invoiceItems: [],
+    };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
       counts: { active: 1, submitted: 0 },
@@ -1173,23 +1181,13 @@ describe("ETC ticket management page", () => {
       ...linkedBusinessBatch,
       invoiceItems: [],
     } as never);
-    const revokeOaDraft = vi.spyOn(etcApi, "revokeEtcBusinessBatchOaDraft").mockResolvedValue({
-      ...linkedBusinessBatch,
-      status: "not_submitted",
-      version: 9,
-      submissionBatchId: "",
-      externalEtcBatchId: "",
-      oaDraftId: "",
-      oaDraftUrl: "",
-      oaDetectionStatus: "revoked",
-      oaDetectionReason: "user_revoked",
-      invoiceItems: [],
-    } as never);
+    const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(submittedBatch as never);
+    const legacyMarkNotSubmitted = vi.spyOn(etcApi, "markEtcBatchNotSubmitted");
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
+    const oaStatusPanel = await within(page).findByRole("region", { name: "OA提交确认" });
     const openDraftButton = within(oaStatusPanel).getByRole("button", { name: "打开草稿" });
     expect(openDraftButton).toBeEnabled();
     await user.click(openDraftButton);
@@ -1198,268 +1196,37 @@ describe("ETC ticket management page", () => {
       "_blank",
       "noopener,noreferrer",
     );
-    expect(within(oaStatusPanel).getByRole("button", { name: "刷新检测" })).toBeEnabled();
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "撤销草稿" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "撤销OA草稿" });
-    expect(within(dialog).getByRole("button", { name: "确认撤销" })).toBeDisabled();
-    await user.type(within(dialog).getByLabelText("撤销原因"), "发票需要重新核对");
-    await user.click(within(dialog).getByRole("button", { name: "确认撤销" }));
-
-    await waitFor(() => {
-      expect(revokeOaDraft).toHaveBeenCalledWith("etc-business-linked-001", {
-        expectedVersion: 8,
-        reason: "发票需要重新核对",
-      });
-    });
+    expect(within(oaStatusPanel).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
+    expect(within(oaStatusPanel).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
     expect(within(oaStatusPanel).queryByRole("button", { name: "异常处理" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "撤销OA草稿" })).not.toBeInTheDocument();
-  });
-
-  test("keeps the OA draft revoke dialog open when revoke fails", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const detectingBatch = businessBatchFixture({
-      businessBatchId: "etc-business-revoke-fail-001",
-      status: "oa_submission_detecting",
-      version: 8,
-      oaDetectionStatus: "detecting",
-      oaDetectionReason: "后台持续检测流程状态。",
-    });
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [detectingBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...detectingBatch,
-      invoiceItems: [],
-    } as never);
-    const revokeOaDraft = vi
-      .spyOn(etcApi, "revokeEtcBusinessBatchOaDraft")
-      .mockRejectedValue(new Error("OA 草稿已进入流程，不能撤销。") as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "撤销草稿" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "撤销OA草稿" });
-    await user.type(within(dialog).getByLabelText("撤销原因"), "发票需要重新核对");
-    await user.click(within(dialog).getByRole("button", { name: "确认撤销" }));
+    expect(within(oaStatusPanel).queryByLabelText("人工处理原因")).not.toBeInTheDocument();
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
 
     await waitFor(() => {
-      expect(revokeOaDraft).toHaveBeenCalledWith("etc-business-revoke-fail-001", {
-        expectedVersion: 8,
-        reason: "发票需要重新核对",
-      });
-    });
-    expect(await within(page).findByText("OA 草稿已进入流程，不能撤销。")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "撤销OA草稿" })).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-business-revoke-fail-001")).toBeInTheDocument();
-  });
-
-  test("refreshes OA detection through the business-batch API and moves detected submissions out of the active list", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const detectingBatch = businessBatchFixture({
-      businessBatchId: "etc-business-refresh-detected-001",
-      status: "oa_submission_detecting",
-      version: 8,
-      oaDetectionStatus: "detecting",
-      oaDetectionReason: "后台持续检测流程状态。",
-    });
-    const detectedBatch = {
-      ...detectingBatch,
-      status: "oa_submitted",
-      version: 9,
-      oaRowId: "oa-row-refresh-detected-001",
-      oaProcessStatus: "in_progress",
-      oaDetectionStatus: "detected",
-      oaDetectionReason: "OA 已进入流程。",
-      invoiceItems: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [detectingBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...detectingBatch,
-      invoiceItems: [],
-    } as never);
-    const refreshOaStatus = vi.spyOn(etcApi, "refreshEtcBusinessBatchOaStatus").mockResolvedValue(detectedBatch as never);
-    const legacyMarkNotSubmitted = vi.spyOn(etcApi, "markEtcBatchNotSubmitted");
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "刷新检测" }));
-
-    await waitFor(() => {
-      expect(refreshOaStatus).toHaveBeenCalledWith("etc-business-refresh-detected-001", { expectedVersion: 8 });
-    });
-    expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
-    await waitFor(() => expect(within(page).getByRole("button", { name: "未提交 0" })).toBeInTheDocument());
-    expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
-    expect(within(page).queryByTestId("etc-batch-row-etc-business-refresh-detected-001")).not.toBeInTheDocument();
-  });
-
-  test("refreshes timed-out OA detection and moves a late valid OA submission to the submitted list", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const timeoutBatch = businessBatchFixture({
-      businessBatchId: "etc-business-refresh-timeout-detected-001",
-      status: "oa_detection_timeout",
-      version: 8,
-      oaDetectionStatus: "timeout",
-      oaDetectionReason: "oa_detection_deadline_exceeded",
-    });
-    const detectedBatch = {
-      ...timeoutBatch,
-      status: "oa_submitted",
-      version: 9,
-      oaRowId: "oa-row-refresh-timeout-detected-001",
-      oaProcessStatus: "in_progress",
-      oaDetectionStatus: "detected",
-      oaDetectionReason: "unique_candidate_detected",
-      invoiceItems: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [timeoutBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...timeoutBatch,
-      invoiceItems: [],
-    } as never);
-    const refreshOaStatus = vi.spyOn(etcApi, "refreshEtcBusinessBatchOaStatus").mockResolvedValue(detectedBatch as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
-    expect(within(oaStatusPanel).getByRole("button", { name: "刷新检测" })).toBeEnabled();
-    expect(within(oaStatusPanel).getByRole("button", { name: "异常处理" })).toBeInTheDocument();
-
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "刷新检测" }));
-
-    await waitFor(() => {
-      expect(refreshOaStatus).toHaveBeenCalledWith("etc-business-refresh-timeout-detected-001", { expectedVersion: 8 });
-    });
-    await waitFor(() => expect(within(page).getByRole("button", { name: "未提交 0" })).toBeInTheDocument());
-    expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
-    expect(within(page).queryByTestId("etc-batch-row-etc-business-refresh-timeout-detected-001")).not.toBeInTheDocument();
-  });
-
-  test("surfaces OA detection refresh errors and keeps the batch actionable", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const detectingBatch = businessBatchFixture({
-      businessBatchId: "etc-business-refresh-fail-001",
-      status: "oa_submission_detecting",
-      version: 8,
-      oaDetectionStatus: "detecting",
-      oaDetectionReason: "后台持续检测流程状态。",
-    });
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [detectingBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...detectingBatch,
-      invoiceItems: [],
-    } as never);
-    const refreshOaStatus = vi
-      .spyOn(etcApi, "refreshEtcBusinessBatchOaStatus")
-      .mockRejectedValue(new Error("OA 检测刷新失败，请稍后重试。") as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "刷新检测" }));
-
-    await waitFor(() => expect(refreshOaStatus).toHaveBeenCalledWith("etc-business-refresh-fail-001", { expectedVersion: 8 }));
-    expect(await within(page).findByText("OA 检测刷新失败，请稍后重试。")).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-business-refresh-fail-001")).toBeInTheDocument();
-    expect(within(oaStatusPanel).getByRole("button", { name: "刷新检测" })).toBeEnabled();
-  });
-
-  test("manually marks an OA detection fallback as submitted through the business-batch API", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const fallbackBatch = businessBatchFixture({
-      businessBatchId: "etc-business-manual-submitted-001",
-      status: "oa_detection_timeout",
-      version: 8,
-      oaDetectionStatus: "timeout",
-      oaDetectionReason: "自动检测超时，需要人工确认。",
-    });
-    const submittedBatch = {
-      ...fallbackBatch,
-      status: "manually_marked_submitted",
-      version: 9,
-      oaProcessStatus: "manual_without_oa_row",
-      oaDetectionReason: "财务已在 OA 中确认进入流程。",
-      invoiceItems: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [fallbackBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...fallbackBatch,
-      invoiceItems: [],
-    } as never);
-    const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(submittedBatch as never);
-    const legacyMarkNotSubmitted = vi.spyOn(etcApi, "markEtcBatchNotSubmitted");
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "异常处理" }));
-    expect(within(oaStatusPanel).getByRole("button", { name: "我已提交 OA" })).toBeDisabled();
-    expect(within(oaStatusPanel).getByRole("button", { name: "未提交 OA" })).toBeDisabled();
-    await user.type(within(oaStatusPanel).getByLabelText("人工处理原因"), "财务已在 OA 中确认进入流程。");
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "我已提交 OA" }));
-
-    await waitFor(() => {
-      expect(manualOaStatus).toHaveBeenCalledWith("etc-business-manual-submitted-001", {
+      expect(manualOaStatus).toHaveBeenCalledWith("etc-business-linked-001", {
         decision: "submitted",
-        reason: "财务已在 OA 中确认进入流程。",
         expectedVersion: 8,
+        reason: "用户确认 OA 草稿已提交。",
       });
     });
     expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
     await waitFor(() => expect(within(page).getByRole("button", { name: "未提交 0" })).toBeInTheDocument());
     expect(within(page).getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
-    expect(within(page).queryByTestId("etc-batch-row-etc-business-manual-submitted-001")).not.toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-batch-row-etc-business-linked-001")).not.toBeInTheDocument();
   });
 
-  test("manually marks an OA detection fallback as not submitted through the business-batch API", async () => {
+  test("manually confirms a draft-created business batch as not submitted", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
-    const fallbackBatch = businessBatchFixture({
+    const detectingBatch = businessBatchFixture({
       businessBatchId: "etc-business-manual-not-submitted-001",
-      status: "oa_detection_unavailable",
+      status: "oa_submission_detecting",
       version: 8,
-      oaDetectionStatus: "unavailable",
-      oaDetectionReason: "OA 检测服务不可用。",
+      oaDetectionStatus: "detecting",
+      oaDetectionReason: "后台持续检测流程状态。",
     });
     const notSubmittedBatch = {
-      ...fallbackBatch,
+      ...detectingBatch,
       status: "manually_marked_not_submitted",
       version: 9,
       submissionBatchId: "",
@@ -1467,17 +1234,17 @@ describe("ETC ticket management page", () => {
       oaDraftId: "",
       oaDraftUrl: "",
       oaDetectionStatus: "revoked",
-      oaDetectionReason: "确认未提交 OA，重新整理发票。",
+      oaDetectionReason: "用户确认 OA 草稿未提交。",
       invoiceItems: [],
     };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
       counts: { active: 1, submitted: 0 },
-      items: [fallbackBatch],
+      items: [detectingBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...fallbackBatch,
+      ...detectingBatch,
       invoiceItems: [],
     } as never);
     const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(notSubmittedBatch as never);
@@ -1486,42 +1253,40 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "异常处理" }));
-    await user.type(within(oaStatusPanel).getByLabelText("人工处理原因"), "确认未提交 OA，重新整理发票。");
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "未提交 OA" }));
-
+    const oaStatusPanel = await within(page).findByRole("region", { name: "OA提交确认" });
+    expect(within(oaStatusPanel).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "未提交" }));
     await waitFor(() => {
       expect(manualOaStatus).toHaveBeenCalledWith("etc-business-manual-not-submitted-001", {
         decision: "not_submitted",
-        reason: "确认未提交 OA，重新整理发票。",
         expectedVersion: 8,
+        reason: "用户确认 OA 草稿未提交。",
       });
     });
     expect(legacyMarkNotSubmitted).not.toHaveBeenCalled();
-    await waitFor(() => expect(within(oaStatusPanel).queryByText("人工处理原因")).not.toBeInTheDocument());
+    expect(within(oaStatusPanel).queryByLabelText("人工处理原因")).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "未提交 1" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "已提交 0" })).toBeInTheDocument();
   });
 
-  test("surfaces manual OA status errors and keeps the manual panel open", async () => {
+  test("surfaces manual OA status errors and keeps the confirmation actions available", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
-    const fallbackBatch = businessBatchFixture({
+    const detectingBatch = businessBatchFixture({
       businessBatchId: "etc-business-manual-fail-001",
-      status: "oa_detection_timeout",
+      status: "oa_submission_detecting",
       version: 8,
-      oaDetectionStatus: "timeout",
-      oaDetectionReason: "自动检测超时，需要人工确认。",
+      oaDetectionStatus: "pending",
+      oaDetectionReason: "后台持续检测流程状态。",
     });
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
       counts: { active: 1, submitted: 0 },
-      items: [fallbackBatch],
+      items: [detectingBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...fallbackBatch,
+      ...detectingBatch,
       invoiceItems: [],
     } as never);
     const manualOaStatus = vi
@@ -1531,20 +1296,19 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const oaStatusPanel = await within(page).findByRole("region", { name: "OA草稿与检测状态" });
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "异常处理" }));
-    await user.type(within(oaStatusPanel).getByLabelText("人工处理原因"), "财务复核 OA 状态失败。");
-    await user.click(within(oaStatusPanel).getByRole("button", { name: "我已提交 OA" }));
+    const oaStatusPanel = await within(page).findByRole("region", { name: "OA提交确认" });
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
 
     await waitFor(() => {
       expect(manualOaStatus).toHaveBeenCalledWith("etc-business-manual-fail-001", {
         decision: "submitted",
-        reason: "财务复核 OA 状态失败。",
+        reason: "用户确认 OA 草稿已提交。",
         expectedVersion: 8,
       });
     });
     expect(await within(page).findByText("人工处理失败，请重新确认 OA 状态。")).toBeInTheDocument();
-    expect(within(oaStatusPanel).getByLabelText("人工处理原因")).toHaveValue("财务复核 OA 状态失败。");
+    expect(within(oaStatusPanel).getByRole("button", { name: "已提交" })).toBeEnabled();
+    expect(within(oaStatusPanel).getByRole("button", { name: "未提交" })).toBeEnabled();
     expect(within(page).getByTestId("etc-batch-row-etc-business-manual-fail-001")).toBeInTheDocument();
   });
 
@@ -3770,6 +3534,16 @@ describe("ETC ticket management page", () => {
       oaDraftId: "oa_draft_001",
       oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
     } as never);
+    const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue({
+      ...businessBatch,
+      status: "manually_marked_submitted",
+      version: 9,
+      submissionBatchId: "etc_batch_0027",
+      oaDraftId: "oa_draft_001",
+      oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
+      oaProcessStatus: "manual_without_oa_row",
+      invoiceItems: [],
+    } as never);
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
@@ -3786,13 +3560,19 @@ describe("ETC ticket management page", () => {
     await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_0001", { expectedVersion: 7 }));
     expect(openMock).not.toHaveBeenCalled();
 
-    const resultDialog = await screen.findByRole("dialog", { name: "OA自动检测" });
+    const resultDialog = await screen.findByRole("dialog", { name: "OA提交确认" });
     expect(resultDialog).toHaveTextContent("OA草稿已创建，等待提交确认。");
     expect(within(resultDialog).getByRole("button", { name: "打开草稿" })).toBeEnabled();
-    expect(within(resultDialog).getByRole("button", { name: "刷新检测" })).toBeEnabled();
+    expect(within(resultDialog).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
     expect(within(resultDialog).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
-    expect(within(resultDialog).queryByRole("button", { name: "确认已提交OA" })).not.toBeInTheDocument();
-    expect(within(resultDialog).queryByRole("button", { name: "未提交OA" })).not.toBeInTheDocument();
+    await user.click(within(resultDialog).getByRole("button", { name: "已提交" }));
+    await waitFor(() => {
+      expect(manualOaStatus).toHaveBeenCalledWith("etc_business_batch_0001", {
+        decision: "submitted",
+        expectedVersion: 8,
+        reason: "用户确认 OA 草稿已提交。",
+      });
+    });
   });
 
   test("keeps the create OA draft dialog open when draft creation fails", async () => {
@@ -3878,9 +3658,11 @@ describe("ETC ticket management page", () => {
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
     await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc-business-oa-action-001", { expectedVersion: 7 }));
-    const resultDialog = await screen.findByRole("dialog", { name: "OA自动检测" });
+    const resultDialog = await screen.findByRole("dialog", { name: "OA提交确认" });
     expect(resultDialog).toHaveTextContent("OA草稿已创建，等待提交确认。");
     expect(within(resultDialog).queryByRole("button", { name: "打开草稿" })).not.toBeInTheDocument();
-    expect(within(resultDialog).getByRole("button", { name: "刷新检测" })).toBeEnabled();
+    expect(within(resultDialog).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
+    expect(within(resultDialog).getByRole("button", { name: "已提交" })).toBeEnabled();
+    expect(within(resultDialog).getByRole("button", { name: "未提交" })).toBeEnabled();
   });
 });

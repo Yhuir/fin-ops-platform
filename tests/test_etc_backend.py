@@ -2986,7 +2986,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(other_detail_response.body)["error"]["code"], "forbidden_scope")
         self.assertEqual(admin_detail_response.status_code, 200)
 
-    def test_etc_business_batch_oa_draft_enqueues_detection_event(self) -> None:
+    def test_etc_business_batch_oa_draft_does_not_enqueue_detection_event(self) -> None:
         class QueueRecorder:
             def __init__(self) -> None:
                 self.events: list[dict[str, object]] = []
@@ -3037,8 +3037,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(draft_response.status_code, 200)
-        self.assertEqual([event["event_type"] for event in queue.events], ["etc_business.oa_detection.refresh"])
-        self.assertEqual(queue.events[0]["aggregate_id"], created["businessBatchId"])
+        self.assertEqual(queue.events, [])
 
     def test_etc_business_batch_source_files_append_to_reconciliation_task(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -3067,12 +3066,12 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["sourceFiles"][0]["sourceKind"], "etc_zip")
         self.assertEqual(task_after_upload.source_files[0].original_name, "ticket-root.zip")
 
-    def test_etc_business_manual_status_rejects_detecting_state(self) -> None:
+    def test_etc_business_manual_status_accepts_detecting_state(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
             app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001"]))])
-            batch = app._etc_service.create_business_batch(task_id="ETC-TASK-MANUAL", owner_user_id="alice")
+            batch = app._etc_service.create_business_batch(task_id="ETC-TASK-MANUAL")
             imported, _ = app._etc_service.confirm_business_batch_import(
                 batch.business_batch_id,
                 app._etc_service.preview_business_batch_import_zips(
@@ -3087,15 +3086,20 @@ class EtcApiTests(unittest.TestCase):
                 expected_version=imported.version,
             )
 
-            with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as context:
-                app._etc_service.manual_business_batch_oa_status(
-                    drafted.business_batch_id,
-                    decision="submitted",
-                    reason="人工确认",
-                    expected_version=drafted.version,
-                )
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{drafted.business_batch_id}/manual-oa-status",
+                json.dumps({
+                    "decision": "submitted",
+                    "reason": "用户确认 OA 草稿已提交。",
+                    "expectedVersion": drafted.version,
+                }),
+            )
+            payload = json.loads(response.body)["data"]["businessBatch"]
 
-        self.assertEqual(context.exception.code, "invalid_manual_status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "manually_marked_submitted")
+        self.assertEqual(payload["oaProcessStatus"], "manual_without_oa_row")
 
     def test_etc_business_batch_delete_is_idempotent_for_stale_business_ids(self) -> None:
         with TemporaryDirectory() as temp_dir:

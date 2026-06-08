@@ -23,7 +23,6 @@ import {
   markEtcBatchNotSubmitted,
   patchEtcReconciliationItem,
   previewEtcZipFiles,
-  refreshEtcBusinessBatchOaStatus,
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
   revokeEtcBusinessBatchOaDraft,
@@ -125,7 +124,6 @@ describe("etc api", () => {
       { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "imported", version: 7 } },
       { item: { business_batch_id: "etc_business_batch_0001", status: "imported", version: 7 } },
       { detail: { business_batch_id: "etc_business_batch_0001", status: "oa_submission_detecting", version: 8 } },
-      { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "oa_detection_timeout", version: 8 } },
       { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "not_submitted", version: 9 } },
       { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "manually_marked_submitted", version: 10 } },
     ];
@@ -145,13 +143,11 @@ describe("etc api", () => {
     const created = await createEtcBusinessBatch({ taskId: "etc-recon-task-001", idempotencyKey: "create-1" });
     const detail = await fetchEtcBusinessBatchDetail("etc_business_batch_0001");
     const draft = await createEtcBusinessBatchOaDraft("etc_business_batch_0001", { expectedVersion: 7, idempotencyKey: "draft-1" });
-    const refreshed = await refreshEtcBusinessBatchOaStatus("etc_business_batch_0001", { expectedVersion: 8 });
     const revoked = await revokeEtcBusinessBatchOaDraft("etc_business_batch_0001", { expectedVersion: 8, reason: "导入发票不足", idempotencyKey: "revoke-1" });
     const manual = await manualEtcBusinessBatchOaStatus("etc_business_batch_0001", {
       decision: "submitted",
       expectedVersion: 9,
-      reason: "OA 已进入流程，自动检测超时后人工确认。",
-      candidateOaRowId: "oa-row-001",
+      reason: "用户确认 OA 草稿已提交。",
     });
     await deleteEtcBusinessBatch("etc_business_batch_0001", { expectedVersion: 10, reason: "测试删除" });
 
@@ -159,7 +155,6 @@ describe("etc api", () => {
       "/api/etc/business-batches",
       "/api/etc/business-batches/etc_business_batch_0001",
       "/api/etc/business-batches/etc_business_batch_0001/oa-draft",
-      "/api/etc/business-batches/etc_business_batch_0001/oa-status/refresh",
       "/api/etc/business-batches/etc_business_batch_0001/oa-draft/revoke",
       "/api/etc/business-batches/etc_business_batch_0001/manual-oa-status",
       "/api/etc/business-batches/etc_business_batch_0001",
@@ -167,11 +162,10 @@ describe("etc api", () => {
     expect(created).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "imported", version: 7 });
     expect(detail).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "imported", version: 7 });
     expect(draft).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "oa_submission_detecting", version: 8 });
-    expect(refreshed).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "oa_detection_timeout", version: 8 });
     expect(revoked).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "not_submitted", version: 9 });
     expect(manual).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "manually_marked_submitted", version: 10 });
     expect(fetchMock).toHaveBeenNthCalledWith(
-      5,
+      4,
       "/api/etc/business-batches/etc_business_batch_0001/oa-draft/revoke",
       expect.objectContaining({
         method: "POST",
@@ -179,15 +173,14 @@ describe("etc api", () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      6,
+      5,
       "/api/etc/business-batches/etc_business_batch_0001/manual-oa-status",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
           decision: "submitted",
           expectedVersion: 9,
-          reason: "OA 已进入流程，自动检测超时后人工确认。",
-          candidateOaRowId: "oa-row-001",
+          reason: "用户确认 OA 草稿已提交。",
         }),
       }),
     );

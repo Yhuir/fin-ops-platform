@@ -9,7 +9,7 @@ from typing import Any, Callable, Iterable
 from fin_ops_platform.services.etc_oa_detection import EtcOADetectionContext, EtcOADetectionService
 from fin_ops_platform.services.etc_reconciliation_models import ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_service import (
-    ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES,
+    ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES,
     EtcBusinessBatch,
     EtcBusinessBatchInvalidTransitionError,
     EtcBusinessBatchNotFoundError,
@@ -197,7 +197,6 @@ class EtcBusinessBatchApplicationService:
                 actor=actor.actor_id,
             )
         self._sync_invoices(batch, "etc_business_oa_draft_created")
-        self.enqueue_oa_detection(batch)
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def refresh_oa_status_payload(
@@ -227,9 +226,9 @@ class EtcBusinessBatchApplicationService:
         actor: EtcBusinessBatchActor,
     ) -> dict[str, object]:
         current = self._scoped_batch(business_batch_id, actor)
-        if str(getattr(current, "status", "")) not in ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES:
+        if str(getattr(current, "status", "")) not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
             raise EtcBusinessBatchInvalidTransitionError(
-                "manual OA status is allowed only after OA detection timed out, conflicted, or became unavailable.",
+                "manual OA status is allowed only after an OA draft is created and waiting for confirmation.",
                 code="invalid_manual_status",
             )
         if str(decision or "").strip().lower() == "submitted" and candidate_oa_row_id:

@@ -14,7 +14,7 @@
 - `/api/workbench*`：关联工作台查询、详情、动作、异常、设置。
 - `/imports/*`：导入预览、确认、模板、批次和文件会话。
 - `/api/no-oa-bank-batches/*`：免 OA 批次。
-- `/api/etc/business-batches*`：ETC 用户可见业务批次、补充导入、OA 草稿、OA 自动检测、人工兜底和撤销草稿。
+- `/api/etc/business-batches*`：ETC 用户可见业务批次、补充导入、OA 草稿和 OA 提交人工确认。
 - `/api/tax-offset*`：税金抵扣和已认证导入。
 - `/api/cost-statistics*`：成本统计、下钻和导出。
 - `/api/bank-details*`：银行明细、自动分类展示和 XLSX 导出。
@@ -668,10 +668,12 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 契约要求：
 
-- 响应必须区分导入批次、业务批次、OA 草稿、自动检测结果和人工兜底状态。
+- 响应必须区分导入批次、业务批次、OA 草稿、人工提交确认状态和历史 OA 检测兼容状态。
 - 幂等 key、重复提交、撤销草稿和释放发票规则必须由后端校验。
 - 权限不足、状态冲突、发票占用、OA 草稿失败和撤销失败需要返回稳定错误码。
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。
+- ETC 页面创建 OA 草稿后使用 `POST /api/etc/business-batches/{id}/manual-oa-status` 确认 `submitted` 或 `not_submitted`；前端不再调用 `/oa-status/refresh`。
+- `/oa-status/refresh` 仅作为后端 legacy 兼容入口保留，不得作为新的 ETC 页面交互入口扩展。
 
 ## AppHealth 运维 Dashboard API
 

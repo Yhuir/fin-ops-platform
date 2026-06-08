@@ -1,14 +1,14 @@
 import {
-  AlertTriangle,
   ArrowRight,
   ChevronDown,
   ChevronUp,
+  CheckCircle2,
   ExternalLink,
   Plus,
   RefreshCw,
-  RotateCcw,
   Trash2,
   UploadCloud,
+  XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import { Link as RouterLink } from "react-router-dom";
@@ -35,10 +35,8 @@ import {
   manualEtcBusinessBatchOaStatus,
   fetchEtcReconciliationTasks,
   patchEtcReconciliationItem,
-  refreshEtcBusinessBatchOaStatus,
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
-  revokeEtcBusinessBatchOaDraft,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
   uploadEtcTicketRootFiles,
@@ -65,6 +63,9 @@ const initialCounts: EtcBatchCounts = {
   unsubmitted: 0,
   submitted: 0,
 };
+
+const MANUAL_OA_SUBMITTED_REASON = "用户确认 OA 草稿已提交。";
+const MANUAL_OA_NOT_SUBMITTED_REASON = "用户确认 OA 草稿未提交。";
 
 function formatMoney(value: string | number) {
   const parsed = Number(value);
@@ -191,11 +192,11 @@ function businessBatchStatusLabel(status: EtcBusinessBatchStatus) {
     import_partial_failed: "部分导入失败",
     oa_draft_creating: "草稿创建中",
     oa_draft_failed: "草稿创建失败",
-    oa_submission_detecting: "等待OA确认",
+    oa_submission_detecting: "待确认OA状态",
     oa_submitted: "OA已提交",
-    oa_detection_timeout: "检测超时",
-    oa_detection_conflict: "检测冲突",
-    oa_detection_unavailable: "检测不可用",
+    oa_detection_timeout: "待人工确认",
+    oa_detection_conflict: "待人工确认",
+    oa_detection_unavailable: "待人工确认",
     not_submitted: "未提交OA",
     manually_marked_submitted: "人工确认已提交",
     manually_marked_not_submitted: "人工确认未提交",
@@ -267,10 +268,6 @@ function transitionBusinessBatchCounts(
 
 function isOaDetectionStatus(status: EtcBusinessBatchStatus) {
   return status === "oa_submission_detecting" || status === "oa_detection_timeout" || status === "oa_detection_conflict" || status === "oa_detection_unavailable";
-}
-
-function isManualOaFallbackStatus(status: EtcBusinessBatchStatus) {
-  return status === "oa_detection_timeout" || status === "oa_detection_conflict" || status === "oa_detection_unavailable";
 }
 
 function canCreateOaDraft(status: EtcBusinessBatchStatus) {
@@ -649,12 +646,7 @@ export default function EtcTicketManagementPage() {
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftResult, setDraftResult] = useState<EtcOaDraftPayload | null>(null);
-  const [manualOaPanelOpen, setManualOaPanelOpen] = useState(false);
-  const [manualOaReason, setManualOaReason] = useState("");
   const [oaActionLoading, setOaActionLoading] = useState(false);
-  const [revokeOaDraftTarget, setRevokeOaDraftTarget] = useState<EtcBusinessBatchDetail | EtcBusinessBatchSummary | null>(null);
-  const [revokeOaDraftReason, setRevokeOaDraftReason] = useState("");
-  const [revokeOaDraftSubmitting, setRevokeOaDraftSubmitting] = useState(false);
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
 
   const loadBatches = useCallback(async (signal?: AbortSignal) => {
@@ -1755,62 +1747,6 @@ export default function EtcTicketManagementPage() {
     openOaDraftUrl(draftResult?.oaDraftUrl || currentOaActionBatch?.oaDraftUrl || "");
   };
 
-  const handleRefreshBusinessBatchOaStatus = async (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
-    const target = resolveOaActionBatch(batch);
-    if (!target) {
-      return;
-    }
-    setOaActionLoading(true);
-    setActionError(null);
-    try {
-      const result = await refreshEtcBusinessBatchOaStatus(target.businessBatchId, { expectedVersion: target.version });
-      mergeBusinessBatch(result);
-      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_status_refresh" });
-    } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "OA 检测刷新失败。");
-    } finally {
-      setOaActionLoading(false);
-    }
-  };
-
-  const openRevokeOaDraftDialog = (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => {
-    setActionError(null);
-    setRevokeOaDraftTarget(batch);
-    setRevokeOaDraftReason("");
-  };
-
-  const closeRevokeOaDraftDialog = () => {
-    if (revokeOaDraftSubmitting) {
-      return;
-    }
-    setRevokeOaDraftTarget(null);
-    setRevokeOaDraftReason("");
-  };
-
-  const handleRevokeOaDraft = async () => {
-    const target = resolveOaActionBatch(revokeOaDraftTarget);
-    const reason = revokeOaDraftReason.trim();
-    if (!target || !reason) {
-      return;
-    }
-    setRevokeOaDraftSubmitting(true);
-    setActionError(null);
-    try {
-      const result = await revokeEtcBusinessBatchOaDraft(target.businessBatchId, {
-        expectedVersion: target.version,
-        reason,
-      });
-      mergeBusinessBatch(result);
-      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_draft_revoke" });
-      setRevokeOaDraftTarget(null);
-      setRevokeOaDraftReason("");
-    } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : "OA 草稿撤销失败。");
-    } finally {
-      setRevokeOaDraftSubmitting(false);
-    }
-  };
-
   const handleManualBusinessBatchOaStatus = async (
     decision: "submitted" | "not_submitted",
     batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null,
@@ -1819,11 +1755,7 @@ export default function EtcTicketManagementPage() {
     if (!target) {
       return;
     }
-    const reason = manualOaReason.trim();
-    if (!reason) {
-      setActionError("人工处理原因不能为空。");
-      return;
-    }
+    const reason = decision === "submitted" ? MANUAL_OA_SUBMITTED_REASON : MANUAL_OA_NOT_SUBMITTED_REASON;
     setOaActionLoading(true);
     setActionError(null);
     try {
@@ -1834,8 +1766,8 @@ export default function EtcTicketManagementPage() {
       });
       mergeBusinessBatch(result);
       emitEtcBusinessDomainUpdated({ source: "etc_business_batch_manual_oa_status" });
-      setManualOaReason("");
-      setManualOaPanelOpen(false);
+      setDraftResult(null);
+      setCreateDialogOpen(false);
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : "人工处理失败。");
     } finally {
@@ -1844,11 +1776,11 @@ export default function EtcTicketManagementPage() {
   };
 
   const renderOaStatusPanel = (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => (
-    <section className="etc-oa-status-panel" aria-label="OA草稿与检测状态">
+    <section className="etc-oa-status-panel" aria-label="OA提交确认">
       <div className="etc-oa-status-header">
         <div>
           <strong>OA草稿已创建，等待提交确认。</strong>
-          <p>{batch.oaDetectionReason || batch.oaDetectionError || "后台持续检测流程状态。"}</p>
+          <p>请选择 OA 草稿的实际提交状态。</p>
         </div>
         <div className="etc-oa-status-actions">
           {batch.oaDraftUrl ? (
@@ -1863,64 +1795,24 @@ export default function EtcTicketManagementPage() {
           ) : null}
           <button
             type="button"
-            className="etc-secondary-action"
+            className="etc-primary-action"
             disabled={oaActionLoading}
-            onClick={() => void handleRefreshBusinessBatchOaStatus(batch)}
+            onClick={() => void handleManualBusinessBatchOaStatus("submitted", batch)}
           >
-            <RefreshCw aria-hidden="true" size={16} />
-            刷新检测
+            <CheckCircle2 aria-hidden="true" size={16} />
+            已提交
           </button>
           <button
             type="button"
-            className="etc-secondary-action etc-secondary-action--warning"
+            className="etc-secondary-action"
             disabled={oaActionLoading}
-            onClick={() => openRevokeOaDraftDialog(batch)}
+            onClick={() => void handleManualBusinessBatchOaStatus("not_submitted", batch)}
           >
-            <RotateCcw aria-hidden="true" size={16} />
-            撤销草稿
+            <XCircle aria-hidden="true" size={16} />
+            未提交
           </button>
-          {isManualOaFallbackStatus(batch.status) ? (
-            <button
-              type="button"
-              className="etc-secondary-action etc-secondary-action--warning"
-              onClick={() => setManualOaPanelOpen((current) => !current)}
-            >
-              <AlertTriangle aria-hidden="true" size={16} />
-              异常处理
-            </button>
-          ) : null}
         </div>
       </div>
-      {isManualOaFallbackStatus(batch.status) && manualOaPanelOpen ? (
-        <div className="etc-oa-manual-panel">
-          <label className="etc-dialog-field">
-            <span>人工处理原因</span>
-            <textarea
-              value={manualOaReason}
-              onChange={(event) => setManualOaReason(event.target.value)}
-              required
-            />
-          </label>
-          <div className="etc-oa-status-actions">
-            <button
-              type="button"
-              className="etc-primary-action"
-              disabled={oaActionLoading || !manualOaReason.trim()}
-              onClick={() => void handleManualBusinessBatchOaStatus("submitted", batch)}
-            >
-              我已提交 OA
-            </button>
-            <button
-              type="button"
-              className="etc-secondary-action"
-              disabled={oaActionLoading || !manualOaReason.trim()}
-              onClick={() => void handleManualBusinessBatchOaStatus("not_submitted", batch)}
-            >
-              未提交 OA
-            </button>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 
@@ -2889,50 +2781,6 @@ export default function EtcTicketManagementPage() {
         </AppDialog>
 
         <AppDialog
-          open={Boolean(revokeOaDraftTarget)}
-          title="撤销OA草稿"
-          description="撤销会释放本地 ETC 发票占用；如果 OA 已进入流程，后端会拒绝撤销。"
-          onClose={closeRevokeOaDraftDialog}
-          actions={
-            <>
-              <button
-                type="button"
-                className="etc-secondary-action"
-                onClick={closeRevokeOaDraftDialog}
-                disabled={revokeOaDraftSubmitting}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="etc-secondary-action etc-secondary-action--warning"
-                onClick={() => void handleRevokeOaDraft()}
-                disabled={revokeOaDraftSubmitting || !revokeOaDraftReason.trim()}
-              >
-                {revokeOaDraftSubmitting ? "正在撤销..." : "确认撤销"}
-              </button>
-            </>
-          }
-        >
-          <div className="etc-dialog-stack">
-            <div className="etc-dialog-detail-list">
-              <p>批次：{revokeOaDraftTarget?.externalEtcBatchId || revokeOaDraftTarget?.businessBatchId || "-"}</p>
-              <p>版本：v{revokeOaDraftTarget?.version ?? "-"}</p>
-            </div>
-            <label className="etc-dialog-field">
-              <span>撤销原因</span>
-              <textarea
-                value={revokeOaDraftReason}
-                onChange={(event) => setRevokeOaDraftReason(event.target.value)}
-                disabled={revokeOaDraftSubmitting}
-                rows={3}
-                required
-              />
-            </label>
-          </div>
-        </AppDialog>
-
-        <AppDialog
           open={removeImportedInvoicesDialogOpen}
           title="移除发票"
           description="清空本任务下已导入发票，任务可重新导入。"
@@ -2974,7 +2822,7 @@ export default function EtcTicketManagementPage() {
 
         <AppDialog
           open={createDialogOpen}
-          title={draftResult ? "OA自动检测" : "创建OA草稿"}
+          title={draftResult ? "OA提交确认" : "创建OA草稿"}
           onClose={() => setCreateDialogOpen(false)}
           actions={
             draftResult ? (
@@ -2991,12 +2839,21 @@ export default function EtcTicketManagementPage() {
                 ) : null}
                 <button
                   type="button"
+                  className="etc-primary-action"
+                  disabled={oaActionLoading}
+                  onClick={() => void handleManualBusinessBatchOaStatus("submitted")}
+                >
+                  <CheckCircle2 aria-hidden="true" size={16} />
+                  已提交
+                </button>
+                <button
+                  type="button"
                   className="etc-secondary-action"
                   disabled={oaActionLoading}
-                  onClick={() => void handleRefreshBusinessBatchOaStatus()}
+                  onClick={() => void handleManualBusinessBatchOaStatus("not_submitted")}
                 >
-                  <RefreshCw aria-hidden="true" size={16} />
-                  刷新检测
+                  <XCircle aria-hidden="true" size={16} />
+                  未提交
                 </button>
                 <button type="button" className="etc-secondary-action" onClick={() => setCreateDialogOpen(false)}>关闭</button>
               </>

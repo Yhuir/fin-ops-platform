@@ -1599,25 +1599,6 @@ export async function revokeEtcBusinessBatchOaDraft(
   return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
 }
 
-export async function refreshEtcBusinessBatchOaStatus(
-  businessBatchId: string,
-  payload: Pick<EtcBusinessBatchVersionedPayload, "expectedVersion"> = {},
-): Promise<EtcBusinessBatchDetail> {
-  const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
-    `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}/oa-status/refresh`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
-      }),
-    },
-  );
-  return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
-}
-
 export async function manualEtcBusinessBatchOaStatus(
   businessBatchId: string,
   payload: EtcManualOaStatusPayload,
