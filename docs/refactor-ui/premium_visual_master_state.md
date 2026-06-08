@@ -141,4 +141,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-025-etc-tickets-premium-visual` | `75defcb9` | pushed to `origin/main` | ETC tickets premium visual polish verified; PV-026 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-026-settings-discovery` | `8094685e` | pushed to `origin/main` | Settings premium discovery verified; PV-027 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-027-settings-premium-visual` | `4f708c0c` | pushed to `origin/main` | Settings premium visual polish verified; PV-028 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
-| 2026-06-08 | `PV-028-app-wide-smoothness-audit` | current commit | pending push | App-wide smoothness audit verified; final MG prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-028-app-wide-smoothness-audit` | `7ae907ff` | pushed to `origin/main` | App-wide smoothness audit verified; final MG prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
