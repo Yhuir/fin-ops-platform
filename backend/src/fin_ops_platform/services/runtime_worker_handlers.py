@@ -18,6 +18,7 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_business_batch_application_service import ETC_BUSINESS_OA_DETECTION_EVENT_TYPE
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
+from fin_ops_platform.services.etc_oa_detection import FallbackEtcOADetectionCandidateAdapter
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import EtcService
 from fin_ops_platform.services.import_file_service import FileImportService
@@ -30,8 +31,9 @@ from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
+from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
-from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
+from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION, PostgresOAProjectionAdapter
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
@@ -227,7 +229,7 @@ class EtcBusinessOaDetectionWorkerFactory:
             reconciliation_task_service=EtcReconciliationTaskService(state_store=state_store),
             queue_repository=self._queue_repository,
             oa_client_factory=_unsupported_etc_oa_client_factory,
-            oa_adapter_provider=lambda: None,
+            oa_adapter_provider=lambda: _etc_oa_detection_adapter(state_store),
             sync_etc_invoices_to_canonical_invoices=_sync_etc_invoices_to_canonical_invoices(import_service),
             refresh_after_etc_invoice_sync=lifecycle.refresh_after_etc_invoice_sync,
         )
@@ -236,6 +238,22 @@ class EtcBusinessOaDetectionWorkerFactory:
         from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 
         return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
+
+
+def _etc_oa_detection_adapter(state_store: Any) -> Any | None:
+    adapters: list[Any] = []
+    oa_projection_repository = getattr(state_store, "oa_projection_repository", None)
+    if oa_projection_repository is not None:
+        adapters.append(PostgresOAProjectionAdapter(oa_projection_repository))
+    data_dir = getattr(state_store, "data_dir", None)
+    mongo_oa_settings = load_mongo_oa_settings(Path(data_dir)) if data_dir is not None else load_mongo_oa_settings(None)
+    if mongo_oa_settings is not None:
+        adapters.append(MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=state_store))
+    if not adapters:
+        return None
+    if len(adapters) == 1:
+        return adapters[0]
+    return FallbackEtcOADetectionCandidateAdapter(adapters)
 
 
 def build_import_job_handler_bundle(
