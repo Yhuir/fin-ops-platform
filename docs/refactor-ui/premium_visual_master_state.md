@@ -128,3 +128,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-018-no-oa-bank-batches-discovery` | `753c4a70` | pushed to `origin/main` | No-OA bank batches premium discovery verified; PV-019 prompt generated. |
 | 2026-06-08 | `PV-019-no-oa-bank-batches-premium-visual` | `a80c8c4a` | pushed to `origin/main` | No-OA bank batches premium visual polish verified; PV-020 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-020-batch-accounting-discovery` | `b2e24824` | pushed to `origin/main` | Batch accounting premium discovery verified; PV-021 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-021-batch-accounting-premium-visual` | `d4bb8b4a` | pushed to `origin/main` | Batch accounting premium visual polish verified; PV-022 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
