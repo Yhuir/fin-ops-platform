@@ -147,6 +147,13 @@ function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
 
+function cssRule(source: string, selector: string) {
+  const normalizedSelector = selector.replace(/\\n/g, "\n");
+  const escapedSelector = normalizedSelector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`, "m"));
+  return match?.[1] ?? "";
+}
+
 function renderPage() {
   return render(<BatchAccountingPage />);
 }
@@ -257,6 +264,53 @@ describe("BatchAccountingPage", () => {
       forbiddenLegacySurfaces: [],
       missingPrimitiveTargets: [],
     });
+  });
+
+  test("keeps premium compact panels, OA table, stable tags, and interaction CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const buttonRule = cssRule(styles, ".batch-accounting-button");
+    const segmentRule = cssRule(styles, ".batch-accounting-segment__button");
+    const inputRule = cssRule(styles, ".batch-accounting-field input,\\n.batch-accounting-field textarea");
+    const searchRule = cssRule(styles, ".batch-accounting-search");
+    const searchClearRule = cssRule(styles, ".batch-accounting-search__clear");
+    const bankRowRule = cssRule(styles, ".batch-accounting-bank-row");
+    const selectedBankRowRule = cssRule(styles, ".batch-accounting-bank-row--selected,\\n.batch-accounting-bank-row[aria-pressed=\"true\"]");
+    const tagRule = cssRule(styles, ".batch-accounting-tag,\\n.batch-accounting-summary-tag");
+    const mismatchRule = cssRule(styles, ".batch-accounting-mismatch-warning__trigger");
+    const oaToolbarRule = cssRule(styles, ".batch-accounting-oa-panel__toolbar");
+    const tableWrapRule = cssRule(styles, ".batch-accounting-oa-table-wrap");
+    const tableCellRule = cssRule(styles, ".batch-accounting-oa-table th,\\n.batch-accounting-oa-table td");
+    const tableHeadRule = cssRule(styles, ".batch-accounting-oa-table th");
+    const amountRule = cssRule(styles, ".batch-accounting-oa-table .batch-accounting-oa-table__amount");
+    const checkboxRule = cssRule(styles, ".batch-accounting-checkbox");
+    const expandToggleRule = cssRule(styles, ".batch-accounting-expandable__toggle");
+    const feedbackCloseRule = cssRule(styles, ".batch-accounting-feedback__close");
+
+    expect(buttonRule).toContain("var(--motion-fast)");
+    expect(segmentRule).toContain("var(--motion-fast)");
+    expect(inputRule).toContain("var(--motion-fast)");
+    expect(searchRule).toContain("var(--motion-fast)");
+    expect(searchClearRule).toContain("var(--motion-fast)");
+    expect(bankRowRule).toContain("var(--motion-fast)");
+    expect(mismatchRule).toContain("var(--motion-fast)");
+    expect(tableCellRule).toContain("var(--motion-fast)");
+    expect(checkboxRule).toContain("var(--motion-fast)");
+    expect(expandToggleRule).toContain("var(--motion-fast)");
+    expect(feedbackCloseRule).toContain("var(--motion-fast)");
+
+    expect(bankRowRule).toContain("padding: var(--fp-space-2) var(--fp-space-3)");
+    expect(selectedBankRowRule).toContain("inset 3px 0 0 var(--fp-primary)");
+    expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
+    expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
+    expect(oaToolbarRule).toContain("padding: var(--fp-space-2) var(--fp-space-3)");
+    expect(tableWrapRule).toContain("max-height: calc(100vh - 252px)");
+    expect(tableHeadRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
+    expect(amountRule).toContain("text-align: right");
+    expect(amountRule).toContain("font-variant-numeric: tabular-nums");
+    expect(tagRule).not.toContain("min-height: 22px");
+    expect(buttonRule).not.toContain("120ms ease");
+    expect(bankRowRule).not.toContain("120ms ease");
+    expect(tableCellRule).not.toContain("120ms ease");
   });
 
   test("renders controls, bank list, and selectable OA table for unsubmitted rows", async () => {

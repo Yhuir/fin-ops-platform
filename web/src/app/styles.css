@@ -3424,7 +3424,12 @@ textarea {
   font-weight: 800;
   line-height: 1.2;
   padding: 0 var(--fp-space-3);
-  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-button--secondary {
@@ -3440,9 +3445,13 @@ textarea {
 .batch-accounting-button:hover:not(:disabled),
 .batch-accounting-button:focus-visible {
   border-color: var(--fp-primary);
-  background: var(--fp-primary-soft);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
   color: var(--fp-primary-hover);
   outline: none;
+}
+
+.batch-accounting-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .batch-accounting-button:focus-visible,
@@ -3472,7 +3481,7 @@ textarea {
   overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
+  background: color-mix(in srgb, var(--fp-surface-muted) 35%, var(--fp-surface));
 }
 
 .batch-accounting-segment__button {
@@ -3485,6 +3494,10 @@ textarea {
   font-size: var(--fp-text-body);
   font-weight: 800;
   padding: 0 var(--fp-space-3);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-segment__button:last-child {
@@ -3493,15 +3506,19 @@ textarea {
 
 .batch-accounting-segment__button:hover,
 .batch-accounting-segment__button:focus-visible {
-  background: var(--fp-primary-soft);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
   color: var(--fp-primary-hover);
   outline: none;
 }
 
 .batch-accounting-segment__button--active,
 .batch-accounting-segment__button[aria-pressed="true"] {
-  background: var(--fp-primary-soft);
+  background: color-mix(in srgb, var(--fp-primary-soft) 88%, var(--fp-surface));
   color: var(--fp-primary-hover);
+}
+
+.batch-accounting-segment__button:active {
+  transform: translateY(1px);
 }
 
 .batch-accounting-field {
@@ -3533,7 +3550,9 @@ textarea {
   font-weight: 650;
   outline: none;
   padding: 0 var(--fp-space-3);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-field textarea {
@@ -3563,7 +3582,9 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-muted);
   padding: 0 var(--fp-space-2);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-search:focus-within {
@@ -3595,13 +3616,21 @@ textarea {
   background: transparent;
   color: var(--fp-text-muted);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-search__clear:hover,
 .batch-accounting-search__clear:focus-visible {
-  background: var(--fp-primary-soft);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
   color: var(--fp-primary-hover);
   outline: none;
+}
+
+.batch-accounting-search__clear:active {
+  transform: translateY(1px);
 }
 
 .batch-accounting-bank-panel {
@@ -3653,9 +3682,13 @@ textarea {
   background: var(--fp-surface);
   color: var(--fp-text-primary);
   cursor: pointer;
-  padding: var(--fp-space-3);
+  padding: var(--fp-space-2) var(--fp-space-3);
   text-align: left;
-  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-bank-row:last-child {
@@ -3664,7 +3697,7 @@ textarea {
 
 .batch-accounting-bank-row:hover,
 .batch-accounting-bank-row:focus-visible {
-  background: var(--fp-primary-soft);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
   outline: none;
 }
 
@@ -3675,7 +3708,12 @@ textarea {
 .batch-accounting-bank-row--selected,
 .batch-accounting-bank-row[aria-pressed="true"] {
   border-left-color: var(--fp-primary);
-  background: color-mix(in srgb, var(--fp-primary-soft) 72%, var(--fp-surface));
+  background: color-mix(in srgb, var(--fp-primary-soft) 76%, var(--fp-surface));
+  box-shadow: inset 3px 0 0 var(--fp-primary);
+}
+
+.batch-accounting-bank-row:active {
+  transform: translateY(1px);
 }
 
 .batch-accounting-bank-row__main {
@@ -3709,17 +3747,21 @@ textarea {
 .batch-accounting-tag,
 .batch-accounting-summary-tag {
   display: inline-flex;
-  min-height: 22px;
+  min-height: var(--fp-tag-height-table);
   align-items: center;
   justify-content: center;
   border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-xs);
+  border-radius: var(--fp-tag-radius-table);
   background: var(--fp-surface-muted);
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
   font-weight: 800;
   line-height: 1.1;
   padding: 0 var(--fp-space-2);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart);
   white-space: nowrap;
 }
 
@@ -3773,7 +3815,11 @@ textarea {
   background: color-mix(in srgb, var(--fp-warning) 12%, var(--fp-surface));
   color: var(--fp-warning);
   cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-mismatch-warning__trigger:hover,
@@ -3782,6 +3828,10 @@ textarea {
   background: color-mix(in srgb, var(--fp-warning) 18%, var(--fp-surface));
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-warning) 18%, transparent);
+}
+
+.batch-accounting-mismatch-warning__trigger:active {
+  transform: translateY(1px);
 }
 
 .batch-accounting-mismatch-warning__tooltip {
@@ -3815,7 +3865,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: var(--fp-space-3);
-  padding: var(--fp-space-3);
+  padding: var(--fp-space-2) var(--fp-space-3);
 }
 
 .batch-accounting-oa-panel__controls {
@@ -3835,6 +3885,7 @@ textarea {
 .batch-accounting-oa-table-wrap {
   overflow-x: auto;
   overflow-y: auto;
+  max-height: calc(100vh - 252px);
 }
 
 .batch-accounting-oa-table {
@@ -3851,6 +3902,7 @@ textarea {
   border-bottom: 1px solid var(--fp-border-subtle);
   padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
   text-align: left;
+  transition: background-color var(--motion-fast) var(--ease-out-quart);
   vertical-align: top;
 }
 
@@ -3858,7 +3910,7 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--fp-table-header-bg);
+  background: color-mix(in srgb, var(--fp-surface-muted) 82%, var(--fp-surface));
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-label);
   font-weight: 900;
@@ -3869,7 +3921,7 @@ textarea {
 }
 
 .batch-accounting-oa-table__row--selected td {
-  background: color-mix(in srgb, var(--fp-primary-soft) 46%, var(--fp-surface));
+  background: color-mix(in srgb, var(--fp-primary-soft) 52%, var(--fp-surface));
 }
 
 .batch-accounting-oa-table__check {
@@ -3910,6 +3962,9 @@ textarea {
   height: 16px;
   accent-color: var(--fp-primary);
   cursor: pointer;
+  transition:
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-checkbox:focus-visible {
@@ -3945,12 +4000,20 @@ textarea {
   font-size: var(--fp-text-caption);
   font-weight: 850;
   padding: 1px var(--fp-space-1);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-expandable__toggle:hover,
 .batch-accounting-expandable__toggle:focus-visible {
-  background: var(--fp-primary-soft);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
   outline: none;
+}
+
+.batch-accounting-expandable__toggle:active {
+  transform: translateY(1px);
 }
 
 .batch-accounting-feedback {
@@ -3998,12 +4061,19 @@ textarea {
   background: transparent;
   color: currentColor;
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
 }
 
 .batch-accounting-feedback__close:hover,
 .batch-accounting-feedback__close:focus-visible {
   background: color-mix(in srgb, currentColor 12%, transparent);
   outline: none;
+}
+
+.batch-accounting-feedback__close:active {
+  transform: translateY(1px);
 }
 
 @media (max-width: 1100px) {

@@ -142,6 +142,49 @@
 - Do not change the two-column page structure, bank row selection semantics, OA table accessible names, submit dialog shape, withdraw dialog shape or feedback text.
 - Do not convert the bank list or OA table into dashboard cards.
 
+## PV-021 Premium Visual Execution
+
+- Prompt ID: `PV-021-batch-accounting-premium-visual`
+- Type: premium visual implementation
+- Status: verified
+- Scope: `/batch-accounting` only.
+- Runtime implementation changed: yes, only shared stylesheet rules for `batch-accounting-*`.
+- Test implementation changed: yes, only `web/src/test/BatchAccountingPage.test.tsx`.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Implementation Summary
+
+- Preserved all current React logic and user-visible behavior: refresh, status switch, year/search filters, bank row selection, OA selection, mismatch note enablement, submitted mismatch tooltip, withdraw dialog, feedback and domain event emission.
+- Replaced fixed `120ms ease` transitions in the batch accounting surface with `--motion-fast` / `--ease-out-quart`.
+- Tightened bank rows, OA toolbar and OA table scroll treatment without converting the bank list or OA table into cards.
+- Standardized batch-accounting tags and summary tags on table tag height/radius tokens.
+- Added selected row inset treatment and press feedback without changing row dimensions.
+- Added CSS contract coverage for compact panels/table, motion-token usage, amount alignment, selected-row treatment, stable tags and token colors.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run BatchAccountingPage.test.tsx`
+- `cd web && npx vitest run BatchAccountingPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- forbidden keepalive/snapshot/scroll-session grep over runtime docs and module docs
+- non-workbench runtime MUI grep
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4183/batch-accounting`
+
+Browser smoke result:
+
+- Verified heading, filter region, bank list, `可关联OA项` table, mismatch note submit enablement, search clear, submitted bucket, amount-mismatch tooltip and withdraw dialog.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/batch-accounting-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
+
 ## P080 Prompt Draft
 
 ```text

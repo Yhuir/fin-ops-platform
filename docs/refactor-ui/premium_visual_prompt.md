@@ -1155,7 +1155,13 @@ Notes:
 
 - Code tests were not run for PV-020 because this slice only documents discovery and the next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-021-batch-accounting-premium-visual
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-021-batch-accounting-premium-visual`
 
@@ -1183,3 +1189,58 @@ Notes:
 - 浏览器 smoke `/batch-accounting`：确认 heading、filter region、bank list、OA table、search clear、submit disabled/enabled path or mismatch note path、submitted bucket, withdraw dialog and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_batch_accounting.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Polished `/batch-accounting` without changing React logic, API calls, selection caches, search normalization, mismatch note reset, submit/withdraw payloads, feedback text or domain event emission.
+- Replaced fixed `120ms ease` transitions in batch-accounting page controls with `--motion-fast` / `--ease-out-quart`.
+- Tightened compact bank rows, OA toolbar, OA table scroll area, stable tags, selected-row treatment and feedback close interaction.
+- Added CSS contract coverage in `BatchAccountingPage.test.tsx` for compact panel/table treatment, motion-token usage, amount alignment, stable tags, selected row treatment and token colors.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run BatchAccountingPage.test.tsx`
+- `cd web && npx vitest run BatchAccountingPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked API at `http://127.0.0.1:4183/batch-accounting`
+
+Browser smoke result:
+
+- Verified heading, filter region, bank list, `可关联OA项` table, search clear, mismatch note submit enablement, submitted bucket, amount-mismatch tooltip and withdraw dialog.
+- Top-level horizontal overflow: 0.
+- Screenshot: `/tmp/batch-accounting-premium-smoke.png`.
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
+
+## Next Prompt Draft
+
+`PV-022-turnover-ledger-discovery`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_6_turnover_ledger.md`、`web/src/pages/TurnoverLedgerPage.tsx`、`web/src/components/turnoverLedger/*`、相关 `web/src/test/*TurnoverLedger*` 测试和当前 `git status`。本切片只做 `/turnover-ledger` premium visual discovery，不改运行时代码，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_6_turnover_ledger.md` 追加 `PV-022 Premium Visual Discovery`，并确认 `docs/refactor-ui/module_inventory.md` 已链接该模块文档。
+- 清点 `/turnover-ledger` 当前用户可见入口：route/sidebar、page heading/actions、filters、left/right ledger tables, row selection, detail/extra-info surfaces, right drawers/dialogs/export controls, loading/empty/error/status feedback。
+- 标明哪些元素必须功能等价保留：旧左右表格/双栏结构仍保持，旧右侧抽屉仍为右侧抽屉，旧弹窗仍为弹窗，旧表格仍为表格，旧筛选/选择/展开/导出/补充信息 behavior 不改变。
+- 列出表格和列表排版要求：金额右对齐、tabular nums；状态/方向/tag 稳定高度；左右表格行 hover/selected 不改变行高；长项目名/对方户名/备注需要截断或可读换行。
+- 列出 interaction smoothness 要求：filters、table row、expand controls、drawer/dialog controls、export controls、feedback controls 都使用 motion tokens，不增加页面切换动画，不阻塞路由跳转。
+- 对比旧迁移记录，区分已完成平台迁移和本轮 premium visual 仍需提升的点。
+- 生成下一条唯一 prompt：`PV-023-turnover-ledger-premium-visual`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_turnover_ledger.md`，精确 staging，commit 并 push 到 `origin/main`。
