@@ -57,6 +57,60 @@ class _PreparedCandidate:
     search_text: str
 
 
+class FallbackEtcOADetectionCandidateAdapter:
+    name = "fallback_etc_oa_detection"
+
+    def __init__(self, adapters: Iterable[Any]) -> None:
+        self._adapters: list[Any] = []
+        seen: set[int] = set()
+        for adapter in list(adapters or []):
+            if adapter is None:
+                continue
+            identity = id(adapter)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            self._adapters.append(adapter)
+
+    def list_etc_oa_detection_candidates(
+        self,
+        *,
+        business_batch_id: str,
+        external_etc_batch_id: str,
+        created_from: datetime,
+        created_to: datetime,
+        limit: int = 50,
+    ) -> list[Any]:
+        errors: list[str] = []
+        called = False
+        for adapter in self._adapters:
+            candidate_loader = getattr(adapter, "list_etc_oa_detection_candidates", None)
+            if not callable(candidate_loader):
+                continue
+            called = True
+            try:
+                candidates = list(
+                    candidate_loader(
+                        business_batch_id=business_batch_id,
+                        external_etc_batch_id=external_etc_batch_id,
+                        created_from=created_from,
+                        created_to=created_to,
+                        limit=limit,
+                    )
+                )
+            except (OSError, TimeoutError, ValueError, RuntimeError) as exc:
+                adapter_name = clean_string(getattr(adapter, "name", "")) or adapter.__class__.__name__
+                errors.append(f"{adapter_name}: {exc}")
+                continue
+            if candidates:
+                return candidates
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        if not called:
+            return []
+        return []
+
+
 class EtcOADetectionService:
     def detect(
         self,
@@ -66,7 +120,6 @@ class EtcOADetectionService:
         now: datetime | None = None,
     ) -> EtcOADetectionResult:
         prepared = [self._prepare_candidate(candidate, context) for candidate in list(candidates or [])]
-        deadline_exceeded = now is not None and context.oa_detection_deadline_at and now > context.oa_detection_deadline_at
 
         business_marker_candidates = [
             candidate for candidate in prepared if candidate.marker == "business_batch_id"
@@ -75,12 +128,6 @@ class EtcOADetectionService:
             candidate for candidate in prepared if candidate.marker == "external_etc_batch_id"
         ]
         if not marker_candidates:
-            if deadline_exceeded:
-                return EtcOADetectionResult(
-                    status=DETECTION_TIMEOUT,
-                    reason="oa_detection_deadline_exceeded",
-                    candidates=[candidate.summary for candidate in prepared[:10]],
-                )
             return EtcOADetectionResult(
                 status=DETECTION_MISSING,
                 reason="oa_marker_missing",
@@ -146,7 +193,7 @@ class EtcOADetectionService:
             return "form_id_mismatch"
         if candidate.amount != self._decimal(context.amount):
             return "amount_mismatch"
-        if candidate.invoice_count != int(context.invoice_count):
+        if candidate.invoice_count is not None and candidate.invoice_count != int(context.invoice_count):
             return "invoice_count_mismatch"
         if not self._organization_matches(context, candidate):
             return "organization_mismatch"

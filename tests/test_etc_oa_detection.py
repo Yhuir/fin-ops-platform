@@ -5,6 +5,7 @@ from decimal import Decimal
 from fin_ops_platform.services.etc_oa_detection import (
     EtcOADetectionContext,
     EtcOADetectionService,
+    FallbackEtcOADetectionCandidateAdapter,
 )
 
 
@@ -95,7 +96,7 @@ class EtcOADetectionServiceTests(unittest.TestCase):
         self.assertEqual(result.reason, "oa_marker_missing")
         self.assertEqual(result.candidates[0]["oaRowId"], "oa-pay-001")
 
-    def test_marker_missing_after_deadline_is_timeout(self) -> None:
+    def test_marker_missing_after_deadline_remains_missing(self) -> None:
         context = detection_context()
         assert context.oa_detection_deadline_at is not None
 
@@ -105,8 +106,8 @@ class EtcOADetectionServiceTests(unittest.TestCase):
             now=context.oa_detection_deadline_at + timedelta(days=3),
         )
 
-        self.assertEqual(result.status, "timeout")
-        self.assertEqual(result.reason, "oa_detection_deadline_exceeded")
+        self.assertEqual(result.status, "missing")
+        self.assertEqual(result.reason, "oa_marker_missing")
         self.assertEqual(result.candidates[0]["oaRowId"], "oa-pay-001")
 
     def test_valid_candidate_created_after_deadline_is_detected(self) -> None:
@@ -156,6 +157,26 @@ class EtcOADetectionServiceTests(unittest.TestCase):
         self.assertEqual(result.reason, "amount_mismatch")
         self.assertEqual(result.candidates[0]["amount"], "53.85")
 
+    def test_missing_candidate_invoice_count_does_not_reject_stable_marker(self) -> None:
+        result = EtcOADetectionService().detect(
+            detection_context(),
+            [candidate(invoice_count="", detail_fields={"表单ID": "2", "流程状态": "进行中"})],
+        )
+
+        self.assertEqual(result.status, "detected")
+        self.assertEqual(result.reason, "unique_candidate_detected")
+        self.assertIsNone(result.candidates[0]["invoiceCount"])
+
+    def test_explicit_candidate_invoice_count_mismatch_is_conflict(self) -> None:
+        result = EtcOADetectionService().detect(
+            detection_context(),
+            [candidate(invoice_count=3)],
+        )
+
+        self.assertEqual(result.status, "conflict")
+        self.assertEqual(result.reason, "invoice_count_mismatch")
+        self.assertEqual(result.candidates[0]["invoiceCount"], 3)
+
     def test_unavailable_exception_becomes_unavailable_result(self) -> None:
         def failing_query(_context: EtcOADetectionContext) -> list[dict[str, object]]:
             raise TimeoutError("mongo timeout")
@@ -165,6 +186,38 @@ class EtcOADetectionServiceTests(unittest.TestCase):
         self.assertEqual(result.status, "unavailable")
         self.assertEqual(result.reason, "oa_query_unavailable")
         self.assertIn("mongo timeout", result.error or "")
+
+    def test_fallback_adapter_uses_live_adapter_when_projection_has_no_candidates(self) -> None:
+        class EmptyProjectionAdapter:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_etc_oa_detection_candidates(self, **kwargs: object) -> list[dict[str, object]]:
+                self.calls.append(dict(kwargs))
+                return []
+
+        class LiveOAAdapter:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_etc_oa_detection_candidates(self, **kwargs: object) -> list[dict[str, object]]:
+                self.calls.append(dict(kwargs))
+                return [candidate(oa_row_id="oa-pay-live-001")]
+
+        projection = EmptyProjectionAdapter()
+        live = LiveOAAdapter()
+        adapter = FallbackEtcOADetectionCandidateAdapter([projection, live])
+
+        rows = adapter.list_etc_oa_detection_candidates(
+            business_batch_id="etc_business_batch_0001",
+            external_etc_batch_id="etc_20260519_001",
+            created_from=datetime(2026, 5, 1),
+            created_to=datetime(2026, 5, 31),
+        )
+
+        self.assertEqual(rows[0]["oa_row_id"], "oa-pay-live-001")
+        self.assertEqual(projection.calls[0]["business_batch_id"], "etc_business_batch_0001")
+        self.assertEqual(live.calls[0]["external_etc_batch_id"], "etc_20260519_001")
 
 
 if __name__ == "__main__":

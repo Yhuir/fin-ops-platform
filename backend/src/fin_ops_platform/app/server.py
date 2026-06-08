@@ -123,6 +123,7 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
 )
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
+from fin_ops_platform.services.etc_oa_detection import FallbackEtcOADetectionCandidateAdapter
 import fin_ops_platform.services.etc_document_parsers as etc_document_parsers
 from fin_ops_platform.services.etc_document_parsers import (
     CcbCreditCardStatementParser,
@@ -792,6 +793,7 @@ class Application:
             persisted_state.get("tax_offset_read_models"),
         )
         source_oa_adapter = self._build_legacy_direct_oa_mongo_adapter()
+        self._source_oa_adapter = source_oa_adapter
         oa_projection_repository = getattr(self._state_store, "oa_projection_repository", None)
         oa_adapter = (
             PostgresOAProjectionAdapter(oa_projection_repository)
@@ -5605,6 +5607,7 @@ class Application:
             id(getattr(self, "_etc_reconciliation_task_service", None)),
             id(queue_repository) if queue_repository is not None else None,
             id(getattr(self, "_workbench_query_service", None)),
+            id(getattr(self, "_source_oa_adapter", None)),
         )
         service = getattr(self, "_etc_business_batch_application_service", None)
         if isinstance(service, EtcBusinessBatchApplicationService) and getattr(self, "_etc_business_batch_dependency_key", None) == dependency_key:
@@ -5614,13 +5617,33 @@ class Application:
             reconciliation_task_service=self._etc_reconciliation_task_service,
             queue_repository=queue_repository,
             oa_client_factory=self._build_etc_oa_client,
-            oa_adapter_provider=lambda: getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None),
+            oa_adapter_provider=self._etc_oa_detection_adapter,
             sync_etc_invoices_to_canonical_invoices=self._sync_etc_invoices_to_canonical_invoices,
             refresh_after_etc_invoice_sync=self._refresh_after_etc_invoice_sync,
         )
         self._etc_business_batch_application_service = service
         self._etc_business_batch_dependency_key = dependency_key
         return service
+
+    def _etc_oa_detection_adapter(self) -> object | None:
+        primary_adapter = getattr(getattr(self, "_workbench_query_service", None), "_oa_adapter", None)
+        source_adapter = getattr(self, "_source_oa_adapter", None)
+        adapters = [adapter for adapter in (primary_adapter, source_adapter) if adapter is not None]
+        if not adapters:
+            return None
+        if len({id(adapter) for adapter in adapters}) == 1:
+            return adapters[0]
+        adapter_key = tuple(id(adapter) for adapter in adapters)
+        cached = getattr(self, "_etc_oa_detection_adapter_cache", None)
+        if (
+            isinstance(cached, FallbackEtcOADetectionCandidateAdapter)
+            and getattr(self, "_etc_oa_detection_adapter_key", None) == adapter_key
+        ):
+            return cached
+        adapter = FallbackEtcOADetectionCandidateAdapter(adapters)
+        self._etc_oa_detection_adapter_cache = adapter
+        self._etc_oa_detection_adapter_key = adapter_key
+        return adapter
 
     def _etc_business_routes(self) -> EtcBusinessBatchApiRoutes:
         service = self._etc_business_application_service()

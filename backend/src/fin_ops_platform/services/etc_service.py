@@ -908,8 +908,8 @@ class EtcService:
             batch.oa_detection_status = "pending"
             batch.oa_detection_started_at = now
             batch.oa_detection_next_run_at = now
-            batch.oa_detection_deadline_at = now + timedelta(minutes=30)
-            batch.oa_detection_final_retry_until = now + timedelta(hours=24)
+            batch.oa_detection_deadline_at = None
+            batch.oa_detection_final_retry_until = None
             for import_batch_id in list(batch.import_batch_ids):
                 import_batch = self._import_batches.get(import_batch_id)
                 if import_batch is not None:
@@ -1055,6 +1055,8 @@ class EtcService:
                 batch.status = EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value
                 batch.oa_detection_status = "timeout"
             else:
+                if batch.status == EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value:
+                    batch.status = EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value
                 batch.oa_detection_status = "missing"
             self._bump_business_batch_version(
                 batch,
@@ -1180,6 +1182,34 @@ class EtcService:
         batch = self._get_business_batch_mutable(batch_or_id) if isinstance(batch_or_id, str) else batch_or_id
         invoices = [self._invoices[invoice_id] for invoice_id in list(batch.invoice_ids) if invoice_id in self._invoices]
         amount = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        invoice_count = len(invoices)
+        display_count_text: str | None = None
+        if batch.submission_batch_id and (submission_batch := self._batches.get(batch.submission_batch_id)) is not None:
+            self._ensure_batch_metadata_fields(submission_batch)
+            submission_amount = (
+                getattr(submission_batch, "oa_total_amount", None)
+                or getattr(submission_batch, "etc_invoice_amount", None)
+                or getattr(submission_batch, "total_amount", None)
+            )
+            if submission_amount not in (None, ""):
+                try:
+                    amount = Decimal(str(submission_amount)).quantize(Decimal("0.01"))
+                except (InvalidOperation, ValueError):
+                    amount = amount
+            submission_count = getattr(submission_batch, "etc_invoice_count", None) or getattr(
+                submission_batch,
+                "invoice_count",
+                None,
+            )
+            if submission_count not in (None, ""):
+                try:
+                    invoice_count = int(submission_count)
+                except (TypeError, ValueError):
+                    invoice_count = len(invoices)
+            display_count_text = str(getattr(submission_batch, "display_count_text", "") or "").strip() or None
+        invoice_summary: dict[str, object] = {"count": invoice_count, "amount": amount}
+        if display_count_text:
+            invoice_summary["displayCountText"] = display_count_text
         return {
             "businessBatchId": batch.business_batch_id,
             "taskId": batch.task_id,
@@ -1206,7 +1236,7 @@ class EtcService:
             "oaDetectionAttempts": batch.oa_detection_attempts,
             "oaDetectionReason": batch.oa_detection_reason,
             "invoiceIds": list(batch.invoice_ids),
-            "invoiceSummary": {"count": len(invoices), "amount": amount},
+            "invoiceSummary": invoice_summary,
             "importAttempts": list(batch.import_attempts),
             "auditEvents": list(batch.audit_events),
             "createdAt": batch.created_at,

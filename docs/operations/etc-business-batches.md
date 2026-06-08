@@ -9,7 +9,7 @@
 - App Mongo detailed collections 已创建 `etc_business_batches` 集合，且满足同一 `task_id` 只有一个 active 批次的存储层约束。
 - 如果 Mongo 支持 partial unique index，检查 `unique(task_id, active=true)` 已存在；如果不支持，检查 `task_active_key` 唯一索引已存在，且非 active 批次不会保留该 key。
 - 生产部署不得使用本地 state 文件模式承载该功能；如启动参数声明 `FINOPS_STORAGE_MODE=local_state`，只能用于单进程本地开发。
-- OA 检测 adapter 可查询支付申请表单；生产可使用直连 Mongo adapter 或 PostgreSQL OA projection adapter，且需具备 form id、processStatus、createdAt 与 ETC 稳定标记的可用查询路径。
+- OA 检测 adapter 可查询支付申请表单；生产优先使用 PostgreSQL OA projection adapter，并为 ETC 稳定标记检测保留直连 Mongo adapter 兜底。两条路径都需具备 form id、processStatus、createdAt 与 ETC 稳定标记的可用查询能力。
 - 后端配置了 OA 检测查询超时，避免后台任务因慢查询阻塞。
 
 ## 迁移 dry-run
@@ -65,9 +65,10 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 
 - 按 `oa_detection_next_run_at` 调度，不立即无界扫描历史数据。
 - 每个 `businessBatchId` 同一时刻只能有一个运行中检测任务。
-- `oa_detection_timeout` 不再自动高频轮询；用户任意时间点击刷新检测时，只触发一次即时检测。只要 OA adapter 找到带 ETC 稳定标记且金额、发票数、组织和流程状态都合法的候选，就推进到 `oa_submitted`。
-- ETC 专用 OA 查询以 `business_batch_id` / `etc_batch_id` 稳定标记为事实入口，不用本地 `oa_detection_started_at` 或 30 分钟 deadline 排除历史 OA；deadline 只用于未找到候选时的状态提示。
-- OA 检测 adapter 查询超时、权限失败或 projection 不可用时进入 `oa_detection_unavailable`，写 `oa_detection_error` 和审计。
+- `oa_detection_timeout` 仅作为历史状态兼容，不再由新的自动检测生成；用户任意时间点击刷新检测时，只触发一次即时检测。只要 OA adapter 找到带 ETC 稳定标记且金额、组织和流程状态都合法的候选，就推进到 `oa_submitted`。OA 候选显式提供发票数时必须一致；支付表单未提供发票数字段时，不因该字段为空否定稳定标记和金额已匹配的候选。
+- ETC 专用 OA 查询以 `business_batch_id` / `etc_batch_id` 稳定标记为事实入口，不用本地 `oa_detection_started_at` 或 30 分钟 deadline 排除历史 OA；未找到候选时保持等待检测语义并记录 `oa_marker_missing`。
+- 业务批次已关联提交批次后，检测上下文使用提交批次的 OA 口径总额和 ETC 票数量；未关联提交批次时才退回发票行汇总。
+- OA 检测 adapter 查询超时、权限失败、projection 不可用或 projection 空结果后的实时 OA 兜底不可用时进入 `oa_detection_unavailable`，写 `oa_detection_error` 和审计。
 - 后台推进状态时必须校验批次 `version`，不能覆盖用户刚执行的人工兜底或撤销草稿。
 
 运维排查时优先按 `businessBatchId` 查后台任务、审计事件和 OA 检测 adapter 查询日志或 OA projection 同步状态，再按 `requestId` 查单次 API 调用。

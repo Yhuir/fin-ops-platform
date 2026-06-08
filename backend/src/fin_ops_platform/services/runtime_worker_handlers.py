@@ -787,9 +787,7 @@ def handle_etc_business_oa_detection_event(service: Any, event: Any) -> dict[str
     else:
         expected_version = int(expected_version)
     batch = service.refresh_oa_detection(business_batch_id, expected_version=expected_version)
-    if str(getattr(batch, "status", "")) == "oa_submission_detecting":
-        service.enqueue_oa_detection(batch)
-    else:
+    if str(getattr(batch, "status", "")) != "oa_submission_detecting":
         service.sync_invoices_after_oa_detection(batch, reason="etc_business_oa_status_detected_async")
     return {
         "status": str(getattr(batch, "status", "")),
