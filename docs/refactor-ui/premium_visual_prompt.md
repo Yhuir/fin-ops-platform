@@ -1338,7 +1338,13 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-024-etc-tickets-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-024-etc-tickets-discovery`
 
@@ -1361,5 +1367,58 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_etc_tickets.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Added `PV-024 Premium Visual Discovery` to `docs/refactor-ui/modules/phase_6_etc_tickets.md`.
+- Confirmed current `/etc-tickets` runtime is already migrated out of MUI:
+  - `EtcTicketManagementPage.tsx` has no `@mui/*` imports or legacy MUI JSX;
+  - non-workbench runtime MUI grep passes.
+- Reframed earlier `P092-P098` records as platform migration history, not as the current premium visual completion evidence.
+- Preserved current ETC functionality as mandatory PV-025 constraints: heading, import link, submit action, status segmented controls, filters, batch/task lists, upload/drop controls, reconciliation workspace/table, manual review, batch details, invoice tables, imported invoices, dialogs, OA actions and feedback/status states.
+- Identified the premium visual gap as ETC-local hard-coded colors, fixed transitions, non-tokenized tags, migration-era list/upload/table/dialog rhythm and incomplete motion-token usage.
+- No runtime code or tests changed because PV-024 is discovery-only.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-024 because this slice only documents discovery and the next prompt.
+
+## Next Prompt Draft
+
+`PV-025-etc-tickets-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_etc_tickets.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/EtcTicketManagementPage.tsx`、`web/src/app/styles.css`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcOaNavigation.test.ts` 和当前 `git status`。本切片只做 `/etc-tickets` premium visual implementation，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+实现要求：
+
+- 保留所有当前功能和用户可见入口：page heading `ETC票据`、`导入发票`、`提交OA`、status segmented controls、月份/车牌/信用卡任务筛选、`ETC批次列表区`、`ETC批次列表`、`ETC对账任务列表`、upload/drop controls、`ETC对账工作区`、`人工核对处理`、`ETC双侧核对明细`、批次详情、发票明细表、导入任务发票表、所有删除/撤销/上传/创建 OA/检测 dialogs、feedback/status/loading/empty/error states。
+- 不做大 card 设计，不制造大留白；batch/task/source rows 保持 compact operational list，reconciliation/invoice sections 保持 dense tables，不改成 dashboard cards。
+- 旧列表仍为列表，旧上传仍为 file/drop controls，旧弹窗仍为 `AppDialog` modal dialog，旧表格仍为 table；OA workflow、upload payloads、delete/stale cleanup、manual reconciliation and import behavior 不改变。
+- 将 ETC 本地硬编码颜色和固定 `0.16s ease` transition 尽量替换为 Ledger Calm tokens、`color-mix(...)`、`--motion-fast`、`--ease-out-quart`。
+- 金额列保持 right-align/tabular nums；车牌/日期/status/count tag 高度稳定；long descriptions、invoice numbers、seller/source/OA labels 需要截断或可读换行，不得撑乱行高。
+- `ETC双侧核对明细` 保持固定 row-height strategy；hover/selected/expanded/checked states 不得改变行高或列宽。
+- Tighten filter bar、left list panel、task rows、batch rows、source file rows、upload blocks、manual review cards、OA status panel、invoice tables、reconciliation table、dialog fields and action buttons，使其接近银行明细/no-OA/batch-accounting/turnover ledger premium direction，但不改变 workflow shape。
+- 增加或更新 `EtcTicketManagementPage.test.tsx` 的 CSS contract：锁定 compact list/panel/upload/table/dialog treatment、motion-token usage、amount alignment、stable tags、token colors、reconciliation row height and no layout-shift rules。
+
+验证：
+
+- `cd web && npx vitest run EtcTicketManagementPage.test.tsx EtcApi.test.ts EtcOaNavigation.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 浏览器 smoke `/etc-tickets`：确认 heading/filters、batch/task lists、upload area、reconciliation workspace/table、one dialog open/close and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_etc_tickets.md`，精确 staging，commit 并 push 到 `origin/main`。

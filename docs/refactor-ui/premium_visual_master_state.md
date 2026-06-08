@@ -53,7 +53,7 @@ Last updated: 2026-06-08
 | 21 | `PV-021-batch-accounting-premium-visual` | verified | 批量账务 premium visual slice。 |
 | 22 | `PV-022-turnover-ledger-discovery` | verified | `/turnover-ledger` discovery。 |
 | 23 | `PV-023-turnover-ledger-premium-visual` | verified | 外部往来款管理 premium visual slice。 |
-| 24 | `PV-024-etc-tickets-discovery` | pending | `/etc-tickets` premium visual discovery。 |
+| 24 | `PV-024-etc-tickets-discovery` | verified | `/etc-tickets` premium visual discovery。 |
 | 25 | `PV-025-etc-tickets-premium-visual` | pending | ETC 票据管理 premium visual slice。 |
 | 26 | `PV-026-settings-discovery` | pending | `/settings` discovery。 |
 | 27 | `PV-027-settings-premium-visual` | pending | 设置 premium visual slice。 |
@@ -62,7 +62,7 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-024-etc-tickets-discovery`
+`PV-025-etc-tickets-premium-visual`
 
 ### Scope
 
@@ -70,22 +70,22 @@ Last updated: 2026-06-08
 - `docs/refactor-ui/premium_visual_prompt.md`
 - `docs/refactor-ui/modules/phase_6_etc_tickets.md`
 - `web/src/pages/EtcTicketManagementPage.tsx`
-- `web/src/features/etc/api.ts`
-- `web/src/features/etc/types.ts`
 - `web/src/test/EtcTicketManagementPage.test.tsx`
 - `web/src/test/EtcApi.test.ts`
 - `web/src/test/EtcOaNavigation.test.ts`
+- `web/src/app/styles.css`
 
 ### Verification
 
-Required for PV-024:
+Required for PV-025:
 
+- `cd web && npx vitest run EtcTicketManagementPage.test.tsx EtcApi.test.ts EtcOaNavigation.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
-- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- `git status --short --branch`
-
-PV-024 is discovery-only. Code tests are not required unless discovery adds or changes characterization tests, which this prompt does not request.
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke `/etc-tickets`: heading/filters, batch/task lists, upload area, reconciliation workspace/table, one dialog open/close, and no top-level horizontal overflow.
 
 ## Execution Rules
 
@@ -136,3 +136,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-021-batch-accounting-premium-visual` | `d4bb8b4a` | pushed to `origin/main` | Batch accounting premium visual polish verified; PV-022 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-022-turnover-ledger-discovery` | `d9b663ad` | pushed to `origin/main` | Turnover ledger premium discovery verified; PV-023 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-023-turnover-ledger-premium-visual` | `c133ecc5` | pushed to `origin/main` | Turnover ledger premium visual polish verified; PV-024 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `PV-024-etc-tickets-discovery` | current commit | pending push to `origin/main` | ETC tickets premium discovery verified; PV-025 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |

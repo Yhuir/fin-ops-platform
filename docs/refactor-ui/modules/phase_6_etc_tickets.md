@@ -219,6 +219,223 @@ Scope: `/etc-tickets` page shell, status/filter bar, and batch/task list panels 
   - `git status --short --branch`: passed; only P094 page/style files changed before docs.
 - Commit: `47a2d993 feat: migrate etc tickets shell and lists`, pushed to `origin/refactor-ui`.
 
+## PV-024 Premium Visual Discovery
+
+- Status: verified.
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- This section is for the current `main` premium visual program. The earlier `P092-P098` records above are platform migration history and do not by themselves prove the current premium visual standard.
+
+### Current Code Facts
+
+- Route: `/etc-tickets`
+- Page: `web/src/pages/EtcTicketManagementPage.tsx`
+- API/client:
+  - `web/src/features/etc/api.ts`
+  - `web/src/features/etc/types.ts`
+  - `web/src/features/etc/oaNavigation.ts`
+- Tests:
+  - `web/src/test/EtcTicketManagementPage.test.tsx`
+  - `web/src/test/EtcApi.test.ts`
+  - `web/src/test/EtcOaNavigation.test.ts`
+- Current runtime MUI status:
+  - `EtcTicketManagementPage.tsx` has no `@mui/*` imports.
+  - Current non-workbench runtime MUI grep passes.
+  - The historical MUI inventory above is no longer the current runtime fact.
+- Current project primitives:
+  - `PageScaffold` for page shell.
+  - `StatePanel` for loading/empty/error/status states.
+  - `AppDialog` for destructive, upload, revoke, OA creation and OA detection flows.
+  - Native buttons, inputs, selects, lists, file inputs and tables with `etc-*` classes.
+
+### Current User-visible Entrypoints
+
+Must remain functionally equivalent in PV-025:
+
+- route/sidebar entry for `/etc-tickets`;
+- page heading `ETC票据`;
+- top actions:
+  - `导入发票`;
+  - `提交OA`;
+- status segmented controls:
+  - `未提交 2`;
+  - `已提交 1`;
+- filters:
+  - `月份`;
+  - `车牌`;
+  - `信用卡任务`;
+- list regions:
+  - `ETC批次列表区`;
+  - `ETC批次列表`;
+  - `ETC对账任务列表`;
+  - `ETC对账任务`;
+- upload/drop controls:
+  - `ETC对账文件上传`;
+  - `ETC导入动作`;
+  - `上传票根网`;
+  - ticket-root text and file upload blocks;
+  - supplement evidence upload controls;
+- reconciliation workspace:
+  - `ETC对账工作区`;
+  - `人工核对处理`;
+  - selection summary metrics;
+  - `ETC双侧核对明细`;
+  - row selection controls and clear/paired-only actions;
+  - `接受推荐票根`, manual relation and exclusion actions;
+- batch detail:
+  - `ETC批次详情`;
+  - `批次指标`;
+  - `车牌汇总`;
+  - `ETC发票明细`;
+  - import attempt list;
+- task imported invoices:
+  - `已导入ETC发票`;
+  - `已导入ETC发票明细`;
+  - `移除发票`;
+- dialogs must remain modal dialogs:
+  - `删除批次`;
+  - `删除任务`;
+  - `删除源文件`;
+  - `移除发票`;
+  - `上传补充凭证`;
+  - `撤销OA提交`;
+  - `创建OA草稿`;
+  - `OA自动检测`;
+- OA actions must keep behavior:
+  - `打开草稿`;
+  - `刷新检测`;
+  - `撤销草稿`;
+  - `确认已提交OA`;
+  - `未提交OA`;
+- feedback/status/loading/empty/error states continue to use project status surfaces and existing copy.
+
+### Functional Equivalence Constraints
+
+- Old lists remain lists; do not convert the batch/task list to dashboard cards.
+- Old reconciliation detail remains a table named `ETC双侧核对明细`.
+- Old invoice detail sections remain dense tables named `ETC发票明细` and `已导入ETC发票明细`.
+- Old upload surfaces remain file/drop controls with file input semantics.
+- Old dialogs remain dialogs; do not change them to drawers, routes, popovers or inline panels.
+- OA workflow, OA draft URL construction, detection refresh, revoke, submitted confirmation and not-submitted correction behavior must not change.
+- Delete, stale cleanup, import, upload, manual reconciliation and confirmation payloads must not change.
+- Existing domain events and background job refresh behavior must not change.
+
+### Premium Visual Gaps
+
+The page is already off MUI, but the visual system still reads as a migration surface rather than the current premium standard:
+
+- `web/src/app/styles.css` still has many ETC hard-coded colors such as `#2563eb`, `#dbe3ef`, `#f9fbfe`, `#eff6ff`, `#fef2f2`, `#fffbeb`, `#172033`, `rgba(...)`.
+- ETC action controls still use fixed transitions such as `0.16s ease` instead of `--motion-fast` and `--ease-out-quart`.
+- Status tags use `999px` pill treatment and page-local colors rather than table tag tokens.
+- Batch/task/source rows, upload blocks, manual review cards and OA panels need tighter finance-product rhythm while avoiding large cards and large whitespace.
+- Reconciliation table already uses fixed row height, but still needs tokenized hover/selected/background treatment and stable checkbox/description toggle feedback.
+- Invoice tables need the same table treatment as the rest of the premium set: tokenized header background, stable money alignment, bounded scroll, compact empty rows and no top-level overflow.
+- Dialog fields and upload picker surfaces need motion-token focus/hover treatment and tokenized borders/backgrounds.
+
+### Table and List Layout Requirements
+
+PV-025 must preserve and harden:
+
+- money columns right aligned and `font-variant-numeric: tabular-nums`;
+- invoice amount/tax columns stable width;
+- reconciliation amount cells centered or right-aligned according to current table semantics without row height changes;
+- plate/date/status/tag controls stable height;
+- selection checkbox column fixed width;
+- long transaction descriptions collapsed by default with explicit expand/collapse affordance;
+- long invoice numbers, seller names, source filenames, source file ids, OA draft labels and dialog details truncated or wrapped predictably;
+- active/selected/expanded/hover states must not change list item height, table row height or column width.
+
+### Interaction Smoothness Requirements
+
+PV-025 should apply `docs/refactor-ui/interaction_smoothness.md` to ETC-local surfaces:
+
+- status segmented controls;
+- filter inputs;
+- batch and task list rows;
+- source file rows;
+- icon actions and destructive actions;
+- upload/drop/file picker surfaces;
+- manual review input/select/buttons;
+- reconciliation row hover/selected/toggle controls;
+- invoice table row hover;
+- dialog action buttons and textareas;
+- OA status action buttons;
+- feedback close if present.
+
+Do not add page transitions, route-blocking animations, layout animations for table cells or broad blur/shadow effects.
+
+### Test Coverage and PV-025 Needs
+
+Existing `EtcTicketManagementPage.test.tsx` already covers broad behavior:
+
+- background job refresh;
+- unsubmitted/submitted mode;
+- business batch deletion and stale cleanup;
+- reconciliation task deletion;
+- source file deletion;
+- upload/drop behavior;
+- ticket-root import behavior;
+- reconciliation table rendering and row selection;
+- manual reconciliation payloads;
+- OA draft creation/detection/revoke/submitted state flows;
+- batch invoice detail native table rendering;
+- imported task invoice display and removal.
+
+Existing source-level contract already verifies no MUI/project primitive usage for the ETC page.
+
+PV-025 should add or update a CSS contract test in `EtcTicketManagementPage.test.tsx` for:
+
+- tokenized ETC colors and motion-token usage;
+- compact list/panel/upload/table/dialog treatment;
+- table tag height/radius consistency;
+- amount alignment and tabular nums;
+- reconciliation row height and no layout-shift selectors;
+- upload/drop and dialog focus/hover treatment.
+
+PV-025 browser smoke should verify:
+
+- heading and filters render;
+- batch/task list renders;
+- upload area renders;
+- reconciliation workspace/table renders;
+- one dialog opens and closes;
+- no top-level horizontal overflow.
+
+## PV-025 Prompt Draft
+
+```text
+Prompt ID: PV-025-etc-tickets-premium-visual
+Phase: premium_visual_pages
+Type: premium visual implementation
+Scope: `/etc-tickets` visual treatment only.
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_etc_tickets.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/EtcTicketManagementPage.tsx`、`web/src/app/styles.css`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcOaNavigation.test.ts` 和当前 `git status`。本切片只做 `/etc-tickets` premium visual implementation，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+实现要求：
+
+- 保留所有当前功能和用户可见入口：page heading `ETC票据`、`导入发票`、`提交OA`、status segmented controls、月份/车牌/信用卡任务筛选、`ETC批次列表区`、`ETC批次列表`、`ETC对账任务列表`、upload/drop controls、`ETC对账工作区`、`人工核对处理`、`ETC双侧核对明细`、批次详情、发票明细表、导入任务发票表、所有删除/撤销/上传/创建 OA/检测 dialogs、feedback/status/loading/empty/error states。
+- 不做大 card 设计，不制造大留白；batch/task/source rows 保持 compact operational list，reconciliation/invoice sections 保持 dense tables，不改成 dashboard cards。
+- 旧列表仍为列表，旧上传仍为 file/drop controls，旧弹窗仍为 `AppDialog` modal dialog，旧表格仍为 table；OA workflow、upload payloads、delete/stale cleanup、manual reconciliation and import behavior 不改变。
+- 将 ETC 本地硬编码颜色和固定 `0.16s ease` transition 尽量替换为 Ledger Calm tokens、`color-mix(...)`、`--motion-fast`、`--ease-out-quart`。
+- 金额列保持 right-align/tabular nums；车牌/日期/status/count tag 高度稳定；long descriptions、invoice numbers、seller/source/OA labels 需要截断或可读换行，不得撑乱行高。
+- `ETC双侧核对明细` 保持固定 row-height strategy；hover/selected/expanded/checked states 不得改变行高或列宽。
+- Tighten filter bar、left list panel、task rows、batch rows、source file rows、upload blocks、manual review cards、OA status panel、invoice tables、reconciliation table、dialog fields and action buttons，使其接近银行明细/no-OA/batch-accounting/turnover ledger premium direction，但不改变 workflow shape。
+- 增加或更新 `EtcTicketManagementPage.test.tsx` 的 CSS contract：锁定 compact list/panel/upload/table/dialog treatment、motion-token usage、amount alignment、stable tags、token colors、reconciliation row height and no layout-shift rules。
+
+验证：
+
+- `cd web && npx vitest run EtcTicketManagementPage.test.tsx EtcApi.test.ts EtcOaNavigation.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- forbidden page-cache/snapshot guard grep against `web/src`, `docs/dev`, `docs/app-architecture` and `docs/refactor-ui/modules`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 浏览器 smoke `/etc-tickets`：确认 heading/filters、batch/task lists、upload area、reconciliation workspace/table、one dialog open/close and no top-level horizontal overflow。
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_etc_tickets.md`，精确 staging，commit 并 push 到 `origin/main`。
+```
+
 ## P095 Prompt Draft
 
 ```text
