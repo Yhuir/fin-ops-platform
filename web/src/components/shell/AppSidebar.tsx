@@ -1,4 +1,4 @@
-import { Drawer, Separator, Tooltip } from "@heroui/react";
+import { Drawer, Separator } from "@heroui/react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -88,6 +88,7 @@ export default function AppSidebar({
                     aria-current={active ? "page" : undefined}
                     aria-label={item.label}
                     className={`app-sidebar-link${active ? " active" : ""}`}
+                    title={showExpandedContent ? undefined : item.label}
                     onClick={isCompact ? onCloseMobile : undefined}
                     onFocus={prefetchRoute}
                     onPointerEnter={prefetchRoute}
@@ -104,17 +105,7 @@ export default function AppSidebar({
 
                 return (
                   <li key={item.id ?? item.to} className="app-sidebar-item">
-                    {showExpandedContent ? (
-                      link
-                    ) : (
-                      <Tooltip delay={350}>
-                        <Tooltip.Trigger>{link}</Tooltip.Trigger>
-                        <Tooltip.Content placement="right" showArrow>
-                          <Tooltip.Arrow />
-                          {item.label}
-                        </Tooltip.Content>
-                      </Tooltip>
-                    )}
+                    {link}
                   </li>
                 );
               })}

@@ -33,8 +33,9 @@ describe("AppSidebar shell contract", () => {
     expect(sidebarRule).toMatch(/position:\s*sticky;/);
     expect(sidebarRule).toMatch(/top:\s*0;/);
     expect(sidebarRule).toMatch(/height:\s*100dvh;/);
-    expect(itemRule).toMatch(/min-height:\s*40px;/);
-    expect(linkRule).toMatch(/min-height:\s*40px;/);
+    expect(itemRule).toMatch(/min-height:\s*36px;/);
+    expect(linkRule).toMatch(/min-height:\s*36px;/);
+    expect(linkRule).toMatch(/font-size:\s*14px;/);
   });
 
   test("keeps the status icon mark free of decorative gradient backgrounds", () => {
@@ -65,10 +66,13 @@ describe("AppSidebar shell contract", () => {
     const collapsedBrandTextRule = appStyles.match(/\.app-sidebar-content\.collapsed \.app-sidebar-brand-text\s*\{[^}]*\}/s)?.[0] ?? "";
     const linkLabelRule = appStyles.match(/\.app-sidebar-link-label\s*\{[^}]*\}/s)?.[0] ?? "";
     const collapsedLinkLabelRule = appStyles.match(/\.app-sidebar-content\.collapsed \.app-sidebar-link-label\s*\{[^}]*\}/s)?.[0] ?? "";
+    const collapsedGroupRule = appStyles.match(/\.app-sidebar-content\.collapsed \.app-sidebar-group\s*\{[^}]*\}/s)?.[0] ?? "";
+    const collapsedListRule = appStyles.match(/\.app-sidebar-content\.collapsed \.app-sidebar-list\s*\{[^}]*\}/s)?.[0] ?? "";
 
     expect(screen.getByText("财务运营平台")).toBeInTheDocument();
     expect(screen.getByText("财务业务")).toBeInTheDocument();
     expect(screen.getByText("关联台")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "银行明细" })).toHaveAttribute("title", "银行明细");
     expect(sidebarRule).toMatch(/--app-sidebar-motion:\s*var\(--motion-slow\) var\(--ease-out-quart\)/);
     expect(sidebarRule).toMatch(/--app-sidebar-content-motion:\s*var\(--motion-base\) var\(--ease-out-quart\)/);
     expect(contentRule).toMatch(/transition:[^;]*var\(--app-sidebar-motion\)/);
@@ -78,6 +82,9 @@ describe("AppSidebar shell contract", () => {
     expect(linkLabelRule).toMatch(/opacity[^;]*var\(--app-sidebar-content-motion\)/);
     expect(linkLabelRule).toMatch(/transform[^;]*var\(--app-sidebar-content-motion\)/);
     expect(collapsedLinkLabelRule).toMatch(/max-width:\s*0;/);
+    expect(collapsedGroupRule).toMatch(/width:\s*38px;/);
+    expect(collapsedListRule).toMatch(/width:\s*38px;/);
+    expect(appSidebarSource).not.toMatch(/Tooltip\.Trigger/);
     expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
     expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.app-sidebar/);
   });

@@ -4,12 +4,12 @@
 
 ## Current Phase
 
-- Phase: `phase_10_visual_premium_sample`
-- Status: `completed`
-- Branch: `refactor-ui`
-- Last Updated: `2026-06-07`
-- Current Prompt ID: `MG-P121-bank-details-premium-sample`
-- Current MG ID: `MG-P121-bank-details-premium-sample`
+- Phase: `phase_11_app_shell_motion_smoothness`
+- Status: `verified`
+- Branch: `main`
+- Last Updated: `2026-06-08`
+- Current Prompt ID: `P129-app-shell-sidebar-density-and-drawer-motion`
+- Current MG ID: `pending`
 
 ## Global Invariants
 
@@ -42,6 +42,7 @@
 | `phase_8_full_verification` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P114 full verification passed: source contract, full Vitest, build, diff check |
 | `phase_9_closeout` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P116 post-closeout audit/fix completed; full suite, build, no-MUI scans and browser smoke recorded |
 | `phase_10_visual_premium_sample` | `completed` | 2026-06-07 | 2026-06-07 | `passed` | P118-P121 and MG-P121 verified; BankDetails premium sample pushed to `origin/refactor-ui` |
+| `phase_11_app_shell_motion_smoothness` | `verified` | 2026-06-08 | 2026-06-08 | `passed` | P129 fixed collapsed sidebar icon visibility, compressed sidebar density, and added shared AppDrawer right-side slide motion on `main` |
 
 ## Status Values
 
@@ -56,7 +57,7 @@
 
 ## Active Checkpoint
 
-- Scope: P118 App Shell local visual surface, P119 BankDetails layout/toolbar, P120 BankDetails table premium treatment, P121 BankDetails popovers/drawer polish and MG-P121 premium sample merge gate completed。
+- Scope: P129 App Shell sidebar density/collapsed icon fix and shared AppDrawer motion polish implemented on `main`。
 - Files touched in P117:
   - `docs/refactor-ui/bank_details_premium_sample.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
@@ -83,9 +84,18 @@
   - `docs/refactor-ui/bank_details_premium_sample.md`
   - `docs/refactor-ui/refactor_ui_prompt.md`
   - `docs/refactor-ui/refactor_ui_state.md`
-- Verification run: App shell tests, AppStatusIndicator tests, BankDetails table tests, BankDetails behavior tests, AutoTagRulesDrawer tests, platform smoke tests, table alignment tests, runtime no-MUI grep, build, diff check, headless Chrome `/bank-details` smoke。
+- Files touched in P129:
+  - `docs/refactor-ui/app_shell_motion_prompt.md`
+  - `docs/refactor-ui/refactor_ui_prompt.md`
+  - `docs/refactor-ui/refactor_ui_state.md`
+  - `web/src/app/styles.css`
+  - `web/src/components/common/AppDrawer.tsx`
+  - `web/src/components/shell/AppSidebar.tsx`
+  - `web/src/test/AppSidebar.test.tsx`
+  - `web/src/test/CommonMuiComponents.test.tsx`
+- Verification run: AppSidebar/CommonMui/HeroUI platform tests, runtime no-MUI grep, keepAlive/snapshot residue grep, build, diff check, headless Chrome `/bank-details` collapsed sidebar smoke。
 - Failures: none。
-- Next action: BankDetails premium sample is closed; wait for next user-selected premium page or visual iteration。
+- Next action: run final merge gate checks, exact stage, commit and push to `origin/main`。
 
 ## Prompt Lifecycle
 
@@ -123,11 +133,17 @@
 | workbench MUI migration | `verified` | `P-WB010-closeout` | Workbench runtime, CSS hooks, test provider and MUI/Emotion dependencies removed |
 | closeout | `verified` | `P116-phase-9-post-closeout-audit-fix` | Post-closeout audit/fix completed; full suite/browser smoke/docs facts updated |
 | bank details premium sample | `verified` | `MG-P121-bank-details-premium-sample` | P118-P121 and MG-P121 verified; premium sample pushed |
+| app shell motion smoothness | `verified` | `P129-app-shell-sidebar-density-and-drawer-motion` | Collapsed sidebar icons visible, sidebar density reduced, shared AppDrawer slide motion added |
 
 ## Verification Log
 
 | Date | Prompt / MG | Command | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-06-08 | `P129-app-shell-sidebar-density-and-drawer-motion` | `cd web && npx vitest run AppSidebar.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx` | passed | 3 files / 19 tests passed; covers collapsed sidebar contract and AppDrawer persistent exit presence |
+| 2026-06-08 | `P129-app-shell-sidebar-density-and-drawer-motion` | runtime no-MUI grep | passed | No non-workbench runtime MUI imports introduced |
+| 2026-06-08 | `P129-app-shell-sidebar-density-and-drawer-motion` | keepAlive/snapshot residue grep | passed | No removed keepAlive/snapshot/session scroll residue returned |
+| 2026-06-08 | `P129-app-shell-sidebar-density-and-drawer-motion` | `cd web && npm run build` | passed | Build passed with known HeroUI/Tailwind CSS minifier warnings |
+| 2026-06-08 | `P129-app-shell-sidebar-density-and-drawer-motion` | headless Chrome smoke at `/bank-details` | passed | Collapsed sidebar rendered 17 visible icons, first icon center x=36 in the 72px rail, no page runtime errors |
 | 2026-06-07 | `MG-P121-bank-details-premium-sample` | `cd web && npx vitest run BankDetailsPage.test.tsx AutoTagRulesDrawer.test.tsx` | passed | 2 files / 52 tests passed |
 | 2026-06-07 | `MG-P121-bank-details-premium-sample` | `cd web && npx vitest run App.test.tsx AppStatusIndicator.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx TableAlignmentStyles.test.ts` | passed | 5 files / 31 tests passed |
 | 2026-06-07 | `MG-P121-bank-details-premium-sample` | runtime no-MUI grep | passed | No non-workbench runtime MUI imports detected |

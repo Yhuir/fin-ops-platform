@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { act } from "react";
 import userEvent from "@testing-library/user-event";
 import type React from "react";
 import { vi } from "vitest";
@@ -17,6 +19,9 @@ function renderWithProject(ui: React.ReactElement) {
 }
 
 describe("common MUI components", () => {
+  const appDrawerSource = readFileSync("src/components/common/AppDrawer.tsx", "utf8");
+  const appStyles = readFileSync("src/app/styles.css", "utf8");
+
   test("renders state panels with accessible roles and loading affordances", () => {
     renderWithProject(
       <>
@@ -151,6 +156,51 @@ describe("common MUI components", () => {
 
     await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps persistent app drawer mounted for its exit motion", () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+
+    try {
+      const { rerender } = renderWithProject(
+        <AppDrawer modal={false} onClose={onClose} open title="非模态抽屉">
+          <p>持久抽屉正文</p>
+        </AppDrawer>,
+      );
+
+      expect(screen.getByText("持久抽屉正文")).toBeInTheDocument();
+      expect(screen.getByText("持久抽屉正文").closest(".finance-drawer__content")).toHaveAttribute("data-entering", "true");
+
+      rerender(
+        <AppDrawer modal={false} onClose={onClose} open={false} title="非模态抽屉">
+          <p>持久抽屉正文</p>
+        </AppDrawer>,
+      );
+
+      const exitingDrawer = screen.getByText("持久抽屉正文").closest(".finance-drawer__content");
+      expect(exitingDrawer).toHaveAttribute("data-exiting", "true");
+      expect(appDrawerSource).toContain("persistentDrawerExitMs");
+
+      act(() => {
+        vi.advanceTimersByTime(180);
+      });
+
+      expect(screen.queryByText("持久抽屉正文")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("defines right drawer slide motion with reduced-motion safeguards", () => {
+    expect(appStyles).toMatch(/--finance-drawer-enter-duration:\s*220ms;/);
+    expect(appStyles).toMatch(/--finance-drawer-exit-duration:\s*170ms;/);
+    expect(appStyles).toMatch(/@keyframes finance-drawer-slide-in/);
+    expect(appStyles).toMatch(/@keyframes finance-drawer-slide-out/);
+    expect(appStyles).toMatch(/translate3d\(28px, 0, 0\)/);
+    expect(appStyles).toMatch(/translate3d\(22px, 0, 0\)/);
+    expect(appStyles).toMatch(/prefers-reduced-motion:\s*reduce/);
+    expect(appStyles).toMatch(/\[data-reduce-motion="true"\] \.finance-drawer/);
   });
 
   test("renders page scaffold heading, description, actions, and children", () => {

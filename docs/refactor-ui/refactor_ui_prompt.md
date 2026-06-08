@@ -6762,6 +6762,68 @@ Scope: BankDetails premium visual sample P117-P121.
   - `git diff --check`: passed。
   - `git status --short --branch`: clean after exact stage/commit/push completion。
 
+### P129-app-shell-sidebar-density-and-drawer-motion
+
+- Phase: `phase_11_app_shell_motion_smoothness`
+- Status: `verified`
+- Type: `app-wide visual and motion polish`
+- Scope: AppSidebar density/collapsed icon visibility and shared AppDrawer right-side motion only.
+
+#### Prompt
+
+```text
+Prompt ID: P129-app-shell-sidebar-density-and-drawer-motion
+Branch: main
+Type: app-wide visual and motion polish
+Scope: AppSidebar density/collapsed icon visibility and shared AppDrawer right-side motion only.
+
+读取 PRODUCT.md、DESIGN.md、docs/refactor-ui/README.md、docs/refactor-ui/refactor_ui_state.md、web/src/components/shell/AppSidebar.tsx、web/src/components/common/AppDrawer.tsx、web/src/app/styles.css、web/src/test/AppSidebar.test.tsx、web/src/test/CommonMuiComponents.test.tsx 和当前 git status。
+
+修复桌面折叠 sidebar 后导航 icon 不显示的问题。降低左侧 sidebar 行高、分组间距和字号，使财务业务导航在常见桌面高度下尽量不需要上下滚动即可扫描完整。保留现有 sidebar 路由、active 状态、hover/focus/touch preload、compact mobile drawer、全局状态入口、可访问名称和折叠/展开按钮。
+
+让所有基于 AppDrawer 的右侧抽屉拥有丝滑的右侧滑入/滑出动效。HeroUI Drawer modal 分支使用 HeroUI 状态属性和项目 motion token；persistent non-modal 分支必须在关闭时短暂保留挂载以完成退出动画。不引入第三方 motion 库。
+
+不得改后端、API contract、read model、worker、queue、权限语义或业务状态机。不得改变任何页面的右侧抽屉业务内容、按钮、保存/取消/关闭语义、宽度输入或 modal/persistent 选择。不得改变关联台内部工作区结构。
+
+运行 `cd web && npx vitest run AppSidebar.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`；运行 runtime no-MUI grep；运行 keepAlive/snapshot residue grep；运行 `cd web && npm run build`；运行 headless Chrome `/bank-details` collapsed sidebar smoke；运行 `git diff --check` 和 `git status --short --branch`。更新 docs/refactor-ui/app_shell_motion_prompt.md、refactor_ui_prompt.md 和 refactor_ui_state.md。通过后精确 stage、commit 并 push 到 `origin/main`。
+```
+
+#### Review
+
+- Single slice: yes，AppShell sidebar 与 shared AppDrawer only。
+- Third-party motion dependency: no，当前只需要 HeroUI state + CSS transform/opacity。
+- Behavior preservation: required，保留 route preload、link targets、drawer content、modal/persistent semantics。
+- Backend/API/read model/worker untouched: required。
+- Verification defined: targeted tests, no-MUI, keepAlive residue, build, browser smoke, diff check。
+
+#### Execution Notes
+
+- Removed HeroUI `Tooltip.Trigger` wrapping from collapsed desktop sidebar links after browser smoke showed links/icons rendered at negative x coordinates. Collapsed links now render directly and keep `aria-label`, `title`, active state and route preload.
+- Reduced sidebar density:
+  - brand area `78px -> 64px`;
+  - nav row `40px -> 36px`;
+  - nav font `15px -> 14px`;
+  - group padding/gap and title size reduced;
+  - icon slot and collapsed link width tightened to `38px`.
+- Fixed the real collapsed icon root cause by constraining collapsed group/list/item widths to `38px`; hidden `200px` group titles no longer push the list off the 72px rail.
+- Added shared right drawer motion:
+  - `finance-drawer-slide-in` and `finance-drawer-slide-out` keyframes;
+  - HeroUI modal Drawer state selectors;
+  - persistent non-modal close presence with `data-exiting` and delayed unmount;
+  - reduced-motion and `data-reduce-motion` safeguards.
+- No backend, API, read model, worker, permissions, business state, route splitting, sidebar preload or `usePageSessionState` behavior changed.
+
+#### Verification
+
+- Status: verified。
+- Commands:
+  - `cd web && npx vitest run AppSidebar.test.tsx CommonMuiComponents.test.tsx HeroUIPlatformSmoke.test.tsx`: passed, 3 files / 19 tests。
+  - runtime no-MUI grep: passed。
+  - keepAlive/snapshot residue grep: passed。
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings。
+  - headless Chrome smoke at `http://127.0.0.1:4188/bank-details`: passed; collapsed sidebar rendered 17 visible icons, first icon center x=36 in the 72px rail, no page runtime errors。
+  - `git diff --check`: passed after final docs update。
+
 ### MG Prompt Template
 
 ```text

@@ -1,5 +1,5 @@
 import { Button, Drawer } from "@heroui/react";
-import { useId, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 type AppDrawerProps = {
   open: boolean;
@@ -18,6 +18,8 @@ type AppDrawerStyle = CSSProperties & {
   "--finance-drawer-width": string;
 };
 
+const persistentDrawerExitMs = 180;
+
 export default function AppDrawer({
   open,
   title,
@@ -31,17 +33,62 @@ export default function AppDrawer({
   onClose,
 }: AppDrawerProps) {
   const titleId = useId();
+  const [persistentMounted, setPersistentMounted] = useState(open);
+  const [persistentClosing, setPersistentClosing] = useState(false);
+  const persistentCloseTimerRef = useRef<number | null>(null);
   const drawerStyle: AppDrawerStyle = {
     "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
 
+  useEffect(() => {
+    if (modal) {
+      return undefined;
+    }
+
+    if (persistentCloseTimerRef.current !== null) {
+      window.clearTimeout(persistentCloseTimerRef.current);
+      persistentCloseTimerRef.current = null;
+    }
+
+    if (open) {
+      setPersistentMounted(true);
+      setPersistentClosing(false);
+      return undefined;
+    }
+
+    if (!persistentMounted) {
+      setPersistentClosing(false);
+      return undefined;
+    }
+
+    setPersistentClosing(true);
+    persistentCloseTimerRef.current = window.setTimeout(() => {
+      persistentCloseTimerRef.current = null;
+      setPersistentMounted(false);
+      setPersistentClosing(false);
+    }, persistentDrawerExitMs);
+
+    return () => {
+      if (persistentCloseTimerRef.current !== null) {
+        window.clearTimeout(persistentCloseTimerRef.current);
+        persistentCloseTimerRef.current = null;
+      }
+    };
+  }, [modal, open, persistentMounted]);
+
   if (!modal) {
-    if (!open) {
+    if (!open && !persistentMounted) {
       return null;
     }
 
     return (
-      <aside className="finance-drawer__content finance-drawer__content--persistent" data-placement="right">
+      <aside
+        aria-hidden={persistentClosing ? true : undefined}
+        className="finance-drawer__content finance-drawer__content--persistent"
+        data-entering={open && !persistentClosing ? true : undefined}
+        data-exiting={persistentClosing ? true : undefined}
+        data-placement="right"
+      >
         <section className={`finance-drawer${className ? ` ${className}` : ""}`} role="presentation" style={drawerStyle}>
           <header className="finance-drawer__header">
             <div className="finance-drawer__heading">
