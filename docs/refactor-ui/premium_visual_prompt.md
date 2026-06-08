@@ -1510,7 +1510,11 @@ Notes:
 
 - Code tests were not run for PV-026 because this slice only documents discovery and the next prompt.
 
-## Next Prompt Draft
+## Completed Prompt: PV-027-settings-premium-visual
+
+### Status
+
+verified
 
 `PV-027-settings-premium-visual`
 
@@ -1538,3 +1542,62 @@ Notes:
 - 浏览器 smoke `/settings`：确认 tree navigation、one section switch、save action/read-only feedback or data reset dialog、OA manual import table or dense table surface and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_settings.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Polished `/settings` through a Settings-scoped CSS override layer, preserving existing JSX, Settings tree, section forms, native tables, menus, data-reset dialogs, OA manual import table and all save/data-reset/import workflows.
+- Tightened route shell, tree navigation, content header/save area, project rows, bank mapping rows, pending invoice tag selector/menu, checkbox groups, data reset cards/dialog content and OA manual import filters/metrics/table/pagination.
+- Covered older hard-coded Settings colors and fixed local transitions with Ledger Calm tokens, `color-mix(...)`, `--motion-fast`, `--motion-base` and `--ease-out-quart` where this slice touched them.
+- Added CSS contract coverage in `SettingsPage.test.tsx` for compact tree/content/table/dialog treatment, motion-token usage, tokenized Settings colors, amount/count alignment, stable tags, OA manual table containment and no layout-shift rules.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- Browser smoke with system Chrome and mocked Settings API at `http://127.0.0.1:4186/settings`
+
+Browser smoke result:
+
+- Verified Settings tree, one section switch, data reset confirmation dialog and no top-level horizontal overflow.
+- Verified `OA全量搜索导入结果` table and no top-level horizontal overflow.
+- Screenshots:
+  - `/tmp/settings-premium-smoke.png`
+  - `/tmp/settings-premium-table-smoke.png`
+
+Notes:
+
+- `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
+
+## Next Prompt Draft
+
+`PV-028-app-wide-smoothness-audit`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`docs/refactor-ui/module_inventory.md`、`docs/refactor-ui/modules/phase_8_full_verification.md`、`web/src/app/styles.css`、主要页面文件、主要表格/抽屉/弹窗组件测试和当前 `git status`。本切片只做 app-wide interaction smoothness and premium visual audit，不改运行时代码，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+输出要求：
+
+- 在 `docs/refactor-ui/modules/phase_8_full_verification.md` 追加 `PV-028 App-wide Smoothness Audit`。
+- 汇总本轮 premium visual 已完成页面：银行明细、税金抵扣、系统状态、导入页族、成本统计、待找发票、进项发票使用、OA 待付款核对、销项发票收款、免 OA 流水批量处理、批量账务、外部往来款管理、ETC 票据管理、Settings。
+- 用 source/CSS/test scan 审查全 app 交互体感风险：
+  - 是否仍有非关联台运行时代码引入 MUI/Emotion；
+  - 是否仍有页面切换阻塞或已移除页面缓存/快照逻辑残留；
+  - 是否仍有明显固定 `transition: 0.16s ease`、`180ms ease-out`、裸 `transition: all`、route-level decorative animation；
+  - 是否有表格行 hover/selected 改变尺寸、button press 缺失、dialog/popover/drawer 缺少 motion token 的高风险区域；
+  - 是否有旧硬编码颜色残留集中在已完成 premium 页面，区分 harmless legacy/frozen workbench/history 与 current runtime risk。
+- 明确哪些风险必须进入最终 MG 修复，哪些只作为后续 backlog，不要扩大运行时代码 scope。
+- 生成下一条唯一 prompt：`MG-PV-final-premium-visual-closeout`，但不要执行。
+
+验证：
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_8_full_verification.md`，精确 staging，commit 并 push 到 `origin/main`。

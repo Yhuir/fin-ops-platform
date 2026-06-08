@@ -576,3 +576,29 @@ PV-027 must preserve all user-visible entrypoints and workflows:
 ### Next Prompt
 
 Next unique prompt: `PV-027-settings-premium-visual`.
+
+## PV-027 Premium Visual Execution
+
+- Prompt ID: `PV-027-settings-premium-visual`
+- Status: `verified`
+- Runtime implementation changed:
+  - `web/src/app/styles.css` adds a Settings-scoped premium override layer for the Settings route, tree navigation, content panel, save/actions, forms, project/bank rows, pending invoice tag selector, menus, data reset cards/dialogs, native tables and OA manual import table.
+  - The implementation keeps existing Settings JSX and all behavior intact. No API calls, payloads, save/data-reset/OA manual import workflows, route/session behavior, backend, read model, worker or workbench internals changed.
+  - Older hard-coded Settings colors and fixed local transitions are covered by Ledger Calm tokens, `color-mix(...)`, `--motion-fast`, `--motion-base` and `--ease-out-quart` where this slice touched them.
+  - Settings tables keep dense row rhythm; amount/count/code fields remain tabular; tree/list/table selected/hover states avoid dimension changes.
+- Test implementation changed:
+  - `web/src/test/SettingsPage.test.tsx` adds a CSS contract test for compact tree/content/table/dialog treatment, motion-token usage, tokenized Settings colors, amount/count alignment, stable tags, OA manual table containment and no layout-shift rules.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+- Verification:
+  - `cd web && npx vitest run SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`: passed; 23 tests passed.
+  - `cd web && npx tsc -b --pretty false`: passed.
+  - `cd web && npm run build`: passed with known HeroUI/Tailwind CSS minifier warnings.
+  - `git diff --check`: passed.
+  - Forbidden page-cache/snapshot guard grep: passed.
+  - Non-workbench runtime MUI/emotion grep: passed.
+  - Browser smoke at `/settings`: passed; verified Settings tree, one section switch, data reset confirmation dialog and no top-level horizontal overflow.
+  - Browser table smoke at `/settings`: passed; verified `OA全量搜索导入结果` table and no top-level horizontal overflow.
+  - Screenshots:
+    - `/tmp/settings-premium-smoke.png`
+    - `/tmp/settings-premium-table-smoke.png`

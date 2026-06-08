@@ -22,8 +22,18 @@ const settingsSourceFiles = [
   "src/components/settings/OaManualSearchImportTable.tsx",
 ] as const;
 
-function readWebSource(path: (typeof settingsSourceFiles)[number]) {
+function readWebSource(path: string) {
   return readFileSync(resolve(__dirname, "..", path.replace(/^src\//, "")), "utf8");
+}
+
+function cssRule(styles: string, selector: string, containing?: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = Array.from(styles.matchAll(new RegExp(`${escapedSelector}\\s*\\{([\\s\\S]*?)\\n\\}`, "gm")));
+  const match = containing ? matches.find((candidate) => candidate[1].includes(containing)) : matches.at(-1);
+  if (!match) {
+    throw new Error(`Missing CSS rule for ${selector}`);
+  }
+  return match[1];
 }
 
 function installSettingsTagFetch() {
@@ -153,6 +163,59 @@ describe("Settings page", () => {
     ].filter(Boolean);
 
     expect(missingPrimitiveTargets).toEqual([]);
+  });
+
+  test("keeps premium settings tree, form, table, dialog, and motion CSS contracts", () => {
+    const styles = readWebSource("src/app/styles.css");
+    const shellRule = cssRule(styles, ".settings-route,\n.settings-layout,\n.settings-content-panel");
+    const navRule = cssRule(styles, ".settings-nav-shell,\n.settings-tree-panel,\n.settings-content-panel,\n.settings-section-panel");
+    const treeMotionRule = cssRule(styles, ".settings-tree-item", "--motion-fast");
+    const controlMotionRule = cssRule(
+      styles,
+      ".settings-save-button,\n.settings-primary-button,\n.settings-secondary-button,\n.settings-danger-button,\n.settings-icon-button,\n.settings-menu button,\n.settings-pending-group-button,\n.settings-project-row,\n.settings-checkbox-row,\n.settings-table-pagination select",
+      "--motion-fast",
+    );
+    const fieldRule = cssRule(styles, ".settings-field input,\n.settings-table-input,\n.settings-select-control");
+    const tableRule = cssRule(styles, ".settings-native-table th,\n.settings-native-table td");
+    const amountRule = cssRule(styles, ".settings-table-code,\n.settings-table-input--code,\n.settings-table-amount");
+    const tagRule = cssRule(styles, ".settings-source-tag,\n.settings-selected-tag,\n.oa-manual-import__metrics span");
+    const projectRule = cssRule(styles, ".settings-project-toolbar,\n.settings-project-column,\n.settings-bank-mapping-row,\n.settings-data-reset-card,\n.settings-pending-tag-panel,\n.settings-checkbox-list");
+    const oaTableRule = cssRule(styles, ".oa-manual-import__table");
+    const selectedRule = cssRule(styles, ".settings-native-table-row--selected > td,\n.settings-tree-item[aria-selected=\"true\"],\n.settings-tree-item--selected");
+    const dangerRule = cssRule(styles, ".settings-danger-button:hover:not(:disabled)");
+
+    expect(shellRule).toContain("var(--fp-surface)");
+    expect(navRule).toContain("var(--fp-border)");
+    expect(navRule).toContain("var(--fp-radius-sm)");
+    expect(treeMotionRule).toContain("--motion-fast");
+    expect(treeMotionRule).toContain("--ease-out-quart");
+    expect(controlMotionRule).toContain("--motion-fast");
+    expect(controlMotionRule).toContain("--ease-out-quart");
+    expect(fieldRule).toContain("var(--fp-border)");
+    expect(fieldRule).toContain("--motion-fast");
+    expect(tableRule).toContain("height: 36px");
+    expect(tableRule).toContain("--motion-fast");
+    expect(amountRule).toContain("font-variant-numeric: tabular-nums");
+    expect(amountRule).toContain("text-align: right");
+    expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
+    expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
+    expect(projectRule).toContain("var(--fp-surface)");
+    expect(projectRule).toContain("var(--fp-border)");
+    expect(oaTableRule).toContain("min-width: 1500px");
+    expect(oaTableRule).toContain("table-layout: fixed");
+    expect(selectedRule).toContain("var(--fp-primary-soft)");
+    expect(dangerRule).toContain("color-mix(in srgb, var(--fp-danger)");
+    expect([
+      shellRule,
+      navRule,
+      treeMotionRule,
+      controlMotionRule,
+      fieldRule,
+      tableRule,
+      projectRule,
+      selectedRule,
+      dangerRule,
+    ].join("\n")).not.toMatch(/#102a43|#486581|#e7edf5|#fbfdff|#ffffff|#f0fff4|#fff5f5|#9f1d1d|#0f4c81|180ms ease-out/i);
   });
 
   test("renders as a tree-and-panel page without an extra page header title", async () => {
