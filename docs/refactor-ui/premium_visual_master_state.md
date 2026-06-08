@@ -58,35 +58,29 @@ Last updated: 2026-06-08
 | 26 | `PV-026-settings-discovery` | verified | `/settings` premium visual discovery。 |
 | 27 | `PV-027-settings-premium-visual` | verified | 设置 premium visual slice。 |
 | 28 | `PV-028-app-wide-smoothness-audit` | verified | 全 app interaction smoothness audit。 |
-| 29 | `MG-PV-final-premium-visual-closeout` | pending | 全量验证、smoke、commit/push closeout。 |
+| 29 | `MG-PV-final-premium-visual-closeout` | verified | 全量验证、smoke、commit/push closeout。 |
 
 ## Current Slice
 
-`MG-PV-final-premium-visual-closeout`
+`complete`
 
 ### Scope
 
 - `docs/refactor-ui/premium_visual_master_state.md`
 - `docs/refactor-ui/premium_visual_prompt.md`
-- `docs/refactor-ui/interaction_smoothness.md`
 - `docs/refactor-ui/modules/phase_8_full_verification.md`
-- `web/src/app/styles.css`
-- `web/src/pages/*`
-- `web/src/components/*`
-- `web/src/test/*`
 
 ### Verification
 
-Required for final MG:
+Final MG result:
 
-- `cd web && npx vitest run BankDetailsPage.test.tsx TaxOffsetPage.test.tsx AppHealthOperationsPage.test.tsx ImportCenterPage.test.tsx CostStatisticsPage.test.tsx PendingInvoicesPage.test.tsx InputInvoiceUsagePage.test.tsx OaPendingPaymentsPage.test.tsx OutputInvoiceCollectionsPage.test.tsx NoOaBankBatchPage.test.tsx BatchAccountingPage.test.tsx TurnoverLedgerPage.test.tsx EtcTicketManagementPage.test.tsx SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
-- `cd web && npx tsc -b --pretty false`
-- `cd web && npm run build`
-- `git diff --check`
-- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
-- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- `git status --short --branch`
-- Browser smoke representative pages: `/bank-details`, `/etc-tickets`, `/settings`.
+- Targeted premium page tests passed: 17 files, 249 tests.
+- Type check passed.
+- Production build passed.
+- `git diff --check` passed.
+- Removed page-cache/snapshot guard passed.
+- Non-workbench runtime MUI/Emotion guard passed.
+- Browser smoke covered Bank Details, Settings, and ETC page render/overflow; full ETC interaction smoke is recorded in PV-025.
 
 ## Execution Rules
 
@@ -142,3 +136,4 @@ Each implementation slice must:
 | 2026-06-08 | `PV-026-settings-discovery` | `8094685e` | pushed to `origin/main` | Settings premium discovery verified; PV-027 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-027-settings-premium-visual` | `4f708c0c` | pushed to `origin/main` | Settings premium visual polish verified; PV-028 prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
 | 2026-06-08 | `PV-028-app-wide-smoothness-audit` | `7ae907ff` | pushed to `origin/main` | App-wide smoothness audit verified; final MG prompt generated in `docs/refactor-ui/premium_visual_prompt.md`. |
+| 2026-06-08 | `MG-PV-final-premium-visual-closeout` | current commit | pending push | Final premium visual MG verified. |

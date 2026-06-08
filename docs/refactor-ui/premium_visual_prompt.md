@@ -1628,7 +1628,11 @@ Notes:
 
 - Code tests were not run for PV-028 because this slice only documents audit findings and the final MG prompt.
 
-## Next Prompt Draft
+## Completed Prompt: MG-PV-final-premium-visual-closeout
+
+### Status
+
+verified
 
 `MG-PV-final-premium-visual-closeout`
 
@@ -1654,3 +1658,38 @@ MG 要求：
 - Update `docs/refactor-ui/premium_visual_master_state.md` and `docs/refactor-ui/premium_visual_prompt.md`, mark final MG verified and record exact commit/push state.
 - Use exact `git add` only. Do not use `git add .` or `git add -A`.
 - Commit and push to `origin/main`.
+
+### Execution Notes
+
+- Ran final cumulative verification on `main` synchronized with `origin/main`.
+- No runtime code changed during MG.
+- Updated final verification records in `docs/refactor-ui/modules/phase_8_full_verification.md`.
+- Marked `premium_visual_master_state.md` and this prompt log as final verified.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run BankDetailsPage.test.tsx TaxOffsetPage.test.tsx AppHealthOperationsPage.test.tsx ImportCenterPage.test.tsx CostStatisticsPage.test.tsx PendingInvoicesPage.test.tsx InputInvoiceUsagePage.test.tsx OaPendingPaymentsPage.test.tsx OutputInvoiceCollectionsPage.test.tsx NoOaBankBatchPage.test.tsx BatchAccountingPage.test.tsx TurnoverLedgerPage.test.tsx EtcTicketManagementPage.test.tsx SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/|@emotion/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+
+Browser smoke:
+
+- `/bank-details`: primary premium table surface and overflow 0.
+- `/settings`: tree, data reset dialog, OA manual import table and overflow 0.
+- `/etc-tickets`: page render and overflow 0 in final MG minimal mock; full list/upload/table/dialog browser smoke was already verified in PV-025.
+
+Screenshots:
+
+- `/tmp/mg-bank-details-smoke.png`
+- `/tmp/mg-etc-tickets-smoke.png`
+- `/tmp/mg-settings-smoke.png`
+- `/tmp/etc-tickets-premium-smoke.png`
+
+## Closeout
+
+No next prompt. Premium visual master goal is complete.

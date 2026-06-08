@@ -130,3 +130,63 @@ The final merge gate should not expand into another visual redesign. It should v
 ## MG-PV-final-premium-visual-closeout Prompt Draft
 
 Next unique prompt: `MG-PV-final-premium-visual-closeout`.
+
+## MG-PV-final-premium-visual-closeout Execution
+
+- Prompt ID: `MG-PV-final-premium-visual-closeout`
+- Status: `verified`
+- Runtime implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Scope Check
+
+- Branch: `main`.
+- `main` was synchronized with `origin/main` before MG execution.
+- Working tree was clean before MG verification.
+- MG changed documentation state only after verification.
+
+### Verification
+
+Passed:
+
+- `cd web && npx vitest run BankDetailsPage.test.tsx TaxOffsetPage.test.tsx AppHealthOperationsPage.test.tsx ImportCenterPage.test.tsx CostStatisticsPage.test.tsx PendingInvoicesPage.test.tsx InputInvoiceUsagePage.test.tsx OaPendingPaymentsPage.test.tsx OutputInvoiceCollectionsPage.test.tsx NoOaBankBatchPage.test.tsx BatchAccountingPage.test.tsx TurnoverLedgerPage.test.tsx EtcTicketManagementPage.test.tsx SettingsPage.test.tsx SettingsOaManualSearchImportTable.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+  - Result: 17 test files, 249 tests passed.
+- `cd web && npx tsc -b --pretty false`: passed.
+- `cd web && npm run build`: passed.
+- `git diff --check`: passed.
+- Removed page-cache/snapshot guard grep: passed.
+- Non-workbench runtime MUI/Emotion grep: passed.
+
+Known warnings observed during MG:
+
+- React Router v7 future-flag warnings in tests.
+- Node localstorage-file warning in the test environment.
+- HeroUI/Tailwind generated selector minifier warnings during build.
+
+### Browser Smoke
+
+Preview target: `http://127.0.0.1:4187`.
+
+- `/bank-details`: passed; verified primary premium table surface and no top-level horizontal overflow.
+  - Result: 1 table, overflow 0.
+  - Screenshot: `/tmp/mg-bank-details-smoke.png`.
+- `/settings`: passed; verified tree navigation, data reset confirmation dialog, OA manual import table and no top-level horizontal overflow.
+  - Dialog path: 7 tree items, 1 dialog, overflow 0.
+  - Table path: 1 table, overflow 0.
+  - Screenshot: `/tmp/mg-settings-smoke.png`.
+- `/etc-tickets`: partially covered in final MG smoke with minimal API mock.
+  - Final MG verified page render and no top-level horizontal overflow.
+  - Result: overflow 0.
+  - Screenshot: `/tmp/mg-etc-tickets-smoke.png`.
+  - Full ETC list/upload/table/dialog browser path was already verified in `PV-025-etc-tickets-premium-visual` with screenshot `/tmp/etc-tickets-premium-smoke.png`.
+
+### Closeout Result
+
+- Premium visual slices are complete through Settings.
+- App-wide smoothness audit is complete.
+- Final MG passed with the ETC final-smoke limitation documented above and covered by the PV-025 ETC full browser smoke.
+- Remaining non-blocking technical debt:
+  - Bundle/CSS size warnings.
+  - HeroUI/Tailwind generated selector minifier warnings.
+  - Future shell-specific motion token cleanup for global status tooltip and status indicator.
