@@ -49,7 +49,7 @@ Last updated: 2026-06-08
 | 17 | `PV-017-output-invoice-collections-premium-visual` | verified | 销项发票收款 premium visual slice。 |
 | 18 | `PV-018-no-oa-bank-batches-discovery` | verified | `/no-oa-bank-batches` discovery。 |
 | 19 | `PV-019-no-oa-bank-batches-premium-visual` | verified | 免 OA 流水批量处理 premium visual slice。 |
-| 20 | `PV-020-batch-accounting-discovery` | pending | `/batch-accounting` discovery。 |
+| 20 | `PV-020-batch-accounting-discovery` | verified | `/batch-accounting` discovery。 |
 | 21 | `PV-021-batch-accounting-premium-visual` | pending | 批量账务 premium visual slice。 |
 | 22 | `PV-022-turnover-ledger-discovery` | pending | `/turnover-ledger` discovery。 |
 | 23 | `PV-023-turnover-ledger-premium-visual` | pending | 外部往来款管理 premium visual slice。 |
@@ -62,7 +62,7 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-020-batch-accounting-discovery`
+`PV-021-batch-accounting-premium-visual`
 
 ### Scope
 
@@ -70,18 +70,20 @@ Last updated: 2026-06-08
 - `docs/refactor-ui/premium_visual_prompt.md`
 - `docs/refactor-ui/modules/phase_6_batch_accounting.md`
 - `web/src/pages/BatchAccountingPage.tsx`
-- `web/src/features/batchAccounting/api.ts`
-- `web/src/features/batchAccounting/types.ts`
+- `web/src/app/styles.css`
 - `web/src/test/BatchAccountingPage.test.tsx`
 
 ### Verification
 
-Required for PV-020:
+Required for PV-021:
 
+- `cd web && npx vitest run BatchAccountingPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- `git status --short --branch`
+- Browser smoke `/batch-accounting`: heading, filter region, bank list, OA table, search clear, submit disabled/enabled path or mismatch note path, submitted bucket, withdraw dialog, and no top-level horizontal overflow.
 
 ## Execution Rules
 

@@ -1103,7 +1103,13 @@ Notes:
 - Playwright bundled browser was not installed in the local cache, so the smoke used system Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`.
 - `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-020-batch-accounting-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-020-batch-accounting-discovery`
 
@@ -1125,5 +1131,55 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_batch_accounting.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Added `PV-020 Premium Visual Discovery` to `docs/refactor-ui/modules/phase_6_batch_accounting.md`.
+- Confirmed `/batch-accounting` already migrated out of MUI in the earlier `P080-P084` work and currently uses `PageScaffold`, `StatePanel`, `AppDialog`, native controls, native table, native feedback and `batch-accounting-*` classes.
+- Identified the premium visual gap as density, alignment, tag stability and motion-token consistency, not component-platform migration.
+- Preserved route/sidebar, heading, refresh, status switch, year/search filters, bank region/list, amount summary, mismatch note/warning, OA table, submit, withdraw dialog, feedback and loading/empty/error states as mandatory PV-021 constraints.
+- No runtime code or tests changed because PV-020 is discovery-only.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-020 because this slice only documents discovery and the next prompt.
+
+## Next Prompt Draft
+
+`PV-021-batch-accounting-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_batch_accounting.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/BatchAccountingPage.tsx`、`web/src/app/styles.css`、`web/src/test/BatchAccountingPage.test.tsx` 和当前 `git status`。本切片只做 `/batch-accounting` premium visual implementation，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+实现要求：
+
+- 保留所有当前功能和用户可见入口：route/sidebar、page heading、`刷新`、status segmented controls、`流水年份`、`OA年份`、`搜索OA内容`、`清空搜索`、`批量账务流水` region、bank row list、amount summary、`差额说明`、`查看金额不一致差额说明`、`可关联OA项`/`已关联OA项` table、OA row checkbox、`关联OA项与流水`、withdraw dialog、feedback/toast、loading/empty/error states。
+- 不做大 card 设计，不制造大留白；bank rows 保持 compact selectable operational list，OA/relation area 保持 dense table，不改成 dashboard cards。
+- Bank list amount 和 OA amount 继续右对齐并保持 tabular nums；direction/account/status/summary tags 高度稳定；selected bank row 和 selected OA row 不改变行高。
+- Long project/reason text 继续使用 explicit expand/collapse affordance；不得把长文本撑乱表格或影响无关行。
+- 使用 `docs/refactor-ui/interaction_smoothness.md` 的 motion tokens，替换 `batch-accounting-*` 中固定 `120ms ease` 的 hover/focus/press transition；不得增加 page transition 或路由阻塞动画。
+- Tighten bank panel、bank row、OA panel、OA toolbar、summary tags、table wrap、dialog field and feedback surfaces，使其接近银行明细/no-OA premium direction，但不改变信息层级或 workflow shape。
+- 将 `batch-accounting-tag` 和 `batch-accounting-summary-tag` 标准化到 `--fp-tag-height-table`、`--fp-tag-radius-table` 和 Ledger Calm token-based `color-mix(...)` treatment。
+- 增加或更新 `BatchAccountingPage.test.tsx` 的 CSS contract：锁定 compact panel/table treatment、motion-token usage、amount alignment、stable tags、selected row treatment and token colors。
+
+验证：
+
+- `cd web && npx vitest run BatchAccountingPage.test.tsx TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 浏览器 smoke `/batch-accounting`：确认 heading、filter region、bank list、OA table、search clear、submit disabled/enabled path or mismatch note path、submitted bucket, withdraw dialog and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_batch_accounting.md`，精确 staging，commit 并 push 到 `origin/main`。

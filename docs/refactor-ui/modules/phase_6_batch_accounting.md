@@ -83,6 +83,65 @@
 - Search normalizes whitespace and case across multiple fields; visual refactor must not alter filtering logic.
 - Mutation completion emits workbench relation update events; UI migration must not move or suppress this side effect.
 
+## PV-020 Premium Visual Discovery
+
+- Prompt ID: `PV-020-batch-accounting-discovery`
+- Type: premium visual discovery
+- Status: verified
+- Scope: `/batch-accounting` only.
+- Runtime implementation changed: no.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Current Implementation Status On `main`
+
+- The page already migrated out of MUI in the earlier `P080-P084` sequence.
+- Runtime uses `PageScaffold`, `StatePanel`, `AppDialog`, native buttons/inputs/table/checkboxes and `batch-accounting-*` project CSS classes.
+- The current premium gap is not component-platform migration; it is visual density, table/list alignment, tag stability, and motion-token consistency.
+- Existing page tests include a source-level project primitive contract and 12 behavior tests for controls, loading/empty/error, selection, notes, submit, search, submitted bucket, withdraw and sidebar entry.
+
+### User-visible Entrypoint Matrix
+
+| Area | Preserve exactly |
+| --- | --- |
+| Route/sidebar | `/batch-accounting`, sidebar label `批量账务`, page heading `日常报销批量账务管理`. |
+| Header action | `刷新` reloads current bucket/year data and remains disabled while loading. |
+| Status switch | Region `批量账务筛选`; group `批量账务状态`; buttons `未提交 <count>` and `已提交 <count>` keep exclusive `aria-pressed` behavior. |
+| Filters | `流水年份`, `OA年份`, `搜索OA内容`, `清空搜索`; search still matches applicant, project, amount and reason. |
+| Bank region | Region `批量账务流水`; copy `对方户名精确匹配批量账务集中处理`; bank row accessible name includes amount, trade time, direction and account; selected row keeps `aria-pressed`. |
+| Amount summary | `银行流水金额`, `已选 OA <n> 项`, `已选 OA 金额`, `差额`, `金额不一致`, `差额说明`, and `查看金额不一致差额说明` remain in the OA panel toolbar area. |
+| OA/relation table | Table accessible name switches between `可关联OA项` and `已关联OA项`; unsubmitted bucket shows OA row checkboxes; submitted bucket is read-only and hides checkbox column. |
+| Submit | `关联OA项与流水` keeps disabled/enabled rules, selected row payload, mismatch note trim requirement, success feedback and workbench relation event. |
+| Withdraw | `撤回关联` opens dialog `撤回关联`; `撤回原因`, `取消`, `确认撤回`, disabled-without-reason and payload semantics remain. |
+| Feedback/status | Success/error feedback remains visible, closable and auto-hides after the existing timeout. |
+| Empty/loading/error | `正在加载流水`, `当前年份暂无批量账务流水`, `暂无可关联 OA`, `暂无已关联 OA`, and `批量账务数据加载失败` remain in equivalent positions. |
+
+### Table And List Content Roles
+
+| Surface | Premium layout requirement |
+| --- | --- |
+| Bank list | Keep compact selectable rows, not large cards. The amount stays right/tabular and account/date/direction tags keep stable height. Selected state must not change row height. |
+| Amount summary | Summary tags should align as a compact control strip; warning/success colors use Ledger Calm tokens and do not dominate the toolbar. |
+| OA table | Keep dense table shape. Applicant/date, project, amount and reason columns must remain scan-friendly; amount is right-aligned with tabular nums. |
+| Expandable text | Long project/reason text stays clamped with explicit expand/collapse affordance; expansion must not affect unrelated rows. |
+| Dialog/feedback | Withdraw dialog remains small and focused; feedback remains a lightweight toast-like surface. |
+
+### PV-021 Premium Opportunities
+
+- Replace fixed-duration `120ms ease` transitions in `batch-accounting-*` styles with `--motion-fast` / `--ease-out-quart`.
+- Tighten bank panel, bank row, OA panel, OA toolbar, summary tags, table wrap and feedback surfaces while keeping the current two-column information architecture.
+- Standardize `batch-accounting-tag` and `batch-accounting-summary-tag` on `--fp-tag-height-table` and `--fp-tag-radius-table`.
+- Add active/press feedback to refresh/status/search-clear/bank-row/OA checkbox/expand-toggle/submit/withdraw/dialog/feedback controls without adding route/page transition delay.
+- Improve selected bank row and selected OA row treatments with token-based `color-mix(...)` and inset indicators that do not change dimensions.
+- Add CSS contract coverage in `BatchAccountingPage.test.tsx` for compact panel/table treatment, motion-token usage, amount alignment, stable tags and token colors.
+
+### Non-scope For PV-021
+
+- Do not change `fetchBatchAccounting`, `submitBatchAccounting`, `withdrawBatchAccounting`, request params, mutation payloads, response mapping, domain event name/payload, selection caches, search normalization, note reset behavior or workbench internals.
+- Do not change the two-column page structure, bank row selection semantics, OA table accessible names, submit dialog shape, withdraw dialog shape or feedback text.
+- Do not convert the bank list or OA table into dashboard cards.
+
 ## P080 Prompt Draft
 
 ```text
