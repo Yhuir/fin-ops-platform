@@ -228,14 +228,13 @@ class EtcOADetectionService:
             form_id=self._first_text(payload, "form_id", "formId") or clean_string(detail_fields.get("表单ID")),
             amount=self._decimal(payload.get("amount")),
             invoice_count=self._invoice_count(payload, detail_fields),
-            owner_user_id=self._first_text(payload, "owner_user_id", "applicant_user_id", "user_id", "applicant"),
+            owner_user_id=self._first_text(payload, "owner_user_id", "applicant_user_id", "user_id"),
             owner_org_id=self._first_text(
                 payload,
                 "owner_org_id",
                 "org_id",
                 "organization_id",
                 "department_id",
-                "organization",
             ),
             created_at=self._candidate_created_at(payload),
             process_status=process_status,
@@ -343,11 +342,15 @@ class EtcOADetectionService:
     def _organization_matches(context: EtcOADetectionContext, candidate: _PreparedCandidate) -> bool:
         expected_user = clean_string(context.owner_user_id)
         expected_org = clean_string(context.owner_org_id)
-        if expected_user and candidate.owner_user_id == expected_user:
+        candidate_user = clean_string(candidate.owner_user_id)
+        candidate_org = clean_string(candidate.owner_org_id)
+        if expected_user and candidate_user == expected_user:
             return True
-        if expected_org and candidate.owner_org_id == expected_org:
+        if expected_org and candidate_org == expected_org:
             return True
-        return not expected_user and not expected_org
+        if (expected_user or expected_org) and (candidate_user or candidate_org):
+            return False
+        return True
 
     def _within_detection_window(self, context: EtcOADetectionContext, candidate: _PreparedCandidate) -> bool:
         if candidate.marker in {"business_batch_id", "external_etc_batch_id"}:

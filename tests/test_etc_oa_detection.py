@@ -177,6 +177,31 @@ class EtcOADetectionServiceTests(unittest.TestCase):
         self.assertEqual(result.reason, "invoice_count_mismatch")
         self.assertEqual(result.candidates[0]["invoiceCount"], 3)
 
+    def test_missing_candidate_owner_identity_does_not_reject_stable_marker(self) -> None:
+        result = EtcOADetectionService().detect(
+            detection_context(),
+            [
+                candidate(
+                    applicant="杨丽萍",
+                    applicant_user_id="",
+                    owner_org_id="",
+                    organization="",
+                )
+            ],
+        )
+
+        self.assertEqual(result.status, "detected")
+        self.assertEqual(result.reason, "unique_candidate_detected")
+
+    def test_explicit_candidate_owner_identity_mismatch_is_conflict(self) -> None:
+        result = EtcOADetectionService().detect(
+            detection_context(),
+            [candidate(applicant_user_id="other-user", owner_org_id="other-org")],
+        )
+
+        self.assertEqual(result.status, "conflict")
+        self.assertEqual(result.reason, "organization_mismatch")
+
     def test_unavailable_exception_becomes_unavailable_result(self) -> None:
         def failing_query(_context: EtcOADetectionContext) -> list[dict[str, object]]:
             raise TimeoutError("mongo timeout")
