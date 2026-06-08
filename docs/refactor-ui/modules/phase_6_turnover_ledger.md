@@ -50,6 +50,64 @@
 - Group row expansion-like density uses many nested text fragments; long counterparty names, category paths and remarks must truncate or wrap predictably.
 - Export preview table is a secondary table but still needs the same table layout system: sticky header, readable empty/loading rows and tabular amount cells.
 
+## PV-022 Premium Visual Discovery
+
+- Prompt ID: `PV-022-turnover-ledger-discovery`
+- Type: premium visual discovery
+- Status: verified
+- Scope: `/turnover-ledger` only.
+- Runtime implementation changed: no.
+- Test implementation changed: no.
+- Backend/API/read model/worker changed: no.
+- Workbench internals changed: no.
+
+### Current Implementation Status On `main`
+
+- The page and its turnover ledger components already migrated out of MUI in the earlier `P086-P091` sequence.
+- Runtime uses `PageScaffold`, `AppDrawer`, `AppDialog`, native controls, native tables and `turnover-ledger-*` project CSS classes.
+- Current source-level grep shows no direct MUI/runtime legacy surfaces in `TurnoverLedgerPage.tsx` or `web/src/components/turnoverLedger/*`.
+- The premium gap is now visual density, sticky table rhythm, tag sizing, selected-row treatment, drawer/dialog polish and motion-token consistency.
+
+### User-visible Entrypoint Matrix
+
+| Area | Preserve exactly |
+| --- | --- |
+| Route/sidebar | `/turnover-ledger`, sidebar label `外部往来款管理`, page heading and shell actions remain. |
+| Page actions | `外部往来款标签设置` opens the tag right drawer; `下载表格` opens export dialog. |
+| Family tabs | `全部`, `个人往来`, `公司往来`, `银行往来`, `业务往来`; selected tab state and closure selection reset remain. |
+| Summary metrics | Four metric blocks remain above the table with family breakdown rows and tabular amounts. |
+| Grouped table | Table accessible name `往来款左右双栏台账`; sticky left group summary, flow rows, amount tones, remarks, edit actions, loading and empty rows remain. |
+| Closure selection | Flow checkbox labels, cross-group selection guard, delta test id `turnover-closure-delta`, cancel and confirm behavior remain. |
+| Tag drawer | Right drawer remains right drawer; tag checkbox labels, selected state, inactive warning, `全选`, `清空`, `保存`, disabled rules and save payload remain. |
+| Closure drawer | Right drawer remains right drawer; selected two-flow preview, income/expense totals, delta, cancel and confirm disabled rules remain. |
+| Extra drawer | Right drawer `编辑流水补充信息`; relation detail loading/error, overview, form labels, dirty/save disabled rule, confirm/withdraw actions remain. |
+| Export dialog | Modal dialog `下载往来款台账`; range select, preview table `往来款导出预览`, summary, loading/empty/error, `取消` and `确认下载` remain. |
+| Feedback/status | Read-only/stale notices and success/error feedback remain visible and dismissible/autohide-equivalent. |
+
+### Table And Layout Roles
+
+| Surface | Premium layout requirement |
+| --- | --- |
+| Summary metrics | Compact metric strip, no large dashboard cards; amounts use tabular nums and family breakdown text stays aligned. |
+| Grouped table | Preserve left/right alignment. Sticky group column and right rows must keep consistent row rhythm; hover/selected states must not shift layout. |
+| Amount cells | Income/expense/neutral amount stacks right-align; direction tags and account/category chips keep stable height. |
+| Drawers | Tag, closure and extra drawers remain right drawers with compact sections and tokenized controls. |
+| Export dialog | Preview remains dense table with sticky/readable headers, right-aligned money columns and scroll containment. |
+
+### PV-023 Premium Opportunities
+
+- Replace fixed-duration turnover ledger transitions with `--motion-fast` / `--ease-out-quart` where still present.
+- Tighten summary cards, tabs, grouped table cells, chip rows, drawer sections, export table and feedback surfaces while preserving the existing information architecture.
+- Standardize `turnover-ledger-chip`, direction tags, amount stacks and export money cells on the table layout system.
+- Add selected/hover/press feedback for tabs, table rows, checkboxes, edit/expand controls, drawer actions, export dialog actions and feedback close.
+- Add CSS contract coverage in `TurnoverLedgerPage.test.tsx` for compact summary/table/drawer/dialog treatment, motion-token usage, amount alignment, stable tags and no layout-shift selected states.
+
+### Non-scope For PV-023
+
+- Do not change turnover ledger API clients, request params, response mapping, domain event names/payloads, closure logic, export download logic, relation detail loading, permission logic, backend/read model/worker or workbench internals.
+- Do not change the left/right grouped table architecture, right drawer shapes, export dialog shape, accessible names, checkbox labels or feedback messages.
+- Do not convert grouped table rows into cards or dashboard panels.
+
 ## Existing Tests
 
 - `web/src/test/TurnoverLedgerPage.test.tsx` covers page rendering, family tabs, table interaction, closure flow, extra drawer, export dialog and feedback at behavior level.

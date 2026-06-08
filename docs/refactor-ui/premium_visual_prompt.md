@@ -1220,7 +1220,13 @@ Notes:
 
 - `npm run build` passed with existing HeroUI/Tailwind CSS minifier warnings.
 
-## Next Prompt Draft
+## Completed Prompt: PV-022-turnover-ledger-discovery
+
+### Status
+
+verified
+
+### Prompt
 
 `PV-022-turnover-ledger-discovery`
 
@@ -1242,5 +1248,55 @@ Notes:
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
 - `git status --short --branch`
+
+完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_turnover_ledger.md`，精确 staging，commit 并 push 到 `origin/main`。
+
+### Execution Notes
+
+- Added `PV-022 Premium Visual Discovery` to `docs/refactor-ui/modules/phase_6_turnover_ledger.md`.
+- Confirmed `/turnover-ledger` and `web/src/components/turnoverLedger/*` already migrated out of MUI in the earlier `P086-P091` work.
+- Identified the premium visual gap as sticky table rhythm, compact summary/table/drawer/export surfaces, amount/tag stability and motion-token consistency.
+- Preserved page actions, family tabs, summary metrics, grouped table, closure selection/drawer, tag drawer, extra drawer, export dialog, feedback/status and permission behavior as mandatory PV-023 constraints.
+- No runtime code or tests changed because PV-022 is discovery-only.
+
+### Verification
+
+Passed:
+
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- `git status --short --branch`
+
+Notes:
+
+- Code tests were not run for PV-022 because this slice only documents discovery and the next prompt.
+
+## Next Prompt Draft
+
+`PV-023-turnover-ledger-premium-visual`
+
+读取 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md`、`docs/refactor-ui/modules/phase_6_turnover_ledger.md`、`DESIGN.md`、`docs/refactor-ui/table_layout_system.md`、`docs/refactor-ui/interaction_smoothness.md`、`web/src/pages/TurnoverLedgerPage.tsx`、`web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx`、`web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx`、`web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx`、`web/src/app/styles.css`、`web/src/test/TurnoverLedgerPage.test.tsx` 和当前 `git status`。本切片只做 `/turnover-ledger` premium visual implementation，不改后端、API contract、read model、worker、权限语义、业务状态机或关联台内部工作区。
+
+实现要求：
+
+- 保留所有当前功能和用户可见入口：page actions、family tabs、summary metrics、`往来款左右双栏台账` grouped table、flow selection、tag right drawer、closure right drawer、extra right drawer、export dialog、read-only/stale notices、feedback/toast、loading/empty/error states。
+- 不做大 card 设计，不制造大留白；左右双栏 grouped table 仍是主体验，不改成卡片列表或 dashboard。
+- Sticky left group column 和右侧 flow rows 必须保持对齐；hover/selected/expanded/checked states 不得改变行高或列宽。
+- 金额列继续右对齐并保持 tabular nums；income/expense/neutral tones restrained；direction/account/category/status chips 高度稳定。
+- Export preview table 继续是 dense table，money columns right-align，表头可读，scroll containment 不造成顶层横向溢出。
+- 使用 `docs/refactor-ui/interaction_smoothness.md` 的 motion tokens，替换 turnover ledger 相关固定 transition；不得增加 page transition 或路由阻塞动画。
+- Tighten summary cards、tabs、grouped table cells、chip rows、drawer sections、export table、dialog controls and feedback surfaces，使其接近银行明细/no-OA/batch-accounting premium direction，但不改变信息层级或 workflow shape。
+- 增加或更新 `TurnoverLedgerPage.test.tsx` 的 CSS contract：锁定 compact summary/table/drawer/dialog treatment、motion-token usage、amount alignment、stable chips、selected row treatment and no layout-shift rules。
+
+验证：
+
+- `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
+- `git diff --check`
+- `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
+- `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
+- 浏览器 smoke `/turnover-ledger`：确认 heading/actions、family tabs、summary metrics、grouped table、row selection or edit drawer, export dialog, feedback path or status notice and no top-level horizontal overflow。
 
 完成后更新 `docs/refactor-ui/premium_visual_master_state.md`、`docs/refactor-ui/premium_visual_prompt.md` 和 `docs/refactor-ui/modules/phase_6_turnover_ledger.md`，精确 staging，commit 并 push 到 `origin/main`。

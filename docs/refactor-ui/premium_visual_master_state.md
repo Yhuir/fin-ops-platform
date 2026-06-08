@@ -51,7 +51,7 @@ Last updated: 2026-06-08
 | 19 | `PV-019-no-oa-bank-batches-premium-visual` | verified | 免 OA 流水批量处理 premium visual slice。 |
 | 20 | `PV-020-batch-accounting-discovery` | verified | `/batch-accounting` discovery。 |
 | 21 | `PV-021-batch-accounting-premium-visual` | verified | 批量账务 premium visual slice。 |
-| 22 | `PV-022-turnover-ledger-discovery` | pending | `/turnover-ledger` discovery。 |
+| 22 | `PV-022-turnover-ledger-discovery` | verified | `/turnover-ledger` discovery。 |
 | 23 | `PV-023-turnover-ledger-premium-visual` | pending | 外部往来款管理 premium visual slice。 |
 | 24 | `PV-024-etc-tickets-discovery` | pending | `/etc-tickets` discovery。 |
 | 25 | `PV-025-etc-tickets-premium-visual` | pending | ETC 票据管理 premium visual slice。 |
@@ -62,7 +62,7 @@ Last updated: 2026-06-08
 
 ## Current Slice
 
-`PV-022-turnover-ledger-discovery`
+`PV-023-turnover-ledger-premium-visual`
 
 ### Scope
 
@@ -70,17 +70,23 @@ Last updated: 2026-06-08
 - `docs/refactor-ui/premium_visual_prompt.md`
 - `docs/refactor-ui/modules/phase_6_turnover_ledger.md`
 - `web/src/pages/TurnoverLedgerPage.tsx`
-- `web/src/components/turnoverLedger/*`
-- `web/src/test/*TurnoverLedger*`
+- `web/src/components/turnoverLedger/TurnoverLedgerGroupedTable.tsx`
+- `web/src/components/turnoverLedger/TurnoverLedgerExtraDrawer.tsx`
+- `web/src/components/turnoverLedger/TurnoverLedgerExportDialog.tsx`
+- `web/src/app/styles.css`
+- `web/src/test/TurnoverLedgerPage.test.tsx`
 
 ### Verification
 
-Required for PV-022:
+Required for PV-023:
 
+- `cd web && npx vitest run TurnoverLedgerPage.test.tsx TurnoverLedgerApi.test.ts TableAlignmentStyles.test.ts DesignTokens.test.ts`
+- `cd web && npx tsc -b --pretty false`
+- `cd web && npm run build`
 - `git diff --check`
 - `if rg -n 'PageKeepAliveHost|keepAliveMode|PageSessionSnapshot|usePageSessionSnapshot|usePageScrollSession|pageSessionSnapshot|stateSnapshotReady' web/src docs/dev docs/app-architecture docs/refactor-ui/modules; then exit 1; else exit 0; fi`
 - `if rg -n "(@mui/material|@mui/icons-material|@mui/x-|from ['\"]@mui/)" web/src --glob '!components/workbench/**' --glob '!**/test/**'; then exit 1; else exit 0; fi`
-- `git status --short --branch`
+- Browser smoke `/turnover-ledger`: heading/actions, family tabs, summary metrics, grouped table, row selection or edit drawer, export dialog, feedback path or status notice, and no top-level horizontal overflow.
 
 ## Execution Rules
 
