@@ -65,7 +65,11 @@ class ObjectDedupDecisionService:
         return self._identity_policy
 
     def decide_invoice_import(self, normalized: dict[str, Any]) -> ObjectDedupDecision:
-        identity = self._identity_policy.identify_invoice_mapping(normalized)
+        identity = (
+            self._identity_policy.identify_etc_invoice_mapping(normalized)
+            if self._is_etc_invoice(normalized)
+            else self._identity_policy.identify_invoice_mapping(normalized)
+        )
         existing = self._find_invoice(identity)
         if identity.canonical_key and existing is not None:
             incoming_status = _text(normalized.get("invoice_status_from_source"))
@@ -177,6 +181,13 @@ class ObjectDedupDecisionService:
         if self._repository is None:
             return None
         return self._repository.find_bank_transaction_by_identity(canonical_key=identity.canonical_key)
+
+    @staticmethod
+    def _is_etc_invoice(normalized: dict[str, Any]) -> bool:
+        tags = {str(tag or "").strip().upper() for tag in list(normalized.get("tags") or [])}
+        invoice_source = str(normalized.get("invoice_source") or "").upper()
+        invoice_kind = str(normalized.get("invoice_kind") or "").upper()
+        return "ETC" in tags or "ETC" in invoice_source or "ETC" in invoice_kind
 
 
 def _text(value: Any) -> str | None:

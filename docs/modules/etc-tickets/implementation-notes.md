@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-09 - ETC canonical invoice弱指纹冲突修复
+
+- 目标：修复 ETC ZIP 导入显示失败，以及创建 OA 草稿时 OA 系统已成功创建/附件已上传但前端仍显示接口失败的问题。
+- 影响范围：`FinancialObjectIdentityPolicy.identify_etc_invoice_mapping`、`ObjectDedupDecisionService.decide_invoice_import`、ETC 发票同步到 canonical `app.invoices` 的去重语义。
+- 关键决策：ETC 发票存在强发票号 identity 时，canonical invoice 只使用该强 identity；普通“卖方 + 日期 + 金额”的弱 suspected fingerprint 只保留在审计字段，不写入 `data_fingerprint`，也不参与强 identity 未命中后的 fallback 合并。这样同一批内多张同卖方、同日、同金额但不同发票号的 ETC 发票不会被 `invoices_data_fingerprint_uidx` 误判为重复。
+- 文档影响：更新 ETC 模块测试矩阵；页面口径和 API shape 不变。
+- 测试覆盖：新增 `ImportNormalizationService` 回归，覆盖 ETC 发票号变化时不靠弱 fingerprint 合并旧发票，以及同卖方/同日/同金额/不同发票号的 ETC 发票可保留为两张 canonical invoice；历史 repair parsed seed 幂等用例恢复通过。
+- 验证命令：`pytest tests/test_import_service.py -q`；`pytest tests/test_etc_backend.py::EtcApiTests::test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle -q`；`pytest tests/test_etc_reconciliation_service.py tests/test_etc_backend.py tests/test_import_service.py -q`。
+- 未测风险：本次未执行真实生产写入；生产上已经存在的失败 background job 仍会保留失败记录，但部署后重新触发导入/创建草稿链路不应再因同类 weak fingerprint 唯一键冲突失败。
+
 ## 2026-06-09 - ETC durable导入恢复与OA草稿一致性修复
 
 - 目标：修复确认导入 ETC ZIP 后后台 job 成功写入业务批次，但 linked `etc_reconciliation_tasks` 被服务启动恢复回 `ready_for_import`，随后点击“创建草稿”抛出通用接口失败的问题。

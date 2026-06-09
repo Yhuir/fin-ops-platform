@@ -84,7 +84,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertIsNone(weak_identity.canonical_key)
         self.assertEqual(weak_identity.suspected_key, "suspected:云南省交通投资建设集团有限公司:云南溯源科技有限公司:2026-02-05:41.75")
 
-    def test_upsert_etc_invoice_reuses_existing_fingerprint_when_invoice_number_changed(self) -> None:
+    def test_upsert_etc_invoice_does_not_reuse_weak_fingerprint_when_invoice_number_changed(self) -> None:
         existing = Invoice(
             id="inv_existing_etc",
             invoice_type=InvoiceType.INPUT,
@@ -127,11 +127,42 @@ class ImportNormalizationServiceTests(unittest.TestCase):
 
         invoice = service.upsert_etc_invoice(etc_invoice)
 
-        self.assertEqual(invoice.id, "inv_existing_etc")
+        self.assertNotEqual(invoice.id, "inv_existing_etc")
+        self.assertEqual(invoice.source_unique_key, "NEW-ETC-NO")
+        self.assertIsNone(invoice.data_fingerprint)
         self.assertEqual(invoice.etc_invoice_id, "etc_invoice_new")
         self.assertEqual(invoice.etc_submission_batch_id, "etc_batch_0035")
         self.assertEqual(invoice.workbench_visibility, "hidden_after_etc_submission")
-        self.assertEqual(len(service.list_invoices()), 1)
+        self.assertEqual(len(service.list_invoices()), 2)
+
+    def test_upsert_etc_invoice_keeps_same_amount_same_day_invoices_distinct(self) -> None:
+        service = ImportNormalizationService()
+        base_fields = {
+            "issue_date": "2026-03-31",
+            "seller_name": "昆明新机场高速公路建设发展有限公司",
+            "seller_tax_no": "",
+            "buyer_name": "云南溯源科技有限公司",
+            "buyer_tax_no": "",
+            "total_amount": Decimal("9.50"),
+            "tax_amount": Decimal("0.27"),
+            "tax_rate": "3%",
+            "import_batch_id": "etc_import_batch_0012",
+            "current_batch_id": "etc_business_batch_0006",
+            "last_batch_id": "etc_business_batch_0006",
+            "status": "unsubmitted",
+        }
+        first = type("EtcInvoice", (), {"id": "etc_invoice_0442", "invoice_number": "26537911470300077680", **base_fields})()
+        second = type("EtcInvoice", (), {"id": "etc_invoice_0443", "invoice_number": "26537911470300077790", **base_fields})()
+
+        first_invoice = service.upsert_etc_invoice(first)
+        second_invoice = service.upsert_etc_invoice(second)
+
+        self.assertNotEqual(first_invoice.id, second_invoice.id)
+        self.assertEqual(first_invoice.source_unique_key, "26537911470300077680")
+        self.assertEqual(second_invoice.source_unique_key, "26537911470300077790")
+        self.assertIsNone(first_invoice.data_fingerprint)
+        self.assertIsNone(second_invoice.data_fingerprint)
+        self.assertEqual(len(service.list_invoices()), 2)
 
     def test_preview_output_invoice_classifies_rows_across_all_decision_types(self) -> None:
         preview = self.service.preview_import(

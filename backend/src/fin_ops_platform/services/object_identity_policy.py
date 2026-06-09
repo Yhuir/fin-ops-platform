@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 import json
@@ -269,12 +269,18 @@ class FinancialObjectIdentityPolicy:
         *,
         source_row_id: str | None = None,
     ) -> ObjectIdentity:
-        return self.identify_invoice_mapping(
+        identity = self.identify_invoice_mapping(
             values,
             source_kind="etc_invoice",
             source_row_id=source_row_id,
             object_type="etc_invoice",
         )
+        if not identity.canonical_key:
+            return identity
+        audit_fields = dict(identity.audit_fields)
+        if identity.suspected_key:
+            audit_fields["weak_suspected_key_suppressed"] = identity.suspected_key
+        return replace(identity, suspected_key=None, audit_fields=audit_fields)
 
     def identify_tax_certified_invoice_mapping(
         self,
