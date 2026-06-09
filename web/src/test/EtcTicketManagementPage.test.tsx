@@ -604,6 +604,53 @@ describe("ETC ticket management page", () => {
     });
   });
 
+  test("deletes a legacy submission batch row through the linked business batch", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      etcInvoiceStoreBatches: [{
+        id: "etc-submission-legacy-001",
+        business_batch_id: "etc-business-legacy-001",
+        business_status: "imported",
+        etc_batch_id: "ETC-2026-LEGACY",
+        external_batch_id: "ETC-2026-LEGACY",
+        external_etc_batch_id: "ETC-2026-LEGACY",
+        status: "unsubmitted",
+        source_type: "normal_oa_draft",
+        invoice_ids: ["etc-inv-001", "etc-inv-002"],
+        invoice_summary: { count: 37, amount: "1673.30" },
+        import_batch_ids: ["etc-import-legacy-001"],
+        submission_batch_id: "etc-submission-legacy-001",
+        confirmed_at: "2026-06-09T01:21:07+08:00",
+        linked_oa_row_id: null,
+        linked_oa_case_id: null,
+        linked_oa_applicant: null,
+        linked_oa_apply_date: null,
+        linked_oa_amount: null,
+        amount_delta: null,
+        note: "",
+        version: 14,
+      }],
+    });
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const row = await within(page).findByTestId("etc-batch-row-etc-business-legacy-001");
+    await user.click(within(row).getByRole("button", { name: "删除批次 ETC-2026-LEGACY" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, init]) =>
+        url === "/api/etc/business-batches/etc-business-legacy-001"
+        && (init as RequestInit | undefined)?.method === "DELETE",
+      )).toBe(true);
+    });
+    expect(fetchMock.mock.calls.some(([url, init]) =>
+      url === "/api/etc/batches/etc-submission-legacy-001"
+      && (init as RequestInit | undefined)?.method === "DELETE",
+    )).toBe(false);
+  });
+
   test("treats an already-deleted business batch as a successful delete and refreshes stale rows", async () => {
     const user = userEvent.setup();
     installMockApiFetch();

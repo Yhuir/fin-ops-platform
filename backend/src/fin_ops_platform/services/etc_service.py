@@ -740,6 +740,28 @@ class EtcService:
             raise EtcBusinessBatchNotFoundError(f"ETC business batch not found: {business_batch_id}")
         return self._copy_business_batch(batch)
 
+    def find_business_batch_by_linked_batch_id(self, batch_id: str) -> EtcBusinessBatch | None:
+        normalized_id = str(batch_id or "").strip()
+        if not normalized_id:
+            return None
+        with self._business_batch_lock:
+            for batch in self._business_batches.values():
+                self._ensure_business_batch_fields(batch)
+                if batch.status == EtcBusinessBatchStatus.DELETED.value:
+                    continue
+                linked_ids = {
+                    batch.business_batch_id,
+                    str(batch.submission_batch_id or "").strip(),
+                    str(batch.external_etc_batch_id or "").strip(),
+                    *[
+                        str(import_batch_id or "").strip()
+                        for import_batch_id in list(batch.import_batch_ids or [])
+                    ],
+                }
+                if normalized_id in {linked_id for linked_id in linked_ids if linked_id}:
+                    return self._copy_business_batch(batch)
+        return None
+
     def preview_business_batch_import_zips(
         self,
         business_batch_id: str,

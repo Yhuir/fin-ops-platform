@@ -3087,6 +3087,58 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual({invoice.status for invoice in etc_invoices}, {EtcInvoiceStatus.UNSUBMITTED})
         self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
 
+    def test_legacy_submission_batch_delete_delegates_to_business_batch_reset(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
+            self.assertEqual(preview_response.status_code, 200)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            business_batch = json.loads(
+                app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
+            )["data"]["items"][0]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": business_batch["version"]}),
+            )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
+            manual_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{drafted['businessBatchId']}/manual-oa-status",
+                json.dumps({
+                    "decision": "submitted",
+                    "reason": "用户确认 OA 草稿已提交。",
+                    "expectedVersion": drafted["version"],
+                }),
+            )
+            manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
+
+            delete_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/batches/{manual_payload['submissionBatchId']}",
+            )
+            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
+            task_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
+            etc_invoices = app._etc_service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
+
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertEqual(delete_response.status_code, 200)
+        delete_payload = json.loads(delete_response.body)["data"]
+        self.assertEqual(delete_payload["kind"], "submitted_business_batch_reset")
+        self.assertEqual(delete_payload["businessBatchId"], manual_payload["businessBatchId"])
+        self.assertEqual(delete_payload["submissionBatchId"], manual_payload["submissionBatchId"])
+        self.assertEqual(submitted_batches["total"], 0)
+        self.assertEqual(task_response.status_code, 404)
+        self.assertEqual({invoice.status for invoice in etc_invoices}, {EtcInvoiceStatus.UNSUBMITTED})
+        self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
+
     def test_submitted_etc_business_batch_delete_cancels_summary_relation_without_restoring_oa_bank_pair(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

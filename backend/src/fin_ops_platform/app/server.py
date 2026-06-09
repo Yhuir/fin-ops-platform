@@ -6364,6 +6364,12 @@ class Application:
                 batch_id,
                 json.dumps({"reason": "legacy_etc_batch_delete"}),
             )
+        linked_business_batch = self._etc_service.find_business_batch_by_linked_batch_id(batch_id)
+        if linked_business_batch is not None:
+            return self._handle_api_etc_business_batch_delete(
+                str(getattr(linked_business_batch, "business_batch_id")),
+                json.dumps({"reason": "legacy_etc_batch_delete"}),
+            )
         task = None
         resolved_submission_batch_id = batch_id
         submission_invoice_ids: list[str] = []

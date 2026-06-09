@@ -37,6 +37,7 @@ type MockApiOptions = {
   etcImportConfirmPreviewStale?: boolean;
   etcImportConfirmStaleReconciliationTask?: boolean;
   etcImportBlockingIssues?: Array<Record<string, unknown>>;
+  etcInvoiceStoreBatches?: Array<Record<string, unknown>>;
   readyEtcReconciliationTasks?: Array<Record<string, unknown>>;
   workbenchColumnLayouts?: {
     oa?: string[];
@@ -177,7 +178,7 @@ function buildDefaultWorkbenchExceptionPreview(rowIds: string[]) {
   };
 }
 
-function createEtcInvoiceStore() {
+function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBatches"> = {}) {
   let invoices = [
     {
       id: "etc-inv-001",
@@ -291,6 +292,66 @@ function createEtcInvoiceStore() {
       note: "历史补关联",
     },
   ];
+  if (options.etcInvoiceStoreBatches) {
+    batches = options.etcInvoiceStoreBatches.map((batch) => ({ ...batch })) as typeof batches;
+  }
+
+  const textField = (source: Record<string, unknown>, ...keys: string[]) => {
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+    return "";
+  };
+
+  const stringListField = (source: Record<string, unknown>, ...keys: string[]) => {
+    for (const key of keys) {
+      const value = source[key];
+      if (Array.isArray(value)) {
+        return value.map((item) => String(item).trim()).filter(Boolean);
+      }
+    }
+    return [];
+  };
+
+  const numberField = (source: Record<string, unknown>, fallback: number, ...keys: string[]) => {
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+    }
+    return fallback;
+  };
+
+  const businessStatusForBatch = (batch: (typeof batches)[number]) => {
+    const rawBatch = batch as Record<string, unknown>;
+    return textField(rawBatch, "business_status", "businessStatus")
+      || (batch.status === "submitted" ? "oa_submitted" : "imported");
+  };
+
+  const businessBatchIsSubmitted = (batch: (typeof batches)[number]) =>
+    ["oa_submitted", "manually_marked_submitted"].includes(businessStatusForBatch(batch));
+
+  const batchBusinessIds = (batch: (typeof batches)[number]) => {
+    const rawBatch = batch as Record<string, unknown>;
+    return new Set([
+      batch.id,
+      textField(rawBatch, "business_batch_id", "businessBatchId"),
+      textField(rawBatch, "submission_batch_id", "submissionBatchId"),
+      textField(rawBatch, "external_etc_batch_id", "externalEtcBatchId"),
+      textField(rawBatch, "external_batch_id", "externalBatchId"),
+      textField(rawBatch, "etc_batch_id", "etcBatchId"),
+      ...stringListField(rawBatch, "import_batch_ids", "importBatchIds"),
+    ].filter(Boolean));
+  };
+
+  const findBatchByBusinessId = (batchId: string) => {
+    const normalizedId = String(batchId ?? "").trim();
+    return batches.find((item) => batchBusinessIds(item).has(normalizedId)) ?? null;
+  };
 
   const getBatchInvoiceIds = (batch: (typeof batches)[number]) => (
     "invoice_ids" in batch ? batch.invoice_ids : batch.invoiceIds
@@ -355,24 +416,39 @@ function createEtcInvoiceStore() {
   const hydrateBusinessBatch = (batch: (typeof batches)[number], includeInvoices = false) => {
     const hydrated = hydrateBatch(batch, includeInvoices);
     const batchId = "id" in batch ? batch.id : "";
+    const rawBatch = batch as Record<string, unknown>;
     const isSubmitted = batch.status === "submitted";
+    const businessBatchId = textField(rawBatch, "business_batch_id", "businessBatchId") || batchId;
+    const importBatchIds = stringListField(rawBatch, "import_batch_ids", "importBatchIds");
+    const submissionBatchId = textField(rawBatch, "submission_batch_id", "submissionBatchId");
+    const externalEtcBatchId = textField(rawBatch, "external_etc_batch_id", "externalEtcBatchId");
+    const invoiceSummary = typeof rawBatch.invoice_summary === "object" && rawBatch.invoice_summary !== null
+      ? rawBatch.invoice_summary as Record<string, unknown>
+      : typeof rawBatch.invoiceSummary === "object" && rawBatch.invoiceSummary !== null
+        ? rawBatch.invoiceSummary as Record<string, unknown>
+        : null;
     return {
-      business_batch_id: batchId,
+      business_batch_id: businessBatchId,
       task_id: batchId === "etc-batch-unsubmitted-01" ? "etc-recon-task-001" : "",
-      status: isSubmitted ? "oa_submitted" : "imported",
-      version: 7,
+      status: businessStatusForBatch(batch),
+      version: numberField(rawBatch, 7, "version"),
       owner_user_id: "web_finance_user",
       owner_org_id: "finance",
-      import_batch_ids: [`${batchId}-import-001`],
-      submission_batch_id: isSubmitted ? batchId : "",
-      external_etc_batch_id: hydrated.external_batch_id ?? hydrated.externalBatchId ?? hydrated.etc_batch_id ?? hydrated.etcBatchId,
+      import_batch_ids: importBatchIds.length ? importBatchIds : [`${batchId}-import-001`],
+      submission_batch_id: submissionBatchId || (isSubmitted ? batchId : ""),
+      external_etc_batch_id: externalEtcBatchId || (
+        hydrated.external_batch_id
+        ?? hydrated.externalBatchId
+        ?? hydrated.etc_batch_id
+        ?? hydrated.etcBatchId
+      ),
       oa_draft_id: "",
       oa_draft_url: "",
       oa_row_id: hydrated.linked_oa_row_id ?? hydrated.linkedOaRowId ?? "",
       oa_process_status: isSubmitted ? "in_progress" : "",
       invoice_summary: {
-        count: hydrated.invoice_count,
-        amount: hydrated.total_amount,
+        count: numberField(invoiceSummary ?? {}, hydrated.invoice_count, "count"),
+        amount: textField(invoiceSummary ?? {}, "amount") || hydrated.total_amount,
       },
       invoice_ids: getBatchInvoiceIds(batch),
       import_attempts: [
@@ -502,15 +578,21 @@ function createEtcInvoiceStore() {
           return true;
         });
       const rows = filteredBatches
-        .filter((batch) => !normalizedStatus || batch.status === normalizedStatus)
+        .filter((batch) => {
+          if (!normalizedStatus) {
+            return true;
+          }
+          const submitted = businessBatchIsSubmitted(batch);
+          return normalizedStatus === "submitted" ? submitted : !submitted;
+        })
         .map((batch) => hydrateBusinessBatch(batch))
         .filter(Boolean);
       return {
         ok: true,
         data: {
           counts: {
-            active: filteredBatches.filter((batch) => batch.status !== "submitted").length,
-            submitted: filteredBatches.filter((batch) => batch.status === "submitted").length,
+            active: filteredBatches.filter((batch) => !businessBatchIsSubmitted(batch)).length,
+            submitted: filteredBatches.filter((batch) => businessBatchIsSubmitted(batch)).length,
           },
           items: cloneJson(rows),
           pagination: {
@@ -527,11 +609,11 @@ function createEtcInvoiceStore() {
       return batch ? cloneJson(hydrateBatch(batch, true)) : null;
     },
     businessBatchDetail(batchId: string) {
-      const batch = batches.find((item) => item.id === batchId);
+      const batch = findBatchByBusinessId(batchId);
       return batch ? cloneJson(hydrateBusinessBatch(batch, true)) : null;
     },
     businessBatchDraft(batchId: string) {
-      const batch = batches.find((item) => item.id === batchId);
+      const batch = findBatchByBusinessId(batchId);
       if (!batch) {
         return null;
       }
@@ -545,7 +627,7 @@ function createEtcInvoiceStore() {
       };
     },
     deleteBatch(batchId: string, options: { allowSubmitted?: boolean } = {}) {
-      const batch = batches.find((item) => item.id === batchId);
+      const batch = options.allowSubmitted ? findBatchByBusinessId(batchId) : batches.find((item) => item.id === batchId);
       if (!batch || (batch.status !== "unsubmitted" && !options.allowSubmitted)) {
         return false;
       }
@@ -4284,7 +4366,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     options.initialImportPreviewFileNames ?? [],
     options.initialImportPreviewOverrides ?? [],
   );
-  const etcInvoiceStore = createEtcInvoiceStore();
+  const etcInvoiceStore = createEtcInvoiceStore(options);
   const etcReconciliationTaskStore = createEtcReconciliationTaskStore();
   const turnoverExtraStore = new Map<string, Record<string, unknown>>();
   let latestEtcImportPreview = etcInvoiceStore.previewZip([]);

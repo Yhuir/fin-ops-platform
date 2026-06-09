@@ -1159,8 +1159,23 @@ export default function EtcTicketManagementPage() {
     }
     return "将删除本地 ETC 批次、上传文件和核对结果。OA 系统中的草稿和已提交记录不会删除。";
   };
-  const businessBatchForBatchSummary = (batch: EtcBatchSummary) =>
-    businessBatches.find((item) => item.businessBatchId === batch.id) ?? null;
+  const businessBatchForBatchSummary = (batch: EtcBatchSummary) => {
+    const candidateIds = new Set(
+      [batch.id, batch.etcBatchId, batch.externalBatchId]
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+    return businessBatches.find((item) => {
+      if (
+        candidateIds.has(item.businessBatchId)
+        || candidateIds.has(item.submissionBatchId)
+        || candidateIds.has(item.externalEtcBatchId)
+      ) {
+        return true;
+      }
+      return item.importBatchIds.some((importBatchId) => candidateIds.has(importBatchId));
+    }) ?? null;
+  };
   const deleteBatchDescription = (target: Extract<DeleteTarget, { kind: "batch" }>) => {
     const businessBatch = businessBatchForBatchSummary(target.item);
     if (businessBatch && isSubmittedBusinessStatus(businessBatch.status)) {

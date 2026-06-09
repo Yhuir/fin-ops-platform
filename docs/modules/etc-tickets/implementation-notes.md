@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-10 - ETC旧批次删除入口桥接修复
+
+- 目标：修复页面点击删除时旧 `/api/etc/batches/{submissionBatchId}` 路径命中提交确认元数据 guard，返回 `ETC batch has submitted confirmation metadata and cannot be deleted.` 的问题。
+- 影响范围：`EtcService` 业务批次 linked id 查询、旧 ETC batch 删除 API 兼容入口、ETC 页面删除按钮的业务批次匹配逻辑、前端测试 mock。
+- 关键决策：删除仍以 `etc_business_batches` 业务批次删除服务为唯一入口；旧 submission/import/external id 只做兼容解析，解析到业务批次后转交 `DELETE /api/etc/business-batches/{id}` 同一条本地清理链路，不在旧 submission batch 删除逻辑里新增绕过分支。
+- 文档影响：状态机和 API 长期口径不变，本记录补充兼容修复背景。
+- 测试覆盖：新增后端旧 submission batch id 删除桥接业务批次 reset 回归；新增前端 legacy submission row 点击删除时走业务批次删除接口、不走旧 batch 删除接口的交互回归。
+- 验证命令：`python -m pytest tests/test_etc_backend.py -q`；`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npm run build`。
+- 未测风险：未在真实浏览器手动点击生产页面；自动化已覆盖旧 id 入口和当前页面按钮请求路径。
+
 ## 2026-06-09 - ETC canonical invoice弱指纹冲突修复
 
 - 目标：修复 ETC ZIP 导入显示失败，以及创建 OA 草稿时 OA 系统已成功创建/附件已上传但前端仍显示接口失败的问题。
