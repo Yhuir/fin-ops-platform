@@ -593,7 +593,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/app/oa_attachment_audit.py",
             "backend/src/fin_ops_platform/app/server.py",
             "backend/src/fin_ops_platform/app/worker.py",
-            "backend/src/fin_ops_platform/services/etc_oa_detection.py",
             "backend/src/fin_ops_platform/services/oa_manual_import_service.py",
             "backend/src/fin_ops_platform/services/search_pending_sql_projection.py",
             "backend/src/fin_ops_platform/services/workbench_relation_sql_projection.py",

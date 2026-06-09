@@ -42,7 +42,7 @@ function businessBatchFixture(overrides: Record<string, unknown> = {}) {
   return {
     businessBatchId: "etc-business-oa-action-001",
     taskId: "etc-recon-oa-action-001",
-    status: "oa_detection_timeout",
+    status: "oa_confirmation_pending",
     version: 8,
     ownerUserId: "web_finance_user",
     ownerOrgId: "finance",
@@ -53,14 +53,6 @@ function businessBatchFixture(overrides: Record<string, unknown> = {}) {
     oaDraftUrl: "https://oa.example.test/draft/oa-draft-oa-action-001",
     oaRowId: "",
     oaProcessStatus: "",
-    oaDetectionStatus: "timeout",
-    oaDetectionReason: "历史草稿等待人工确认。",
-    oaDetectionError: "",
-    oaDetectionStartedAt: "",
-    oaDetectionNextRunAt: "",
-    oaDetectionDeadlineAt: "",
-    oaDetectionFinalRetryUntil: "",
-    oaDetectionAttempts: 3,
     invoiceSummary: { count: 2, amount: "32.26" },
     invoiceIds: ["etc-inv-oa-action-001", "etc-inv-oa-action-002"],
     importAttempts: [],
@@ -357,7 +349,6 @@ describe("ETC ticket management page", () => {
       submissionBatchId: "etc_batch_0032",
       externalEtcBatchId: "etc_20260520_001",
       oaProcessStatus: "manual_without_oa_row",
-      oaDetectionReason: "用户确认 OA 草稿已提交。",
       invoiceSummary: { count: 37, amount: "1673.30" },
       invoiceIds: [],
     });
@@ -572,15 +563,7 @@ describe("ETC ticket management page", () => {
       oaDraftId: "",
       oaDraftUrl: "",
       oaRowId: "",
-      oaProcessStatus: "",
-      oaDetectionStatus: "",
-      oaDetectionReason: "",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 0,
+      oaProcessStatus: "in_progress",
       invoiceSummary: { count: 2, amount: "32.26" },
       invoiceIds: ["etc-inv-001", "etc-inv-002"],
       importAttempts: [],
@@ -594,7 +577,7 @@ describe("ETC ticket management page", () => {
       submissionBatchId: "etc-submission-batch-active-001",
       oaDraftId: "oa-draft-active-001",
       oaDraftUrl: "https://oa.example.test/draft/oa-draft-active-001",
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       invoiceItems: [],
     };
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
@@ -638,14 +621,6 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "",
       oaRowId: "",
       oaProcessStatus: "",
-      oaDetectionStatus: "revoked",
-      oaDetectionReason: "user_revoked",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 1,
       invoiceSummary: { count: 36, amount: "1673.30" },
       invoiceIds: ["etc-inv-001"],
       importAttempts: [],
@@ -709,14 +684,6 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "",
       oaRowId: "",
       oaProcessStatus: "",
-      oaDetectionStatus: "revoked",
-      oaDetectionReason: "user_revoked",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 1,
       invoiceSummary: { count: 36, amount: "1673.30" },
       invoiceIds: ["etc-inv-001"],
       importAttempts: [],
@@ -780,14 +747,6 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "",
       oaRowId: "",
       oaProcessStatus: "",
-      oaDetectionStatus: "revoked",
-      oaDetectionReason: "user_revoked",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 1,
       invoiceSummary: { count: 36, amount: "1673.30" },
       invoiceIds: ["etc-inv-001"],
       importAttempts: [],
@@ -1057,8 +1016,8 @@ describe("ETC ticket management page", () => {
     await user.click(within(row).getByRole("button", { name: "删除批次 2026-03 ETC 已导入" }));
 
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    expect(dialog).toHaveTextContent("将删除该批次及未进入 OA 的数据");
-    expect(dialog).toHaveTextContent("一并删除已导入发票");
+    expect(dialog).toHaveTextContent("将删除本地 ETC 批次、上传文件、核对结果和已导入发票");
+    expect(dialog).toHaveTextContent("OA 系统中的草稿和已提交记录不会删除");
     expect(dialog.textContent).toContain("重新确认并导入 ZIP");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -1224,7 +1183,7 @@ describe("ETC ticket management page", () => {
     const linkedBusinessBatch = {
       businessBatchId: "etc-business-linked-001",
       taskId: "etc-recon-imported-business-linked-001",
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 8,
       ownerUserId: "web_finance_user",
       ownerOrgId: "finance",
@@ -1235,14 +1194,6 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "https://oa.example.test/draft/oa-draft-linked-001",
       oaRowId: "",
       oaProcessStatus: "",
-      oaDetectionStatus: "detecting",
-      oaDetectionReason: "",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 1,
       invoiceSummary: { count: 37, amount: "1673.30" },
       invoiceIds: [],
       importAttempts: [],
@@ -1327,7 +1278,7 @@ describe("ETC ticket management page", () => {
     const linkedBusinessBatch = {
       businessBatchId: "etc-business-linked-001",
       taskId: "etc-recon-imported-business-linked-001",
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 8,
       ownerUserId: "web_finance_user",
       ownerOrgId: "finance",
@@ -1338,14 +1289,6 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "https://oa.example.test/draft/oa-draft-linked-001",
       oaRowId: "",
       oaProcessStatus: "",
-      oaDetectionStatus: "detecting",
-      oaDetectionReason: "后台持续检测流程状态。",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 1,
       invoiceSummary: { count: 37, amount: "1673.30" },
       invoiceIds: [],
       importAttempts: [],
@@ -1358,7 +1301,6 @@ describe("ETC ticket management page", () => {
       status: "manually_marked_submitted",
       version: 9,
       oaProcessStatus: "manual_without_oa_row",
-      oaDetectionReason: "用户确认 OA 草稿已提交。",
       invoiceItems: [],
     };
     const fetchReconciliationTasks = vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
@@ -1449,7 +1391,7 @@ describe("ETC ticket management page", () => {
     const linkedBusinessBatch = businessBatchFixture({
       businessBatchId: "etc-business-linked-001",
       taskId: "etc-recon-imported-business-linked-001",
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 8,
       importBatchIds: ["etc-import-business-linked-001"],
       submissionBatchId: "etc-submission-linked-001",
@@ -1496,10 +1438,8 @@ describe("ETC ticket management page", () => {
     installMockApiFetch();
     const detectingBatch = businessBatchFixture({
       businessBatchId: "etc-business-manual-not-submitted-001",
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 8,
-      oaDetectionStatus: "detecting",
-      oaDetectionReason: "后台持续检测流程状态。",
     });
     const notSubmittedBatch = {
       ...detectingBatch,
@@ -1509,8 +1449,6 @@ describe("ETC ticket management page", () => {
       externalEtcBatchId: "",
       oaDraftId: "",
       oaDraftUrl: "",
-      oaDetectionStatus: "revoked",
-      oaDetectionReason: "用户确认 OA 草稿未提交。",
       invoiceItems: [],
     };
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
@@ -1550,10 +1488,8 @@ describe("ETC ticket management page", () => {
     installMockApiFetch();
     const detectingBatch = businessBatchFixture({
       businessBatchId: "etc-business-manual-fail-001",
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 8,
-      oaDetectionStatus: "pending",
-      oaDetectionReason: "后台持续检测流程状态。",
     });
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
@@ -3221,14 +3157,6 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "",
       oaRowId: "",
       oaProcessStatus: "",
-      oaDetectionStatus: "",
-      oaDetectionReason: "",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 0,
       invoiceSummary: { count: 36, amount: "1673.30" },
       invoiceIds: ["etc-inv-imported-submit-001"],
       importAttempts: [
@@ -3273,7 +3201,7 @@ describe("ETC ticket management page", () => {
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
     const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue({
       ...businessBatch,
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 12,
       submissionBatchId: "etc_batch_submission_001",
       oaDraftId: "oa-draft-001",
@@ -3719,8 +3647,8 @@ describe("ETC ticket management page", () => {
     expect(deleteButton).toBeEnabled();
     await user.click(deleteButton);
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    expect(dialog).toHaveTextContent("释放 ETC 发票");
-    expect(dialog).toHaveTextContent("OA 草稿和已提交记录不会删除");
+    expect(dialog).toHaveTextContent("取消发票合并");
+    expect(dialog).toHaveTextContent("OA 系统中的草稿和已提交记录不会删除");
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
@@ -3788,14 +3716,6 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "",
       oaRowId: "",
       oaProcessStatus: "",
-      oaDetectionStatus: "",
-      oaDetectionReason: "",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
-      oaDetectionAttempts: 0,
       invoiceSummary: { count: 2, amount: "32.26" },
       invoiceIds: ["etc-inv-001", "etc-inv-002"],
       importAttempts: [
@@ -3840,7 +3760,7 @@ describe("ETC ticket management page", () => {
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
     const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue({
       ...businessBatch,
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 8,
       submissionBatchId: "etc_batch_0027",
       oaDraftId: "oa_draft_001",
@@ -3899,8 +3819,6 @@ describe("ETC ticket management page", () => {
         submissionBatchId: "",
         oaDraftId: "",
         oaDraftUrl: "",
-        oaDetectionStatus: "",
-        oaDetectionReason: "",
         invoiceItems: [],
       }),
     } as const;
@@ -3939,8 +3857,6 @@ describe("ETC ticket management page", () => {
         submissionBatchId: "",
         oaDraftId: "",
         oaDraftUrl: "",
-        oaDetectionStatus: "",
-        oaDetectionReason: "",
         invoiceItems: [],
       }),
     } as const;
@@ -3952,7 +3868,7 @@ describe("ETC ticket management page", () => {
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
     const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue({
       ...businessBatch,
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 8,
       submissionBatchId: "etc_batch_0027",
       oaDraftId: "oa_draft_without_url_001",

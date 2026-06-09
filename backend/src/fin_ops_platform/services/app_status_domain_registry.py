@@ -131,9 +131,8 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         key="etc_tickets",
         label="ETC票据",
         route="/etc-tickets",
-        worker_instances=("etc-business-oa-detection", "import"),
-        job_types=("etc_business.oa_detection.refresh", "etc_invoice_import"),
-        dependencies=("oa_sync",),
+        worker_instances=("import",),
+        job_types=("etc_invoice_import",),
     ),
     AppStatusDomainDefinition(
         key="settings",

@@ -46,13 +46,10 @@ class EtcBusinessBatchStatus(str, Enum):
     IMPORT_PARTIAL_FAILED = "import_partial_failed"
     OA_DRAFT_CREATING = "oa_draft_creating"
     OA_DRAFT_FAILED = "oa_draft_failed"
-    OA_SUBMISSION_DETECTING = "oa_submission_detecting"
+    OA_CONFIRMATION_PENDING = "oa_confirmation_pending"
     OA_SUBMITTED = "oa_submitted"
     CLOSED = "closed"
     NOT_SUBMITTED = "not_submitted"
-    OA_DETECTION_TIMEOUT = "oa_detection_timeout"
-    OA_DETECTION_CONFLICT = "oa_detection_conflict"
-    OA_DETECTION_UNAVAILABLE = "oa_detection_unavailable"
     MANUALLY_MARKED_SUBMITTED = "manually_marked_submitted"
     MANUALLY_MARKED_NOT_SUBMITTED = "manually_marked_not_submitted"
     MIGRATION_CONFLICT = "migration_conflict"
@@ -71,10 +68,7 @@ ETC_BUSINESS_BATCH_ACTIVE_STATUSES = {
     EtcBusinessBatchStatus.IMPORT_PARTIAL_FAILED.value,
     EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
     EtcBusinessBatchStatus.OA_DRAFT_FAILED.value,
-    EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value,
-    EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value,
-    EtcBusinessBatchStatus.OA_DETECTION_CONFLICT.value,
-    EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
+    EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
     EtcBusinessBatchStatus.NOT_SUBMITTED.value,
     EtcBusinessBatchStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
     EtcBusinessBatchStatus.MIGRATION_CONFLICT.value,
@@ -94,21 +88,11 @@ ETC_BUSINESS_BATCH_IMPORT_ALLOWED_STATUSES = {
 }
 
 ETC_BUSINESS_BATCH_DRAFT_REVOCABLE_STATUSES = {
-    EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value,
-    EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value,
-    EtcBusinessBatchStatus.OA_DETECTION_CONFLICT.value,
-    EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
-}
-
-ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES = {
-    EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value,
-    EtcBusinessBatchStatus.OA_DETECTION_CONFLICT.value,
-    EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
+    EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
 }
 
 ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES = {
-    EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value,
-    *ETC_BUSINESS_BATCH_MANUAL_FALLBACK_STATUSES,
+    EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
 }
 
 ETC_BUSINESS_BATCH_SUBMITTED_STATUSES = {
@@ -444,14 +428,6 @@ class EtcBusinessBatch:
     oa_draft_url: str | None = None
     oa_row_id: str | None = None
     oa_process_status: str = "unknown"
-    oa_detection_status: str = "not_started"
-    oa_detection_started_at: datetime | None = None
-    oa_detection_next_run_at: datetime | None = None
-    oa_detection_deadline_at: datetime | None = None
-    oa_detection_final_retry_until: datetime | None = None
-    oa_detection_attempts: int = 0
-    oa_detection_error: str | None = None
-    oa_detection_reason: str | None = None
     invoice_ids: list[str] = field(default_factory=list)
     amount_breakdown: dict[str, object] = field(default_factory=dict)
     import_attempts: list[dict[str, object]] = field(default_factory=list)
@@ -878,7 +854,7 @@ class EtcService:
     ) -> EtcBusinessBatch:
         with self._business_batch_lock:
             batch = self._get_business_batch_mutable(business_batch_id)
-            if batch.status == EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value and batch.submission_batch_id:
+            if batch.status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value and batch.submission_batch_id:
                 return self._copy_business_batch(batch)
             self._assert_business_batch_version(batch, expected_version)
             if batch.status not in {
@@ -918,12 +894,7 @@ class EtcService:
             batch.external_etc_batch_id = draft.etc_batch_id
             batch.oa_draft_id = draft.oa_draft_id
             batch.oa_draft_url = draft.oa_draft_url
-            batch.status = EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value
-            batch.oa_detection_status = "pending"
-            batch.oa_detection_started_at = now
-            batch.oa_detection_next_run_at = now
-            batch.oa_detection_deadline_at = None
-            batch.oa_detection_final_retry_until = None
+            batch.status = EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value
             for import_batch_id in list(batch.import_batch_ids):
                 import_batch = self._import_batches.get(import_batch_id)
                 if import_batch is not None:
@@ -980,8 +951,6 @@ class EtcService:
             batch.external_etc_batch_id = None
             batch.oa_draft_id = None
             batch.oa_draft_url = None
-            batch.oa_detection_status = "revoked"
-            batch.oa_detection_reason = "user_revoked"
             batch.status = EtcBusinessBatchStatus.NOT_SUBMITTED.value
             self._bump_business_batch_version(
                 batch,
@@ -990,99 +959,6 @@ class EtcService:
                 after_status=batch.status,
                 reason=normalized_reason,
                 submission_batch_id=old_submission_batch_id,
-            )
-            self._persist()
-            return self._copy_business_batch(batch)
-
-    def refresh_business_batch_oa_status(
-        self,
-        business_batch_id: str,
-        *,
-        expected_version: int | None = None,
-    ) -> EtcBusinessBatch:
-        with self._business_batch_lock:
-            batch = self._get_business_batch_mutable(business_batch_id)
-            self._assert_business_batch_version(batch, expected_version)
-            if batch.status not in ETC_BUSINESS_BATCH_DRAFT_REVOCABLE_STATUSES:
-                raise EtcBusinessBatchInvalidTransitionError("current status does not allow OA status refresh.")
-            before_status = batch.status
-            batch.oa_detection_attempts += 1
-            batch.oa_detection_status = "stub_unavailable"
-            batch.oa_detection_reason = "oa_detector_not_configured"
-            self._bump_business_batch_version(
-                batch,
-                event_type="oa_status_refresh_requested",
-                before_status=before_status,
-                after_status=batch.status,
-                reason=batch.oa_detection_reason,
-            )
-            self._persist()
-            return self._copy_business_batch(batch)
-
-    def apply_business_batch_oa_detection_result(
-        self,
-        business_batch_id: str,
-        *,
-        detection_status: str,
-        reason: str,
-        expected_version: int | None = None,
-        oa_row_id: str | None = None,
-        process_status: str | None = None,
-        error: str | None = None,
-        candidates: list[dict[str, object]] | None = None,
-    ) -> EtcBusinessBatch:
-        with self._business_batch_lock:
-            batch = self._get_business_batch_mutable(business_batch_id)
-            self._assert_business_batch_version(batch, expected_version)
-            if batch.status not in ETC_BUSINESS_BATCH_DRAFT_REVOCABLE_STATUSES:
-                raise EtcBusinessBatchInvalidTransitionError("current status does not allow OA status refresh.")
-            before_status = batch.status
-            normalized_status = str(detection_status or "").strip()
-            normalized_reason = str(reason or "").strip() or normalized_status
-            now = datetime.now(UTC)
-            batch.oa_detection_attempts += 1
-            batch.oa_detection_reason = normalized_reason
-            batch.oa_detection_error = str(error or "").strip() or None
-            batch.oa_detection_next_run_at = now
-            if normalized_status == "detected":
-                batch.status = EtcBusinessBatchStatus.OA_SUBMITTED.value
-                batch.oa_detection_status = "detected"
-                batch.oa_row_id = str(oa_row_id or "").strip() or None
-                batch.oa_process_status = str(process_status or "in_progress").strip() or "in_progress"
-                if batch.submission_batch_id and (submission_batch := self._batches.get(batch.submission_batch_id)) is not None:
-                    submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
-                    submission_batch.confirmed_at = submission_batch.confirmed_at or now
-                    submission_batch.linked_oa_row_id = batch.oa_row_id or submission_batch.linked_oa_row_id
-                for invoice_id in list(batch.invoice_ids):
-                    invoice = self._invoices.get(invoice_id)
-                    if invoice is None:
-                        continue
-                    invoice.status = EtcInvoiceStatus.SUBMITTED
-                    invoice.current_batch_id = batch.submission_batch_id or batch.business_batch_id
-                    invoice.business_batch_id = batch.business_batch_id
-                    invoice.last_batch_id = invoice.current_batch_id
-                    invoice.updated_at = now
-            elif normalized_status == "conflict":
-                batch.status = EtcBusinessBatchStatus.OA_DETECTION_CONFLICT.value
-                batch.oa_detection_status = "conflict"
-            elif normalized_status == "unavailable":
-                batch.status = EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value
-                batch.oa_detection_status = "unavailable"
-            elif normalized_status == "timeout":
-                batch.status = EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value
-                batch.oa_detection_status = "timeout"
-            else:
-                if batch.status == EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value:
-                    batch.status = EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value
-                batch.oa_detection_status = "missing"
-            self._bump_business_batch_version(
-                batch,
-                event_type="oa_submission_detection_refreshed",
-                before_status=before_status,
-                after_status=batch.status,
-                reason=normalized_reason,
-                oa_row_id=batch.oa_row_id,
-                candidates=list(candidates or [])[:10],
             )
             self._persist()
             return self._copy_business_batch(batch)
@@ -1169,13 +1045,11 @@ class EtcService:
                     reason=str(reason or "").strip() or None,
                 )
             if batch.submission_batch_id and batch.submission_batch_id in self._batches:
-                self._delete_submission_batch(self._batches[batch.submission_batch_id])
+                self._delete_submission_batch(self._batches[batch.submission_batch_id], force=True)
             for invoice_id in list(batch.invoice_ids):
                 invoice = self._invoices.get(invoice_id)
                 if invoice is None:
                     continue
-                if invoice.status == EtcInvoiceStatus.SUBMITTED:
-                    raise EtcBusinessBatchInvalidTransitionError("submitted ETC invoices cannot be deleted.")
                 if invoice.current_batch_id in {batch.business_batch_id, batch.submission_batch_id}:
                     invoice.current_batch_id = None
                 if str(invoice.business_batch_id or "").strip() == batch.business_batch_id:
@@ -1183,7 +1057,7 @@ class EtcService:
             for import_batch_id in list(batch.import_batch_ids):
                 import_batch = self._import_batches.get(import_batch_id)
                 if import_batch is not None:
-                    self._delete_import_batch(import_batch)
+                    self._delete_import_batch(import_batch, force=True)
             before_status = batch.status
             batch.status = EtcBusinessBatchStatus.DELETED.value
             batch.task_active_key = None
@@ -1309,14 +1183,6 @@ class EtcService:
             "oaDraftUrl": batch.oa_draft_url,
             "oaRowId": batch.oa_row_id,
             "oaProcessStatus": batch.oa_process_status,
-            "oaDetectionStatus": batch.oa_detection_status,
-            "oaDetectionError": batch.oa_detection_error,
-            "oaDetectionStartedAt": batch.oa_detection_started_at,
-            "oaDetectionNextRunAt": batch.oa_detection_next_run_at,
-            "oaDetectionDeadlineAt": batch.oa_detection_deadline_at,
-            "oaDetectionFinalRetryUntil": batch.oa_detection_final_retry_until,
-            "oaDetectionAttempts": batch.oa_detection_attempts,
-            "oaDetectionReason": batch.oa_detection_reason,
             "invoiceIds": list(batch.invoice_ids),
             "invoiceSummary": invoice_summary,
             "amountBreakdown": dict(batch.amount_breakdown or {}),
@@ -1972,7 +1838,6 @@ class EtcService:
                 external_etc_batch_id=normalized_external_etc_batch_id,
                 oa_row_id=normalized_oa_row_id,
                 oa_process_status="in_progress" if normalized_oa_row_id else "manual_without_oa_row",
-                oa_detection_status="manual_submitted",
                 invoice_ids=[invoice.id for invoice in invoices],
                 amount_breakdown=amount_breakdown,
                 created_at=now,
@@ -2325,14 +2190,6 @@ class EtcService:
             "oa_draft_url": None,
             "oa_row_id": None,
             "oa_process_status": "unknown",
-            "oa_detection_status": "not_started",
-            "oa_detection_started_at": None,
-            "oa_detection_next_run_at": None,
-            "oa_detection_deadline_at": None,
-            "oa_detection_final_retry_until": None,
-            "oa_detection_attempts": 0,
-            "oa_detection_error": None,
-            "oa_detection_reason": None,
             "invoice_ids": [],
             "amount_breakdown": {},
             "import_attempts": [],
@@ -2796,14 +2653,15 @@ class EtcService:
         import_batch_ids = {invoice.import_batch_id for invoice in invoices if invoice.import_batch_id}
         return [batch for batch_id in sorted(import_batch_ids) if (batch := self._import_batches.get(batch_id)) is not None]
 
-    def _delete_import_batch(self, import_batch: EtcImportBatch) -> dict[str, object]:
-        if str(import_batch.submission_batch_id or "").strip():
+    def _delete_import_batch(self, import_batch: EtcImportBatch, *, force: bool = False) -> dict[str, object]:
+        if str(import_batch.submission_batch_id or "").strip() and not force:
             raise EtcBatchDeleteError("import batch has an OA draft and cannot be deleted before deleting the draft batch.")
         invoice_ids = [str(invoice_id) for invoice_id in list(import_batch.invoice_ids or [])]
         invoices = [self._invoices[invoice_id] for invoice_id in invoice_ids if invoice_id in self._invoices]
-        for invoice in invoices:
-            if str(invoice.current_batch_id or "").strip():
-                raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
+        if not force:
+            for invoice in invoices:
+                if str(invoice.current_batch_id or "").strip():
+                    raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
         for invoice in invoices:
             self._delete_invoice_files(invoice)
             self._invoice_numbers.pop(invoice.invoice_number, None)
@@ -2811,12 +2669,12 @@ class EtcService:
         self._import_batches.pop(import_batch.id, None)
         return {"deleted": True, "batchId": import_batch.id, "kind": "import_batch"}
 
-    def _delete_submission_batch(self, batch: EtcBatch) -> dict[str, object]:
-        if batch.status == EtcBatchStatus.SUBMITTED_CONFIRMED.value:
+    def _delete_submission_batch(self, batch: EtcBatch, *, force: bool = False) -> dict[str, object]:
+        if batch.status == EtcBatchStatus.SUBMITTED_CONFIRMED.value and not force:
             raise EtcBatchDeleteError("submitted ETC batch cannot be deleted.")
-        if str(batch.linked_oa_row_id or "").strip() or str(batch.linked_oa_case_id or "").strip():
+        if (str(batch.linked_oa_row_id or "").strip() or str(batch.linked_oa_case_id or "").strip()) and not force:
             raise EtcBatchDeleteError("ETC batch is linked to OA/workbench records and cannot be deleted.")
-        if batch.confirmed_at is not None:
+        if batch.confirmed_at is not None and not force:
             raise EtcBatchDeleteError("ETC batch has submitted confirmation metadata and cannot be deleted.")
         allowed_statuses = {
             EtcBatchStatus.DRAFT_CREATING.value,
@@ -2824,7 +2682,7 @@ class EtcService:
             EtcBatchStatus.NOT_SUBMITTED.value,
             EtcBatchStatus.FAILED.value,
         }
-        if str(batch.status) not in allowed_statuses:
+        if str(batch.status) not in allowed_statuses and not force:
             raise EtcBatchDeleteError(f"ETC batch status {batch.status} cannot be deleted.")
 
         now = datetime.now(UTC)
@@ -3401,14 +3259,7 @@ def _etc_business_batch_from_snapshot(value: object) -> EtcBusinessBatch:
     if isinstance(value, EtcBusinessBatch):
         return value
     raw = _coerce_snapshot_dict(EtcBusinessBatch, value)
-    for field_name in (
-        "oa_detection_started_at",
-        "oa_detection_next_run_at",
-        "oa_detection_deadline_at",
-        "oa_detection_final_retry_until",
-        "created_at",
-        "updated_at",
-    ):
+    for field_name in ("created_at", "updated_at"):
         if field_name in raw:
             raw[field_name] = _datetime_from_snapshot(raw.get(field_name), default=None)
     return EtcBusinessBatch(**raw)

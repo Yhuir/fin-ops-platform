@@ -401,6 +401,52 @@ class WorkbenchPairRelationService:
         )
         return deepcopy(normalized_restored_relations), history
 
+    def cancel_active_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        created_by: str,
+        note: str | None = None,
+        created_at: str | None = None,
+        operation_type: str = "cancel_active_relation",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        resolved_row_ids = {
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        }
+        if not resolved_row_ids:
+            return [], None
+
+        before_relations = self.active_relations_for_row_ids(sorted(resolved_row_ids))
+        if not before_relations:
+            return [], None
+
+        timestamp = created_at or self._timestamp()
+        cancelled_relations: list[dict[str, Any]] = []
+        for relation in before_relations:
+            cancelled = self.cancel_relation(str(relation.get("case_id", "")), cancelled_at=timestamp)
+            if isinstance(cancelled, dict):
+                cancelled_relations.append(cancelled)
+
+        affected_row_ids = [
+            str(row_id).strip()
+            for relation in before_relations
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        history = self.record_history(
+            operation_type=operation_type,
+            before_relations=before_relations,
+            after_relations=[],
+            affected_row_ids=affected_row_ids,
+            created_by=created_by,
+            note=note,
+            amount_check=dict(before_relations[0].get("amount_check") or {}),
+            created_at=timestamp,
+        )
+        return deepcopy(cancelled_relations), history
+
     def record_history(
         self,
         *,

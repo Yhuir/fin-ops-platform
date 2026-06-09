@@ -609,7 +609,7 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 - 支付状态列表只展示状态标签；规则原因和自动闭环解释不在列表行内展示。
 - 反提 OA 工作流按 `preview -> create batch -> create OA draft -> user submission confirmation -> OA projection refresh` 推进。创建 OA 草稿只表示外部 OA 草稿已生成，状态为 `oa_draft_created`，不得直接等同于已提交 OA 流程。
 - 进项发票反提 OA 草稿使用支付申请 form `2` 的标准草稿 payload：顶层包含 `formId`、`isDraft`、`data`，`data.userName`/`data.applicant` 来自用户选择的目标 OA 申请人，`data.cause` 必须包含本地反提批次 ID，供 OA 投影回扫识别。
-- 用户在 OA 页面处理草稿后，前端必须让用户选择 `submitted` 或 `not_submitted`。`submitted` 进入 `oa_submission_detecting`，随后才允许刷新 OA 投影状态；`not_submitted` 只记录本地暂未提交，保留本地草稿链接。撤销本地草稿绑定只清除本地 `oaDraftId`/`oaDraftUrl`，不代表调用 OA 删除外部草稿。
+- 用户在 OA 页面处理草稿后，前端必须让用户选择 `submitted` 或 `not_submitted`。`submitted` 进入 OA 投影检测链路，随后才允许刷新 OA 投影状态；`not_submitted` 只记录本地暂未提交，保留本地草稿链接。撤销本地草稿绑定只清除本地 `oaDraftId`/`oaDraftUrl`，不代表调用 OA 删除外部草稿。
 
 ## OA 待付款 API
 
@@ -668,13 +668,13 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 契约要求：
 
-- 响应必须区分导入批次、业务批次、OA 草稿、人工提交确认状态和历史 OA 检测兼容状态。
+- 响应必须区分导入批次、业务批次、OA 草稿和人工提交确认状态；ETC 专用 OA 自动检测状态不再作为业务批次 API 合同输出。
 - `GET /api/etc/business-batches` 的 `month` 参数按 ETC 发票开票日期、通行开始日期和通行结束日期任一月份匹配业务批次。响应中的 `counts.active`、`counts.submitted` 必须先应用同一组 scope、`month`、`plate`、`keyword` 筛选，再按状态 bucket 统计；`items` 在同一筛选结果上继续应用请求的 `status` 和分页。
 - 幂等 key、重复提交、撤销草稿和释放发票规则必须由后端校验。
 - 权限不足、状态冲突、发票占用、OA 草稿失败和撤销失败需要返回稳定错误码。
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。
-- ETC 页面创建 OA 草稿后使用 `POST /api/etc/business-batches/{id}/manual-oa-status` 确认 `submitted` 或 `not_submitted`；前端不再调用 `/oa-status/refresh`。
-- `/oa-status/refresh` 仅作为后端 legacy 兼容入口保留，不得作为新的 ETC 页面交互入口扩展。
+- ETC 页面创建 OA 草稿后，业务批次状态为 `oa_confirmation_pending`，使用 `POST /api/etc/business-batches/{id}/manual-oa-status` 确认 `submitted` 或 `not_submitted`。
+- ETC 专用 OA 自动检测入口已移除：后端不再提供 `/api/etc/business-batches/{id}/oa-status/refresh`，不再输出 `oaDetection*` 字段，也不再注册 ETC OA 检测 worker 或 detector adapter。
 - `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并在关联台 open 区投影一条 `source_kind=etc_invoice_summary` 的折叠汇总发票行。该行金额优先使用业务批次上报金额，不使用散票合计覆盖；散票继续作为折叠明细，不直接散落展示。
 - `etc_invoice_summary` 在没有 OA 和银行流水三项完全匹配前必须保持 open/pending 状态，关系标签显示待匹配 OA/流水；只有关联台普通配对逻辑确认三项关系后，才进入已配对区。
 - `DELETE /api/etc/business-batches/{id}` 对已提交业务批次执行本地 reset，不撤销 OA。请求必须带 `expectedVersion` 和 `reason`；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind=submitted_business_batch_reset`、`releasedInvoiceCount` 和 `submissionBatchId`。后端必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失、散票回到 open 未配对区；不得删除 OA 草稿/流程、已闭环 ETC 对账任务或原始导入来源。

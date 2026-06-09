@@ -92,6 +92,48 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
             "cancelled",
         )
 
+    def test_cancel_active_relations_for_row_ids_does_not_restore_prior_oa_bank_relation(self) -> None:
+        service = WorkbenchPairRelationService()
+        service.create_active_relation(
+            case_id="CASE-ETC-DELETE-OLD",
+            row_ids=["oa-001", "bank-001"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-04",
+            created_at="2026-04-08T10:00:00+00:00",
+        )
+        service.replace_with_confirmed_relation(
+            case_id="CASE-ETC-DELETE",
+            row_ids=["oa-001", "bank-001", "etc-summary-etc_20260520_001"],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-04",
+            note="ETC三栏配对",
+            amount_check={"status": "matched", "external_etc_batch_id": "etc_20260520_001"},
+            created_at="2026-04-08T11:00:00+00:00",
+        )
+
+        cancelled, history = service.cancel_active_relations_for_row_ids(
+            ["etc-summary-etc_20260520_001"],
+            created_by="system",
+            note="删除 ETC 批次，取消 summary 关联",
+            created_at="2026-04-08T12:00:00+00:00",
+            operation_type="etc_summary_unmerged",
+        )
+
+        self.assertEqual([relation["case_id"] for relation in cancelled], ["CASE-ETC-DELETE"])
+        self.assertEqual(history["operation_type"], "etc_summary_unmerged")
+        self.assertEqual(history["after_relations"], [])
+        self.assertIsNone(service.get_active_relation_by_row_id("etc-summary-etc_20260520_001"))
+        self.assertIsNone(service.get_active_relation_by_row_id("oa-001"))
+        self.assertIsNone(service.get_active_relation_by_row_id("bank-001"))
+        self.assertEqual(
+            service.snapshot()["pair_relations"]["CASE-ETC-DELETE"]["status"],
+            "cancelled",
+        )
+
     def test_snapshot_case_ids_only_deepcopies_requested_relations(self) -> None:
         service = WorkbenchPairRelationService.from_snapshot(
             {

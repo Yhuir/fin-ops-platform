@@ -9,8 +9,8 @@
 - App Mongo detailed collections 已创建 `etc_business_batches` 集合，且满足同一 `task_id` 只有一个 active 批次的存储层约束。
 - 如果 Mongo 支持 partial unique index，检查 `unique(task_id, active=true)` 已存在；如果不支持，检查 `task_active_key` 唯一索引已存在，且非 active 批次不会保留该 key。
 - 生产部署不得使用本地 state 文件模式承载该功能；如启动参数声明 `FINOPS_STORAGE_MODE=local_state`，只能用于单进程本地开发。
-- OA 检测 adapter 和 `/oa-status/refresh` 仅作为 legacy 兼容能力保留；ETC 页面创建 OA 草稿后由用户手动确认“已提交”或“未提交”。
-- 后端不得在创建 OA 草稿或应用启动恢复时自动为 ETC 业务批次入队 `etc_business.oa_detection.refresh`。
+- ETC 专用 OA 自动检测链路已移除；ETC 页面创建 OA 草稿后由用户手动确认“已提交”或“未提交”。
+- 后端不得提供 ETC `oa-status/refresh` 入口，不得注册 ETC OA 检测 worker，不得在创建 OA 草稿或应用启动恢复时自动为 ETC 业务批次入队 `etc_business.oa_detection.refresh`。
 - 对象存储配置必须可供 PostgreSQL 文件写入链路识别 backend 和 bucket；上传信用卡账单、票根网文件和业务批次源文件前，先确认对象存储健康检查、bucket 权限和服务环境变量一致。
 
 ## 迁移 dry-run
@@ -74,22 +74,29 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 
 - `manual-oa-status` 必须校验批次 `version`，不能覆盖并发更新。
 - 人工确认必须写入审计原因；前端默认原因是“用户确认 OA 草稿已提交。”或“用户确认 OA 草稿未提交。”。
-- 历史 `oa_detection_timeout`、`oa_detection_conflict`、`oa_detection_unavailable` 批次在页面显示为待人工确认，可继续通过 manual status API 闭环。
-- 后端 legacy `/oa-status/refresh` 和 worker 代码不得由 ETC 页面、草稿创建或启动恢复自动触发；如运维手动调用 legacy refresh，必须确认不会覆盖用户刚执行的人工确认。
+- 旧版本留下的 `oa_submission_detecting`、`oa_detection_timeout`、`oa_detection_conflict`、`oa_detection_unavailable` 批次由迁移归并为 `oa_confirmation_pending`，继续通过 manual status API 闭环。
+- 后端不保留 ETC 专用检测 refresh、worker 或 detector adapter；排查时不得再通过检测接口推进 ETC 业务批次。
 
 运维排查时优先按 `businessBatchId` 查业务批次状态、审计事件、提交批次和 manual status API `requestId`。
 
-## 已提交批次本地删除
+## 业务批次本地删除
 
-已提交业务批次的 `DELETE /api/etc/business-batches/{id}` 是本地 reset 操作，不是 OA 撤销：
+ETC 批次删除是本地清理操作，不是 OA 撤销。删除入口包括：
 
-- 请求必须携带当前 `expectedVersion` 和删除原因；前端必须显示二次确认框。
-- 后端将业务批次标记为 `deleted` 并写入 `submitted_business_batch_reset` 审计事件。
-- 绑定的 ETC 发票恢复为 `unsubmitted`，`current_batch_id` 清空，canonical invoice 同步为 `workbench_visibility=visible`，关联台 open 区不再生成该批次的 `etc_invoice_summary`。
-- 旧 OA 草稿、OA 流程、已闭环 ETC 对账任务、原始导入来源和 source files 不删除、不重开、不清空。
-- 删除后 submitted bucket 不再显示该业务批次；散票会留在关联台未配对区，等待未来 OA 和银行流水按普通配对规则闭环。
+- `DELETE /api/etc/business-batches/{id}`：删除用户可见业务批次。
+- `DELETE /api/etc/reconciliation-tasks/{id}`：当任务绑定业务批次时，先委托同一套业务批次删除服务，再删除本地任务上传记录。
 
-排查时如果用户反馈“删除已提交批次后 1673 汇总仍存在”，优先检查 canonical ETC 发票是否仍为 `hidden_after_etc_submission` 或 `etc_submission_status=submitted`，再重跑对应 Workbench read model refresh。
+运行规则：
+
+- 请求必须携带当前 `expectedVersion`；前端必须显示二次确认框。`expectedVersion` 只用于并发保护，不用于流程状态阻塞。
+- 不因已确认对账、已创建 OA 草稿、已人工确认提交、`submitted_confirmed` 或 `closed` 状态阻塞删除。
+- 未提交批次删除会清理本地导入批次、ETC 发票和 canonical ETC 发票。
+- 已提交批次删除会将业务批次标记为 `deleted` 并写入 `submitted_business_batch_reset` 审计事件；绑定的 ETC 发票恢复为 `unsubmitted`，`current_batch_id` 清空，canonical invoice 同步为 `workbench_visibility=visible`，关联台 open 区不再生成该批次的 `etc_invoice_summary`。
+- 如果 `etc_invoice_summary` 已经参与 active relation，删除批次时取消包含该 summary row 的 active relation，记录 `etc_summary_unmerged` 历史；取消后不得恢复旧 OA+银行流水二栏 active relation，OA 和银行流水各自回到未配对。
+- 真实 OA 草稿、OA 流程、已提交 OA 事实不删除、不撤销；若存在绑定 ETC 对账任务，两个删除入口都会删除本地任务和本地上传元数据。
+- 删除后 submitted bucket 不再显示该业务批次；已提交批次释放出的散票会留在关联台未配对区，等待未来 OA 和银行流水按普通三栏配对规则闭环。
+
+排查时如果用户反馈“删除已提交批次后 1673 汇总仍存在”，优先检查 active relation 是否仍包含 summary row、canonical ETC 发票是否仍为 `hidden_after_etc_submission` 或 `etc_submission_status=submitted`，再重跑对应 Workbench read model refresh。
 
 ## 回滚
 
@@ -98,7 +105,7 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 回滚顺序：
 
 1. 关闭 `business-batches` 写开关，阻止新增业务批次、补充导入、创建 OA 草稿和人工兜底。
-2. 确认 ETC 页面没有自动检测入口，legacy OA 检测后台任务不会由草稿创建或启动恢复触发。
+2. 确认 ETC 页面没有自动检测入口，后端没有 ETC OA 检测后台任务、检测 adapter 或 refresh API。
 3. 回滚前端到旧 ETC 页面或隐藏新入口。
 4. 回滚后端版本或配置到旧 `/api/etc/batches*` 兼容路径。
 5. 如迁移已写入错误数据，先恢复迁移前备份；无法立即恢复时保留 `migration_conflict` 状态并由管理员人工修复。
@@ -112,8 +119,8 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 
 - `active_business_batch_exists` 或唯一索引冲突持续出现。
 - `manual-oa-status` 状态冲突或 version conflict 持续出现。
-- `oa_detection_unavailable`、`oa_detection_conflict` 历史兼容状态数量异常增加。
-- 后台检测任务被意外入队并推进 ETC 业务批次。
+- `oa_confirmation_pending` 批次长期无人确认，或旧检测状态迁移后仍有新增记录。
+- 日志中出现 ETC `oa-status/refresh`、`etc_business.oa_detection.refresh` 或 detector adapter 调用痕迹。
 - `/api/etc/business-batches*` 出现 HTML 响应或 Nginx 502。
 - 上传信用卡账单、票根网或业务批次源文件返回 `reconciliation_file_storage_unavailable`，或后端日志出现 `ObjectStorageWriteError`。
 - 迁移报告中 `migration_conflict`、脏引用修复或跳过数量超过预期。

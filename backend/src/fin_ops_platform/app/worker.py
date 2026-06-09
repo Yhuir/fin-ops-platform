@@ -32,7 +32,6 @@ from fin_ops_platform.services.postgres_connection import (
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
-from fin_ops_platform.services.etc_business_batch_application_service import ETC_BUSINESS_OA_DETECTION_EVENT_TYPE
 from fin_ops_platform.services.file_object_migration import GridFSObjectMigrationService
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -64,10 +63,8 @@ from fin_ops_platform.services.runtime_redis import RuntimeRedisHelper, RuntimeR
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
 from fin_ops_platform.services.runtime_worker_handlers import (
     IMPORT_FACT_CHANGED_EVENT,
-    EtcBusinessOaDetectionWorkerFactory,
     ImportRuntimeProcessorFactory,
     WorkbenchMatchingWorkerFactory,
-    build_etc_business_oa_detection_handler,
     build_import_job_handler_bundle,
     check_import_job_processors,
     handle_import_fact_changed_event,
@@ -139,7 +136,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-output-invoice-collection-read-model-refresh", action="store_true", help="Register output invoice collection SQL read model refresh handler.")
     parser.add_argument("--enable-oa-pending-payment-read-model-refresh", action="store_true", help="Register OA pending payment SQL read model refresh handler.")
     parser.add_argument("--enable-oa-sync", action="store_true", help="Register OA Mongo to PostgreSQL projection sync handler.")
-    parser.add_argument("--enable-etc-business-oa-detection", action="store_true", help="Register ETC business batch OA detection handler.")
     parser.add_argument("--enable-import-job-processing", action="store_true", help="Register import job worker handler.")
     parser.add_argument("--enable-workbench-matching", action="store_true", help="Poll DB-backed workbench matching dirty scopes.")
     parser.add_argument("--workbench-matching-batch-size", type=int, default=10)
@@ -242,19 +238,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
             config.event_types.append("oa.sync")
-    if args.enable_etc_business_oa_detection:
-        etc_business_service = (
-            SimpleNamespace()
-            if args.check
-            else EtcBusinessOaDetectionWorkerFactory(
-                data_dir=default_data_dir(),
-                connection=connection,
-                queue_repository=queue,
-            ).build_service()
-        )
-        handlers[ETC_BUSINESS_OA_DETECTION_EVENT_TYPE] = build_etc_business_oa_detection_handler(etc_business_service)
-        if ETC_BUSINESS_OA_DETECTION_EVENT_TYPE not in config.event_types:
-            config.event_types.append(ETC_BUSINESS_OA_DETECTION_EVENT_TYPE)
     if args.enable_workbench_read_model_refresh:
         projection_builder = WorkbenchSqlProjectionBuilder(connection=connection)
         page_cache_warmer = WorkbenchGroupsPageCacheWarmer(
@@ -539,10 +522,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _handle_import_fact_changed_event(event: Any) -> dict[str, Any]:
     return handle_import_fact_changed_event(event)
-
-
-def _handle_etc_business_oa_detection_event(service: Any, event: Any) -> dict[str, Any]:
-    return build_etc_business_oa_detection_handler(service)(event)
 
 
 def _no_oa_workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:

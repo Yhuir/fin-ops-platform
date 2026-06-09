@@ -537,7 +537,7 @@ function createEtcInvoiceStore() {
       }
       return {
         ...hydrateBusinessBatch(batch, true),
-        status: "oa_submission_detecting",
+        status: "oa_confirmation_pending",
         version: 8,
         submission_batch_id: "etc_batch_0027",
         oa_draft_id: "oa_draft_001",

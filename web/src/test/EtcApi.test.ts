@@ -58,7 +58,7 @@ describe("etc api", () => {
                 {
                   id: "etc_business_batch_0001",
                   task_id: "etc-recon-task-001",
-                  status: "oa_submission_detecting",
+                  status: "oa_confirmation_pending",
                   version: 7,
                   import_batch_ids: ["etc_import_batch_0004", "etc_import_batch_0005"],
                   submission_batch_id: "etc_batch_0027",
@@ -101,7 +101,7 @@ describe("etc api", () => {
     expect(result.items[0]).toMatchObject({
       businessBatchId: "etc_business_batch_0001",
       taskId: "etc-recon-task-001",
-      status: "oa_submission_detecting",
+      status: "oa_confirmation_pending",
       version: 7,
       importBatchIds: ["etc_import_batch_0004", "etc_import_batch_0005"],
       submissionBatchId: "etc_batch_0027",
@@ -124,7 +124,7 @@ describe("etc api", () => {
     const responsePayloads = [
       { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "imported", version: 7 } },
       { item: { business_batch_id: "etc_business_batch_0001", status: "imported", version: 7 } },
-      { detail: { business_batch_id: "etc_business_batch_0001", status: "oa_submission_detecting", version: 8 } },
+      { detail: { business_batch_id: "etc_business_batch_0001", status: "oa_confirmation_pending", version: 8 } },
       { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "not_submitted", version: 9 } },
       { businessBatch: { business_batch_id: "etc_business_batch_0001", status: "manually_marked_submitted", version: 10 } },
     ];
@@ -162,7 +162,7 @@ describe("etc api", () => {
     ]);
     expect(created).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "imported", version: 7 });
     expect(detail).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "imported", version: 7 });
-    expect(draft).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "oa_submission_detecting", version: 8 });
+    expect(draft).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "oa_confirmation_pending", version: 8 });
     expect(revoked).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "not_submitted", version: 9 });
     expect(manual).toMatchObject({ businessBatchId: "etc_business_batch_0001", status: "manually_marked_submitted", version: 10 });
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -201,11 +201,6 @@ describe("etc api", () => {
             taskId: "ETC-TASK-001",
             status: "imported",
             version: 3,
-            oaDetectionError: null,
-            oaDetectionStartedAt: null,
-            oaDetectionNextRunAt: null,
-            oaDetectionDeadlineAt: null,
-            oaDetectionFinalRetryUntil: null,
             invoiceSummary: { count: 1, amount: "13.07" },
             invoiceItems: [
               {
@@ -232,11 +227,6 @@ describe("etc api", () => {
     expect(detail).toMatchObject({
       businessBatchId: "etc_business_batch_0001",
       status: "imported",
-      oaDetectionError: "",
-      oaDetectionStartedAt: "",
-      oaDetectionNextRunAt: "",
-      oaDetectionDeadlineAt: "",
-      oaDetectionFinalRetryUntil: "",
     });
     expect(detail.invoiceItems).toEqual([
       expect.objectContaining({

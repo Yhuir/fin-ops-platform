@@ -1509,7 +1509,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = SwitchingActiveWorkbenchGenerationConnection()
         repository = PostgresReadModelRepository(connection)
 
-        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
+        page = repository.get_workbench_groups_page(scope_key="all", zone="paired", page=1, page_size=25)
 
         all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
         active_generation_queries = [
@@ -1548,7 +1548,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         connection = WorkbenchGenerationStatsConnection()
         repository = PostgresReadModelRepository(connection)
 
-        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=1, page_size=25)
+        page = repository.get_workbench_groups_page(scope_key="all", zone="paired", page=1, page_size=25)
 
         self.assertEqual(page["total"], 2)
         self.assertEqual(page["row_counts"], {"oa": 3, "bank": 4, "invoice": 5, "rows": 12})

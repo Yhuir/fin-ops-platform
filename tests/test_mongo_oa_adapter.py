@@ -2727,45 +2727,6 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertIn({"data.applicationDate": {"$regex": "^2026-03"}}, query["$or"])
         self.assertIn({"data.ApplicationDate": {"$regex": "^2026-03"}}, query["$or"])
 
-    def test_etc_detection_marker_lookup_does_not_apply_local_detection_date_filter(self) -> None:
-        marker_text = "ETC批量提交 etc_batch_id=etc_20260520_001 business_batch_id=etc_business_batch_0004"
-        adapter = SearchSummaryStubMongoOAAdapter(
-            form_documents={
-                "2": [
-                    {
-                        "_id": "1004",
-                        "form_id": "2",
-                        "modifiedTime": "2026-05-20T10:00:00",
-                        "data": {
-                            "applicationDate": "2026-05-20",
-                            "amount": "1673.30",
-                            "invoiceCount": "37",
-                            "applicantUserId": "user-001",
-                            "ownerOrgId": "org-001",
-                            "processStatus": "1",
-                            "expenseContent": marker_text,
-                        },
-                    }
-                ]
-            },
-            project_documents=[],
-        )
-
-        candidates = adapter.list_etc_oa_detection_candidates(
-            business_batch_id="etc_business_batch_0004",
-            external_etc_batch_id="etc_20260520_001",
-            created_from=datetime(2026, 6, 7, 0, 0, 0),
-            created_to=datetime(2026, 6, 8, 19, 0, 0),
-        )
-
-        query_text = str(adapter.search_document_calls[0]["query"])
-        self.assertNotIn("applicationDate", query_text)
-        self.assertNotIn("modifiedTime", query_text)
-        self.assertIn("data.expenseContent", query_text)
-        self.assertEqual(candidates[0]["amount"], "1673.30")
-        self.assertEqual(candidates[0]["invoice_count"], "37")
-        self.assertIn("business_batch_id=etc_business_batch_0004", candidates[0]["reason"])
-
     def test_list_available_months_retries_after_transient_query_failure(self) -> None:
         collection = FlakyMonthCollection()
         adapter = QueryRecordingMongoOAAdapter(collection)

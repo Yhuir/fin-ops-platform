@@ -227,22 +227,6 @@ type ApiEtcBusinessBatch = ApiEtcBatch & {
   oa_row_id?: string | null;
   oaProcessStatus?: string | null;
   oa_process_status?: string | null;
-  oaDetectionStatus?: string | null;
-  oa_detection_status?: string | null;
-  oaDetectionReason?: string | null;
-  oa_detection_reason?: string | null;
-  oaDetectionError?: string | null;
-  oa_detection_error?: string | null;
-  oaDetectionStartedAt?: string | null;
-  oa_detection_started_at?: string | null;
-  oaDetectionNextRunAt?: string | null;
-  oa_detection_next_run_at?: string | null;
-  oaDetectionDeadlineAt?: string | null;
-  oa_detection_deadline_at?: string | null;
-  oaDetectionFinalRetryUntil?: string | null;
-  oa_detection_final_retry_until?: string | null;
-  oaDetectionAttempts?: number | null;
-  oa_detection_attempts?: number | null;
   invoiceSummary?: {
     count?: number | null;
     amount?: string | number | null;
@@ -950,14 +934,6 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
     oaDraftUrl: batch.oaDraftUrl ?? batch.oa_draft_url ?? "",
     oaRowId: batch.oaRowId ?? batch.oa_row_id ?? batch.linkedOaRowId ?? batch.linked_oa_row_id ?? "",
     oaProcessStatus: batch.oaProcessStatus ?? batch.oa_process_status ?? "",
-    oaDetectionStatus: batch.oaDetectionStatus ?? batch.oa_detection_status ?? "",
-    oaDetectionReason: batch.oaDetectionReason ?? batch.oa_detection_reason ?? "",
-    oaDetectionError: batch.oaDetectionError ?? batch.oa_detection_error ?? "",
-    oaDetectionStartedAt: batch.oaDetectionStartedAt ?? batch.oa_detection_started_at ?? "",
-    oaDetectionNextRunAt: batch.oaDetectionNextRunAt ?? batch.oa_detection_next_run_at ?? "",
-    oaDetectionDeadlineAt: batch.oaDetectionDeadlineAt ?? batch.oa_detection_deadline_at ?? "",
-    oaDetectionFinalRetryUntil: batch.oaDetectionFinalRetryUntil ?? batch.oa_detection_final_retry_until ?? "",
-    oaDetectionAttempts: batch.oaDetectionAttempts ?? batch.oa_detection_attempts ?? 0,
     invoiceSummary: {
       count: invoiceSummary?.count ?? batch.invoiceCount ?? batch.invoice_count ?? 0,
       amount: normalizeMoney(invoiceSummary?.amount ?? batch.totalAmount ?? batch.total_amount),

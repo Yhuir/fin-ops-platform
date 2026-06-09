@@ -19,11 +19,8 @@ export type EtcBusinessBatchStatus =
   | "import_partial_failed"
   | "oa_draft_creating"
   | "oa_draft_failed"
-  | "oa_submission_detecting"
+  | "oa_confirmation_pending"
   | "oa_submitted"
-  | "oa_detection_timeout"
-  | "oa_detection_conflict"
-  | "oa_detection_unavailable"
   | "not_submitted"
   | "manually_marked_submitted"
   | "manually_marked_not_submitted"
@@ -186,14 +183,6 @@ export type EtcBusinessBatchSummary = {
   oaDraftUrl: string;
   oaRowId: string;
   oaProcessStatus: string;
-  oaDetectionStatus: string;
-  oaDetectionReason: string;
-  oaDetectionError: string;
-  oaDetectionStartedAt: string;
-  oaDetectionNextRunAt: string;
-  oaDetectionDeadlineAt: string;
-  oaDetectionFinalRetryUntil: string;
-  oaDetectionAttempts: number;
   invoiceSummary: EtcBusinessBatchInvoiceSummary;
   invoiceIds: string[];
   importAttempts: EtcBusinessBatchImportAttempt[];

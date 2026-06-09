@@ -192,11 +192,8 @@ function businessBatchStatusLabel(status: EtcBusinessBatchStatus) {
     import_partial_failed: "部分导入失败",
     oa_draft_creating: "草稿创建中",
     oa_draft_failed: "草稿创建失败",
-    oa_submission_detecting: "待确认OA状态",
+    oa_confirmation_pending: "待确认OA状态",
     oa_submitted: "OA已提交",
-    oa_detection_timeout: "待人工确认",
-    oa_detection_conflict: "待人工确认",
-    oa_detection_unavailable: "待人工确认",
     not_submitted: "未提交OA",
     manually_marked_submitted: "人工确认已提交",
     manually_marked_not_submitted: "人工确认未提交",
@@ -213,7 +210,7 @@ function businessBatchTone(status: EtcBusinessBatchStatus): "default" | "primary
   if (status === "oa_submitted" || status === "manually_marked_submitted" || status === "closed") {
     return "success";
   }
-  if (status === "oa_detection_timeout" || status === "oa_detection_conflict" || status === "oa_detection_unavailable" || status === "oa_draft_failed" || status === "import_failed" || status === "import_partial_failed") {
+  if (status === "oa_draft_failed" || status === "import_failed" || status === "import_partial_failed") {
     return "warning";
   }
   if (status === "migration_conflict" || status === "business_batch_invariant_broken") {
@@ -305,8 +302,8 @@ function transitionBusinessBatchCounts(
   return nextCounts;
 }
 
-function isOaDetectionStatus(status: EtcBusinessBatchStatus) {
-  return status === "oa_submission_detecting" || status === "oa_detection_timeout" || status === "oa_detection_conflict" || status === "oa_detection_unavailable";
+function isOaConfirmationPendingStatus(status: EtcBusinessBatchStatus) {
+  return status === "oa_confirmation_pending";
 }
 
 function canCreateOaDraft(status: EtcBusinessBatchStatus) {
@@ -1129,35 +1126,7 @@ export default function EtcTicketManagementPage() {
   function taskHasOaDraftOrSubmittedLink(task: EtcReconciliationTask) {
     return Boolean(task.oaDraftBatchId?.trim() || task.submittedConfirmedAt?.trim());
   }
-  const businessBatchDeleteBlockReason = (batch: EtcBusinessBatchSummary) => {
-    if (isSubmittedBusinessStatus(batch.status)) {
-      return "";
-    }
-    if (batch.oaProcessStatus === "in_progress") {
-      return "OA处理中，不能删除";
-    }
-    if (batch.status === "importing" || batch.status === "oa_draft_creating") {
-      return "处理中，不能删除";
-    }
-    if (![
-      "draft",
-      "reviewing",
-      "ready_for_import",
-      "imported",
-      "import_failed",
-      "import_partial_failed",
-      "oa_draft_failed",
-      "oa_submission_detecting",
-      "oa_detection_timeout",
-      "oa_detection_conflict",
-      "oa_detection_unavailable",
-      "not_submitted",
-      "manually_marked_not_submitted",
-    ].includes(batch.status)) {
-      return "当前状态不能删除";
-    }
-    return "";
-  };
+  const businessBatchDeleteBlockReason = (_batch: EtcBusinessBatchSummary) => "";
   const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) => !businessBatchDeleteBlockReason(batch);
   const taskLinkedBusinessBatch = (task: EtcReconciliationTask) => {
     const importBatchId = task.importBatchId?.trim();
@@ -1166,54 +1135,38 @@ export default function EtcTicketManagementPage() {
       && (!importBatchId || batch.importBatchIds.includes(importBatchId))
     ) ?? null;
   };
-  const taskLinkedBusinessBatchDeleteBlockReason = (task: EtcReconciliationTask) => {
-    const linkedBusinessBatch = taskLinkedBusinessBatch(task);
-    return linkedBusinessBatch ? businessBatchDeleteBlockReason(linkedBusinessBatch) : "";
-  };
-  function taskHasDeleteBlockingSubmissionLink(task: EtcReconciliationTask) {
-    const linkedBusinessBatch = taskLinkedBusinessBatch(task);
-    if (linkedBusinessBatch) {
-      return Boolean(task.submittedConfirmedAt?.trim() || businessBatchDeleteBlockReason(linkedBusinessBatch));
-    }
-    return Boolean(task.submittedConfirmedAt?.trim());
-  }
   const canRemoveImportedInvoicesFromTask = (task: EtcReconciliationTask) =>
     task.status === "imported" && Boolean(task.importBatchId?.trim()) && !task.submittedConfirmedAt?.trim();
-  const canDeleteTask = (task: EtcReconciliationTask) =>
-    ["draft", "reviewing", "ready_for_import", "imported"].includes(task.status) && !taskHasDeleteBlockingSubmissionLink(task);
-  const deleteTaskDisabledReason = (task: EtcReconciliationTask) => {
+  const canDeleteTask = (_task: EtcReconciliationTask) => true;
+  const removeImportedInvoicesDisabledReason = (task: EtcReconciliationTask) => {
     if (task.submittedConfirmedAt?.trim()) {
-      return "OA已提交，不能删除";
-    }
-    const linkedBusinessBatchReason = taskLinkedBusinessBatchDeleteBlockReason(task);
-    if (linkedBusinessBatchReason) {
-      return linkedBusinessBatchReason;
+      return "OA已提交，不能移除已导入发票";
     }
     if (task.status === "importing") {
-      return "导入中，不能删除";
+      return "导入中，不能移除已导入发票";
     }
     if (task.status === "closed") {
-      return "已关闭批次不能删除";
+      return "已关闭批次不能移除已导入发票";
     }
-    return "当前状态不能删除";
+    return "当前任务不能移除已导入发票";
   };
   const deleteTaskDescription = (task: EtcReconciliationTask) => {
     if (task.status === "imported") {
-      return "将删除该批次及未进入 OA 的数据，并一并删除已导入发票。";
+      return "将删除本地 ETC 批次、上传文件、核对结果和已导入发票。OA 系统中的草稿和已提交记录不会删除。";
     }
     if (task.status === "ready_for_import") {
-      return "将删除该批次及未进入 OA 的数据。";
+      return "将删除本地 ETC 批次、上传文件和核对结果。OA 系统中的草稿和已提交记录不会删除。";
     }
-    return "将删除该批次、上传文件和核对结果。已进入 OA 的数据不能删除。";
+    return "将删除本地 ETC 批次、上传文件和核对结果。OA 系统中的草稿和已提交记录不会删除。";
   };
   const businessBatchForBatchSummary = (batch: EtcBatchSummary) =>
     businessBatches.find((item) => item.businessBatchId === batch.id) ?? null;
   const deleteBatchDescription = (target: Extract<DeleteTarget, { kind: "batch" }>) => {
     const businessBatch = businessBatchForBatchSummary(target.item);
     if (businessBatch && isSubmittedBusinessStatus(businessBatch.status)) {
-      return "将删除本地批次记录并释放 ETC 发票，OA 草稿和已提交记录不会删除。";
+      return "将删除本地 ETC 批次并取消发票合并，OA 系统中的草稿和已提交记录不会删除。";
     }
-    return "将删除该未提交批次。已提交或已关联 OA 的批次不能删除。";
+    return "将删除本地 ETC 批次及已导入内容，OA 系统中的草稿和已提交记录不会删除。";
   };
   const batchDeletePlan = (batch: EtcBatchSummary): BatchDeletePlan => {
     const businessBatch = businessBatchForBatchSummary(batch);
@@ -1232,18 +1185,18 @@ export default function EtcTicketManagementPage() {
       return canDeleteBusinessBatch(businessBatch);
     }
     if (isBusinessBatchSource(batch)) {
-      return batch.status !== "submitted";
+      return true;
     }
-    return batch.status !== "submitted";
+    return true;
   };
   const deleteBusinessBatchDisabledReason = (batch: EtcBusinessBatchSummary) =>
-    businessBatchDeleteBlockReason(batch) || "当前状态不能删除";
+    businessBatchDeleteBlockReason(batch) || "当前批次暂不可删除";
   const deleteBatchDisabledReason = (batch: EtcBatchSummary) => {
     const businessBatch = businessBatchForBatchSummary(batch);
     if (businessBatch) {
       return deleteBusinessBatchDisabledReason(businessBatch);
     }
-    return "已提交批次不能删除";
+    return "当前批次暂不可删除";
   };
   const evidenceRows = useMemo<EvidenceRow[]>(() => {
     const ticketRows = (selectedTask?.ticketRootItems ?? []).map((item: EtcTicketRootItem) => ({
@@ -1720,7 +1673,7 @@ export default function EtcTicketManagementPage() {
       const latestTask = await fetchEtcReconciliationTask(selectedTask.taskId);
       mergeReconciliationTask(latestTask);
       if (!canRemoveImportedInvoicesFromTask(latestTask)) {
-        throw new Error(deleteTaskDisabledReason(latestTask));
+        throw new Error(removeImportedInvoicesDisabledReason(latestTask));
       }
       const task = await deleteEtcReconciliationTaskImportedInvoices(latestTask.taskId, latestTask.version);
       setTaskImportBatchDetail(null);
@@ -1777,9 +1730,6 @@ export default function EtcTicketManagementPage() {
       if (linkedBusinessBatchReason) {
         throw new Error(linkedBusinessBatchReason);
       }
-    }
-    if (!canDeleteTask(latestTask)) {
-      throw new Error(deleteTaskDisabledReason(latestTask));
     }
     return latestTask;
   };
@@ -2341,8 +2291,8 @@ export default function EtcTicketManagementPage() {
                       <button
                         type="button"
                         className="etc-icon-action etc-icon-action--danger"
-                        aria-label={deletable ? `删除批次 ${batchTitle}` : taskRow ? deleteTaskDisabledReason(taskRow) : deleteBatchDisabledReason(batch)}
-                        title={deletable ? "删除批次" : taskRow ? deleteTaskDisabledReason(taskRow) : deleteBatchDisabledReason(batch)}
+                        aria-label={deletable ? `删除批次 ${batchTitle}` : deleteBatchDisabledReason(batch)}
+                        title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}
                         disabled={!deletable || deleteSubmitting}
                         onClick={(event) => {
                           if (taskRow) {
@@ -2802,7 +2752,7 @@ export default function EtcTicketManagementPage() {
                           ) : null}
                         </DisclosureGroup>
 
-                        {selectedTaskBusinessBatch && isOaDetectionStatus(selectedTaskBusinessBatch.status)
+                        {selectedTaskBusinessBatch && isOaConfirmationPendingStatus(selectedTaskBusinessBatch.status)
                           ? renderOaStatusPanel(selectedTaskBusinessBatch)
                           : null}
                       </div>
@@ -2856,7 +2806,7 @@ export default function EtcTicketManagementPage() {
                   </div>
 
                   {selectedBusinessBatch
-                    && isOaDetectionStatus(selectedBusinessBatch.status)
+                    && isOaConfirmationPendingStatus(selectedBusinessBatch.status)
                     && (
                       activeStatus !== "unsubmitted"
                       || !selectedTaskBusinessBatch

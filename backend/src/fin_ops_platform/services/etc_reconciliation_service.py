@@ -117,20 +117,6 @@ class EtcReconciliationTaskService:
     ) -> dict[str, object]:
         task = self._tasks[task_id]
         self._assert_expected_version(task, expected_version)
-        if task.submitted_confirmed_at is not None:
-            raise ValueError("reconciliation_task_has_submission_link")
-        if (
-            str(task.oa_draft_batch_id or "").strip()
-            or str(task.etc_batch_id or "").strip()
-        ) and not import_cleanup_confirmed:
-            raise ValueError("reconciliation_task_has_submission_link")
-        if task.status not in {
-            EtcReconciliationTaskStatus.DRAFT,
-            EtcReconciliationTaskStatus.REVIEWING,
-            EtcReconciliationTaskStatus.READY_FOR_IMPORT,
-            EtcReconciliationTaskStatus.IMPORTED,
-        }:
-            raise ValueError("invalid_reconciliation_task_status")
         if (
             task.status == EtcReconciliationTaskStatus.IMPORTED
             and str(task.import_batch_id or "").strip()

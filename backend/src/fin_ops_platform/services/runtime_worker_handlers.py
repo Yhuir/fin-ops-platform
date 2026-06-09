@@ -16,9 +16,6 @@ from fin_ops_platform.services.background_job_service import BackgroundJobServic
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
-from fin_ops_platform.services.etc_business_batch_application_service import ETC_BUSINESS_OA_DETECTION_EVENT_TYPE
-from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
-from fin_ops_platform.services.etc_oa_detection import FallbackEtcOADetectionCandidateAdapter
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import EtcService
 from fin_ops_platform.services.import_file_service import FileImportService
@@ -31,9 +28,8 @@ from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, load_mongo_oa_settings
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
-from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION, PostgresOAProjectionAdapter
+from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
@@ -200,60 +196,6 @@ class WorkbenchMatchingWorkerFactory:
         from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 
         return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
-
-
-class EtcBusinessOaDetectionWorkerFactory:
-    def __init__(self, *, data_dir: str | Path, connection: Any, queue_repository: Any | None = None) -> None:
-        self._data_dir = data_dir
-        self._connection = connection
-        self._queue_repository = queue_repository
-
-    def build_service(self) -> EtcBusinessBatchApplicationService:
-        state_store = self._state_store()
-        import_service = ImportNormalizationService.from_snapshot(
-            _call_or_empty(state_store, "load_imports_snapshot"),
-            id_registry=state_store,
-            fact_repository=getattr(state_store, "import_fact_repository", None),
-        )
-        etc_service = EtcService(state_store=state_store)
-        etc_service.set_canonical_invoice_key_exists(_canonical_invoice_key_exists(import_service))
-        app_settings_service = _app_settings_service(state_store)
-        lifecycle = _RuntimeWorkerDerivedLifecycle(
-            queue_repository=self._queue_repository,
-            state_store=state_store,
-            search_service=_runtime_search_service(import_service),
-            workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
-        )
-        return EtcBusinessBatchApplicationService(
-            etc_service=etc_service,
-            reconciliation_task_service=EtcReconciliationTaskService(state_store=state_store),
-            queue_repository=self._queue_repository,
-            oa_client_factory=_unsupported_etc_oa_client_factory,
-            oa_adapter_provider=lambda: _etc_oa_detection_adapter(state_store),
-            sync_etc_invoices_to_canonical_invoices=_sync_etc_invoices_to_canonical_invoices(import_service),
-            refresh_after_etc_invoice_sync=lifecycle.refresh_after_etc_invoice_sync,
-        )
-
-    def _state_store(self) -> Any:
-        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
-
-        return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
-
-
-def _etc_oa_detection_adapter(state_store: Any) -> Any | None:
-    adapters: list[Any] = []
-    oa_projection_repository = getattr(state_store, "oa_projection_repository", None)
-    if oa_projection_repository is not None:
-        adapters.append(PostgresOAProjectionAdapter(oa_projection_repository))
-    data_dir = getattr(state_store, "data_dir", None)
-    mongo_oa_settings = load_mongo_oa_settings(Path(data_dir)) if data_dir is not None else load_mongo_oa_settings(None)
-    if mongo_oa_settings is not None:
-        adapters.append(MongoOAAdapter(settings=mongo_oa_settings, attachment_invoice_cache=state_store))
-    if not adapters:
-        return None
-    if len(adapters) == 1:
-        return adapters[0]
-    return FallbackEtcOADetectionCandidateAdapter(adapters)
 
 
 def build_import_job_handler_bundle(
@@ -477,10 +419,6 @@ class _RuntimeWorkerDerivedLifecycle:
     def _scope_keys(domain_plan: dict[str, object]) -> list[str]:
         raw_scope_keys = domain_plan.get("scope_keys") if isinstance(domain_plan, dict) else []
         return _dedupe_text(raw_scope_keys if isinstance(raw_scope_keys, list) else [])
-
-
-def build_etc_business_oa_detection_handler(service: Any) -> Callable[[Any], dict[str, Any]]:
-    return lambda event: handle_etc_business_oa_detection_event(service, event)
 
 
 def _runtime_search_service(import_service: ImportNormalizationService) -> SearchService:
@@ -791,26 +729,6 @@ def handle_import_fact_changed_event(event: Any) -> dict[str, Any]:
         "scope_type": scope_type,
         "scope_key": scope_key,
         "note": "import fact dirty scopes are persisted by the import fact writer",
-    }
-
-
-def handle_etc_business_oa_detection_event(service: Any, event: Any) -> dict[str, Any]:
-    payload = getattr(event, "payload", {}) or {}
-    business_batch_id = str(payload.get("business_batch_id") or getattr(event, "aggregate_id", "") or "").strip()
-    if not business_batch_id:
-        raise ValueError("business_batch_id is required for ETC OA detection event.")
-    expected_version = payload.get("expected_version")
-    if expected_version in (None, ""):
-        expected_version = None
-    else:
-        expected_version = int(expected_version)
-    batch = service.refresh_oa_detection(business_batch_id, expected_version=expected_version)
-    if str(getattr(batch, "status", "")) != "oa_submission_detecting":
-        service.sync_invoices_after_oa_detection(batch, reason="etc_business_oa_status_detected_async")
-    return {
-        "status": str(getattr(batch, "status", "")),
-        "business_batch_id": business_batch_id,
-        "version": int(getattr(batch, "version", 0) or 0),
     }
 
 

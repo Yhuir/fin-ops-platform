@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Callable, Iterable
 
-from fin_ops_platform.services.etc_oa_detection import EtcOADetectionContext, EtcOADetectionService
 from fin_ops_platform.services.etc_reconciliation_models import ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_service import (
     ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES,
@@ -17,10 +16,6 @@ from fin_ops_platform.services.etc_service import (
     EtcService,
     UploadedEtcZipFile,
 )
-
-
-ETC_BUSINESS_OA_DETECTION_EVENT_TYPE = "etc_business.oa_detection.refresh"
-ETC_OA_MARKER_LOOKUP_START_AT = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,17 +41,13 @@ class EtcBusinessBatchApplicationService:
         *,
         etc_service: EtcService,
         reconciliation_task_service: Any,
-        queue_repository: Any | None = None,
         oa_client_factory: Callable[[dict[str, str] | None], Any] | None = None,
-        oa_adapter_provider: Callable[[], Any] | None = None,
         sync_etc_invoices_to_canonical_invoices: Callable[[list[object]], list[str]] | None = None,
         refresh_after_etc_invoice_sync: Callable[[list[str], str], None] | None = None,
     ) -> None:
         self._etc_service = etc_service
         self._reconciliation_task_service = reconciliation_task_service
-        self._queue_repository = queue_repository
         self._oa_client_factory = oa_client_factory
-        self._oa_adapter_provider = oa_adapter_provider
         self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices
         self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync
 
@@ -83,10 +74,7 @@ class EtcBusinessBatchApplicationService:
             EtcBusinessBatchStatus.IMPORT_PARTIAL_FAILED.value,
             EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
             EtcBusinessBatchStatus.OA_DRAFT_FAILED.value,
-            EtcBusinessBatchStatus.OA_SUBMISSION_DETECTING.value,
-            EtcBusinessBatchStatus.OA_DETECTION_TIMEOUT.value,
-            EtcBusinessBatchStatus.OA_DETECTION_CONFLICT.value,
-            EtcBusinessBatchStatus.OA_DETECTION_UNAVAILABLE.value,
+            EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
             EtcBusinessBatchStatus.NOT_SUBMITTED.value,
             EtcBusinessBatchStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
             EtcBusinessBatchStatus.MIGRATION_CONFLICT.value,
@@ -205,23 +193,6 @@ class EtcBusinessBatchApplicationService:
         self._sync_invoices(batch, "etc_business_oa_draft_created")
         return {"businessBatch": self.business_batch_payload(batch)}
 
-    def refresh_oa_status_payload(
-        self,
-        business_batch_id: str,
-        *,
-        expected_version: int | None,
-        actor: EtcBusinessBatchActor,
-    ) -> dict[str, object]:
-        self._scoped_batch(business_batch_id, actor)
-        batch = self.refresh_oa_detection(business_batch_id, expected_version=expected_version)
-        if str(getattr(batch, "status", "")) in {
-            EtcBusinessBatchStatus.OA_SUBMITTED.value,
-            EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
-        }:
-            self._record_reconciliation_task_submitted(batch, actor=actor)
-            self._sync_invoices(batch, "etc_business_oa_status_detected")
-        return {"businessBatch": self.business_batch_payload(batch)}
-
     def manual_oa_status_payload(
         self,
         business_batch_id: str,
@@ -238,8 +209,6 @@ class EtcBusinessBatchApplicationService:
                 "manual OA status is allowed only after an OA draft is created and waiting for confirmation.",
                 code="invalid_manual_status",
             )
-        if str(decision or "").strip().lower() == "submitted" and candidate_oa_row_id:
-            self._validate_candidate_oa_row(current, candidate_oa_row_id)
         batch = self._etc_service.manual_business_batch_oa_status(
             business_batch_id,
             decision=decision,
@@ -281,83 +250,6 @@ class EtcBusinessBatchApplicationService:
             "sourceFiles": self.source_file_payloads(task),
             "createdSourceFiles": [self._source_file_payload(item, blocking_file_ids=set()) for item in created],
         }
-
-    def enqueue_oa_detection(self, batch_or_id: EtcBusinessBatch | str) -> bool:
-        queue = self._queue_repository
-        enqueue = getattr(queue, "enqueue", None)
-        if not callable(enqueue):
-            return False
-        batch = self._etc_service.get_business_batch(batch_or_id) if isinstance(batch_or_id, str) else batch_or_id
-        enqueue(
-            event_type=ETC_BUSINESS_OA_DETECTION_EVENT_TYPE,
-            aggregate_type="etc_business_batch",
-            aggregate_id=batch.business_batch_id,
-            scope_type="etc_business_batch",
-            scope_key=batch.business_batch_id,
-            dedupe_key=f"{ETC_BUSINESS_OA_DETECTION_EVENT_TYPE}:{batch.business_batch_id}:{batch.version}",
-            payload={"business_batch_id": batch.business_batch_id, "expected_version": batch.version},
-            source_version=batch.version,
-            priority=50,
-        )
-        return True
-
-    def refresh_oa_detection(self, business_batch_id: str, *, expected_version: int | None) -> EtcBusinessBatch:
-        batch = self._etc_service.get_business_batch(business_batch_id)
-        payload = self._etc_service.business_batch_payload(batch)
-        invoice_summary = payload.get("invoiceSummary") if isinstance(payload.get("invoiceSummary"), dict) else {}
-        context = EtcOADetectionContext(
-            business_batch_id=str(payload.get("businessBatchId") or ""),
-            external_etc_batch_id=str(payload.get("externalEtcBatchId") or ""),
-            amount=invoice_summary.get("amount", "0.00") if isinstance(invoice_summary, dict) else "0.00",
-            invoice_count=int(invoice_summary.get("count", 0) or 0) if isinstance(invoice_summary, dict) else 0,
-            owner_user_id=str(payload.get("ownerUserId") or "").strip() or None,
-            owner_org_id=str(payload.get("ownerOrgId") or "").strip() or None,
-            oa_draft_created_at=getattr(batch, "oa_detection_started_at", None) or getattr(batch, "updated_at", None),
-            oa_detection_deadline_at=getattr(batch, "oa_detection_deadline_at", None),
-            oa_detection_final_retry_until=getattr(batch, "oa_detection_final_retry_until", None),
-        )
-        adapter = self._oa_adapter_provider() if self._oa_adapter_provider is not None else None
-        candidate_loader = getattr(adapter, "list_etc_oa_detection_candidates", None)
-        if not callable(candidate_loader):
-            return self._etc_service.apply_business_batch_oa_detection_result(
-                business_batch_id,
-                expected_version=expected_version,
-                detection_status="unavailable",
-                reason="oa_detector_not_configured",
-                error="OA detector is not configured.",
-            )
-        detector = EtcOADetectionService()
-        start, end = detector.detection_window(context)
-        now = datetime.now(UTC)
-        if context.business_batch_id or context.external_etc_batch_id:
-            start = ETC_OA_MARKER_LOOKUP_START_AT
-        elif start is None:
-            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if end is None:
-            end = now
-        result = detector.detect_with_adapter(
-            context,
-            lambda detection_context: candidate_loader(
-                business_batch_id=detection_context.business_batch_id,
-                external_etc_batch_id=detection_context.external_etc_batch_id,
-                created_from=start,
-                created_to=end,
-            ),
-            now=datetime.now(UTC),
-        )
-        return self._etc_service.apply_business_batch_oa_detection_result(
-            business_batch_id,
-            expected_version=expected_version,
-            detection_status=result.status,
-            reason=result.reason,
-            oa_row_id=result.oa_row_id,
-            process_status=result.process_status,
-            error=result.error,
-            candidates=result.candidates,
-        )
-
-    def sync_invoices_after_oa_detection(self, batch: EtcBusinessBatch, *, reason: str) -> None:
-        self._sync_invoices(batch, reason)
 
     def business_batch_payload(self, batch: EtcBusinessBatch, *, include_invoice_items: bool = False) -> dict[str, object]:
         payload = self._etc_service.business_batch_payload(batch)
@@ -512,27 +404,6 @@ class EtcBusinessBatchApplicationService:
         if isinstance(value, Enum):
             return str(value.value)
         return str(value or "").strip()
-
-    def _validate_candidate_oa_row(self, batch: EtcBusinessBatch, candidate_oa_row_id: str) -> None:
-        adapter = self._oa_adapter_provider() if self._oa_adapter_provider is not None else None
-        candidate_loader = getattr(adapter, "list_etc_oa_detection_candidates", None)
-        if not callable(candidate_loader):
-            raise EtcBusinessBatchInvalidTransitionError("OA detector is not configured.", code="invalid_manual_oa_candidate")
-        detected = self.refresh_oa_detection(batch.business_batch_id, expected_version=None)
-        latest_payload = self._etc_service.business_batch_payload(detected)
-        audit_events = list(latest_payload.get("auditEvents") or [])
-        candidate_rows = [
-            str(candidate.get("oaRowId") or "").strip()
-            for event in reversed(audit_events)
-            if isinstance(event, dict)
-            for candidate in list(event.get("candidates") or [])
-            if isinstance(candidate, dict)
-        ]
-        if str(candidate_oa_row_id or "").strip() not in candidate_rows:
-            raise EtcBusinessBatchInvalidTransitionError(
-                "人工确认的 OA 行未通过实时检测候选校验。",
-                code="invalid_manual_oa_candidate",
-            )
 
     def _invoice_payload(self, invoice: object) -> dict[str, object]:
         payload = self._serialize_value(invoice)

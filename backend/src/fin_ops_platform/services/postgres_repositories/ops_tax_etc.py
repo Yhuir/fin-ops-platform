@@ -686,18 +686,15 @@ class PostgresOpsTaxEtcRepository:
                     """
                     insert into app.etc_business_batches(
                         legacy_mongo_id, business_batch_id, task_id, status, scope_month,
-                        invoice_count, total_amount, oa_detection_status, oa_detection_payload,
-                        import_attempts, audit_events, version, raw_payload
+                        invoice_count, total_amount, import_attempts, audit_events, version, raw_payload
                     )
-                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s)
                     on conflict (business_batch_id) do update set
                         task_id = excluded.task_id,
                         status = excluded.status,
                         scope_month = excluded.scope_month,
                         invoice_count = excluded.invoice_count,
                         total_amount = excluded.total_amount,
-                        oa_detection_status = excluded.oa_detection_status,
-                        oa_detection_payload = excluded.oa_detection_payload,
                         import_attempts = excluded.import_attempts,
                         audit_events = excluded.audit_events,
                         version = excluded.version,
@@ -712,21 +709,6 @@ class PostgresOpsTaxEtcRepository:
                         month_start(business_scope_month),
                         business_invoice_count,
                         business_total_amount,
-                        text(payload.get("oa_detection_status")),
-                        jsonb(
-                            {
-                                key: payload.get(key)
-                                for key in (
-                                    "oa_detection_started_at",
-                                    "oa_detection_next_run_at",
-                                    "oa_detection_deadline_at",
-                                    "oa_detection_attempts",
-                                    "oa_detection_error",
-                                    "oa_detection_reason",
-                                )
-                                if key in payload
-                            }
-                        ),
                         jsonb(payload.get("import_attempts") if isinstance(payload.get("import_attempts"), list) else []),
                         jsonb(payload.get("audit_events") if isinstance(payload.get("audit_events"), list) else []),
                         int_value(payload.get("version"), 1),
