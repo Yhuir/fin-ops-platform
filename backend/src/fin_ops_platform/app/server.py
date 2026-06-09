@@ -170,6 +170,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
 )
+from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
@@ -4480,6 +4481,8 @@ class Application:
                         evidence_kind_override=(fields.get("evidenceKind") or [None])[0],
                     )
                 task = self._etc_reconciliation_task_service.apply_parse_result(task_id=task_id, parse_result=parse_result, actor=actor)
+        except ObjectStorageWriteError as error:
+            return self._reconciliation_storage_error_response(error)
         except ValueError as error:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
@@ -4518,6 +4521,8 @@ class Application:
             )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ObjectStorageWriteError as error:
+            return self._reconciliation_storage_error_response(error)
         except ValueError as error:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
@@ -4579,6 +4584,8 @@ class Application:
                     parse_result=parse_result,
                     actor=actor,
                 )
+        except ObjectStorageWriteError as error:
+            return self._reconciliation_storage_error_response(error)
         except ValueError as value_error:
             return self._reconciliation_error_response(value_error)
         return self._json_response(HTTPStatus.OK, self._etc_reconciliation_task_payload(task))
@@ -5013,6 +5020,15 @@ class Application:
         }
         normalized_code = "ticket_root_source_mode_conflict" if code.startswith("ticket_root_source_mode_conflict") else code
         return self._json_response(status, {"error": normalized_code, "message": messages.get(code, code)})
+
+    def _reconciliation_storage_error_response(self, error: ObjectStorageWriteError) -> Response:
+        return self._json_response(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "reconciliation_file_storage_unavailable",
+                "message": "文件存储暂时不可用，上传未保存。请稍后重试或联系管理员检查对象存储配置。",
+            },
+        )
 
     @staticmethod
     def _reconciliation_wrong_slot_message(*, expected_source_kind: SourceFileKind, content: bytes) -> str | None:

@@ -11,6 +11,7 @@
 - 生产部署不得使用本地 state 文件模式承载该功能；如启动参数声明 `FINOPS_STORAGE_MODE=local_state`，只能用于单进程本地开发。
 - OA 检测 adapter 和 `/oa-status/refresh` 仅作为 legacy 兼容能力保留；ETC 页面创建 OA 草稿后由用户手动确认“已提交”或“未提交”。
 - 后端不得在创建 OA 草稿或应用启动恢复时自动为 ETC 业务批次入队 `etc_business.oa_detection.refresh`。
+- 对象存储配置必须可供 PostgreSQL 文件写入链路识别 backend 和 bucket；上传信用卡账单、票根网文件和业务批次源文件前，先确认对象存储健康检查、bucket 权限和服务环境变量一致。
 
 ## 迁移 dry-run
 
@@ -114,4 +115,5 @@ curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 - `oa_detection_unavailable`、`oa_detection_conflict` 历史兼容状态数量异常增加。
 - 后台检测任务被意外入队并推进 ETC 业务批次。
 - `/api/etc/business-batches*` 出现 HTML 响应或 Nginx 502。
+- 上传信用卡账单、票根网或业务批次源文件返回 `reconciliation_file_storage_unavailable`，或后端日志出现 `ObjectStorageWriteError`。
 - 迁移报告中 `migration_conflict`、脏引用修复或跳过数量超过预期。

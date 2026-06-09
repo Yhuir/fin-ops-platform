@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.services.object_storage import ObjectStorageConfigurationError, ObjectStorageSettings
+from fin_ops_platform.services.object_storage import ObjectStorageConfigurationError, ObjectStorageSettings, S3ObjectStorageRepository
 
 
 class ObjectStorageSettingsTests(unittest.TestCase):
@@ -39,6 +41,25 @@ class ObjectStorageSettingsTests(unittest.TestCase):
         self.assertEqual(settings.backend, "minio")
         self.assertEqual(settings.endpoint_url, "http://minio.internal:9000")
         self.assertEqual(settings.bucket, "fin-ops-files")
+
+    def test_s3_repository_exposes_storage_identity_for_postgres_file_writes(self) -> None:
+        fake_boto3 = SimpleNamespace(client=lambda *args, **kwargs: object())
+        with patch.dict(
+            os.environ,
+            {
+                "OBJECT_STORAGE_BACKEND": "minio",
+                "S3_ENDPOINT_URL": "http://minio.internal:9000",
+                "S3_BUCKET": "fin-ops-files",
+                "S3_REGION": "cn-north-1",
+                "S3_ACCESS_KEY_ID": "access",
+                "S3_SECRET_ACCESS_KEY": "secret",
+            },
+            clear=True,
+        ), patch.dict(sys.modules, {"boto3": fake_boto3}):
+            repository = S3ObjectStorageRepository(ObjectStorageSettings.from_env())
+
+        self.assertEqual(repository.backend, "minio")
+        self.assertEqual(repository.bucket, "fin-ops-files")
 
 
 if __name__ == "__main__":

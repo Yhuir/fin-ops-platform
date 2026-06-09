@@ -73,6 +73,9 @@ class StoredObject:
 
 
 class ObjectStorageRepository(Protocol):
+    backend: str
+    bucket: str
+
     def put_object(self, object_key: str, body: bytes | BinaryIO, *, content_type: str | None = None) -> StoredObject: ...
 
     def get_object(self, object_key: str) -> bytes: ...
@@ -132,6 +135,8 @@ class S3ObjectStorageRepository:
         except ImportError as exc:
             raise ObjectStorageConfigurationError("S3-compatible object storage requires the optional boto3 package.") from exc
         self._settings = settings
+        self.backend = settings.backend
+        self.bucket = str(settings.bucket or "")
         self._client = boto3.client(
             "s3",
             endpoint_url=settings.endpoint_url,

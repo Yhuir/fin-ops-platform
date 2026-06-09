@@ -168,7 +168,15 @@ class EtcReconciliationTaskService:
         previous_updated_at = task.updated_at
         self._file_counter += 1
         file_id = f"ETC-RECON-FILE-{self._file_counter:06d}"
-        stored_path = self._store_file(task_id=task_id, file_id=file_id, original_name=original_name, content=content_bytes)
+        try:
+            stored_path = self._store_file(task_id=task_id, file_id=file_id, original_name=original_name, content=content_bytes)
+        except Exception:
+            self._file_counter = previous_file_counter
+            task.source_files = previous_source_files
+            task.audit_events = previous_audit_events
+            task.version = previous_version
+            task.updated_at = previous_updated_at
+            raise
         metadata = UploadedSourceFileMetadata(
             file_id=file_id,
             task_id=task_id,

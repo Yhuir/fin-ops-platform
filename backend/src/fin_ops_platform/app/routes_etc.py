@@ -20,6 +20,7 @@ from fin_ops_platform.services.etc_service import (
     EtcServiceError,
     UploadedEtcZipFile,
 )
+from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 
 
 class EtcBusinessBatchApiRoutes:
@@ -226,6 +227,11 @@ class EtcBusinessBatchApiRoutes:
             )
         if isinstance(exc, (EtcDraftRequestError, EtcOAClientError)):
             return HTTPStatus.BAD_REQUEST, cls._error("invalid_etc_draft_request", str(exc))
+        if isinstance(exc, ObjectStorageWriteError):
+            return HTTPStatus.SERVICE_UNAVAILABLE, cls._error(
+                "reconciliation_file_storage_unavailable",
+                "文件存储暂时不可用，上传未保存。请稍后重试或联系管理员检查对象存储配置。",
+            )
         if isinstance(exc, EtcServiceError):
             return HTTPStatus.BAD_REQUEST, cls._error("invalid_etc_business_batch_request", str(exc))
         raise exc

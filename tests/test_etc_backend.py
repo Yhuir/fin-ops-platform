@@ -35,6 +35,7 @@ from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
     HistoricalEtcRepairService,
 )
+from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkService,
@@ -2539,6 +2540,106 @@ class EtcApiTests(unittest.TestCase):
         )
         self.assertEqual(payload["parseIssues"], [])
 
+    def test_ticket_root_upload_route_imports_txt_file_with_clipboard_parser(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            created = json.loads(app.handle_request(
+                "POST",
+                "/api/etc/reconciliation-tasks",
+                json.dumps({"title": "ETC", "createdBy": "alice"}),
+            ).body)
+            body, headers = multipart(
+                {"云ADA0381.txt": TICKET_ROOT_CLIPBOARD_TEXT.encode("utf-8")},
+                fields={"expectedVersion": str(created["version"])},
+            )
+
+            with patch(
+                "fin_ops_platform.app.server.TicketRootDocumentParser.parse_file",
+                return_value=FileParseResult(file_id="DOC-UNEXPECTED", parser_code="ticket_root_document_v1"),
+            ) as document_parse:
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/reconciliation-tasks/{created['taskId']}/ticket-root-files",
+                    body=body,
+                    headers=headers,
+                )
+            payload = json.loads(response.body)
+
+        document_parse.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["sourceFiles"][0]["originalName"], "云ADA0381.txt")
+        self.assertEqual(payload["sourceFiles"][0]["contentType"], "text/plain; charset=utf-8")
+        self.assertEqual(len(payload["ticketRootItems"]), 1)
+        self.assertEqual(payload["ticketRootItems"][0]["vehicle_plate"], "云ADA0381")
+        self.assertEqual(payload["ticketRootItems"][0]["amount"], "71.25")
+        self.assertEqual(payload["ticketRootItems"][0]["extraction_method"], "clipboard_text")
+        self.assertEqual(payload["parseIssues"], [])
+
+    def test_ticket_root_txt_file_upload_returns_structured_storage_error(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            created = json.loads(app.handle_request(
+                "POST",
+                "/api/etc/reconciliation-tasks",
+                json.dumps({"title": "ETC", "createdBy": "alice"}),
+            ).body)
+
+            def fail_store(**_kwargs: object) -> str:
+                raise ObjectStorageWriteError("object storage unavailable")
+
+            app._state_store.store_etc_reconciliation_file = fail_store
+            body, headers = multipart(
+                {"云ADA0381.txt": TICKET_ROOT_CLIPBOARD_TEXT.encode("utf-8")},
+                fields={"expectedVersion": str(created["version"])},
+            )
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{created['taskId']}/ticket-root-files",
+                body=body,
+                headers=headers,
+            )
+            stored_task = app._etc_reconciliation_task_service.get_task(created["taskId"])
+
+        self.assertEqual(response.status_code, 503)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "reconciliation_file_storage_unavailable")
+        self.assertIn("文件存储", payload["message"])
+        self.assertEqual(stored_task.source_files, [])
+
+    def test_ticket_root_text_route_returns_structured_storage_error(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            created = json.loads(app.handle_request(
+                "POST",
+                "/api/etc/reconciliation-tasks",
+                json.dumps({"title": "ETC", "createdBy": "alice"}),
+            ).body)
+
+            def fail_store(**_kwargs: object) -> str:
+                raise ObjectStorageWriteError("object storage unavailable")
+
+            app._state_store.store_etc_reconciliation_file = fail_store
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{created['taskId']}/ticket-root-texts",
+                json.dumps(
+                    {
+                        "expectedVersion": created["version"],
+                        "entries": [{"clientId": "paste-1", "text": TICKET_ROOT_CLIPBOARD_TEXT}],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            stored_task = app._etc_reconciliation_task_service.get_task(created["taskId"])
+
+        self.assertEqual(response.status_code, 503)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "reconciliation_file_storage_unavailable")
+        self.assertIn("文件存储", payload["message"])
+        self.assertEqual(stored_task.source_files, [])
+
     def test_ticket_root_upload_route_rejects_existing_clipboard_text_source(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -3163,6 +3264,38 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["sourceFiles"][0]["sourceKind"], "etc_zip")
         self.assertEqual(task_after_upload.source_files[0].original_name, "ticket-root.zip")
 
+    def test_etc_business_batch_source_file_upload_returns_structured_storage_error(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC source files", created_by="alice")
+            create_response = app.handle_request(
+                "POST",
+                "/api/etc/business-batches",
+                json.dumps({"taskId": task.task_id}),
+            )
+            created = json.loads(create_response.body)["data"]["businessBatch"]
+
+            def fail_store(**_kwargs: object) -> str:
+                raise ObjectStorageWriteError("object storage unavailable")
+
+            app._state_store.store_etc_reconciliation_file = fail_store
+            body, headers = multipart({"ticket-root.zip": b"zip-bytes"})
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{created['businessBatchId']}/source-files",
+                body,
+                headers,
+            )
+            task_after_upload = app._etc_reconciliation_task_service.get_task(task.task_id)
+
+        self.assertEqual(response.status_code, 503)
+        payload = json.loads(response.body)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "reconciliation_file_storage_unavailable")
+        self.assertIn("文件存储", payload["error"]["message"])
+        self.assertEqual(task_after_upload.source_files, [])
+
     def test_etc_business_manual_status_accepts_detecting_state(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -3617,6 +3750,34 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(ready_patch.body)["error"], "reconciliation_task_not_mutable")
         self.assertEqual(ready_upload.status_code, 400)
         self.assertEqual(json.loads(ready_upload.body)["error"], "reconciliation_task_not_mutable")
+
+    def test_credit_card_statement_upload_returns_structured_storage_error(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC upload", created_by="alice")
+
+            def fail_store(**_kwargs: object) -> str:
+                raise ObjectStorageWriteError("object storage unavailable")
+
+            app._state_store.store_etc_reconciliation_file = fail_store
+            body, headers = multipart(
+                {"statement.pdf": b"%PDF-1.4\n%%EOF"},
+                fields={"expectedVersion": str(task.version)},
+            )
+
+            response = app.handle_request(
+                "POST",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/credit-card-statement",
+                body=body,
+                headers=headers,
+            )
+            stored_task = app._etc_reconciliation_task_service.get_task(task.task_id)
+
+        self.assertEqual(response.status_code, 503)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "reconciliation_file_storage_unavailable")
+        self.assertIn("文件存储", payload["message"])
+        self.assertEqual(stored_task.source_files, [])
 
     def test_reconciliation_item_supplement_upload_requires_note_for_amount_delta(self) -> None:
         with TemporaryDirectory() as temp_dir:
