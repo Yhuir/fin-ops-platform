@@ -26,14 +26,14 @@
 
 ## 历史记录
 
-## 2026-06-09 - ETC源文件上传对象存储契约修复
+## 2026-06-09 - ETC源文件上传与大ZIP预览超时修复
 
-- 目标：修复上传信用卡账单 PDF 时后端对象存储写入链路抛出未结构化异常，前端只显示通用“接口处理失败”的问题。
-- 影响范围：`S3ObjectStorageRepository`、`EtcReconciliationTaskService.store_uploaded_source_file`、ETC 对账任务上传 API、业务批次源文件上传 API。
-- 关键决策：继续复用现有对象存储 repository、PostgreSQL state store 和 ETC reconciliation service；不在前端绕过上传失败。对象存储不可写时返回 `reconciliation_file_storage_unavailable`/503，且任务 source files、版本号和审计事件必须回滚到上传前状态。
+- 目标：修复上传信用卡账单 PDF 时后端对象存储写入链路抛出未结构化异常，前端只显示通用“接口处理失败”的问题；同时修复 ETC ZIP 批量预览上传被普通 API 60 秒 timeout 截断的问题。
+- 影响范围：`S3ObjectStorageRepository`、`EtcReconciliationTaskService.store_uploaded_source_file`、ETC 对账任务上传 API、业务批次源文件上传 API、ETC 前端 API helper 的大文件上传/预览/确认超时配置。
+- 关键决策：继续复用现有对象存储 repository、PostgreSQL state store 和 ETC reconciliation service；不在前端绕过上传失败。对象存储不可写时返回 `reconciliation_file_storage_unavailable`/503，且任务 source files、版本号和审计事件必须回滚到上传前状态。ETC ZIP 上传预览使用大文件专用 timeout，不取消超时保护；本机同批 6 个真实 ZIP 解析耗时低于 1 秒，生产报错主要来自上传耗时被前端 60 秒截断。
 - 文档影响：更新 API 契约、测试矩阵和运维告警；产品口径不变。
-- 测试覆盖：新增 S3 repository backend/bucket contract 测试、信用卡账单上传结构化存储错误测试、业务批次源文件上传结构化存储错误测试、票根网 TXT 文件上传正常解析测试、TXT 文件上传结构化存储错误测试、保留文本路由结构化存储错误测试，并回归对象存储和 ETC reconciliation service 测试。
-- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_object_storage_repository tests.test_file_object_storage tests.test_etc_reconciliation_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_etc_business_batch_source_files_append_to_reconciliation_task tests.test_etc_backend.EtcApiTests.test_credit_card_statement_upload_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_etc_business_batch_source_file_upload_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_ticket_root_upload_route_imports_txt_file_with_clipboard_parser tests.test_etc_backend.EtcApiTests.test_ticket_root_txt_file_upload_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_ticket_root_text_route_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_reconciliation_mutations_require_expected_version_and_reject_ready_patch -v`；`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`。
+- 测试覆盖：新增 S3 repository backend/bucket contract 测试、信用卡账单上传结构化存储错误测试、业务批次源文件上传结构化存储错误测试、票根网 TXT 文件上传正常解析测试、TXT 文件上传结构化存储错误测试、保留文本路由结构化存储错误测试、ETC ZIP 预览上传超过普通 60 秒仍保持请求的前端 API 测试，并回归对象存储和 ETC reconciliation service 测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_object_storage_repository tests.test_file_object_storage tests.test_etc_reconciliation_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_etc_business_batch_source_files_append_to_reconciliation_task tests.test_etc_backend.EtcApiTests.test_credit_card_statement_upload_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_etc_business_batch_source_file_upload_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_ticket_root_upload_route_imports_txt_file_with_clipboard_parser tests.test_etc_backend.EtcApiTests.test_ticket_root_txt_file_upload_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_ticket_root_text_route_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_reconciliation_mutations_require_expected_version_and_reject_ready_patch -v`；`cd web && npm test -- --run src/test/EtcApi.test.ts src/test/ImportCenterPage.test.tsx src/test/EtcTicketManagementPage.test.tsx`。
 - 未测风险：`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend -v` 仍有既存历史修复用例 `test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle` 失败，失败点在历史发票导入去重数量，与本次对象存储上传链路无关。
 
 ## 2026-06-09 - 历史ETC批次迁移与open区泄漏防线

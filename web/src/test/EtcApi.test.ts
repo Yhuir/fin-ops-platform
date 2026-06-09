@@ -39,6 +39,7 @@ const originalFetch = global.fetch;
 
 afterEach(() => {
   global.fetch = originalFetch;
+  vi.useRealTimers();
   vi.restoreAllMocks();
   document.cookie = "Admin-Token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
 });
@@ -522,6 +523,61 @@ describe("etc api", () => {
         },
       ],
     });
+  });
+
+  test("keeps large ETC zip preview uploads alive beyond the default request timeout", async () => {
+    vi.useFakeTimers();
+    document.cookie = "Admin-Token=mock-cookie-token";
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const signal = init?.signal;
+      signal?.addEventListener("abort", () => {
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+      window.setTimeout(() => {
+        resolve(new Response(
+          JSON.stringify({
+            sessionId: "etc_import_session_001",
+            summary: {
+              imported: 1,
+              duplicatesSkipped: 0,
+              attachmentsCompleted: 0,
+              failed: 0,
+            },
+            items: [
+              {
+                invoiceNumber: "ETC-2026-006",
+                fileName: "large-etc.zip",
+                status: "created",
+                reason: "新发票待导入",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ));
+      }, 61_000);
+    }));
+    global.fetch = fetchMock as typeof fetch;
+
+    const pendingPreview = previewEtcZipFiles(
+      [new File(["zip-a"], "large-etc.zip", { type: "application/zip" })],
+      "etc_task_ready_001",
+    );
+    const settled = vi.fn();
+    pendingPreview.then(settled, settled);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(settled).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(pendingPreview).resolves.toMatchObject({
+      sessionId: "etc_import_session_001",
+      imported: 1,
+      items: [{ invoiceNumber: "ETC-2026-006", fileName: "large-etc.zip" }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/import/preview",
+      expect.objectContaining({ method: "POST", credentials: "include", body: expect.any(FormData) }),
+    );
   });
 
   test("confirms ETC import session with Authorization header and maps snake_case fallback fields", async () => {

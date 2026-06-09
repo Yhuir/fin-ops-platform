@@ -596,6 +596,7 @@ type ApiEtcReconciliationTasksPayload = {
 
 type EtcRequestInit = RequestInit & {
   timeoutMs?: number;
+  timeoutMessage?: string;
 };
 
 export class EtcApiError extends Error {
@@ -614,6 +615,8 @@ export class EtcApiError extends Error {
 
 const DEFAULT_ETC_REQUEST_TIMEOUT_MS = 60_000;
 const FAST_ETC_MUTATION_TIMEOUT_MS = 15_000;
+const ETC_FILE_UPLOAD_TIMEOUT_MS = 300_000;
+const ETC_IMPORT_CONFIRM_TIMEOUT_MS = 300_000;
 
 function uniqueUrls(urls: string[]) {
   return urls.filter((url, index) => urls.indexOf(url) === index);
@@ -675,7 +678,7 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
     ? Number(init.timeoutMs)
     : DEFAULT_ETC_REQUEST_TIMEOUT_MS;
   const requestSignal = requestTimeoutSignal(init.signal, timeoutMs);
-  const { timeoutMs: _timeoutMs, ...fetchInit } = init;
+  const { timeoutMs: _timeoutMs, timeoutMessage, ...fetchInit } = init;
   try {
     for (const candidateUrl of candidates) {
       const response = await apiFetchResolved(candidateUrl, {
@@ -735,7 +738,7 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
     throw new Error("ETC API request failed");
   } catch (error) {
     if (requestSignal.timedOut) {
-      throw new Error("ETC API 请求超时，请确认后端服务状态后重试。");
+      throw new Error(timeoutMessage || "ETC API 请求超时，请确认后端服务状态后重试。");
     }
     throw error;
   } finally {
@@ -1289,6 +1292,8 @@ async function uploadEtcReconciliationFiles(
     {
       method: "POST",
       body: reconciliationUploadFormData(files, expectedVersion, extra),
+      timeoutMs: ETC_FILE_UPLOAD_TIMEOUT_MS,
+      timeoutMessage: "ETC 文件上传超时，请检查网络后重试，或分批上传较大的文件。",
     },
   );
   return mapEtcReconciliationTask(task);
@@ -1709,6 +1714,8 @@ export async function previewEtcZipFiles(files: File[], taskId?: string): Promis
   const payload = await requestJson<ApiEtcImportSummary>("/api/etc/import/preview", {
     method: "POST",
     body: formData,
+    timeoutMs: ETC_FILE_UPLOAD_TIMEOUT_MS,
+    timeoutMessage: "ETC zip 上传或预览超时，请检查网络后重试，或分批上传较大的 zip 文件。",
   });
   return mapEtcImportResult(payload);
 }
@@ -1723,6 +1730,8 @@ export async function confirmEtcImportSession(sessionId: string, taskId?: string
       sessionId,
       ...(taskId ? { taskId } : {}),
     }),
+    timeoutMs: ETC_IMPORT_CONFIRM_TIMEOUT_MS,
+    timeoutMessage: "ETC zip 确认导入超时，请检查后端导入状态后再刷新页面。",
   });
   return mapEtcImportConfirmResult(payload);
 }
