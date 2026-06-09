@@ -29,6 +29,7 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
     parse_etc_xml,
 )
+from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchActor
 from fin_ops_platform.services.etc_document_parsers import CcbCreditCardStatementParser, SupplementEvidenceParser, TicketRootPdfTextParser
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, SourceFileKind
 from fin_ops_platform.services.historical_etc_repair_service import (
@@ -4197,6 +4198,54 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(active_business_batches["data"]["counts"]["active"], 1)
         self.assertEqual(active_business_batches["data"]["total"], 1)
         self.assertEqual(active_business_batches["data"]["items"][0]["businessBatchId"], business_batch["businessBatchId"])
+
+    def test_business_batch_oa_draft_recovers_linked_task_after_durable_import_restart(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            try:
+                fake_oa = FakeEtcOAClient()
+                app._build_etc_oa_client = lambda _headers: fake_oa
+                task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
+                session_id = str(preview_payload["sessionId"])
+                reconciliation_preview = app._etc_reconciliation_import_previews[session_id]
+                app._etc_reconciliation_task_service.begin_import(
+                    task_id=task_id,
+                    task_version=reconciliation_preview.task_version,
+                    confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
+                    import_session_id=session_id,
+                    actor="alice",
+                )
+                app._etc_reconciliation_task_service.recover_interrupted_imports(active_import_session_ids=[])
+                business_batch = app._import_processing_service.resolve_task_etc_business_batch(
+                    task_id=task_id,
+                    owner_user_id="web_finance_user",
+                    idempotency_key=f"etc_business_task_import:{task_id}:{session_id}",
+                )
+                business_batch, result = app._etc_service.confirm_business_batch_import(
+                    business_batch.business_batch_id,
+                    session_id,
+                    expected_version=business_batch.version,
+                    idempotency_key=f"etc_import_session:{session_id}",
+                )
+
+                draft_payload = app._etc_business_application_service().create_oa_draft_payload(
+                    business_batch.business_batch_id,
+                    expected_version=business_batch.version,
+                    actor=EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True),
+                    headers={},
+                )
+                task = app._etc_reconciliation_task_service.get_task(task_id)
+            finally:
+                app._background_job_service.shutdown()
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(result.imported, 1)
+        self.assertIn("businessBatch", draft_payload)
+        self.assertEqual(task.status.value, "imported")
+        self.assertEqual(task.import_batch_id, "etc_import_batch_0001")
+        self.assertEqual(task.oa_draft_batch_id, draft_payload["businessBatch"]["submissionBatchId"])
+        self.assertEqual(len(fake_oa.draft_payloads), 1)
 
     def test_etc_import_preview_requires_ready_task_even_when_no_tasks_exist(self) -> None:
         with TemporaryDirectory() as temp_dir:

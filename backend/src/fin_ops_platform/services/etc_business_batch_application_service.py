@@ -182,6 +182,12 @@ class EtcBusinessBatchApplicationService:
     ) -> dict[str, object]:
         current = self._scoped_batch(business_batch_id, actor)
         reconciliation_task = self._get_reconciliation_task(current.task_id)
+        reconciliation_task = self._ensure_reconciliation_task_imported_for_batch(
+            current,
+            reconciliation_task,
+            actor=actor,
+        )
+        self._assert_reconciliation_task_allows_oa_draft(reconciliation_task)
         oa_client = self._oa_client_factory(headers) if self._oa_client_factory is not None else None
         batch = self._etc_service.create_business_batch_oa_draft(
             business_batch_id,
@@ -388,6 +394,65 @@ class EtcBusinessBatchApplicationService:
         except KeyError:
             return None
 
+    def _ensure_reconciliation_task_imported_for_batch(
+        self,
+        batch: EtcBusinessBatch,
+        reconciliation_task: object | None,
+        *,
+        actor: EtcBusinessBatchActor,
+    ) -> object | None:
+        if reconciliation_task is None:
+            return None
+        status = self._enum_value(getattr(reconciliation_task, "status", None))
+        if status in {"imported", "closed"}:
+            return reconciliation_task
+        if status not in {"ready_for_import", "importing"}:
+            return reconciliation_task
+        if not self._business_batch_has_successful_import(batch):
+            return reconciliation_task
+        task_id = str(getattr(reconciliation_task, "task_id", "") or "").strip()
+        confirmed_item_set_hash = str(getattr(reconciliation_task, "confirmed_item_set_hash", "") or "").strip()
+        task_version = getattr(reconciliation_task, "version", None)
+        if not task_id or not isinstance(task_version, int) or not confirmed_item_set_hash:
+            return reconciliation_task
+        import_batch_id = self._first_text(*(getattr(batch, "import_batch_ids", []) or []))
+        return self._reconciliation_task_service.mark_imported(
+            task_id=task_id,
+            task_version=task_version,
+            confirmed_item_set_hash=confirmed_item_set_hash,
+            import_batch_id=import_batch_id,
+            etc_batch_id=str(getattr(batch, "external_etc_batch_id", "") or "").strip() or None,
+            actor=actor.actor_id,
+        )
+
+    @classmethod
+    def _business_batch_has_successful_import(cls, batch: EtcBusinessBatch) -> bool:
+        if not list(getattr(batch, "invoice_ids", []) or []):
+            return False
+        for attempt in list(getattr(batch, "import_attempts", []) or []):
+            if not isinstance(attempt, dict):
+                continue
+            summary = attempt.get("summary") if isinstance(attempt.get("summary"), dict) else attempt
+            if int(summary.get("failed", 0) or 0) != 0:
+                continue
+            imported = int(summary.get("imported", 0) or 0)
+            attachments_completed = int(summary.get("attachmentsCompleted", 0) or 0)
+            if imported > 0 or attachments_completed > 0 or list(attempt.get("import_batch_ids") or []):
+                return True
+        return False
+
+    @classmethod
+    def _assert_reconciliation_task_allows_oa_draft(cls, reconciliation_task: object | None) -> None:
+        if reconciliation_task is None:
+            return
+        status = cls._enum_value(getattr(reconciliation_task, "status", None))
+        if status in {"imported", "closed"}:
+            return
+        raise EtcBusinessBatchInvalidTransitionError(
+            "ETC 对账任务尚未完成发票导入，不能创建 OA 草稿。",
+            code="invalid_reconciliation_task_status",
+        )
+
     def _sync_invoices(self, batch: EtcBusinessBatch, reason: str) -> None:
         if self._sync_etc_invoices_to_canonical_invoices is None:
             return
@@ -441,6 +506,12 @@ class EtcBusinessBatchApplicationService:
         if value in (None, ""):
             return None
         return int(value)
+
+    @staticmethod
+    def _enum_value(value: object) -> str:
+        if isinstance(value, Enum):
+            return str(value.value)
+        return str(value or "").strip()
 
     def _validate_candidate_oa_row(self, batch: EtcBusinessBatch, candidate_oa_row_id: str) -> None:
         adapter = self._oa_adapter_provider() if self._oa_adapter_provider is not None else None

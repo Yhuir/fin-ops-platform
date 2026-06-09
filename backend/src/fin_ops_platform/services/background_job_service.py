@@ -456,6 +456,24 @@ class BackgroundJobService:
         ]
         return sorted(active_jobs, key=lambda item: item.updated_at, reverse=True)
 
+    def active_source_values(self, *, job_type: str, source_key: str) -> set[str]:
+        normalized_type = str(job_type or "").strip()
+        normalized_key = str(source_key or "").strip()
+        if not normalized_type or not normalized_key:
+            return set()
+        now = datetime.now(UTC)
+        with self._lock:
+            jobs = [self._job_from_payload(payload) for payload in self._load_jobs().values()]
+        values: set[str] = set()
+        for job in jobs:
+            if job.type != normalized_type or not self._is_active(job, now):
+                continue
+            source = job.source if isinstance(job.source, dict) else {}
+            value = str(source.get(normalized_key) or "").strip()
+            if value:
+                values.add(value)
+        return values
+
     def list_attention_jobs(self, owner_user_id: str, *, include_system: bool = True) -> list[BackgroundJob]:
         owner = self._normalize_owner(owner_user_id)
         with self._lock:

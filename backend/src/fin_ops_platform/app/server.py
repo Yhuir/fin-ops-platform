@@ -1017,6 +1017,12 @@ class Application:
             else None
         )
         self._background_job_service = BackgroundJobService(self._state_store)
+        self._etc_reconciliation_task_service.recover_interrupted_imports(
+            active_import_session_ids=self._background_job_service.active_source_values(
+                job_type="etc_invoice_import",
+                source_key="session_id",
+            )
+        )
         self._import_processing_service = ImportProcessingService(
             import_service=self._import_service,
             file_import_service=self._file_import_service,

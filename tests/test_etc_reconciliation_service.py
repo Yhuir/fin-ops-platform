@@ -1713,6 +1713,54 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertIsNone(recovered.import_batch_id)
         self.assertGreater(recovered.version, importing.version)
 
+    def test_active_import_session_is_not_recovered_after_hydration(self) -> None:
+        service, task_id = self._parsed_task()
+        task = service.refresh_matches(task_id=task_id)
+        card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
+        ticket = task.ticket_root_items[0]
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+        )
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "set_manual_resolution", "manualResolution": "included_etc"},
+        )
+        other_card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("23.00"))
+        task = service.patch_item(
+            task_id=task_id,
+            item_id=other_card.item_id,
+            expected_version=task.version,
+            actor="alice",
+            payload={"action": "exclude_card", "manualResolution": "excluded_non_etc", "reason": "非本次报销"},
+        )
+        confirmed = service.confirm_task(task_id=task_id, expected_version=task.version, actor="alice")
+        importing = service.begin_import(
+            task_id=task_id,
+            task_version=confirmed.version,
+            confirmed_item_set_hash=confirmed.confirmed_item_set_hash or "",
+            import_session_id="session-1",
+            actor="alice",
+        )
+
+        recovered_service = EtcReconciliationTaskService.from_snapshot(
+            service.snapshot(),
+            data_dir=Path(self.temp_dir.name),
+            active_import_session_ids={"session-1"},
+        )
+        recovered = recovered_service.get_task(task_id)
+
+        self.assertEqual(importing.status, EtcReconciliationTaskStatus.IMPORTING)
+        self.assertEqual(recovered.status, EtcReconciliationTaskStatus.IMPORTING)
+        self.assertEqual(recovered.import_batch_id, "session-1")
+        self.assertEqual(recovered.version, importing.version)
+
     def test_reopen_returns_to_reviewing_and_invalidates_zip_preview(self) -> None:
         service, task_id = self._parsed_task()
         task = service.refresh_matches(task_id=task_id)

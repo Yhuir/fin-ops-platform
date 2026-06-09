@@ -10,7 +10,7 @@ import pickle
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from fin_ops_platform.services.etc_document_parsers import SupplementEvidenceParser, with_task_id
 from fin_ops_platform.services.etc_reconciliation_matcher import refresh_reconciliation_matches
@@ -51,8 +51,6 @@ class EtcReconciliationTaskService:
         self._tasks: dict[str, EtcReconciliationTask] = {}
         self._root.mkdir(parents=True, exist_ok=True)
         self._hydrate(self._load_snapshot())
-        if self._recover_interrupted_imports():
-            self._persist()
 
     @classmethod
     def from_snapshot(
@@ -61,10 +59,13 @@ class EtcReconciliationTaskService:
         *,
         data_dir: Path | None = None,
         state_store: Any | None = None,
+        active_import_session_ids: Iterable[str] | None = None,
+        recover_interrupted_imports: bool = True,
     ) -> "EtcReconciliationTaskService":
         service = cls(data_dir=data_dir, state_store=state_store)
         service._hydrate(snapshot or {})
-        service._recover_interrupted_imports()
+        if recover_interrupted_imports:
+            service.recover_interrupted_imports(active_import_session_ids=active_import_session_ids)
         return service
 
     def create_task(self, *, title: str, created_by: str) -> EtcReconciliationTask:
@@ -1042,10 +1043,31 @@ class EtcReconciliationTaskService:
             for task_id, task_payload in raw_tasks.items()
         }
 
-    def _recover_interrupted_imports(self) -> bool:
+    def recover_interrupted_imports(
+        self,
+        *,
+        active_import_session_ids: Iterable[str] | None = None,
+    ) -> bool:
+        changed = self._recover_interrupted_imports(active_import_session_ids=active_import_session_ids)
+        if changed:
+            self._persist()
+        return changed
+
+    def _recover_interrupted_imports(
+        self,
+        *,
+        active_import_session_ids: Iterable[str] | None = None,
+    ) -> bool:
+        active_sessions = {
+            str(session_id or "").strip()
+            for session_id in (active_import_session_ids or [])
+            if str(session_id or "").strip()
+        }
         changed = False
         for task in self._tasks.values():
             if task.status != EtcReconciliationTaskStatus.IMPORTING:
+                continue
+            if str(task.import_batch_id or "").strip() in active_sessions:
                 continue
             before_status = task.status.value
             task.status = EtcReconciliationTaskStatus.READY_FOR_IMPORT

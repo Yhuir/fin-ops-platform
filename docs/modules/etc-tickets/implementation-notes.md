@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-09 - ETC durable导入恢复与OA草稿一致性修复
+
+- 目标：修复确认导入 ETC ZIP 后后台 job 成功写入业务批次，但 linked `etc_reconciliation_tasks` 被服务启动恢复回 `ready_for_import`，随后点击“创建草稿”抛出通用接口失败的问题。
+- 影响范围：`EtcReconciliationTaskService` 导入恢复时机、`BackgroundJobService` active source 查询、`Application` service 组装顺序、`EtcBusinessBatchApplicationService.create_oa_draft_payload`。
+- 关键决策：`IMPORTING -> READY_FOR_IMPORT` 不再由 task service 构造函数无条件执行；Application 在 background job service 初始化并标记陈旧 job 后，按仍活跃的 `etc_invoice_import` session 显式恢复真正中断的 task。创建 OA 草稿前先验证 linked task 已 imported/closed；若业务批次已有成功导入 attempt 和发票，但 task 仍停在 ready/importing，则复用 `mark_imported` 做幂等一致性补偿，不绕过状态机。
+- 文档影响：更新 ETC 模块测试矩阵；产品口径、页面口径和 API shape 不变。
+- 测试覆盖：新增 active import session 不被 hydration recovery 打断的 service 状态机测试；新增 durable import restart 半状态下创建 OA 草稿会补齐 linked task 并记录 OA draft 的业务闭环测试。
+- 验证命令：`pytest tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_active_import_session_is_not_recovered_after_hydration tests/test_etc_backend.py::EtcApiTests::test_business_batch_oa_draft_recovers_linked_task_after_durable_import_restart -q`；`pytest tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_interrupted_importing_task_recovers_to_ready_after_hydration tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_delete_task_rejects_importing_closed_and_submission_links tests/test_etc_backend.py::EtcApiTests::test_task_aware_etc_import_confirm_imports_sum_matched_invoices_only tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously tests/test_etc_backend.py::EtcApiTests::test_task_aware_etc_import_empty_allowlist_does_not_import_original_zip -q`。
+- 未测风险：`pytest tests/test_etc_reconciliation_service.py tests/test_etc_backend.py -q` 仍有既存历史 repair 用例 `test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle` 失败，失败点为 canonical invoice 数量 `1 != 2`，与本次 durable import/task 状态修复无关。
+
 ## 2026-06-09 - ETC源文件上传与大ZIP预览超时修复
 
 - 目标：修复上传信用卡账单 PDF 时后端对象存储写入链路抛出未结构化异常，前端只显示通用“接口处理失败”的问题；同时修复 ETC ZIP 批量预览上传被普通 API 60 秒 timeout 截断的问题。
