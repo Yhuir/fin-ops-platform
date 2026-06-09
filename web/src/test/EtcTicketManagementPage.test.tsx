@@ -310,6 +310,134 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByText("无匹配批次。")).toBeInTheDocument();
   });
 
+  test("keeps submitted business batches visible when their workflow task shares the ETC batch id", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const closedWorkflowTask = {
+      taskId: "ETC-RECON-000026",
+      status: "closed",
+      version: 17,
+      title: "新建ETC批次",
+      periodStart: "2026-03-28",
+      periodEnd: "2026-04-27",
+      statementPeriodStart: "2026-03-28",
+      statementPeriodEnd: "2026-04-27",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "0381",
+      oaTotalAmount: "1673.30",
+      etcInvoiceAmount: "1673.30",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 37,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云A361HX", "云A516HJ", "云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "etc_20260520_001",
+      etcBatchId: "etc_20260520_001",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 37,
+      importedInvoiceAmount: "1673.30",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "2026-06-09T01:21:07+08:00",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      reconciledItems: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    const submittedBusinessBatch = businessBatchFixture({
+      businessBatchId: "etc_business_batch_0004",
+      taskId: "ETC-RECON-000026",
+      status: "manually_marked_submitted",
+      version: 39,
+      importBatchIds: ["etc_20260520_001"],
+      submissionBatchId: "etc_batch_0032",
+      externalEtcBatchId: "etc_20260520_001",
+      oaProcessStatus: "manual_without_oa_row",
+      oaDetectionReason: "用户确认 OA 草稿已提交。",
+      invoiceSummary: { count: 37, amount: "1673.30" },
+      invoiceIds: [],
+    });
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [closedWorkflowTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: { active: 0, submitted: 1 },
+      items: query.status === "submitted" ? [submittedBusinessBatch] : [],
+      pagination: { page: 1, pageSize: 100, total: query.status === "submitted" ? 1 : 0 },
+    } as never));
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
+      ...submittedBusinessBatch,
+      invoiceItems: [],
+    } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
+    await user.click(within(page).getByRole("radio", { name: "已提交 1" }));
+
+    const submittedRow = await within(page).findByTestId("etc-batch-row-etc_business_batch_0004");
+    expect(submittedRow).toHaveTextContent("人工确认已提交");
+    expect(submittedRow).toHaveTextContent("1673.30");
+    expect(within(page).queryByText("无匹配批次。")).not.toBeInTheDocument();
+  });
+
+  test("clears stale workflow detail when no workflow batch remains visible", async () => {
+    installMockApiFetch();
+    const hiddenClosedWorkflowTask = {
+      taskId: "ETC-RECON-000026",
+      status: "closed",
+      version: 17,
+      title: "新建ETC批次",
+      periodStart: "2026-03-28",
+      periodEnd: "2026-04-27",
+      statementPeriodStart: "2026-03-28",
+      statementPeriodEnd: "2026-04-27",
+      approvedDelta: "0.00",
+      approvedDeltaNote: "",
+      cardLast4: "0381",
+      oaTotalAmount: "1673.30",
+      etcInvoiceAmount: "1673.30",
+      supplementAmount: "0.00",
+      etcInvoiceCount: 37,
+      supplementCount: 0,
+      canConfirm: false,
+      vehiclePlates: ["云A361HX", "云A516HJ", "云ADA0381"],
+      confirmedItemSetHash: "sha256:selected",
+      importBatchId: "etc_20260520_001",
+      etcBatchId: "etc_20260520_001",
+      hasImportedInvoices: true,
+      importedInvoiceCount: 37,
+      importedInvoiceAmount: "1673.30",
+      oaDraftBatchId: "",
+      oaDraftStatus: "",
+      submittedConfirmedAt: "2026-06-09T01:21:07+08:00",
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      reconciledItems: [],
+      sourceFiles: [],
+      parseIssues: [],
+    };
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { active: 0, submitted: 1 },
+      items: [],
+      pagination: { page: 1, pageSize: 100, total: 0 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [hiddenClosedWorkflowTask] } as never);
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByText("无匹配批次。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(page).queryByText("新建ETC批次 / v17")).not.toBeInTheDocument();
+    });
+    expect(within(page).getByText("选择左侧批次，或新建批次。")).toBeInTheDocument();
+  });
+
   test("renders a unified ETC batch workflow list without a separate reconciliation task list", async () => {
     installMockApiFetch();
 
@@ -3257,7 +3385,7 @@ describe("ETC ticket management page", () => {
     });
   });
 
-  test("does not render a task imported invoice batch as a separate left-side batch", async () => {
+  test("renders the business batch instead of a duplicate task row when an imported task shares its batch id", async () => {
     installMockApiFetch();
     vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
       items: [
@@ -3298,9 +3426,9 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByTestId("etc-reconciliation-task-row-etc-recon-task-imported-batch")).toBeInTheDocument();
+    expect(await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-02")).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toBeInTheDocument();
-    expect(within(page).queryByTestId("etc-batch-row-etc-batch-unsubmitted-02")).not.toBeInTheDocument();
+    expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-task-imported-batch")).not.toBeInTheDocument();
   });
 
   test("does not pair same-amount suggested rows without an explicit ticket link", async () => {

@@ -936,46 +936,66 @@ export default function EtcTicketManagementPage() {
     () => reconciliationTasks.find((task) => task.taskId === selectedTaskId) ?? null,
     [reconciliationTasks, selectedTaskId],
   );
-  const taskImportedBatchIds = useMemo(() => {
-    const ids = new Set<string>();
-    reconciliationTasks.forEach((task) => {
-      if (task.etcBatchId) {
-        ids.add(task.etcBatchId);
-      }
-      if (task.importBatchId) {
-        ids.add(task.importBatchId);
-      }
-    });
-    return ids;
-  }, [reconciliationTasks]);
   const businessBatchTaskIds = useMemo(
     () => new Set(businessBatches.map((batch) => batch.taskId).filter(Boolean)),
     [businessBatches],
   );
+  const businessBatchLinkIds = useMemo(() => {
+    const ids = new Set<string>();
+    businessBatches.forEach((batch) => {
+      if (batch.businessBatchId) {
+        ids.add(batch.businessBatchId);
+      }
+      if (batch.externalEtcBatchId) {
+        ids.add(batch.externalEtcBatchId);
+      }
+      if (batch.submissionBatchId) {
+        ids.add(batch.submissionBatchId);
+      }
+      batch.importBatchIds.forEach((importBatchId) => {
+        if (importBatchId) {
+          ids.add(importBatchId);
+        }
+      });
+    });
+    return ids;
+  }, [businessBatches]);
   const taskOnlyBatches = useMemo(
     () => activeStatus === "unsubmitted"
       ? reconciliationTasks
         .filter((task) =>
           !businessBatchTaskIds.has(task.taskId)
+          && !(task.importBatchId && businessBatchLinkIds.has(task.importBatchId))
+          && !(task.etcBatchId && businessBatchLinkIds.has(task.etcBatchId))
           && !taskHasSubmittedConfirmation(task)
           && !locallySubmittedTaskIds.has(task.taskId)
         )
         .map(reconciliationTaskToBatchSummary)
       : [],
-    [activeStatus, businessBatchTaskIds, locallySubmittedTaskIds, reconciliationTasks],
+    [activeStatus, businessBatchLinkIds, businessBatchTaskIds, locallySubmittedTaskIds, reconciliationTasks],
   );
   const visibleBusinessBatchSummaries = useMemo(
-    () => batches.filter((batch) =>
-      !taskImportedBatchIds.has(batch.id)
-      && !taskImportedBatchIds.has(batch.etcBatchId)
-      && !taskImportedBatchIds.has(batch.externalBatchId)
-    ),
-    [batches, taskImportedBatchIds],
+    () => batches,
+    [batches],
   );
   const visibleBatches = useMemo(
     () => [...taskOnlyBatches, ...visibleBusinessBatchSummaries],
     [taskOnlyBatches, visibleBusinessBatchSummaries],
   );
+  const visibleWorkflowTaskIds = useMemo(() => {
+    const ids = new Set<string>();
+    visibleBatches.forEach((batch) => {
+      if (batch.sourceType === "reconciliation_task") {
+        ids.add(batch.id);
+        return;
+      }
+      const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
+      if (businessBatch?.taskId) {
+        ids.add(businessBatch.taskId);
+      }
+    });
+    return ids;
+  }, [businessBatches, visibleBatches]);
   const selectedTaskBusinessBatch = useMemo(
     () => selectedTask
       ? businessBatches.find((batch) => batch.taskId === selectedTask.taskId) ?? null
@@ -1049,6 +1069,20 @@ export default function EtcTicketManagementPage() {
     setBusinessBatchDetail(null);
     setSelectedBatchId(firstBusinessBatch?.id ?? "");
   }, [batches.length, selectedBatchId, visibleBatches]);
+
+  useEffect(() => {
+    if (!selectedTaskId) {
+      return;
+    }
+    if (activeStatus === "unsubmitted" && visibleWorkflowTaskIds.has(selectedTaskId)) {
+      return;
+    }
+    setSelectedTaskId("");
+    setTaskImportBatchDetail(null);
+    setTaskImportDetailError(null);
+    setTaskImportDetailLoading(false);
+  }, [activeStatus, selectedTaskId, visibleWorkflowTaskIds]);
+
   const ticketRootManualSources = useMemo(
     () => (selectedTask?.sourceFiles ?? []).filter(isManualTicketRootSource),
     [selectedTask],
