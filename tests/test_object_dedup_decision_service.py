@@ -127,6 +127,30 @@ class ObjectDedupDecisionServiceTests(unittest.TestCase):
         self.assertEqual(decision.decision, ImportDecision.SUSPECTED_DUPLICATE)
         self.assertEqual(decision.linked_object_id, "inv-2")
 
+    def test_invoice_with_new_canonical_key_falls_back_to_fingerprint_before_create(self) -> None:
+        repo = FakeObjectIdentityRepository(invoices=[self.invoice])
+        service = ObjectDedupDecisionService(object_identity_repository=repo)
+
+        decision = service.decide_invoice_import(
+            {
+                "digital_invoice_no": "DIFFERENT-INVOICE-NO",
+                "normalized_counterparty_name": "acme",
+                "invoice_date": "2026-03-21",
+                "total_with_tax": "100.00",
+                "invoice_status_from_source": "valid",
+            }
+        )
+
+        self.assertEqual(decision.decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(decision.linked_object_id, "inv-1")
+        self.assertEqual(
+            repo.invoice_queries,
+            [
+                ("DIFFERENT-INVOICE-NO", None),
+                (None, "invoice:acme:2026-03-21:100.00"),
+            ],
+        )
+
     def test_bank_transaction_decision_uses_canonical_key_repository_lookup(self) -> None:
         repo = FakeObjectIdentityRepository(transactions=[self.transaction])
         service = ObjectDedupDecisionService(object_identity_repository=repo)

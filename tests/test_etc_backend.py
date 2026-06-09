@@ -452,7 +452,73 @@ class EtcServiceTests(unittest.TestCase):
             self.assertIsNone(import_batch.submission_batch_id)
             self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.UNSUBMITTED})
             self.assertEqual({invoice.current_batch_id for invoice in invoices}, {None})
+            self.assertEqual({invoice.business_batch_id for invoice in invoices}, {None})
             self.assertEqual({invoice.last_batch_id for invoice in invoices}, {submitted.submission_batch_id})
+
+    def test_create_historical_submitted_business_batch_links_existing_submission_to_new_model(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            service.import_zips([UploadedEtcZipFile("historical.zip", etc_zip(["ETC001", "ETC002"]))])
+            submitted_batch = service.create_historical_submitted_batch(
+                case_id="CASE-BATCH-txn_imported_1328",
+                external_batch_id="ETC-OA-20260215-154900",
+                invoice_numbers=["ETC001", "ETC002"],
+                linked_oa_row_id="oa-exp-1994",
+                oa_amount=Decimal("1549.00"),
+                note="existing relation",
+            )
+
+            business_batch = service.create_historical_submitted_business_batch(
+                business_batch_id="etc_business_batch_hist_20260215_154900",
+                task_id="ETC-RECON-HIST-20260215-154900",
+                submission_batch_id=submitted_batch.id,
+                external_etc_batch_id="ETC-OA-20260215-154900",
+                reported_amount=Decimal("1549.00"),
+                relation_case_id="CASE-BATCH-txn_imported_1328",
+                linked_oa_row_id="oa-exp-1994",
+                gap_reason="骑行费/非ETC发票差额",
+                scope_month="2026-02",
+            )
+            replayed = service.create_historical_submitted_business_batch(
+                business_batch_id="etc_business_batch_hist_20260215_154900",
+                task_id="ETC-RECON-HIST-20260215-154900",
+                submission_batch_id=submitted_batch.id,
+                external_etc_batch_id="ETC-OA-20260215-154900",
+                reported_amount=Decimal("1549.00"),
+                relation_case_id="CASE-BATCH-txn_imported_1328",
+                linked_oa_row_id="oa-exp-1994",
+                gap_reason="骑行费/非ETC发票差额",
+                scope_month="2026-02",
+            )
+
+            invoices = service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
+            stored_submission = service._batches[submitted_batch.id]
+            stored_business = service._business_batches[business_batch.business_batch_id]
+
+            self.assertEqual(business_batch.business_batch_id, "etc_business_batch_hist_20260215_154900")
+            self.assertEqual(replayed.business_batch_id, business_batch.business_batch_id)
+            self.assertEqual(len(service.list_business_batches(status=EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)), 1)
+            self.assertEqual(business_batch.status, EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)
+            self.assertEqual(business_batch.task_id, "ETC-RECON-HIST-20260215-154900")
+            self.assertEqual(business_batch.submission_batch_id, submitted_batch.id)
+            self.assertEqual(business_batch.external_etc_batch_id, "ETC-OA-20260215-154900")
+            self.assertEqual(business_batch.oa_row_id, "oa-exp-1994")
+            self.assertEqual(business_batch.oa_process_status, "in_progress")
+            self.assertEqual({invoice.business_batch_id for invoice in invoices}, {business_batch.business_batch_id})
+            self.assertEqual({invoice.current_batch_id for invoice in invoices}, {submitted_batch.id})
+            self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.SUBMITTED})
+            self.assertEqual(stored_submission.oa_total_amount, Decimal("1549.00"))
+            self.assertEqual(stored_submission.etc_invoice_amount, Decimal("26.14"))
+            self.assertEqual(stored_submission.etc_invoice_count, 2)
+            self.assertEqual(stored_submission.amount_delta, Decimal("1522.86"))
+            self.assertEqual(stored_business.amount_breakdown["reported_amount"], "1549.00")
+            self.assertEqual(stored_business.amount_breakdown["etc_invoice_amount"], "26.14")
+            self.assertEqual(stored_business.amount_breakdown["gap_amount"], "1522.86")
+            self.assertEqual(stored_business.amount_breakdown["gap_reason"], "骑行费/非ETC发票差额")
+            self.assertEqual(
+                [event["event_type"] for event in stored_business.audit_events].count("historical_business_batch_migrated"),
+                1,
+            )
 
     def test_business_batch_delete_is_idempotent_and_hides_deleted_batch(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3254,6 +3320,77 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(june_payload["counts"], {"active": 0, "submitted": 0})
         self.assertEqual(june_payload["total"], 0)
         self.assertEqual(june_payload["items"], [])
+
+    def test_historical_business_batch_lists_by_scope_month_and_reported_amount(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.import_historical_invoices_from_records(
+                records=[
+                    {
+                        "invoice_number": "ETC-HIST-SCOPE-001",
+                        "issue_date": "2026-01-04",
+                        "passage_start_date": "2026-01-04",
+                        "passage_end_date": "2026-01-04",
+                        "plate_number": "云ADA0381",
+                        "seller_name": "云南昆玉高速公路开发有限公司",
+                        "seller_tax_no": "91530000ETC001",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052520",
+                        "amount_without_tax": "22.80",
+                        "tax_amount": "0.70",
+                        "total_amount": "23.50",
+                    },
+                    {
+                        "invoice_number": "ETC-HIST-SCOPE-002",
+                        "issue_date": "2026-01-05",
+                        "passage_start_date": "2026-01-05",
+                        "passage_end_date": "2026-01-05",
+                        "plate_number": "云ADA0381",
+                        "seller_name": "云南昆玉高速公路开发有限公司",
+                        "seller_tax_no": "91530000ETC001",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052520",
+                        "amount_without_tax": "20.88",
+                        "tax_amount": "0.64",
+                        "total_amount": "21.52",
+                    },
+                ],
+                source_name="historical-scope-test",
+            )
+            submitted_batch = app._etc_service.create_historical_submitted_batch(
+                case_id="CASE-HIST-SCOPE",
+                external_batch_id="ETC-OA-20260215-154900",
+                invoice_numbers=["ETC-HIST-SCOPE-001", "ETC-HIST-SCOPE-002"],
+                linked_oa_row_id="oa-hist-scope",
+                oa_amount=Decimal("1549.00"),
+                note="旧批次已提交 OA",
+            )
+            business_batch = app._etc_service.create_historical_submitted_business_batch(
+                business_batch_id="etc_business_batch_hist_20260215_154900",
+                task_id="ETC-RECON-HIST-20260215-154900",
+                submission_batch_id=submitted_batch.id,
+                external_etc_batch_id="ETC-OA-20260215-154900",
+                reported_amount=Decimal("1549.00"),
+                relation_case_id="CASE-HIST-SCOPE",
+                linked_oa_row_id="oa-hist-scope",
+                gap_reason="旧 OA 金额包含骑行费。",
+                scope_month="2026-02",
+            )
+
+            legacy_payload = json.loads(app.handle_request("GET", "/api/etc/batches?status=submitted&month=2026-02").body)
+            business_payload = json.loads(
+                app.handle_request("GET", "/api/etc/business-batches?status=submitted&month=2026-02").body
+            )["data"]
+
+        self.assertEqual(legacy_payload["counts"]["submitted"], 1)
+        self.assertEqual(legacy_payload["counts"]["current"], 1)
+        self.assertEqual(legacy_payload["items"][0]["id"], business_batch.business_batch_id)
+        self.assertEqual(legacy_payload["items"][0]["total_amount"], "1549.00")
+        self.assertEqual(legacy_payload["items"][0]["scope_month"], "2026-02")
+        self.assertEqual(business_payload["counts"], {"active": 0, "submitted": 1})
+        self.assertEqual(business_payload["total"], 1)
+        self.assertEqual(business_payload["items"][0]["businessBatchId"], business_batch.business_batch_id)
+        self.assertEqual(business_payload["items"][0]["invoiceSummary"]["amount"], "1549.00")
 
     def test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

@@ -84,6 +84,55 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertIsNone(weak_identity.canonical_key)
         self.assertEqual(weak_identity.suspected_key, "suspected:云南省交通投资建设集团有限公司:云南溯源科技有限公司:2026-02-05:41.75")
 
+    def test_upsert_etc_invoice_reuses_existing_fingerprint_when_invoice_number_changed(self) -> None:
+        existing = Invoice(
+            id="inv_existing_etc",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="OLD-ETC-NO",
+            digital_invoice_no="OLD-ETC-NO",
+            counterparty=Counterparty(
+                id="cp_etc",
+                name="云南省交通投资建设集团有限公司",
+                normalized_name="云南省交通投资建设集团有限公司",
+                counterparty_type="vendor",
+            ),
+            amount=Decimal("147.25"),
+            signed_amount=Decimal("147.25"),
+            invoice_date="2026-03-06",
+            total_with_tax=Decimal("147.25"),
+            source_unique_key="OLD-ETC-NO",
+            data_fingerprint="invoice:云南省交通投资建设集团有限公司:2026-03-06:147.25",
+        )
+        service = ImportNormalizationService(existing_invoices=[existing])
+        etc_invoice = type(
+            "EtcInvoice",
+            (),
+            {
+                "id": "etc_invoice_new",
+                "invoice_number": "NEW-ETC-NO",
+                "issue_date": "2026-03-06",
+                "seller_name": "云南省交通投资建设集团有限公司",
+                "seller_tax_no": "",
+                "buyer_name": "云南溯源科技有限公司",
+                "buyer_tax_no": "",
+                "total_amount": Decimal("147.25"),
+                "tax_amount": Decimal("4.29"),
+                "tax_rate": "3%",
+                "import_batch_id": "etc_import_batch_hist",
+                "current_batch_id": "etc_batch_0035",
+                "last_batch_id": "etc_batch_0035",
+                "status": "submitted",
+            },
+        )()
+
+        invoice = service.upsert_etc_invoice(etc_invoice)
+
+        self.assertEqual(invoice.id, "inv_existing_etc")
+        self.assertEqual(invoice.etc_invoice_id, "etc_invoice_new")
+        self.assertEqual(invoice.etc_submission_batch_id, "etc_batch_0035")
+        self.assertEqual(invoice.workbench_visibility, "hidden_after_etc_submission")
+        self.assertEqual(len(service.list_invoices()), 1)
+
     def test_preview_output_invoice_classifies_rows_across_all_decision_types(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.OUTPUT_INVOICE,

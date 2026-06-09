@@ -1372,17 +1372,29 @@ class WorkbenchSqlProjectionBuilder:
         return self._etc_invoice_summary_rows(external_batch_ids=external_batch_ids)
 
     def _open_etc_invoice_summary_rows(self, month: str) -> list[dict[str, Any]]:
-        return list(self._etc_invoice_summary_rows(month=month).values())
+        linked_external_batch_ids = self._active_etc_relation_external_batch_ids()
+        return list(
+            self._etc_invoice_summary_rows(
+                month=month,
+                excluded_external_batch_ids=linked_external_batch_ids,
+            ).values()
+        )
 
     def _etc_invoice_summary_rows(
         self,
         *,
         month: str | None = None,
         external_batch_ids: set[str] | None = None,
+        excluded_external_batch_ids: set[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         normalized_external_batch_ids = {
             str(external_batch_id).strip()
             for external_batch_id in set(external_batch_ids or set())
+            if str(external_batch_id).strip()
+        }
+        normalized_excluded_external_batch_ids = {
+            str(external_batch_id).strip()
+            for external_batch_id in set(excluded_external_batch_ids or set())
             if str(external_batch_id).strip()
         }
         filters = [
@@ -1403,6 +1415,9 @@ class WorkbenchSqlProjectionBuilder:
         if normalized_external_batch_ids:
             filters.append("submitted_batches.external_etc_batch_id = any(%s)")
             params.append(sorted(normalized_external_batch_ids))
+        if normalized_excluded_external_batch_ids:
+            filters.append("submitted_batches.external_etc_batch_id <> all(%s)")
+            params.append(sorted(normalized_excluded_external_batch_ids))
         where_clause = "\n              and ".join(filters)
         rows = self._connection.fetch_all(
             f"""
@@ -1530,10 +1545,20 @@ class WorkbenchSqlProjectionBuilder:
                   where invoice_ids.invoice_id = etc_invoices.etc_invoice_id
                      or invoice_ids.invoice_id = coalesce(etc_invoices.legacy_mongo_id, '')
               )
-            where {" and ".join(self._etc_business_summary_filters(normalized_month, normalized_external_batch_ids))}
+            where {" and ".join(self._etc_business_summary_filters(
+                normalized_month,
+                normalized_external_batch_ids,
+                normalized_excluded_external_batch_ids,
+            ))}
             order by business_batches.external_etc_batch_id, etc_invoices.invoice_date, row_id
             """,
-            tuple(self._etc_business_summary_params(normalized_month, normalized_external_batch_ids)),
+            tuple(
+                self._etc_business_summary_params(
+                    normalized_month,
+                    normalized_external_batch_ids,
+                    normalized_excluded_external_batch_ids,
+                )
+            ),
         )
         for row in business_rows:
             append_summary_source_row(
@@ -1551,22 +1576,51 @@ class WorkbenchSqlProjectionBuilder:
         }
 
     @staticmethod
-    def _etc_business_summary_filters(month: str, external_batch_ids: set[str]) -> list[str]:
+    def _etc_business_summary_filters(
+        month: str,
+        external_batch_ids: set[str],
+        excluded_external_batch_ids: set[str] | None = None,
+    ) -> list[str]:
         filters = ["etc_invoices.status <> 'deleted'"]
         if month:
             filters.append("business_batches.scope_month = %s::date")
         if external_batch_ids:
             filters.append("business_batches.external_etc_batch_id = any(%s)")
+        if excluded_external_batch_ids:
+            filters.append("business_batches.external_etc_batch_id <> all(%s)")
         return filters
 
     @staticmethod
-    def _etc_business_summary_params(month: str, external_batch_ids: set[str]) -> list[Any]:
+    def _etc_business_summary_params(
+        month: str,
+        external_batch_ids: set[str],
+        excluded_external_batch_ids: set[str] | None = None,
+    ) -> list[Any]:
         params: list[Any] = []
         if month:
             params.append(month_start(month))
         if external_batch_ids:
             params.append(sorted(external_batch_ids))
+        if excluded_external_batch_ids:
+            params.append(sorted(excluded_external_batch_ids))
         return params
+
+    def _active_etc_relation_external_batch_ids(self) -> set[str]:
+        rows = self._connection.fetch_all(
+            """
+            select distinct amount_check->>'external_etc_batch_id' as external_etc_batch_id
+            from app.workbench_pair_relations
+            where status = 'active'
+              and amount_check ? 'external_etc_batch_id'
+              and nullif(amount_check->>'external_etc_batch_id', '') is not null
+            """,
+            (),
+        )
+        return {
+            str(row.get("external_etc_batch_id") or "").strip()
+            for row in rows
+            if str(row.get("external_etc_batch_id") or "").strip()
+        }
 
     @staticmethod
     def _etc_invoice_summary_invoice_identity(row: dict[str, Any]) -> str:
@@ -1636,6 +1690,7 @@ class WorkbenchSqlProjectionBuilder:
         issue_range = _date_range_label(issue_dates)
         total_amount_text = _money_text(total_amount)
         invoice_lines = [self._etc_invoice_summary_line(row) for row in invoices]
+        detail_rows = [self._etc_invoice_detail_row(row, external_batch_id=external_batch_id) for row in invoices]
         return {
             "id": _etc_invoice_summary_row_id(external_batch_id),
             "type": "invoice",
@@ -1659,6 +1714,8 @@ class WorkbenchSqlProjectionBuilder:
             "tags": ["ETC", "ETC批量提交"],
             "etc_batch_id": external_batch_id,
             "etc_invoice_count": count,
+            "etc_invoice_detail_count": len(detail_rows),
+            "etc_invoice_detail_rows": detail_rows,
             "available_actions": ["detail"],
             "summary_fields": {
                 "ETC批次": external_batch_id,
@@ -1690,6 +1747,52 @@ class WorkbenchSqlProjectionBuilder:
         seller_name = str(row.get("seller_name") or row.get("counterparty_name") or "—")
         amount = _money_text(_decimal_value(row.get("total_with_tax") or row.get("amount")))
         return f"{issue_date} ｜ {invoice_no} ｜ {seller_name} ｜ {amount}"
+
+    @staticmethod
+    def _etc_invoice_detail_row(row: dict[str, Any], *, external_batch_id: str) -> dict[str, Any]:
+        row_id = str(row.get("row_id") or row.get("digital_invoice_no") or row.get("invoice_no") or "").strip()
+        invoice_no = str(row.get("digital_invoice_no") or row.get("invoice_no") or row_id or "—").strip()
+        issue_date = _date_text(row.get("invoice_date")) or "—"
+        seller_name = str(row.get("seller_name") or row.get("counterparty_name") or "—").strip() or "—"
+        amount = _money_text(_decimal_value(row.get("total_with_tax") or row.get("amount")))
+        return {
+            "id": row_id or f"{_etc_invoice_summary_row_id(external_batch_id)}:detail:{invoice_no}",
+            "type": "invoice",
+            "source_kind": "etc_invoice",
+            "status": "paired",
+            "seller_tax_no": "ETC发票",
+            "seller_name": seller_name,
+            "buyer_tax_no": external_batch_id,
+            "buyer_name": str(row.get("buyer_name") or "—").strip() or "—",
+            "invoice_code": str(row.get("invoice_code") or external_batch_id).strip() or external_batch_id,
+            "invoice_no": invoice_no,
+            "digital_invoice_no": invoice_no,
+            "issue_date": issue_date,
+            "amount": amount,
+            "amount_value": str(_decimal_value(row.get("total_with_tax") or row.get("amount"))),
+            "tax_rate": str(row.get("tax_rate") or "—"),
+            "tax_amount": _money_text(_decimal_value(row.get("tax_amount"))) if row.get("tax_amount") not in (None, "") else "—",
+            "total_with_tax": amount,
+            "invoice_type": str(row.get("invoice_type") or "进项发票"),
+            "tags": ["ETC", "ETC发票明细"],
+            "etc_batch_id": external_batch_id,
+            "invoice_bank_relation": {"code": "etc_batch_detail", "label": "ETC批次明细", "tone": "neutral"},
+            "available_actions": ["detail"],
+            "summary_fields": {
+                "ETC批次": external_batch_id,
+                "发票号码": invoice_no,
+                "销方": seller_name,
+                "金额": amount,
+                "开票日期": issue_date,
+            },
+            "detail_fields": {
+                "ETC批次": external_batch_id,
+                "发票号码": invoice_no,
+                "销方": seller_name,
+                "金额": amount,
+                "开票日期": issue_date,
+            },
+        }
 
     @staticmethod
     def _row_is_held_for_matching(row: dict[str, Any]) -> bool:

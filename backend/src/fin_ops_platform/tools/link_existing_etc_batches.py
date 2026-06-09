@@ -12,6 +12,7 @@ from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkService,
     ExistingEtcBatchLinkSpec,
 )
+from fin_ops_platform.services.state_store import default_data_dir
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -187,13 +188,29 @@ def _optional_text(value: object) -> str | None:
 
 
 def _build_full_snapshot_application(data_dir: Path | None) -> Any:
-    if data_dir is None:
-        return build_application(data_dir=None)
-    app = build_application(data_dir=data_dir, bootstrap_mode="lightweight")
+    root = data_dir or default_data_dir()
+    app = build_application(data_dir=root, bootstrap_mode="lightweight")
     state_store = getattr(app, "_state_store", None)
     if state_store is not None:
-        app._initialize_runtime_services(state_store.load())
+        app._initialize_runtime_services(_load_tool_runtime_state(state_store))
     return app
+
+
+def _load_tool_runtime_state(state_store: Any) -> dict[str, object]:
+    state: dict[str, object] = {}
+    for key, loader_name in (
+        ("imports", "load_imports_snapshot"),
+        ("file_imports", "load_file_imports_snapshot"),
+        ("workbench_pair_relations", "load_workbench_pair_relations"),
+        ("etc_reconciliation_state", "load_etc_reconciliation_state"),
+    ):
+        loader = getattr(state_store, loader_name, None)
+        if not callable(loader):
+            continue
+        loaded = loader()
+        if isinstance(loaded, dict):
+            state[key] = loaded
+    return state
 
 
 if __name__ == "__main__":

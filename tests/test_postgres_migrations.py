@@ -74,6 +74,7 @@ EXPECTED_MIGRATIONS = [
     "0059_input_invoice_usage_bank_filters.sql",
     "0060_oa_pending_payment_bank_filters.sql",
     "0061_output_invoice_collection_bank_filters.sql",
+    "0062_workbench_relation_etc_external_batch_idx.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -182,7 +183,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 62)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 63)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -449,6 +450,7 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "workbench_reconciliation_decisions_row_ids_gin",
             "workbench_matching_dirty_scopes_claim_idx",
             "matching_runs_tenant_request_id_uidx",
+            "workbench_pair_relations_active_etc_external_batch_idx",
             "bank_detail_rows_transaction_uidx",
             "bank_detail_rows_month_time_idx",
             "bank_detail_rows_month_account_time_idx",

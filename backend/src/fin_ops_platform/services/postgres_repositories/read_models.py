@@ -4155,6 +4155,9 @@ class PostgresReadModelRepository:
         if normalized := text(source_kind):
             clauses.append("%s = any(g.source_kinds)")
             params.append(normalized)
+        excludes_linked_etc_summary_groups = normalized_zone == "open"
+        if excludes_linked_etc_summary_groups:
+            clauses.append(_workbench_open_linked_etc_summary_group_exclusion_sql())
         normalized_search = text(search)
         if (
             normalized_search
@@ -4201,18 +4204,20 @@ class PostgresReadModelRepository:
             search_by_pane=normalized_search_by_pane,
             fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
-        materialized_counts = self._workbench_generation_stats_for_groups_page(
-            scope_key=normalized_scope_key,
-            generation_id=active_generation_id,
-            zone=normalized_zone,
-            status=status,
-            source_kind=source_kind,
-            search=normalized_search,
-            search_mode=normalized_search_mode,
-            search_by_pane=normalized_search_by_pane,
-            column_filters=normalized_column_filters,
-            time_filters=normalized_time_filters,
-        )
+        materialized_counts = None
+        if not excludes_linked_etc_summary_groups:
+            materialized_counts = self._workbench_generation_stats_for_groups_page(
+                scope_key=normalized_scope_key,
+                generation_id=active_generation_id,
+                zone=normalized_zone,
+                status=status,
+                source_kind=source_kind,
+                search=normalized_search,
+                search_mode=normalized_search_mode,
+                search_by_pane=normalized_search_by_pane,
+                column_filters=normalized_column_filters,
+                time_filters=normalized_time_filters,
+            )
         if materialized_counts is None:
             count_row = self._connection.fetch_one(
                 f"""
@@ -4325,15 +4330,19 @@ class PostgresReadModelRepository:
         if active_generation_id:
             generation_clause = "and generation_id = %s"
             generation_params.append(active_generation_id)
+        exclusion_clause = ""
+        if normalized_zone == "open":
+            exclusion_clause = f"and {_workbench_open_linked_etc_summary_group_exclusion_sql()}"
         row = self._connection.fetch_one(
             f"""
-            select group_id, zone, payload, raw_payload
-            from read_model.workbench_groups
+            select g.group_id, g.zone, g.payload, g.raw_payload
+            from read_model.workbench_groups g
             where {scope_where}
               {generation_clause}
-              and zone = %s
-              and group_id = %s
-            order by scope_month desc nulls last, updated_at desc
+              and g.zone = %s
+              and g.group_id = %s
+              {exclusion_clause}
+            order by g.scope_month desc nulls last, g.updated_at desc
             limit 1
             """,
             (*scope_params, *generation_params, normalized_zone, normalized_group_id),
@@ -8647,6 +8656,26 @@ def _workbench_groups_order_by(sort: str | None) -> str:
     if prefix is None:
         return "scope_month desc nulls last, updated_at desc, group_id"
     return f"{prefix}, scope_month desc nulls last, updated_at desc, group_id"
+
+
+def _workbench_open_linked_etc_summary_group_exclusion_sql() -> str:
+    return """
+    not exists (
+        select 1
+        from read_model.workbench_group_rows gr
+        join app.workbench_pair_relations rel
+          on rel.status = 'active'
+         and nullif(rel.amount_check->>'external_etc_batch_id', '') is not null
+         and gr.row_id = concat('etc-summary-', rel.amount_check->>'external_etc_batch_id')
+        where gr.scope_key = g.scope_key
+          and gr.generation_id = g.generation_id
+          and gr.zone = g.zone
+          and gr.group_id = g.group_id
+          and gr.pane = 'invoice'
+          and coalesce(gr.row_role, '') <> 'summary'
+          and gr.source_kind = 'etc_invoice_summary'
+    )
+    """
 
 
 def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:

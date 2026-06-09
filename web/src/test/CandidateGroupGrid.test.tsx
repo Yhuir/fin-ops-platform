@@ -238,6 +238,104 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
+  function createEtcInvoiceRecord(id: string, invoiceNo: string, amount: string): WorkbenchRecord {
+    return {
+      id,
+      recordType: "invoice",
+      sourceKind: "etc_invoice",
+      label: "ETC发票",
+      status: "ETC批次",
+      statusCode: "etc_invoice",
+      statusTone: "info",
+      exceptionHandled: false,
+      amount,
+      counterparty: "云南昆玉高速公路开发有限公司",
+      tableValues: {
+        sellerName: "云南昆玉高速公路开发有限公司",
+        sellerTaxId: "91530000ETC001",
+        buyerName: "云南溯源科技有限公司",
+        buyerTaxId: "915300007194052520",
+        invoiceCode: "--",
+        invoiceNo,
+        issueDate: "2026-01-04",
+        amount,
+        taxRate: "--",
+        taxAmount: "--",
+        grossAmount: amount,
+        invoiceType: "进",
+      },
+      detailFields: [],
+      actionVariant: "detail-only",
+      availableActions: ["detail"],
+    };
+  }
+
+  function createEtcCollapsedGroup(): WorkbenchCandidateGroup {
+    const summary: WorkbenchRecord = {
+      id: "etc-summary-ETC-OA-20260215-154900",
+      recordType: "invoice",
+      sourceKind: "etc_invoice_summary",
+      label: "ETC批次",
+      status: "ETC批次",
+      statusCode: "etc_invoice_summary",
+      statusTone: "info",
+      exceptionHandled: false,
+      amount: "1546.50",
+      counterparty: "云南昆玉高速公路开发有限公司",
+      tableValues: {
+        sellerName: "云南昆玉高速公路开发有限公司",
+        sellerTaxId: "--",
+        buyerName: "云南溯源科技有限公司",
+        buyerTaxId: "915300007194052520",
+        invoiceCode: "--",
+        invoiceNo: "ETC-OA-20260215-154900",
+        issueDate: "2025-12-29 至 2026-01-27",
+        amount: "1546.50",
+        taxRate: "--",
+        taxAmount: "--",
+        grossAmount: "1546.50",
+        invoiceType: "ETC批次",
+      },
+      detailFields: [],
+      actionVariant: "detail-only",
+      availableActions: ["detail"],
+    };
+    return {
+      id: "case:ETC-OA-20260215-154900",
+      groupType: "paired",
+      matchConfidence: "high",
+      reason: "ETC批次",
+      displayMode: "collapsed_summary",
+      defaultCollapsed: true,
+      rows: {
+        oa: [],
+        bank: [],
+        invoice: [summary],
+      },
+      rowCounts: {
+        oa: 0,
+        bank: 0,
+        invoice: 2,
+        rows: 2,
+      },
+      displayRowCounts: {
+        oa: 0,
+        bank: 0,
+        invoice: 1,
+        rows: 1,
+      },
+      collapsedRows: {
+        invoice: [
+          createEtcInvoiceRecord("etc-inv-001", "ETC-001", "23.50"),
+          createEtcInvoiceRecord("etc-inv-002", "ETC-002", "21.52"),
+        ],
+      },
+      collapsedRowCounts: {
+        invoice: 2,
+      },
+    };
+  }
+
   function renderNoOaGrid(group: WorkbenchCandidateGroup = createNoOaCollapsedGroup()) {
     return render(
       <CandidateGroupGrid
@@ -637,6 +735,46 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("免OA手续费批次")).not.toBeInTheDocument();
     expect(within(bankCell).getAllByRole("row")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "收起免OA批次明细" })).toBeInTheDocument();
+  });
+
+  test("renders ETC invoice summaries collapsed by default and expands in the invoice pane", () => {
+    const group = createEtcCollapsedGroup();
+    render(
+      <CandidateGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
+    expect(screen.getByText("ETC批次")).toBeInTheDocument();
+    expect(screen.queryByText("ETC-001")).not.toBeInTheDocument();
+    expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
+    const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，2 张" });
+    expect(expandButton).toHaveTextContent("展开 2 张明细");
+    expect(screen.getByText("当前显示 1 条摘要")).toBeInTheDocument();
+    expect(screen.getByText("实际 2 张发票")).toBeInTheDocument();
+    expect(invoiceCell).not.toContainElement(expandButton);
+    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
+
+    fireEvent.click(expandButton);
+
+    expect(screen.getByText("ETC-001")).toBeInTheDocument();
+    expect(screen.getByText("ETC-002")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起ETC发票明细" })).toBeInTheDocument();
+    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(2);
   });
 
   test("renders submitted salary and internal-transfer batches as collapsed no-OA summaries", () => {

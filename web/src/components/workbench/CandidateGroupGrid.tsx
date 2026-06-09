@@ -83,6 +83,37 @@ type CandidateGroupGridProps = {
   canMutateData: boolean;
 };
 
+type CollapsedSummaryCopy = {
+  detailLabel: string;
+  countUnit: string;
+  totalLabel: (count: number) => string;
+};
+
+function resolveCollapsedSummaryCopy(
+  group: WorkbenchCandidateGroup,
+  paneId: WorkbenchRecordType,
+  collapsedRows: WorkbenchRecord[],
+): CollapsedSummaryCopy {
+  const summaryRow = group.summaryRow ?? group.rows[paneId]?.[0];
+  const isEtcInvoiceSummary =
+    paneId === "invoice" &&
+    (summaryRow?.sourceKind === "etc_invoice_summary" || collapsedRows.some((row) => row.sourceKind === "etc_invoice"));
+
+  if (isEtcInvoiceSummary) {
+    return {
+      detailLabel: "ETC发票明细",
+      countUnit: "张",
+      totalLabel: (count) => `实际 ${count} 张发票`,
+    };
+  }
+
+  return {
+    detailLabel: "免OA批次明细",
+    countUnit: "条",
+    totalLabel: (count) => `实际 ${count} 条流水`,
+  };
+}
+
 function CandidateGroupGrid({
   zoneId,
   panes,
@@ -386,22 +417,31 @@ function CandidateGroupGrid({
           const isLoading = loadingCollapsedGroups.has(collapseKey);
           const displayRowCount = group.displayRowCounts?.[paneId] ?? group.rows[paneId].length;
           const collapsedRowCount = group.rowCounts?.[paneId] ?? group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
+          const collapseCopy = resolveCollapsedSummaryCopy(group, paneId, collapsedRows);
           return [
             <Fragment key={collapseKey}>
               <button
                 aria-expanded={isExpanded}
-                aria-label={isExpanded ? "收起免OA批次明细" : `展开免OA批次明细，${collapsedRowCount} 条`}
+                aria-label={
+                  isExpanded
+                    ? `收起${collapseCopy.detailLabel}`
+                    : `展开${collapseCopy.detailLabel}，${collapsedRowCount} ${collapseCopy.countUnit}`
+                }
                 className="row-action-btn candidate-group-collapse-control"
                 disabled={isLoading}
                 type="button"
                 onClick={() => void toggleCollapsedGroup(group, paneId, isExpanded, collapsedRowCount, collapsedRows.length)}
               >
-                {isLoading ? "加载中" : isExpanded ? "收起明细" : `展开 ${collapsedRowCount} 条明细`}
+                {isLoading
+                  ? "加载中"
+                  : isExpanded
+                    ? "收起明细"
+                    : `展开 ${collapsedRowCount} ${collapseCopy.countUnit}明细`}
               </button>
               {!isExpanded ? (
                 <span className="candidate-group-collapse-counts">
                   <span>当前显示 {displayRowCount} 条摘要</span>
-                  <span>实际 {collapsedRowCount} 条流水</span>
+                  <span>{collapseCopy.totalLabel(collapsedRowCount)}</span>
                 </span>
               ) : null}
             </Fragment>,

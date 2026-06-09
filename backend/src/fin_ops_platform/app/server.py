@@ -398,7 +398,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-05-25-oa-attachment-source-groups"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-06-09-etc-linked-summary-filter"
 PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 APP_HEALTH_DASHBOARD_STALE_WARNING_CODES = {
@@ -6700,6 +6700,13 @@ class Application:
         invoice_ids = [str(invoice_id) for invoice_id in list(getattr(batch, "invoice_ids", []) or [])]
         invoices = self._existing_etc_invoices_by_ids(invoice_ids)
         amount = sum((Decimal(str(getattr(invoice, "total_amount", "0"))) for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        amount_breakdown = getattr(batch, "amount_breakdown", {}) if isinstance(getattr(batch, "amount_breakdown", {}), dict) else {}
+        reported_amount = amount_breakdown.get("reported_amount") or amount_breakdown.get("oa_amount")
+        if reported_amount not in (None, ""):
+            try:
+                amount = Decimal(str(reported_amount)).quantize(Decimal("0.01"))
+            except (ArithmeticError, ValueError):
+                amount = amount
         issue_dates = sorted(str(getattr(invoice, "issue_date", "") or "") for invoice in invoices if str(getattr(invoice, "issue_date", "") or ""))
         passage_dates = sorted(
             date_value
@@ -6733,6 +6740,8 @@ class Application:
         summary["businessBatchId"] = str(getattr(batch, "business_batch_id", ""))
         summary["business_status"] = str(getattr(batch, "status", ""))
         summary["submissionBatchId"] = getattr(batch, "submission_batch_id", None)
+        summary["scope_month"] = str(amount_breakdown.get("scope_month") or "")
+        summary["amount_breakdown"] = dict(amount_breakdown)
         return {
             "batch": self._etc_service.business_batch_payload(batch),
             "summary": summary,
@@ -6923,6 +6932,7 @@ class Application:
         normalized_month = str(month or "").strip()
         if normalized_month:
             date_values = [
+                str(summary.get("scope_month", "") or ""),
                 str(summary.get("issue_start_date", "") or ""),
                 str(summary.get("issue_end_date", "") or ""),
                 str(summary.get("passage_start_date", "") or ""),

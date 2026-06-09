@@ -727,6 +727,9 @@ class EtcSummaryProjectionConnection(WorkbenchProjectionSettingsConnection):
 class EtcBusinessSummaryProjectionConnection(WorkbenchProjectionSettingsConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
+        if "from app.workbench_pair_relations" in normalized:
+            self.active_relation_query = normalized
+            return []
         if "with submitted_batches as" in normalized and "from app.invoices invoices" in normalized:
             return []
         if "from app.etc_business_batches" in normalized and "join app.etc_invoices etc_invoices" in normalized:
@@ -795,6 +798,18 @@ class EtcBusinessSummaryProjectionConnection(WorkbenchProjectionSettingsConnecti
                     "raw_payload": {},
                 },
             ]
+        return super().fetch_all(sql, params)
+
+
+class EtcBusinessSummaryWithActiveRelationConnection(EtcBusinessSummaryProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "from app.workbench_pair_relations" in normalized:
+            self.active_relation_query = normalized
+            return [{"external_etc_batch_id": "etc_20260520_001"}]
+        if "business_batches.external_etc_batch_id <> all" in normalized:
+            self.business_summary_query = normalized
+            return []
         return super().fetch_all(sql, params)
 
 
@@ -1063,9 +1078,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(groups), 1)
         group = groups[0]
         self.assertEqual(group["group_id"], "case:CASE-BATCH-txn_imported_1328")
+        self.assertEqual(group["display_mode"], "collapsed_summary")
+        self.assertTrue(group["default_collapsed"])
+        self.assertEqual(group["collapsed_row_counts"], {"invoice": 2})
         self.assertEqual(len(group["oa_rows"]), 1)
         self.assertEqual(len(group["bank_rows"]), 1)
         self.assertEqual(len(group["invoice_rows"]), 1)
+        self.assertEqual([row["id"] for row in group["collapsed_rows"]["invoice"]], ["inv-hidden-etc-1", "inv-hidden-etc-2"])
         oa_row = group["oa_rows"][0]
         self.assertEqual(oa_row["etc_batch_id"], "ETC-OA-20260215-154900")
         self.assertIn("ETC批量提交", oa_row["tags"])
@@ -1075,6 +1094,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["invoice_bank_relation"]["label"], "已关联ETC发票")
         self.assertEqual(summary_row["etc_invoice_count"], 2)
         self.assertEqual(summary_row["total_with_tax"], "144.50")
+        self.assertEqual(summary_row["etc_invoice_detail_count"], 2)
 
     def test_sql_projection_creates_open_etc_summary_from_submitted_business_batch(self) -> None:
         connection = EtcBusinessSummaryProjectionConnection()
@@ -1095,6 +1115,16 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("ETC002", summary_row["detail_fields"]["发票清单"])
         self.assertIn("business_batches.scope_month = %s::date", connection.business_summary_query)
         self.assertNotIn("etc_invoices.scope_month = %s::date", connection.business_summary_query)
+        self.assertEqual([row["id"] for row in summary_row["etc_invoice_detail_rows"]], ["ETC001", "ETC002"])
+
+    def test_sql_projection_excludes_open_etc_summary_when_batch_has_active_relation(self) -> None:
+        connection = EtcBusinessSummaryWithActiveRelationConnection()
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+
+        rows = builder._open_etc_invoice_summary_rows("2026-05")
+
+        self.assertEqual(rows, [])
+        self.assertIn("from app.workbench_pair_relations", connection.active_relation_query)
 
     def test_sql_projection_scope_shards_include_etc_business_sources(self) -> None:
         connection = WorkbenchScopeShardEtcConnection()
@@ -1437,6 +1467,27 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(page["read_model_version"], "gen-active")
         self.assertTrue(any("g.generation_id = %s" in sql and "gen-active" in params for sql, params in all_queries))
         self.assertTrue(any("r.generation_id = g.generation_id" in sql for sql, _params in all_queries))
+
+    def test_repository_excludes_open_etc_summary_groups_already_linked_by_active_relation(self) -> None:
+        connection = ActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="2026-01", zone="open", page=1, page_size=25)
+        detail = repository.get_workbench_group_detail(scope_key="2026-01", zone="open", group_id="temp:etc")
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        self.assertEqual(page["zone"], "open")
+        self.assertEqual(detail["group_id"], "case:1")
+        self.assertTrue(
+            any(
+                "app.workbench_pair_relations rel" in sql
+                and "external_etc_batch_id" in sql
+                and "etc_invoice_summary" in sql
+                for sql, _params in all_queries
+            )
+        )
+        self.assertTrue(any("count(*) as total_count" in sql for sql, _params in connection.fetch_one_calls))
+        self.assertFalse(any("from read_model.workbench_generation_stats" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_batch_accounting_loader_reads_only_active_workbench_generations(self) -> None:
         connection = BatchAccountingActiveGenerationConnection()

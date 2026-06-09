@@ -163,10 +163,15 @@ class ObjectDedupDecisionService:
     def _find_invoice(self, identity: ObjectIdentity) -> Invoice | None:
         if self._repository is None:
             return None
-        return self._repository.find_invoice_by_identity(
+        invoice = self._repository.find_invoice_by_identity(
             canonical_key=identity.canonical_key,
             suspected_key=None if identity.canonical_key else identity.suspected_key,
         )
+        if invoice is not None:
+            return invoice
+        if identity.canonical_key and identity.suspected_key:
+            return self._repository.find_invoice_by_identity(canonical_key=None, suspected_key=identity.suspected_key)
+        return None
 
     def _find_bank_transaction(self, identity: ObjectIdentity) -> BankTransaction | None:
         if self._repository is None:

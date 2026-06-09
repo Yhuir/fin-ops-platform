@@ -366,6 +366,7 @@ class EtcInvoice:
     status: EtcInvoiceStatus = EtcInvoiceStatus.UNSUBMITTED
     import_batch_id: str | None = None
     import_session_id: str | None = None
+    business_batch_id: str | None = None
     current_batch_id: str | None = None
     last_batch_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -452,6 +453,7 @@ class EtcBusinessBatch:
     oa_detection_error: str | None = None
     oa_detection_reason: str | None = None
     invoice_ids: list[str] = field(default_factory=list)
+    amount_breakdown: dict[str, object] = field(default_factory=dict)
     import_attempts: list[dict[str, object]] = field(default_factory=list)
     audit_events: list[dict[str, object]] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -836,6 +838,7 @@ class EtcService:
                         code="invoice_already_submitted",
                     )
                 invoice.current_batch_id = batch.business_batch_id
+                invoice.business_batch_id = batch.business_batch_id
                 invoice.last_batch_id = batch.business_batch_id
                 invoice.updated_at = now
             if result.failed and (result.imported or result.attachments_completed):
@@ -964,6 +967,8 @@ class EtcService:
                 invoice.status = EtcInvoiceStatus.UNSUBMITTED
                 if invoice.current_batch_id in {old_submission_batch_id, batch.business_batch_id}:
                     invoice.current_batch_id = None
+                if str(invoice.business_batch_id or "").strip() == batch.business_batch_id:
+                    invoice.business_batch_id = None
                 invoice.last_batch_id = old_submission_batch_id or batch.business_batch_id
                 invoice.updated_at = now
             for import_batch_id in list(batch.import_batch_ids):
@@ -1054,6 +1059,7 @@ class EtcService:
                         continue
                     invoice.status = EtcInvoiceStatus.SUBMITTED
                     invoice.current_batch_id = batch.submission_batch_id or batch.business_batch_id
+                    invoice.business_batch_id = batch.business_batch_id
                     invoice.last_batch_id = invoice.current_batch_id
                     invoice.updated_at = now
             elif normalized_status == "conflict":
@@ -1116,6 +1122,7 @@ class EtcService:
                         continue
                     invoice.status = EtcInvoiceStatus.SUBMITTED
                     invoice.current_batch_id = batch.submission_batch_id or batch.business_batch_id
+                    invoice.business_batch_id = batch.business_batch_id
                     invoice.last_batch_id = invoice.current_batch_id
                     invoice.updated_at = now
                 batch.status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
@@ -1171,6 +1178,8 @@ class EtcService:
                     raise EtcBusinessBatchInvalidTransitionError("submitted ETC invoices cannot be deleted.")
                 if invoice.current_batch_id in {batch.business_batch_id, batch.submission_batch_id}:
                     invoice.current_batch_id = None
+                if str(invoice.business_batch_id or "").strip() == batch.business_batch_id:
+                    invoice.business_batch_id = None
             for import_batch_id in list(batch.import_batch_ids):
                 import_batch = self._import_batches.get(import_batch_id)
                 if import_batch is not None:
@@ -1215,6 +1224,8 @@ class EtcService:
             changed = invoice.status == EtcInvoiceStatus.SUBMITTED or str(invoice.current_batch_id or "").strip() in linked_batch_ids
             invoice.status = EtcInvoiceStatus.UNSUBMITTED
             invoice.current_batch_id = None
+            if str(invoice.business_batch_id or "").strip() == batch.business_batch_id:
+                invoice.business_batch_id = None
             invoice.last_batch_id = released_last_batch_id
             invoice.updated_at = now
             if changed:
@@ -1308,6 +1319,7 @@ class EtcService:
             "oaDetectionReason": batch.oa_detection_reason,
             "invoiceIds": list(batch.invoice_ids),
             "invoiceSummary": invoice_summary,
+            "amountBreakdown": dict(batch.amount_breakdown or {}),
             "importAttempts": list(batch.import_attempts),
             "auditEvents": list(batch.audit_events),
             "createdAt": batch.created_at,
@@ -1833,6 +1845,152 @@ class EtcService:
         self._persist()
         return replace(batch, invoice_ids=list(batch.invoice_ids), plate_summary=list(batch.plate_summary))
 
+    def create_historical_submitted_business_batch(
+        self,
+        *,
+        business_batch_id: str,
+        task_id: str,
+        submission_batch_id: str,
+        external_etc_batch_id: str,
+        reported_amount: Decimal | str | int | float,
+        relation_case_id: str,
+        linked_oa_row_id: str | None = None,
+        gap_reason: str | None = None,
+        scope_month: str | None = None,
+    ) -> EtcBusinessBatch:
+        normalized_business_batch_id = str(business_batch_id or "").strip()
+        normalized_task_id = str(task_id or "").strip()
+        normalized_submission_batch_id = str(submission_batch_id or "").strip()
+        normalized_external_etc_batch_id = str(external_etc_batch_id or "").strip()
+        normalized_relation_case_id = str(relation_case_id or "").strip()
+        normalized_oa_row_id = str(linked_oa_row_id or "").strip() or None
+        normalized_gap_reason = str(gap_reason or "").strip() or None
+        normalized_scope_month = str(scope_month or "").strip()
+        if not normalized_business_batch_id:
+            raise EtcBusinessBatchInvalidTransitionError("business_batch_id is required.", code="invalid_business_batch_request")
+        if not normalized_task_id:
+            raise EtcBusinessBatchInvalidTransitionError("task_id is required.", code="invalid_business_batch_request")
+        if not normalized_submission_batch_id:
+            raise EtcBusinessBatchInvalidTransitionError("submission_batch_id is required.", code="invalid_business_batch_request")
+        if not normalized_external_etc_batch_id:
+            raise EtcBusinessBatchInvalidTransitionError("external_etc_batch_id is required.", code="invalid_business_batch_request")
+        if not normalized_relation_case_id:
+            raise EtcBusinessBatchInvalidTransitionError("relation_case_id is required.", code="invalid_business_batch_request")
+
+        with self._business_batch_lock:
+            existing = self._business_batches.get(normalized_business_batch_id)
+            if existing is not None:
+                self._ensure_business_batch_fields(existing)
+                if existing.status == EtcBusinessBatchStatus.DELETED.value:
+                    raise EtcBusinessBatchInvalidTransitionError(
+                        "deleted historical business batch cannot be recreated by migration.",
+                        code="historical_business_batch_deleted",
+                    )
+                return self._copy_business_batch(existing)
+            active_for_task = self._active_business_batch_for_task(normalized_task_id)
+            if active_for_task is not None and active_for_task.business_batch_id != normalized_business_batch_id:
+                raise EtcBusinessBatchActiveExistsError(
+                    f"Active ETC business batch already exists for task {normalized_task_id}."
+                )
+
+            submission_batch = self.get_batch(normalized_submission_batch_id)
+            invoices = [
+                self._get_invoice(invoice_id)
+                for invoice_id in list(submission_batch.invoice_ids or [])
+                if invoice_id in self._invoices
+            ]
+            if not invoices:
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "historical submitted business batch requires existing ETC invoices.",
+                    code="empty_business_batch",
+                )
+            now = datetime.now(UTC)
+            invoice_total = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+            reported_total = _decimal_from_amount(reported_amount).quantize(Decimal("0.01"))
+            gap_amount = (reported_total - invoice_total).quantize(Decimal("0.01"))
+            linked_batch_ids = {submission_batch.id, submission_batch.etc_batch_id, normalized_external_etc_batch_id}
+            for invoice in invoices:
+                invoice_business_batch_id = str(getattr(invoice, "business_batch_id", "") or "").strip()
+                if invoice_business_batch_id and invoice_business_batch_id != normalized_business_batch_id:
+                    raise EtcBusinessBatchInvalidTransitionError(
+                        f"ETC invoice {invoice.invoice_number} is already assigned to another business batch.",
+                        code="invoice_business_batch_conflict",
+                    )
+                invoice_current_batch_id = str(invoice.current_batch_id or "").strip()
+                if invoice_current_batch_id and invoice_current_batch_id not in linked_batch_ids:
+                    raise EtcBusinessBatchInvalidTransitionError(
+                        f"ETC invoice {invoice.invoice_number} is assigned to another submitted batch.",
+                        code="invoice_batch_conflict",
+                    )
+
+            submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
+            submission_batch.confirmed_at = submission_batch.confirmed_at or now
+            submission_batch.linked_oa_case_id = normalized_relation_case_id
+            submission_batch.linked_oa_row_id = normalized_oa_row_id or submission_batch.linked_oa_row_id
+            submission_batch.oa_total_amount = reported_total
+            submission_batch.etc_invoice_amount = invoice_total
+            submission_batch.etc_invoice_count = len(invoices)
+            submission_batch.amount_delta = gap_amount
+            if normalized_gap_reason:
+                submission_batch.note = normalized_gap_reason
+
+            for invoice in invoices:
+                invoice.status = EtcInvoiceStatus.SUBMITTED
+                invoice.current_batch_id = submission_batch.id
+                invoice.business_batch_id = normalized_business_batch_id
+                invoice.last_batch_id = submission_batch.id
+                invoice.updated_at = now
+
+            import_batch_ids = [
+                import_batch.id
+                for import_batch in self._import_batches_for_invoices(invoices)
+                if import_batch.id
+            ]
+            for import_batch in self._import_batches_for_invoices(invoices):
+                import_batch.submission_batch_id = submission_batch.id
+                import_batch.updated_at = now
+
+            amount_breakdown = {
+                "reported_amount": _amount_text(reported_total),
+                "oa_amount": _amount_text(reported_total),
+                "bank_amount": _amount_text(reported_total),
+                "etc_invoice_amount": _amount_text(invoice_total),
+                "gap_amount": _amount_text(gap_amount),
+                "gap_reason": normalized_gap_reason or "",
+                "relation_case_id": normalized_relation_case_id,
+                "scope_month": normalized_scope_month,
+                "coverage_status": "matched" if gap_amount == Decimal("0.00") else "partial",
+            }
+            batch = EtcBusinessBatch(
+                business_batch_id=normalized_business_batch_id,
+                task_id=normalized_task_id,
+                status=EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
+                version=1,
+                task_active_key=None,
+                import_batch_ids=sorted(set(import_batch_ids)),
+                submission_batch_id=submission_batch.id,
+                external_etc_batch_id=normalized_external_etc_batch_id,
+                oa_row_id=normalized_oa_row_id,
+                oa_process_status="in_progress" if normalized_oa_row_id else "manual_without_oa_row",
+                oa_detection_status="manual_submitted",
+                invoice_ids=[invoice.id for invoice in invoices],
+                amount_breakdown=amount_breakdown,
+                created_at=now,
+                updated_at=now,
+            )
+            self._append_business_batch_audit(
+                batch,
+                "historical_business_batch_migrated",
+                before_status=None,
+                after_status=batch.status,
+                reason=normalized_gap_reason,
+                submission_batch_id=submission_batch.id,
+                oa_row_id=normalized_oa_row_id,
+            )
+            self._business_batches[batch.business_batch_id] = batch
+            self._persist()
+            return self._copy_business_batch(batch)
+
     def create_oa_draft(
         self,
         invoice_ids: list[str],
@@ -2082,6 +2240,8 @@ class EtcService:
                 invoice.import_batch_id = None
             if not hasattr(invoice, "import_session_id"):
                 invoice.import_session_id = None
+            if not hasattr(invoice, "business_batch_id"):
+                invoice.business_batch_id = None
         for batch in self._batches.values():
             self._ensure_batch_metadata_fields(batch)
         for business_batch in self._business_batches.values():
@@ -2144,6 +2304,7 @@ class EtcService:
             batch,
             import_batch_ids=list(batch.import_batch_ids),
             invoice_ids=list(batch.invoice_ids),
+            amount_breakdown=dict(batch.amount_breakdown or {}),
             import_attempts=[dict(item) for item in batch.import_attempts],
             audit_events=[dict(item) for item in batch.audit_events],
         )
@@ -2173,6 +2334,7 @@ class EtcService:
             "oa_detection_error": None,
             "oa_detection_reason": None,
             "invoice_ids": [],
+            "amount_breakdown": {},
             "import_attempts": [],
             "audit_events": [],
             "created_at": datetime.now(UTC),
@@ -2670,6 +2832,8 @@ class EtcService:
         for invoice in invoices:
             if invoice.current_batch_id == batch.id:
                 invoice.current_batch_id = None
+            if str(invoice.business_batch_id or "").strip():
+                invoice.business_batch_id = None
             invoice.status = EtcInvoiceStatus.UNSUBMITTED
             invoice.updated_at = now
         for import_batch in self._import_batches_for_invoices(invoices):
@@ -3300,6 +3464,10 @@ def _decimal_from_amount(value: Decimal | str | int | float) -> Decimal:
         return Decimal(str(value).replace(",", ""))
     except (InvalidOperation, ValueError) as exc:
         raise EtcInvoiceRequestError("amount must be a valid decimal.") from exc
+
+
+def _amount_text(value: Decimal) -> str:
+    return str(value.quantize(Decimal("0.01")))
 
 
 def _decimal_or_none(value: object) -> Decimal | None:

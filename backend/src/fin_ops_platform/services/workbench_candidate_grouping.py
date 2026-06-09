@@ -841,9 +841,34 @@ class WorkbenchCandidateGroupingService:
         processed_summary = self._group_processed_exception_summary(group)
         if processed_summary:
             payload["processed_exception_summary"] = processed_summary
+        self._apply_etc_invoice_summary_collapsed_details(payload)
         if section == "paired" and self._should_collapse_no_oa_bank_batch_group(group):
             self._apply_no_oa_bank_batch_collapsed_summary(payload)
         return payload
+
+    @staticmethod
+    def _apply_etc_invoice_summary_collapsed_details(payload: dict[str, Any]) -> None:
+        invoice_rows = [row for row in list(payload.get("invoice_rows") or []) if isinstance(row, dict)]
+        if len(invoice_rows) != 1:
+            return
+        summary_row = invoice_rows[0]
+        if str(summary_row.get("source_kind") or "").strip() != "etc_invoice_summary":
+            return
+        detail_rows = [
+            dict(row)
+            for row in list(summary_row.get("etc_invoice_detail_rows") or [])
+            if isinstance(row, dict)
+        ]
+        if not detail_rows:
+            return
+        summary_row = dict(summary_row)
+        summary_row.pop("etc_invoice_detail_rows", None)
+        summary_row["etc_invoice_detail_count"] = len(detail_rows)
+        payload["display_mode"] = "collapsed_summary"
+        payload["default_collapsed"] = True
+        payload["collapsed_rows"] = {"invoice": detail_rows}
+        payload["collapsed_row_counts"] = {"invoice": len(detail_rows)}
+        payload["invoice_rows"] = [summary_row]
 
     def _should_collapse_no_oa_bank_batch_group(self, group: CandidateGroup) -> bool:
         if group.oa_rows or group.invoice_rows or not group.bank_rows:

@@ -32,6 +32,14 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - 发现多个 active 批次时，只标记 `migration_conflict`，不得自动选择 winner。
 - 迁移失败时保持功能开关关闭，恢复备份或保留现场后回滚应用版本。
 
+历史已配对 ETC 批次转入新业务批次模型时使用 `backend/src/fin_ops_platform/tools/migrate_historical_etc_business_batches.py`：
+
+- spec 必须显式提供 `business_batch_id`、`task_id`、旧 `submission_batch_id`、外部 ETC 批次号、active relation `case_id`、上报金额和 scope month。
+- dry-run 只校验旧提交批次、active relation 和金额差额；execute 必须通过 `HistoricalEtcBusinessBatchMigrationService` 调用 `EtcService` 和 pair relation service，不允许直接写 read model。
+- 差额批次保留旧 OA/银行事实源，差额原因写入业务批次 `amount_breakdown`，不为了凑金额跨批次抢占其他批次发票。
+- 迁移后必须只读验证：ETC 管理 submitted bucket 可见业务批次；关联台 paired 区可展开 ETC 明细；同一 `external_etc_batch_id` 不再出现在 open 区。
+- `0062_workbench_relation_etc_external_batch_idx.sql` 是 active relation ETC 外部批次索引，应由 schema owner/migrator 在部署迁移阶段执行；运行时 app 账号无权创建该索引时，不得用 runtime 账号手工改 owner。
+
 ## 发布后 smoke
 
 发布后至少检查：

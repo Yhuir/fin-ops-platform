@@ -5,7 +5,9 @@
 
 ## 当前决策
 
-- 待补充。
+- `etc_business_batches` 继续作为用户可见业务批次事实源，`etc_reconciliation_tasks` 继续作为导入、核对、来源文件和提交闭环的 workflow 状态，不物理合并为单表/单实体。
+- 历史已在关联台 paired 的 ETC 批次可通过专用 migration service 转入新业务批次模型；迁移必须复用 `EtcService`、pair relation service、现有 state/repository 持久化和 Workbench invalidation，不允许临时 SQL 直接改 read model。
+- `etc_invoice_summary` 在 open 区和 paired 区都必须保留可展开 ETC 发票明细；已存在 active pair relation 的 ETC 外部批次不得继续泄漏到 open 区。
 
 ## 记录模板
 
@@ -23,6 +25,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-09 - 历史ETC批次迁移与open区泄漏防线
+
+- 目标：把历史 1-4 批 ETC 配对事实转入新业务批次模型，并确保已进入 active pair relation 的 ETC summary 不再散落到关联台未配对区。
+- 影响范围：`EtcService.create_historical_submitted_business_batch`、`HistoricalEtcBusinessBatchMigrationService`、`migrate_historical_etc_business_batches.py`、Workbench SQL projection、Workbench groups repository、关联台 ETC summary 展开明细。
+- 关键决策：迁移按旧 OA/银行/ETC relation 作为真实事实源，不补齐第 1 批缺失的去年发票；业务批次上报金额和 ETC 发票合计差额写入 `amount_breakdown`。Workbench projection 负责新 generation 的 open 排除，repository 在 groups 查询层再基于 active relation 过滤陈旧 generation 中的 open ETC summary，避免旧 read model 泄漏。
+- 文档影响：更新 ETC 模块实施记录、测试矩阵和关联台状态机；产品口径不变。
+- 测试覆盖：新增历史迁移 service/tool 测试、ETC service 历史业务批次测试、Workbench SQL projection/repository open 排除测试、CandidateGroupGrid ETC summary 展开明细测试、dedup fallback 回归测试。
+- 验证命令：`python -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_excludes_open_etc_summary_groups_already_linked_by_active_relation tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_pins_workbench_groups_page_to_active_generation tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_sql_has_required_extensions_and_indexes tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_expected_migration_files_are_present_and_ordered`。
+- 生产验证：生产库历史 1-4 批已生成 `etc_business_batch_hist_20260114_187293`、`etc_business_batch_hist_20260215_154900`、`etc_business_batch_hist_20260312_193545`、`etc_business_batch_hist_20260413_241125`；关联台 open 查询只保留第 5 批 `etc_20260520_001`，paired 查询可看到 1/43/27/44 张 ETC 明细。
+- 未测风险：新增索引迁移 `0062_workbench_relation_etc_external_batch_idx.sql` 需要由 owner/migrator 角色在部署流程执行；runtime 账号只读验证通过但无权创建该索引。
 
 ## 2026-06-09 - 业务批次筛选计数口径修复
 

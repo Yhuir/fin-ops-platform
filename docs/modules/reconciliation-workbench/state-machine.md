@@ -24,6 +24,7 @@
 ## Read Model / Worker 状态
 
 - Workbench projection 需要把已提交 ETC 批次的散票折叠成一条 `source_kind=etc_invoice_summary` 行；金额使用业务批次上报金额，散票作为可展开明细。
+- 当 `app.workbench_pair_relations.amount_check.external_etc_batch_id` 已有 active relation 时，同一个 ETC 外部批次不得继续出现在 open 区；projection 和 groups repository 都要过滤陈旧 generation 中的 open summary。
 - fresh/missing/refreshing/stale/failed/unavailable 由 read model gateway 和 active generation 决定；ETC 汇总行只是 projection 结果，不单独定义 read model 状态。
 - refresh 触发来源：导入确认、OA/银行/发票导入、ETC 人工提交确认、配对确认和撤回。
 - 失败恢复：重跑 Workbench refresh 或修复 active generation；不得用前端本地合并绕过 projection。
@@ -32,4 +33,5 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-09 | 已有 active relation 的 ETC summary 在 open 区增加 projection/repository 双重排除，并保留 paired 区展开明细 | Workbench open/paired 查询、历史 ETC 批次迁移、陈旧 active generation 防线 | `tests.test_workbench_sql_runtime`；生产库只读验证 |
 | 2026-06-08 | 已提交 ETC 批次在 open 区投影折叠 `etc_invoice_summary`，等待普通三项配对 | 关联台 open/paired 分区、Workbench projection | `tests.test_etc_backend` |
