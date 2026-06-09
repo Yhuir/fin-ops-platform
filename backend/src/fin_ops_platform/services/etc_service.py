@@ -1067,7 +1067,7 @@ class EtcService:
                     reason=str(reason or "").strip() or None,
                 )
             if batch.submission_batch_id and batch.submission_batch_id in self._batches:
-                self._delete_submission_batch(self._batches[batch.submission_batch_id], force=True)
+                self._delete_submission_batch(self._batches[batch.submission_batch_id])
             for invoice_id in list(batch.invoice_ids):
                 invoice = self._invoices.get(invoice_id)
                 if invoice is None:
@@ -1079,7 +1079,7 @@ class EtcService:
             for import_batch_id in list(batch.import_batch_ids):
                 import_batch = self._import_batches.get(import_batch_id)
                 if import_batch is not None:
-                    self._delete_import_batch(import_batch, force=True)
+                    self._delete_import_batch(import_batch)
             before_status = batch.status
             batch.status = EtcBusinessBatchStatus.DELETED.value
             batch.task_active_key = None
@@ -2069,9 +2069,6 @@ class EtcService:
             if str(getattr(invoice, "import_batch_id", "") or "").strip() == normalized_batch_id
         ]
         for invoice in invoices:
-            if str(invoice.current_batch_id or "").strip():
-                raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
-        for invoice in invoices:
             self._delete_invoice_files(invoice)
             self._invoice_numbers.pop(invoice.invoice_number, None)
             self._invoices.pop(invoice.id, None)
@@ -2675,15 +2672,9 @@ class EtcService:
         import_batch_ids = {invoice.import_batch_id for invoice in invoices if invoice.import_batch_id}
         return [batch for batch_id in sorted(import_batch_ids) if (batch := self._import_batches.get(batch_id)) is not None]
 
-    def _delete_import_batch(self, import_batch: EtcImportBatch, *, force: bool = False) -> dict[str, object]:
-        if str(import_batch.submission_batch_id or "").strip() and not force:
-            raise EtcBatchDeleteError("import batch has an OA draft and cannot be deleted before deleting the draft batch.")
+    def _delete_import_batch(self, import_batch: EtcImportBatch) -> dict[str, object]:
         invoice_ids = [str(invoice_id) for invoice_id in list(import_batch.invoice_ids or [])]
         invoices = [self._invoices[invoice_id] for invoice_id in invoice_ids if invoice_id in self._invoices]
-        if not force:
-            for invoice in invoices:
-                if str(invoice.current_batch_id or "").strip():
-                    raise EtcBatchDeleteError("import batch contains invoices assigned to an OA batch and cannot be deleted.")
         for invoice in invoices:
             self._delete_invoice_files(invoice)
             self._invoice_numbers.pop(invoice.invoice_number, None)
@@ -2691,22 +2682,7 @@ class EtcService:
         self._import_batches.pop(import_batch.id, None)
         return {"deleted": True, "batchId": import_batch.id, "kind": "import_batch"}
 
-    def _delete_submission_batch(self, batch: EtcBatch, *, force: bool = False) -> dict[str, object]:
-        if batch.status == EtcBatchStatus.SUBMITTED_CONFIRMED.value and not force:
-            raise EtcBatchDeleteError("submitted ETC batch cannot be deleted.")
-        if (str(batch.linked_oa_row_id or "").strip() or str(batch.linked_oa_case_id or "").strip()) and not force:
-            raise EtcBatchDeleteError("ETC batch is linked to OA/workbench records and cannot be deleted.")
-        if batch.confirmed_at is not None and not force:
-            raise EtcBatchDeleteError("ETC batch has submitted confirmation metadata and cannot be deleted.")
-        allowed_statuses = {
-            EtcBatchStatus.DRAFT_CREATING.value,
-            EtcBatchStatus.DRAFT_CREATED.value,
-            EtcBatchStatus.NOT_SUBMITTED.value,
-            EtcBatchStatus.FAILED.value,
-        }
-        if str(batch.status) not in allowed_statuses and not force:
-            raise EtcBatchDeleteError(f"ETC batch status {batch.status} cannot be deleted.")
-
+    def _delete_submission_batch(self, batch: EtcBatch) -> dict[str, object]:
         now = datetime.now(UTC)
         invoices = [self._get_invoice(invoice_id) for invoice_id in batch.invoice_ids if invoice_id in self._invoices]
         for invoice in invoices:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
 import json
@@ -1208,7 +1208,7 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual({invoice.current_batch_id for invoice in invoices}, {None})
         self.assertEqual(counts["unsubmitted"], 2)
 
-    def test_delete_submitted_batch_is_rejected(self) -> None:
+    def test_delete_submitted_batch_releases_local_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
             fake_oa = FakeEtcOAClient()
             service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
@@ -1216,8 +1216,14 @@ class EtcServiceTests(unittest.TestCase):
             draft = service.create_oa_draft(["etc_invoice_0001"])
             service.confirm_submitted(draft.batch_id)
 
-            with self.assertRaisesRegex(Exception, "submitted"):
-                service.delete_batch(draft.batch_id)
+            result = service.delete_batch(draft.batch_id)
+            invoices, _total, counts = service.list_invoices(page=1, page_size=20)
+
+        self.assertEqual(result, {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
+        self.assertEqual(service.list_batches(), [])
+        self.assertEqual({invoice.status for invoice in invoices}, {EtcInvoiceStatus.UNSUBMITTED})
+        self.assertEqual({invoice.current_batch_id for invoice in invoices}, {None})
+        self.assertEqual(counts["unsubmitted"], 1)
 
     def test_draft_creation_failure_marks_batch_failed_and_keeps_invoice_unsubmitted(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2356,7 +2362,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(invoices["total"], 0)
         self.assertEqual(app._import_service.list_invoices(), [])
 
-    def test_delete_etc_batch_route_deletes_unsubmitted_and_rejects_submitted(self) -> None:
+    def test_delete_etc_batch_route_deletes_unsubmitted_and_submitted(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.import_zips([UploadedEtcZipFile("unsubmitted.zip", etc_zip(["ETC001"]))])
@@ -2370,12 +2376,14 @@ class EtcApiTests(unittest.TestCase):
             draft = app._etc_service.create_oa_draft(["etc_invoice_0002"], oa_client=FakeEtcOAClient())
             app._etc_service.confirm_submitted(draft.batch_id)
             submitted_delete = app.handle_request("DELETE", f"/api/etc/batches/{draft.batch_id}")
+            submitted_after_delete = json.loads(app.handle_request("GET", "/api/etc/batches?status=submitted").body)
 
         self.assertEqual(delete_response.status_code, 200)
         self.assertEqual(json.loads(delete_response.body), {"deleted": True, "batchId": batch_id, "kind": "import_batch"})
         self.assertEqual(unsubmitted_after_delete["items"], [])
-        self.assertEqual(submitted_delete.status_code, 409)
-        self.assertEqual(json.loads(submitted_delete.body)["error"], "etc_batch_delete_conflict")
+        self.assertEqual(submitted_delete.status_code, 200)
+        self.assertEqual(json.loads(submitted_delete.body), {"deleted": True, "batchId": draft.batch_id, "kind": "submission_batch"})
+        self.assertEqual(submitted_after_delete["items"], [])
 
     def test_delete_etc_submission_batch_route_cascades_mutable_batch_contents(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -3332,6 +3340,49 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
         self.assertEqual(len([row for row in after_rows if row.get("source_kind") == "etc_invoice"]), 2)
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
+
+    def test_reconciliation_task_delete_removes_orphan_submission_metadata_link(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._etc_service.oa_client = FakeEtcOAClient()
+
+            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
+            self.assertEqual(preview_response.status_code, 200)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
+            )
+            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
+            business_batch = json.loads(
+                app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
+            )["data"]["items"][0]
+            draft_response = app.handle_request(
+                "POST",
+                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
+                json.dumps({"expectedVersion": business_batch["version"]}),
+            )
+            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
+            submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
+            submission_batch.confirmed_at = datetime.now(UTC)
+            app._etc_service._business_batches.pop(str(drafted["businessBatchId"]))
+            task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
+
+            delete_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task_id}",
+                json.dumps({"expectedVersion": task_payload["version"]}),
+            )
+            missing_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
+            invoices = json.loads(app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20").body)
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(json.loads(delete_response.body), {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        self.assertEqual(missing_response.status_code, 404)
+        self.assertEqual(invoices["total"], 0)
+        self.assertEqual(app._etc_service.list_import_batches(), [])
+        self.assertEqual(app._etc_service.list_batches(), [])
+        self.assertEqual(app._import_service.list_invoices(), [])
 
     def test_etc_business_batch_delete_is_idempotent_for_stale_business_ids(self) -> None:
         with TemporaryDirectory() as temp_dir:

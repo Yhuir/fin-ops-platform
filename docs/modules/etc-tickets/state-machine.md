@@ -28,6 +28,7 @@
 
 - loading：页面加载业务批次、导入/草稿/人工确认动作执行中时显示按钮级 loading，不展示后台英文状态码作为主文案。
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
+- initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
 - submitted delete confirm：已提交批次删除确认框必须说明“取消发票合并，OA 系统中的草稿和已提交记录不会删除”，不得展示为撤销 OA。
 - stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
@@ -45,6 +46,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-10 | 清理 ETC 任务删除旧状态阻塞，并确认页面初始化不自动创建空任务 | reconciliation task 删除、旧 batch 删除兼容入口、ETC 页面初始化请求 | `tests.test_etc_backend`；`tests.test_etc_reconciliation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-09 | 彻底移除 ETC 专用 OA 自动检测后端链路，草稿后统一进入 `oa_confirmation_pending` 等待人工确认 | ETC business batch API、worker registry、OA projection/Mongo adapter、前端状态显示、历史状态迁移 | `tests.test_etc_backend`；`tests.test_platform_runtime_boundary_guards`；`tests.test_oa_projection_sql_runtime`；`tests.test_mongo_oa_adapter`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |
 | 2026-06-09 | ETC 批次删除入口统一为任意阶段本地清理；绑定 summary 的 active relation 取消且不恢复历史 OA+流水二栏关系 | ETC 任务入口删除、业务批次入口删除、Workbench active relation、open 区散票恢复 | `tests.test_etc_backend`；`tests.test_workbench_pair_relation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-09 | 已提交 ETC 业务批次支持本地删除/重置，释放合并发票但保留 OA 和已闭环任务事实 | ETC 页面 submitted bucket、业务批次状态、Workbench open 区散票恢复 | `tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx` |

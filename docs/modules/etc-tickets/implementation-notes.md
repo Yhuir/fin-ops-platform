@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-10 - ETC任务删除旧阻塞清理与空任务追因
+
+- 目标：修复点击删除仍返回 `ETC batch has submitted confirmation metadata and cannot be deleted.`，并解释/防止部署后误以为页面自动新建空批次的问题。
+- 影响范围：`DELETE /api/etc/reconciliation-tasks/{id}`、旧 `/api/etc/batches/{id}` 兼容删除入口、`EtcService` import/submission batch 删除、ETC 页面任务选择状态和初始化请求。
+- 关键决策：批次删除统一为本地清理链路，不再因 `confirmed_at`、submitted status、OA/workbench link、import invoice assignment 等旧 submission/import batch guard 阻塞。任务删除会先解析绑定业务批次、导入批次和提交批次，再清理本地导入、核对、提交元数据和 ETC 发票；真实 OA 草稿/流程仍不删除。页面初始化只允许 GET 读取现有任务，不能自动 POST 创建空任务；部署后出现的“空批次”是已有持久化 task-only 记录，不是页面自动创建。
+- 文档影响：更新 API 契约和测试矩阵，明确任意阶段本地删除/reset 语义。
+- 测试覆盖：新增后端回归覆盖旧 task-only submission metadata 删除不再命中 submitted confirmation guard；调整 reconciliation service 测试覆盖 importing、submission link、closed 状态删除；前端测试覆盖页面初始化不自动创建任务。
+- 验证命令：`python -m pytest tests/test_etc_backend.py -q`；`python -m pytest tests/test_etc_reconciliation_service.py tests/test_workbench_pair_relation_service.py -q`；`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npm test -- --run src/test/EtcApi.test.ts`；`cd web && npm run build`。
+- 未测风险：未在真实浏览器点击生产页面；自动化已覆盖实际报错路径和页面初始化请求行为。
+
 ## 2026-06-10 - ETC旧批次删除入口桥接修复
 
 - 目标：修复页面点击删除时旧 `/api/etc/batches/{submissionBatchId}` 路径命中提交确认元数据 guard，返回 `ETC batch has submitted confirmation metadata and cannot be deleted.` 的问题。

@@ -209,6 +209,10 @@ describe("ETC ticket management page", () => {
       const taskCalls = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/etc/reconciliation-tasks");
       expect(taskCalls.length).toBeGreaterThanOrEqual(2);
     });
+    const taskCreateCalls = fetchMock.mock.calls.filter(([url, init]) =>
+      String(url) === "/api/etc/reconciliation-tasks" && init?.method === "POST"
+    );
+    expect(taskCreateCalls).toHaveLength(0);
   });
 
   test("unsubmitted mode shows batch list and whole-batch OA submit action", async () => {

@@ -677,7 +677,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - ETC 专用 OA 自动检测入口已移除：后端不再提供 `/api/etc/business-batches/{id}/oa-status/refresh`，不再输出 `oaDetection*` 字段，也不再注册 ETC OA 检测 worker 或 detector adapter。
 - `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并在关联台 open 区投影一条 `source_kind=etc_invoice_summary` 的折叠汇总发票行。该行金额优先使用业务批次上报金额，不使用散票合计覆盖；散票继续作为折叠明细，不直接散落展示。
 - `etc_invoice_summary` 在没有 OA 和银行流水三项完全匹配前必须保持 open/pending 状态，关系标签显示待匹配 OA/流水；只有关联台普通配对逻辑确认三项关系后，才进入已配对区。
-- `DELETE /api/etc/business-batches/{id}` 对已提交业务批次执行本地 reset，不撤销 OA。请求必须带 `expectedVersion` 和 `reason`；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind=submitted_business_batch_reset`、`releasedInvoiceCount` 和 `submissionBatchId`。后端必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失、散票回到 open 未配对区；不得删除 OA 草稿/流程、已闭环 ETC 对账任务或原始导入来源。
+- `DELETE /api/etc/business-batches/{id}` 对任意阶段业务批次执行本地删除/reset，不撤销 OA。请求可带 `expectedVersion` 做并发保护，不要求删除原因；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind`、`releasedInvoiceCount` 和关联删除结果。后端必须删除该批次本地创建/导入的 ETC 对账任务、导入来源、核对结果、提交批次元数据和 ETC 发票；若已提交批次存在 `etc_invoice_summary`，必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失。若该 summary 已参与 active relation，删除时取消包含该 summary 的 relation，OA 和银行流水不得恢复成二栏 active relation。
 - ETC 对账任务和业务批次源文件上传必须先落对象存储，再追加 source file 元数据。对象存储不可写时返回稳定错误码 `reconciliation_file_storage_unavailable` 和 HTTP 503，上传不得留下半写入的 source file、版本号或审计事件。`/api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`/ticket-root-files`、`/ticket-root-texts`、`/supplement-evidences` 使用直接错误结构 `{ "error": "...", "message": "..." }`；`/api/etc/business-batches/{id}/source-files` 使用 business batch envelope `{ "ok": false, "error": { "code": "...", "message": "..." } }`。
 
 ## AppHealth 运维 Dashboard API

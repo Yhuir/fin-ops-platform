@@ -413,6 +413,10 @@ function taskHasSubmittedConfirmation(task: Pick<EtcReconciliationTask, "status"
   return task.status === "closed" || Boolean(task.submittedConfirmedAt?.trim());
 }
 
+function taskCanAppearAsStandaloneBatch(task: EtcReconciliationTask) {
+  return !taskHasSubmittedConfirmation(task);
+}
+
 function isBusinessBatchSource(batch: EtcBatchSummary) {
   return batch.sourceType === "business_batch" || batch.sourceType === "etc_business_batch";
 }
@@ -964,7 +968,7 @@ export default function EtcTicketManagementPage() {
           !businessBatchTaskIds.has(task.taskId)
           && !(task.importBatchId && businessBatchLinkIds.has(task.importBatchId))
           && !(task.etcBatchId && businessBatchLinkIds.has(task.etcBatchId))
-          && !taskHasSubmittedConfirmation(task)
+          && taskCanAppearAsStandaloneBatch(task)
           && !locallySubmittedTaskIds.has(task.taskId)
         )
         .map(reconciliationTaskToBatchSummary)
@@ -993,6 +997,14 @@ export default function EtcTicketManagementPage() {
     });
     return ids;
   }, [businessBatches, visibleBatches]);
+  useEffect(() => {
+    setSelectedTaskId((current) => {
+      if (!current || visibleWorkflowTaskIds.has(current)) {
+        return current;
+      }
+      return "";
+    });
+  }, [visibleWorkflowTaskIds]);
   const selectedTaskBusinessBatch = useMemo(
     () => selectedTask
       ? businessBatches.find((batch) => batch.taskId === selectedTask.taskId) ?? null

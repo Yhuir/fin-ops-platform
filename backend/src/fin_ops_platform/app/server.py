@@ -4805,8 +4805,6 @@ class Application:
         task: object,
         actor: str,
     ) -> tuple[object, dict[str, object] | None, list[str]]:
-        if getattr(task, "submitted_confirmed_at", None) is not None:
-            raise ValueError("reconciliation_task_has_submission_link")
         oa_draft_batch_id = str(getattr(task, "oa_draft_batch_id", "") or "").strip()
         etc_batch_id = str(getattr(task, "etc_batch_id", "") or "").strip()
         if not oa_draft_batch_id and not etc_batch_id:
@@ -4852,28 +4850,35 @@ class Application:
         business_delete_result = self._delete_reconciliation_task_business_batch_sources(task)
         if business_delete_result is not None:
             return business_delete_result
-        if getattr(task, "submitted_confirmed_at", None) is not None:
-            raise ValueError("reconciliation_task_has_submission_link")
-        if (
-            str(getattr(task, "oa_draft_batch_id", "") or "").strip()
-            or str(getattr(task, "etc_batch_id", "") or "").strip()
-        ):
-            raise ValueError("reconciliation_task_has_submission_link")
         return self._delete_etc_import_batch_sources(import_batch_id)
 
     def _reconciliation_task_business_batch_for_import(self, task: object):
         task_id = str(getattr(task, "task_id", "") or "").strip()
         import_batch_id = str(getattr(task, "import_batch_id", "") or "").strip()
-        if not task_id or not import_batch_id:
-            return None
-        return next(
-            (
-                batch
-                for batch in self._etc_service.list_business_batches(task_id=task_id)
-                if import_batch_id in {str(value) for value in list(getattr(batch, "import_batch_ids", []) or [])}
-            ),
-            None,
-        )
+        candidate_batches = self._etc_service.list_business_batches(task_id=task_id) if task_id else []
+        if candidate_batches:
+            if not import_batch_id:
+                return candidate_batches[0]
+            matched_batch = next(
+                (
+                    batch
+                    for batch in candidate_batches
+                    if import_batch_id in {str(value) for value in list(getattr(batch, "import_batch_ids", []) or [])}
+                ),
+                None,
+            )
+            if matched_batch is not None:
+                return matched_batch
+        linked_ids = [
+            import_batch_id,
+            str(getattr(task, "oa_draft_batch_id", "") or "").strip(),
+            str(getattr(task, "etc_batch_id", "") or "").strip(),
+        ]
+        for linked_id in linked_ids:
+            linked_batch = self._etc_service.find_business_batch_by_linked_batch_id(linked_id)
+            if linked_batch is not None:
+                return linked_batch
+        return None
 
     def _delete_reconciliation_task_business_batch_sources(self, task: object) -> tuple[dict[str, object], int, list[str]] | None:
         business_batch = self._reconciliation_task_business_batch_for_import(task)

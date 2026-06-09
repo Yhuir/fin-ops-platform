@@ -892,86 +892,114 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             service.get_task(task_id)
 
-    def test_delete_task_rejects_importing_closed_and_submission_links(self) -> None:
-        service, task_id = self._parsed_task()
-        task = service.refresh_matches(task_id=task_id)
-        card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
-        ticket = task.ticket_root_items[0]
-        task = service.patch_item(
-            task_id=task_id,
-            item_id=card.item_id,
-            expected_version=task.version,
-            actor="alice",
-            payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
-        )
-        other_card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("23.00"))
-        task = service.patch_item(
-            task_id=task_id,
-            item_id=other_card.item_id,
-            expected_version=task.version,
-            actor="alice",
-            payload={"action": "exclude_card", "manualResolution": "excluded_non_etc", "reason": "非本次报销"},
-        )
-        ready = service.confirm_task(task_id=task_id, expected_version=task.version, actor="alice")
-        importing = service.begin_import(
-            task_id=task_id,
-            task_version=ready.version,
-            confirmed_item_set_hash=ready.confirmed_item_set_hash or "",
-            import_session_id="session-1",
+    def test_delete_task_allows_importing_closed_and_submission_links_after_confirmation(self) -> None:
+        def build_importing_service(suffix: str) -> tuple[EtcReconciliationTaskService, EtcReconciliationTask]:
+            service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name) / suffix)
+            task = service.create_task(title="ETC", created_by="alice")
+            service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=CcbCreditCardStatementParser().parse_text(file_id="CARD-1", text=CCB_STATEMENT_TEXT),
+                actor="alice",
+            )
+            task = service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=TicketRootPdfTextParser().parse_text(file_id="TICKET-1", text=TICKET_ROOT_TEXT),
+                actor="alice",
+            )
+            task = service.refresh_matches(task_id=task.task_id)
+            card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("25.00"))
+            ticket = task.ticket_root_items[0]
+            task = service.patch_item(
+                task_id=task.task_id,
+                item_id=card.item_id,
+                expected_version=task.version,
+                actor="alice",
+                payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
+            )
+            other_card = next(item for item in task.credit_card_items if item.settlement_amount == Decimal("23.00"))
+            task = service.patch_item(
+                task_id=task.task_id,
+                item_id=other_card.item_id,
+                expected_version=task.version,
+                actor="alice",
+                payload={"action": "exclude_card", "manualResolution": "excluded_non_etc", "reason": "非本次报销"},
+            )
+            ready = service.confirm_task(task_id=task.task_id, expected_version=task.version, actor="alice")
+            importing = service.begin_import(
+                task_id=task.task_id,
+                task_version=ready.version,
+                confirmed_item_set_hash=ready.confirmed_item_set_hash or "",
+                import_session_id=f"session-{suffix}",
+                actor="alice",
+            )
+            return service, importing
+
+        service, importing = build_importing_service("importing")
+        deleted_importing = service.delete_task(
+            task_id=importing.task_id,
+            expected_version=importing.version,
             actor="alice",
         )
 
-        with self.assertRaisesRegex(ValueError, "invalid_reconciliation_task_status"):
-            service.delete_task(task_id=task_id, expected_version=importing.version, actor="alice")
+        self.assertEqual(deleted_importing, {"deleted": True, "taskId": importing.task_id, "kind": "reconciliation_task"})
+        with self.assertRaises(KeyError):
+            service.get_task(importing.task_id)
 
-        recovered_service = EtcReconciliationTaskService.from_snapshot(service.snapshot(), data_dir=Path(self.temp_dir.name))
-        recovered_ready = recovered_service.get_task(task_id)
-        imported = recovered_service.mark_imported(
-            task_id=task_id,
-            task_version=recovered_ready.version,
-            confirmed_item_set_hash=recovered_ready.confirmed_item_set_hash or "",
+        linked_service, linked_importing = build_importing_service("linked")
+        linked_service.mark_imported(
+            task_id=linked_importing.task_id,
+            task_version=linked_importing.version,
+            confirmed_item_set_hash=linked_importing.confirmed_item_set_hash or "",
             import_batch_id="import-batch-1",
             actor="alice",
         )
-        linked = recovered_service.record_oa_draft_created(
-            task_id=task_id,
+        linked = linked_service.record_oa_draft_created(
+            task_id=linked_importing.task_id,
             oa_draft_batch_id="oa-draft-1",
             etc_batch_id="etc-submission-1",
             actor="alice",
         )
 
-        deleted = recovered_service.delete_task(
-            task_id=task_id,
+        deleted = linked_service.delete_task(
+            task_id=linked_importing.task_id,
             expected_version=linked.version,
             actor="alice",
             import_cleanup_confirmed=True,
         )
-        self.assertEqual(deleted, {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"})
+        self.assertEqual(deleted, {"deleted": True, "taskId": linked_importing.task_id, "kind": "reconciliation_task"})
+        with self.assertRaises(KeyError):
+            linked_service.get_task(linked_importing.task_id)
 
-        recovered_service = EtcReconciliationTaskService.from_snapshot(service.snapshot(), data_dir=Path(self.temp_dir.name))
-        recovered_ready = recovered_service.get_task(task_id)
-        imported = recovered_service.mark_imported(
-            task_id=task_id,
-            task_version=recovered_ready.version,
-            confirmed_item_set_hash=recovered_ready.confirmed_item_set_hash or "",
+        closed_service, closed_importing = build_importing_service("closed")
+        closed_service.mark_imported(
+            task_id=closed_importing.task_id,
+            task_version=closed_importing.version,
+            confirmed_item_set_hash=closed_importing.confirmed_item_set_hash or "",
             import_batch_id="import-batch-1",
             actor="alice",
         )
-        recovered_service.record_oa_draft_created(
-            task_id=task_id,
+        closed_service.record_oa_draft_created(
+            task_id=closed_importing.task_id,
             oa_draft_batch_id="oa-draft-1",
             etc_batch_id="etc-submission-1",
             actor="alice",
         )
-        recovered_service.record_oa_submitted_confirmed(task_id=task_id, oa_draft_batch_id="oa-draft-1", actor="alice")
-        closed = recovered_service.get_task(task_id)
-        with self.assertRaisesRegex(ValueError, "reconciliation_task_has_submission_link"):
-            recovered_service.delete_task(
-                task_id=task_id,
-                expected_version=closed.version,
-                actor="alice",
-                import_cleanup_confirmed=True,
-            )
+        closed_service.record_oa_submitted_confirmed(
+            task_id=closed_importing.task_id,
+            oa_draft_batch_id="oa-draft-1",
+            actor="alice",
+        )
+        closed = closed_service.get_task(closed_importing.task_id)
+        deleted_closed = closed_service.delete_task(
+            task_id=closed_importing.task_id,
+            expected_version=closed.version,
+            actor="alice",
+            import_cleanup_confirmed=True,
+        )
+
+        self.assertEqual(deleted_closed, {"deleted": True, "taskId": closed_importing.task_id, "kind": "reconciliation_task"})
+        with self.assertRaises(KeyError):
+            closed_service.get_task(closed_importing.task_id)
 
     def test_matching_marks_unique_multiple_missing_and_extra_candidates(self) -> None:
         multi_ticket_text = TICKET_ROOT_TEXT + """
