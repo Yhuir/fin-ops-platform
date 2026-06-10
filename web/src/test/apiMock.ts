@@ -4475,6 +4475,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       applicant_names: ["周洁莹"],
     },
   };
+  let oaApplicantCredentialsState = [
+    {
+      targetApplicantCode: "chen_xiuyun",
+      targetApplicantName: "陈秀云",
+      oaUsername: "chen_xiuyun",
+      credentialStatus: "configured",
+      hasCredential: true,
+      enabled: true,
+    },
+  ];
 
   const dataResetJobs = new Map<string, Record<string, unknown>>();
   let backgroundJobs = cloneJson(options.backgroundJobs ?? []);
@@ -4869,6 +4879,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
       return { body: cloneJson(workbenchSettingsState) };
     },
+    "/api/workbench/settings/oa-applicant-credentials": () => ({
+      body: {
+        credentials: cloneJson(oaApplicantCredentialsState),
+      },
+    }),
     "/api/workbench/settings/projects/sync": () => {
       if (!workbenchSettingsState.projects.active.some((project) => project.id === "proj-oa-sync-001")) {
         workbenchSettingsState = {
@@ -6847,6 +6862,50 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : null;
     const formData = init?.body instanceof FormData ? init.body : null;
     const method = (init?.method ?? "GET").toUpperCase();
+
+    const oaApplicantCredentialMatch = url.pathname.match(/^\/api\/workbench\/settings\/oa-applicant-credentials\/([^/]+)$/);
+    if (oaApplicantCredentialMatch) {
+      const targetApplicantCode = decodeURIComponent(oaApplicantCredentialMatch[1] ?? "");
+      if (method === "PUT") {
+        const credential = {
+          targetApplicantCode,
+          targetApplicantName: String(jsonBody?.targetApplicantName ?? "").trim(),
+          oaUsername: String(jsonBody?.oaUsername ?? "").trim(),
+          credentialStatus: "configured",
+          hasCredential: Boolean(jsonBody?.password),
+          enabled: true,
+        };
+        oaApplicantCredentialsState = [
+          ...oaApplicantCredentialsState.filter((item) => item.targetApplicantCode !== targetApplicantCode),
+          credential,
+        ];
+        return jsonResponse({
+          body: {
+            credential: cloneJson(credential),
+          },
+        });
+      }
+      if (method === "DELETE") {
+        const existing = oaApplicantCredentialsState.find((item) => item.targetApplicantCode === targetApplicantCode);
+        const credential = {
+          targetApplicantCode,
+          targetApplicantName: existing?.targetApplicantName ?? "",
+          oaUsername: existing?.oaUsername ?? "",
+          credentialStatus: "unconfigured",
+          hasCredential: false,
+          enabled: true,
+        };
+        oaApplicantCredentialsState = [
+          ...oaApplicantCredentialsState.filter((item) => item.targetApplicantCode !== targetApplicantCode),
+          credential,
+        ];
+        return jsonResponse({
+          body: {
+            credential: cloneJson(credential),
+          },
+        });
+      }
+    }
 
     if (method === "DELETE" && url.pathname.startsWith("/api/workbench/settings/projects/")) {
       const projectId = decodeURIComponent(url.pathname.split("/").pop() ?? "");

@@ -42,6 +42,7 @@ from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkService,
     ExistingEtcBatchLinkSpec,
 )
+from fin_ops_platform.services.state_store import ApplicationStateStore
 from unittest.mock import patch
 
 
@@ -257,6 +258,32 @@ class FakeHTTPResponse:
 
     def read(self) -> bytes:
         return json.dumps(self._payload).encode("utf-8")
+
+
+class PostgresLikeReconciliationStateStore(ApplicationStateStore):
+    def __init__(self, data_dir: Path) -> None:
+        super().__init__(data_dir)
+        self.reconciliation_rows: dict[str, object] = {}
+        self.reconciliation_task_counter = 0
+        self.reconciliation_file_counter = 0
+        self.reconciliation_audit_counter = 0
+
+    def load_etc_reconciliation_state(self) -> dict:
+        return {
+            "schema_version": 1,
+            "task_counter": self.reconciliation_task_counter,
+            "file_counter": self.reconciliation_file_counter,
+            "audit_counter": self.reconciliation_audit_counter,
+            "tasks": dict(self.reconciliation_rows),
+        }
+
+    def save_etc_reconciliation_state(self, snapshot: dict) -> None:
+        self.reconciliation_task_counter = int(snapshot.get("task_counter", 0) or 0)
+        self.reconciliation_file_counter = int(snapshot.get("file_counter", 0) or 0)
+        self.reconciliation_audit_counter = int(snapshot.get("audit_counter", 0) or 0)
+        for task_id, payload in dict(snapshot.get("tasks") or {}).items():
+            self.reconciliation_rows[str(task_id)] = payload
+        super().save_etc_reconciliation_state(snapshot)
 
 
 class EtcServiceTests(unittest.TestCase):
@@ -2245,6 +2272,77 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(json.loads(deleted.body), {"deleted": True, "taskId": created["taskId"], "kind": "reconciliation_task"})
         self.assertEqual(missing.status_code, 404)
+
+    def test_deleted_reconciliation_task_route_does_not_reappear_after_postgres_rehydrate(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresLikeReconciliationStateStore(Path(temp_dir))
+            with patch("fin_ops_platform.app.server.build_state_store", return_value=store):
+                app = build_application(data_dir=Path(temp_dir))
+                created = json.loads(app.handle_request(
+                    "POST",
+                    "/api/etc/reconciliation-tasks",
+                    body=json.dumps({"title": "待删除"}),
+                ).body)
+                deleted = app.handle_request(
+                    "DELETE",
+                    f"/api/etc/reconciliation-tasks/{created['taskId']}",
+                    body=json.dumps({"expectedVersion": created["version"]}),
+                )
+                reloaded_app = build_application(data_dir=Path(temp_dir))
+                list_response = reloaded_app.handle_request("GET", "/api/etc/reconciliation-tasks")
+                next_created = json.loads(reloaded_app.handle_request(
+                    "POST",
+                    "/api/etc/reconciliation-tasks",
+                    body=json.dumps({"title": "新批次"}),
+                ).body)
+
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(json.loads(list_response.body)["tasks"], [])
+        self.assertNotEqual(next_created["taskId"], created["taskId"])
+        self.assertTrue(next_created["taskId"].endswith("000002"))
+
+    def test_deleted_business_batch_route_tombstones_task_after_postgres_rehydrate(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresLikeReconciliationStateStore(Path(temp_dir))
+            with patch("fin_ops_platform.app.server.build_state_store", return_value=store):
+                app = build_application(data_dir=Path(temp_dir))
+                created_task = json.loads(app.handle_request(
+                    "POST",
+                    "/api/etc/reconciliation-tasks",
+                    body=json.dumps({"title": "待删除批次"}),
+                ).body)
+                created_batch = json.loads(app.handle_request(
+                    "POST",
+                    "/api/etc/business-batches",
+                    json.dumps({"taskId": created_task["taskId"]}),
+                ).body)["data"]["businessBatch"]
+                deleted = app.handle_request(
+                    "DELETE",
+                    f"/api/etc/business-batches/{created_batch['businessBatchId']}",
+                    json.dumps({
+                        "expectedVersion": created_batch["version"],
+                        "reason": "delete_batch_should_tombstone_task",
+                    }),
+                )
+                reloaded_app = build_application(data_dir=Path(temp_dir))
+                task_list = json.loads(reloaded_app.handle_request("GET", "/api/etc/reconciliation-tasks").body)
+                business_batches = json.loads(reloaded_app.handle_request("GET", "/api/etc/business-batches").body)
+                next_created = json.loads(reloaded_app.handle_request(
+                    "POST",
+                    "/api/etc/reconciliation-tasks",
+                    body=json.dumps({"title": "重新新建批次"}),
+                ).body)
+
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(json.loads(deleted.body)["data"], {
+            "deleted": True,
+            "businessBatchId": created_batch["businessBatchId"],
+            "kind": "business_batch",
+        })
+        self.assertEqual(task_list["tasks"], [])
+        self.assertEqual(business_batches["data"]["items"], [])
+        self.assertNotEqual(next_created["taskId"], created_task["taskId"])
+        self.assertTrue(next_created["taskId"].endswith("000002"))
 
     def test_delete_ready_for_import_reconciliation_task(self) -> None:
         with TemporaryDirectory() as temp_dir:

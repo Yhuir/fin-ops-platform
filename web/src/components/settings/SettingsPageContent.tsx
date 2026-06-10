@@ -4,6 +4,8 @@ import { usePageSessionState } from "../../contexts/PageSessionStateContext";
 import { useSession } from "../../contexts/SessionContext";
 import type {
   BankAccountMapping,
+  OaApplicantCredentialSummary,
+  SaveOaApplicantCredentialRequest,
   WorkbenchAccessRole,
   WorkbenchProjectSetting,
   WorkbenchSettings,
@@ -15,6 +17,7 @@ import SettingsAccessAccountsSection from "./SettingsAccessAccountsSection";
 import SettingsBankAccountsSection from "./SettingsBankAccountsSection";
 import SettingsDataResetDialogs from "./SettingsDataResetDialogs";
 import SettingsDataResetSection from "./SettingsDataResetSection";
+import SettingsOaApplicantCredentialsSection from "./SettingsOaApplicantCredentialsSection";
 import SettingsOaInvoiceOffsetSection from "./SettingsOaInvoiceOffsetSection";
 import SettingsOaRetentionSection from "./SettingsOaRetentionSection";
 import SettingsPendingInvoiceTagsSection from "./SettingsPendingInvoiceTagsSection";
@@ -35,6 +38,9 @@ type SettingsPageContentProps = {
   canSave: boolean;
   canManageAccessControl: boolean;
   activeDataResetJob: WorkbenchSettingsDataResetJob | null;
+  oaApplicantCredentials: OaApplicantCredentialSummary[];
+  isOaApplicantCredentialLoading: boolean;
+  isOaApplicantCredentialSaving: boolean;
   onSave: (payload: {
     completedProjectIds: string[];
     bankAccountMappings: BankAccountMapping[];
@@ -59,6 +65,8 @@ type SettingsPageContentProps = {
     projectName: string;
   }) => Promise<WorkbenchSettings>;
   onDeleteProject: (projectId: string) => Promise<WorkbenchSettings>;
+  onSaveOaApplicantCredential: (payload: SaveOaApplicantCredentialRequest) => Promise<void>;
+  onDeleteOaApplicantCredential: (targetApplicantCode: string) => Promise<void>;
 };
 
 type SettingsDraftSession = {
@@ -99,6 +107,7 @@ function isSettingsDraftSession(value: unknown): value is SettingsDraftSession {
       || session.activeSectionId === "pending_invoice_tags"
       || session.activeSectionId === "oa_retention"
       || session.activeSectionId === "oa_invoice_offset"
+      || session.activeSectionId === "oa_applicant_credentials"
       || session.activeSectionId === "access_accounts"
       || session.activeSectionId === "data_reset"
     )
@@ -228,12 +237,17 @@ export default function SettingsPageContent({
   activeDataResetJob,
   settings,
   isSaving,
+  isOaApplicantCredentialLoading,
+  isOaApplicantCredentialSaving,
+  oaApplicantCredentials,
   canSave,
   canManageAccessControl,
   onCreateProject,
   onDataReset,
   onDeleteProject,
+  onDeleteOaApplicantCredential,
   onSave,
+  onSaveOaApplicantCredential,
   onSyncProjects,
 }: SettingsPageContentProps) {
   const session = useSession();
@@ -286,6 +300,11 @@ export default function SettingsPageContent({
   const setProjectNameDraft = (value: string) => setDraftField("projectNameDraft", value);
   const [projectActionStatus, setProjectActionStatus] = useState<ProjectActionStatus | null>(null);
   const [isProjectActionBusy, setIsProjectActionBusy] = useState(false);
+  const [oaApplicantCredentialStatus, setOaApplicantCredentialStatus] = useState<ProjectActionStatus | null>(null);
+  const [oaApplicantNameDraft, setOaApplicantNameDraft] = useState("");
+  const [oaApplicantCodeDraft, setOaApplicantCodeDraft] = useState("");
+  const [oaApplicantUsernameDraft, setOaApplicantUsernameDraft] = useState("");
+  const [oaApplicantPasswordDraft, setOaApplicantPasswordDraft] = useState("");
   const accessUsernameDraft = draftSession.value.accessUsernameDraft;
   const setAccessUsernameDraft = (value: string) => setDraftField("accessUsernameDraft", value);
   const accessRoleDraft = draftSession.value.accessRoleDraft;
@@ -335,6 +354,11 @@ export default function SettingsPageContent({
     last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
   const canAddProject = projectCodeDraft.trim().length > 0 && projectNameDraft.trim().length > 0;
   const canAddAccessAccount = accessUsernameDraft.trim().length > 0;
+  const canSaveOaApplicantCredential =
+    oaApplicantNameDraft.trim().length > 0
+    && oaApplicantCodeDraft.trim().length > 0
+    && oaApplicantUsernameDraft.trim().length > 0
+    && oaApplicantPasswordDraft.length > 0;
   const currentSessionUser =
     session.status === "authenticated" || session.status === "forbidden" ? session.session.user : null;
   const canManageOaInvoiceOffset =
@@ -380,6 +404,13 @@ export default function SettingsPageContent({
         visible: canManageOaInvoiceOffset,
       },
       {
+        id: "oa_applicant_credentials" as const,
+        label: "OA申请人凭据",
+        description: "反提 OA 登录账号",
+        count: oaApplicantCredentials.filter((credential) => credential.hasCredential).length,
+        visible: canManageAccessControl,
+      },
+      {
         id: "access_accounts" as const,
         label: "访问账户",
         description: "可访问账号权限",
@@ -404,10 +435,17 @@ export default function SettingsPageContent({
     oaImportStatuses.length,
     oaInvoiceOffsetApplicantsText,
     canManageOaInvoiceOffset,
+    oaApplicantCredentials,
     managedAccessAccounts.length,
     adminUsernames.length,
     canManageAccessControl,
   ]);
+
+  useEffect(() => {
+    if (!settingsNavigationItems.some((item) => item.id === activeSectionId)) {
+      setActiveSectionId(settingsNavigationItems[0]?.id ?? "projects");
+    }
+  }, [activeSectionId, settingsNavigationItems]);
 
   function handleAddMapping() {
     if (!canAddMapping || controlsDisabled) {
@@ -537,6 +575,48 @@ export default function SettingsPageContent({
     });
     setAccessUsernameDraft("");
     setAccessRoleDraft("full_access");
+  }
+
+  function handleSelectOaApplicantCredential(credential: OaApplicantCredentialSummary) {
+    setOaApplicantCredentialStatus(null);
+    setOaApplicantNameDraft(credential.targetApplicantName);
+    setOaApplicantCodeDraft(credential.targetApplicantCode);
+    setOaApplicantUsernameDraft(credential.oaUsername);
+    setOaApplicantPasswordDraft("");
+  }
+
+  async function handleSaveOaApplicantCredential(payload: SaveOaApplicantCredentialRequest) {
+    if (!canSaveOaApplicantCredential || controlsDisabled || isOaApplicantCredentialSaving) {
+      return;
+    }
+    setOaApplicantCredentialStatus(null);
+    try {
+      await onSaveOaApplicantCredential(payload);
+      setOaApplicantPasswordDraft("");
+      setOaApplicantCredentialStatus({ tone: "success", message: "已保存 OA 申请人凭据。" });
+    } catch (error) {
+      setOaApplicantCredentialStatus({
+        tone: "error",
+        message: error instanceof Error ? parseResetErrorMessage(error.message) : "OA 申请人凭据保存失败，请稍后重试。",
+      });
+    }
+  }
+
+  async function handleClearOaApplicantCredential(targetApplicantCode: string) {
+    if (controlsDisabled || isOaApplicantCredentialSaving || !targetApplicantCode.trim()) {
+      return;
+    }
+    setOaApplicantCredentialStatus(null);
+    try {
+      await onDeleteOaApplicantCredential(targetApplicantCode);
+      setOaApplicantPasswordDraft("");
+      setOaApplicantCredentialStatus({ tone: "success", message: "已清空 OA 申请人密码。" });
+    } catch (error) {
+      setOaApplicantCredentialStatus({
+        tone: "error",
+        message: error instanceof Error ? parseResetErrorMessage(error.message) : "OA 申请人凭据更新失败，请稍后重试。",
+      });
+    }
   }
 
   function addTagToPendingInvoiceGroup(code: string) {
@@ -772,6 +852,28 @@ export default function SettingsPageContent({
                   controlsDisabled={controlsDisabled}
                   applicantsText={oaInvoiceOffsetApplicantsText}
                   onChangeApplicantsText={setOaInvoiceOffsetApplicantsText}
+                />
+              ) : null}
+
+              {activeSectionId === "oa_applicant_credentials" && canManageAccessControl ? (
+                <SettingsOaApplicantCredentialsSection
+                  controlsDisabled={controlsDisabled}
+                  credentials={oaApplicantCredentials}
+                  isLoading={isOaApplicantCredentialLoading}
+                  isSaving={isOaApplicantCredentialSaving}
+                  status={oaApplicantCredentialStatus}
+                  targetApplicantNameDraft={oaApplicantNameDraft}
+                  targetApplicantCodeDraft={oaApplicantCodeDraft}
+                  oaUsernameDraft={oaApplicantUsernameDraft}
+                  oaPasswordDraft={oaApplicantPasswordDraft}
+                  canSaveCredential={canSaveOaApplicantCredential}
+                  onChangeTargetApplicantNameDraft={setOaApplicantNameDraft}
+                  onChangeTargetApplicantCodeDraft={setOaApplicantCodeDraft}
+                  onChangeOaUsernameDraft={setOaApplicantUsernameDraft}
+                  onChangeOaPasswordDraft={setOaApplicantPasswordDraft}
+                  onSelectCredential={handleSelectOaApplicantCredential}
+                  onSaveCredential={handleSaveOaApplicantCredential}
+                  onClearCredential={handleClearOaApplicantCredential}
                 />
               ) : null}
 

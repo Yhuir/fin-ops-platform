@@ -28,6 +28,7 @@ class InputInvoiceUsageOaReverseStatus(str, Enum):
     DRAFT = "draft"
     OA_DRAFT_CREATED = "oa_draft_created"
     OA_DRAFT_FAILED = "oa_draft_failed"
+    SUBMITTED_CONFIRMED = "submitted_confirmed"
     OA_SUBMISSION_DETECTING = "oa_submission_detecting"
     OA_DETECTED = "oa_detected"
     OA_DETECTION_MISSING = "oa_detection_missing"
@@ -97,6 +98,11 @@ class InputInvoiceUsageOaReverseMissingClientError(InputInvoiceUsageOaReverseSer
 
 class InputInvoiceUsageOaDraftClient(Protocol):
     def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
+        raise NotImplementedError
+
+
+class InputInvoiceUsageOaDraftClientProvider(Protocol):
+    def draft_client_for(self, target_applicant_code: str) -> InputInvoiceUsageOaDraftClient:
         raise NotImplementedError
 
 
@@ -231,6 +237,9 @@ class InputInvoiceUsageOaReverseBatchRepository(Protocol):
     def find_batch_by_create_idempotency_key(self, idempotency_key: str) -> InputInvoiceUsageOaReverseBatch | None:
         raise NotImplementedError
 
+    def list_batches_by_status(self, statuses: list[str], *, limit: int = 50) -> list[InputInvoiceUsageOaReverseBatch]:
+        raise NotImplementedError
+
     def save_batch(self, batch: InputInvoiceUsageOaReverseBatch) -> None:
         raise NotImplementedError
 
@@ -254,6 +263,19 @@ class InMemoryInputInvoiceUsageOaReverseBatchRepository:
                 if batch.idempotency_key == normalized:
                     return _copy_batch(batch)
         return None
+
+    def list_batches_by_status(self, statuses: list[str], *, limit: int = 50) -> list[InputInvoiceUsageOaReverseBatch]:
+        wanted = {str(status or "").strip() for status in list(statuses or []) if str(status or "").strip()}
+        if not wanted:
+            return []
+        with self._lock:
+            batches = [
+                _copy_batch(batch)
+                for batch in self._batches.values()
+                if str(batch.status or "").strip() in wanted
+            ]
+        batches.sort(key=lambda batch: batch.updated_at, reverse=True)
+        return batches[: max(int(limit or 50), 1)]
 
     def save_batch(self, batch: InputInvoiceUsageOaReverseBatch) -> None:
         with self._lock:
@@ -392,8 +414,70 @@ class InputInvoiceUsageOaReverseService:
         self._record_external_audit(batch, "oa_reverse_batch_created", actor_id=actor_id)
         return self.batch_payload(batch)
 
+    def create_oa_draft_from_selection(
+        self,
+        request: dict[str, Any],
+        *,
+        actor_id: str,
+        can_mutate: bool,
+        oa_client_provider: InputInvoiceUsageOaDraftClientProvider,
+    ) -> dict[str, object]:
+        self._assert_mutation_permission(can_mutate)
+        idempotency_key = _required_text(request.get("idempotencyKey"), "idempotencyKey")
+        expected_hash = _required_text(request.get("expectedPreviewHash"), "expectedPreviewHash")
+        preview_request = dict(request.get("previewRequest") if isinstance(request.get("previewRequest"), dict) else {})
+        selected_ids = _text_list(request.get("selectedInvoiceIds") or request.get("invoiceIds"))
+        if selected_ids:
+            preview_request["invoiceIds"] = selected_ids
+            preview_request["source"] = "explicitSelection"
+        if request.get("targetApplicantCode") is not None:
+            preview_request["targetApplicantCode"] = request.get("targetApplicantCode")
+        preview_payload = self.preview(preview_request, can_create_draft=True)
+        if str(preview_payload.get("previewHash") or "") != expected_hash:
+            raise InputInvoiceUsageOaReverseStalePreviewError("OA reverse preview is stale. Refresh preview before creating an OA draft.")
+        if not list(preview_payload.get("invoiceRows") or []):
+            raise InputInvoiceUsageOaReverseInvalidTransitionError("OA reverse draft requires at least one candidate invoice.", code="empty_oa_reverse_batch")
+        target_applicant_code = str(preview_payload.get("targetApplicantCode") or "").strip()
+        try:
+            client = oa_client_provider.draft_client_for(target_applicant_code)
+        except InputInvoiceUsageOaReverseServiceError:
+            raise
+        except Exception as exc:
+            raise InputInvoiceUsageOaReverseMissingClientError("目标 OA 申请人凭据未配置或登录失败。") from exc
+
+        batch_payload = self.create_batch(
+            {
+                **request,
+                "previewRequest": preview_request,
+                "invoiceIds": selected_ids,
+                "targetApplicantCode": target_applicant_code,
+                "expectedPreviewHash": expected_hash,
+                "idempotencyKey": f"{idempotency_key}:batch",
+            },
+            actor_id=actor_id,
+            can_mutate=can_mutate,
+        )
+        return self.create_oa_draft(
+            str(batch_payload["batchId"]),
+            expected_version=int(batch_payload["version"]),
+            idempotency_key=f"{idempotency_key}:draft",
+            actor_id=actor_id,
+            can_mutate=can_mutate,
+            oa_client=client,
+        )
+
     def get_batch(self, batch_id: str) -> dict[str, object]:
         return self.batch_payload(self._get_batch(batch_id))
+
+    def submitted_history(self, *, limit: int = 50) -> dict[str, object]:
+        batches = self._repository.list_batches_by_status(
+            [
+                InputInvoiceUsageOaReverseStatus.SUBMITTED_CONFIRMED.value,
+                InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_SUBMITTED.value,
+            ],
+            limit=limit,
+        )
+        return {"items": [self._submitted_history_item(batch) for batch in batches]}
 
     def create_oa_draft(
         self,
@@ -569,17 +653,26 @@ class InputInvoiceUsageOaReverseService:
             )
         before_status = batch.status
         if normalized_decision == "submitted" and batch.status in SUBMISSION_CONFIRMABLE_STATUSES:
-            batch.status = InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value
-            batch.oa_process_status = "submitted_pending_detection"
+            batch.status = InputInvoiceUsageOaReverseStatus.SUBMITTED_CONFIRMED.value
+            batch.oa_process_status = "user_confirmed_submitted"
             batch.oa_detection_status = "user_confirmed_submitted"
             event_type = "oa_reverse_user_confirmed_submitted"
         elif normalized_decision == "submitted":
-            batch.status = InputInvoiceUsageOaReverseStatus.MANUALLY_MARKED_SUBMITTED.value
+            batch.status = InputInvoiceUsageOaReverseStatus.SUBMITTED_CONFIRMED.value
             batch.oa_row_id = str(candidate_oa_row_id or "").strip() or None
             batch.oa_process_status = "manual_without_oa_row" if batch.oa_row_id is None else "in_progress"
             batch.oa_detection_status = "manual_submitted"
             event_type = "oa_reverse_manual_status_submitted"
         elif batch.status in SUBMISSION_CONFIRMABLE_STATUSES:
+            batch.oa_detection_payload = {
+                **dict(batch.oa_detection_payload or {}),
+                "discardedOaDraftId": batch.oa_draft_id,
+                "discardedOaDraftUrl": batch.oa_draft_url,
+            }
+            batch.oa_draft_id = None
+            batch.oa_draft_url = None
+            batch.oa_row_id = None
+            batch.oa_process_status = "not_submitted"
             batch.status = InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value
             batch.oa_detection_status = "user_confirmed_not_submitted"
             event_type = "oa_reverse_user_confirmed_not_submitted"
@@ -629,6 +722,26 @@ class InputInvoiceUsageOaReverseService:
             "canRevoke": _can_revoke_oa_draft(batch),
             "canRefreshStatus": batch.status in DETECTION_STATUSES,
             "canManualStatus": batch.status in MANUAL_FALLBACK_STATUSES,
+        }
+
+    @staticmethod
+    def _submitted_history_item(batch: InputInvoiceUsageOaReverseBatch) -> dict[str, object]:
+        invoices: list[dict[str, object]] = []
+        for row in list(batch.invoice_display_rows or []):
+            invoices.append(
+                {
+                    "invoiceNo": str(row.get("invoiceNo") or ""),
+                    "invoiceDate": str(row.get("invoiceDate") or ""),
+                    "sellerName": str(row.get("sellerName") or ""),
+                    "totalWithTax": str(row.get("totalWithTax") or ""),
+                }
+            )
+        return {
+            "targetApplicantName": batch.target_applicant_name,
+            "submittedAt": _datetime_to_iso(batch.updated_at),
+            "totalWithTax": str(batch.preview_summary.get("totalWithTax") or ""),
+            "invoiceCount": len(batch.invoice_ids),
+            "invoices": invoices,
         }
 
     def _rows_for_preview_payload(self, payload: dict[str, Any]) -> tuple[list[dict[str, object]], list[str]]:

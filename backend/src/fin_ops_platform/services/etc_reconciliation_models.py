@@ -21,6 +21,7 @@ class EtcReconciliationTaskStatus(str, Enum):
     IMPORTING = "importing"
     IMPORTED = "imported"
     CLOSED = "closed"
+    DELETED = "deleted"
 
 
 class ParseIssueSeverity(str, Enum):

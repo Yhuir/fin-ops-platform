@@ -221,6 +221,85 @@ function installInputInvoiceUsageFetch() {
         },
       });
     }
+    if (url.pathname === "/api/input-invoice-usage/oa-reverse/preview") {
+      return new Response(JSON.stringify({
+        previewId: "oa_reverse_preview_page",
+        previewHash: "preview-page-hash",
+        targetApplicantCode: "chen_xiuyun",
+        targetApplicantName: "陈秀云",
+        targetApplicants: [{ code: "chen_xiuyun", name: "陈秀云" }],
+        invoiceCount: 1,
+        totalWithTax: "88.00",
+        invoiceRows: [{
+          invoiceId: "invoice-001",
+          invoiceNo: "SD-INV-2026-0001",
+          displayNo: "SD-INV-2026-0001",
+          sellerName: "云南长文本供应商科技发展有限公司第一分公司",
+          invoiceDate: "2026-05-02",
+          totalWithTax: "88.00",
+          paymentStatus: { label: "待处理" },
+        }],
+        groups: [{
+          targetApplicantCode: "chen_xiuyun",
+          targetApplicantName: "陈秀云",
+          invoiceCount: 1,
+          totalWithTax: "88.00",
+          candidateInvoiceIds: ["invoice-001"],
+          invoiceRows: [{
+            invoiceId: "invoice-001",
+            invoiceNo: "SD-INV-2026-0001",
+            displayNo: "SD-INV-2026-0001",
+            sellerName: "云南长文本供应商科技发展有限公司第一分公司",
+            invoiceDate: "2026-05-02",
+            totalWithTax: "88.00",
+            paymentStatus: { label: "待处理" },
+          }],
+        }],
+        canCreateDraft: true,
+        nextAction: "create_oa_draft",
+        permissions: { canCreateDraft: true },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.pathname === "/api/input-invoice-usage/oa-reverse/oa-draft") {
+      return new Response(JSON.stringify({
+        batchId: "oa_reverse_batch_page",
+        version: 2,
+        status: "oa_draft_created",
+        invoiceIds: ["invoice-001"],
+        selectedInvoiceIds: ["invoice-001"],
+        totalWithTax: "88.00",
+        targetApplicantCode: "chen_xiuyun",
+        targetApplicantName: "陈秀云",
+        invoiceRows: [],
+        oaDraftUrl: "https://oa.example.test/draft/page",
+        canConfirmSubmission: true,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.pathname === "/api/input-invoice-usage/oa-reverse/submitted-history") {
+      return new Response(JSON.stringify({
+        items: [{
+          targetApplicantName: "陈秀云",
+          submittedAt: "2026-06-10T10:30:00+08:00",
+          totalWithTax: "88.00",
+          invoiceCount: 1,
+          invoices: [{
+            invoiceNo: "SD-INV-2026-0001",
+            invoiceDate: "2026-05-02",
+            sellerName: "云南长文本供应商科技发展有限公司第一分公司",
+            totalWithTax: "88.00",
+          }],
+        }],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     return new Response(JSON.stringify({}), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -536,6 +615,36 @@ describe("Input invoice usage page", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "发票详情" })).toBeInTheDocument();
     });
+  });
+
+  test("opens OA reverse workspace with one-step draft creation and submitted history tabs", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installInputInvoiceUsageFetch();
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    await within(page).findByRole("table", { name: "进项发票使用情况表" });
+    await user.click(within(page).getByRole("button", { name: "以发票反提 OA" }));
+
+    expect(await screen.findByRole("tab", { name: "待处理" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "已提交" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
+    expect(screen.queryByText("尚未创建本地批次。")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/input-invoice-usage/oa-reverse/oa-draft";
+    })).toBe(true));
+    const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
+    expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute("href", "https://oa.example.test/draft/page");
+
+    await user.click(screen.getByRole("tab", { name: "已提交" }));
+    expect(await screen.findByText("陈秀云")).toBeInTheDocument();
+    expect(screen.getAllByText("SD-INV-2026-0001").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText("oa_reverse_batch_page")).not.toBeInTheDocument();
   });
 
   test("restores column filters and sort from table session state", async () => {

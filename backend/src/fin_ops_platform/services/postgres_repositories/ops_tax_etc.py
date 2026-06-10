@@ -805,6 +805,9 @@ class PostgresOpsTaxEtcRepository:
                 continue
             files_by_task.setdefault(task_id, []).append(payload)
         for task_id, task_payload in tasks.items():
+            task_status = str(task_payload.get("status") or "").strip() if isinstance(task_payload, dict) else ""
+            if task_status == "deleted":
+                continue
             if isinstance(task_payload, dict) and task_id in files_by_task and not task_payload.get("source_files"):
                 task_payload["source_files"] = files_by_task[task_id]
         source_file_ids = {
@@ -835,6 +838,7 @@ class PostgresOpsTaxEtcRepository:
             for task_id, payload in iter_mapping(tasks):
                 source_files = payload.get("source_files") if isinstance(payload.get("source_files"), list) else []
                 source_file = next((item for item in source_files if isinstance(item, dict)), {})
+                task_status = text(payload.get("status") or "draft")
                 connection.execute(
                     """
                     insert into app.etc_reconciliation_tasks(
@@ -854,7 +858,7 @@ class PostgresOpsTaxEtcRepository:
                     (
                         task_id,
                         task_id,
-                        text(payload.get("status") or "draft"),
+                        task_status,
                         month_start(payload.get("period_start") or payload.get("statement_period_start") or payload.get("created_at")),
                         text(source_file.get("file_id") if isinstance(source_file, dict) else None),
                         jsonb(self._reconciliation_result_summary(payload)),
@@ -862,6 +866,9 @@ class PostgresOpsTaxEtcRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
+                if task_status == "deleted":
+                    connection.execute("delete from app.etc_reconciliation_files where task_id = %s", (task_id,))
+                    continue
                 for file_payload in source_files:
                     if not isinstance(file_payload, dict):
                         continue

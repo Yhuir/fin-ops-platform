@@ -5,7 +5,6 @@ from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
 from urllib.parse import quote
 
@@ -17,6 +16,8 @@ from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoic
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantTokenProvider
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
@@ -45,6 +46,33 @@ class FakeOaDraftClient:
     def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
         self.requests.append({"form_id": form_id, "payload": payload})
         return "oa-draft-api-001", "https://oa.example.test/drafts/oa-draft-api-001"
+
+
+class FakeTargetOaDraftClientProvider:
+    def __init__(self, client: FakeOaDraftClient | None = None, *, fail: bool = False) -> None:
+        self.client = client or FakeOaDraftClient()
+        self.fail = fail
+        self.requested_codes: list[str] = []
+
+    def draft_client_for(self, target_applicant_code: str) -> FakeOaDraftClient:
+        self.requested_codes.append(target_applicant_code)
+        if self.fail:
+            from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
+                InputInvoiceUsageOaReverseMissingClientError,
+            )
+
+            raise InputInvoiceUsageOaReverseMissingClientError("目标 OA 申请人凭据未配置。")
+        return self.client
+
+
+class RecordingOaLoginClient:
+    def __init__(self, token: str = "target-applicant-token") -> None:
+        self.token = token
+        self.calls: list[tuple[str, str]] = []
+
+    def login(self, username: str, password: str) -> str:
+        self.calls.append((username, password))
+        return self.token
 
 
 class InputInvoiceUsageApiTests(unittest.TestCase):
@@ -268,7 +296,8 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             client = FakeOaDraftClient()
-            app._etc_service = SimpleNamespace(oa_client=client)
+            provider = FakeTargetOaDraftClientProvider(client)
+            app._target_oa_applicant_token_provider_instance = provider
             self._install_service(
                 app,
                 invoices=[self._invoice("inv-preview", "3001", "预览供应商", total_with_tax="99.72")],
@@ -316,18 +345,269 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                     }
                 ),
             )
+            history_response = app.handle_request("GET", "/api/input-invoice-usage/oa-reverse/submitted-history")
 
         self.assertEqual(draft_response.status_code, 200)
         self.assertEqual(draft_payload["status"], "oa_draft_created")
         self.assertEqual(draft_payload["oaDetectionStatus"], "draft_created")
         self.assertTrue(draft_payload["canConfirmSubmission"])
         self.assertFalse(draft_payload["canRefreshStatus"])
+        self.assertEqual(provider.requested_codes, ["zhou_jieying"])
         self.assertEqual(client.requests[0]["payload"]["data"]["userName"], "周洁莹")
         self.assertEqual(confirm_response.status_code, 200)
         confirmed_payload = json.loads(confirm_response.body)
-        self.assertEqual(confirmed_payload["status"], "oa_submission_detecting")
+        self.assertEqual(confirmed_payload["status"], "submitted_confirmed")
         self.assertEqual(confirmed_payload["oaDetectionStatus"], "user_confirmed_submitted")
-        self.assertTrue(confirmed_payload["canRefreshStatus"])
+        self.assertFalse(confirmed_payload["canRefreshStatus"])
+        history_payload = json.loads(history_response.body)
+        self.assertEqual(history_response.status_code, 200)
+        self.assertEqual(history_payload["items"][0]["targetApplicantName"], "周洁莹")
+        self.assertEqual(history_payload["items"][0]["invoiceCount"], 1)
+        self.assertNotIn("batchId", history_payload["items"][0])
+        self.assertNotIn("invoiceIds", history_payload["items"][0])
+
+    def test_oa_reverse_one_step_draft_route_uses_target_applicant_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            client = FakeOaDraftClient()
+            provider = FakeTargetOaDraftClientProvider(client)
+            app._target_oa_applicant_token_provider_instance = provider
+            self._install_service(
+                app,
+                invoices=[self._invoice("inv-one-step", "3101", "一步供应商", total_with_tax="188.00")],
+                oa_projection=StaticOAProjection([]),
+            )
+            preview_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/preview",
+                body=json.dumps(
+                    {
+                        "source": "explicitSelection",
+                        "invoiceIds": ["inv-one-step"],
+                        "targetApplicantCode": "chen_xiuyun",
+                    }
+                ),
+            )
+            preview_payload = json.loads(preview_response.body)
+
+            draft_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/oa-draft",
+                body=json.dumps(
+                    {
+                        "invoiceIds": ["inv-one-step"],
+                        "targetApplicantCode": "chen_xiuyun",
+                        "expectedPreviewHash": preview_payload["previewHash"],
+                        "idempotencyKey": "oa-reverse-one-step-api-1",
+                    }
+                ),
+            )
+            draft_payload = json.loads(draft_response.body)
+
+        self.assertEqual(draft_response.status_code, 200)
+        self.assertEqual(draft_payload["status"], "oa_draft_created")
+        self.assertEqual(provider.requested_codes, ["chen_xiuyun"])
+        self.assertEqual(client.requests[0]["payload"]["data"]["applicant"], "陈秀云")
+        self.assertEqual(client.requests[0]["payload"]["isDraft"], True)
+
+    def test_oa_reverse_full_flow_uses_admin_saved_target_applicant_credential(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            self._install_identity_resolver(app)
+            client = FakeOaDraftClient()
+            login_client = RecordingOaLoginClient()
+            created_tokens: list[str] = []
+            app._target_oa_applicant_token_provider_instance = TargetOaApplicantTokenProvider(
+                credential_service=app._oa_applicant_credential_service(),
+                login_client=login_client,
+                oa_client_factory=lambda token: created_tokens.append(token) or client,
+            )
+            self._install_service(
+                app,
+                invoices=[self._invoice("inv-full-flow", "3201", "闭环供应商", total_with_tax="288.00")],
+                oa_projection=StaticOAProjection([]),
+            )
+
+            save_response = app.handle_request(
+                "PUT",
+                "/api/workbench/settings/oa-applicant-credentials/chen_xiuyun",
+                headers=self._admin_headers(),
+                body=json.dumps(
+                    {
+                        "targetApplicantName": "陈秀云",
+                        "oaUsername": "chen_xiuyun_login",
+                        "password": "correct-password",
+                    }
+                ),
+            )
+            preview_payload = json.loads(
+                app.handle_request(
+                    "POST",
+                    "/api/input-invoice-usage/oa-reverse/preview",
+                    headers=self._full_access_headers(),
+                    body=json.dumps(
+                        {
+                            "source": "explicitSelection",
+                            "invoiceIds": ["inv-full-flow"],
+                            "targetApplicantCode": "chen_xiuyun",
+                        }
+                    ),
+                ).body
+            )
+            draft_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/oa-draft",
+                headers=self._full_access_headers(),
+                body=json.dumps(
+                    {
+                        "invoiceIds": ["inv-full-flow"],
+                        "targetApplicantCode": "chen_xiuyun",
+                        "expectedPreviewHash": preview_payload["previewHash"],
+                        "idempotencyKey": "oa-reverse-full-flow-api-1",
+                    }
+                ),
+            )
+            draft_payload = json.loads(draft_response.body)
+            confirm_response = app.handle_request(
+                "POST",
+                f"/api/input-invoice-usage/oa-reverse/batches/{draft_payload['batchId']}/manual-oa-status",
+                headers=self._full_access_headers(),
+                body=json.dumps(
+                    {
+                        "decision": "submitted",
+                        "expectedVersion": draft_payload["version"],
+                        "idempotencyKey": "oa-reverse-full-flow-confirm-1",
+                    }
+                ),
+            )
+            history_response = app.handle_request(
+                "GET",
+                "/api/input-invoice-usage/oa-reverse/submitted-history",
+                headers=self._full_access_headers(),
+            )
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertNotIn("correct-password", save_response.body)
+        self.assertEqual(draft_response.status_code, 200)
+        self.assertEqual(draft_payload["status"], "oa_draft_created")
+        self.assertNotIn("correct-password", draft_response.body)
+        self.assertNotIn("target-applicant-token", draft_response.body)
+        self.assertEqual(login_client.calls, [("chen_xiuyun_login", "correct-password")])
+        self.assertEqual(created_tokens, ["target-applicant-token"])
+        self.assertEqual(client.requests[0]["payload"]["data"]["applicant"], "陈秀云")
+        self.assertEqual(client.requests[0]["payload"]["invoiceRows"][0]["invoiceNo"], "3201")
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(json.loads(confirm_response.body)["status"], "submitted_confirmed")
+        history_payload = json.loads(history_response.body)
+        self.assertEqual(history_response.status_code, 200)
+        self.assertEqual(history_payload["items"][0]["targetApplicantName"], "陈秀云")
+        self.assertEqual(history_payload["items"][0]["invoiceCount"], 1)
+        self.assertEqual(history_payload["items"][0]["invoices"][0]["invoiceNo"], "3201")
+        self.assertNotIn("batchId", history_payload["items"][0])
+        self.assertNotIn("oaDraftId", history_payload["items"][0])
+
+    def test_oa_reverse_one_step_draft_route_returns_missing_credential_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            provider = FakeTargetOaDraftClientProvider(fail=True)
+            app._target_oa_applicant_token_provider_instance = provider
+            self._install_service(
+                app,
+                invoices=[self._invoice("inv-one-step", "3101", "一步供应商", total_with_tax="188.00")],
+                oa_projection=StaticOAProjection([]),
+            )
+            preview_payload = json.loads(
+                app.handle_request(
+                    "POST",
+                    "/api/input-invoice-usage/oa-reverse/preview",
+                    body=json.dumps({"invoiceIds": ["inv-one-step"], "targetApplicantCode": "chen_xiuyun"}),
+                ).body
+            )
+
+            draft_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/oa-draft",
+                body=json.dumps(
+                    {
+                        "invoiceIds": ["inv-one-step"],
+                        "targetApplicantCode": "chen_xiuyun",
+                        "expectedPreviewHash": preview_payload["previewHash"],
+                        "idempotencyKey": "oa-reverse-one-step-missing-credential",
+                    }
+                ),
+            )
+            payload = json.loads(draft_response.body)
+
+        self.assertEqual(draft_response.status_code, 503)
+        self.assertEqual(payload["error"], "oa_reverse_missing_oa_client")
+        self.assertEqual(provider.requested_codes, ["chen_xiuyun"])
+
+    def test_oa_reverse_not_submitted_api_flow_returns_to_create_ready_and_recreates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            provider = FakeTargetOaDraftClientProvider()
+            app._target_oa_applicant_token_provider_instance = provider
+            self._install_service(
+                app,
+                invoices=[self._invoice("inv-recreate", "3301", "重建供应商", total_with_tax="388.00")],
+                oa_projection=StaticOAProjection([]),
+            )
+            preview_payload = json.loads(
+                app.handle_request(
+                    "POST",
+                    "/api/input-invoice-usage/oa-reverse/preview",
+                    body=json.dumps({"invoiceIds": ["inv-recreate"], "targetApplicantCode": "chen_xiuyun"}),
+                ).body
+            )
+            first_draft_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/oa-draft",
+                body=json.dumps(
+                    {
+                        "invoiceIds": ["inv-recreate"],
+                        "targetApplicantCode": "chen_xiuyun",
+                        "expectedPreviewHash": preview_payload["previewHash"],
+                        "idempotencyKey": "oa-reverse-recreate-first",
+                    }
+                ),
+            )
+            first_draft_payload = json.loads(first_draft_response.body)
+            not_submitted_response = app.handle_request(
+                "POST",
+                f"/api/input-invoice-usage/oa-reverse/batches/{first_draft_payload['batchId']}/manual-oa-status",
+                body=json.dumps(
+                    {
+                        "decision": "not_submitted",
+                        "expectedVersion": first_draft_payload["version"],
+                        "idempotencyKey": "oa-reverse-recreate-not-submitted",
+                    }
+                ),
+            )
+            recreate_response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/oa-draft",
+                body=json.dumps(
+                    {
+                        "invoiceIds": ["inv-recreate"],
+                        "targetApplicantCode": "chen_xiuyun",
+                        "expectedPreviewHash": preview_payload["previewHash"],
+                        "idempotencyKey": "oa-reverse-recreate-second",
+                    }
+                ),
+            )
+
+        self.assertEqual(first_draft_response.status_code, 200)
+        marked_payload = json.loads(not_submitted_response.body)
+        self.assertEqual(not_submitted_response.status_code, 200)
+        self.assertEqual(marked_payload["status"], "not_submitted")
+        self.assertTrue(marked_payload["canCreateDraft"])
+        self.assertIsNone(marked_payload["oaDraftId"])
+        self.assertIsNone(marked_payload["oaDraftUrl"])
+        recreated_payload = json.loads(recreate_response.body)
+        self.assertEqual(recreate_response.status_code, 200)
+        self.assertEqual(recreated_payload["status"], "oa_draft_created")
+        self.assertNotEqual(recreated_payload["batchId"], first_draft_payload["batchId"])
+        self.assertEqual(provider.requested_codes, ["chen_xiuyun", "chen_xiuyun"])
 
     def test_export_preview_and_download_use_current_input_invoice_usage_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -499,6 +779,37 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             relation_label="进行中",
             relation_tone="success",
         )
+
+    @staticmethod
+    def _install_identity_resolver(app: object) -> None:
+        def resolve_identity(token: str) -> OAUserIdentity:
+            if token == "admin-token":
+                return OAUserIdentity(
+                    user_id="101",
+                    username="YNSYLP005",
+                    nickname="管理员",
+                    display_name="管理员",
+                    roles=["finance"],
+                    permissions=["finops:app:view"],
+                )
+            return OAUserIdentity(
+                user_id="102",
+                username="FULL001",
+                nickname="全操作用户",
+                display_name="全操作用户",
+                roles=["finance"],
+                permissions=["finops:app:view"],
+            )
+
+        app._oa_identity_service.resolve_identity = resolve_identity
+
+    @staticmethod
+    def _admin_headers() -> dict[str, str]:
+        return {"Authorization": "Bearer admin-token"}
+
+    @staticmethod
+    def _full_access_headers() -> dict[str, str]:
+        return {"Authorization": "Bearer full-token"}
 
 
 class RefreshingInputInvoiceUsageReadRepository:

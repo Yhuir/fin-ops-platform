@@ -21,12 +21,10 @@ import {
   fetchInputInvoiceUsagePaymentStatusRules,
   fetchInputInvoiceUsageRows,
   fetchInputInvoiceUsageRowRelationDetail,
-  createInputInvoiceUsageOaReverseBatch,
-  createInputInvoiceUsageOaReverseDraft,
+  createInputInvoiceUsageOaReverseDraftFromSelection,
+  fetchInputInvoiceUsageOaReverseSubmittedHistory,
   manualInputInvoiceUsageOaReverseStatus,
   previewInputInvoiceUsageOaReverse,
-  refreshInputInvoiceUsageOaReverseStatus,
-  revokeInputInvoiceUsageOaReverseDraft,
   saveInputInvoiceUsagePaymentStatusRules,
   nextSortDirection,
 } from "../features/inputInvoiceUsage/api";
@@ -478,10 +476,8 @@ export default function InputInvoiceUsagePage() {
         sourceFilters={query.filters}
         selectedInvoiceIds={[]}
         loadPreview={loadOaReversePreview}
-        createBatch={createInputInvoiceUsageOaReverseBatch}
-        createDraft={createInputInvoiceUsageOaReverseDraft}
-        refreshStatus={refreshInputInvoiceUsageOaReverseStatus}
-        revokeDraft={revokeInputInvoiceUsageOaReverseDraft}
+        createDraftFromSelection={createInputInvoiceUsageOaReverseDraftFromSelection}
+        loadSubmittedHistory={fetchInputInvoiceUsageOaReverseSubmittedHistory}
         manualStatus={manualInputInvoiceUsageOaReverseStatus}
         onClose={handleCloseWorkflow}
       />

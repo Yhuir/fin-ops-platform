@@ -78,6 +78,7 @@ EXPECTED_MIGRATIONS = [
     "0063_etc_remove_oa_detection_runtime.sql",
     "0064_etc_scrub_oa_detection_metadata.sql",
     "0065_invoice_canonical_identity_fingerprint_invariant.sql",
+    "0066_oa_applicant_credentials.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -144,6 +145,7 @@ EXPECTED_TABLES = [
     "app.output_invoice_receipts",
     "app.output_invoice_receipt_events",
     "app.input_invoice_usage_oa_reverse_batches",
+    "app.oa_applicant_credentials",
     "read_model.workbench_rows",
     "read_model.workbench_groups",
     "read_model.workbench_group_rows",
@@ -186,7 +188,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 66)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 67)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -467,8 +469,35 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "grant select, insert, update, delete on read_model.bank_detail_scopes to fin_ops_worker",
             "grant select, insert, update, delete on read_model.bank_detail_rows to fin_ops_app_runtime",
             "grant select, insert, update, delete on read_model.bank_detail_scopes to fin_ops_app_runtime",
+            "oa_applicant_credentials_target_uidx",
+            "encrypted_password bytea",
+            "grant select, insert, update, delete on app.oa_applicant_credentials to fin_ops_app_runtime",
         ):
             self.assertIn(required, sql)
+
+    def test_oa_applicant_credentials_schema_uses_encrypted_password_only(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        body = re.search(
+            r"create table if not exists app\.oa_applicant_credentials\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(body)
+        table_body = body.group(1)
+        for required in (
+            "target_applicant_code text not null",
+            "target_applicant_name text not null",
+            "oa_username text not null",
+            "encrypted_password bytea",
+            "credential_status text not null default 'unconfigured'",
+            "enabled boolean not null default true",
+            "updated_by text not null default ''",
+            "raw_payload jsonb not null default '{}'::jsonb",
+        ):
+            self.assertIn(required, table_body)
+        self.assertNotRegex(table_body, r"\bpassword\s+text\b")
+        self.assertIn("credential_status in ('configured', 'unconfigured')", sql)
+        self.assertIn("credential_status <> 'configured' or encrypted_password is not null", sql)
 
     def test_bank_detail_read_model_schema_is_native_sql_projection(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-10 - ETC删除后部署重启复活修复
+
+- 目标：修复用户已删除未提交 ETC 批次后，下一次部署/重启进入 ETC 页面又出现 task-only 空批次的问题。
+- 影响范围：`EtcReconciliationTaskService.delete_task`、PostgreSQL ETC repository 的 reconciliation state 持久化、业务批次删除 API 触发的绑定 task 清理、生产 orphan task 清理工具。
+- 关键决策：`etc_reconciliation_tasks` 删除不再从 snapshot 物理移除，而是写入 `status=deleted` tombstone。用户可见列表、详情和 ready-for-import 候选过滤 deleted task；tombstone 保留 task counter 和删除事实，避免 Postgres 只 upsert 不 delete 的正式表在重启后重新 hydrate 旧行。生产历史残留由 `cleanup_orphan_etc_reconciliation_tasks.py` 按显式 `--task-id` dry-run/execute 清理，工具复用 service 删除边界，不直接 SQL 修改业务表。
+- 文档影响：更新 ETC 状态机、测试矩阵和本实施记录；产品口径、页面入口和 OA 口径不变。
+- 测试覆盖：新增 service 级 Postgres-like retained row 重启不复活/ID 不复用测试；新增业务批次删除 API 后重启不复活测试；新增 Postgres repository deleted task 清理 formal file rows 测试；新增生产清理工具 dry-run 阻塞 active business batch 和 execute 幂等测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_deleted_task_does_not_rehydrate_from_postgres_retained_row_or_reuse_id tests/test_etc_backend.py::EtcApiTests::test_deleted_reconciliation_task_route_does_not_reappear_after_postgres_rehydrate tests/test_etc_backend.py::EtcApiTests::test_deleted_business_batch_route_tombstones_task_after_postgres_rehydrate tests/test_postgres_repositories_boundaries.py::test_ops_tax_etc_deleted_reconciliation_task_clears_formal_file_rows tests/test_cleanup_orphan_etc_reconciliation_tasks_tool.py -q`。
+- 未测风险：本记录不代表已对生产库执行清理；生产清理仍需先 dry-run 核对 task id，再 execute。
+
 ## 2026-06-10 - ETC导入/OA草稿本地持久化失败根因修复
 
 - 目标：修复确认 ETC ZIP 导入后前端显示“导入失败”，以及 OA 草稿已在 OA 系统创建且附件已上传但前端仍显示“接口处理失败”的问题。

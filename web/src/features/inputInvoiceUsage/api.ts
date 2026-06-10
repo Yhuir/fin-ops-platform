@@ -1,5 +1,6 @@
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
+  CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest,
   CreateInputInvoiceUsageOaReverseBatchRequest,
   InputInvoiceUsageDetailResponse,
   InputInvoiceUsageExportDownload,
@@ -10,6 +11,7 @@ import type {
   InputInvoiceUsageOaReverseBatch,
   InputInvoiceUsageOaReversePreviewRequest,
   InputInvoiceUsageOaReversePreviewResponse,
+  InputInvoiceUsageOaReverseSubmittedHistoryResponse,
   InputInvoiceUsagePaymentStatusRulesResponse,
   InputInvoiceUsageQuery,
   InputInvoiceUsageRowsResponse,
@@ -126,6 +128,7 @@ function buildRowsQuery(request: FetchRowsRequest) {
 
 function mapInvoice(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]["invoice"] {
   const raw = objectValue(rawValue);
+  const rawPermissions = raw.permissions === undefined || raw.permissions === null ? null : objectValue(raw.permissions);
   return {
     id: stringValue(raw.id),
     displayNo: stringValue(camelOrSnake(raw, "displayNo", "display_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no")),
@@ -530,6 +533,7 @@ function mapRejectedInvoice(rawValue: unknown) {
 
 function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaReversePreviewResponse {
   const raw = objectValue(unwrapData(payload));
+  const rawPermissions = raw.permissions === undefined || raw.permissions === null ? null : objectValue(raw.permissions);
   const topLevelRows = arrayValue(camelOrSnake(raw, "invoiceRows", "invoice_rows")).map(mapOaReverseInvoice);
   const topLevelCandidates = topLevelRows.length > 0
     ? topLevelRows
@@ -574,12 +578,20 @@ function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaRever
     canCreateDraft: booleanValue(camelOrSnake(raw, "canCreateDraft", "can_create_draft")),
     nextAction: stringValue(camelOrSnake(raw, "nextAction", "next_action")),
     unavailableReason: stringValue(camelOrSnake(raw, "unavailableReason", "unavailable_reason")),
-    permissions: {
-      canCreateBatch: booleanValue(camelOrSnake(objectValue(raw.permissions), "canCreateBatch", "can_create_batch")),
-      canCreateDraft: booleanValue(camelOrSnake(objectValue(raw.permissions), "canCreateDraft", "can_create_draft")),
-      canRevoke: booleanValue(camelOrSnake(objectValue(raw.permissions), "canRevoke", "can_revoke")),
-      canManualStatus: booleanValue(camelOrSnake(objectValue(raw.permissions), "canManualStatus", "can_manual_status")),
-    },
+    permissions: rawPermissions ? {
+      canCreateBatch: camelOrSnake(rawPermissions, "canCreateBatch", "can_create_batch") === undefined
+        ? undefined
+        : booleanValue(camelOrSnake(rawPermissions, "canCreateBatch", "can_create_batch")),
+      canCreateDraft: camelOrSnake(rawPermissions, "canCreateDraft", "can_create_draft") === undefined
+        ? undefined
+        : booleanValue(camelOrSnake(rawPermissions, "canCreateDraft", "can_create_draft")),
+      canRevoke: camelOrSnake(rawPermissions, "canRevoke", "can_revoke") === undefined
+        ? undefined
+        : booleanValue(camelOrSnake(rawPermissions, "canRevoke", "can_revoke")),
+      canManualStatus: camelOrSnake(rawPermissions, "canManualStatus", "can_manual_status") === undefined
+        ? undefined
+        : booleanValue(camelOrSnake(rawPermissions, "canManualStatus", "can_manual_status")),
+    } : undefined,
   };
 }
 
@@ -625,6 +637,30 @@ function mapOaReverseBatch(payload: unknown): InputInvoiceUsageOaReverseBatch {
     canRevoke: camelOrSnake(raw, "canRevoke", "can_revoke") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canRevoke", "can_revoke")),
     canRefreshStatus: camelOrSnake(raw, "canRefreshStatus", "can_refresh_status") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canRefreshStatus", "can_refresh_status")),
     canManualStatus: camelOrSnake(raw, "canManualStatus", "can_manual_status") === undefined ? undefined : booleanValue(camelOrSnake(raw, "canManualStatus", "can_manual_status")),
+  };
+}
+
+function mapOaReverseSubmittedHistory(payload: unknown): InputInvoiceUsageOaReverseSubmittedHistoryResponse {
+  const raw = objectValue(unwrapData(payload));
+  return {
+    items: arrayValue(raw.items).map((item) => {
+      const history = objectValue(item);
+      return {
+        targetApplicantName: stringValue(camelOrSnake(history, "targetApplicantName", "target_applicant_name")),
+        submittedAt: stringValue(camelOrSnake(history, "submittedAt", "submitted_at")),
+        totalWithTax: stringValue(camelOrSnake(history, "totalWithTax", "total_with_tax")),
+        invoiceCount: numberValue(camelOrSnake(history, "invoiceCount", "invoice_count"), 0),
+        invoices: arrayValue(history.invoices).map((invoiceValue) => {
+          const invoice = objectValue(invoiceValue);
+          return {
+            invoiceNo: stringValue(camelOrSnake(invoice, "invoiceNo", "invoice_no")),
+            invoiceDate: stringValue(camelOrSnake(invoice, "invoiceDate", "invoice_date")),
+            sellerName: stringValue(camelOrSnake(invoice, "sellerName", "seller_name")),
+            totalWithTax: stringValue(camelOrSnake(invoice, "totalWithTax", "total_with_tax")),
+          };
+        }),
+      };
+    }),
   };
 }
 
@@ -828,6 +864,31 @@ export async function createInputInvoiceUsageOaReverseBatch(
     }),
   });
   return mapOaReverseBatch(payload);
+}
+
+export async function createInputInvoiceUsageOaReverseDraftFromSelection(
+  request: CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest,
+) {
+  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/oa-reverse/oa-draft", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      previewId: request.previewId,
+      ...(request.expectedPreviewHash ? { expectedPreviewHash: request.expectedPreviewHash } : {}),
+      idempotencyKey: request.idempotencyKey,
+      invoiceIds: request.selectedInvoiceIds,
+      ...(request.targetApplicantCode ? { targetApplicantCode: request.targetApplicantCode } : {}),
+    }),
+  });
+  return mapOaReverseBatch(payload);
+}
+
+export async function fetchInputInvoiceUsageOaReverseSubmittedHistory(signal?: AbortSignal) {
+  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/oa-reverse/submitted-history", {
+    method: "GET",
+    signal,
+  });
+  return mapOaReverseSubmittedHistory(payload);
 }
 
 export async function fetchInputInvoiceUsageOaReverseBatch(batchId: string, signal?: AbortSignal) {

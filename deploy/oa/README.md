@@ -125,9 +125,13 @@
 ```bash
 FIN_OPS_OA_BASE_URL=https://oa.company.com
 FIN_OPS_OA_USER_INFO_PATH=/system/user/getInfo
+FIN_OPS_OA_LOGIN_PATH=/auth/login
 FIN_OPS_OA_REQUIRED_PERMISSION=finops:app:view
 FIN_OPS_OA_REQUEST_TIMEOUT_MS=5000
+FIN_OPS_OA_LOGIN_REQUEST_TIMEOUT_MS=5000
 FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS=30
+FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY=<root-only long random secret>
+FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY=<OA login public key PEM or base64 DER>
 FIN_OPS_ALLOWED_USERNAMES=YNSYLP005
 FIN_OPS_READONLY_EXPORT_USERNAMES=
 FIN_OPS_ADMIN_USERNAMES=YNSYLP005
@@ -142,6 +146,10 @@ VITE_APP_BASE_PATH=/fin-ops/
   `FIN_OPS_OA_BASE_URL / FIN_OPS_OA_USER_INFO_PATH / FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_ADMIN_USERNAMES`，
   缺任一项都会停止发布，避免上线后才出现“未配置 OA 用户信息服务地址”
 - `FIN_OPS_OA_REQUIRED_PERMISSION` 默认就是 `finops:app:view`
+- `FIN_OPS_OA_LOGIN_PATH` 默认 `/auth/login`；`创建 OA 草稿` 会用目标 OA 申请人的账号密码登录 OA，并用返回 token 创建 `isDraft=true` 草稿
+- `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY` 用于 PostgreSQL `pgcrypto` 加密/解密目标 OA 申请人密码，必须放在 root-only secret env，且上线后保持稳定，轮换前需要先设计迁移方案
+- `FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY` 是 OA 登录接口使用的 RSA 公钥，可配置 PEM 或 base64 DER；后端登录目标申请人前会用该公钥加密密码，不发送明文密码
+- 服务器 runtime 必须能执行 `openssl`，用于目标申请人登录密码 RSA 加密；缺失时 `创建 OA 草稿` 会返回目标 OA 登录不可用
 - `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES / FIN_OPS_ADMIN_USERNAMES`
   是启动期兜底配置，真实长期口径仍以 app 设置持久化为准
 - 如果希望“访问账户管理”保存后自动同步 OA 菜单角色，还需要配置：

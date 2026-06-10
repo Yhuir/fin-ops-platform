@@ -264,6 +264,27 @@ def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
     assert "insert into app.etc_reconciliation_files" in executed_sql
 
 
+def test_ops_tax_etc_deleted_reconciliation_task_clears_formal_file_rows() -> None:
+    connection = RecordingConnection()
+    repository = PostgresOpsTaxEtcRepository(connection)
+
+    repository.save_etc_reconciliation_state(
+        {
+            "tasks": {
+                "task-1": {
+                    "status": "deleted",
+                    "source_files": [{"file_id": "file-1", "source_kind": "etc"}],
+                }
+            }
+        }
+    )
+
+    executed_sql = " ".join(sql for sql, _ in connection.executed)
+    assert "insert into app.etc_reconciliation_tasks" in executed_sql
+    assert "delete from app.etc_reconciliation_files where task_id = %s" in executed_sql
+    assert "insert into app.etc_reconciliation_files" not in executed_sql
+
+
 def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
     connection = RecordingConnection()
     repository = PostgresOpsTaxEtcRepository(connection)

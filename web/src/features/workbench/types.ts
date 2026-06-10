@@ -175,6 +175,24 @@ export type WorkbenchSettings = {
   pendingInvoiceTagGroups: PendingInvoiceTagGroups;
 };
 
+export type OaApplicantCredentialStatus = "configured" | "unconfigured" | (string & {});
+
+export type OaApplicantCredentialSummary = {
+  targetApplicantCode: string;
+  targetApplicantName: string;
+  oaUsername: string;
+  credentialStatus: OaApplicantCredentialStatus;
+  hasCredential: boolean;
+  enabled: boolean;
+};
+
+export type SaveOaApplicantCredentialRequest = {
+  targetApplicantCode: string;
+  targetApplicantName: string;
+  oaUsername: string;
+  password: string;
+};
+
 export type WorkbenchPaneRows = {
   oa: WorkbenchRecord[];
   bank: WorkbenchRecord[];

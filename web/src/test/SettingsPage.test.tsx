@@ -16,6 +16,7 @@ const settingsSourceFiles = [
   "src/components/settings/SettingsPendingInvoiceTagsSection.tsx",
   "src/components/settings/SettingsOaRetentionSection.tsx",
   "src/components/settings/SettingsOaInvoiceOffsetSection.tsx",
+  "src/components/settings/SettingsOaApplicantCredentialsSection.tsx",
   "src/components/settings/SettingsAccessAccountsSection.tsx",
   "src/components/settings/SettingsDataResetSection.tsx",
   "src/components/settings/SettingsDataResetDialogs.tsx",
@@ -266,6 +267,77 @@ describe("Settings page", () => {
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
     expect(await screen.findByText("当前账号仅支持查看和导出，不能保存设置。")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "保存设置" })).toBeDisabled();
+  });
+
+  test("lets admin maintain OA applicant credentials through dedicated endpoints", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      sessionAccessTier: "admin",
+      sessionUsername: "YNSYLP005",
+    });
+    renderAppAt("/settings");
+
+    const settingsPage = await screen.findByTestId("settings-page");
+    const tree = await screen.findByRole("tree", { name: "设置分类" });
+    await user.click(within(tree).getByRole("treeitem", { name: /OA申请人凭据/ }));
+
+    const region = within(settingsPage).getByRole("region", { name: "OA申请人凭据" });
+    expect(within(region).getByText("陈秀云")).toBeInTheDocument();
+    expect(within(region).getByText("已配置")).toBeInTheDocument();
+    expect(within(region).queryByDisplayValue("oa-secret")).not.toBeInTheDocument();
+
+    await user.clear(within(region).getByRole("textbox", { name: "目标 OA 申请人" }));
+    await user.type(within(region).getByRole("textbox", { name: "目标 OA 申请人" }), "樊祖芳");
+    await user.clear(within(region).getByRole("textbox", { name: "申请人账号标识" }));
+    await user.type(within(region).getByRole("textbox", { name: "申请人账号标识" }), "fan_zufang");
+    await user.clear(within(region).getByRole("textbox", { name: "OA 登录账号" }));
+    await user.type(within(region).getByRole("textbox", { name: "OA 登录账号" }), "fan_zufang");
+    const passwordInput = within(region).getByLabelText("OA 登录密码") as HTMLInputElement;
+    await user.type(passwordInput, "target-password");
+    await user.click(within(region).getByRole("button", { name: "保存凭据" }));
+
+    await waitFor(() => expect(passwordInput).toHaveValue(""));
+    expect(within(region).getByText("樊祖芳")).toBeInTheDocument();
+    expect(within(region).getAllByText("已配置").length).toBeGreaterThanOrEqual(2);
+
+    const credentialSaveCall = fetchMock.mock.calls.find(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return (
+        url.pathname === "/api/workbench/settings/oa-applicant-credentials/fan_zufang"
+        && (init?.method ?? "GET").toUpperCase() === "PUT"
+      );
+    });
+    expect(credentialSaveCall).toBeDefined();
+    expect(JSON.parse(String(credentialSaveCall?.[1]?.body ?? "{}"))).toMatchObject({
+      targetApplicantName: "樊祖芳",
+      oaUsername: "fan_zufang",
+      password: "target-password",
+    });
+
+    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        if (url.pathname !== "/api/workbench/settings" || (init?.method ?? "GET").toUpperCase() !== "POST") {
+          return false;
+        }
+        const bodyText = String(init?.body ?? "");
+        return !bodyText.includes("target-password") && !bodyText.includes("oa_applicant_credentials");
+      })).toBe(true);
+    });
+  });
+
+  test("keeps OA applicant credentials hidden from full-access non-admin users", async () => {
+    installMockApiFetch({
+      sessionAccessTier: "full_access",
+      sessionUsername: "chen_xiuyun",
+    });
+    renderAppAt("/settings");
+
+    await screen.findByTestId("settings-page");
+    const tree = await screen.findByRole("tree", { name: "设置分类" });
+    expect(within(tree).queryByRole("treeitem", { name: /OA申请人凭据/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "OA申请人凭据" })).not.toBeInTheDocument();
   });
 
   test("keeps data reset behind impact confirmation, OA password review, and job progress", async () => {

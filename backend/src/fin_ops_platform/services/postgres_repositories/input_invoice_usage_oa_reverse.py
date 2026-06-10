@@ -42,6 +42,27 @@ class PostgresInputInvoiceUsageOaReverseBatchRepository:
         )
         return _batch_from_storage(row.get("raw_payload")) if row else None
 
+    def list_batches_by_status(self, statuses: list[str], *, limit: int = 50) -> list[InputInvoiceUsageOaReverseBatch]:
+        normalized = [str(status or "").strip() for status in list(statuses or []) if str(status or "").strip()]
+        if not normalized:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select raw_payload
+            from app.input_invoice_usage_oa_reverse_batches
+            where status = any(%s)
+            order by updated_at desc
+            limit %s
+            """,
+            (normalized, max(int(limit or 50), 1)),
+        )
+        batches: list[InputInvoiceUsageOaReverseBatch] = []
+        for row in rows:
+            batch = _batch_from_storage(row.get("raw_payload"))
+            if batch is not None:
+                batches.append(batch)
+        return batches
+
     def save_batch(self, batch: InputInvoiceUsageOaReverseBatch) -> None:
         payload = _batch_to_storage(batch)
         self._connection.execute(
@@ -108,4 +129,3 @@ class PostgresInputInvoiceUsageOaReverseBatchRepository:
                 batch.updated_at,
             ),
         )
-

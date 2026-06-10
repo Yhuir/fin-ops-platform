@@ -175,6 +175,9 @@ from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecycleP
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_applicant_credentials import (
+    PostgresOaApplicantCredentialRepository,
+)
 from fin_ops_platform.services.invoice_usage_collection_source_versions import (
     input_invoice_usage_source_versions,
     oa_pending_payment_source_versions,
@@ -218,6 +221,14 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
     is_no_oa_managed_old_relation_mode,
     workbench_mode_may_auto_close,
 )
+from fin_ops_platform.services.oa_applicant_credentials import (
+    InMemoryOaApplicantCredentialRepository,
+    OaApplicantCredentialConfigurationError,
+    OaApplicantCredentialError,
+    OaApplicantCredentialPermissionError,
+    OaApplicantCredentialService,
+    OaApplicantCredentialValidationError,
+)
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from fin_ops_platform.services.oa_identity_service import (
     OAIdentityConfigurationError,
@@ -228,6 +239,11 @@ from fin_ops_platform.services.oa_identity_service import (
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OARoleSyncService
 from fin_ops_platform.services.oa_sync_service import OASyncService
+from fin_ops_platform.services.target_oa_applicant_token_provider import (
+    OaLoginClient,
+    TargetOaApplicantTokenProvider,
+    TargetOaApplicantTokenProviderError,
+)
 from fin_ops_platform.services.pending_invoice_service import (
     InMemoryPendingInvoiceCommandRepository,
     PendingInvoiceApplicationService,
@@ -1626,6 +1642,10 @@ class Application:
             return self._handle_api_input_invoice_usage_payment_status_rules_update(body, headers)
         if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/preview":
             return self._handle_api_input_invoice_usage_oa_reverse_preview(body, headers)
+        if method == "GET" and route_path == "/api/input-invoice-usage/oa-reverse/submitted-history":
+            return self._handle_api_input_invoice_usage_oa_reverse_submitted_history(query, headers)
+        if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/oa-draft":
+            return self._handle_api_input_invoice_usage_oa_reverse_one_step_draft_create(body, headers)
         if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/batches":
             return self._handle_api_input_invoice_usage_oa_reverse_batch_create(body, headers)
         if route_path.startswith("/api/input-invoice-usage/oa-reverse/batches/"):
@@ -1879,6 +1899,21 @@ class Application:
             return self._handle_api_workbench_settings()
         if method == "POST" and route_path == "/api/workbench/settings":
             return self._handle_api_workbench_settings_update(body, headers)
+        if method == "GET" and route_path == "/api/workbench/settings/oa-applicant-credentials":
+            return self._handle_api_workbench_settings_oa_applicant_credentials(headers)
+        if route_path.startswith("/api/workbench/settings/oa-applicant-credentials/"):
+            target_applicant_code = unquote(route_path.rsplit("/", 1)[-1])
+            if method == "PUT":
+                return self._handle_api_workbench_settings_oa_applicant_credential_save(
+                    target_applicant_code,
+                    body,
+                    headers,
+                )
+            if method == "DELETE":
+                return self._handle_api_workbench_settings_oa_applicant_credential_delete(
+                    target_applicant_code,
+                    headers,
+                )
         if method == "GET" and route_path == "/api/workbench/settings/oa/manual-search":
             return self._handle_api_workbench_settings_oa_manual_search(query)
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/refresh-attachments":
@@ -8097,6 +8132,34 @@ class Application:
         self._input_invoice_usage_payment_rules_provider_instance = provider
         return provider
 
+    def _oa_applicant_credential_service(self) -> OaApplicantCredentialService:
+        service = getattr(self, "_oa_applicant_credential_service_instance", None)
+        if isinstance(service, OaApplicantCredentialService):
+            return service
+        repository = getattr(self, "_oa_applicant_credential_repository", None)
+        if repository is None:
+            state_store = getattr(self, "_state_store", None)
+            connection = getattr(state_store, "_connection", None)
+            if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres" and connection is not None:
+                repository = PostgresOaApplicantCredentialRepository(connection)
+            else:
+                repository = InMemoryOaApplicantCredentialRepository()
+            self._oa_applicant_credential_repository = repository
+        service = OaApplicantCredentialService(repository=repository)
+        self._oa_applicant_credential_service_instance = service
+        return service
+
+    def _target_oa_applicant_token_provider(self) -> object:
+        provider = getattr(self, "_target_oa_applicant_token_provider_instance", None)
+        if callable(getattr(provider, "draft_client_for", None)):
+            return provider
+        provider = TargetOaApplicantTokenProvider(
+            credential_service=self._oa_applicant_credential_service(),
+            login_client=OaLoginClient(),
+        )
+        self._target_oa_applicant_token_provider_instance = provider
+        return provider
+
     def _input_invoice_usage_oa_reverse_service(self) -> InputInvoiceUsageOaReverseService:
         service = getattr(self, "_input_invoice_usage_oa_reverse_service_instance", None)
         if isinstance(service, InputInvoiceUsageOaReverseService):
@@ -8133,15 +8196,13 @@ class Application:
             self._enqueue_input_invoice_usage_read_model_refresh(str(scope_key or "all"), reason=reason)
         self._persist_workbench_pair_relations()
 
-    def _input_invoice_usage_oa_draft_client(self, headers: dict[str, str] | None) -> object | None:
-        etc_service = getattr(self, "_etc_service", None)
-        configured_client = getattr(etc_service, "oa_client", None)
-        if configured_client is not None and not isinstance(configured_client, NotConfiguredEtcOAClient):
-            return configured_client
-        token = extract_oa_token(headers)
-        if not token:
+    def _input_invoice_usage_oa_draft_client_for_batch(self, batch_id: str) -> object | None:
+        try:
+            batch = self._input_invoice_usage_oa_reverse_service().get_batch(batch_id)
+            target_applicant_code = str(batch.get("targetApplicantCode") or "").strip()
+            return self._target_oa_applicant_token_provider().draft_client_for(target_applicant_code)
+        except (InputInvoiceUsageOaReverseServiceError, TargetOaApplicantTokenProviderError):
             return NotConfiguredInputInvoiceUsageOaDraftClient()
-        return HttpEtcOAClient(token=token)
 
     def _input_invoice_usage_mutation_actor(
         self,
@@ -8417,6 +8478,55 @@ class Application:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
+    def _handle_api_input_invoice_usage_oa_reverse_submitted_history(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问进项发票反提 OA 已提交历史权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        try:
+            result = self._input_invoice_usage_oa_reverse_service().submitted_history(
+                limit=int(query.get("limit", ["50"])[0] or 50),
+            )
+        except (ValueError, TypeError):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_oa_reverse_history_query", "message": "limit must be a positive integer."},
+            )
+        except InputInvoiceUsageOaReverseServiceError as exc:
+            return self._input_invoice_usage_oa_reverse_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_input_invoice_usage_oa_reverse_one_step_draft_create(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        actor_id, can_mutate, auth_error = self._input_invoice_usage_mutation_actor(
+            headers,
+            denied_message="当前账户没有创建进项发票反提 OA 草稿权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            result = self._input_invoice_usage_oa_reverse_service().create_oa_draft_from_selection(
+                payload if isinstance(payload, dict) else {},
+                actor_id=actor_id,
+                can_mutate=can_mutate,
+                oa_client_provider=self._target_oa_applicant_token_provider(),
+            )
+        except InputInvoiceUsageOaReverseServiceError as exc:
+            return self._input_invoice_usage_oa_reverse_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
     def _handle_api_input_invoice_usage_oa_reverse_batch_get(
         self,
         batch_id: str,
@@ -8457,7 +8567,7 @@ class Application:
                 idempotency_key=str(request.get("idempotencyKey", request.get("idempotency_key")) or ""),
                 actor_id=actor_id,
                 can_mutate=can_mutate,
-                oa_client=self._input_invoice_usage_oa_draft_client(headers),
+                oa_client=self._input_invoice_usage_oa_draft_client_for_batch(batch_id),
             )
         except InputInvoiceUsageOaReverseServiceError as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
@@ -9691,6 +9801,92 @@ class Application:
 
     def _handle_api_workbench_settings(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._app_settings_service.get_settings_payload())
+
+    def _handle_api_workbench_settings_oa_applicant_credentials(
+        self,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问设置页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        try:
+            payload = self._oa_applicant_credential_service().list_credentials(
+                can_admin_access=bool(session and session.can_admin_access),
+            )
+        except OaApplicantCredentialError as exc:
+            return self._oa_applicant_credential_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def _handle_api_workbench_settings_oa_applicant_credential_save(
+        self,
+        target_applicant_code: str,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问设置页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        actor_id = actor_id_for_session(session) if session is not None else "system"
+        try:
+            credential = self._oa_applicant_credential_service().save_credential(
+                target_applicant_code=target_applicant_code,
+                target_applicant_name=str(payload.get("targetApplicantName") or ""),
+                oa_username=str(payload.get("oaUsername") or ""),
+                password=str(payload.get("password") or ""),
+                actor_id=actor_id,
+                can_admin_access=bool(session and session.can_admin_access),
+            )
+        except OaApplicantCredentialError as exc:
+            return self._oa_applicant_credential_error_response(exc)
+        return self._json_response(HTTPStatus.OK, {"credential": credential})
+
+    def _handle_api_workbench_settings_oa_applicant_credential_delete(
+        self,
+        target_applicant_code: str,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问设置页面权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        actor_id = actor_id_for_session(session) if session is not None else "system"
+        try:
+            credential = self._oa_applicant_credential_service().delete_credential(
+                target_applicant_code=target_applicant_code,
+                actor_id=actor_id,
+                can_admin_access=bool(session and session.can_admin_access),
+            )
+        except OaApplicantCredentialError as exc:
+            return self._oa_applicant_credential_error_response(exc)
+        return self._json_response(HTTPStatus.OK, {"credential": credential})
+
+    def _oa_applicant_credential_error_response(self, exc: OaApplicantCredentialError) -> Response:
+        if isinstance(exc, OaApplicantCredentialPermissionError):
+            status = HTTPStatus.FORBIDDEN
+        elif isinstance(exc, OaApplicantCredentialValidationError):
+            status = HTTPStatus.BAD_REQUEST
+        elif isinstance(exc, OaApplicantCredentialConfigurationError):
+            status = HTTPStatus.SERVICE_UNAVAILABLE
+        else:
+            status = HTTPStatus.BAD_REQUEST
+        return self._json_response(
+            status,
+            {
+                "error": getattr(exc, "code", "oa_applicant_credentials_error"),
+                "message": str(exc),
+            },
+        )
 
     def _handle_api_workbench_settings_update(
         self,

@@ -18,6 +18,7 @@
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
   - 删除未提交批次会清理本地导入批次、ETC 发票和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失并使散票回到未配对区。
+  - 绑定的 `etc_reconciliation_tasks` 删除后必须落为 `deleted` tombstone，而不是从内存 snapshot 中物理移除；列表、详情、ready-for-import 入口必须过滤 deleted task，但 tombstone 保留 task counter 和重启后的删除事实，防止 Postgres 只追加/更新式持久化在部署后重新加载旧 task-only 行。
   - 已提交 `etc_invoice_summary` 若已经参与关联台 active relation，删除批次时必须取消包含该 summary row 的 active relation；取消后不得恢复历史 OA+银行流水二栏 active relation，OA 和银行流水各自回到未配对。
 - 禁止流转：
   - ETC 页面不得提供自动 OA 检测、刷新检测或异常检测入口。
@@ -42,11 +43,13 @@
 - refresh 触发来源：ETC 导入确认、OA 草稿创建、人工提交确认、人工未提交确认、业务批次本地删除/重置、关联台普通配对关系确认或撤回。
 - canonical invoice identity：ETC 发票有稳定发票号/强 `source_unique_key` 时，不得同时持久化弱 `data_fingerprint`；runtime worker 和 API 导入确认必须使用同一 ETC invoice 同步路径，避免后台导入成功但本地发票索引未刷新。
 - 失败恢复：优先重跑相关 read model refresh；业务批次、ETC 发票占用和审计事实不得从前端临时修补。导入确认的同一 session 只有 queued/running 或近期 succeeded job 可复用；failed、acknowledged、cancelled 等旧 job 必须允许重新确认并创建新 job。
+- 生产残留清理：若历史部署已留下“业务批次已删除但 reconciliation task 仍存在”的 task-only 行，使用 `fin_ops_platform.tools.cleanup_orphan_etc_reconciliation_tasks` 按显式 `--task-id` dry-run/execute 清理；工具必须走 service 删除边界，不直接 SQL 删除任务行。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-10 | 将 ETC reconciliation task 删除改为持久 deleted tombstone，并新增显式 allowlist 的 orphan task 清理工具，防止部署/重启后 task-only 批次复活 | `EtcReconciliationTaskService`、Postgres ETC repository、业务批次删除 API、生产维护工具 | `tests.test_etc_reconciliation_service`；`tests.test_etc_backend`；`tests.test_postgres_repositories_boundaries`；`tests.test_cleanup_orphan_etc_reconciliation_tasks_tool` |
 | 2026-06-10 | 修复 ETC 导入/OA 草稿后本地 canonical invoice 持久化弱 fingerprint 冲突，并补齐导入失败 job 的同 session 重试语义，清理旧 ETC OA detection 部署残留 | ImportNormalizationService、Postgres invoice repository、runtime import worker、BackgroundJobService、ETC import confirm API、migration、RabbitMQ 部署样例 | `tests.test_import_service`；`tests.test_postgres_core_repository`；`tests.test_platform_runtime_boundary_guards`；`tests.test_postgres_migrations`；`tests.test_rabbitmq_staging_preflight`；`tests.test_etc_backend` |
 | 2026-06-10 | 清理 ETC 任务删除旧状态阻塞，并确认页面初始化不自动创建空任务 | reconciliation task 删除、旧 batch 删除兼容入口、ETC 页面初始化请求 | `tests.test_etc_backend`；`tests.test_etc_reconciliation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-09 | 彻底移除 ETC 专用 OA 自动检测后端链路，草稿后统一进入 `oa_confirmation_pending` 等待人工确认 | ETC business batch API、worker registry、OA projection/Mongo adapter、前端状态显示、历史状态迁移 | `tests.test_etc_backend`；`tests.test_platform_runtime_boundary_guards`；`tests.test_oa_projection_sql_runtime`；`tests.test_mongo_oa_adapter`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |

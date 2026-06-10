@@ -6,6 +6,12 @@
 ## 当前决策
 
 - 默认 all scope 查询不得因为月份间嵌套 `workbench_relation_source_versions` 不同而清空基础 `source_versions`；API freshness 只要求服务端期望的基础 source version 字段匹配。
+- `以发票反提 OA` 第一版前端只暴露 `创建 OA 草稿`，后端保留 batch 作为内部状态对象；创建草稿使用目标 OA 申请人的已配置凭据/token，OA 提交由用户在 OA 系统手动完成。
+- 设置页新增 `OA 申请人凭据管理`，第一版只展示目标 OA 申请人、OA 登录账号和 `已配置`/`未配置` 状态；密码保存/更新成功后不回显，且不能进入普通 app settings payload。
+- Phase 1 已落地后端凭据管理：`app.oa_applicant_credentials.encrypted_password` 使用 PostgreSQL `pgcrypto` 加密落库；生产保存/读取密钥来自 `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY`。
+- Phase 2 已落地后端一步创建草稿：`POST /api/input-invoice-usage/oa-reverse/oa-draft` 校验 preview hash 后，使用目标 OA 申请人凭据登录 OA 并创建 `isDraft=true` 暂存草稿；当前操作人的 request token 不参与目标申请人草稿创建。
+- `已提交 OA` 由用户手动确认后进入本地 `submitted_confirmed` 历史；`未提交 OA` 只清理 FinOps 本地草稿字段并回到可重新创建状态，不调用 OA 删除暂存草稿。
+- 目标 OA 申请人登录需要 `FIN_OPS_OA_BASE_URL`、`FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY`、可选 `FIN_OPS_OA_LOGIN_PATH` 和 OpenSSL runtime；密码登录前必须用 OA 公钥 RSA 加密。
 
 ## 记录模板
 
@@ -23,6 +29,83 @@
 ```
 
 ## 历史记录
+
+## 2026-06-10 - 反提 OA 全链路回归与文档收口 Phase 5
+
+- 目标：补齐跨模块 API 集成、未提交回滚重建测试、敏感信息检查和文档收口，确认 `以发票反提 OA` 从凭据维护到已提交历史的闭环。
+- 影响范围：增强 `tests/test_input_invoice_usage_api.py`，新增管理员保存凭据后 full-access 用户创建 OA 草稿的 API 集成测试，以及 `未提交 OA` 后用新 idempotency key 重新创建草稿的 API 测试；更新测试矩阵和实现计划。
+- 关键决策：API 层允许 `未提交 OA` 返回内部 `not_submitted` 状态，但业务可重建契约以 `canCreateDraft=true`、`oaDraftId=null`、`oaDraftUrl=null` 和再次创建成功为准；前端仍不展示该内部状态。
+- 文档影响：更新本实施记录、测试矩阵和实现计划；状态机主规则保持不变，继续把 `未提交 OA` 视为不展示长期历史的本地回滚路径。
+- 测试覆盖：新增 API 集成测试覆盖凭据 API -> target applicant login provider -> OA draft client -> 用户确认 -> 已提交历史；新增 API 回滚测试覆盖未提交后重新创建。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_api -v`；完整目标回归命令见本次最终说明。
+- 未测风险：真实 OA 登录接口、真实 RSA 公钥和真实 OA 草稿页面仍需生产发布前联调。
+- 后续事项：发布前配置 `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY`、`FIN_OPS_OA_BASE_URL`、`FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY`，并在目标申请人测试账号上做一次草稿创建联调。
+
+## 2026-06-10 - 进项发票使用页反提 OA UI 闭环 Phase 4
+
+- 目标：把 `以发票反提 OA` 前端主路径收敛为单一 `创建 OA 草稿` 操作，并提供 `待处理 | 已提交` 视图、OA 草稿提交确认弹窗和未提交本地回滚。
+- 影响范围：更新 `OaReverseWorkspaceDrawer`、进项发票使用页 API 接线、input invoice usage API/types、页面测试 mock 和前端样式；不改变后端 batch 的内部状态对象语义。
+- 关键决策：前端不再暴露 `创建本地批次`、`刷新 OA 状态`、撤销草稿绑定或人工检测 fallback；创建草稿成功后只显示 OA 草稿链接与 `已提交 OA`/`未提交 OA` 确认；`未提交 OA` 清空当前前端 batch 并回到可重新创建状态；已提交历史只展示申请人、时间、金额、张数和发票摘要，不展示内部 id 或英文状态。
+- 文档影响：更新本实施记录、实现计划、状态机和测试矩阵。
+- 测试覆盖：`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` 覆盖 API mapper、一键创建草稿、确认弹窗、未提交回滚、已提交历史和隐藏旧控件；`web/src/test/InputInvoiceUsagePage.test.tsx` 覆盖页面入口接线到一键草稿 API 和已提交 tab。
+- 验证命令：`cd web && npm test -- --run src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`；`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx`；`cd web && npm run build`。
+- 未测风险：本地前端测试使用 mock API；真实浏览器连接生产后端和 OA 草稿页面打开行为仍需联调验证。
+- 后续事项：Phase 5 运行完整后端/前端回归、做 secret 泄漏检查并收口文档。
+
+## 2026-06-10 - 设置页 OA 申请人凭据管理 UI Phase 3
+
+- 目标：让管理员 `YNSYLP005` 可在设置页维护目标 OA 申请人的 OA 登录账号密码，支撑后续 `创建 OA 草稿` 使用目标申请人身份登录。
+- 影响范围：新增 `SettingsOaApplicantCredentialsSection`；扩展设置页导航、页面状态、workbench API client/types 和前端 mock；不改变普通 settings payload。
+- 关键决策：`OA申请人凭据` section 仅 admin 可见；全操作非 admin 不展示入口；保存/清空凭据走 `/api/workbench/settings/oa-applicant-credentials` 独立接口；密码只存在于表单输入中，保存成功后清空，不回显到列表，不进入 `saveWorkbenchSettings(...)`。
+- 文档影响：更新本实施记录、实现计划、设置模块状态机和测试矩阵。
+- 测试覆盖：`web/src/test/SettingsPage.test.tsx` 覆盖管理员维护凭据、非 admin 隐藏、保存密码走独立 endpoint、普通 settings save 不含密码；`web/src/test/WorkbenchSelection.test.tsx` 覆盖既有关联台设置入口回归。
+- 验证命令：`cd web && npm test -- --run src/test/SettingsPage.test.tsx`；`cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx`。
+- 未测风险：尚未在真实浏览器连接生产后端验证凭据保存；完整 `待处理 | 已提交` drawer UI 和创建草稿确认流仍待 Phase 4。
+- 后续事项：Phase 4 实现进项发票使用页面 `创建 OA 草稿`、确认弹窗和已提交历史。
+
+## 2026-06-10 - 目标 OA 申请人创建草稿后端闭环 Phase 2
+
+- 目标：把 `创建 OA 草稿` 后端路径从“当前操作人 token”切到“目标 OA 申请人凭据/token”，并提供前端后续一键创建和历史展示所需 API。
+- 影响范围：新增 `TargetOaApplicantTokenProvider`、`OaLoginClient` 和 OpenSSL RSA 密码加密；扩展 `InputInvoiceUsageOaReverseService` 一步创建草稿、手动确认语义和已提交历史；扩展 PG batch repository 的 status 查询；新增 `/api/input-invoice-usage/oa-reverse/oa-draft` 和 `/submitted-history` API；旧 batch 草稿接口也改为按 batch 目标申请人取 token。
+- 关键决策：preview hash 过期、候选失效或凭据缺失时不创建内部 batch；创建 OA draft 仍写内部 batch 作为状态对象但不暴露为用户入口；目标申请人登录失败、RSA 配置缺失或 OA 外部失败返回结构化错误且不包含密码/token；`submitted` 手动确认落为 `submitted_confirmed`，`not_submitted` 清理本地 `oaDraftId`/`oaDraftUrl`/OA row 字段后允许重新创建。
+- 文档影响：更新本实施记录、状态机、测试矩阵、实现计划和 OA 部署环境变量说明。
+- 测试覆盖：新增 token provider/OA login client 单测、一步创建 service/API 测试、PG repository status 查询测试；更新手动确认、未提交回滚和已提交历史 shape 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_target_oa_applicant_token_provider -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_oa_reverse_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_input_invoice_usage_oa_reverse_repository -v`。
+- 未测风险：本地测试使用 fake login client 和 fake OA draft client，未真实连通 OA 登录接口；生产发布前必须配置 `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY`、`FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY`，确认 runtime 可执行 `openssl`，并做一次目标申请人登录和 OA 暂存草稿联调。
+- 后续事项：Phase 3 实现设置页凭据管理 UI；Phase 4 实现进项发票页面 `待处理 | 已提交` 和 `创建 OA 草稿` 用户闭环。
+
+## 2026-06-10 - OA 申请人凭据管理后端闭环 Phase 1
+
+- 目标：先完成设置页后端凭据管理能力，为后续 `创建 OA 草稿` 使用目标 OA 申请人登录态提供事实源。
+- 影响范围：新增 `OaApplicantCredentialService`、内存/PG repository、`app.oa_applicant_credentials` 迁移、`/api/workbench/settings/oa-applicant-credentials` API；未改动当前 OA draft 创建路径。
+- 关键决策：凭据管理 admin-only；`YNSYLP005` 默认 admin 可维护；全操作非 admin 不能维护；密码只写不读，API 只返回 `已配置`/`未配置`；普通 `/api/workbench/settings` 不包含密码或凭据 payload。
+- 文档影响：更新本实施记录、测试矩阵、状态机，以及设置模块状态机/测试矩阵。
+- 测试覆盖：新增 service、API、Postgres repository 和迁移契约测试，覆盖权限、非敏感响应、PG 加密 SQL、迁移 schema。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_applicant_credentials_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_applicant_credentials_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_oa_applicant_credentials_repository -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`。
+- 未测风险：Phase 1 尚未接入 OA 登录/token provider，也未改前端设置页；生产环境必须配置 `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY` 后才能在 PostgreSQL 模式保存/读取凭据。
+- 后续事项：Phase 2 将使用该凭据事实源实现目标 OA 申请人 token provider，并替换当前从操作人请求 header 取 token 的创建草稿路径。
+
+## 2026-06-10 - 以发票反提 OA 实现计划
+
+- 目标：为 `以发票反提 OA` 闭环生成可由 Codex 分阶段执行的生产级实现计划。
+- 影响范围：计划覆盖后端凭据管理、目标申请人 token provider、一键创建 OA 草稿、设置页凭据 UI、`待处理 | 已提交` 前端闭环、集成测试和文档收口。
+- 关键决策：先落后端凭据管理，再落目标申请人 token provider 和一键草稿创建，随后实现设置页与进项发票页面 UI，最后做全链路回归；每个阶段都要求先测试、再实现、再维护文档。
+- 文档影响：新增 `oa-reverse-implementation-plan.md`，并在 `README.md` 登记。
+- 测试覆盖：计划阶段未改业务代码；计划要求实施阶段覆盖七类测试中的业务核心、service、API、前端交互、集成和既有回归。
+- 验证命令：文档计划阶段未运行自动化测试；已通过读取计划文件和 `git diff` 检查内容。
+- 未测风险：计划中的加密实现需要实施阶段根据 `backend/requirements.txt` 和运行环境确认是否可复用现有库；如需新增依赖必须先停下确认。
+- 后续事项：按 `oa-reverse-implementation-plan.md` 的 Phase 1 prompt 开始实现。
+
+## 2026-06-10 - 以发票反提 OA 闭环设计
+
+- 目标：明确进项发票使用情况页面中 `以发票反提 OA` 的生产级闭环设计。
+- 影响范围：设置页目标 OA 申请人凭据管理；输入发票使用页面 OA 反提 drawer；后端 OA reverse service、凭据 service/repository、target applicant token provider、OA draft client 集成；已提交历史展示。
+- 关键决策：前端不暴露 `创建本地批次`；batch 仅作为内部状态对象；创建 OA 草稿使用目标 OA 申请人凭据/token；FinOps 只创建 `isDraft=true` 暂存草稿，不自动提交 OA；用户选择 `未提交 OA` 时只回滚本地状态，不删除 OA 暂存草稿。
+- 文档影响：新增 `oa-reverse-design.md`，更新 `README.md`、`state-machine.md` 和 `tests.md`。
+- 测试覆盖：当前为设计阶段；实施时必须按 `tests.md` 的七类测试矩阵补齐权限、凭据、服务、API、前端交互、集成和回归测试。
+- 验证命令：文档设计阶段未运行自动化测试；实施后按具体代码变更运行后端 unittest、前端组件测试和构建。
+- 未测风险：OA 外部系统登录、token 缓存和 form draft API 需要在实现阶段用 mock/contract 测试保护，并在生产发布前做联调验证。
+- 后续事项：生成分阶段实现 prompt；每个大阶段完成后维护本模块文档和状态机文档。
 
 ## 2026-06-10 - all scope source_versions 聚合修复
 

@@ -286,6 +286,14 @@ export type CreateInputInvoiceUsageOaReverseBatchRequest = {
   targetApplicantCode?: string | null;
 };
 
+export type CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest = {
+  previewId: string;
+  expectedPreviewHash?: string;
+  idempotencyKey: string;
+  selectedInvoiceIds: string[];
+  targetApplicantCode?: string | null;
+};
+
 export type InputInvoiceUsageOaReverseVersionedRequest = {
   expectedVersion: number;
   idempotencyKey?: string;
@@ -299,6 +307,25 @@ export type ManualInputInvoiceUsageOaReverseStatusRequest = InputInvoiceUsageOaR
   decision: "submitted" | "not_submitted";
   reason: string;
   candidateOaRowId?: string;
+};
+
+export type InputInvoiceUsageOaReverseSubmittedHistoryInvoice = {
+  invoiceNo: string;
+  invoiceDate: string;
+  sellerName: string;
+  totalWithTax: string;
+};
+
+export type InputInvoiceUsageOaReverseSubmittedHistoryItem = {
+  targetApplicantName: string;
+  submittedAt: string;
+  totalWithTax: string;
+  invoiceCount: number;
+  invoices: InputInvoiceUsageOaReverseSubmittedHistoryInvoice[];
+};
+
+export type InputInvoiceUsageOaReverseSubmittedHistoryResponse = {
+  items: InputInvoiceUsageOaReverseSubmittedHistoryItem[];
 };
 
 export type InputInvoiceUsageExportPreview = {

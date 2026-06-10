@@ -94,18 +94,34 @@ class EtcReconciliationTaskService:
         return replace(task)
 
     def get_task(self, task_id: str) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         return _copy_task(task)
 
     def list_tasks(self) -> list[EtcReconciliationTask]:
-        return [_copy_task(task) for task in sorted(self._tasks.values(), key=lambda item: item.created_at, reverse=True)]
+        return [
+            _copy_task(task)
+            for task in sorted(self._active_tasks(), key=lambda item: item.created_at, reverse=True)
+        ]
 
     def list_ready_for_import_tasks(self) -> list[EtcReconciliationTask]:
         return [
             _copy_task(task)
-            for task in sorted(self._tasks.values(), key=lambda item: item.updated_at, reverse=True)
+            for task in sorted(self._active_tasks(), key=lambda item: item.updated_at, reverse=True)
             if task.status == EtcReconciliationTaskStatus.READY_FOR_IMPORT
         ]
+
+    def _active_tasks(self) -> list[EtcReconciliationTask]:
+        return [
+            task
+            for task in self._tasks.values()
+            if task.status != EtcReconciliationTaskStatus.DELETED
+        ]
+
+    def _get_active_task_mutable(self, task_id: str) -> EtcReconciliationTask:
+        task = self._tasks[task_id]
+        if task.status == EtcReconciliationTaskStatus.DELETED:
+            raise KeyError(task_id)
+        return task
 
     def delete_task(
         self,
@@ -116,6 +132,8 @@ class EtcReconciliationTaskService:
         import_cleanup_confirmed: bool = False,
     ) -> dict[str, object]:
         task = self._tasks[task_id]
+        if task.status == EtcReconciliationTaskStatus.DELETED:
+            return {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"}
         self._assert_expected_version(task, expected_version)
         if (
             task.status == EtcReconciliationTaskStatus.IMPORTED
@@ -125,7 +143,48 @@ class EtcReconciliationTaskService:
             raise ValueError("reconciliation_task_import_cleanup_required")
 
         self._delete_task_uploads(task)
-        self._tasks.pop(task_id, None)
+        before_status = task.status.value
+        task.status = EtcReconciliationTaskStatus.DELETED
+        task.period_start = None
+        task.period_end = None
+        task.statement_period_start = None
+        task.statement_period_end = None
+        task.approved_delta = None
+        task.approved_delta_note = None
+        task.card_last4 = None
+        task.oa_total_amount = None
+        task.etc_invoice_amount = None
+        task.supplement_amount = None
+        task.etc_invoice_count = 0
+        task.supplement_count = 0
+        task.vehicle_plates = []
+        task.confirmed_by = None
+        task.confirmed_at = None
+        task.import_batch_id = None
+        task.etc_batch_id = None
+        task.oa_draft_batch_id = None
+        task.oa_draft_status = None
+        task.submitted_confirmed_at = None
+        task.confirmed_item_set_hash = None
+        task.zip_preview_generation += 1
+        task.source_files = []
+        task.credit_card_items = []
+        task.ticket_root_items = []
+        task.supplement_evidences = []
+        task.reconciled_items = []
+        task.expected_etc_invoice_requirements = []
+        task.submission_supplement_attachments = []
+        task.parse_results = []
+        self._touch(task)
+        task.audit_events.append(
+            self._new_audit_event(
+                task_id=task_id,
+                event_type="task_deleted",
+                actor=actor,
+                before_status=before_status,
+                after_status=task.status.value,
+            )
+        )
         self._persist()
         return {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"}
 
@@ -139,7 +198,7 @@ class EtcReconciliationTaskService:
         content: bytes,
         created_by: str,
     ) -> UploadedSourceFileMetadata:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_mutable_task(task)
         content_bytes = bytes(content or b"")
         sha256 = hashlib.sha256(content_bytes).hexdigest()
@@ -199,7 +258,7 @@ class EtcReconciliationTaskService:
         return replace(metadata)
 
     def apply_parse_result(self, *, task_id: str, parse_result: FileParseResult, actor: str) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_mutable_task(task)
         result = with_task_id(parse_result, task_id)
         replaced_existing = any(existing.file_id == result.file_id for existing in task.parse_results)
@@ -236,7 +295,7 @@ class EtcReconciliationTaskService:
         note: str | None = None,
         evidence_kind_override: str | None = None,
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_expected_version(task, expected_version)
         self._assert_mutable_task(task)
         if not files:
@@ -371,7 +430,7 @@ class EtcReconciliationTaskService:
         expected_version: int,
         actor: str,
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_expected_version(task, expected_version)
         self._assert_mutable_task(task)
         source_file = next((item for item in task.source_files if item.file_id == file_id), None)
@@ -441,7 +500,7 @@ class EtcReconciliationTaskService:
         return _copy_task(task)
 
     def refresh_matches(self, *, task_id: str) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         task.credit_card_items, task.ticket_root_items = refresh_reconciliation_matches(
             credit_card_items=task.credit_card_items,
             ticket_root_items=task.ticket_root_items,
@@ -458,7 +517,7 @@ class EtcReconciliationTaskService:
         actor: str,
         payload: dict[str, Any],
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_expected_version(task, expected_version)
         self._assert_mutable_task(task)
         action = str(payload.get("action") or "").strip()
@@ -598,7 +657,7 @@ class EtcReconciliationTaskService:
         approved_delta_note: str | None = None,
         confirmed_credit_card_item_ids: list[str] | None = None,
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_expected_version(task, expected_version)
         if task.status == EtcReconciliationTaskStatus.READY_FOR_IMPORT:
             return _copy_task(task)
@@ -609,7 +668,7 @@ class EtcReconciliationTaskService:
         }:
             raise ValueError("invalid_reconciliation_task_status")
         self.refresh_matches(task_id=task_id)
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         if not task.credit_card_items:
             raise ValueError("credit_card_statement_required")
 
@@ -716,7 +775,7 @@ class EtcReconciliationTaskService:
         return _copy_task(task)
 
     def reopen_task(self, *, task_id: str, expected_version: int, actor: str) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_expected_version(task, expected_version)
         if task.status in {
             EtcReconciliationTaskStatus.IMPORTING,
@@ -753,7 +812,7 @@ class EtcReconciliationTaskService:
         import_session_id: str,
         actor: str = "system",
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         if task.status != EtcReconciliationTaskStatus.READY_FOR_IMPORT:
             raise ValueError("invalid_reconciliation_task_status")
         if task.version != task_version or task.confirmed_item_set_hash != confirmed_item_set_hash:
@@ -782,7 +841,7 @@ class EtcReconciliationTaskService:
         actor: str = "system",
         note: str | None = None,
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         if task.status != EtcReconciliationTaskStatus.IMPORTING:
             return _copy_task(task)
         if task.version != task_version or task.confirmed_item_set_hash != confirmed_item_set_hash:
@@ -813,7 +872,7 @@ class EtcReconciliationTaskService:
         etc_batch_id: str | None = None,
         actor: str = "system",
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         if task.status == EtcReconciliationTaskStatus.IMPORTED:
             return _copy_task(task)
         if task.status not in {EtcReconciliationTaskStatus.READY_FOR_IMPORT, EtcReconciliationTaskStatus.IMPORTING}:
@@ -845,7 +904,7 @@ class EtcReconciliationTaskService:
         import_batch_id: str,
         actor: str,
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         self._assert_expected_version(task, expected_version)
         normalized_import_batch_id = str(import_batch_id or "").strip()
         if task.status != EtcReconciliationTaskStatus.IMPORTED:
@@ -886,7 +945,7 @@ class EtcReconciliationTaskService:
         }
         if not normalized_ids:
             return None
-        for task in self._tasks.values():
+        for task in self._active_tasks():
             if str(task.import_batch_id or "").strip() in normalized_ids and task.status in {
                 EtcReconciliationTaskStatus.IMPORTED,
                 EtcReconciliationTaskStatus.CLOSED,
@@ -898,7 +957,7 @@ class EtcReconciliationTaskService:
         normalized_batch_id = str(batch_id or "").strip()
         if not normalized_batch_id:
             return None
-        for task in self._tasks.values():
+        for task in self._active_tasks():
             if str(task.oa_draft_batch_id or "").strip() == normalized_batch_id:
                 return _copy_task(task)
         return None
@@ -907,7 +966,7 @@ class EtcReconciliationTaskService:
         normalized_batch_id = str(batch_id or "").strip()
         if not normalized_batch_id:
             return None
-        for task in self._tasks.values():
+        for task in self._active_tasks():
             if normalized_batch_id in {
                 str(task.oa_draft_batch_id or "").strip(),
                 str(task.etc_batch_id or "").strip(),
@@ -923,7 +982,7 @@ class EtcReconciliationTaskService:
         etc_batch_id: str,
         actor: str = "system",
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         if task.status not in {EtcReconciliationTaskStatus.IMPORTED, EtcReconciliationTaskStatus.CLOSED}:
             raise ValueError("invalid_reconciliation_task_status")
         task.oa_draft_batch_id = oa_draft_batch_id
@@ -948,7 +1007,7 @@ class EtcReconciliationTaskService:
         oa_draft_batch_id: str,
         actor: str = "system",
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         if task.status == EtcReconciliationTaskStatus.CLOSED and task.submitted_confirmed_at is not None:
             return _copy_task(task)
         if task.status not in {EtcReconciliationTaskStatus.IMPORTED, EtcReconciliationTaskStatus.CLOSED}:
@@ -980,7 +1039,7 @@ class EtcReconciliationTaskService:
         etc_batch_id: str | None = None,
         actor: str = "system",
     ) -> EtcReconciliationTask:
-        task = self._tasks[task_id]
+        task = self._get_active_task_mutable(task_id)
         normalized_oa_draft_batch_id = str(oa_draft_batch_id or "").strip()
         normalized_etc_batch_id = str(etc_batch_id or "").strip()
         current_oa_draft_batch_id = str(task.oa_draft_batch_id or "").strip()
@@ -1050,7 +1109,7 @@ class EtcReconciliationTaskService:
             if str(session_id or "").strip()
         }
         changed = False
-        for task in self._tasks.values():
+        for task in self._active_tasks():
             if task.status != EtcReconciliationTaskStatus.IMPORTING:
                 continue
             if str(task.import_batch_id or "").strip() in active_sessions:

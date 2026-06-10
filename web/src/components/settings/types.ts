@@ -1,5 +1,7 @@
 import type {
   BankAccountMapping,
+  OaApplicantCredentialSummary,
+  SaveOaApplicantCredentialRequest,
   WorkbenchSettings,
   WorkbenchAccessRole,
   WorkbenchOaImportSettings,
@@ -20,6 +22,7 @@ export type SettingsSectionId =
   | "pending_invoice_tags"
   | "oa_retention"
   | "oa_invoice_offset"
+  | "oa_applicant_credentials"
   | "access_accounts"
   | "data_reset";
 
@@ -103,6 +106,26 @@ export type SettingsOaInvoiceOffsetSectionProps = {
   controlsDisabled: boolean;
   applicantsText: string;
   onChangeApplicantsText: (value: string) => void;
+};
+
+export type SettingsOaApplicantCredentialsSectionProps = {
+  controlsDisabled: boolean;
+  credentials: OaApplicantCredentialSummary[];
+  isLoading: boolean;
+  isSaving: boolean;
+  status: ProjectActionStatus | null;
+  targetApplicantNameDraft: string;
+  targetApplicantCodeDraft: string;
+  oaUsernameDraft: string;
+  oaPasswordDraft: string;
+  canSaveCredential: boolean;
+  onChangeTargetApplicantNameDraft: (value: string) => void;
+  onChangeTargetApplicantCodeDraft: (value: string) => void;
+  onChangeOaUsernameDraft: (value: string) => void;
+  onChangeOaPasswordDraft: (value: string) => void;
+  onSelectCredential: (credential: OaApplicantCredentialSummary) => void;
+  onSaveCredential: (payload: SaveOaApplicantCredentialRequest) => Promise<void> | void;
+  onClearCredential: (targetApplicantCode: string) => Promise<void> | void;
 };
 
 export type SettingsAccessAccountsSectionProps = {

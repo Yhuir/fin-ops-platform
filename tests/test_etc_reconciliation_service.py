@@ -250,6 +250,31 @@ def ready_task_with_requirement(
 
 
 class EtcReconciliationServiceTests(unittest.TestCase):
+    class _PostgresLikeReconciliationStateStore:
+        data_dir = None
+
+        def __init__(self) -> None:
+            self.rows: dict[str, object] = {}
+            self.task_counter = 0
+            self.file_counter = 0
+            self.audit_counter = 0
+
+        def load_etc_reconciliation_state(self) -> dict:
+            return {
+                "schema_version": 1,
+                "task_counter": self.task_counter,
+                "file_counter": self.file_counter,
+                "audit_counter": self.audit_counter,
+                "tasks": dict(self.rows),
+            }
+
+        def save_etc_reconciliation_state(self, snapshot: dict) -> None:
+            self.task_counter = int(snapshot.get("task_counter", 0) or 0)
+            self.file_counter = int(snapshot.get("file_counter", 0) or 0)
+            self.audit_counter = int(snapshot.get("audit_counter", 0) or 0)
+            for task_id, payload in dict(snapshot.get("tasks") or {}).items():
+                self.rows[str(task_id)] = payload
+
     def _parsed_task(self, *, ticket_text: str = TICKET_ROOT_TEXT) -> tuple[EtcReconciliationTaskService, str]:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
         task = service.create_task(title="ETC", created_by="alice")
@@ -797,6 +822,21 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             service.get_task(task.task_id)
         self.assertFalse(Path(uploaded.stored_path).exists())
+
+    def test_deleted_task_does_not_rehydrate_from_postgres_retained_row_or_reuse_id(self) -> None:
+        store = self._PostgresLikeReconciliationStateStore()
+        service = EtcReconciliationTaskService(state_store=store)
+        task = service.create_task(title="ETC待删除", created_by="alice")
+
+        service.delete_task(task_id=task.task_id, expected_version=task.version, actor="alice")
+        reloaded = EtcReconciliationTaskService(state_store=store)
+        next_task = reloaded.create_task(title="ETC新批次", created_by="alice")
+
+        self.assertEqual(reloaded.list_tasks(), [next_task])
+        with self.assertRaises(KeyError):
+            reloaded.get_task(task.task_id)
+        self.assertNotEqual(next_task.task_id, task.task_id)
+        self.assertTrue(next_task.task_id.endswith("000002"))
 
     def test_delete_reviewing_task_enforces_expected_version(self) -> None:
         service, task_id = self._parsed_task()

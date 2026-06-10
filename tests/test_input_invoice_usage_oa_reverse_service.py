@@ -38,6 +38,19 @@ class FakeOaDraftClient:
         return "oa-draft-001", "https://oa.example/drafts/oa-draft-001"
 
 
+class FakeTargetOaDraftClientProvider:
+    def __init__(self, client: FakeOaDraftClient | None = None, *, fail: bool = False) -> None:
+        self.client = client or FakeOaDraftClient()
+        self.fail = fail
+        self.requested_codes: list[str] = []
+
+    def draft_client_for(self, target_applicant_code: str) -> FakeOaDraftClient:
+        self.requested_codes.append(target_applicant_code)
+        if self.fail:
+            raise InputInvoiceUsageOaReverseMissingClientError("目标 OA 申请人凭据未配置。")
+        return self.client
+
+
 class StaticEvidenceProvider:
     def __init__(self, evidence: InputInvoiceUsageOaEvidence | None) -> None:
         self.evidence = evidence
@@ -114,6 +127,49 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(first["version"], 1)
         self.assertEqual(first["createdBy"], "user-1")
         self.assertEqual(first["auditEvents"][0]["eventType"], "oa_reverse_batch_created")
+
+    def test_create_oa_draft_from_selection_creates_internal_batch_and_uses_target_provider(self) -> None:
+        service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
+        provider = FakeTargetOaDraftClientProvider()
+        preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "zhou_jieying"}, can_create_draft=True)
+
+        drafted = service.create_oa_draft_from_selection(
+            {
+                "invoiceIds": ["inv-1"],
+                "targetApplicantCode": "zhou_jieying",
+                "expectedPreviewHash": preview["previewHash"],
+                "idempotencyKey": "one-step-key-1",
+            },
+            actor_id="login-user",
+            can_mutate=True,
+            oa_client_provider=provider,
+        )
+
+        self.assertEqual(drafted["status"], InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value)
+        self.assertEqual(provider.requested_codes, ["zhou_jieying"])
+        self.assertEqual(provider.client.requests[0]["payload"]["data"]["applicant"], "周洁莹")
+        self.assertIn("input_invoice_usage_oa_reverse_batch_", drafted["batchId"])
+
+    def test_create_oa_draft_from_selection_missing_target_credential_does_not_create_batch(self) -> None:
+        service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
+        provider = FakeTargetOaDraftClientProvider(fail=True)
+        preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True)
+
+        with self.assertRaises(InputInvoiceUsageOaReverseMissingClientError):
+            service.create_oa_draft_from_selection(
+                {
+                    "invoiceIds": ["inv-1"],
+                    "targetApplicantCode": "chen_xiuyun",
+                    "expectedPreviewHash": preview["previewHash"],
+                    "idempotencyKey": "one-step-missing-credential",
+                },
+                actor_id="login-user",
+                can_mutate=True,
+                oa_client_provider=provider,
+            )
+
+        self.assertEqual(provider.requested_codes, ["chen_xiuyun"])
+        self.assertIsNone(service._repository.find_batch_by_create_idempotency_key("one-step-missing-credential:batch"))
 
     def test_create_oa_draft_rejects_stale_expected_version(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
@@ -229,11 +285,20 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             can_mutate=True,
         )
 
-        self.assertEqual(confirmed["status"], InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value)
+        self.assertEqual(confirmed["status"], "submitted_confirmed")
         self.assertEqual(confirmed["oaDetectionStatus"], "user_confirmed_submitted")
-        self.assertTrue(confirmed["canRefreshStatus"])
+        self.assertFalse(confirmed["canRefreshStatus"])
 
-    def test_user_can_mark_created_oa_draft_not_submitted_without_releasing_local_binding(self) -> None:
+        history = service.submitted_history()
+        self.assertEqual(len(history["items"]), 1)
+        self.assertEqual(history["items"][0]["targetApplicantName"], "周洁莹")
+        self.assertEqual(history["items"][0]["totalWithTax"], "100.00")
+        self.assertEqual(history["items"][0]["invoiceCount"], 1)
+        self.assertEqual(history["items"][0]["invoices"][0]["invoiceNo"], "1001")
+        self.assertNotIn("batchId", history["items"][0])
+        self.assertNotIn("invoiceIds", history["items"][0])
+
+    def test_user_can_mark_created_oa_draft_not_submitted_and_return_to_create_state(self) -> None:
         service = self._service(
             invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
             oa_client=FakeOaDraftClient(),
@@ -259,9 +324,10 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
 
         self.assertEqual(marked["status"], InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value)
         self.assertEqual(marked["oaDetectionStatus"], "user_confirmed_not_submitted")
-        self.assertEqual(marked["oaDraftId"], "oa-draft-001")
-        self.assertEqual(marked["oaDraftUrl"], "https://oa.example/drafts/oa-draft-001")
-        self.assertTrue(marked["canRevoke"])
+        self.assertIsNone(marked["oaDraftId"])
+        self.assertIsNone(marked["oaDraftUrl"])
+        self.assertFalse(marked["canRevoke"])
+        self.assertTrue(marked["canCreateDraft"])
 
     def test_status_refresh_without_evidence_does_not_create_relation_or_complete_batch(self) -> None:
         relation_calls: list[object] = []
@@ -279,19 +345,11 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             actor_id="user-1",
             can_mutate=True,
         )
-        confirmed = service.manual_oa_status(
-            str(batch["batchId"]),
-            decision="submitted",
-            reason="用户确认已在 OA 提交",
-            expected_version=int(drafted["version"]),
-            idempotency_key="confirm-submitted-key-1",
-            actor_id="user-1",
-            can_mutate=True,
-        )
+        detecting = self._force_detection_state(service, str(drafted["batchId"]), int(drafted["version"]))
 
         refreshed = service.refresh_oa_status(
             str(batch["batchId"]),
-            expected_version=int(confirmed["version"]),
+            expected_version=int(detecting.version),
             actor_id="user-1",
             can_mutate=True,
         )
@@ -322,19 +380,11 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             actor_id="user-1",
             can_mutate=True,
         )
-        confirmed = service.manual_oa_status(
-            str(batch["batchId"]),
-            decision="submitted",
-            reason="用户确认已在 OA 提交",
-            expected_version=int(drafted["version"]),
-            idempotency_key="confirm-submitted-key-2",
-            actor_id="user-1",
-            can_mutate=True,
-        )
+        detecting = self._force_detection_state(service, str(drafted["batchId"]), int(drafted["version"]))
 
         refreshed = service.refresh_oa_status(
             str(batch["batchId"]),
-            expected_version=int(confirmed["version"]),
+            expected_version=int(detecting.version),
             actor_id="user-1",
             can_mutate=True,
         )
@@ -356,6 +406,19 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             actor_id="user-1",
             can_mutate=True,
         )
+
+    @staticmethod
+    def _force_detection_state(
+        service: InputInvoiceUsageOaReverseService,
+        batch_id: str,
+        current_version: int,
+    ):
+        batch = service._repository.get_batch(batch_id)
+        batch.status = InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value
+        batch.oa_detection_status = "legacy_detection_pending"
+        batch.version = current_version + 1
+        service._repository.save_batch(batch)
+        return batch
 
     @staticmethod
     def _counterparty(counterparty_id: str, name: str) -> Counterparty:

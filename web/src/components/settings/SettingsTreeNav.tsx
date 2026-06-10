@@ -27,6 +27,8 @@ export default function SettingsTreeNav({
         return "settings-section-oa-retention";
       case "oa_invoice_offset":
         return "settings-section-oa-invoice-offset";
+      case "oa_applicant_credentials":
+        return "settings-section-oa-applicant-credentials";
       case "access_accounts":
         return "settings-section-access-accounts";
       case "data_reset":

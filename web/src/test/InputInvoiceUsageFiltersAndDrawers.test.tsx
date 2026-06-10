@@ -18,7 +18,8 @@ import PaymentStatusRulesDrawer, {
   type PaymentStatusRulesPayload,
 } from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import {
-  createInputInvoiceUsageOaReverseBatch,
+  createInputInvoiceUsageOaReverseDraftFromSelection,
+  fetchInputInvoiceUsageOaReverseSubmittedHistory,
   previewInputInvoiceUsageOaReverse,
 } from "../features/inputInvoiceUsage/api";
 
@@ -233,7 +234,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
 });
 
 describe("Input invoice usage workflow drawers", () => {
-  test("OA reverse API mapper uses backend invoiceRows and invoiceIds as the primary contract", async () => {
+  test("OA reverse API mapper uses one-step draft and submitted history contracts", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
         if (url.pathname === "/api/input-invoice-usage/oa-reverse/preview") {
@@ -271,15 +272,21 @@ describe("Input invoice usage workflow drawers", () => {
             }],
           }],
           canCreateDraft: true,
-          nextAction: "create_batch",
+          nextAction: "create_oa_draft",
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
-      if (url.pathname === "/api/input-invoice-usage/oa-reverse/batches") {
+      if (url.pathname === "/api/input-invoice-usage/oa-reverse/oa-draft") {
         return new Response(JSON.stringify({
           batchId: "batch-backend",
           version: 1,
-          status: "draft",
+          status: "oa_draft_created",
           invoiceIds: ["inv-backend-1"],
+          selectedInvoiceIds: ["inv-backend-1"],
+          targetApplicantCode: "chen_xiuyun",
+          targetApplicantName: "陈秀云",
+          totalWithTax: "88.00",
+          oaDraftId: "oa-draft-backend",
+          oaDraftUrl: "https://oa.example.test/draft/backend",
           invoiceRows: [{
             invoiceId: "inv-backend-1",
             invoiceNo: "INV-BACKEND-1",
@@ -292,6 +299,22 @@ describe("Input invoice usage workflow drawers", () => {
           previewSummary: { invoiceCount: 1, totalWithTax: "88.00" },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
+      if (url.pathname === "/api/input-invoice-usage/oa-reverse/submitted-history") {
+        return new Response(JSON.stringify({
+          items: [{
+            targetApplicantName: "陈秀云",
+            submittedAt: "2026-06-10T10:00:00+08:00",
+            totalWithTax: "88.00",
+            invoiceCount: 1,
+            invoices: [{
+              invoiceNo: "INV-BACKEND-1",
+              invoiceDate: "2026-05-20",
+              sellerName: "后端供应商",
+              totalWithTax: "88.00",
+            }],
+          }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
       return new Response(JSON.stringify({}), { status: 404, headers: { "Content-Type": "application/json" } });
     }));
 
@@ -300,19 +323,24 @@ describe("Input invoice usage workflow drawers", () => {
       filters: [],
       selectedInvoiceIds: ["inv-backend-1"],
     });
-    const batch = await createInputInvoiceUsageOaReverseBatch({
+    const batch = await createInputInvoiceUsageOaReverseDraftFromSelection({
       previewId: preview.previewId ?? "",
       expectedPreviewHash: preview.previewHash,
       idempotencyKey: "create-backend-mapper",
       selectedInvoiceIds: ["inv-backend-1"],
+      targetApplicantCode: "chen_xiuyun",
     });
+    const history = await fetchInputInvoiceUsageOaReverseSubmittedHistory();
 
-      expect(preview.invoiceRows?.[0].invoiceId).toBe("inv-backend-1");
-      expect(preview.targetApplicants).toEqual([{ code: "chen_xiuyun", name: "陈秀云" }]);
-      expect(preview.groups[0].invoiceRows?.[0].paymentStatusLabel).toBe("未付");
+    expect(preview.invoiceRows?.[0].invoiceId).toBe("inv-backend-1");
+    expect(preview.targetApplicants).toEqual([{ code: "chen_xiuyun", name: "陈秀云" }]);
+    expect(preview.groups[0].invoiceRows?.[0].paymentStatusLabel).toBe("未付");
     expect(batch.invoiceIds).toEqual(["inv-backend-1"]);
     expect(batch.invoiceRows[0].displayNo).toBe("SD-BACKEND-1");
     expect(batch.previewSummary?.totalWithTax).toBe("88.00");
+    expect(batch.oaDraftUrl).toBe("https://oa.example.test/draft/backend");
+    expect(history.items[0].targetApplicantName).toBe("陈秀云");
+    expect(history.items[0].invoices[0].sellerName).toBe("后端供应商");
   });
 
   const previewPayload: OaReversePreviewPayload = {
@@ -366,7 +394,7 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse drawer calls loadPreview after opening and hides rejected invoice reasons to keep the workspace compact", async () => {
     const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
-    const createBatch = vi.fn();
+    const createDraftFromSelection = vi.fn();
 
     render(
       <OaReverseWorkspaceDrawer
@@ -374,7 +402,7 @@ describe("Input invoice usage workflow drawers", () => {
         sourceFilters={[{ field: "payment_status", operator: "in", values: ["pending"] }]}
         selectedInvoiceIds={["inv-001", "inv-002"]}
         loadPreview={loadPreview}
-        createBatch={createBatch}
+        createDraftFromSelection={createDraftFromSelection}
         onClose={() => undefined}
       />,
     );
@@ -400,35 +428,25 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("昆明供应商一")).toBeInTheDocument();
     expect(screen.getByText("2026-05-02")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建本地批次" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: /创建 OA 草稿|提交|保存/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
+    expect(screen.queryByText("尚未创建本地批次。")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
   });
 
-  test("OA reverse drawer asks whether the created OA draft was submitted before refreshing status", async () => {
+  test("OA reverse drawer creates OA draft directly and records submitted confirmation", async () => {
     const user = userEvent.setup();
     const loadPreview = vi.fn(() => Promise.resolve({
       ...previewPayload,
       canCreateDraft: true,
-      nextAction: "create_batch",
-      permissions: { canCreateBatch: true, canCreateDraft: true },
+      nextAction: "create_oa_draft",
+      permissions: { canCreateDraft: true },
     }));
-    const createBatch = vi.fn(() => Promise.resolve({
-      batchId: "oa_reverse_batch_001",
-      version: 3,
-      status: "previewed",
-      selectedInvoiceIds: ["inv-001", "inv-002"],
-      totalWithTax: "99.72",
-      targetApplicantCode: "chen_xiuyun",
-      targetApplicantName: "陈秀云",
-      invoices: [],
-      rejectedInvoices: [],
-      canCreateDraft: true,
-    }));
-    const createDraft = vi.fn(() => Promise.resolve({
+    const createDraftFromSelection = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_001",
       version: 4,
       status: "oa_draft_created",
-      selectedInvoiceIds: ["inv-001", "inv-002"],
+      invoiceIds: ["inv-001"],
+      selectedInvoiceIds: ["inv-001"],
       totalWithTax: "99.72",
       targetApplicantCode: "chen_xiuyun",
       targetApplicantName: "陈秀云",
@@ -443,8 +461,9 @@ describe("Input invoice usage workflow drawers", () => {
     const manualStatus = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_001",
       version: 5,
-      status: "oa_submission_detecting",
-      selectedInvoiceIds: ["inv-001", "inv-002"],
+      status: "submitted_confirmed",
+      invoiceIds: ["inv-001"],
+      selectedInvoiceIds: ["inv-001"],
       totalWithTax: "99.72",
       targetApplicantCode: "chen_xiuyun",
       targetApplicantName: "陈秀云",
@@ -452,22 +471,16 @@ describe("Input invoice usage workflow drawers", () => {
       rejectedInvoices: [],
       oaDraftId: "oa-draft-001",
       oaDraftUrl: "https://oa.example.test/draft/oa-draft-001",
-      oaDetectionStatus: "user_confirmed_submitted",
-      canRefreshStatus: true,
+      oaDetectionStatus: "submitted_confirmed",
     }));
-    const refreshStatus = vi.fn(() => Promise.resolve({
-      batchId: "oa_reverse_batch_001",
-      version: 6,
-      status: "oa_submitted",
-      selectedInvoiceIds: ["inv-001", "inv-002"],
-      totalWithTax: "99.72",
-      targetApplicantCode: "chen_xiuyun",
-      targetApplicantName: "陈秀云",
-      invoices: [],
-      rejectedInvoices: [],
-      oaDraftId: "oa-draft-001",
-      oaDraftUrl: "https://oa.example.test/draft/oa-draft-001",
-      oaDetectionStatus: "submitted",
+    const loadSubmittedHistory = vi.fn(() => Promise.resolve({
+      items: [{
+        targetApplicantName: "陈秀云",
+        submittedAt: "2026-06-10T10:30:00+08:00",
+        totalWithTax: "99.72",
+        invoiceCount: 1,
+        invoices: [{ invoiceNo: "SD-INV-001", invoiceDate: "2026-05-01", sellerName: "昆明供应商一", totalWithTax: "49.86" }],
+      }],
     }));
 
     render(
@@ -476,39 +489,33 @@ describe("Input invoice usage workflow drawers", () => {
         sourceFilters={[]}
         selectedInvoiceIds={["inv-001", "inv-002"]}
         loadPreview={loadPreview}
-        createBatch={createBatch}
-        createDraft={createDraft}
+        createDraftFromSelection={createDraftFromSelection}
         manualStatus={manualStatus}
-        refreshStatus={refreshStatus}
+        loadSubmittedHistory={loadSubmittedHistory}
         onClose={() => undefined}
       />,
     );
 
     await user.click(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-002" }));
-    await user.click(screen.getByRole("button", { name: "创建本地批次" }));
-    await waitFor(() => expect(createBatch).toHaveBeenCalledWith(expect.objectContaining({
+    expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
       previewId: "oa_reverse_preview_001",
       expectedPreviewHash: "preview-hash-001",
       selectedInvoiceIds: ["inv-001"],
       targetApplicantCode: "chen_xiuyun",
     })));
-    expect(await screen.findByText("oa_reverse_batch_001")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
-    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("oa_reverse_batch_001", expect.objectContaining({
-      expectedVersion: 3,
-    })));
-    expect(await screen.findByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute("href", "https://oa.example.test/draft/oa-draft-001");
+    const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
+    expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute("href", "https://oa.example.test/draft/oa-draft-001");
     expect(screen.queryByRole("button", { name: "刷新 OA 状态" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "我已在 OA 提交" }));
+    await user.click(within(confirmDialog).getByRole("button", { name: "已提交 OA" }));
     await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("oa_reverse_batch_001", expect.objectContaining({
       decision: "submitted",
       expectedVersion: 4,
     })));
-    await user.click(screen.getByRole("button", { name: "刷新 OA 状态" }));
-    await waitFor(() => expect(refreshStatus).toHaveBeenCalledWith("oa_reverse_batch_001", { expectedVersion: 5 }));
-    expect(await screen.findByText("OA 状态已刷新。")).toBeInTheDocument();
+    expect(await screen.findByText("已进入已提交历史。")).toBeInTheDocument();
+    expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
   });
 
   test("OA reverse drawer lets the backend target applicant list drive preview and batch target", async () => {
@@ -523,17 +530,19 @@ describe("Input invoice usage workflow drawers", () => {
         targetApplicantName: request.targetApplicantCode === "zhou_jieying" ? "周洁莹" : "陈秀云",
       }],
       canCreateDraft: true,
-      permissions: { canCreateBatch: true },
+      permissions: { canCreateDraft: true },
     }));
-    const createBatch = vi.fn(() => Promise.resolve({
+    const createDraftFromSelection = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_target",
       version: 1,
-      status: "draft",
+      status: "oa_draft_created",
       invoiceIds: ["inv-001", "inv-002"],
       selectedInvoiceIds: ["inv-001", "inv-002"],
       totalWithTax: "99.72",
       targetApplicantCode: "zhou_jieying",
       targetApplicantName: "周洁莹",
+      oaDraftId: "oa-draft-target",
+      oaDraftUrl: "https://oa.example.test/draft/target",
       invoiceRows: [],
       invoices: [],
       rejectedInvoices: [],
@@ -545,7 +554,7 @@ describe("Input invoice usage workflow drawers", () => {
         sourceFilters={[]}
         selectedInvoiceIds={["inv-001", "inv-002"]}
         loadPreview={loadPreview}
-        createBatch={createBatch}
+        createDraftFromSelection={createDraftFromSelection}
         onClose={() => undefined}
       />,
     );
@@ -557,33 +566,19 @@ describe("Input invoice usage workflow drawers", () => {
     await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith(expect.objectContaining({
       targetApplicantCode: "zhou_jieying",
     })));
-    await user.click(screen.getByRole("button", { name: "创建本地批次" }));
-    await waitFor(() => expect(createBatch).toHaveBeenCalledWith(expect.objectContaining({
+    await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
       targetApplicantCode: "zhou_jieying",
     })));
   });
 
-  test("OA reverse manual fallback is available for backend detection exception states only", async () => {
+  test("OA reverse not-submitted confirmation returns to create state without visible rollback history", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateBatch: true } }));
-    const createBatch = vi.fn(() => Promise.resolve({
-      batchId: "oa_reverse_batch_missing",
-      version: 1,
-      status: "draft",
-      invoiceIds: ["inv-001"],
-      selectedInvoiceIds: ["inv-001"],
-      totalWithTax: "49.86",
-      targetApplicantCode: "chen_xiuyun",
-      targetApplicantName: "陈秀云",
-      invoiceRows: [],
-      invoices: [],
-      rejectedInvoices: [],
-      canCreateDraft: true,
-    }));
-    const createDraft = vi.fn(() => Promise.resolve({
-      batchId: "oa_reverse_batch_missing",
+    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const createDraftFromSelection = vi.fn(() => Promise.resolve({
+      batchId: "oa_reverse_batch_not_submitted",
       version: 2,
-      status: "oa_submission_detecting",
+      status: "oa_draft_created",
       invoiceIds: ["inv-001"],
       selectedInvoiceIds: ["inv-001"],
       totalWithTax: "49.86",
@@ -592,31 +587,14 @@ describe("Input invoice usage workflow drawers", () => {
       invoiceRows: [],
       invoices: [],
       rejectedInvoices: [],
-      oaDraftId: "oa-draft-missing",
-      oaDraftUrl: "https://oa.example.test/draft/missing",
-      oaDetectionStatus: "pending",
-      canRefreshStatus: true,
-    }));
-    const refreshStatus = vi.fn(() => Promise.resolve({
-      batchId: "oa_reverse_batch_missing",
-      version: 3,
-      status: "oa_detection_missing",
-      invoiceIds: ["inv-001"],
-      selectedInvoiceIds: ["inv-001"],
-      totalWithTax: "49.86",
-      targetApplicantCode: "chen_xiuyun",
-      targetApplicantName: "陈秀云",
-      invoiceRows: [],
-      invoices: [],
-      rejectedInvoices: [],
-      oaDetectionStatus: "missing",
-      canManualStatus: true,
-      canRefreshStatus: true,
+      oaDraftId: "oa-draft-not-submitted",
+      oaDraftUrl: "https://oa.example.test/draft/not-submitted",
+      canConfirmSubmission: true,
     }));
     const manualStatus = vi.fn(() => Promise.resolve({
-      batchId: "oa_reverse_batch_missing",
-      version: 4,
-      status: "manually_marked_submitted",
+      batchId: "oa_reverse_batch_not_submitted",
+      version: 3,
+      status: "not_submitted",
       invoiceIds: ["inv-001"],
       selectedInvoiceIds: ["inv-001"],
       totalWithTax: "49.86",
@@ -625,7 +603,9 @@ describe("Input invoice usage workflow drawers", () => {
       invoiceRows: [],
       invoices: [],
       rejectedInvoices: [],
-      oaDetectionStatus: "manual_submitted",
+      oaDraftId: null,
+      oaDraftUrl: null,
+      canCreateDraft: true,
     }));
 
     render(
@@ -634,27 +614,65 @@ describe("Input invoice usage workflow drawers", () => {
         sourceFilters={[]}
         selectedInvoiceIds={["inv-001"]}
         loadPreview={loadPreview}
-        createBatch={createBatch}
-        createDraft={createDraft}
-        refreshStatus={refreshStatus}
+        createDraftFromSelection={createDraftFromSelection}
         manualStatus={manualStatus}
         onClose={() => undefined}
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "创建本地批次" }));
     await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
-    await user.click(await screen.findByRole("button", { name: "刷新 OA 状态" }));
+    const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
+    await user.click(within(confirmDialog).getByRole("button", { name: "未提交 OA" }));
 
-    const reasonInput = await screen.findByLabelText("人工处理原因");
-    await user.type(reasonInput, "OA投影暂未同步，财务已核验");
-    await user.click(screen.getByRole("button", { name: "标记已进入 OA" }));
-
-    await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("oa_reverse_batch_missing", expect.objectContaining({
-      expectedVersion: 3,
-      decision: "submitted",
-      reason: "OA投影暂未同步，财务已核验",
+    await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("oa_reverse_batch_not_submitted", expect.objectContaining({
+      expectedVersion: 2,
+      decision: "not_submitted",
     })));
+    expect(screen.queryByRole("dialog", { name: "OA 草稿提交确认" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建 OA 草稿" })).toBeEnabled();
+    expect(screen.queryByText("oa_reverse_batch_not_submitted")).not.toBeInTheDocument();
+  });
+
+  test("OA reverse submitted tab renders compact business history without internal identifiers", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const loadSubmittedHistory = vi.fn(() => Promise.resolve({
+      items: [{
+        batchId: "batch-hidden",
+        oaDraftId: "draft-hidden",
+        status: "submitted_confirmed",
+        targetApplicantName: "陈秀云",
+        submittedAt: "2026-06-10T10:30:00+08:00",
+        totalWithTax: "99.72",
+        invoiceCount: 2,
+        invoices: [
+          { invoiceNo: "SD-INV-001", invoiceDate: "2026-05-01", sellerName: "昆明供应商一", totalWithTax: "49.86" },
+          { invoiceNo: "SD-INV-002", invoiceDate: "2026-05-02", sellerName: "昆明供应商二", totalWithTax: "49.86" },
+        ],
+      }],
+    }));
+
+    render(
+      <OaReverseWorkspaceDrawer
+        open
+        sourceFilters={[]}
+        selectedInvoiceIds={["inv-001", "inv-002"]}
+        loadPreview={loadPreview}
+        loadSubmittedHistory={loadSubmittedHistory}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("tab", { name: "已提交" }));
+
+    expect(await screen.findByText("陈秀云")).toBeInTheDocument();
+    expect(screen.getByText("99.72")).toBeInTheDocument();
+    expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
+    expect(screen.getByText("昆明供应商二")).toBeInTheDocument();
+    expect(screen.queryByText("batch-hidden")).not.toBeInTheDocument();
+    expect(screen.queryByText("draft-hidden")).not.toBeInTheDocument();
+    expect(screen.queryByText("submitted_confirmed")).not.toBeInTheDocument();
+    expect(screen.queryByText("previewHash")).not.toBeInTheDocument();
   });
 
   test("payment status rules drawer loads Sheet4 rules as read-only content without editable controls or save state", async () => {
