@@ -41,6 +41,7 @@ OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS = {
 }
 MAX_AGGREGATED_OA_INVOICE_CANDIDATES = 160
 MAX_INVOICE_SUBSET_SUM_STATES = 20000
+MAX_OA_BANK_EXACT_SUM_BANK_ROWS = 6
 
 
 @dataclass(slots=True)
@@ -567,6 +568,8 @@ class WorkbenchCandidateGroupingService:
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if row_type_count <= 1:
             return False
+        if self._has_oa_bank_exact_sum_candidate_relation(group):
+            return True
         if len(group.oa_rows) > 1 or len(group.bank_rows) > 1:
             return False
         if not self._has_group_counterparty_evidence(group) or self._group_direction(group) is None:
@@ -591,6 +594,21 @@ class WorkbenchCandidateGroupingService:
                 return False
 
         return True
+
+    def _has_oa_bank_exact_sum_candidate_relation(self, group: CandidateGroup) -> bool:
+        if len(group.oa_rows) != 1 or not (2 <= len(group.bank_rows) <= MAX_OA_BANK_EXACT_SUM_BANK_ROWS):
+            return False
+        if group.invoice_rows:
+            return False
+        if not self._has_group_counterparty_evidence(group) or self._group_direction(group) is None:
+            return False
+        target_amount = self._amount(group.oa_rows[0])
+        if target_amount is None or target_amount <= ZERO:
+            return False
+        bank_amounts = [self._amount(row) for row in group.bank_rows]
+        if any(amount is None or amount <= ZERO for amount in bank_amounts):
+            return False
+        return sum((amount for amount in bank_amounts if amount is not None), ZERO) == target_amount
 
     def _has_group_counterparty_evidence(self, group: CandidateGroup) -> bool:
         if self._group_counterparty(group) is not None:

@@ -15,6 +15,12 @@
 - 消费后端 read model 或 active generation，不在前端重新拼底层事实。
 - 展示 freshness、refreshing、stale、job 等状态，不能把旧 read model 伪装为 fresh。
 
+## 自动候选规则
+
+- `oa_bank_exact_sum`：当 1 条 OA 与 2 到 6 条同方向银行流水均通过 OA-bank 业务证据，且银行流水按分精度合计金额唯一等于 OA 金额时，后端生成 OA-bank 候选；候选保持待发票状态，不因缺少发票进入完整三方闭环。
+- 该规则必须由后端 matching service/decision engine 产生，前端只消费 candidate、decision、read model 或 active generation 结果。
+- 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合时不自动选择。
+
 ## 核销关系
 
 核销关系是跨页面事实，至少需要记录：

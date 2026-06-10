@@ -88,6 +88,36 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             "bank_invoice_exact_amount",
         )
 
+    def test_legacy_mode_persists_oa_bank_exact_sum_candidate(self) -> None:
+        candidate_service = WorkbenchCandidateMatchService()
+        read_model_service = WorkbenchReadModelService()
+        read_model_service.upsert_read_model(scope_key="2026-05", payload={"cached": True})
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(
+                oa_rows={"2026-05": [oa_row("oa-split", amount="300.00")]},
+                bank_rows={
+                    "2026-05": [
+                        bank_row("bank-120", amount="120.00"),
+                        bank_row("bank-180", amount="180.00"),
+                    ]
+                },
+            ),
+            candidate_service=candidate_service,
+            read_model_service=read_model_service,
+            rules=WorkbenchMatchingRules(include_special_rules=False),
+        ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-oa-bank-sum")
+
+        candidates = candidate_service.list_candidates_by_month("2026-05")
+        exact_sum = next(candidate for candidate in candidates if candidate["rule_code"] == "oa_bank_exact_sum")
+        self.assertGreaterEqual(summary["candidate_count"], 1)
+        self.assertEqual(exact_sum["status"], "incomplete")
+        self.assertEqual(exact_sum["candidate_type"], "oa_bank")
+        self.assertEqual(exact_sum["oa_row_ids"], ["oa-split"])
+        self.assertCountEqual(exact_sum["bank_row_ids"], ["bank-120", "bank-180"])
+        self.assertEqual(exact_sum["amount"], "300.00")
+        self.assertIsNone(read_model_service.get_read_model("2026-05"))
+
     def test_manual_confirmed_relation_row_ids_are_excluded_from_automatic_candidates(self) -> None:
         pair_service = WorkbenchPairRelationService()
         pair_service.create_active_relation(
@@ -347,6 +377,41 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertCountEqual(decisions[0]["invoice_row_ids"], ["oa-att-inv-160", "oa-att-inv-447"])
         self.assertIn("oa-att-inv-160", decisions[0]["row_ids"])
 
+    def test_decision_store_mode_persists_oa_bank_exact_sum_decision(self) -> None:
+        decision_store = WorkbenchReconciliationDecisionStore()
+        candidate_service = WorkbenchCandidateMatchService()
+        read_model_service = WorkbenchReadModelService()
+        read_model_service.upsert_read_model(scope_key="2026-05", payload={"cached": True})
+
+        summary = self._orchestrator(
+            row_provider=FakeRowProvider(
+                oa_rows={"2026-05": [oa_row("oa-split", amount="300.00")]},
+                bank_rows={
+                    "2026-05": [
+                        bank_row("bank-120", amount="120.00", month="2026-05"),
+                        bank_row("bank-180", amount="180.00", month="2026-05"),
+                    ]
+                },
+            ),
+            candidate_service=candidate_service,
+            read_model_service=read_model_service,
+            decision_store=decision_store,
+            rules=StaticRules([]),
+        ).run(changed_scope_months=["2026-05"], reason="unit-test", request_id="req-decision-oa-bank-sum")
+
+        decisions = decision_store.list_decisions("2026-05")
+        self.assertEqual(candidate_service.list_candidates_by_month("2026-05"), [])
+        self.assertEqual(summary["decision_count"], 1)
+        self.assertEqual(summary["paired_decision_count"], 1)
+        self.assertEqual(decisions[0]["rule_code"], "oa_bank_exact_sum")
+        self.assertEqual(decisions[0]["match_shape"], "oa_bank")
+        self.assertEqual(decisions[0]["row_ids"], ["oa-split", "bank-120", "bank-180"])
+        self.assertEqual(decisions[0]["oa_row_ids"], ["oa-split"])
+        self.assertEqual(decisions[0]["bank_row_ids"], ["bank-120", "bank-180"])
+        self.assertTrue(decisions[0]["payment_amount_closed"])
+        self.assertIsNone(decisions[0]["invoice_amount_closed"])
+        self.assertIsNone(read_model_service.get_read_model("2026-05"))
+
     def _orchestrator(
         self,
         *,
@@ -514,24 +579,24 @@ def row(row_id: str) -> dict[str, object]:
     return {"id": row_id}
 
 
-def oa_row(row_id: str, *, month: str = "2026-05") -> dict[str, object]:
+def oa_row(row_id: str, *, month: str = "2026-05", amount: str = "100.00") -> dict[str, object]:
     return {
         "id": row_id,
         "type": "oa",
         "month": month,
-        "amount": "100.00",
+        "amount": amount,
         "applicant": "张三",
         "project_name": "项目A",
         "reason": "支付供应商",
     }
 
 
-def bank_row(row_id: str, *, month: str = "2026-06") -> dict[str, object]:
+def bank_row(row_id: str, *, month: str = "2026-06", amount: str = "100.00") -> dict[str, object]:
     return {
         "id": row_id,
         "type": "bank",
         "month": month,
-        "debit_amount": "100.00",
+        "debit_amount": amount,
         "credit_amount": "",
         "counterparty_name": "供应商",
         "summary": "支付供应商",

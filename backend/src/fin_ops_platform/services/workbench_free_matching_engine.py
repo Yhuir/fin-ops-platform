@@ -420,8 +420,137 @@ class WorkbenchFreeMatchingEngine:
                     )
                 )
                 claimed.update((left.row_id, right.row_id))
+            if match_shape == "oa_bank":
+                decisions.extend(
+                    self._oa_bank_exact_sum_decisions(
+                        oa_rows,
+                        bank_rows,
+                        window,
+                        source_versions,
+                        claimed,
+                    )
+                )
         decisions.extend(self._bank_invoice_decisions(scope_month, bank_rows, invoice_rows, window, source_versions, claimed))
         return decisions
+
+    def _oa_bank_exact_sum_decisions(
+        self,
+        oa_rows: list[_Row],
+        bank_rows: list[_Row],
+        window: tuple[str, ...],
+        source_versions: dict[str, Any],
+        claimed_row_ids: set[str],
+    ) -> list[WorkbenchDecision]:
+        proposals: list[tuple[_Row, tuple[_Row, ...]]] = []
+        for oa in sorted(oa_rows, key=lambda row: row.row_id):
+            if oa.row_id in claimed_row_ids or oa.amount <= Decimal("0.00"):
+                continue
+            eligible_banks = [
+                bank
+                for bank in sorted(bank_rows, key=lambda row: row.row_id)
+                if bank.row_id not in claimed_row_ids
+                and bank.direction == oa.direction
+                and Decimal("0.00") < bank.amount <= oa.amount
+                and self._has_pair_evidence(oa, bank, "oa_bank")
+            ]
+            bank_groups = [
+                tuple(sorted(group, key=lambda row: row.row_id))
+                for group in self._subset_groups_by_amount(
+                    eligible_banks,
+                    target_amount=oa.amount,
+                    max_size=MAX_PAYMENT_PAIR_COMBINATION_SIZE,
+                    amount_getter=lambda bank: bank.amount,
+                )
+                if len(group) >= 2
+            ]
+            if len(bank_groups) == 1:
+                proposals.append((oa, bank_groups[0]))
+
+        if not proposals:
+            return []
+
+        oa_counts: dict[str, int] = {}
+        bank_counts: dict[str, int] = {}
+        for oa, banks in proposals:
+            oa_counts[oa.row_id] = oa_counts.get(oa.row_id, 0) + 1
+            for bank in banks:
+                bank_counts[bank.row_id] = bank_counts.get(bank.row_id, 0) + 1
+
+        decisions: list[WorkbenchDecision] = []
+        for oa, banks in sorted(proposals, key=lambda item: (item[0].row_id, tuple(bank.row_id for bank in item[1]))):
+            row_ids = (oa.row_id, *(bank.row_id for bank in banks))
+            if any(row_id in claimed_row_ids for row_id in row_ids):
+                continue
+            if oa_counts.get(oa.row_id, 0) != 1:
+                continue
+            if any(bank_counts.get(bank.row_id, 0) != 1 for bank in banks):
+                continue
+            decisions.append(
+                self._paired_oa_bank_exact_sum_decision(
+                    oa=oa,
+                    banks=banks,
+                    window=window,
+                    source_versions=source_versions,
+                )
+            )
+            claimed_row_ids.update(row_ids)
+        return decisions
+
+    def _paired_oa_bank_exact_sum_decision(
+        self,
+        *,
+        oa: _Row,
+        banks: tuple[_Row, ...],
+        window: tuple[str, ...],
+        source_versions: dict[str, Any],
+    ) -> WorkbenchDecision:
+        row_ids = (oa.row_id, *(bank.row_id for bank in banks))
+        first_bank = banks[0]
+        resolved_scope_month = resolve_decision_scope_month(
+            has_bank=True,
+            bank_trade_month=first_bank.month,
+            has_oa=True,
+            oa_month=oa.month,
+        )
+        bank_total = sum((bank.amount for bank in banks), Decimal("0.00"))
+        return WorkbenchDecision(
+            decision_id=self._decision_key(resolved_scope_month, "oa_bank_exact_sum", row_ids),
+            decision_key=self._decision_key(resolved_scope_month, "oa_bank_exact_sum", row_ids),
+            scope_month=resolved_scope_month,
+            display_state=DISPLAY_STATE_PAIRED,
+            decision_status=DECISION_STATUS_PAIRED,
+            match_domain=MATCH_DOMAIN_FREE,
+            match_shape="oa_bank",
+            rule_code="oa_bank_exact_sum",
+            rule_version=RULE_VERSION,
+            row_ids=row_ids,
+            oa_row_ids=(oa.row_id,),
+            bank_row_ids=tuple(bank.row_id for bank in banks),
+            invoice_row_ids=(),
+            amount=bank_total,
+            direction=first_bank.direction,
+            payment_amount_closed=True,
+            invoice_amount_closed=None,
+            warnings=(),
+            evidence={
+                "scope_window": list(window),
+                "uniqueness_scope": "five_month_window",
+                "amount_relation": "bank_sum_exact_amount",
+                "target_amount": str(oa.amount),
+                "bank_total": str(bank_total),
+                "bank_count": len(banks),
+                "oa_bank_text_matches": [
+                    {
+                        "bank_row_id": bank.row_id,
+                        "matches": matching_tokens(self._tokens(oa), self._tokens(bank)),
+                    }
+                    for bank in banks
+                ],
+            },
+            blockers=(),
+            explanation="OA amount equals the unique sum of multiple bank transactions in the five-month window.",
+            source_versions=source_versions,
+        )
 
     def _bank_invoice_decisions(
         self,

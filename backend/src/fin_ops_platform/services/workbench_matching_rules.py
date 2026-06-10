@@ -77,7 +77,21 @@ class WorkbenchMatchingRules:
         ]
 
         candidates: list[dict[str, Any]] = []
-        candidates.extend(self._oa_bank_exact_amount(scope_month, oa, bank, resolved_versions))
+        oa_bank_exact_candidates = self._oa_bank_exact_amount(scope_month, oa, bank, resolved_versions)
+        candidates.extend(oa_bank_exact_candidates)
+        candidates.extend(
+            self._oa_bank_exact_sum(
+                scope_month,
+                oa,
+                bank,
+                resolved_versions,
+                preclaimed_oa_row_ids={
+                    row_id
+                    for candidate in oa_bank_exact_candidates
+                    for row_id in candidate["oa_row_ids"]
+                },
+            )
+        )
         candidates.extend(self._oa_attachment_invoice_source_link(scope_month, oa, bank, invoices, resolved_versions))
         candidates.extend(self._oa_multi_invoice_exact_sum(scope_month, oa, invoices, resolved_versions))
         candidates.extend(self._oa_bank_multi_invoice_exact_sum(scope_month, oa, bank, invoices, resolved_versions))
@@ -164,6 +178,122 @@ class WorkbenchMatchingRules:
                             "strong": pair["evidence"]["strong"],
                             "medium": pair["evidence"]["medium"],
                             "negative": pair["evidence"]["negative"],
+                        }
+                    },
+                )
+            )
+        return candidates
+
+    def _oa_bank_exact_sum(
+        self,
+        scope_month: str,
+        oa_rows: list[dict[str, Any]],
+        bank_rows: list[dict[str, Any]],
+        source_versions: dict[str, Any],
+        *,
+        preclaimed_oa_row_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        claimed_oa_ids = set(preclaimed_oa_row_ids or set())
+        proposals: list[dict[str, Any]] = []
+        for oa_row in sorted(oa_rows, key=self._row_id):
+            oa_id = self._row_id(oa_row)
+            if oa_id in claimed_oa_ids:
+                continue
+            target = self._amount(oa_row)
+            if target is None or target <= ZERO:
+                continue
+
+            evidence_by_bank_id: dict[str, dict[str, Any]] = {}
+            eligible_banks: list[dict[str, Any]] = []
+            for bank_row in sorted(bank_rows, key=self._row_id):
+                if self._direction(oa_row) != self._direction(bank_row):
+                    continue
+                bank_amount = self._amount(bank_row)
+                if bank_amount is None or bank_amount <= ZERO or bank_amount > target:
+                    continue
+                evidence = self._oa_bank_evidence(oa_row, bank_row)
+                if not evidence["eligible"]:
+                    continue
+                eligible_banks.append(bank_row)
+                evidence_by_bank_id[self._row_id(bank_row)] = evidence
+
+            match = self._find_unique_sum_match(
+                eligible_banks,
+                target,
+                scope_month=scope_month,
+                rule_code="oa_bank_exact_sum",
+            )
+            if not match:
+                continue
+            bank_total = self._sum_amounts(match)
+            if bank_total != target:
+                continue
+            proposals.append(
+                {
+                    "oa_row": oa_row,
+                    "bank_rows": match,
+                    "target": target,
+                    "bank_total": bank_total,
+                    "evidence_by_bank_id": evidence_by_bank_id,
+                }
+            )
+
+        if not proposals:
+            return []
+
+        oa_counts: dict[str, int] = defaultdict(int)
+        bank_counts: dict[str, int] = defaultdict(int)
+        for proposal in proposals:
+            oa_counts[self._row_id(proposal["oa_row"])] += 1
+            for bank_row in proposal["bank_rows"]:
+                bank_counts[self._row_id(bank_row)] += 1
+
+        candidates: list[dict[str, Any]] = []
+        for proposal in sorted(
+            proposals,
+            key=lambda item: (
+                self._row_id(item["oa_row"]),
+                tuple(self._row_id(bank_row) for bank_row in item["bank_rows"]),
+            ),
+        ):
+            oa_row = proposal["oa_row"]
+            match = proposal["bank_rows"]
+            if oa_counts[self._row_id(oa_row)] != 1:
+                continue
+            if any(bank_counts[self._row_id(bank_row)] != 1 for bank_row in match):
+                continue
+            target = proposal["target"]
+            bank_total = proposal["bank_total"]
+            evidence_by_bank_id = proposal["evidence_by_bank_id"]
+            candidates.append(
+                self._candidate(
+                    scope_month,
+                    rule_code="oa_bank_exact_sum",
+                    rows=[oa_row, *match],
+                    status="incomplete",
+                    confidence="medium",
+                    amount=target,
+                    explanation=(
+                        "OA amount equals the exact sum of multiple credible bank transactions; "
+                        "invoice evidence is missing."
+                    ),
+                    source_versions=source_versions,
+                    special_metadata={
+                        "evidence": {
+                            "target_amount": self._format_amount(target),
+                            "bank_total": self._format_amount(bank_total),
+                            "bank_count": len(match),
+                            "banks": [
+                                {
+                                    "row_id": self._row_id(bank_row),
+                                    "amount": self._format_amount(self._amount(bank_row) or ZERO),
+                                    "score": evidence_by_bank_id[self._row_id(bank_row)]["score"],
+                                    "strong": evidence_by_bank_id[self._row_id(bank_row)]["strong"],
+                                    "medium": evidence_by_bank_id[self._row_id(bank_row)]["medium"],
+                                    "negative": evidence_by_bank_id[self._row_id(bank_row)]["negative"],
+                                }
+                                for bank_row in match
+                            ],
                         }
                     },
                 )

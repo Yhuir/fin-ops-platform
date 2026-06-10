@@ -125,6 +125,117 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
         self.assertEqual(candidate["confidence"], "medium")
         self.assertEqual(candidate["special_metadata"]["evidence"]["strong"], ["counterparty_match"])
 
+    def test_oa_one_to_many_bank_exact_sum_generates_incomplete_candidate(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-04",
+            oa_rows=[
+                oa_row(
+                    "oa-dali-prepay",
+                    "88050.00",
+                    counterparty_name="云南辰飞机电工程有限公司",
+                    applicant_name="樊相芳",
+                    project_name="大理卷烟厂余热综合利用项目",
+                    reason="申请支付大理烟厂余热回收项目空气源热泵15%预付款（88050元）",
+                    pay_receive_time="2026-04-23",
+                )
+            ],
+            bank_rows=[
+                bank_row(
+                    "bank-jh-64996",
+                    "64996.69",
+                    counterparty_name="云南辰飞机电工程有限公司",
+                    summary="货款",
+                    trade_time="2026-04-23 15:28:56",
+                ),
+                bank_row(
+                    "bank-gd-23053",
+                    "23053.31",
+                    counterparty_name="云南辰飞机电工程有限公司",
+                    summary="",
+                    trade_time="2026-04-23 11:18:17",
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        candidate = find_candidate(candidates, "oa_bank_exact_sum")
+        self.assertEqual(candidate["status"], "incomplete")
+        self.assertEqual(candidate["confidence"], "medium")
+        self.assertEqual(candidate["candidate_type"], "oa_bank")
+        self.assertEqual(candidate["amount"], "88050.00")
+        self.assertEqual(candidate["oa_row_ids"], ["oa-dali-prepay"])
+        self.assertCountEqual(candidate["bank_row_ids"], ["bank-jh-64996", "bank-gd-23053"])
+        self.assertEqual(candidate["invoice_row_ids"], [])
+        self.assertEqual(candidate["special_metadata"]["evidence"]["target_amount"], "88050.00")
+        self.assertEqual(candidate["special_metadata"]["evidence"]["bank_total"], "88050.00")
+        self.assertEqual(candidate["special_metadata"]["evidence"]["bank_count"], 2)
+
+    def test_oa_bank_exact_sum_requires_unique_combination(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-04",
+            oa_rows=[oa_row("oa-ambiguous-sum", "300.00", counterparty_name="供应商A")],
+            bank_rows=[
+                bank_row("bank-100", "100.00", counterparty_name="供应商A"),
+                bank_row("bank-200", "200.00", counterparty_name="供应商A"),
+                bank_row("bank-150-a", "150.00", counterparty_name="供应商A"),
+                bank_row("bank-150-b", "150.00", counterparty_name="供应商A"),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertIsNone(find_optional_candidate(candidates, "oa_bank_exact_sum"))
+
+    def test_oa_bank_exact_sum_does_not_claim_same_bank_group_for_multiple_oas(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-04",
+            oa_rows=[
+                oa_row("oa-competing-a", "300.00", counterparty_name="供应商A"),
+                oa_row("oa-competing-b", "300.00", counterparty_name="供应商A"),
+            ],
+            bank_rows=[
+                bank_row("bank-120", "120.00", counterparty_name="供应商A"),
+                bank_row("bank-180", "180.00", counterparty_name="供应商A"),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertIsNone(find_optional_candidate(candidates, "oa_bank_exact_sum"))
+
+    def test_oa_bank_exact_sum_requires_every_bank_to_have_oa_bank_evidence(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-04",
+            oa_rows=[oa_row("oa-evidence-sum", "300.00", counterparty_name="供应商A")],
+            bank_rows=[
+                bank_row("bank-evidence-ok", "120.00", counterparty_name="供应商A"),
+                bank_row(
+                    "bank-evidence-missing",
+                    "180.00",
+                    counterparty_name="无关公司",
+                    summary="完全无关",
+                    remark="无业务线索",
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertIsNone(find_optional_candidate(candidates, "oa_bank_exact_sum"))
+
+    def test_oa_bank_exact_amount_takes_priority_over_bank_sum(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-04",
+            oa_rows=[oa_row("oa-exact-priority", "300.00", counterparty_name="供应商A")],
+            bank_rows=[
+                bank_row("bank-exact", "300.00", counterparty_name="供应商A"),
+                bank_row("bank-split-120", "120.00", counterparty_name="供应商A"),
+                bank_row("bank-split-180", "180.00", counterparty_name="供应商A"),
+            ],
+            invoice_rows=[],
+        )
+
+        exact_candidate = find_candidate_by_rows(candidates, "oa_bank_exact_amount", ["oa-exact-priority", "bank-exact"])
+        self.assertIsNotNone(exact_candidate)
+        self.assertIsNone(find_optional_candidate(candidates, "oa_bank_exact_sum"))
+
     def test_oa_bank_exact_amount_does_not_randomly_choose_when_one_oa_has_tied_banks(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-01",

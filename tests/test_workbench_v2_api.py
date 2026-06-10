@@ -1426,6 +1426,91 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(open_group["bank_rows"][0]["case_id"], oa_bank_candidate["candidate_key"])
         self.assertEqual(open_group["oa_rows"][0]["oa_bank_relation"]["code"], "candidate_incomplete")
 
+    def test_get_api_workbench_keeps_oa_bank_exact_sum_candidate_in_one_open_group(self) -> None:
+        app = build_application()
+        candidate = app._workbench_candidate_match_service.upsert_candidate(
+            {
+                "scope_month": "2026-04",
+                "candidate_type": "oa_bank",
+                "status": "incomplete",
+                "confidence": "medium",
+                "rule_code": "oa_bank_exact_sum",
+                "row_ids": ["oa-dali-prepay", "bank-gd-23053", "bank-jh-64996"],
+                "oa_row_ids": ["oa-dali-prepay"],
+                "bank_row_ids": ["bank-gd-23053", "bank-jh-64996"],
+                "invoice_row_ids": [],
+                "amount": "88050.00",
+                "amount_delta": "0.00",
+                "explanation": "OA amount equals the exact sum of multiple credible bank transactions; invoice evidence is missing.",
+                "conflict_candidate_keys": [],
+                "generated_at": "2026-05-07T00:00:00+00:00",
+                "source_versions": {},
+            }
+        )
+        raw_payload = {
+            "month": "2026-04",
+            "oa_status": {"code": "ready", "message": "OA 已同步"},
+            "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 0, "paired_count": 0, "open_count": 3, "exception_count": 0},
+            "paired": {"oa": [], "bank": [], "invoice": []},
+            "open": {
+                "oa": [
+                    {
+                        "id": "oa-dali-prepay",
+                        "type": "oa",
+                        "case_id": None,
+                        "apply_type": "付款申请",
+                        "amount": "88050.00",
+                        "counterparty_name": "云南辰飞机电工程有限公司",
+                        "direction": "payment",
+                        "oa_bank_relation": {"code": "pending_match", "label": "待找流水与发票", "tone": "warn"},
+                    }
+                ],
+                "bank": [
+                    {
+                        "id": "bank-jh-64996",
+                        "type": "bank",
+                        "case_id": None,
+                        "debit_amount": "64996.69",
+                        "credit_amount": "",
+                        "counterparty_name": "云南辰飞机电工程有限公司",
+                        "direction": "payment",
+                        "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                    },
+                    {
+                        "id": "bank-gd-23053",
+                        "type": "bank",
+                        "case_id": None,
+                        "debit_amount": "23053.31",
+                        "credit_amount": "",
+                        "counterparty_name": "云南辰飞机电工程有限公司",
+                        "direction": "payment",
+                        "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
+                    },
+                ],
+                "invoice": [],
+            },
+        }
+
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            payload = app._build_api_workbench_payload("2026-04")
+
+        self.assertEqual(payload["paired"]["groups"], [])
+        self.assertEqual(len(payload["open"]["groups"]), 1)
+        open_group = payload["open"]["groups"][0]
+        self.assertEqual(open_group["group_type"], "candidate")
+        self.assertEqual(open_group["group_id"], f"case:{candidate['candidate_key']}")
+        self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-dali-prepay"])
+        self.assertCountEqual(
+            [row["id"] for row in open_group["bank_rows"]],
+            ["bank-jh-64996", "bank-gd-23053"],
+        )
+        self.assertEqual(open_group["invoice_rows"], [])
+        self.assertEqual(open_group["oa_rows"][0]["oa_bank_relation"]["code"], "candidate_incomplete")
+        self.assertEqual(
+            {row["invoice_relation"]["code"] for row in open_group["bank_rows"]},
+            {"candidate_incomplete"},
+        )
+
     def test_oa_bank_candidate_attaches_to_existing_oa_attachment_case_group(self) -> None:
         app = build_application()
         app._workbench_candidate_match_service.upsert_candidate(

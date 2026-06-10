@@ -1788,18 +1788,12 @@ class PostgresReadModelRepository:
                     f"select scope_key, source_versions, cache_status from {scope_table_name} where scope_key = 'all' limit 1"
                 )
                 return dict(row) if isinstance(row, dict) else None
-            source_versions: dict[str, Any] | None = None
             for row in rows:
                 if not isinstance(row, dict):
                     continue
                 if text(row.get("cache_status")) not in {"", "fresh"}:
                     return {"scope_key": "all", "source_versions": {}}
-                row_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-                if source_versions is None:
-                    source_versions = dict(row_versions)
-                elif row_versions != source_versions:
-                    return {"scope_key": "all", "source_versions": {}}
-            return {"scope_key": "all", "source_versions": source_versions or {}}
+            return {"scope_key": "all", "source_versions": self._common_source_versions(rows)}
         row = self._connection.fetch_one(
             f"select scope_key, source_versions from {scope_table_name} where scope_key = %s limit 1",
             (scope_key,),
@@ -1824,6 +1818,21 @@ class PostgresReadModelRepository:
         if dirty_row is None:
             return "fresh"
         return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+
+    @staticmethod
+    def _common_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        common_versions: dict[str, Any] | None = None
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
+            if common_versions is None:
+                common_versions = deepcopy(row_versions)
+                continue
+            for key in list(common_versions):
+                if row_versions.get(key) != common_versions[key]:
+                    common_versions.pop(key, None)
+        return common_versions or {}
 
     def list_pending_invoice_rows(
         self,

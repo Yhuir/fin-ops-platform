@@ -560,6 +560,128 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertTrue(decision.payment_amount_closed)
         self.assertIsNone(decision.invoice_amount_closed)
 
+    def test_single_oa_multiple_bank_transactions_exact_sum_is_paired(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-04",
+            [
+                {
+                    "row_id": "oa-dali-prepay",
+                    "amount": "88050.00",
+                    "direction": "expenditure",
+                    "month": "2026-04",
+                    "applicant": "樊相芳",
+                    "project_name": "大理卷烟厂余热综合利用项目",
+                    "reason": "申请支付大理烟厂余热回收项目空气源热泵15%预付款（88050元）",
+                    "counterparty_name": "云南辰飞机电工程有限公司",
+                }
+            ],
+            [
+                bank(
+                    "bk-jh-64996",
+                    "64996.69",
+                    month="2026-04",
+                    counterparty="云南辰飞机电工程有限公司",
+                ),
+                bank(
+                    "bk-gd-23053",
+                    "23053.31",
+                    month="2026-04",
+                    counterparty="云南辰飞机电工程有限公司",
+                ),
+            ],
+            [],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        decision = decisions[0]
+        self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+        self.assertEqual(decision.decision_status, DECISION_STATUS_PAIRED)
+        self.assertEqual(decision.match_shape, "oa_bank")
+        self.assertEqual(decision.rule_code, "oa_bank_exact_sum")
+        self.assertEqual(decision.row_ids, ("oa-dali-prepay", "bk-gd-23053", "bk-jh-64996"))
+        self.assertEqual(decision.oa_row_ids, ("oa-dali-prepay",))
+        self.assertEqual(decision.bank_row_ids, ("bk-gd-23053", "bk-jh-64996"))
+        self.assertTrue(decision.payment_amount_closed)
+        self.assertIsNone(decision.invoice_amount_closed)
+        self.assertEqual(decision.evidence["amount_relation"], "bank_sum_exact_amount")
+        self.assertEqual(decision.evidence["bank_count"], 2)
+
+    def test_single_oa_multiple_bank_transactions_ambiguous_sum_does_not_auto_pair(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-04",
+            [oa("oa-ambiguous-sum", "300.00", month="2026-04", reason="星河项目 供应商A")],
+            [
+                bank("bk-100", "100.00", month="2026-04", counterparty="供应商A"),
+                bank("bk-200", "200.00", month="2026-04", counterparty="供应商A"),
+                bank("bk-150-a", "150.00", month="2026-04", counterparty="供应商A"),
+                bank("bk-150-b", "150.00", month="2026-04", counterparty="供应商A"),
+            ],
+            [],
+        )
+
+        self.assertFalse(any(decision.rule_code == "oa_bank_exact_sum" for decision in decisions))
+        self.assertFalse(
+            any(
+                decision.match_shape == "oa_bank"
+                and decision.display_state == DISPLAY_STATE_PAIRED
+                for decision in decisions
+            )
+        )
+
+    def test_single_oa_multiple_bank_transactions_shared_by_multiple_oas_does_not_auto_pair(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-04",
+            [
+                oa("oa-competing-a", "300.00", month="2026-04", reason="星河项目 供应商A"),
+                oa("oa-competing-b", "300.00", month="2026-04", reason="星河项目 供应商A"),
+            ],
+            [
+                bank("bk-120", "120.00", month="2026-04", counterparty="供应商A"),
+                bank("bk-180", "180.00", month="2026-04", counterparty="供应商A"),
+            ],
+            [],
+        )
+
+        self.assertFalse(any(decision.rule_code == "oa_bank_exact_sum" for decision in decisions))
+
+    def test_single_oa_multiple_bank_transactions_require_each_bank_evidence(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-04",
+            [oa("oa-evidence-sum", "300.00", month="2026-04", reason="星河项目 供应商A")],
+            [
+                bank("bk-evidence-ok", "120.00", month="2026-04", counterparty="供应商A"),
+                {
+                    "row_id": "bk-evidence-missing",
+                    "amount": "180.00",
+                    "direction": "expenditure",
+                    "trade_month": "2026-04",
+                    "counterparty": "无关公司",
+                    "summary": "完全无关",
+                    "remark": "无业务线索",
+                },
+            ],
+            [],
+        )
+
+        self.assertFalse(any(decision.rule_code == "oa_bank_exact_sum" for decision in decisions))
+
+    def test_single_oa_bank_exact_amount_takes_priority_over_bank_sum(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-04",
+            [oa("oa-exact-priority", "300.00", month="2026-04", reason="星河项目 供应商A")],
+            [
+                bank("bk-exact", "300.00", month="2026-04", counterparty="供应商A"),
+                bank("bk-split-120", "120.00", month="2026-04", counterparty="供应商A"),
+                bank("bk-split-180", "180.00", month="2026-04", counterparty="供应商A"),
+            ],
+            [],
+        )
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0].rule_code, "oa_bank_exact_amount")
+        self.assertEqual(decisions[0].row_ids, ("oa-exact-priority", "bk-exact"))
+        self.assertFalse(any(decision.rule_code == "oa_bank_exact_sum" for decision in decisions))
+
     def test_generate_decisions_does_not_mutate_input_rows(self) -> None:
         oa_rows = [oa("oa-1", "1200.00")]
         bank_rows = [bank("bk-1", "1200.00")]
