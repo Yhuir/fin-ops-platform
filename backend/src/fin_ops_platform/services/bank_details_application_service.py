@@ -22,6 +22,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryValidationError,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -883,34 +884,28 @@ class BankDetailsApplicationService:
 
     def _enqueue_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
         queue_repository = getattr(self._runtime_repositories, "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueued = False
-        for scope_key in [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]:
+        target_scope_keys = [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]
+        for scope_key in target_scope_keys:
             self._delete_redis_cache(scope_key)
-            enqueue(scope_type="bank_detail", scope_key=scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(refresh_gateway.enqueue_many("bank_detail", target_scope_keys, reason=reason))
 
     def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
         enqueue = self._enqueue_turnover_ledger_refresh
         if callable(enqueue):
             return bool(enqueue(scope_keys, reason=reason))
         queue_repository = getattr(self._runtime_repositories, "queue_repository", None)
-        queue_enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(queue_enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
+        if not refresh_gateway.can_enqueue():
             return False
         normalized_scope_keys = [
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
             if str(scope_key).strip()
         ] or ["all"]
-        enqueued = False
-        for scope_key in sorted(dict.fromkeys(normalized_scope_keys)):
-            queue_enqueue(scope_type="turnover_ledger", scope_key=scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(refresh_gateway.enqueue_many("turnover_ledger", sorted(dict.fromkeys(normalized_scope_keys)), reason=reason))
 
     def _redis_cache_key(self, kind: str, query: dict[str, object], *, scope_summary: dict[str, object]) -> str:
         signature = {

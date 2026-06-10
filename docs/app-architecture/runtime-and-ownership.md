@@ -58,7 +58,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 2. `AppSettingsService.update_pending_invoice_rule_groups(...)` 校验当前 direction 的规则 `version`、归一化分组、递增对应规则版本并写审计。
 3. 保存事件返回 `event_type=pending_invoice_rules_changed`、`direction`、`old_version`、`new_version`、`affected_groups` 和 `actor_id`。
 4. API finalizer 只清必要内存 cache，并把 `pending_invoice_rules_changed` 交给 `DerivedDataLifecycleService`。
-5. lifecycle executor 通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或 workbench dirty queue 入队相关 read model refresh；API server 不同步重建发票生命周期、待找发票、成本、税金、OA 或关联台 read model。
+5. lifecycle executor 通过 `ReadModelRefreshGateway` 或 workbench dirty queue 入队相关 read model refresh；API server 不同步重建发票生命周期、待找发票、成本、税金、OA 或关联台 read model。
 
 该事件的影响域必须保持低耦合：刷新 `invoice_lifecycle`、`pending_invoice`、workbench、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和 search；不刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。App Health 只根据这些 read model 的 readiness/dirty/outbox/worker 事实判定页面 busy 或 blocked，不能因为规则版本变化把无关页面标红。
 
@@ -67,7 +67,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 成本统计的 `all` scope 是真实物化视图，不是只负责 fan-out 的队列父 scope：
 
 1. `active:YYYY-MM` / `all:YYYY-MM` 月份 shard 由 `CostStatisticsSqlProjectionBuilder` 基于对应工作台月份 read model 重建。
-2. `CostStatisticsReadModelRefreshService` 收到 `active:all` 或 `all:all` 时，先检查所需月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 入队，父 scope 返回 `readiness_status=refreshing`，不写假 fresh。
+2. `CostStatisticsReadModelRefreshService` 收到 `active:all` 或 `all:all` 时，先检查所需月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `ReadModelRefreshGateway` 入队，父 scope 返回 `readiness_status=refreshing`，不写假 fresh。
 3. 所有所需月份 shard fresh 后，`active:all` / `all:all` 从 `read_model.cost_statistics_rows` 的月份 rows 聚合生成，并原子发布到 `read_model.cost_statistics_read_models` snapshot；父 scope 不写 `read_model.cost_statistics_rows`，也不再读取 `read_model.workbench_groups.scope_key='all'` 的全量 JSON payload。
 4. 月份 shard 发布成功后重新入队同 project scope 的父 scope，使全期间视图最终收敛。
 5. `ReadModelReadinessReporter` 对 fan-out-only 事件继续不写 `fresh`；父 scope 等待 shard 时记录 `refreshing`，只有事件已经完成父 scope rebuild 且带有显式 `readiness_status=fresh` 时，才记录父 scope fresh readiness。
@@ -76,7 +76,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 ## Worker 与队列
 
 - durable truth：PostgreSQL 的 `job.outbox_events` 与 `job.read_model_dirty_scopes`。
-- queue API：`RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer。
+- queue API：producer 先通过 `ReadModelRefreshGateway` / scope policy registry 归一化、校验和去重 read model scope，再委托 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer 写入 durable queue。
 - worker registry：`runtime_worker_registry.py` 定义 worker 名称、scope、manifest、health 可见性。
 - RabbitMQ 只能作为可选 wakeup/transport，不能成为 read model 状态事实源。
 - Redis 只能缓存通过 fresh gate 后的 payload，不能缓存或伪造 freshness。

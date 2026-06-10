@@ -24,6 +24,7 @@ from fin_ops_platform.services.invoice_usage_collection_sql_projection import ( 
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings  # noqa: E402
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository  # noqa: E402
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway  # noqa: E402
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
 
 
@@ -191,12 +192,13 @@ def enqueue_fact_scopes(
     invoice_expand_all: bool = False,
 ) -> dict[str, Any]:
     queue = RuntimeQueueRepository(connection)
+    refresh_gateway = ReadModelRefreshGateway(queue_repository=queue)
     months = fact_months(connection)
     enqueued: list[dict[str, str]] = []
     for month in months:
         for scope_type in ("workbench", "search", "bank_detail", "tax_offset"):
             _enqueue_read_model_refresh(
-                queue,
+                refresh_gateway,
                 enqueued,
                 scope_type=scope_type,
                 scope_key=month,
@@ -208,7 +210,7 @@ def enqueue_fact_scopes(
         for project_scope in ("active", "all"):
             scope_key = f"{project_scope}:{month}"
             _enqueue_read_model_refresh(
-                queue,
+                refresh_gateway,
                 enqueued,
                 scope_type="cost_statistics",
                 scope_key=scope_key,
@@ -219,7 +221,7 @@ def enqueue_fact_scopes(
             )
     for scope_key in PENDING_INVOICE_SCOPES:
         _enqueue_read_model_refresh(
-            queue,
+            refresh_gateway,
             enqueued,
             scope_type="pending_invoice",
             scope_key=scope_key,
@@ -229,7 +231,7 @@ def enqueue_fact_scopes(
             trace_id=trace_id,
         )
     _enqueue_read_model_refresh(
-        queue,
+        refresh_gateway,
         enqueued,
         scope_type="workbench",
         scope_key="all",
@@ -285,7 +287,7 @@ def enqueue_invoice_usage_collection_scopes(
 
 
 def _enqueue_read_model_refresh(
-    queue: RuntimeQueueRepository,
+    refresh_gateway: ReadModelRefreshGateway,
     enqueued: list[dict[str, str]],
     *,
     scope_type: str,
@@ -295,15 +297,16 @@ def _enqueue_read_model_refresh(
     priority: str,
     trace_id: str | None,
 ) -> None:
-    if not dry_run:
-        queue.enqueue_read_model_refresh(
-            scope_type=scope_type,
-            scope_key=scope_key,
-            reason=reason,
-            priority=priority,
-            trace_id=trace_id,
-        )
-    enqueued.append({"scope_type": scope_type, "scope_key": scope_key})
+    gateway = ReadModelRefreshGateway(queue_repository=None) if dry_run else refresh_gateway
+    normalized_scope_keys = gateway.enqueue_many(
+        scope_type,
+        [scope_key],
+        reason=reason,
+        priority=priority,
+        trace_id=trace_id,
+    )
+    for normalized_scope_key in normalized_scope_keys:
+        enqueued.append({"scope_type": scope_type, "scope_key": normalized_scope_key})
 
 
 def fact_months(connection: PostgresConnection) -> list[str]:

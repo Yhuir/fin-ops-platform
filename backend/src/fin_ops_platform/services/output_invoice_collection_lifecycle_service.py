@@ -12,6 +12,7 @@ from fin_ops_platform.services.output_invoice_collection_models import (
 )
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 from fin_ops_platform.services.output_invoice_collection_status_service import OutputInvoiceCollectionStatusOverlayService
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 RowProvider = Callable[[str], dict[str, Any] | None]
@@ -524,17 +525,15 @@ class OutputInvoiceCollectionLifecycleService:
         return row
 
     def _enqueue(self, row: dict[str, Any], *, reason: str, trace_id: str | None = None) -> None:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return
-        kwargs = {
-            "scope_type": "output_invoice_collection",
-            "scope_key": output_invoice_collection_scope_key(row),
-            "reason": reason,
-        }
-        if trace_id:
-            kwargs["trace_id"] = trace_id
-        enqueue(**kwargs)
+        refresh_gateway.enqueue_one(
+            "output_invoice_collection",
+            output_invoice_collection_scope_key(row),
+            reason=reason,
+            trace_id=trace_id,
+        )
 
     def _run_mutation(
         self,

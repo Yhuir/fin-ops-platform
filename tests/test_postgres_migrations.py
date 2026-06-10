@@ -75,6 +75,9 @@ EXPECTED_MIGRATIONS = [
     "0060_oa_pending_payment_bank_filters.sql",
     "0061_output_invoice_collection_bank_filters.sql",
     "0062_workbench_relation_etc_external_batch_idx.sql",
+    "0063_etc_remove_oa_detection_runtime.sql",
+    "0064_etc_scrub_oa_detection_metadata.sql",
+    "0065_invoice_canonical_identity_fingerprint_invariant.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -183,7 +186,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 63)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 66)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 

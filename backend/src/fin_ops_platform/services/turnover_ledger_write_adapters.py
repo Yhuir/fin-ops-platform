@@ -5,6 +5,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, Callable
 
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 
@@ -478,8 +479,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
-            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
+            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
                 return None
             local_adapters = TurnoverLedgerLocalWithdrawRelationAdapterSet(
                 state_store=self._state_store,
@@ -569,8 +569,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 else None
             )
         else:
-            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
+            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
                 return None
             local_adapters = TurnoverLedgerLocalConfirmRelationAdapterSet(
                 state_store=self._state_store,
@@ -667,8 +666,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
-            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
+            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
                 return None
             local_adapters = TurnoverLedgerLocalBankRowTagsAdapterSet(
                 state_store=self._state_store,
@@ -744,8 +742,7 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
-            enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-            if not callable(enqueue):
+            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
                 return None
             local_adapters = TurnoverLedgerLocalRelationExtraAdapterSet(
                 state_store=self._state_store,
@@ -1882,24 +1879,19 @@ class TurnoverLedgerLocalDirtyOutboxWriter:
         payload: dict[str, object] | None = None,
     ) -> list[Any]:
         _ = transaction, payload
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
-        events: list[Any] = []
         refresh_reason = (
             "turnover_relation_extra_changed"
             if reason == "relation_extra_update"
             else reason
         )
-        for scope_key in list(scope_keys or ["all"]):
-            events.append(
-                enqueue(
-                    scope_type=scope_type,
-                    scope_key=str(scope_key or "all"),
-                    reason=refresh_reason,
-                )
-            )
-        return events
+        return refresh_gateway.enqueue_many_events(
+            scope_type,
+            [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
+            reason=refresh_reason,
+        )
 
 
 class TurnoverLedgerLocalRelationExtraConnection:

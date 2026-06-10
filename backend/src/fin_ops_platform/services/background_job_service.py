@@ -444,6 +444,19 @@ class BackgroundJobService:
                 return job
         return None
 
+    def get_reusable_idempotent_job(self, owner_user_id: str, idempotency_key: str) -> BackgroundJob | None:
+        owner = self._normalize_owner(owner_user_id)
+        normalized_key = str(idempotency_key or "").strip()
+        if not normalized_key:
+            return None
+        now = datetime.now(UTC)
+        with self._lock:
+            jobs = [self._job_from_payload(payload) for payload in self._load_jobs().values()]
+        for job in jobs:
+            if job.owner_user_id == owner and job.idempotency_key == normalized_key and self._is_idempotent_reusable(job, now):
+                return job
+        return None
+
     def list_active_jobs(self, owner_user_id: str, *, include_system: bool = True) -> list[BackgroundJob]:
         owner = self._normalize_owner(owner_user_id)
         now = datetime.now(UTC)

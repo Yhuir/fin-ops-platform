@@ -4,6 +4,7 @@ from typing import Any
 
 from fin_ops_platform.services.invoice_lifecycle_read_facade import INVOICE_LIFECYCLE_SCOPE_TYPE
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -46,18 +47,21 @@ class InvoiceLifecycleReadModelRefreshService:
 
     def _enqueue_scope_shards(self, event: RuntimeQueueEvent, *, scope_key: str) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_invoice_lifecycle_scope_shards", None)
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(list_shards) or not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
         if not shard_keys:
             mark_empty = getattr(self._projection_builder, "mark_invoice_lifecycle_scope_empty", None)
             if callable(mark_empty):
                 mark_empty(scope_key)
-        for shard_key in shard_keys:
-            enqueue(scope_type=INVOICE_LIFECYCLE_SCOPE_TYPE, scope_key=shard_key, reason="invoice_lifecycle_month_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many(
+            INVOICE_LIFECYCLE_SCOPE_TYPE,
+            shard_keys,
+            reason="invoice_lifecycle_month_shard",
+        )
         self._complete_dirty_scope(event, scope_key=scope_key)
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}
+        return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
     def _complete_dirty_scope(self, event: RuntimeQueueEvent, *, scope_key: str) -> None:
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)

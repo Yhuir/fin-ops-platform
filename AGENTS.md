@@ -40,6 +40,7 @@
 
 - 优先读取现有代码和现有文档，不猜测字段、接口或数据库结构。
 - 变更范围保持最小；如果整理范围扩大到重构代码或改变业务口径，先说明并等待确认。
+- 修复旧模块时，优先保持最小变更；但当旧模块职责边界已经错误，且继续补丁会让接口约定、数据流、测试责任或运维边界更分散时，不要在旧模块继续堆砌代码。应先设计符合当前架构方向的中心边界，小步迁移调用点，再删除重复、过期或绕过新边界的旧路径。此类重构必须有测试保护，并且不得扩大到与当前目标无关的业务行为。
 - 生产级需求必须同时考虑权限、审计、回滚、数据一致性和验证方式。
 - 后端改动必须遵循现有重构方向：`server.py` 只做路由、依赖组装和 HTTP 映射；业务逻辑放入 `services/`；持久化和 SQL 细节放入 repository；后台任务放入 worker/service。
 - service 构造函数必须接收明确依赖，例如 repository、queue、store、orchestrator、settings provider；不要把整个 `Application` 传给 service。
@@ -51,7 +52,7 @@
 - Worker 不得依赖 `Application`、`app.server`、`app.auth`、HTTP response 或 HTTP 状态对象。
 - Read model 查询必须走 freshness/status/enqueue 边界，不能让页面读旧 read model 却伪装 fresh。
 - Read model refresh 的事实源是 PostgreSQL durable queue：`job.outbox_events` 与 `job.read_model_dirty_scopes`。
-- 所有 read model refresh 请求必须通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或事务内 writer；业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。
+- 所有非事务 read model refresh 请求必须先通过 `ReadModelRefreshGateway` / scope policy registry 做 normalize、validate 和 dedupe，再委托 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`；事务内 writer 必须保持同一业务事务并承担等价 scope contract。业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。
 - Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
 - 新增 read model 或 worker 时，必须同步更新 registry、manifest/systemd env、tests、docs。
 - `workbench` 保留 active generation 原子发布模型；不要把它机械套成普通 read model gateway。

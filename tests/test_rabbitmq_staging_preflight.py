@@ -61,11 +61,10 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
             "rabbitmq.consumer_worker_check.cost_tax",
             "rabbitmq.consumer_worker_check.import",
             "rabbitmq.consumer_worker_check.no_oa_bank_batch",
-            "rabbitmq.consumer_worker_check.etc_business_oa_detection",
             "rabbitmq.consumer_worker_check.bank_account_balance",
             "rabbitmq.consumer_worker_check.file_migration",
         ])
-        self.assertEqual(len(runner.calls), 18)
+        self.assertEqual(len(runner.calls), 17)
         dispatcher_env = runner.calls[3][1]
         self.assertEqual(dispatcher_env["FIN_OPS_QUEUE_BACKEND"], "postgres")
         self.assertEqual(dispatcher_env["RABBITMQ_SHADOW_PUBLISH"], "true")

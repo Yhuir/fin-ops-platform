@@ -4359,6 +4359,43 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(second_job["job_id"], first_job["job_id"])
         self.assertEqual(json.loads(query_response.body)["total"], 1)
 
+    def test_etc_confirm_failed_session_can_retry_with_same_preview(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            task_id, preview_response, _preview_payload = self._preview_task_zip(app, ["ETC001"])
+            session_id = json.loads(preview_response.body)["sessionId"]
+            original_confirm = app._etc_service.confirm_business_batch_import
+
+            def fail_once(*args, **kwargs):
+                raise RuntimeError("synthetic canonical persist failure")
+
+            app._etc_service.confirm_business_batch_import = fail_once
+            first_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": session_id, "taskId": task_id}),
+            )
+            first_job = json.loads(first_response.body)["job"]
+            failed_job = self._wait_for_job(app, first_job["job_id"])
+            app._etc_service.confirm_business_batch_import = original_confirm
+
+            second_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": session_id, "taskId": task_id}),
+            )
+            second_job = json.loads(second_response.body)["job"]
+            completed_job = self._wait_for_job(app, second_job["job_id"])
+            query_response = app.handle_request("GET", "/api/etc/invoices?page=1&page_size=20")
+
+        self.assertEqual(first_response.status_code, 202)
+        self.assertEqual(failed_job["status"], "failed")
+        self.assertEqual(second_response.status_code, 202)
+        self.assertNotEqual(second_job["job_id"], first_job["job_id"])
+        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(json.loads(query_response.body)["total"], 1)
+
     def test_etc_confirm_job_partial_success_when_some_items_fail(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

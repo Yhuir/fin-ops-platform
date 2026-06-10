@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.pending_invoice_relation_identity import is_valid_pending_invoice_oa_row_id
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 PENDING_INVOICE_BASE_SCOPE_KEYS = (
@@ -36,15 +37,13 @@ class PendingInvoiceOaIdentityBackfillService:
 
     def enqueue_affected_scopes(self, *, reason: str = "pending_invoice_oa_identity_backfill") -> list[str]:
         report = self.inspect()
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return []
         scope_keys = list(report.get("affected_scope_keys") or [])
         if report.get("manual_repair_required"):
             scope_keys = list(dict.fromkeys([*scope_keys, *PENDING_INVOICE_BASE_SCOPE_KEYS]))
-        for scope_key in scope_keys:
-            enqueue(scope_type="pending_invoice", scope_key=scope_key, reason=reason)
-        return scope_keys
+        return refresh_gateway.enqueue_many("pending_invoice", scope_keys, reason=reason)
 
     def _invalid_read_model_rows(self) -> list[dict[str, Any]]:
         rows = self._repository.invalid_read_model_rows()

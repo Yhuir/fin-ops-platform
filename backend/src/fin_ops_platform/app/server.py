@@ -102,6 +102,7 @@ from fin_ops_platform.services.cost_statistics_query_service import CostStatisti
 from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.etc_service import (
     ETC_BUSINESS_BATCH_SUBMITTED_STATUSES,
     EtcBatchDeleteError,
@@ -3798,12 +3799,15 @@ class Application:
         except ValueError:
             return 30.0
 
-    def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
+    def _read_model_refresh_gateway(self) -> ReadModelRefreshGateway:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        return ReadModelRefreshGateway(queue_repository=queue_repository)
+
+    def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return
-        enqueue(scope_type="workbench", scope_key=scope_key, reason=reason)
+        refresh_gateway.enqueue_one("workbench", scope_key, reason=reason)
 
     def _handle_api_oa_sync_status(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._oa_sync_service.status_payload())
@@ -4293,12 +4297,10 @@ class Application:
         }
 
     def _enqueue_search_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type="search", scope_key=scope_key, reason=reason)
-        return True
+        return bool(refresh_gateway.enqueue_one("search", scope_key, reason=reason))
 
     def _handle_api_etc_import(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         return self._json_response(
@@ -5383,7 +5385,7 @@ class Application:
         normalized_task_id = task_id.strip()
         owner_user_id = self._resolve_background_job_owner(headers)
         idempotency_key = f"etc_import_session:{normalized_session_id}"
-        existing_job = self._background_job_service.get_idempotent_job(owner_user_id, idempotency_key)
+        existing_job = self._background_job_service.get_reusable_idempotent_job(owner_user_id, idempotency_key)
         if existing_job is not None:
             return self._json_response(HTTPStatus.ACCEPTED, {"job": existing_job.to_payload()})
         try:
@@ -5410,6 +5412,7 @@ class Application:
             return self._json_response(HTTPStatus.CONFLICT, {"error": "stale_reconciliation_task_preview", "message": str(error)})
         except ValueError as error:
             return self._reconciliation_error_response(error)
+        effective_task_version = int(getattr(task, "version", reconciliation_preview.task_version))
         initial_summary = {
             "created": 0,
             "imported": 0,
@@ -5431,14 +5434,13 @@ class Application:
             result_summary=initial_summary,
             source={"session_id": normalized_session_id},
             affected_scopes=["etc_invoices", "imports", "workbench"],
-            reuse_any_status=True,
         )
         if not created:
             return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
         try:
             self._etc_reconciliation_task_service.begin_import(
                 task_id=normalized_task_id,
-                task_version=reconciliation_preview.task_version,
+                task_version=effective_task_version,
                 confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
                 import_session_id=normalized_session_id,
                 actor=owner_user_id,
@@ -5458,7 +5460,7 @@ class Application:
                         "task_id": normalized_task_id,
                         "owner_user_id": owner_user_id,
                         "background_job_id": job.job_id,
-                        "task_version": reconciliation_preview.task_version,
+                        "task_version": effective_task_version,
                         "confirmed_item_set_hash": reconciliation_preview.confirmed_item_set_hash,
                         "total": total,
                     },
@@ -5482,7 +5484,7 @@ class Application:
                 task_id=normalized_task_id,
                 owner_user_id=owner_user_id,
                 background_job_id=running_job.job_id,
-                task_version=reconciliation_preview.task_version,
+                task_version=effective_task_version,
                 confirmed_item_set_hash=reconciliation_preview.confirmed_item_set_hash,
                 total=total,
             )
@@ -5559,7 +5561,6 @@ class Application:
             result_summary=initial_summary,
             source={"session_id": normalized_session_id},
             affected_scopes=["etc_invoices", "imports", "workbench"],
-            reuse_any_status=True,
         )
         if not created:
             return self._json_response(HTTPStatus.ACCEPTED, {"job": job.to_payload()})
@@ -9264,28 +9265,22 @@ class Application:
         return payload
 
     def _enqueue_input_invoice_usage_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type="input_invoice_usage", scope_key=scope_key, reason=reason)
-        return True
+        return bool(refresh_gateway.enqueue_one("input_invoice_usage", scope_key, reason=reason))
 
     def _enqueue_output_invoice_collection_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type="output_invoice_collection", scope_key=scope_key, reason=reason)
-        return True
+        return bool(refresh_gateway.enqueue_one("output_invoice_collection", scope_key, reason=reason))
 
     def _enqueue_oa_pending_payment_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type="oa_pending_payment", scope_key=scope_key, reason=reason)
-        return True
+        return bool(refresh_gateway.enqueue_one("oa_pending_payment", scope_key, reason=reason))
 
     def _pending_invoice_routes(self) -> PendingInvoiceApiRoutes:
         routes = getattr(self, "_pending_invoice_api_routes", None)
@@ -12043,21 +12038,17 @@ class Application:
         return self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=reason)
 
     def _enqueue_bank_detail_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueued = False
-        for scope_key in [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]:
+        target_scope_keys = [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]
+        for scope_key in target_scope_keys:
             self._delete_bank_detail_redis_cache(scope_key)
-            enqueue(scope_type="bank_detail", scope_key=scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(refresh_gateway.enqueue_many("bank_detail", target_scope_keys, reason=reason))
 
     def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
         normalized_scope_keys = [
             str(item).strip()
@@ -12066,16 +12057,11 @@ class Application:
         ]
         if not normalized_scope_keys:
             normalized_scope_keys = ["all"]
-        enqueued = False
-        for scope_key in sorted(dict.fromkeys(normalized_scope_keys)):
-            enqueue(scope_type="turnover_ledger", scope_key=scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(refresh_gateway.enqueue_many("turnover_ledger", sorted(dict.fromkeys(normalized_scope_keys)), reason=reason))
 
     def _enqueue_no_oa_bank_batch_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
         normalized_scope_keys = [
             str(item).strip()
@@ -12084,11 +12070,7 @@ class Application:
         ]
         if not normalized_scope_keys:
             normalized_scope_keys = ["all"]
-        enqueued = False
-        for scope_key in sorted(dict.fromkeys(normalized_scope_keys)):
-            enqueue(scope_type="no_oa_bank_batch", scope_key=scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(refresh_gateway.enqueue_many("no_oa_bank_batch", sorted(dict.fromkeys(normalized_scope_keys)), reason=reason))
 
     def _bank_detail_redis_cache_key(self, kind: str, query: dict[str, object], *, scope_summary: dict[str, object]) -> str:
         signature = {
@@ -18114,23 +18096,10 @@ class Application:
         }
 
     def _enqueue_generic_read_model_refreshes(self, scope_type: str, scope_keys: list[str], *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
-        target_scope_keys = (
-            CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys(scope_keys)
-            if scope_type == "cost_statistics"
-            else scope_keys
-        )
-        enqueued = False
-        for scope_key in target_scope_keys:
-            normalized_scope_key = str(scope_key or "").strip()
-            if not normalized_scope_key:
-                continue
-            enqueue(scope_type=scope_type, scope_key=normalized_scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(refresh_gateway.enqueue_many(scope_type, scope_keys, reason=reason))
 
     def _derived_lifecycle_candidate_matches_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
@@ -18205,11 +18174,9 @@ class Application:
             if not deleted_scope_keys:
                 deleted_scope_keys = list(target_scope_keys or ["all"])
         elif schedule_warmup:
-            queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-            enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
             enqueued_jobs.append(
                 "cost_statistics.read_model.refresh"
-                if callable(enqueue)
+                if self._read_model_refresh_gateway().can_enqueue()
                 else "cost_statistics_cache_warmup"
             )
         return {
@@ -18293,12 +18260,10 @@ class Application:
         }
 
     def _enqueue_bank_account_balance_read_model_refresh(self, *, reason: str) -> bool:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type="bank_account_balance", scope_key="all", reason=reason)
-        return True
+        return bool(refresh_gateway.enqueue_one("bank_account_balance", "all", reason=reason))
 
     def _bank_detail_available_month_scope_keys(self) -> list[str]:
         months: set[str] = set()
@@ -18436,13 +18401,10 @@ class Application:
 
     def _invalidate_pending_invoice_read_model_scopes(self, *, reason: str) -> list[str]:
         scope_keys = self._pending_invoice_read_model_scope_keys()
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = self._read_model_refresh_gateway()
+        if not refresh_gateway.can_enqueue():
             return []
-        for scope_key in scope_keys:
-            enqueue(scope_type="pending_invoice", scope_key=scope_key, reason=reason)
-        return scope_keys
+        return refresh_gateway.enqueue_many("pending_invoice", scope_keys, reason=reason)
 
     def _invalidate_invoice_usage_collection_read_model_scopes(self, scope_keys: list[str], *, reason: str) -> list[str]:
         months = self._months_from_lifecycle_scope_keys(scope_keys)

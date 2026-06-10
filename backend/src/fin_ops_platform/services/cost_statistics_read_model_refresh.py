@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -93,14 +94,7 @@ class CostStatisticsReadModelRefreshService:
         self._enqueue_scope_keys([f"{project_scope}:all"], reason="cost_statistics_shard_converged")
 
     def _enqueue_scope_keys(self, scope_keys: list[str], *, reason: str) -> list[str]:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return []
-        enqueued: list[str] = []
-        for scope_key in scope_keys:
-            normalized_scope_key = str(scope_key or "").strip()
-            if not normalized_scope_key:
-                continue
-            enqueue(scope_type="cost_statistics", scope_key=normalized_scope_key, reason=reason)
-            enqueued.append(normalized_scope_key)
-        return enqueued
+        return refresh_gateway.enqueue_many("cost_statistics", scope_keys, reason=reason)

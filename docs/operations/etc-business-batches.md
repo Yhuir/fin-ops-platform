@@ -11,7 +11,9 @@
 - 生产部署不得使用本地 state 文件模式承载该功能；如启动参数声明 `FINOPS_STORAGE_MODE=local_state`，只能用于单进程本地开发。
 - ETC 专用 OA 自动检测链路已移除；ETC 页面创建 OA 草稿后由用户手动确认“已提交”或“未提交”。
 - 后端不得提供 ETC `oa-status/refresh` 入口，不得注册 ETC OA 检测 worker，不得在创建 OA 草稿或应用启动恢复时自动为 ETC 业务批次入队 `etc_business.oa_detection.refresh`。
+- 如果旧生产环境曾启用 `fin-ops-worker@etc-business-oa-detection.service`，发布后必须一次性 `disable --now` 该 unit；仓库部署样例不再包含 `etc-business-oa-detection` worker 或 `etc_business.oa_detection.refresh` dispatcher 事件。
 - 对象存储配置必须可供 PostgreSQL 文件写入链路识别 backend 和 bucket；上传信用卡账单、票根网文件和业务批次源文件前，先确认对象存储健康检查、bucket 权限和服务环境变量一致。
+- `0065_invoice_canonical_identity_fingerprint_invariant.sql` 必须随发布执行，用于清理历史 canonical invoice 中同时存在强 `source_unique_key` 和弱 `data_fingerprint` 的列值与 raw payload；否则旧快照仍可能在 ETC ZIP 导入或 OA 草稿创建后的本地持久化阶段触发 `invoices_data_fingerprint_uidx`。
 
 ## 迁移 dry-run
 

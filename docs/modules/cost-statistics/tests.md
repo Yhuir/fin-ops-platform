@@ -7,25 +7,22 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 待判断 | 待补充 | 业务规则、金额、状态、分类、权限、去重、幂等时适用。 |
-| 2. Service-layer tests | 待判断 | 待补充 | service、repository、audit、read model、cache、worker 编排时适用。 |
-| 3. API contract tests | 待判断 | 待补充 | HTTP/API contract 或 DTO shape 变化时适用。 |
-| 4. Read model/cache/background job tests | 待判断 | 待补充 | list、summary、search、workbench、ledger、import、worker 变化时适用。 |
-| 5. Frontend component and interaction tests | 待判断 | 待补充 | 页面、表格、drawer、dialog、按钮、筛选、权限渲染变化时适用。 |
-| 6. End-to-end business-flow integration tests | 待判断 | 待补充 | 跨模块业务链路变化时适用。 |
-| 7. Existing feature regression tests | 待判断 | 待补充 | 每次变更都要判断受影响旧行为。 |
+| 1. Business core unit tests | 适用 | `tests/test_read_model_refresh_gateway.py` | 覆盖成本统计 scope contract：裸月份/裸 `all` 归一化为 `active/all` project scope，非法 project scope 拒绝。 |
+| 2. Service-layer tests | 适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | 覆盖 worker lifecycle 触发成本统计 refresh 时复用统一 gateway，以及生产旧成本统计 scope contract 检查/清理编排。 |
+| 3. API contract tests | 按需适用 | `tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_generic_cost_statistics_enqueue_expands_month_scopes` | 本阶段不改变成本统计 HTTP response shape；保留既有 app/API enqueue 行为回归。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | 覆盖成本统计 read model refresh 不再写入裸月份/裸 `all` dirty/outbox scope，并覆盖旧 readiness/dirty/outbox 清理。 |
+| 5. Frontend component and interaction tests | 不适用 | N/A | 本阶段不改变成本统计页面 UI。 |
+| 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py` | 当前阶段覆盖 ETC/导入类 lifecycle 对成本统计入队的核心路径；真实 worker 投影端到端后续补充。 |
+| 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py` | 覆盖 runtime 架构边界；非成本统计 read model 不被成本统计规则误改。 |
 
 ## 现有验证命令
 
 ```bash
-# 后端示例，按实际模块替换
-PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
-
-# 前端示例，按实际模块替换
-cd web && npm test
-cd web && npm run build
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_scope_contract -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_generic_cost_statistics_enqueue_expands_month_scopes -v
 ```
 
 ## 未测风险
 
-- 待补充。
+- 未在单测中连接真实生产 PostgreSQL 执行 `scripts/check-read-model-scope-contracts.py --apply`；发布前后需先 dry-run 检查 JSON 报告，再按 runbook 执行受控清理。

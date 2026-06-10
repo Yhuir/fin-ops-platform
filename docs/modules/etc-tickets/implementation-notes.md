@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-10 - ETC导入/OA草稿本地持久化失败根因修复
+
+- 目标：修复确认 ETC ZIP 导入后前端显示“导入失败”，以及 OA 草稿已在 OA 系统创建且附件已上传但前端仍显示“接口处理失败”的问题。
+- 影响范围：`ImportNormalizationService` canonical invoice identity、PostgreSQL invoice repository、runtime import worker 的 ETC 导入结果同步、PostgreSQL migration、RabbitMQ/worker 部署样例。
+- 关键决策：ETC 发票有稳定发票号/强 canonical identity 时，弱 `invoice:<卖方>:<日期>:<金额>` fingerprint 不得写入 `app.invoices.data_fingerprint`，也不得留在 raw payload 中重新加载；弱 fingerprint 只用于没有强 identity 的历史/异常发票候选。API 路径和 runtime worker 路径都必须按 `EtcImportResult.items[*].invoice_number` 回查 ETC service 并同步 canonical invoice，避免后台导入成功但本地发票同步缺失。导入确认同一 session 只复用 queued/running 或近期 succeeded 的 job，failed/acknowledged/cancelled 旧 job 不得阻塞用户重新点击确认导入。ETC OA 自动检测已废弃，部署样例和 RabbitMQ preflight 不再包含 `etc_business.oa_detection.refresh` 或 `etc-business-oa-detection` worker。
+- 文档影响：更新 ETC 模块测试矩阵、状态机记录和运维检查；产品口径和页面 API shape 不变。
+- 测试覆盖：新增旧 canonical invoice 加载时清理弱 fingerprint 的 business core 回归；新增 Postgres repository 写入边界测试；新增 runtime worker 从 `EtcImportResult.items` 回查发票的 service/boundary 回归；新增同一导入 session 失败后可重试且成功后仍幂等复用 job 的 API 回归；更新 migration discovery 和 RabbitMQ preflight 测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_service tests.test_postgres_core_repository -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards tests.test_rabbitmq_staging_preflight -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend -v`。
+- 未测风险：未在真实浏览器重新上传生产 ZIP；自动化已覆盖触发线上异常的持久化唯一键路径和后台导入同步路径。生产部署后需要执行 migration `0065_invoice_canonical_identity_fingerprint_invariant.sql`，并停用旧 `fin-ops-worker@etc-business-oa-detection.service`。
+
 ## 2026-06-10 - ETC任务删除旧阻塞清理与空任务追因
 
 - 目标：修复点击删除仍返回 `ETC batch has submitted confirmation metadata and cannot be deleted.`，并解释/防止部署后误以为页面自动新建空批次的问题。

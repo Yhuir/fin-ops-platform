@@ -99,11 +99,17 @@ class CostStatisticsRuntimeService:
             return 60
 
     def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not gateway.can_enqueue():
             return False
-        enqueue(scope_type="cost_statistics", scope_key=scope_key, reason=reason)
-        return True
+        enqueued_scope_keys = gateway.enqueue_many(
+            "cost_statistics",
+            [scope_key],
+            reason=reason,
+        )
+        return bool(enqueued_scope_keys)
 
     def delete_redis_cache(self, scope_key: str) -> None:
         delete = getattr(self._redis_helper, "delete", None)

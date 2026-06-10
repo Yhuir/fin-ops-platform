@@ -11,6 +11,7 @@ from fin_ops_platform.services.oa_pending_payment_read_model_details import (
 )
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError, OaPendingPaymentQueryService
 from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 SourceVersionsProvider = Callable[[], dict[str, Any]]
@@ -262,8 +263,7 @@ class OaPendingPaymentReadModelService:
         return "all"
 
     def _enqueue_refresh(self, scope_key: str, *, reason: str) -> bool:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type="oa_pending_payment", scope_key=scope_key, reason=reason)
-        return True
+        return bool(refresh_gateway.enqueue_one("oa_pending_payment", scope_key, reason=reason))

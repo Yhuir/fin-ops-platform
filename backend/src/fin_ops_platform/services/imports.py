@@ -930,6 +930,7 @@ class ImportNormalizationService:
         self._ensure_invoice_metadata_fields(invoice)
         if not invoice.source_unique_key:
             invoice.source_unique_key = self._object_identity_policy.identify_invoice(invoice).canonical_key
+        self._clear_weak_invoice_fingerprint_when_canonical(invoice)
         self._invoices_by_id[invoice.id] = invoice
         self._get_or_create_counterparty(invoice.counterparty.name, existing=invoice.counterparty)
         if invoice.source_unique_key:
@@ -1096,6 +1097,7 @@ class ImportNormalizationService:
             invoice.source_unique_key = normalized.get("source_unique_key")
             if invoice.source_unique_key:
                 self._invoice_unique_index[invoice.source_unique_key] = invoice.id
+        self._clear_weak_invoice_fingerprint_when_canonical(invoice)
 
     def _build_etc_invoice_source_link(self, normalized: dict[str, Any]) -> dict[str, str]:
         return {
@@ -1121,6 +1123,12 @@ class ImportNormalizationService:
                 setattr(invoice, field_name, None)
         if not hasattr(invoice, "workbench_visibility"):
             invoice.workbench_visibility = "visible"
+
+    def _clear_weak_invoice_fingerprint_when_canonical(self, invoice: Invoice) -> None:
+        if not invoice.source_unique_key or not invoice.data_fingerprint:
+            return
+        self._invoice_fingerprint_index.pop(invoice.data_fingerprint, None)
+        invoice.data_fingerprint = None
 
     @staticmethod
     def _ensure_transaction_metadata_fields(transaction: BankTransaction) -> None:
@@ -1169,6 +1177,7 @@ class ImportNormalizationService:
             invoice.source_unique_key = normalized.get("source_unique_key")
             if invoice.source_unique_key:
                 self._invoice_unique_index[invoice.source_unique_key] = invoice.id
+        self._clear_weak_invoice_fingerprint_when_canonical(invoice)
 
     def _build_invoice_source_link(self, batch_id: str, normalized: dict[str, Any]) -> dict[str, str]:
         source_link = {

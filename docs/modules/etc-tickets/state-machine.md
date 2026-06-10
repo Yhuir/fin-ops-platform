@@ -40,12 +40,14 @@
 - `submitted` 人工确认会隐藏散落 ETC 发票，并让 Workbench open 区投影一条合并行；投影失败时不应把批次回滚成未提交。
 - `etc_invoice_summary` 的展示金额可以保留千分位格式；read model 必须同时持久化结构化金额，用于 `workbench_rows.amount`、分组搜索文本和金额过滤。
 - refresh 触发来源：ETC 导入确认、OA 草稿创建、人工提交确认、人工未提交确认、业务批次本地删除/重置、关联台普通配对关系确认或撤回。
-- 失败恢复：优先重跑相关 read model refresh；业务批次、ETC 发票占用和审计事实不得从前端临时修补。
+- canonical invoice identity：ETC 发票有稳定发票号/强 `source_unique_key` 时，不得同时持久化弱 `data_fingerprint`；runtime worker 和 API 导入确认必须使用同一 ETC invoice 同步路径，避免后台导入成功但本地发票索引未刷新。
+- 失败恢复：优先重跑相关 read model refresh；业务批次、ETC 发票占用和审计事实不得从前端临时修补。导入确认的同一 session 只有 queued/running 或近期 succeeded job 可复用；failed、acknowledged、cancelled 等旧 job 必须允许重新确认并创建新 job。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-10 | 修复 ETC 导入/OA 草稿后本地 canonical invoice 持久化弱 fingerprint 冲突，并补齐导入失败 job 的同 session 重试语义，清理旧 ETC OA detection 部署残留 | ImportNormalizationService、Postgres invoice repository、runtime import worker、BackgroundJobService、ETC import confirm API、migration、RabbitMQ 部署样例 | `tests.test_import_service`；`tests.test_postgres_core_repository`；`tests.test_platform_runtime_boundary_guards`；`tests.test_postgres_migrations`；`tests.test_rabbitmq_staging_preflight`；`tests.test_etc_backend` |
 | 2026-06-10 | 清理 ETC 任务删除旧状态阻塞，并确认页面初始化不自动创建空任务 | reconciliation task 删除、旧 batch 删除兼容入口、ETC 页面初始化请求 | `tests.test_etc_backend`；`tests.test_etc_reconciliation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-06-09 | 彻底移除 ETC 专用 OA 自动检测后端链路，草稿后统一进入 `oa_confirmation_pending` 等待人工确认 | ETC business batch API、worker registry、OA projection/Mongo adapter、前端状态显示、历史状态迁移 | `tests.test_etc_backend`；`tests.test_platform_runtime_boundary_guards`；`tests.test_oa_projection_sql_runtime`；`tests.test_mongo_oa_adapter`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |
 | 2026-06-09 | ETC 批次删除入口统一为任意阶段本地清理；绑定 summary 的 active relation 取消且不恢复历史 OA+流水二栏关系 | ETC 任务入口删除、业务批次入口删除、Workbench active relation、open 区散票恢复 | `tests.test_etc_backend`；`tests.test_workbench_pair_relation_service`；`web/src/test/EtcTicketManagementPage.test.tsx` |

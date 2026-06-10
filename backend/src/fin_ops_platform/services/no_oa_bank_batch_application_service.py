@@ -19,6 +19,7 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
 )
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
 from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
@@ -718,14 +719,10 @@ class NoOaBankBatchApplicationService:
         return bool(normalized_months)
 
     def enqueue_background_refresh(self, scope_keys: list[str], *, reason: str) -> bool:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueued = False
-        for scope_key in [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]:
-            enqueue(scope_type="no_oa_bank_batch", scope_key=scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(refresh_gateway.enqueue_many("no_oa_bank_batch", scope_keys, reason=reason))
 
     def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
         if self._state_store is None:

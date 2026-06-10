@@ -31,6 +31,7 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_inv
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.project_costing import ProjectCostingService
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
 from fin_ops_platform.services.workbench_candidate_match_service import (
@@ -135,7 +136,10 @@ class ImportRuntimeProcessorFactory:
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
             cost_statistics_scope_keys_for_import_preview=_cost_statistics_scope_keys_for_import_preview,
             cost_statistics_scope_keys_for_import_file_session=_cost_statistics_scope_keys_for_import_file_session,
-            sync_etc_import_result_to_canonical_invoices=_sync_etc_import_result_to_canonical_invoices(import_service),
+            sync_etc_import_result_to_canonical_invoices=_sync_etc_import_result_to_canonical_invoices(
+                import_service,
+                etc_service,
+            ),
             refresh_after_etc_invoice_sync=lifecycle.refresh_after_etc_invoice_sync,
             oa_manual_import_create_processor=_oa_manual_import_create_processor(state_store=state_store),
         )
@@ -232,6 +236,7 @@ class _RuntimeWorkerDerivedLifecycle:
         self._state_store = state_store
         self._search_service = search_service
         self._lifecycle = DerivedDataLifecycleService()
+        self._read_model_refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
         self._workbench_source_versions_provider = workbench_source_versions_provider
 
     def execute_event(
@@ -387,13 +392,7 @@ class _RuntimeWorkerDerivedLifecycle:
         }
 
     def _enqueue_scopes(self, scope_type: str, scope_keys: list[str], *, reason: str) -> list[str]:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        enqueued: list[str] = []
-        for scope_key in _dedupe_text(scope_keys):
-            if callable(enqueue):
-                enqueue(scope_type=scope_type, scope_key=scope_key, reason=reason)
-            enqueued.append(scope_key)
-        return enqueued
+        return self._read_model_refresh_gateway.enqueue_many(scope_type, scope_keys, reason=reason)
 
     def _mark_workbench_matching(self, domain_plan: dict[str, object], reason: str) -> dict[str, object]:
         months = [scope for scope in self._scope_keys(domain_plan) if SEARCH_MONTH_RE.match(scope)]
@@ -599,10 +598,10 @@ def _persist_import_state_callback(
     )
 
 
-def _sync_etc_import_result_to_canonical_invoices(import_service: Any) -> Callable[[Any], list[str]]:
+def _sync_etc_import_result_to_canonical_invoices(import_service: Any, etc_service: Any | None = None) -> Callable[[Any], list[str]]:
     def sync(result: Any) -> list[str]:
         changed_months: set[str] = set()
-        for etc_invoice in list(getattr(result, "invoices", None) or getattr(result, "imported_invoices", None) or []):
+        for etc_invoice in _etc_invoices_from_import_result(result, etc_service):
             invoice = import_service.upsert_etc_invoice(etc_invoice)
             for date_value in (
                 getattr(invoice, "invoice_date", None),
@@ -615,6 +614,26 @@ def _sync_etc_import_result_to_canonical_invoices(import_service: Any) -> Callab
         return sorted(changed_months)
 
     return sync
+
+
+def _etc_invoices_from_import_result(result: Any, etc_service: Any | None) -> list[Any]:
+    direct_invoices = list(getattr(result, "invoices", None) or getattr(result, "imported_invoices", None) or [])
+    if direct_invoices:
+        return direct_invoices
+    list_invoices_by_numbers = getattr(etc_service, "list_invoices_by_numbers", None)
+    if not callable(list_invoices_by_numbers):
+        return []
+    invoice_numbers: list[str] = []
+    seen: set[str] = set()
+    for item in list(getattr(result, "items", None) or []):
+        invoice_number = str(getattr(item, "invoice_number", "") or "").strip()
+        if not invoice_number or invoice_number in seen:
+            continue
+        invoice_numbers.append(invoice_number)
+        seen.add(invoice_number)
+    if not invoice_numbers:
+        return []
+    return list(list_invoices_by_numbers(invoice_numbers) or [])
 
 
 def _sync_etc_invoices_to_canonical_invoices(import_service: Any) -> Callable[[list[Any]], list[str]]:

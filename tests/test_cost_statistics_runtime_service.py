@@ -57,6 +57,23 @@ class CostStatisticsRuntimeServiceTests(unittest.TestCase):
         self.assertIn("cost_statistics:month:active:2026-05", redis.deletes)
         self.assertTrue(any(":schema:2026-05-cost-statistics-explorer-v1:sources:" in key for key in redis.deletes))
 
+    def test_enqueue_read_model_refresh_normalizes_legacy_month_scope(self) -> None:
+        from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
+
+        queue = QueueRecorder()
+        service = CostStatisticsRuntimeService(queue_repository=queue)
+
+        enqueued = service.enqueue_read_model_refresh("2026-05", reason="unit_test")
+
+        self.assertTrue(enqueued)
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("cost_statistics", "active:2026-05", "unit_test"),
+                ("cost_statistics", "all:2026-05", "unit_test"),
+            ],
+        )
+
     def test_scope_key_normalization_rejects_unknown_project_scopes(self) -> None:
         from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 

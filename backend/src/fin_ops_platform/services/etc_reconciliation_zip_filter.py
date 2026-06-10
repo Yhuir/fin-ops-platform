@@ -520,7 +520,6 @@ def _select_non_overlapping_group_matches(matches: list[_RequirementMatch]) -> l
 def validate_etc_zip_confirm_for_task(*, task: EtcReconciliationTask, preview: EtcZipFilterPreview) -> None:
     if (
         task.task_id != preview.task_id
-        or task.version != preview.task_version
         or task.confirmed_item_set_hash != preview.confirmed_item_set_hash
     ):
         raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")

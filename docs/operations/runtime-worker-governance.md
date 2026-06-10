@@ -64,7 +64,7 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 2. query service 调 `ReadModelQueryGateway` 或同等统一 freshness resolver。
 3. fresh 时才允许读取 SQL payload，并且 Redis 只可缓存 fresh gate 之后的 payload。
 4. missing、dirty、schema mismatch、source version mismatch 时返回 `read_model_status=refreshing`，
-   同时通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 入队。
+   同时通过 `ReadModelRefreshGateway` 入队。
 5. unavailable 时由 route 映射 HTTP 状态，不能把不可用 projection 包装成 fresh。
 
 统一响应至少应包含：
@@ -82,13 +82,47 @@ transport/wakeup，不能作为 read model 状态事实源。
 
 刷新请求只允许写入 PostgreSQL durable queue：
 
+- `ReadModelRefreshGateway` / scope policy registry：在写入 durable queue 前统一做 read model scope normalize、validate 和 dedupe；具体 read model 的 scope contract 不放进 `RuntimeQueueRepository`。
 - `job.read_model_dirty_scopes`：scope 的刷新状态事实源。
 - `job.outbox_events`：worker 可 claim 的事件事实源。
-- `RuntimeQueueRepository.enqueue_read_model_refresh(...)`：常规入队入口。
+- `RuntimeQueueRepository.enqueue_read_model_refresh(...)`：gateway 和事务内 writer 委托的 durable queue 写入入口。
 - 事务内 writer：写业务数据时需要同事务标记 dirty/outbox 时使用。
 
 业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。refresh service
 完成 projection 后调用 queue repository 完成 dirty scope；失败或 dead-letter 后由运维 inspect/requeue。
+
+### Read model scope contract 检查
+
+发布前后或 App Status 出现无法解释的 cost statistics failed/refreshing scope 时，先运行只读检查：
+
+```bash
+cd /opt/fin-ops/current
+set -a
+source /etc/fin-ops/fin-ops.api.env
+set +a
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python scripts/check-read-model-scope-contracts.py --json
+```
+
+脚本会检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness`
+中不符合当前 registry 的 `cost_statistics` scope。发现 violation 时默认返回非 0，JSON 中会区分：
+
+- `legacy`：如 `2026-03`、裸 `all`，可归一化为规范 `active/all` scope。
+- `invalid`：如未知 project scope，当前 registry 无法解释，不猜测 replacement。
+
+确认报告后执行受控修复：
+
+```bash
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python scripts/check-read-model-scope-contracts.py \
+    --apply \
+    --reason production_scope_contract_repair \
+    --json
+```
+
+`--apply` 只删除非规范的 `cost_statistics` runtime 状态，并通过 `ReadModelRefreshGateway` 补投
+可归一化的 replacement scope；不会手工把 readiness 改成 `fresh`。如果只需要删除旧状态而不补投
+replacement scope，可加 `--no-enqueue-replacements`。
 
 ### Workbench generation retention
 
@@ -240,13 +274,13 @@ worker readiness 不是 systemd active。发布脚本会等待：
 处理规则：
 
 - refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，worker 从对应工作台月份 read model 构建成本统计 shard，发布成功后重新入队同 project scope 的父 scope，推动全期间视图收敛。
-- refresh `active:all` 或 `all:all` 时，worker 先检查对应月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 入队，父 scope 记录 `refreshing`，不完成 dirty scope，不伪造 `fresh`。
+- refresh `active:all` 或 `all:all` 时，worker 先检查对应月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `ReadModelRefreshGateway` 入队，父 scope 记录 `refreshing`，不完成 dirty scope，不伪造 `fresh`。
 - 所有所需月份 shard fresh 后，worker 从 `read_model.cost_statistics_rows` 中的月份 rows 聚合生成父 scope，原子写入 `read_model.cost_statistics_read_models` snapshot，并写入父 scope `fresh` readiness。`read_model.cost_statistics_rows` 只承载月份 shard 明细，不承载 `active:all` / `all:all` parent rows。
 - 父 scope 不直接读取 `read_model.workbench_groups(scope_key='all')` 的全量 JSON payload；工作台 `all` scope 超时不能再成为成本统计全期间父 scope rebuild 的关键路径。
 - 父 scope failed/unavailable 代表成本统计主体验不可用，App Status domain 可以 blocked/red。
 - 单个月份 shard failed/unavailable 只代表该分片需要重试，App Status domain 应保持 busy/yellow，并暴露 `read_model_scopes[].scope_key`、`last_error` 和 `updated_at`。
 - historical failed readiness 只能由同一 `read_model_key + scope_type + scope_key` 的真实 successful rebuild 覆盖；运维不得手工改写 readiness 为 fresh。
-- 重新入队必须走 `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 或受控运维工具，保留 dirty scope/outbox 事实链路。
+- 重新入队必须走 `ReadModelRefreshGateway` 或受控运维工具，保留 dirty scope/outbox 事实链路。
 
 ## 健康字段
 
@@ -328,8 +362,9 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
     --reason operator_repair
 ```
 
-如果 dead-letter 来自历史 invalid-scope 事件，且当前版本已经通过真实 readiness convergence 证明对应
-read model fresh，可以使用受控 resolve，而不是重放必然再次失败的旧事件：
+如果 dead-letter 来自历史 invalid-scope cost statistics 事件，优先使用 `scripts/check-read-model-scope-contracts.py`
+检查和清理同类 legacy/invalid scope，避免逐个重放必然再次失败的旧事件。对于其他 read model，且当前版本
+已经通过真实 readiness convergence 证明对应 read model fresh，可以使用受控 resolve：
 
 ```bash
 PYTHONPATH=/opt/fin-ops/current/backend/src \

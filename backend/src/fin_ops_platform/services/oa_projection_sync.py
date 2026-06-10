@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -188,14 +189,12 @@ class OAProjectionSyncService:
             target_scopes.append("all")
         else:
             target_scopes = ["all"]
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return
-        for target_scope in target_scopes:
-            enqueue(scope_type="workbench", scope_key=target_scope, reason="oa_projection_sync")
-            enqueue(scope_type="search", scope_key=target_scope, reason="oa_projection_sync")
-        for pending_scope in ("expense:all", "income:all"):
-            enqueue(scope_type="pending_invoice", scope_key=pending_scope, reason="oa_projection_sync")
+        refresh_gateway.enqueue_many("workbench", target_scopes, reason="oa_projection_sync")
+        refresh_gateway.enqueue_many("search", target_scopes, reason="oa_projection_sync")
+        refresh_gateway.enqueue_many("pending_invoice", ["expense:all", "income:all"], reason="oa_projection_sync")
 
 
 def _is_invoice_attachment_payload(value: Any) -> bool:

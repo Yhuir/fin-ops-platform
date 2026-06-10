@@ -11,6 +11,7 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceError,
 )
 from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 RowNormalizer = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
@@ -299,11 +300,10 @@ class PendingInvoiceReadModelService:
         ]
 
     def enqueue_refresh(self, scope_key: str, *, reason: str) -> bool:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type="pending_invoice", scope_key=scope_key, reason=reason)
-        return True
+        return bool(refresh_gateway.enqueue_one("pending_invoice", scope_key, reason=reason))
 
     @staticmethod
     def scope_key(*, direction: str, filter_name: str | None = None) -> str:

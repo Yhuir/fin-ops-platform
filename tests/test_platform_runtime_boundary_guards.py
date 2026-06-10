@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import ast
+from decimal import Decimal
 import inspect
 import os
 from pathlib import Path
 import re
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app import server as server_module
+from fin_ops_platform.services.etc_service import EtcImportItem, EtcImportResult
+from fin_ops_platform.services.runtime_worker_handlers import _sync_etc_import_result_to_canonical_invoices
 from fin_ops_platform.services.runtime_bootstrap import LegacySnapshotBootstrap
 
 
@@ -17,6 +21,7 @@ SOURCE_ROOT = REPO_ROOT / "backend" / "src" / "fin_ops_platform"
 APP_ROOT = SOURCE_ROOT / "app"
 SERVICES_ROOT = SOURCE_ROOT / "services"
 TOOLS_ROOT = SOURCE_ROOT / "tools"
+SCRIPTS_ROOT = REPO_ROOT / "scripts"
 
 
 def _relative(path: Path) -> str:
@@ -715,6 +720,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_business_code_does_not_write_outbox_or_dirty_scopes_directly(self) -> None:
         allowed_paths = {
             "backend/src/fin_ops_platform/services/postgres_repositories/core.py",
+            "backend/src/fin_ops_platform/services/postgres_repositories/read_model_scope_contracts.py",
             "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
             "backend/src/fin_ops_platform/services/postgres_repositories/workbench.py",
             "backend/src/fin_ops_platform/services/runtime_queue.py",
@@ -782,6 +788,42 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertNotIn("HTTPStatus", path.read_text(encoding="utf-8"))
         self.assertNotIn("RuntimeWorkerApplicationBridge", path.read_text(encoding="utf-8"))
 
+    def test_read_model_refresh_producers_use_scope_gateway_boundary(self) -> None:
+        allowed_exact_paths = {
+            "backend/src/fin_ops_platform/services/runtime_queue.py",
+            "backend/src/fin_ops_platform/services/read_model_refresh_gateway.py",
+        }
+        violations: list[str] = []
+        for path in _python_files(APP_ROOT, SERVICES_ROOT, TOOLS_ROOT, SCRIPTS_ROOT):
+            rel_path = _relative(path)
+            if rel_path in allowed_exact_paths:
+                continue
+            tree = _parse(path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "enqueue_read_model_refresh"
+                    and "queue" in _attribute_chain(node.func.value)
+                ):
+                    violations.append(f"{rel_path}:{node.lineno}")
+                    continue
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "getattr"
+                    and len(node.args) >= 2
+                    and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value == "enqueue_read_model_refresh"
+                    and "queue" in _attribute_chain(node.args[0])
+                ):
+                    violations.append(f"{rel_path}:{node.lineno}")
+        self.assertEqual(
+            violations,
+            [],
+            "read model refresh producers must use ReadModelRefreshGateway instead of calling enqueue_read_model_refresh directly.",
+        )
+
     def test_no_oa_worker_bootstrap_does_not_load_full_workbench_snapshot(self) -> None:
         worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
 
@@ -821,6 +863,54 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"{rel_path}: {sorted(set(calls))}")
 
         self.assertEqual(violations, [])
+
+
+class RuntimeWorkerEtcImportSyncTests(unittest.TestCase):
+    def test_sync_etc_import_result_uses_import_items_to_load_invoices(self) -> None:
+        upserted: list[object] = []
+
+        class ImportService:
+            def upsert_etc_invoice(self, etc_invoice: object) -> object:
+                upserted.append(etc_invoice)
+                return SimpleNamespace(invoice_date=getattr(etc_invoice, "issue_date", None))
+
+        class EtcService:
+            def __init__(self) -> None:
+                self.invoice_numbers: list[str] = []
+
+            def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[object]:
+                self.invoice_numbers = list(invoice_numbers)
+                return [
+                    SimpleNamespace(
+                        id="etc_invoice_0514",
+                        invoice_number="26537911470300077680",
+                        issue_date="2026-03-31",
+                        seller_name="昆明新机场高速公路建设发展有限公司",
+                        total_amount=Decimal("9.22"),
+                        passage_start_date=None,
+                        passage_end_date=None,
+                    )
+                ]
+
+        etc_service = EtcService()
+        sync = _sync_etc_import_result_to_canonical_invoices(ImportService(), etc_service)
+
+        months = sync(
+            EtcImportResult(
+                imported=1,
+                items=[
+                    EtcImportItem(
+                        file_name="invoice.xml",
+                        invoice_number="26537911470300077680",
+                        status="imported",
+                    )
+                ],
+            )
+        )
+
+        self.assertEqual(etc_service.invoice_numbers, ["26537911470300077680"])
+        self.assertEqual([getattr(item, "invoice_number") for item in upserted], ["26537911470300077680"])
+        self.assertEqual(months, ["2026-03"])
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from fin_ops_platform.services.read_model_freshness import (
     normalize_source_versions,
     resolve_read_model_freshness,
 )
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class ReadModelQueryGateway:
 
     def __init__(self, *, queue_repository: Any | None = None, redis_helper: Any | None = None) -> None:
         self._queue_repository = queue_repository
+        self._refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
         self._redis_helper = redis_helper
 
     def load(
@@ -130,11 +132,9 @@ class ReadModelQueryGateway:
         )
 
     def _enqueue_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> bool:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        if not self._refresh_gateway.can_enqueue():
             return False
-        enqueue(scope_type=scope_type, scope_key=scope_key, reason=reason)
-        return True
+        return bool(self._refresh_gateway.enqueue_many(scope_type, [scope_key], reason=reason))
 
     def _get_cached_payload(self, cache_key: str | None) -> dict[str, Any] | None:
         if not cache_key:

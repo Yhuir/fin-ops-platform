@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -85,18 +86,17 @@ class InvoiceUsageCollectionReadModelRefreshService:
         shard_reason: str,
     ) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, list_method_name, None)
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(list_shards) or not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
         if not shard_keys:
             mark_empty = getattr(self._projection_builder, empty_method_name, None)
             if callable(mark_empty):
                 mark_empty(scope_key)
-        for shard_key in shard_keys:
-            enqueue(scope_type=scope_type, scope_key=shard_key, reason=shard_reason)
+        enqueued_scope_keys = refresh_gateway.enqueue_many(scope_type, shard_keys, reason=shard_reason)
         self._complete_dirty_scope(event, scope_type=scope_type, scope_key=scope_key)
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}
+        return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
     def _complete_dirty_scope(self, event: RuntimeQueueEvent, *, scope_type: str, scope_key: str) -> None:
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
 from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
 
@@ -37,6 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     connection = PostgresConnection(PostgresSettings.from_env())
     queue = RuntimeQueueRepository(connection)
+    refresh_gateway = ReadModelRefreshGateway(queue_repository=queue)
     projection_builder = BankDetailSqlProjectionBuilder(connection=connection)
     scope_keys = _scope_keys(args.scope_key, projection_builder)
     plan = {
@@ -49,11 +51,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     enqueued: list[str] = []
     if not args.dry_run:
         if args.enqueue_all:
-            queue.enqueue_read_model_refresh(scope_type="bank_detail", scope_key="all", reason="bank_detail_backfill_all")
+            refresh_gateway.enqueue_one("bank_detail", "all", reason="bank_detail_backfill_all")
             enqueued.append("all")
         if args.enqueue_missing:
             for scope_key in scope_keys:
-                queue.enqueue_read_model_refresh(scope_type="bank_detail", scope_key=scope_key, reason="bank_detail_backfill_missing")
+                refresh_gateway.enqueue_one("bank_detail", scope_key, reason="bank_detail_backfill_missing")
                 enqueued.append(scope_key)
     drain_result: list[str] = []
     if args.worker_drain and not args.dry_run:

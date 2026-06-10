@@ -3,6 +3,7 @@ from __future__ import annotations
 from inspect import signature
 from typing import Any
 
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -38,14 +39,13 @@ class BankDetailReadModelRefreshService:
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, *, source_version: Any) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_bank_detail_scope_shards", None)
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(list_shards) or not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards("all") or []) if str(item).strip()]
-        for shard_key in shard_keys:
-            enqueue(scope_type="bank_detail", scope_key=shard_key, reason="bank_detail_all_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many("bank_detail", shard_keys, reason="bank_detail_all_shard")
         self._complete_dirty_scope(event, scope_key="all", source_version=source_version)
-        return {"scope_key": "all", "enqueued_scope_keys": shard_keys, "row_count": 0}
+        return {"scope_key": "all", "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
     def _complete_dirty_scope(self, event: RuntimeQueueEvent, *, scope_key: str, source_version: Any) -> None:
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)

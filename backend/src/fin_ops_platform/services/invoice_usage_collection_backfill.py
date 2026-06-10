@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import PRIORITY_VALUES
 
 
@@ -97,26 +98,27 @@ def execute_invoice_usage_collection_backfill_plan(
     tasks = list(plan)
     events: list[dict[str, object]] = []
     if not dry_run:
-        enqueue = getattr(queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
+        if not refresh_gateway.can_enqueue():
             raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
         for task in tasks:
-            event = enqueue(
-                scope_type=task.scope_type,
-                scope_key=task.scope_key,
+            enqueued_events = refresh_gateway.enqueue_many_events(
+                task.scope_type,
+                [task.scope_key],
                 reason=task.reason,
                 priority=task.priority,
                 trace_id=task.trace_id,
             )
-            event_report: dict[str, object] = {}
-            event_id = getattr(event, "event_id", None)
-            source_version = getattr(event, "source_version", None)
-            if event_id is not None:
-                event_report["event_id"] = str(event_id)
-            if source_version is not None:
-                event_report["source_version"] = int(source_version)
-            if event_report:
-                events.append(event_report)
+            for event in enqueued_events:
+                event_report: dict[str, object] = {}
+                event_id = getattr(event, "event_id", None)
+                source_version = getattr(event, "source_version", None)
+                if event_id is not None:
+                    event_report["event_id"] = str(event_id)
+                if source_version is not None:
+                    event_report["source_version"] = int(source_version)
+                if event_report:
+                    events.append(event_report)
     return {
         "action": "enqueue_invoice_usage_collection",
         "dry_run": bool(dry_run),

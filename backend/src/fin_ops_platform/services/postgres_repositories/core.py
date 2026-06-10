@@ -816,6 +816,12 @@ class PostgresCoreRepository:
         invoice_id = self._text(invoice.get("id"))
         if not invoice_id:
             return
+        source_unique_key, data_fingerprint = self._invoice_identity_values(invoice)
+        normalized_payload = self._invoice_payload_with_identity_values(
+            invoice,
+            source_unique_key=source_unique_key,
+            data_fingerprint=data_fingerprint,
+        )
         counterparty = invoice.get("counterparty") if isinstance(invoice.get("counterparty"), dict) else {}
         connection.execute(
             """
@@ -869,8 +875,8 @@ class PostgresCoreRepository:
                 self._text(invoice.get("invoice_no")) or invoice_id,
                 self._text(invoice.get("invoice_code")),
                 self._text(invoice.get("digital_invoice_no")),
-                self._text(invoice.get("source_unique_key")),
-                self._text(invoice.get("data_fingerprint")),
+                source_unique_key,
+                data_fingerprint,
                 self._date_text(invoice.get("invoice_date")),
                 self._date_text(invoice.get("invoice_date")),
                 self._text(counterparty.get("id") or invoice.get("counterparty_id")),
@@ -893,7 +899,7 @@ class PostgresCoreRepository:
                 self._text(invoice.get("status")) or InvoiceStatus.PENDING.value,
                 self._text_list(invoice.get("tags")),
                 _jsonb(invoice.get("source_links") if isinstance(invoice.get("source_links"), list) else []),
-                _jsonb({"normalized_payload": invoice}),
+                _jsonb({"normalized_payload": normalized_payload}),
             ),
         )
 
@@ -901,6 +907,12 @@ class PostgresCoreRepository:
         invoice_id = self._text(invoice.get("id"))
         if not invoice_id:
             return
+        source_unique_key, data_fingerprint = self._invoice_identity_values(invoice)
+        normalized_payload = self._invoice_payload_with_identity_values(
+            invoice,
+            source_unique_key=source_unique_key,
+            data_fingerprint=data_fingerprint,
+        )
         connection.execute(
             """
             update app.invoices
@@ -926,11 +938,28 @@ class PostgresCoreRepository:
                 self._text(invoice.get("status")) or InvoiceStatus.PENDING.value,
                 self._text_list(invoice.get("tags")),
                 _jsonb(invoice.get("source_links") if isinstance(invoice.get("source_links"), list) else []),
-                _jsonb(invoice),
+                _jsonb(normalized_payload),
                 invoice_id,
                 invoice_id,
             ),
         )
+
+    def _invoice_identity_values(self, invoice: dict[str, Any]) -> tuple[str | None, str | None]:
+        source_unique_key = self._text(invoice.get("source_unique_key"))
+        data_fingerprint = None if source_unique_key else self._text(invoice.get("data_fingerprint"))
+        return source_unique_key, data_fingerprint
+
+    def _invoice_payload_with_identity_values(
+        self,
+        invoice: dict[str, Any],
+        *,
+        source_unique_key: str | None,
+        data_fingerprint: str | None,
+    ) -> dict[str, Any]:
+        payload = dict(invoice)
+        payload["source_unique_key"] = source_unique_key
+        payload["data_fingerprint"] = data_fingerprint
+        return payload
 
     def _save_transaction(self, connection: Any, transaction: dict[str, Any]) -> None:
         transaction_id = self._text(transaction.get("id"))
@@ -1057,6 +1086,12 @@ class PostgresCoreRepository:
         payload = payload if isinstance(payload, dict) else {}
         counterparty_payload = payload.get("counterparty") if isinstance(payload.get("counterparty"), dict) else {}
         counterparty_name = self._text(counterparty_payload.get("name") or row.get("counterparty_name")) or "unknown"
+        source_unique_key = self._text(payload.get("source_unique_key") or row.get("source_unique_key"))
+        data_fingerprint = (
+            None
+            if source_unique_key
+            else self._text(payload.get("data_fingerprint") or row.get("data_fingerprint"))
+        )
         counterparty = Counterparty(
             id=self._text(counterparty_payload.get("id") or row.get("counterparty_id")) or f"counterparty:{counterparty_name}",
             name=counterparty_name,
@@ -1073,8 +1108,8 @@ class PostgresCoreRepository:
             signed_amount=Decimal(str(payload.get("signed_amount") or row.get("signed_amount") or payload.get("amount") or row.get("amount") or "0")),
             invoice_code=self._text(payload.get("invoice_code") or row.get("invoice_code")),
             digital_invoice_no=self._text(payload.get("digital_invoice_no") or row.get("digital_invoice_no")),
-            source_unique_key=self._text(payload.get("source_unique_key") or row.get("source_unique_key")),
-            data_fingerprint=self._text(payload.get("data_fingerprint") or row.get("data_fingerprint")),
+            source_unique_key=source_unique_key,
+            data_fingerprint=data_fingerprint,
             invoice_status_from_source=self._text(
                 payload.get("invoice_status_from_source") or row.get("invoice_status_from_source")
             ),

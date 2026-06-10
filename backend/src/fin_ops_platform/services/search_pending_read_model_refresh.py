@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -52,33 +53,31 @@ class SearchPendingReadModelRefreshService:
 
     def _enqueue_search_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_search_scope_shards", None)
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(list_shards) or not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        for shard_key in shard_keys:
-            enqueue(scope_type="search", scope_key=shard_key, reason="search_all_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many("search", shard_keys, reason="search_all_shard")
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type="search", scope_key=scope_key)
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}
+        return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
     def _enqueue_pending_invoice_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_pending_invoice_scope_shards", None)
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(list_shards) or not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
         if not shard_keys:
             mark_empty = getattr(self._projection_builder, "mark_pending_invoice_scope_empty", None)
             if callable(mark_empty):
                 mark_empty(scope_key)
-        for shard_key in shard_keys:
-            enqueue(scope_type="pending_invoice", scope_key=shard_key, reason="pending_invoice_month_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many("pending_invoice", shard_keys, reason="pending_invoice_month_shard")
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type="pending_invoice", scope_key=scope_key)
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "row_count": 0}
+        return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
 
 def _pending_invoice_scope_requires_expansion(scope_key: str) -> bool:

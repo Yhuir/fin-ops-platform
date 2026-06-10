@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder
 from fin_ops_platform.services.bank_account_balance_read_model_refresh import BankAccountBalanceReadModelRefreshService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig
 
@@ -51,15 +52,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     connection = PostgresConnection(PostgresSettings.from_env())
     queue = RuntimeQueueRepository(connection)
+    refresh_gateway = ReadModelRefreshGateway(queue_repository=queue)
     projection_builder = BankAccountBalanceProjectionBuilder(connection=connection)
     if args.rebuild_now:
         rebuild_result = projection_builder.rebuild_bank_account_balance_read_model()
     if args.enqueue:
-        queue.enqueue_read_model_refresh(
-            scope_type="bank_account_balance",
-            scope_key="all",
-            reason="bank_account_balance_backfill",
-        )
+        refresh_gateway.enqueue_one("bank_account_balance", "all", reason="bank_account_balance_backfill")
         enqueued = True
     if args.worker_drain:
         refresh_service = BankAccountBalanceReadModelRefreshService(

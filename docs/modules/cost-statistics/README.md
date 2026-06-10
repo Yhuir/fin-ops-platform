@@ -19,7 +19,7 @@
 
 ## 当前边界
 
-关注项目范围、费用归因、导出 shape 和 cost read model freshness。
+关注项目范围、费用归因、导出 shape 和 cost read model freshness。成本统计 read model refresh scope 必须是 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 或 `all:all`；旧的裸月份/裸 `all` 只能在统一 read model refresh scope gateway 中归一化，不能直接进入 durable queue。生产旧 readiness、dirty scope 或 outbox 中残留的裸 scope 使用 `scripts/check-read-model-scope-contracts.py` 检查和受控清理。
 
 ## 维护触发器
 

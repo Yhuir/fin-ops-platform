@@ -94,11 +94,12 @@ class TaxOffsetRuntimeService:
             return 60
 
     def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not gateway.can_enqueue():
             return False
-        enqueue(scope_type="tax_offset", scope_key=scope_key, reason=reason)
-        return True
+        return bool(gateway.enqueue_one("tax_offset", scope_key, reason=reason))
 
     def read_model_scope_key(self, month: str, *, read_model: dict[str, Any] | None = None) -> str:
         if isinstance(read_model, dict):

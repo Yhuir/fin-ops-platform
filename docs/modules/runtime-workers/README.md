@@ -19,7 +19,7 @@
 
 ## 当前边界
 
-Worker 不得依赖 Application、app.server、app.auth 或 HTTP response。
+Worker 不得依赖 Application、app.server、app.auth 或 HTTP response。Worker lifecycle 触发 read model refresh 时必须通过统一 refresh gateway 入队，由 registry/policy 先完成 scope normalize、validate 和 dedupe，避免 worker 直接投递过期或非法 scope contract。
 
 ## 维护触发器
 

@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, text, text_list
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 FRESH_BANK_TAG_STATUS = "fresh"
@@ -201,16 +202,17 @@ class BankTransactionTagReadFacade:
         )
 
     def _enqueue_scope_refresh(self, *, scope_keys: list[str], reason: str) -> bool:
-        if self._queue_repository is None:
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
-            return False
-        did_enqueue = False
-        for scope_key in _dedupe_preserve_order(text(value) for value in list(scope_keys or [])):
-            enqueue(scope_type="bank_detail", scope_key=scope_key, reason=reason, tenant_id=self._tenant_id)
-            did_enqueue = True
-        return did_enqueue
+        return bool(
+            refresh_gateway.enqueue_many(
+                "bank_detail",
+                _dedupe_preserve_order(text(value) for value in list(scope_keys or [])),
+                reason=reason,
+                tenant_id=self._tenant_id,
+            )
+        )
 
 
 def _facade_result(

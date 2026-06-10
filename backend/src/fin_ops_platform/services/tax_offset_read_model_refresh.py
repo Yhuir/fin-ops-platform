@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -41,13 +42,12 @@ class TaxOffsetReadModelRefreshService:
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_tax_offset_scope_shards", None)
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(list_shards) or not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        for shard_key in shard_keys:
-            enqueue(scope_type="tax_offset", scope_key=shard_key, reason="tax_offset_all_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many("tax_offset", shard_keys, reason="tax_offset_all_shard")
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type="tax_offset", scope_key=scope_key)
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "entry_count": 0}
+        return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "entry_count": 0}

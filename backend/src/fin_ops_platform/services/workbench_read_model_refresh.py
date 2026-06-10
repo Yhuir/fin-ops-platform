@@ -3,6 +3,7 @@ from __future__ import annotations
 from inspect import signature
 from typing import Any, Callable
 
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -63,12 +64,11 @@ class WorkbenchReadModelRefreshService:
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent, scope_key: str) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, "list_workbench_scope_shards", None)
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(list_shards) or not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not callable(list_shards) or not refresh_gateway.can_enqueue():
             return None
         shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        for shard_key in shard_keys:
-            enqueue(scope_type="workbench", scope_key=shard_key, reason="workbench_all_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many("workbench", shard_keys, reason="workbench_all_shard")
         enqueue_event = getattr(self._queue_repository, "enqueue", None)
         if callable(enqueue_event):
             source_version = event.source_version or event.payload.get("source_version")
@@ -84,14 +84,14 @@ class WorkbenchReadModelRefreshService:
                     "scope_key": scope_key,
                     "aggregate_only": True,
                     "source_version": source_version,
-                    "parent_scope_keys": shard_keys,
+                    "parent_scope_keys": enqueued_scope_keys,
                 },
                 tenant_id=event.tenant_id,
                 source_version=source_version,
                 priority="low",
                 trace_id=event.trace_id,
             )
-        return {"scope_key": scope_key, "enqueued_scope_keys": shard_keys, "aggregate_enqueued": callable(enqueue_event), "row_count": 0}
+        return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "aggregate_enqueued": callable(enqueue_event), "row_count": 0}
 
     def _enqueue_all_scope_aggregate_after_shard_publish(self, event: RuntimeQueueEvent, scope_key: str) -> bool | None:
         if scope_key == "all":

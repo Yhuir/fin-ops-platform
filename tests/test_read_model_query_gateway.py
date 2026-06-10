@@ -111,6 +111,28 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
             [{"scope_type": "example", "scope_key": "all", "reason": "api_miss"}],
         )
 
+    def test_cost_statistics_refresh_uses_registered_scope_policy_before_enqueue(self) -> None:
+        queue = QueueRecorder()
+        gateway = ReadModelQueryGateway(queue_repository=queue)
+
+        result = gateway.load(
+            scope_type="cost_statistics",
+            scope_key="2026-05",
+            expected_source_versions={"source_version": 3},
+            load_view=lambda: None,
+            empty_payload_factory=lambda: {"rows": []},
+            missing_reason="api_miss",
+        )
+
+        self.assertTrue(result.refresh_enqueued)
+        self.assertEqual(
+            queue.refreshes,
+            [
+                {"scope_type": "cost_statistics", "scope_key": "active:2026-05", "reason": "api_miss"},
+                {"scope_type": "cost_statistics", "scope_key": "all:2026-05", "reason": "api_miss"},
+            ],
+        )
+
     def test_fresh_sql_view_sets_refresh_enqueued_false_and_populates_cache(self) -> None:
         queue = QueueRecorder()
         redis = RedisRecorder()

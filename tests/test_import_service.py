@@ -164,6 +164,32 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertIsNone(second_invoice.data_fingerprint)
         self.assertEqual(len(service.list_invoices()), 2)
 
+    def test_existing_canonical_invoice_drops_weak_fingerprint_on_load(self) -> None:
+        stale = Invoice(
+            id="inv_existing_etc_stale",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="26537911470300077680",
+            digital_invoice_no="26537911470300077680",
+            counterparty=Counterparty(
+                id="cp_etc_stale",
+                name="昆明新机场高速公路建设发展有限公司",
+                normalized_name="昆明新机场高速公路建设发展有限公司",
+                counterparty_type="vendor",
+            ),
+            amount=Decimal("9.22"),
+            signed_amount=Decimal("9.22"),
+            invoice_date="2026-03-31",
+            total_with_tax=Decimal("9.22"),
+            source_unique_key="26537911470300077680",
+            data_fingerprint="invoice:昆明新机场高速公路建设发展有限公司:2026-03-31:9.22",
+        )
+
+        service = ImportNormalizationService(existing_invoices=[stale])
+
+        loaded = service.get_invoice("inv_existing_etc_stale")
+        self.assertEqual(loaded.source_unique_key, "26537911470300077680")
+        self.assertIsNone(loaded.data_fingerprint)
+
     def test_preview_output_invoice_classifies_rows_across_all_decision_types(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.OUTPUT_INVOICE,

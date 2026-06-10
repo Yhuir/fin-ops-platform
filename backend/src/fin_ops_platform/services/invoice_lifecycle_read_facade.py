@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import text
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 FRESH_INVOICE_LIFECYCLE_STATUS = "fresh"
@@ -196,14 +197,16 @@ class InvoiceLifecycleReadFacade:
         return result
 
     def _enqueue_scope_refresh(self, *, scope_keys: list[str], reason: str) -> bool:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
-        if not callable(enqueue):
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if not refresh_gateway.can_enqueue():
             return False
-        enqueued = False
-        for scope_key in _dedupe_preserve_order(text(value) for value in list(scope_keys or [])):
-            enqueue(scope_type=INVOICE_LIFECYCLE_SCOPE_TYPE, scope_key=scope_key, reason=reason)
-            enqueued = True
-        return enqueued
+        return bool(
+            refresh_gateway.enqueue_many(
+                INVOICE_LIFECYCLE_SCOPE_TYPE,
+                _dedupe_preserve_order(text(value) for value in list(scope_keys or [])),
+                reason=reason,
+            )
+        )
 
 
 def _facade_result(
