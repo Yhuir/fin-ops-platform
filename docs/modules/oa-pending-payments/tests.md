@@ -7,25 +7,22 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 待判断 | 待补充 | 业务规则、金额、状态、分类、权限、去重、幂等时适用。 |
-| 2. Service-layer tests | 待判断 | 待补充 | service、repository、audit、read model、cache、worker 编排时适用。 |
-| 3. API contract tests | 待判断 | 待补充 | HTTP/API contract 或 DTO shape 变化时适用。 |
-| 4. Read model/cache/background job tests | 待判断 | 待补充 | list、summary、search、workbench、ledger、import、worker 变化时适用。 |
-| 5. Frontend component and interaction tests | 待判断 | 待补充 | 页面、表格、drawer、dialog、按钮、筛选、权限渲染变化时适用。 |
-| 6. End-to-end business-flow integration tests | 待判断 | 待补充 | 跨模块业务链路变化时适用。 |
-| 7. Existing feature regression tests | 待判断 | 待补充 | 每次变更都要判断受影响旧行为。 |
+| 1. Business core unit tests | 不适用（纯前端布局时） | N/A | 业务规则、金额计算、状态流转、权限、去重、幂等未变化时不需要。 |
+| 2. Service-layer tests | 不适用（纯前端布局时） | N/A | service、repository、audit、read model、cache、worker 编排未变化时不需要。 |
+| 3. API contract tests | 不适用（纯前端布局时） | N/A | HTTP/API contract、DTO shape、错误字段和权限响应未变化时不需要。 |
+| 4. Read model/cache/background job tests | 不适用（纯前端布局时） | N/A | read model freshness、cache、worker、dirty scope 和后台刷新未变化时不需要。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/OaPendingPaymentsPage.test.tsx` | 覆盖页面渲染、分组表格、筛选/排序、详情抽屉、规则抽屉、空状态和银行金额/方向 chip 非重叠布局。 |
+| 6. End-to-end business-flow integration tests | 不适用（纯前端布局时） | N/A | 未跨导入、关系确认、后台任务、read model 刷新等业务链路。 |
+| 7. Existing feature regression tests | 适用 | `web/src/test/OaPendingPaymentsPage.test.tsx`; `web/src/test/TableAlignmentStyles.test.ts` | 保护既有表格 CSS 契约、页面交互、筛选/排序参数和共享财务表格对齐样式。 |
 
 ## 现有验证命令
 
 ```bash
-# 后端示例，按实际模块替换
-PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
-
-# 前端示例，按实际模块替换
-cd web && npm test
+cd web && npx vitest run src/test/OaPendingPaymentsPage.test.tsx
+cd web && npx vitest run src/test/TableAlignmentStyles.test.ts
 cd web && npm run build
 ```
 
 ## 未测风险
 
-- 待补充。
+- 纯前端布局修复不覆盖真实浏览器像素级截图差异；必要时在本地 dev server 打开 `/oa-pending-payments` 做人工视觉确认。

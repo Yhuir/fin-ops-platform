@@ -364,7 +364,7 @@ describe("Input invoice usage workflow drawers", () => {
     nextAction: "create_batch",
   };
 
-  test("OA reverse drawer calls loadPreview after opening and only displays backend-provided totals/groups/rejections", async () => {
+  test("OA reverse drawer calls loadPreview after opening and hides rejected invoice reasons to keep the workspace compact", async () => {
     const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
 
     render(
@@ -392,7 +392,8 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getAllByText("99.72").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("陈秀云").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("chen_xiuyun")).toBeInTheDocument();
-    expect(screen.getByText("缺少目标 OA 账号")).toBeInTheDocument();
+    expect(screen.queryByText("不可提交原因")).not.toBeInTheDocument();
+    expect(screen.queryByText("缺少目标 OA 账号")).not.toBeInTheDocument();
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("昆明供应商一")).toBeInTheDocument();
     expect(screen.getByText("2026-05-02")).toBeInTheDocument();

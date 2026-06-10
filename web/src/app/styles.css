@@ -1719,7 +1719,7 @@ textarea {
 
 .oa-pending-payments-table {
   width: 100%;
-  min-width: 1210px;
+  min-width: 1235px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -1748,7 +1748,7 @@ textarea {
 }
 
 .oa-pending-payments-col-bankAmountAccount {
-  width: 125px;
+  width: 150px;
 }
 
 .oa-pending-payments-col-bankSummaryRemark {
@@ -1863,8 +1863,7 @@ textarea {
 }
 
 .oa-pending-payments-inline-row,
-.oa-pending-payments-tag-row,
-.oa-pending-payments-amount-detail-row {
+.oa-pending-payments-tag-row {
   display: inline-flex;
   max-width: 100%;
   align-items: center;
@@ -1882,8 +1881,36 @@ textarea {
 }
 
 .oa-pending-payments-tag-row--right,
-.oa-pending-payments-amount-detail-row {
+.oa-pending-payments-bank-account-row {
   justify-content: flex-end;
+}
+
+.oa-pending-payments-bank-amount-cell {
+  display: grid;
+  max-width: 100%;
+  min-width: 0;
+  justify-items: end;
+  gap: 4px;
+}
+
+.oa-pending-payments-bank-amount-line {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--fp-space-1);
+}
+
+.oa-pending-payments-bank-amount-line > * {
+  flex: 0 0 auto;
+}
+
+.oa-pending-payments-bank-account-row {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .oa-pending-payments-table-text {

@@ -153,7 +153,6 @@ export default function OaReverseWorkspaceDrawer({
   const selectedCandidateIdSet = useMemo(() => new Set(selectedCandidateIds), [selectedCandidateIds]);
   const targetApplicants = preview?.targetApplicants ?? [];
   const selectedTargetApplicantCode = targetApplicantCode ?? preview?.targetApplicantCode ?? "";
-  const rejected = preview ? rejectedInvoices(preview) : [];
   const canCreateBatch = Boolean(
     preview
     && !batch
@@ -373,17 +372,6 @@ export default function OaReverseWorkspaceDrawer({
                 ))}
               </div>
             </Section>
-            <Section title="不可提交原因">
-              {rejected.length === 0 ? <p className="input-invoice-usage-rules-empty">当前预览未返回不可提交发票。</p> : null}
-              <div className="input-invoice-usage-oa-stack">
-                {rejected.map((item) => (
-                  <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--warning" key={item.invoiceId}>
-                    <strong>{item.invoiceNumber || item.invoiceId}</strong>
-                    <span>{item.reason}</span>
-                  </div>
-                ))}
-              </div>
-            </Section>
             <Section title="候选发票清单">
               {candidateInvoices.length > 0 ? (
                 <div className="input-invoice-usage-oa-actions">
@@ -558,16 +546,6 @@ export default function OaReverseWorkspaceDrawer({
       </div>
     </AppDrawer>
   );
-}
-
-function rejectedInvoices(preview: OaReversePreviewPayload) {
-  const byId = new Map<string, OaReverseRejectedInvoice>();
-  for (const group of preview.groups) {
-    for (const item of group.rejectedInvoices ?? []) {
-      byId.set(item.invoiceId, item);
-    }
-  }
-  return Array.from(byId.values());
 }
 
 function invoicesFromPreview(preview: OaReversePreviewPayload) {

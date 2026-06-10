@@ -204,24 +204,26 @@ export default function OaPendingPaymentsTable({
                   </span>
                 </td>
                 <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
-                  <span className="oa-pending-payments-amount-detail-row">
-                    <TextLine numeric strong value={bankAmount(row)} />
-                    <FinanceDirectionTag direction={row.bankTransaction.directionLabel || "支出"}>
-                      {row.bankTransaction.directionLabel || "支出"}
-                    </FinanceDirectionTag>
-                    <DetailButton
-                      disabled={!bankDetailTarget(row)}
-                      label={bankDetailLabel(row)}
-                      onClick={() => {
-                        const target = bankDetailTarget(row);
-                        if (target) {
-                          onOpenDetail(target);
-                        }
-                      }}
-                    />
-                  </span>
-                  <span className="oa-pending-payments-tag-row oa-pending-payments-tag-row--right">
-                    <TableTag>{bankAccountLabel(row)}</TableTag>
+                  <span className="oa-pending-payments-bank-amount-cell">
+                    <span className="oa-pending-payments-bank-amount-line">
+                      <TextLine numeric strong value={bankAmount(row)} />
+                      <FinanceDirectionTag direction={row.bankTransaction.directionLabel || "支出"}>
+                        {row.bankTransaction.directionLabel || "支出"}
+                      </FinanceDirectionTag>
+                      <DetailButton
+                        disabled={!bankDetailTarget(row)}
+                        label={bankDetailLabel(row)}
+                        onClick={() => {
+                          const target = bankDetailTarget(row);
+                          if (target) {
+                            onOpenDetail(target);
+                          }
+                        }}
+                      />
+                    </span>
+                    <span className="oa-pending-payments-bank-account-row">
+                      <TableTag>{bankAccountLabel(row)}</TableTag>
+                    </span>
                   </span>
                 </td>
                 <td className="oa-pending-payments-table-cell" data-column-role="description">

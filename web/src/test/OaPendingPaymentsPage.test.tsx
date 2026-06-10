@@ -521,6 +521,38 @@ describe("OA pending payments page", () => {
     expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
   });
 
+  test("keeps bank amount and direction chip in a non-overlapping layout slot", async () => {
+    installOaPendingPaymentsFetch();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("张三");
+    const row = within(page).getByRole("row", { name: /张三/ });
+    const bankDetailButton = within(row).getByRole("button", { name: "查看流水 张三 详情" });
+    const bankAmountLayout = bankDetailButton.closest(".oa-pending-payments-bank-amount-cell");
+    const amountLine = bankDetailButton.closest(".oa-pending-payments-bank-amount-line");
+
+    expect(bankAmountLayout).not.toBeNull();
+    expect(amountLine).not.toBeNull();
+    expect(bankAmountLayout).toContainElement(amountLine);
+    expect(amountLine).toContainElement(within(row).getAllByText("10000.00")[1]);
+    expect(within(amountLine as HTMLElement).getByText("支出").closest(".finance-direction-tag")).not.toBeNull();
+    expect(bankAmountLayout).toContainElement(within(row).getByText("建设银行 1234"));
+
+    const styles = readWebSource("src/app/styles.css");
+    const amountLineStyles = cssRule(styles, ".oa-pending-payments-bank-amount-line");
+    const nonShrinkingChildren = cssRule(
+      styles,
+      ".oa-pending-payments-bank-amount-line > *",
+    );
+
+    expect(amountLineStyles).toContain("display: flex");
+    expect(amountLineStyles).toContain("flex-wrap: wrap");
+    expect(amountLineStyles).toContain("justify-content: flex-end");
+    expect(nonShrinkingChildren).toContain("flex: 0 0 auto");
+  });
+
   test("adds sidebar route and renders compact grouped project table from OA perspective", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
