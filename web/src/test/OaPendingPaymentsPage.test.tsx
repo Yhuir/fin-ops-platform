@@ -22,6 +22,7 @@ const rowsPayload = {
         applicantName: "张三",
         applicationType: "报销",
         projectName: "红河卷烟厂能源管理系统运维服务",
+        applicationTime: "2026-01-03",
         amount: "10000.00",
         detailAvailable: true,
       },
@@ -74,6 +75,7 @@ const rowsPayload = {
         applicantName: "李四",
         applicationType: "付款",
         projectName: "多关联项目",
+        applicationTime: "2026-01-04 10:30:00",
         amount: "15000.00",
         detailAvailable: true,
       },
@@ -154,6 +156,7 @@ const rowsPayload = {
         applicantName: "王五",
         applicationType: "付款",
         projectName: "未关联发票项目",
+        applicationTime: "2026-01-05",
         amount: "18200.00",
         detailAvailable: true,
       },
@@ -187,6 +190,62 @@ const rowsPayload = {
         relationCount: 1,
         hasMultiple: false,
         detailMode: "single",
+      },
+      invoice: {
+        primaryInvoiceId: null,
+        digitalInvoiceNo: "",
+        sellerName: "",
+        invoiceDate: "",
+        totalWithTax: "",
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+      },
+    },
+    {
+      id: "oa-payment-row-004",
+      oa: {
+        id: "oa-004",
+        applicantName: "杨丽萍",
+        applicationType: "支付申请",
+        projectName: "大理卷烟厂余热综合利用项目",
+        applicationTime: "2026-05-23",
+        amount: "977.00",
+        detailAvailable: true,
+      },
+      paymentStatus: {
+        code: "unpaid",
+        label: "未支付",
+        reason: "未关联支出流水",
+      },
+      bankTransaction: {
+        primaryBankTransactionId: null,
+        accountDetailNo: "",
+        enterpriseSerialNo: "",
+        voucherKind: "",
+        voucherNo: "",
+        bankName: "",
+        accountNo: "",
+        accountLast4: "",
+        bankAccount: "",
+        directionLabel: "支出",
+        accountName: "",
+        tradeTime: "",
+        debitAmount: "0.00",
+        creditAmount: "0.00",
+        balance: "",
+        currency: "",
+        counterpartyName: "",
+        counterpartyAccountNo: "",
+        counterpartyBankName: "",
+        bookedDate: "",
+        summary: "",
+        remark: "",
+        amount: "0.00",
+        paidTotal: "0.00",
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
       },
       invoice: {
         primaryInvoiceId: null,
@@ -551,6 +610,32 @@ describe("OA pending payments page", () => {
     expect(amountLineStyles).toContain("flex-wrap: wrap");
     expect(amountLineStyles).toContain("justify-content: flex-end");
     expect(nonShrinkingChildren).toContain("flex: 0 0 auto");
+  });
+
+  test("shows OA application time under project and renders missing bank transaction as dash only", async () => {
+    installOaPendingPaymentsFetch();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("张三");
+
+    const paidRow = within(page).getByRole("row", { name: /张三/ });
+    const paidCells = paidRow.querySelectorAll(".oa-pending-payments-table-cell");
+    const projectCell = paidCells[1] as HTMLElement;
+    expect(within(projectCell).getByText("红河卷烟厂能源管理系统运维服务")).toBeInTheDocument();
+    expect(within(projectCell).getByText("2026-01-03")).toHaveClass("oa-pending-payments-table-tag");
+
+    const missingBankRow = within(page).getByRole("row", { name: /杨丽萍/ });
+    const missingBankCells = missingBankRow.querySelectorAll(".oa-pending-payments-table-cell");
+    expect(within(missingBankCells[1] as HTMLElement).getByText("2026-05-23")).toHaveClass("oa-pending-payments-table-tag");
+    expect(missingBankCells[4]?.textContent?.trim()).toBe("-");
+    expect(missingBankCells[5]?.textContent?.trim()).toBe("-");
+    expect(missingBankCells[6]?.textContent?.trim()).toBe("-");
+    expect(within(missingBankRow).queryByText("交易时间为空")).not.toBeInTheDocument();
+    expect(within(missingBankRow).queryByText("0.00")).not.toBeInTheDocument();
+    expect(missingBankRow.querySelector(".finance-direction-tag")).toBeNull();
+    expect(within(missingBankRow).queryByRole("button", { name: /查看流水/ })).not.toBeInTheDocument();
   });
 
   test("adds sidebar route and renders compact grouped project table from OA perspective", async () => {

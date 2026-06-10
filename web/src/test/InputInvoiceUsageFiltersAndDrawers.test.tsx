@@ -366,6 +366,7 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse drawer calls loadPreview after opening and hides rejected invoice reasons to keep the workspace compact", async () => {
     const loadPreview = vi.fn(() => Promise.resolve(previewPayload));
+    const createBatch = vi.fn();
 
     render(
       <OaReverseWorkspaceDrawer
@@ -373,6 +374,7 @@ describe("Input invoice usage workflow drawers", () => {
         sourceFilters={[{ field: "payment_status", operator: "in", values: ["pending"] }]}
         selectedInvoiceIds={["inv-001", "inv-002"]}
         loadPreview={loadPreview}
+        createBatch={createBatch}
         onClose={() => undefined}
       />,
     );
@@ -394,10 +396,12 @@ describe("Input invoice usage workflow drawers", () => {
     expect(screen.getByText("chen_xiuyun")).toBeInTheDocument();
     expect(screen.queryByText("不可提交原因")).not.toBeInTheDocument();
     expect(screen.queryByText("缺少目标 OA 账号")).not.toBeInTheDocument();
+    expect(screen.queryByText("create_batch")).not.toBeInTheDocument();
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("昆明供应商一")).toBeInTheDocument();
     expect(screen.getByText("2026-05-02")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /创建.*草稿|提交|保存/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建本地批次" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /创建 OA 草稿|提交|保存/ })).not.toBeInTheDocument();
   });
 
   test("OA reverse drawer asks whether the created OA draft was submitted before refreshing status", async () => {

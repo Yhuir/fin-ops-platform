@@ -72,6 +72,22 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["oa-paid"]["invoice"]["primaryInvoiceId"], "inv-paid")
         self.assertEqual(rows["oa-paid"]["invoice"]["digitalInvoiceNo"], "SD-001")
 
+    def test_oa_summary_exposes_application_time_from_detail_fields(self) -> None:
+        service = self._service(
+            oa_records=[
+                self._oa(
+                    "oa-application-time",
+                    "张三",
+                    "30.00",
+                    detail_fields={"申请日期": "2026-05-25"},
+                ),
+            ]
+        )
+
+        row = service.list_rows()["rows"][0]
+
+        self.assertEqual(row["oa"]["applicationTime"], "2026-05-25")
+
     def test_filter_sort_pagination_and_validation_are_server_side_contracts(self) -> None:
         service = self._service(
             oa_records=[
@@ -215,6 +231,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         *,
         project_name: str = "测试项目",
         apply_type: str = "报销",
+        detail_fields: dict[str, object] | None = None,
     ) -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
@@ -230,6 +247,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
             relation_code="",
             relation_label="",
             relation_tone="",
+            detail_fields=detail_fields or {},
             project_name_display=project_name,
         )
 

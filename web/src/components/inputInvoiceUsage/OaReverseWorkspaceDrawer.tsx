@@ -153,14 +153,12 @@ export default function OaReverseWorkspaceDrawer({
   const selectedCandidateIdSet = useMemo(() => new Set(selectedCandidateIds), [selectedCandidateIds]);
   const targetApplicants = preview?.targetApplicants ?? [];
   const selectedTargetApplicantCode = targetApplicantCode ?? preview?.targetApplicantCode ?? "";
+  const showCreateBatchAction = Boolean(preview && !batch && createBatch && preview.previewId && candidateInvoices.length > 0);
   const canCreateBatch = Boolean(
-    preview
-    && !batch
-    && createBatch
-    && preview.previewId
-    && preview.canCreateDraft
+    showCreateBatchAction
+    && preview?.canCreateDraft
     && selectedCandidateIds.length > 0
-    && (preview.permissions?.canCreateBatch ?? true),
+    && (preview?.permissions?.canCreateBatch ?? true),
   );
   const canCreateDraft = Boolean(batch && createDraft && (batch.canCreateDraft ?? true) && !batch.oaDraftUrl);
   const canConfirmSubmission = Boolean(batch && manualStatus && batch.oaDraftUrl && (batch.canConfirmSubmission ?? batch.status === "oa_draft_created"));
@@ -356,7 +354,7 @@ export default function OaReverseWorkspaceDrawer({
             ) : null}
             {!preview.canCreateDraft ? (
               <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--info">
-                {preview.unavailableReason || preview.nextAction || "后端当前未允许创建 OA 草稿。"}
+                {previewUnavailableMessage(preview, candidateInvoices.length)}
               </div>
             ) : null}
             <Section title="目标 OA 分组">
@@ -442,10 +440,10 @@ export default function OaReverseWorkspaceDrawer({
             <Section title="批次与 OA 草稿">
               {batch ? <BatchStatusPanel batch={batch} /> : <p className="input-invoice-usage-rules-empty">尚未创建本地批次。</p>}
               <div className="input-invoice-usage-oa-actions">
-                {canCreateBatch ? (
+                {showCreateBatchAction ? (
                   <button
                     className="input-invoice-usage-button input-invoice-usage-button--primary"
-                    disabled={Boolean(actionLoading)}
+                    disabled={Boolean(actionLoading) || !canCreateBatch}
                     onClick={handleCreateBatch}
                     type="button"
                   >
@@ -589,6 +587,16 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
 
 function firstTargetApplicantCode(preview: OaReversePreviewPayload) {
   return preview.groups.find((group) => group.targetApplicantCode)?.targetApplicantCode ?? null;
+}
+
+function previewUnavailableMessage(preview: OaReversePreviewPayload, candidateCount: number) {
+  if (preview.unavailableReason) {
+    return preview.unavailableReason;
+  }
+  if (candidateCount > 0 || preview.nextAction === "create_batch") {
+    return "当前账户或预览状态暂不允许创建本地批次。";
+  }
+  return "当前预览未返回可创建批次的候选发票。";
 }
 
 function isManualFallbackStatus(status?: string | null, detectionStatus?: string | null) {

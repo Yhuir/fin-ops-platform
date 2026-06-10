@@ -168,104 +168,124 @@ export default function OaPendingPaymentsTable({
                   暂无 OA 待付款核对数据
                 </td>
               </tr>
-            ) : rows.map((row) => (
-              <tr className="oa-pending-payments-table-row" key={row.id}>
-                <td className="oa-pending-payments-table-cell" data-column-role="identity">
-                  <span className="oa-pending-payments-inline-row">
-                    <TextLine strong value={row.oa.applicantName} />
-                    <DetailButton
-                      disabled={!row.oa.detailAvailable}
-                      label={`查看 OA ${row.oa.applicantName} 详情`}
-                      onClick={() => onOpenDetail({ kind: "oa", id: row.oa.id })}
-                    />
-                  </span>
-                  <span className="oa-pending-payments-tag-row">
-                    <TableTag>{row.oa.applicationType || "类型为空"}</TableTag>
-                  </span>
-                </td>
-                <td className="oa-pending-payments-table-cell" data-column-role="description">
-                  <TextLine value={row.oa.projectName} />
-                </td>
-                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
-                  <TextLine numeric strong value={row.oa.amount} />
-                </td>
-                <td
-                  className="oa-pending-payments-table-cell oa-pending-payments-table-cell--status oa-pending-payments-table-cell--left-border oa-pending-payment-status-cell"
-                  data-column-role="status"
-                >
-                  <FinanceStatusTag tone={statusTone(row.paymentStatus.severity)}>
-                    {row.paymentStatus.label}
-                  </FinanceStatusTag>
-                </td>
-                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
-                  <TextLine strong value={row.bankTransaction.counterpartyName} />
-                  <span className="oa-pending-payments-tag-row">
-                    <TableTag>{row.bankTransaction.tradeTime || "交易时间为空"}</TableTag>
-                  </span>
-                </td>
-                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
-                  <span className="oa-pending-payments-bank-amount-cell">
-                    <span className="oa-pending-payments-bank-amount-line">
-                      <TextLine numeric strong value={bankAmount(row)} />
-                      <FinanceDirectionTag direction={row.bankTransaction.directionLabel || "支出"}>
-                        {row.bankTransaction.directionLabel || "支出"}
-                      </FinanceDirectionTag>
+            ) : rows.map((row) => {
+              const hasBank = hasBankTransaction(row);
+              const bankTarget = bankDetailTarget(row);
+              return (
+                <tr className="oa-pending-payments-table-row" key={row.id}>
+                  <td className="oa-pending-payments-table-cell" data-column-role="identity">
+                    <span className="oa-pending-payments-inline-row">
+                      <TextLine strong value={row.oa.applicantName} />
                       <DetailButton
-                        disabled={!bankDetailTarget(row)}
-                        label={bankDetailLabel(row)}
-                        onClick={() => {
-                          const target = bankDetailTarget(row);
-                          if (target) {
-                            onOpenDetail(target);
-                          }
-                        }}
+                        disabled={!row.oa.detailAvailable}
+                        label={`查看 OA ${row.oa.applicantName} 详情`}
+                        onClick={() => onOpenDetail({ kind: "oa", id: row.oa.id })}
                       />
                     </span>
-                    <span className="oa-pending-payments-bank-account-row">
-                      <TableTag>{bankAccountLabel(row)}</TableTag>
+                    <span className="oa-pending-payments-tag-row">
+                      <TableTag>{row.oa.applicationType || "类型为空"}</TableTag>
                     </span>
-                  </span>
-                </td>
-                <td className="oa-pending-payments-table-cell" data-column-role="description">
-                  <MultiLineValue value={combinedBankSummaryRemark(row)} />
-                </td>
-                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
-                  {hasInvoice(row) ? (
-                    <>
-                      <span className="oa-pending-payments-inline-row">
-                        <span className="oa-pending-payments-invoice-type-chip">进</span>
-                        <TextLine strong value={row.invoice.digitalInvoiceNo} />
-                        {invoiceDetailTarget(row) ? (
+                  </td>
+                  <td className="oa-pending-payments-table-cell" data-column-role="description">
+                    <TextLine value={row.oa.projectName} />
+                    {row.oa.applicationTime ? (
+                      <span className="oa-pending-payments-tag-row">
+                        <TableTag>{row.oa.applicationTime}</TableTag>
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
+                    <TextLine numeric strong value={row.oa.amount} />
+                  </td>
+                  <td
+                    className="oa-pending-payments-table-cell oa-pending-payments-table-cell--status oa-pending-payments-table-cell--left-border oa-pending-payment-status-cell"
+                    data-column-role="status"
+                  >
+                    <FinanceStatusTag tone={statusTone(row.paymentStatus.severity)}>
+                      {row.paymentStatus.label}
+                    </FinanceStatusTag>
+                  </td>
+                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
+                    {hasBank ? (
+                      <>
+                        <TextLine strong value={row.bankTransaction.counterpartyName} />
+                        {row.bankTransaction.tradeTime ? (
+                          <span className="oa-pending-payments-tag-row">
+                            <TableTag>{row.bankTransaction.tradeTime}</TableTag>
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <EmptyValue />
+                    )}
+                  </td>
+                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
+                    {hasBank ? (
+                      <span className="oa-pending-payments-bank-amount-cell">
+                        <span className="oa-pending-payments-bank-amount-line">
+                          <TextLine numeric strong value={bankAmount(row)} />
+                          <FinanceDirectionTag direction={row.bankTransaction.directionLabel || "支出"}>
+                            {row.bankTransaction.directionLabel || "支出"}
+                          </FinanceDirectionTag>
                           <DetailButton
-                            disabled={false}
-                            label={invoiceDetailLabel(row)}
+                            disabled={!bankTarget}
+                            label={bankDetailLabel(row)}
                             onClick={() => {
-                              const target = invoiceDetailTarget(row);
-                              if (target) {
-                                onOpenDetail(target);
+                              if (bankTarget) {
+                                onOpenDetail(bankTarget);
                               }
                             }}
                           />
-                        ) : null}
-                      </span>
-                      <TextLine value={row.invoice.sellerName} />
-                      {row.invoice.invoiceDate ? (
-                        <span className="oa-pending-payments-tag-row">
-                          <TableTag>{row.invoice.invoiceDate}</TableTag>
                         </span>
-                      ) : null}
-                    </>
-                  ) : (
-                    <span className="oa-pending-payments-empty-invoice-cell">
+                        <span className="oa-pending-payments-bank-account-row">
+                          <TableTag>{bankAccountLabel(row)}</TableTag>
+                        </span>
+                      </span>
+                    ) : (
                       <EmptyValue />
-                    </span>
-                  )}
-                </td>
-                <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
-                  <TextLine numeric strong value={row.invoice.totalWithTax} />
-                </td>
-              </tr>
-            ))}
+                    )}
+                  </td>
+                  <td className="oa-pending-payments-table-cell" data-column-role="description">
+                    {hasBank ? <MultiLineValue value={combinedBankSummaryRemark(row)} /> : <EmptyValue />}
+                  </td>
+                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--left-border" data-column-role="identity">
+                    {hasInvoice(row) ? (
+                      <>
+                        <span className="oa-pending-payments-inline-row">
+                          <span className="oa-pending-payments-invoice-type-chip">进</span>
+                          <TextLine strong value={row.invoice.digitalInvoiceNo} />
+                          {invoiceDetailTarget(row) ? (
+                            <DetailButton
+                              disabled={false}
+                              label={invoiceDetailLabel(row)}
+                              onClick={() => {
+                                const target = invoiceDetailTarget(row);
+                                if (target) {
+                                  onOpenDetail(target);
+                                }
+                              }}
+                            />
+                          ) : null}
+                        </span>
+                        <TextLine value={row.invoice.sellerName} />
+                        {row.invoice.invoiceDate ? (
+                          <span className="oa-pending-payments-tag-row">
+                            <TableTag>{row.invoice.invoiceDate}</TableTag>
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="oa-pending-payments-empty-invoice-cell">
+                        <EmptyValue />
+                      </span>
+                    )}
+                  </td>
+                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--amount" data-column-role="amount">
+                    <TextLine numeric strong value={row.invoice.totalWithTax} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -668,6 +688,15 @@ function combinedBankSummaryRemark(row: OaPendingPaymentRow): string {
     });
   });
   return lines.join("\n");
+}
+
+function hasBankTransaction(row: OaPendingPaymentRow): boolean {
+  return Boolean(
+    (row.bankTransaction.detailMode === "single" && row.bankTransaction.primaryBankTransactionId)
+    || (row.bankTransaction.detailMode === "list" && row.bankTransaction.relationCount > 0)
+    || row.bankTransaction.counterpartyName
+    || row.bankTransaction.tradeTime,
+  );
 }
 
 function bankDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {

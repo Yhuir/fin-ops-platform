@@ -114,7 +114,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             service = OaPendingPaymentQueryService(
                 import_service=import_service,
                 relation_facade=FakeRelationFacade(pair_service.list_active_relations()),
-                oa_projection=StaticOAProjection([self._oa("oa-api", "张三", "100.00")]),
+                oa_projection=StaticOAProjection([
+                    self._oa("oa-api", "张三", "100.00", detail_fields={"申请日期": "2026-05-20"}),
+                ]),
             )
             app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(service)
 
@@ -134,6 +136,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(bank_response.status_code, 200)
         self.assertEqual(relation_response.status_code, 200)
         self.assertEqual(json.loads(rows_response.body)["rows"][0]["paymentStatus"]["code"], "paid")
+        self.assertEqual(json.loads(rows_response.body)["rows"][0]["oa"]["applicationTime"], "2026-05-20")
         self.assertIn("oa_applicant", [field["field"] for field in json.loads(filter_response.body)["fields"]])
         self.assertEqual(json.loads(oa_response.body)["id"], "oa-api")
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-api")
@@ -481,7 +484,13 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(record["bank_direction"], "outflow")
 
     @staticmethod
-    def _oa(oa_id: str, applicant: str, amount: str) -> OAApplicationRecord:
+    def _oa(
+        oa_id: str,
+        applicant: str,
+        amount: str,
+        *,
+        detail_fields: dict[str, object] | None = None,
+    ) -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
             month="2026-05",
@@ -496,6 +505,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             relation_code="",
             relation_label="",
             relation_tone="",
+            detail_fields=detail_fields or {},
             project_name_display="API项目",
         )
 
@@ -598,6 +608,7 @@ def _read_model_row() -> dict[str, object]:
             "applicantName": "张三",
             "applicationType": "报销",
             "projectName": "API项目",
+            "applicationTime": "2026-05-20",
             "amount": "100.00",
             "month": "2026-05",
             "reason": "API测试",

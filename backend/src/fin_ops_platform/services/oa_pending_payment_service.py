@@ -23,6 +23,21 @@ ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 SOURCE_VERSION = "oa-pending-payment:v1"
 READ_MODEL_STATUS = "live_query"
+OA_APPLICATION_TIME_FIELDS = (
+    "审批完成时间",
+    "申请时间",
+    "申请日期",
+    "提交时间",
+    "创建时间",
+    "单据日期",
+    "日期",
+    "applicationTime",
+    "application_time",
+    "applyTime",
+    "apply_time",
+    "createdAt",
+    "created_at",
+)
 
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
@@ -422,6 +437,7 @@ class OaPendingPaymentQueryService:
             "applicantName": record.applicant,
             "applicationType": record.apply_type,
             "projectName": record.project_name_display or record.project_name,
+            "applicationTime": _oa_application_time(record),
             "amount": _money(record.amount) if _parse_decimal(record.amount) is not None else "",
             "detailAvailable": True,
             "month": record.month,
@@ -879,6 +895,38 @@ def _bank_account_label(transaction: BankTransaction) -> str:
     bank_name = str(transaction.imported_bank_name or "").strip()
     account_last4 = str(transaction.imported_bank_last4 or str(transaction.account_no or "")[-4:]).strip()
     return " ".join(part for part in [bank_name, account_last4] if part)
+
+
+def _oa_application_time(record: OAApplicationRecord) -> str:
+    detail_fields = record.detail_fields if isinstance(record.detail_fields, dict) else {}
+    for field in OA_APPLICATION_TIME_FIELDS:
+        text = _oa_time_text(detail_fields.get(field))
+        if text:
+            return text
+    return ""
+
+
+def _oa_time_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text in {"-", "--", "—", "None", "null"}:
+        return ""
+    normalized = text.replace("T", " ").strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1].strip()
+    if _looks_like_datetime(normalized):
+        return normalized[:19]
+    return normalized
+
+
+def _looks_like_datetime(value: str) -> bool:
+    return (
+        len(value) >= 19
+        and value[4] == "-"
+        and value[7] == "-"
+        and value[10] == " "
+        and value[13] == ":"
+        and value[16] == ":"
+    )
 
 
 def _debit_amount(transaction: BankTransaction) -> str:

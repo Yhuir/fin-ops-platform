@@ -28,6 +28,7 @@ export type OaPendingPaymentOaSummary = {
   applicantName: string;
   applicationType: string;
   projectName: string;
+  applicationTime: string;
   amount: string;
   detailAvailable: boolean;
 };
