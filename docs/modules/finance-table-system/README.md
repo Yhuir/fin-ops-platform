@@ -1,6 +1,5 @@
 # Finance Table System 模块维护入口
 
-
 - Module key: `finance-table-system`
 - 类型: 资源模块
 - Route: `N/A`
@@ -9,18 +8,44 @@
 ## 修改前必读
 
 - `docs/app-architecture/pages.md`
+- `docs/modules/app-shell-navigation/README.md`
 - `docs/refactor-ui/table_layout_system.md`
 - `docs/refactor-ui/test_migration_strategy.md`
 
 ## 代码入口
 
-- `web/src/hooks/useFinanceTableSession.ts`
-- `web/src/components/*Table*`
-- `docs/refactor-ui/table_layout_system.md`
+- `web/src/components/common/FinanceTable.tsx`：HeroUI Table 外壳、列/行/单元格 primitive、分页、金额/方向/状态/空值/截断文本 primitive。
+- `web/src/hooks/useFinanceTableSession.ts`：表格分页、排序、选择、滚动位置的轻量 session hook。
+- `web/src/components/*Table*`、`web/src/pages/*Page.tsx`：页面级业务表格、筛选、排序、分页、导出、详情 drawer/dialog。
+- `web/src/app/styles.css`：共享表格 token、列角色对齐、行高、tag 高度和 motion contract。
+- `docs/refactor-ui/table_layout_system.md`：表格排版事实源。
 
 ## 当前边界
 
-表格会话只保存轻量 UI 状态，不保存 read model payload 或业务事实。
+- 共享 `FinanceTable` 只提供 presentation primitives，不拥有业务查询、read model freshness、导出 API、权限或业务状态。
+- 页面级表格仍由各页面维护自己的筛选、排序、分页、search、drawer/dialog、导出和 loading/error/stale 状态；共享表格不强行抽象这些业务差异。
+- 表格 session 只保存轻量 UI 状态，不保存 read model payload、rows、业务事实、权限事实、loading/error/toast 或失败中的提交。
+- `useFinanceTableSession` 当前主要由专项测试覆盖；并非所有页面都已统一接入该 hook。已经接入或自行实现 session 的页面必须在页面模块测试中保护恢复语义。
+- 列对齐由 `columnRole` 决定：金额/数量右对齐，日期/状态/方向/选择居中，主体/账户/说明左对齐。禁止全局把所有 cell 居中。
+- 表格 migration 不能删除旧页面的导出、确认、刷新、筛选、选择、右侧详情抽屉或现有分页语义。
+
+## 主要使用点
+
+| 使用点 | 说明 |
+| --- | --- |
+| `BankDetailsPage` | 银行流水表使用共享 `FinanceTable` primitives；分页、导出、标签筛选在页面维护。 |
+| `TaxTable` / `CertifiedInvoiceImportModal` | 税金抵扣和认证导入预览使用共享 primitive。 |
+| `ImportWorkflowPage` | 导入预览表使用共享 primitive 和状态 tag。 |
+| `AppHealthOperationsPage` | runtime dashboard 多个只读表使用共享 primitive。 |
+| `InputInvoiceUsageTable`、`PendingInvoicesTable`、`OaPendingPaymentsTable`、`OutputInvoiceCollectionsTable`、`TurnoverLedgerGroupedTable`、`CostStatisticsTable` | 业务表格多为页面/模块专属 table wrapper，需由对应页面测试覆盖。 |
+
+## 测试入口
+
+- `web/src/test/FinanceTable.test.tsx`
+- `web/src/test/TableLayoutTokens.test.ts`
+- `web/src/test/TableAlignmentStyles.test.ts`
+- `web/src/test/useFinanceTableSession.test.tsx`
+- 页面级表格测试：`BankDetailsPage.test.tsx`、`TaxOffsetPage.test.tsx`、`InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx`、`OaPendingPaymentsPage.test.tsx`、`CostStatisticsPage.test.tsx`、`TurnoverLedgerPage.test.tsx`、`AppHealthOperationsPage.test.tsx`、`ImportCenterPage.test.tsx`。
 
 ## 维护触发器
 

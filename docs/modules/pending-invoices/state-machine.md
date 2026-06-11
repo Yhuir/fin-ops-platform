@@ -1,31 +1,108 @@
-# 待找发票 状态机
+# 待找发票状态机
 
-
-> 修改 `待找发票` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+> 修改 `待找发票` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。待找发票状态必须由后端 policy/read model 给出，页面不得自行推断。
 
 ## 业务状态
 
-- 当前状态：待补充。
-- 状态事实源：待补充。
-- 允许流转：待补充。
-- 禁止流转：待补充。
+| 状态域 | 状态 | 事实源 | 允许流转 |
+| --- | --- | --- | --- |
+| 方向 | `expense` | API query / pending invoice read model | 支出流水查找进项发票，规则组包含 `requires_invoice`、`bank_statement_as_invoice`、`no_invoice_required`。 |
+| 方向 | `income` | API query / pending invoice read model | 收入流水查找销项发票，规则组包含 `requires_invoice`、`no_invoice_required`、`cash_income`。 |
+| 规则组 | `requires_invoice` | active bank tag complement | 由 active 标签减去可编辑 no-invoice/cash/statement 分组实时派生，不作为请求事实保存。 |
+| 规则组 | `bank_statement_as_invoice` | expense pending invoice rules | 只适用于支出；最终仍为流水代替发票的行才出现在该筛选。 |
+| 规则组 | `no_invoice_required` | expense/income rules | 支出或收入都可配置；改变发票生命周期和待找发票口径。 |
+| 规则组 | `cash_income` | income rules | 只适用于收入现金场景；不得污染支出规则。 |
+| 行状态 | `pending_invoice` / `paid_invoiced` / `no_invoice_required` 等 | `InvoiceLifecyclePolicy`、pending invoice read model | 列表只展示后端返回的 `invoice_acquisition_status`；页面不补推 primary action。 |
+| 人工补票 | `previewed` | `PendingInvoiceApplicationService.preview_manual_invoice` | preview 校验并返回 identity/relation impact，不写最终发票或关系事实。 |
+| 人工补票 | `confirmed` | `confirm_manual_invoice` | 创建或修复发票、relation、audit、command log，触发 lifecycle finalizer。 |
+| 选择已有发票 | `attach_previewed` / `attach_confirmed` | application service | 只允许 expense 行选择 input invoice；confirm 写 relation/audit/finalizer。 |
+| 收入状态覆盖 | `income_no_invoice_required` / `cash_income` | income status override command | 只适用于收入行；事件只刷新 pending/search。 |
+| command log | `created` / `relation_created` / `finalized` / `failed_terminal` | command repository | confirm 中断后可重试恢复，不得重复创建发票或关系。 |
+
+关键规则：
+
+- `pending_invoice_tag_groups.version` 只代表支出规则版本；`pending_output_invoice_tag_groups.version` 只代表收入规则版本。
+- 保存规则只递增当前 direction 的规则版本，不递增 `bank_transaction_tags.version`。
+- `requires_invoice` 即使出现在请求中也必须忽略；后端始终按 active tag complement 派生。
+- filter-options、export-preview 和 export 必须先读 fresh read model；非 fresh 时返回 accepted/refreshing。
+- 人工补票 preview 不写事实；confirm 必须返回 affected months/objects，供页面刷新和 lifecycle 使用。
+- invoice lifecycle 必须先于待找发票、税金、成本、OA/进项/销项下游页面刷新。
+
+禁止流转：
+
+- 禁止前端根据缺失字段猜测 `invoice_acquisition_status` 或 primary action。
+- 禁止 read model miss/stale 时把空 rows 当作真实“没有待找发票”。
+- 禁止保存规则时接受未知标签、归档标签或重复映射。
+- 禁止收入规则污染支出规则，或支出规则污染收入规则。
+- 禁止候选 relation case id 被当作真实 OA id 请求详情。
+- 禁止人工补票/attach existing 失败重试重复创建发票或 relation。
+- 禁止 pending invoice 规则变更刷新 `turnover_ledger`、`no_oa_bank_batch` 或 `bank_account_balance`。
 
 ## UI 状态
 
-- loading：待补充。
-- empty：待补充。
-- error：待补充。
-- stale/refreshing：待补充。
-- permission disabled/hidden：待补充。
+| UI 状态 | 来源 | 语义 |
+| --- | --- | --- |
+| loading | rows/filter-options/detail/rules 请求进行中 | 展示加载态；请求 abort 后清理 loading。 |
+| refreshing | API 返回 `read_model_status=refreshing` 或 202 | 展示刷新语义；若有旧 rows 可继续展示，但不能把空 accepted payload 当最终空结果。 |
+| stale | API 返回 stale/source/schema mismatch 或 App Status 暴露 stale scope | 展示陈旧/同步提示；写操作按后端权限和版本控制。 |
+| empty | fresh payload 且 total 为 0 | 表示当前 direction/filter/query 真实没有行。 |
+| error | rows/detail/rules/manual/attach/export 请求失败 | 展示业务错误，不暴露底层 SQL/worker internals。 |
+| rules drawer | 用户打开规则配置 | 读取当前 direction 规则和 active tags；支持 stale version conflict 反馈。 |
+| manual invoice dialog | 用户从状态 action 发起 | 必须 preview 后 confirm；confirm 成功后 refetch rows。 |
+| attach existing drawer/dialog | 用户选择候选发票 | preview 展示冲突和影响；confirm 成功后刷新行和关系详情。 |
+| income status action | 收入行状态按钮 | 提交时禁用该行重复操作；成功后 row 状态以响应或 refetch 为准。 |
+| permission disabled/hidden | session permissions | 只读用户隐藏或禁用保存规则、manual、attach、income override 等 mutation。 |
+
+前端事件：
+
+- `invoiceFactUpdated`、`workbenchRelationUpdated`、`bankTransactionCategoryUpdated`、`bankAutoTagRulesUpdated` 只能触发 refetch 或规则刷新。
+- 前端事件不是事实源；后端 lifecycle/dirty scope/outbox/readiness 才证明待找发票已收敛。
+- 页面卸载后不 replay 事件；返回页面重新通过 API/read boundary 加载。
 
 ## Read Model / Worker 状态
 
-- fresh/missing/refreshing/stale/failed/unavailable：待补充。
-- refresh 触发来源：待补充。
-- 失败恢复：待补充。
+| 状态 | 判定 | 后续动作 |
+| --- | --- | --- |
+| `fresh` | scope schema/source/readiness 与当前事实一致，且没有 active dirty scope | rows/filter-options/export 可使用当前 payload。 |
+| `missing` | 没有对应 scope read model 或 readiness | 入队 `pending_invoice.read_model.refresh`；API 返回 refreshing。 |
+| `refreshing` | dirty scope pending/processing，或 parent scope 正 fan-out month shards | worker 继续处理；页面展示同步中。 |
+| `stale` / `source_mismatch` / `schema_mismatch` | bank tags、relation、invoice lifecycle、schema source version 落后 | 入队重建；可展示旧 rows 但必须暴露 stale reason。 |
+| `failed` | projection/worker refresh 失败 | App Status busy/blocked，页面显示失败或等待运维重试。 |
+| `unavailable` | repository、queue、worker dependency 不可用 | API 返回 unavailable/refreshing；不得返回 fake fresh。 |
+
+Scope 形态：
+
+- `expense:all`、`expense:requires_invoice`、`expense:bank_statement_as_invoice`、`expense:no_invoice_required`
+- `income:all`、`income:requires_invoice`、`income:no_invoice_required`、`income:cash_income`
+- 月份 shard 形态为 `<direction>:<filter>:YYYY-MM`
+
+Refresh 触发来源：
+
+- 发票导入确认。
+- Workbench 关系确认/撤回、人工补票 confirm、attach existing confirm。
+- 待找发票规则保存。
+- 收入状态 override。
+- 银行标签保存、重命名、归档或自动分类版本变化。
+- invoice lifecycle refresh、startup stale scan、OA rebuild、App Health/backfill 运维任务。
+
+父 scope / filter scope fan-out：
+
+1. 收到 `pending_invoice.read_model.refresh`，scope 可能是 direction/filter 父 scope 或月份 shard。
+2. 父 scope 通过 projection builder 列出需要的月份 shard。
+3. 通过 `ReadModelRefreshGateway` 入队每个 `<direction>:<filter>:YYYY-MM`。
+4. 父 scope 完成 dirty scope；月份 shard worker 发布真实 rows/scope readiness。
+5. API 读父 scope 时由 repository 聚合或读取对应 scope payload，不能同步扫描旧事实。
+
+失败恢复：
+
+1. 先看 `/api/app-health.app_status` 中 `pending_invoice` 和 `search` read model scopes、dirty scopes、outbox 和 `search-pending` worker。
+2. 对 rule version conflict，让页面重新读取规则 payload，再基于新 version 保存。
+3. 对 manual/attach command 中断，优先用 command log 重试恢复，不手工删除已创建发票或 relation。
+4. 对 bank tag source mismatch，先确认 bank detail read model freshness，再重跑 pending scope。
+5. 对 invoice lifecycle lag，先恢复 `invoice_lifecycle` scope，再重跑 pending/search scope。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| - | 初始骨架 | 待补充 | - |
+| 2026-06-11 | 补齐测试闭环状态机 | 支出/收入规则、manual/attach/income status、UI、read model 和 worker 状态边界 | `tests.test_pending_invoice_service`、`tests.test_pending_invoice_api`、`tests.test_invoice_lifecycle_page_integration`、`tests.test_search_pending_sql_runtime`、`tests.test_pending_invoice_relation_identity`、`tests.test_pending_invoice_oa_identity_backfill`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_runtime_worker_registry`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` 通过 |

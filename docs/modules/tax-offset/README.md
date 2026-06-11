@@ -9,17 +9,30 @@
 ## 修改前必读
 
 - `docs/product-specs/cost-tax.md`
+- `docs/product-specs/invoice-lifecycle.md`
+- `docs/app-architecture/runtime-and-ownership.md`
 - `docs/app-architecture/pages.md`
 - `docs/dev/api-contracts.md`
+- `docs/operations/runtime-worker-governance.md`
 
 ## 代码入口
 
 - `web/src/pages/TaxOffsetPage.tsx`
 - `web/src/components/tax/*`
+- `web/src/features/tax/api.ts`
+- `backend/src/fin_ops_platform/app/routes_tax.py`
+- `backend/src/fin_ops_platform/services/tax_offset_service.py`
+- `backend/src/fin_ops_platform/services/tax_offset_runtime_service.py`
+- `backend/src/fin_ops_platform/services/tax_offset_read_model_service.py`
+- `backend/src/fin_ops_platform/services/tax_offset_read_model_refresh.py`
+- `backend/src/fin_ops_platform/services/tax_certified_import_service.py`
+- `backend/src/fin_ops_platform/services/tax_certified_import_application_service.py`
+- `backend/src/fin_ops_platform/services/tax_certified_import_job_service.py`
+- `backend/src/fin_ops_platform/services/cost_tax_sql_projection.py`
 
 ## 当前边界
 
-关注发票认证、使用状态、read model freshness 和认证导入结果。
+关注发票认证、可抵扣试算、已认证导入、计划保存、read model freshness 和认证导入结果。发票生命周期状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 分发，税金抵扣页面不私有定义认证状态。
 
 ## 维护触发器
 

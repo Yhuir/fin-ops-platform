@@ -469,6 +469,101 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(active_payload["status"], "running")
         self.assertGreater(active_payload["percent"], 0)
 
+    def test_reset_job_api_rejects_concurrent_job_without_echoing_password(self) -> None:
+        with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
+                user_id="1",
+                username="YNSYLP005",
+                nickname="管理员",
+                display_name="管理员",
+                dept_id="01",
+                dept_name="财务部",
+                roles=["finance_admin"],
+                permissions=[],
+            )
+            app._oa_identity_service.verify_current_user_password = lambda token, password: (
+                token == "admin-token" and password == "correct-password"
+            )
+
+            original_execute = app._settings_data_reset_service.execute
+            release_job = Event()
+
+            def slow_execute(action: str, **kwargs: object):
+                progress_callback = kwargs.get("progress_callback")
+                if callable(progress_callback):
+                    progress_callback("persist_state", "正在写入银行流水重置结果。", 2, 4)
+                release_job.wait(timeout=2)
+                return original_execute(action, **kwargs)
+
+            app._settings_data_reset_service.execute = slow_execute
+            try:
+                create_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/data-reset/jobs",
+                    body=json.dumps(
+                        {
+                            "action": RESET_BANK_TRANSACTIONS_ACTION,
+                            "oa_password": "correct-password",
+                        }
+                    ),
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                create_payload = json.loads(create_response.body)
+                job_id = create_payload["job"]["job_id"]
+
+                running_payload = None
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    active_response = app.handle_request(
+                        "GET",
+                        "/api/workbench/settings/data-reset/jobs/active",
+                        headers={"Authorization": "Bearer admin-token"},
+                    )
+                    running_payload = json.loads(active_response.body)["job"]
+                    if running_payload is not None and running_payload["status"] == "running":
+                        break
+                    time.sleep(0.02)
+
+                conflict_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/data-reset/jobs",
+                    body=json.dumps(
+                        {
+                            "action": RESET_INVOICES_ACTION,
+                            "oa_password": "correct-password",
+                        }
+                    ),
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                conflict_payload = json.loads(conflict_response.body)
+            finally:
+                release_job.set()
+
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                completed_response = app.handle_request(
+                    "GET",
+                    f"/api/workbench/settings/data-reset/jobs/{job_id}",
+                    headers={"Authorization": "Bearer admin-token"},
+                )
+                completed_payload = json.loads(completed_response.body)["job"]
+                if completed_payload["status"] in {"completed", "failed"}:
+                    break
+                time.sleep(0.02)
+
+        self.assertEqual(create_response.status_code, 202)
+        self.assertEqual(active_response.status_code, 200)
+        self.assertIsNotNone(running_payload)
+        self.assertEqual(conflict_response.status_code, 409)
+        self.assertEqual(conflict_payload["error"], "settings_data_reset_job_running")
+        self.assertEqual(conflict_payload["job"]["job_id"], job_id)
+        self.assertEqual(conflict_payload["job"]["status"], "running")
+        self.assertEqual(conflict_payload["job"]["action"], RESET_BANK_TRANSACTIONS_ACTION)
+        serialized_conflict = json.dumps(conflict_payload, ensure_ascii=False)
+        self.assertNotIn("oa_password", serialized_conflict)
+        self.assertNotIn("correct-password", serialized_conflict)
+
     def test_reset_oa_job_rebuilds_progress_with_retained_months_only(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

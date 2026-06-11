@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from types import SimpleNamespace
+from urllib.error import HTTPError, URLError
 
 from fin_ops_platform.services.oa_applicant_credentials import OaApplicantLoginCredential
 from fin_ops_platform.services.target_oa_applicant_token_provider import (
@@ -57,6 +58,23 @@ class FakeHttpResponse:
         return json.dumps(self.payload).encode("utf-8")
 
 
+class FakeRawHttpResponse:
+    def __init__(self, body: str) -> None:
+        self.body = body
+
+    def __enter__(self) -> "FakeRawHttpResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body.encode("utf-8")
+
+    def close(self) -> None:
+        return None
+
+
 class OaLoginClientTests(unittest.TestCase):
     def test_login_posts_rsa_encrypted_password_and_extracts_token(self) -> None:
         encryptor = FakeEncryptor()
@@ -102,6 +120,61 @@ class OaLoginClientTests(unittest.TestCase):
 
         self.assertNotIn("plain-password", str(context.exception))
         self.assertEqual(context.exception.code, "target_oa_login_failed")
+
+    def test_http_error_uses_oa_message_without_exposing_password(self) -> None:
+        encryptor = FakeEncryptor()
+
+        def urlopen_stub(request: object, *, timeout: float) -> FakeHttpResponse:
+            del request, timeout
+            raise HTTPError(
+                url="https://oa.example.test/auth/login",
+                code=500,
+                msg="server error",
+                hdrs=None,
+                fp=FakeRawHttpResponse(json.dumps({"msg": "目标账号被锁定"})),
+            )
+
+        client = OaLoginClient(
+            settings=OaLoginClientSettings(base_url="https://oa.example.test"),
+            password_encryptor=encryptor,
+            urlopen_func=urlopen_stub,
+        )
+
+        with self.assertRaises(TargetOaApplicantLoginError) as context:
+            client.login("chen_xiuyun", "plain-password")
+
+        self.assertEqual(str(context.exception), "目标账号被锁定")
+        self.assertNotIn("plain-password", str(context.exception))
+        self.assertEqual(context.exception.code, "target_oa_login_failed")
+
+    def test_network_failure_invalid_json_and_missing_token_are_failures(self) -> None:
+        scenarios = [
+            (
+                lambda _request, *, timeout: (_ for _ in ()).throw(URLError("timed out")),
+                "无法连接 OA 登录服务。",
+            ),
+            (
+                lambda _request, *, timeout: FakeRawHttpResponse("<html>not json</html>"),
+                "OA 登录服务返回了无效 JSON。",
+            ),
+            (
+                lambda _request, *, timeout: FakeHttpResponse({"code": 200, "data": {}}),
+                "OA 登录响应没有返回 token。",
+            ),
+        ]
+        for urlopen_stub, expected_message in scenarios:
+            with self.subTest(expected_message=expected_message):
+                client = OaLoginClient(
+                    settings=OaLoginClientSettings(base_url="https://oa.example.test"),
+                    password_encryptor=FakeEncryptor(),
+                    urlopen_func=urlopen_stub,
+                )
+
+                with self.assertRaises(TargetOaApplicantLoginError) as context:
+                    client.login("chen_xiuyun", "plain-password")
+
+                self.assertEqual(str(context.exception), expected_message)
+                self.assertEqual(context.exception.code, "target_oa_login_failed")
 
 
 class TargetOaApplicantTokenProviderTests(unittest.TestCase):

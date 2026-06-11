@@ -12,6 +12,7 @@
 - Phase 2 已落地后端一步创建草稿：`POST /api/input-invoice-usage/oa-reverse/oa-draft` 校验 preview hash 后，使用目标 OA 申请人凭据登录 OA 并创建 `isDraft=true` 暂存草稿；当前操作人的 request token 不参与目标申请人草稿创建。
 - `已提交 OA` 由用户手动确认后进入本地 `submitted_confirmed` 历史；`未提交 OA` 只清理 FinOps 本地草稿字段并回到可重新创建状态，不调用 OA 删除暂存草稿。
 - 目标 OA 申请人登录需要 `FIN_OPS_OA_BASE_URL`、`FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY`、可选 `FIN_OPS_OA_LOGIN_PATH` 和 OpenSSL runtime；密码登录前必须用 OA 公钥 RSA 加密。
+- 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
 
 ## 记录模板
 
@@ -29,6 +30,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-11 - 测试闭环矩阵与 API 契约同步
+
+- 目标：执行测试闭环 master goal 的 input-invoice-usage 模块轮次，审计进项发票使用页面/API/read model、OA 反提、目标申请人凭据、设置页 UI 和相关测试覆盖。
+- 影响范围：本模块 `tests.md`、`state-machine.md`、`implementation-notes.md`；同步 `docs/dev/api-contracts.md` 中反提 OA 当前一键创建、目标申请人 token、`submitted_confirmed` 历史和 `not_submitted` 本地回滚语义。
+- 关键决策：现有 P0/P1 测试已经覆盖 all scope freshness、rows/filter/detail/export、OA reverse preview/one-step draft/manual status/submitted history、credential service/API/PG encryption、target token provider、Settings UI 和 InputInvoiceUsage drawer；本轮不新增重复代码测试。
+- 文档影响：将 `tests.md` 迁入闭环标准结构，补齐影响面清单、场景覆盖清单、七类测试适用性、历史 bug 回归库、关键 smoke flows、验证命令和未测风险。
+- 测试覆盖：沿用现有 input invoice usage、invoice usage collection、OA reverse、credential、settings 前后端测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime tests.test_input_invoice_usage_api tests.test_read_model_freshness -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_applicant_credentials_service tests.test_oa_applicant_credentials_api tests.test_postgres_oa_applicant_credentials_repository tests.test_postgres_migrations -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_target_oa_applicant_token_provider tests.test_input_invoice_usage_oa_reverse_service tests.test_postgres_input_invoice_usage_oa_reverse_repository -v`；`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx src/test/SettingsPage.test.tsx src/test/WorkbenchSelection.test.tsx`。
+- 未测风险：真实 OA 登录、公钥 RSA 加密、OA 草稿 URL 打开和人工提交仍需 staging/发布前联调；真实 Postgres/RabbitMQ/Redis 多 worker drain 仍由夜间或 staging smoke 覆盖。
+- 后续事项：下一模块继续处理 `cost-statistics`。
 
 ## 2026-06-10 - 反提 OA 全链路回归与文档收口 Phase 5
 

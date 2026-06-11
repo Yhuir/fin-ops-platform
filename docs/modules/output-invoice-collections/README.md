@@ -1,6 +1,5 @@
 # 销项发票收款情况 模块维护入口
 
-
 - Module key: `output-invoice-collections`
 - 类型: 页面模块
 - Route: `/output-invoice-collections`
@@ -9,17 +8,58 @@
 ## 修改前必读
 
 - `docs/product-specs/invoice-lifecycle.md`
+- `docs/product-specs/cost-tax.md`
 - `docs/app-architecture/pages.md`
+- `docs/app-architecture/runtime-and-ownership.md`
 - `docs/dev/api-contracts.md`
+- `docs/dev/testing-closure-dependency-map.md`
+- `docs/operations/runtime-worker-governance.md`
+- `docs/modules/input-invoice-usage/README.md`
+- `docs/modules/oa-pending-payments/README.md`
+- `docs/modules/tax-offset/README.md`
+- `docs/modules/cost-statistics/README.md`
+- `docs/modules/domain-events-lifecycle/README.md`
+- `docs/modules/runtime-workers/README.md`
 
 ## 代码入口
 
 - `web/src/pages/OutputInvoiceCollectionsPage.tsx`
 - `web/src/components/outputInvoiceCollections/*`
+- `web/src/features/outputInvoiceCollections/api.ts`
+- `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`
+- `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`
+- `backend/src/fin_ops_platform/services/output_invoice_collection_lifecycle_service.py`
+- `backend/src/fin_ops_platform/services/output_invoice_collection_receipt_service.py`
+- `backend/src/fin_ops_platform/services/output_invoice_collection_models.py`
+- `backend/src/fin_ops_platform/services/output_invoice_collection_status_service.py`
+- `backend/src/fin_ops_platform/services/invoice_lifecycle_policy.py`
+- `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`
+- `backend/src/fin_ops_platform/services/invoice_usage_collection_source_versions.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/output_invoice_collection.py`
+- `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
+- `backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
+- `backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 
 ## 当前边界
 
-关注销项收款、红票、回款、历史记录、设置和右侧抽屉行为。
+本模块维护销项发票收款情况页面的列表、筛选、排序、分页、详情 drawer、收款状态、提醒、红蓝票关系和正式收据生命周期。
+
+当前事实边界：
+
+- 列表读接口优先读取 SQL read model `output_invoice_collection`；miss/stale/schema/source version mismatch 时返回 `202` 与 `read_model_status=refreshing`，不得在请求线程同步 live rebuild。
+- fresh SQL rows 在返回前叠加 lifecycle facts：`collectionStatus`、手动状态、提醒、红蓝票关系和正式收据摘要。
+- 收款状态规则由 `InvoiceLifecyclePolicy` 与 `OutputInvoiceCollectionStatusRuleService` 统一判定；页面不能自定义销项收款状态规则。
+- 写接口只通过 `OutputInvoiceCollectionLifecycleService` 与 `OutputInvoiceCollectionReceiptService` 写 lifecycle facts；service 不读取 HTTP header/cookie。
+- 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 必须 enqueue `output_invoice_collection` scope，并在 PostgreSQL 模式下通过 transaction-bound queue writer 与事实写入同事务提交。
+- 正式收据创建必须有 `Idempotency-Key` 或 body `idempotencyKey`；历史接口返回真实 receipt lifecycle facts，不伪造空历史。
+- `output_invoice_collection_source_versions()` 包含销项收款 read model、invoice lifecycle policy、lifecycle facts、status rules、receipt schema 和 OA projection sync 版本。
+- App Status domain `output_invoice_collections` 依赖 `output_invoice_collection`、`invoice_lifecycle` readiness，以及 `invoice-usage-collection`、`invoice-lifecycle` worker。
+
+跨模块影响：
+
+- 上游：发票导入、关联台关系、invoice lifecycle、pending invoice rules、OA projection、银行流水关系和 tax/cost 相关 lifecycle。
+- 下游：税金抵扣、成本统计、搜索和 App Health 通过 invoice lifecycle/domain events/readiness 观察销项发票事实变化；本模块写入自身 lifecycle facts 时首要刷新 `output_invoice_collection`。
+- 真实运行回填顺序必须遵守 `workbench_relation -> invoice_lifecycle -> output_invoice_collection`，不能用旧 SQL 或页面私有规则伪装 fresh。
 
 ## 维护触发器
 

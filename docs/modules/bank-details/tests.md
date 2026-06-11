@@ -1,31 +1,105 @@
-# 银行明细 测试矩阵
-
+# 银行明细测试矩阵
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
+
+## 修改前影响面清单
+
+银行明细不是单纯列表页。它同时维护银行流水展示、自动标签、人工分类入口、关系标签投影、账户余额 read model 和多个下游页面的刷新信号。任何改动都要先按下表做影响面评估：
+
+| 影响面 | 当前事实源 | 需要关注的旧功能 |
+| --- | --- | --- |
+| 银行流水原始字段 | import normalized payload、`BankDetailsService`、`BankDetailSqlProjectionBuilder` | 各银行 purpose/summary/note/detail 字段不能互相兜底污染；导出字段必须保留可追溯原文。 |
+| 自动标签规则 | `AppSettingsService`、`BankTransactionCategoryService`、`BankTransactionAutoCategoryService` | 系统规则 `internal_transfer` 固定 priority 1；普通规则 priority/sort_order、版本、归档、文件替换、field errors。 |
+| 候选确认 | `/api/bank-details/transactions/{id}/category-confirmation` | 只能确认当前规则生成的 `needs_confirmation` 候选；外部往来同 code 多第三层时必须校验第三层标签。 |
+| 人工补分类 | `/api/bank-details/transactions/{id}/category-assignment` | 只允许 `unmatched` 行；不能覆盖 `auto_matched`、`needs_confirmation`、`internal_transfer`。 |
+| 银行明细 read model | `read_model.bank_detail_rows/scopes`、`bank_detail.read_model.refresh` | stale/schema mismatch/missing/refreshing 不能被伪装成 fresh；规则版本变化要判 stale。 |
+| 账户余额 read model | `read_model.bank_account_balances`、`bank_account_balance.read_model.refresh` | 余额来自独立 read model；日期/关键字/分类筛选和标签规则变化不能覆盖 fresh balance。 |
+| 关系标签投影 | `BankDetailsRelationTagProjectionService`、workbench relation distribution | 关联台确认/撤回、OA-only、invoice-only、OA+invoice relation tag 要在银行明细行刷新。 |
+| 下游 fan-out | turnover ledger、no-OA batch、pending invoices/search、cost/tax、App Health | 标签/分类/导入/关系变更必须通过 lifecycle/dirty scope/outbox 刷新下游，不能只靠前端事件。 |
+| 前端交互 | `BankDetailsPage`、`web/src/features/bankDetails/api.ts` | loading/empty/error/stale/refreshing、drawer、filter、pagination、export、权限、domain event refetch。 |
+
+## 场景覆盖清单
+
+| 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
+| --- | --- | --- | --- | --- |
+| 银行流水 identity/dedup | P0 | `tests/test_bank_transaction_identity_service.py` | covered | 相同业务字段稳定去重；serial 相同但业务字段不同不能误判。 |
+| 自动标签规则解析和执行 | P0 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_transaction_category_service.py` | covered | 关键词、方向、组合条件、regex、priority、外部往来候选、内部往来优先。 |
+| 自动标签规则 API GET/PUT/file replacement/reapply | P0 | `tests/test_bank_auto_tag_rules_api.py` | covered | 权限、版本冲突、字段错误、审计、规则重应用、队列不可用 503。 |
+| 候选确认防伪造 | P0 | `tests/test_bank_auto_tag_rules_api.py` | covered | 非当前候选、非自动规则、单一 auto match、unmatched 行均拒绝。 |
+| 外部往来第三层候选和人工补分类 | P0 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetailsPage.test.tsx` | covered | 候选确认和人工补分类均覆盖第三层标签、动作语义和前端选择。 |
+| 人工补分类只允许 unmatched | P0 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_transaction_category_service.py` | covered | 禁止绕过自动候选或覆盖确定性自动结果。 |
+| 分类/规则写入事务和 outbox | P0 | `tests/test_bankdetail_write_uow_contract.py`、`tests/test_bank_details_sql_runtime.py` | covered | 版本冲突、rollback、dirty/outbox、turnover/no-OA fan-out。 |
+| 银行明细 SQL read model freshness | P0 | `tests/test_bank_details_sql_runtime.py` | covered | missing、fresh empty、schema mismatch、dirty scope refreshing、规则版本 stale、cache key。 |
+| read model refresh worker | P0 | `tests/test_bank_details_sql_runtime.py` | covered | `all` fan-out 到月份 shard；月份 scope rebuild 后按 source version complete。 |
+| 账户余额独立 read model | P0 | `tests/test_bank_account_balance_read_model.py`、`web/src/test/BankDetailsPage.test.tsx` | covered | latest balance、CNY 别名、日期筛选只影响 count、不从 detail rows 聚合、不用 stale 覆盖 fresh。 |
+| 关系标签投影 | P0 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py` | covered | relation distribution row、OA/invoice-only 边界、失败降级、不读 legacy candidate matches。 |
+| API route contract | P0 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | covered | stale rows 仍 200；refreshing 空 payload 才 202；权限、错误 envelope、导出 facade。 |
+| 导出 | P1 | `tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx` | covered | 多 sheet、筛选转发、空结果、分页、公式转义、错误映射、filename。 |
+| 前端列表/筛选/分页/search | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | covered | 默认日期、账户切换、关键词、分类 counts、分页、表格中文标签。 |
+| 前端 drawer、规则保存、重应用 | P1 | `web/src/test/BankDetailsPage.test.tsx` | covered | 保存/重应用后只刷新交易，不重取账户余额；事件广播和反馈状态。 |
+| 前端 stale/refreshing/error/abort | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | covered | 保留旧 rows、隐藏 read model 细节、unmount 清理 timer、abort 不报错。 |
+| 跨页面真实 worker smoke | P2 | 夜间 CI + staging/手动验证 | documented-risk | 真实 Postgres/RabbitMQ/Redis 和历史数据需要环境级 smoke。 |
 
 ## 七类测试适用性
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 待判断 | 待补充 | 业务规则、金额、状态、分类、权限、去重、幂等时适用。 |
-| 2. Service-layer tests | 待判断 | 待补充 | service、repository、audit、read model、cache、worker 编排时适用。 |
-| 3. API contract tests | 待判断 | 待补充 | HTTP/API contract 或 DTO shape 变化时适用。 |
-| 4. Read model/cache/background job tests | 待判断 | 待补充 | list、summary、search、workbench、ledger、import、worker 变化时适用。 |
-| 5. Frontend component and interaction tests | 待判断 | 待补充 | 页面、表格、drawer、dialog、按钮、筛选、权限渲染变化时适用。 |
-| 6. End-to-end business-flow integration tests | 待判断 | 待补充 | 跨模块业务链路变化时适用。 |
-| 7. Existing feature regression tests | 待判断 | 待补充 | 每次变更都要判断受影响旧行为。 |
+| 1. Business core unit tests | 适用 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_transaction_category_service.py`、`tests/test_bank_transaction_identity_service.py` | 分类规则、内部往来、外部往来候选、manual/effective category、identity/dedup 属于核心业务。 |
+| 2. Service-layer tests | 适用 | `tests/test_bank_details_service.py`、`tests/test_bank_details_export_service.py`、`tests/test_bankdetail_write_uow_contract.py` | 覆盖 service 编排、relation provider、导出、事务、审计、dirty/outbox rollback。 |
+| 3. API contract tests | 适用 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | 覆盖 accounts/transactions/规则/确认/人工补分类/reapply/file replacement、权限、错误字段和 stale/refreshing 响应。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_bank_details_sql_runtime.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bankdetail_backfill_cli.py` | 覆盖 bank detail rows/scopes、schema/source version、dirty scope、worker fan-out、账户余额 read model 和 backfill。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | 覆盖页面加载、筛选、drawer、候选确认、人工补分类、导出、domain event、stale/refreshing/abort。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bankdetail_write_uow_contract.py`、Workbench/no-OA/turnover 相关模块测试 | 本模块现有集成以 API/UoW/lifecycle 为主；真实导入到多页面完整 smoke 仍归 staging/nightly 风险项。 |
+| 7. Existing feature regression tests | 适用 | 上述全部 bank details 回归测试，加 `tests/test_workbench_*`、`tests/test_no_oa_*`、`tests/test_turnover_*`、`tests/test_cost_statistics_*` 的按改动选择扩展集 | 银行明细是多个页面上游事实源；任何标签、分类、read model、导入或关系变更都要先问会影响哪些旧页面。 |
 
-## 现有验证命令
+## 历史 bug 回归库
+
+| 日期 | Bug / 风险 | 回归测试 | 状态 |
+| --- | --- | --- | --- |
+| 长期 | 标签规则重应用只刷新银行明细交易，不应重算或覆盖账户余额。 | `web/src/test/BankDetailsPage.test.tsx`、`tests/test_bank_account_balance_read_model.py` | covered |
+| 长期 | read model stale/schema mismatch 时空 rows 被误解为真实空列表。 | `tests/test_bank_details_routes.py`、`tests/test_bank_details_sql_runtime.py`、`web/src/test/BankDetailsPage.test.tsx` | covered |
+| 长期 | 前端用全量标签字典确认非当前候选，导致伪造分类。 | `tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetailsPage.test.tsx` | covered |
+| 长期 | 人工分类绕过自动候选/内部往来确定性结果。 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_transaction_category_service.py` | covered |
+| 长期 | 银行原始字段跨银行 fallback，导出或表格展示错误语义。 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts` | covered |
+| 长期 | 标签/分类写入成功但 dirty/outbox 或审计半写入。 | `tests/test_bankdetail_write_uow_contract.py`、`tests/test_bank_details_sql_runtime.py` | covered |
+| 长期 | 关联台关系变更后银行明细 relation tag 不刷新。 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/src/test/BankDetailsPage.test.tsx` | covered |
+
+## 关键 smoke flows
+
+1. `银行流水导入确认 -> bank_account_balance + bank_detail dirty scope -> worker refresh -> /api/bank-details/accounts + /transactions fresh -> 页面展示余额、标签和原始字段`
+2. `自动标签规则保存/文件替换 -> audit + lifecycle -> bank_detail/no-OA/turnover dirty -> 页面规则抽屉刷新 -> 旧账户余额不被 stale payload 覆盖`
+3. `needs_confirmation 行 -> 后端重新计算当前候选 -> 用户确认第三层标签 -> dirty/outbox -> 银行明细、往来款、成本统计刷新`
+4. `unmatched 行 -> 人工补分类 -> audit + dirty/outbox -> manual 清除 -> 回到当前自动规则计算`
+5. `关联台确认/撤回 -> workbench relation distribution -> bank details relation tag projection -> 页面收到 domain event 后 refetch`
+
+## 本模块验证命令
+
+最小闭环：
 
 ```bash
-# 后端示例，按实际模块替换
-PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
-
-# 前端示例，按实际模块替换
-cd web && npm test
-cd web && npm run build
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_service tests.test_bank_transaction_auto_category_service tests.test_bank_transaction_category_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api tests.test_bank_details_routes tests.test_bankdetail_write_uow_contract -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_bankdetail_backfill_cli -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_export_service tests.test_bank_transaction_identity_service -v
+cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx
+bash scripts/verify.sh docs
 ```
+
+扩展回归按改动选择：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api tests.test_turnover_workbench_integration tests.test_no_oa_bank_batch_workbench_integration -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime tests.test_search_pending_projection -v
+cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx src/test/NoOaBankBatchPage.test.tsx src/test/TurnoverLedgerPage.test.tsx src/test/CostStatisticsPage.test.tsx
+```
+
+## Nightly CI 覆盖
+
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest 和 build，覆盖完整 bank details 测试集。单轮模块验证只跑最小闭环，避免把所有历史下游页面回归作为每次人工推进的阻塞项。
 
 ## 未测风险
 
-- 待补充。
+- 本轮不运行真实生产 Postgres/RabbitMQ/Redis worker drain；真实导入、backfill 和多页面 smoke 需要 staging 或夜间环境验证。
+- 前端 Vitest 覆盖交互和 API mapper，不覆盖真实浏览器视觉布局、超大数据滚动性能和下载文件人工验收。
+- 银行明细对 pending invoices、turnover、no-OA、cost/tax 的 fan-out 仍需在对应模块轮次继续矩阵化；本模块只记录上游影响和已有关键保护。

@@ -10,16 +10,55 @@
 
 - `docs/product-specs/imports-and-etc.md`
 - `docs/product-specs/invoice-lifecycle.md`
+- `docs/app-architecture/runtime-and-ownership.md`
+- `docs/app-architecture/pages.md`
 - `docs/dev/api-contracts.md`
+- `docs/operations/runtime-worker-governance.md`
+- `docs/modules/domain-events-lifecycle/README.md`
+- `docs/modules/runtime-workers/README.md`
+- `docs/modules/reconciliation-workbench/README.md`
+- `docs/modules/pending-invoices/README.md`
+- `docs/modules/tax-offset/README.md`
+- `docs/modules/input-invoice-usage/README.md`
+- `docs/modules/output-invoice-collections/README.md`
+- `docs/modules/oa-pending-payments/README.md`
+- `docs/modules/cost-statistics/README.md`
 
 ## 代码入口
 
 - `web/src/pages/imports/ImportInvoicesPage.tsx`
 - `web/src/components/imports/ImportWorkflowPage.tsx`
+- `web/src/features/imports/api.ts`
+- `web/src/features/imports/types.ts`
+- `web/src/app/importRoutes.ts`
+- `backend/src/fin_ops_platform/app/server.py`
+- `backend/src/fin_ops_platform/services/import_file_service.py`
+- `backend/src/fin_ops_platform/services/imports.py`
+- `backend/src/fin_ops_platform/services/import_processing_service.py`
+- `backend/src/fin_ops_platform/services/import_job_queue.py`
+- `backend/src/fin_ops_platform/services/import_preview_audit.py`
+- `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
+- `backend/src/fin_ops_platform/services/runtime_worker_handlers.py`
+- `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
+- `backend/src/fin_ops_platform/services/app_status_job_registry.py`
 
 ## 当前边界
 
-关注上传、预览、确认、发票生命周期、后台任务和相关 read model invalidation。
+`/imports/invoices` 只渲染 `ImportWorkflowPage mode="invoice"`。共享导入工作流负责文件选择、每文件票据方向选择、预览、重复审计、确认、后台 job 反馈和 session restore。
+
+当前发票导入支持每个文件指定 `input_invoice` 或 `output_invoice` batch type。前端预览调用 `/imports/files/preview`，以 multipart `file_overrides` 传 `template_code=invoice_export` 和 `batch_type`；确认调用 `/imports/files/confirm`，返回后台 job 或已确认 session。后端兼容 legacy `/imports/preview`、`/imports/confirm`，但页面默认走 file/session API。
+
+导入确认不是下游 fresh 的事实源。确认只能说明发票事实写入或确认 job 已排队；关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计和搜索必须通过 derived lifecycle、dirty scope、read model freshness 与 worker readiness 判断是否可读。
+
+核心 fan-out：
+
+| 动作 | 事实源 / 事件 | 影响 |
+| --- | --- | --- |
+| 文件预览 | `FileImportSession`、`ImportPreviewAuditCounts` | 当前导入页重复审计和 confirm eligibility |
+| 文件确认排队 | `file_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status import worker |
+| 文件确认处理 | `ImportNormalizationService.confirm_import(...)` | input/output invoice facts、source links、duplicate decisions |
+| 发票导入生命周期 | `invoice_import_confirmed` | Workbench、Workbench relation/matching、invoice lifecycle、tax offset、cost statistics、search |
+| 预览过期 | API `409 preview_stale` | 当前导入页必须要求重新预览，不能继续确认旧结果 |
 
 ## 维护触发器
 

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import PageRouteHost from "../app/PageRouteHost";
 import { appPageRoutes, sidebarGroups, type AppPageRoute } from "../app/pageRegistry";
-import { usePageActivation } from "../contexts/PageRuntimeContext";
+import { useActivePageEvent, usePageActivation } from "../contexts/PageRuntimeContext";
 
 function Harness({
   children,
@@ -195,5 +195,41 @@ describe("PageRouteHost", () => {
       expect(screen.getByText("page b")).toBeInTheDocument();
     });
     expect(screen.queryByRole("link", { name: "to b" })).not.toBeInTheDocument();
+  });
+
+  test("removes active page event listeners when a route unmounts", async () => {
+    const user = userEvent.setup();
+    const pageAHandler = vi.fn();
+    const pageBHandler = vi.fn();
+
+    function PageA() {
+      useActivePageEvent("shellNavigationTestEvent", pageAHandler);
+      return <Link to="/b">to b</Link>;
+    }
+
+    function PageB() {
+      useActivePageEvent("shellNavigationTestEvent", pageBHandler);
+      return <p>page b</p>;
+    }
+
+    render(<PageRouteHost routes={[createRoute("/a", "page-a", PageA), createRoute("/b", "page-b", PageB)]} />, {
+      wrapper: Harness,
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("shellNavigationTestEvent", { detail: { source: "page-a" } }));
+    });
+    expect(pageAHandler).toHaveBeenCalledTimes(1);
+    expect(pageBHandler).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("link", { name: "to b" }));
+    expect(await screen.findByText("page b")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("shellNavigationTestEvent", { detail: { source: "page-b" } }));
+    });
+
+    expect(pageAHandler).toHaveBeenCalledTimes(1);
+    expect(pageBHandler).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,6 +6,9 @@
 - `codebase-development.md`：后端、前端、代码组织和新增功能开发流程。
 - `runtime-development.md`：PostgreSQL durable queue、read model freshness、worker、runtime bootstrap、Redis/RabbitMQ 和对象存储开发边界。
 - `testing.md`：测试和验证命令。
+- `nightly-ci.md`：nightly CI、统一验证入口和失败处理规则。
+- `testing-closure-dependency-map.md`：页面/API/read model/worker/domain event 的测试闭环依赖地图。
+- `testing-closure-state.md`：测试闭环 master goal 的模块状态和下一步队列。
 
 ## 接口和契约
 

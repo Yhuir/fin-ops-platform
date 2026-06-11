@@ -607,9 +607,11 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 - `seller_name` 的前端列名为 `销方名称`。`bank_account` 展示为银行名称加账号后四位；`bank_direction` 原始值保持后端事实值，前端展示为 `收入` 或 `支出` chip。
 - 发票号码列表头只提供开票日期排序，不提供下拉筛选。排序通过 `sort_field=invoice_date` 和 `sort_direction` 提交。
 - 支付状态列表只展示状态标签；规则原因和自动闭环解释不在列表行内展示。
-- 反提 OA 工作流按 `preview -> create batch -> create OA draft -> user submission confirmation -> OA projection refresh` 推进。创建 OA 草稿只表示外部 OA 草稿已生成，状态为 `oa_draft_created`，不得直接等同于已提交 OA 流程。
+- 反提 OA 工作流按 `preview -> one-step create OA draft -> user submission confirmation -> submitted history / local rollback` 推进。前端只暴露 `创建 OA 草稿` 一个用户动作；后端可以继续保存内部 batch，但不得把 `创建本地批次` 作为用户概念暴露。创建 OA 草稿只表示外部 OA 草稿已生成，状态为 `oa_draft_created`，不得直接等同于已提交 OA 流程。
 - 进项发票反提 OA 草稿使用支付申请 form `2` 的标准草稿 payload：顶层包含 `formId`、`isDraft`、`data`，`data.userName`/`data.applicant` 来自用户选择的目标 OA 申请人，`data.cause` 必须包含本地反提批次 ID，供 OA 投影回扫识别。
-- 用户在 OA 页面处理草稿后，前端必须让用户选择 `submitted` 或 `not_submitted`。`submitted` 进入 OA 投影检测链路，随后才允许刷新 OA 投影状态；`not_submitted` 只记录本地暂未提交，保留本地草稿链接。撤销本地草稿绑定只清除本地 `oaDraftId`/`oaDraftUrl`，不代表调用 OA 删除外部草稿。
+- `POST /api/input-invoice-usage/oa-reverse/oa-draft` 是当前一键创建入口。请求必须携带 preview id/hash、幂等 key、目标申请人和选中发票；后端重新校验候选、权限和目标申请人凭据后，用目标申请人凭据/token 创建 `isDraft=true` OA 暂存草稿。不得使用当前操作人的请求 token 创建目标申请人草稿。
+- 用户在 OA 页面处理草稿后，前端必须让用户选择 `submitted` 或 `not_submitted`。`submitted` 进入本地 `submitted_confirmed` 历史；`not_submitted` 只清理 FinOps 本地当前草稿字段并回到可重新创建状态，不展示为已提交历史，也不调用 OA 删除外部草稿。
+- `GET /api/input-invoice-usage/oa-reverse/submitted-history` 只返回业务可读字段，例如目标申请人、确认时间、金额、发票张数和发票摘要；不得返回 `batchId`、`oaDraftId`、`previewHash`、英文内部状态、密码、密文或 token。
 
 ## OA 待付款 API
 

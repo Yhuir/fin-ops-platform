@@ -1,7 +1,32 @@
 # ETC票据管理 测试矩阵
 
-
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
+
+## 影响面清单
+
+| 层级 | 当前入口 | 回归风险 |
+| --- | --- | --- |
+| Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/submitted tab、业务批次筛选计数、workflow/detail/error/loading/delete dialog、OA 草稿和人工确认、source file 上传 |
+| Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/business-batches*` envelope、legacy `/api/etc/batches*` fallback、multipart upload、HTML/proxy error、stale preview error、本地化错误 |
+| Workbench UI | `web/src/components/workbench/CandidateGroupGrid.tsx` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、撤回/删除后散票恢复 |
+| HTTP routes | `server.py` `/api/etc*` | business batch、reconciliation task、legacy batch、import preview/confirm、source files、manual status、delete/reset 的状态码和结构化错误 |
+| Business service | `EtcService` | 业务批次幂等、状态流转、发票占用释放、canonical invoice 同步、历史 batch 迁移、删除 audit |
+| Application service | `EtcBusinessBatchApplicationService` | OA 草稿、manual OA status、source file、绑定 task 恢复、Workbench invalidation |
+| Reconciliation service | `EtcReconciliationTaskService` | task ready/importing/imported/closed/deleted、source files、version、tombstone、重启 hydrate |
+| Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 canonical invoice 同步 |
+| Workbench projection | `WorkbenchSqlProjectionBuilder`、`WorkbenchPairRelationService` | submitted business batch -> `etc_invoice_summary`、active relation 排除 open summary、delete/reset 后不恢复旧 OA+银行二栏 relation |
+| 运维工具 | cleanup/migration tools | orphan task 清理必须显式 allowlist；历史迁移 dry-run/execute 不能绕过 service 边界 |
+| App Status | import worker、Workbench read model、App Health | import job、Workbench dirty/readiness、ETC route/API smoke、Nginx HTML/502 风险 |
+
+## 关键 smoke flows
+
+- 票根/信用卡文件上传 -> reconciliation task ready -> ETC ZIP preview -> confirm import job -> business batch visible -> OA draft -> manual submitted -> Workbench open 区出现 `etc_invoice_summary`。
+- business batch manual `not_submitted` -> 释放 ETC 发票占用 -> 回到未提交链路，不触发自动检测。
+- 任意阶段 business batch delete/reset -> 删除本地导入和 task/source metadata -> 已提交 summary 消失 -> 散票回到关联台 open 区；若 summary 已 active relation，取消 relation 且不恢复旧二栏关系。
+- source file/object storage failure -> API 返回稳定 storage error -> 不留下半写入 source file、版本号或审计。
+- failed/acknowledged/cancelled ETC import job -> 同 session 可重新 confirm；queued/running/recent succeeded 才允许幂等复用。
+- 历史 ETC batch migration dry-run -> execute -> submitted bucket 可见 -> Workbench paired/open 口径一致。
+- Nginx/API smoke -> `/api/etc/business-batches*` 必须返回 JSON，不得返回 HTML、502 或 React shell。
 
 ## 七类测试适用性
 
@@ -31,8 +56,21 @@ python -m pytest tests/test_etc_reconciliation_service.py tests/test_etc_backend
 
 cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx src/test/CandidateGroupGrid.test.tsx
 cd web && npm run build
+bash scripts/verify.sh docs
 ```
+
+## Nightly CI 覆盖
+
+夜间 CI 应包含：
+
+- 后端 ETC/API/service/import/workbench 投影组合：`tests.test_etc_backend`、`tests.test_etc_reconciliation_service`、`tests.test_import_service`、`tests.test_workbench_sql_runtime`、`tests.test_workbench_pair_relation_service`、`tests.test_platform_runtime_boundary_guards`、ETC cleanup/migration tool tests。
+- 前端 ETC/API/Workbench summary 组合：`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/CandidateGroupGrid.test.tsx`。
+- `bash scripts/verify.sh docs`。
 
 ## 未测风险
 
 - `tests.test_etc_backend` 中依赖本机真实票据样例的用例在样例缺失时会 skip；核心 ETC 业务批次和 Workbench projection 路径不依赖这些样例。
+- 真实大 ZIP、票根网 PDF/XML/TXT 混合包、Nginx 上传超时和对象存储权限仍需要 staging/生产前 smoke。
+- 真实 OA 草稿页面、附件上传和人工确认后的 OA 系统状态不能由本地 mock 完全证明。
+- 历史生产数据迁移和 orphan task 清理必须先 dry-run，再由运维窗口执行；本地测试只能证明工具边界。
+- 真实 Workbench、税金、成本和 search read model 全量重建后的最终页面展示仍需跨模块 smoke。

@@ -374,6 +374,23 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             ),
         )
 
+    def test_every_declared_event_builds_safe_json_serializable_plan(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        for event in DERIVED_DATA_EVENTS:
+            with self.subTest(event=event):
+                plan = service.plan_event(event, months=["2026-03"], metadata={"source": "test"})
+
+                self.assertEqual(plan["event"], event)
+                self.assertGreater(len(plan["domains"]), 0)
+                planned_delete_targets = {
+                    target
+                    for domain in plan["domains"]
+                    for target in domain.get("delete_targets", [])
+                }
+                self.assertTrue(planned_delete_targets.isdisjoint(PROTECTED_TARGETS))
+                json.dumps(plan)
+
 
 if __name__ == "__main__":
     unittest.main()

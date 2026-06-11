@@ -9,17 +9,27 @@
 ## 修改前必读
 
 - `docs/product-specs/invoice-lifecycle.md`
+- `docs/app-architecture/runtime-and-ownership.md`
 - `docs/app-architecture/pages.md`
 - `docs/dev/api-contracts.md`
+- `docs/operations/runtime-worker-governance.md`
 
 ## 代码入口
 
 - `web/src/pages/PendingInvoicesPage.tsx`
 - `web/src/components/pendingInvoices/*`
+- `web/src/features/pendingInvoices/api.ts`
+- `backend/src/fin_ops_platform/app/routes_pending_invoices.py`
+- `backend/src/fin_ops_platform/services/pending_invoice_service.py`
+- `backend/src/fin_ops_platform/services/pending_invoice_read_model_service.py`
+- `backend/src/fin_ops_platform/services/pending_invoice_rules_application_service.py`
+- `backend/src/fin_ops_platform/services/pending_invoice_lifecycle_service.py`
+- `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`
+- `backend/src/fin_ops_platform/services/invoice_lifecycle_sql_projection.py`
 
 ## 当前边界
 
-关注支出流水、进项发票、规则建议、人工关系和搜索/read model 状态。
+关注支出/收入流水、进项/销项发票、规则建议、人工补票、选择已有发票、收入状态标记、搜索/read model 状态和 invoice lifecycle 分发。发票获取状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 与 pending invoice read model 共同表达，页面不私有定义状态。
 
 ## 维护触发器
 

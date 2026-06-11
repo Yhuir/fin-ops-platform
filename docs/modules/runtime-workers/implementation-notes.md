@@ -25,6 +25,17 @@
 
 ## 历史记录
 
+## 2026-06-11 - 测试闭环矩阵与状态机补齐
+
+- 目标：执行测试闭环 master goal 的 runtime-workers 模块轮次，先审计 worker/queue/readiness/transport 影响面，再补齐模块文档。
+- 影响范围：`runtime-workers` 模块文档、状态机、测试矩阵、历史 bug 回归库、模块验证命令。
+- 关键决策：本轮未发现 P0 自动化缺口；现有测试已覆盖 worker loop、durable queue、registry/manifest、readiness reporter、runtime monitoring、RabbitMQ envelope/dispatcher/consumer、ops 命令和平台边界守卫。真实 RabbitMQ、真实 Postgres migration、systemd worker drain 保持 documented-risk，由 staging/运维 gate 验证。
+- 文档影响：更新 `tests.md` 和 `state-machine.md`；长期 worker/read model 治理事实仍以 `docs/operations/runtime-worker-governance.md` 为准。
+- 测试覆盖：沿用 `tests/test_runtime_worker.py`、`tests/test_runtime_worker_registry.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py`、`tests/test_read_model_readiness_reporter.py`、`tests/test_rabbitmq_runtime.py`、`tests/test_runtime_queue_ops.py`、`tests/test_runtime_state_policy.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_platform_runtime_boundary_guards.py` 和 `tests/test_app_status_readiness_backfill.py`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_worker_registry tests.test_runtime_queue tests.test_runtime_monitoring -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract tests.test_read_model_readiness_reporter -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_runtime tests.test_runtime_queue_ops tests.test_runtime_state_policy tests.test_deploy_runtime_examples -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards tests.test_app_status_readiness_backfill -v`。
+- 未测风险：无真实基础设施环境变量时，不运行 `tests/test_runtime_infrastructure_postgres_integration.py`、`tests/test_rabbitmq_integration.py` 和真实 staging preflight。
+- 后续事项：下一模块继续处理 `domain-events-lifecycle`。
+
 ## 2026-06-10 - Read model refresh producer gateway guard
 
 - 目标：防止 app/API、service、backfill 或 worker lifecycle 新增 producer 时绕过统一 scope policy/gateway。

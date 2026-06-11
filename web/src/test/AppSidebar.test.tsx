@@ -21,6 +21,30 @@ function renderSidebar(expanded = false) {
   );
 }
 
+function renderSidebarAt(
+  initialPath: string,
+  props?: Partial<{
+    expanded: boolean;
+    isCompact: boolean;
+    mobileOpen: boolean;
+    onCloseMobile: () => void;
+    onToggleExpanded: () => void;
+  }>,
+) {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <AppSidebar
+        embedded={false}
+        expanded={props?.expanded ?? true}
+        isCompact={props?.isCompact ?? false}
+        mobileOpen={props?.mobileOpen ?? false}
+        onCloseMobile={props?.onCloseMobile ?? (() => undefined)}
+        onToggleExpanded={props?.onToggleExpanded ?? (() => undefined)}
+      />
+    </MemoryRouter>,
+  );
+}
+
 function renderEmbeddedSidebar(expanded = true) {
   return render(
     <MemoryRouter initialEntries={["/fin-ops/workbench"]}>
@@ -146,5 +170,30 @@ describe("AppSidebar shell contract", () => {
         bankDetailsItem.preload = originalPreload;
       }
     }
+  });
+
+  test("derives active route state from the current path while import shortcuts stay inactive", () => {
+    const { unmount } = renderSidebarAt("/bank-details/transactions");
+
+    expect(screen.getByRole("link", { name: "银行明细" })).toHaveAttribute("aria-current", "page");
+
+    unmount();
+    renderSidebarAt("/imports/bank-transactions");
+
+    expect(screen.getByRole("link", { name: "银行流水导入" })).not.toHaveAttribute("aria-current");
+  });
+
+  test("closes the compact drawer after selecting a navigation item", () => {
+    const onCloseMobile = vi.fn();
+
+    renderSidebarAt("/cost-statistics", {
+      isCompact: true,
+      mobileOpen: true,
+      onCloseMobile,
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "设置" }));
+
+    expect(onCloseMobile).toHaveBeenCalledTimes(1);
   });
 });

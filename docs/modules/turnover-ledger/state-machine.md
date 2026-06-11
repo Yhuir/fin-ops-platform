@@ -1,31 +1,204 @@
 # 外部往来款管理 状态机
 
-
-> 修改 `外部往来款管理` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。当前没有独立状态机时，在对应小节写明“不适用原因”，不要删除文件。
+> 修改 `外部往来款管理` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。
 
 ## 业务状态
 
-- 当前状态：待补充。
-- 状态事实源：待补充。
-- 允许流转：待补充。
-- 禁止流转：待补充。
+### 标签准入
+
+事实源：
+
+- 银行明细自动标签规则中的外部往来标签。
+- App settings 中的 `turnover_ledger_tag_selection`。
+
+状态：
+
+| 状态 | 含义 | 允许动作 |
+| --- | --- | --- |
+| `active` | 当前可用且属于外部往来的标签 code | 可被选择或取消选择 |
+| `selected` | 已保存为外部往来台账准入标签 | 列表/read model 纳入符合三层分类条件的银行流水 |
+| `inactive_selected` | 历史保存但当前停用、未知或不再属于外部往来的标签 | GET 返回提示；下次保存后清理 |
+| `version_conflict` | PUT 的 `expected_version` 与当前版本不一致 | 返回 409；不得保存或刷新 |
+
+规则：
+
+- `selected_tag_codes` 可为空，表示暂不拉取新的外部往来流水。
+- PUT 只能提交当前 `active_tags` 中存在且属于外部往来的 code。
+- 保存成功必须写审计，并触发 `turnover_ledger` read model refresh。
+
+### 台账候选和分组
+
+事实源：
+
+- 银行明细流水。
+- 银行明细有效分类和外部往来标签。
+- Turnover relation snapshot。
+- Turnover extra snapshot。
+- App settings tag selection。
+
+状态：
+
+| 状态 | 含义 | Workbench 影响 |
+| --- | --- | --- |
+| `suggested` | 系统发现可能的往来候选，但不是唯一零差额闭环 | 不进入 Workbench 已配对事实 |
+| `deterministic` | 系统发现唯一零差额候选 | 仍不代表已闭环；不进入 Workbench 已配对事实 |
+| `confirmed` | 用户人工确认的 Turnover relation | 只有 manual closure 写出的 Workbench pair relation 才进入 Workbench |
+| `withdrawn` | 已撤回的人工 relation | 不再作为 active pair relation |
+| `conflict` / `stale` | 分类、方向、金额或底层流水变化导致关系不再可信 | 不可作为 active closure |
+
+分组维度：
+
+- `family`: `personal`、`company`、`bank`、`business`。
+- `counterparty_name`。
+- 外部往来语义和标签路径。
+- grouped response 中 `summary_row` 是组级入口，写操作必须使用 `flow_rows[*].source_bank_row_id` 等真实银行流水 ID。
+
+禁止：
+
+- 不得把 `deterministic` 当作已闭环。
+- 不得用 grouped summary row 作为确认闭环的银行流水。
+- 不得把内部转账 legacy tag 纳入外部往来 relation。
+- 不得混合同一对方下不同业务语义的流水形成闭环。
+
+### 人工零差额闭环
+
+入口：
+
+- `POST /api/turnover-ledger/closures/confirm`
+- 前端 `confirmTurnoverClosure`
+
+允许流转：
+
+```text
+same group flow rows selected
+  -> one income + one expense
+  -> amount delta == 0.00
+  -> backend stale precondition passes
+  -> Turnover manual confirmed relation
+  -> Workbench active pair relation
+  -> turnover/workbench/workbench_relation dirty-outbox refresh
+```
+
+校验：
+
+- `bank_row_ids` 必须正好两条，不能重复。
+- 两条流水必须同组、同对方、同语义。
+- 必须一收一支，差额为 `0.00`。
+- 不得被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用。
+- `expected_versions` 必须在写 relation 和 Workbench pair relation 前校验。
+- `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
+
+### 撤回
+
+入口：
+
+- `POST /api/turnover-ledger/relations/{id}/withdraw`
+
+允许流转：
+
+```text
+manual confirmed relation
+  -> stale precondition passes
+  -> withdrawn
+  -> turnover/workbench/workbench_relation dirty-outbox refresh
+```
+
+禁止：
+
+- system/generated relation 撤回。
+- stale relation version 撤回。
+- duplicate withdraw 产生第二次 mutation 或第二次 refresh。
+
+### Relation extra
+
+入口：
+
+- `GET /api/turnover-ledger/relations/{id}/extra`
+- `PUT /api/turnover-ledger/relations/{id}/extra`
+
+状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| default | relation 存在但没有 extra，返回默认结构 |
+| saved | 保存利率、支付方式、备注、日期等补充字段 |
+| invalid | 利率类型、负数、日期或过长文本非法 |
+| stale | `expected_versions` 不匹配，拒绝保存 |
+
+extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `turnoverLedgerExtraUpdated` 作为刷新提示，但不能让无关页面依赖该事件作为事实源。
 
 ## UI 状态
 
-- loading：待补充。
-- empty：待补充。
-- error：待补充。
-- stale/refreshing：待补充。
-- permission disabled/hidden：待补充。
+| 状态 | 当前行为 | 测试入口 |
+| --- | --- | --- |
+| loading | 首次或筛选加载 grouped ledger | `web/src/test/TurnoverLedgerPage.test.tsx` |
+| empty | grouped response 无 groups 时展示空态 | `web/src/test/TurnoverLedgerPage.test.tsx` |
+| error | ledger/detail/export/extra API 失败时显示错误或 toast | `shows a business error when relation detail disappears after the ledger was rendered` |
+| stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据但禁用写动作 | `disables turnover write actions while grouped read model is stale` |
+| permission disabled | `canMutateData=false` 时禁用保存、确认、撤回等写动作 | API 403 + 前端 disabled tests |
+| tag drawer | 加载 active tags，保存 selected codes 后 reload ledger | `opens tag selection drawer, saves selected bank detail labels, and reloads ledger` |
+| closure drawer | 只允许同组两条 flow rows；非零差额禁用确认 | manual closure/cross-group tests |
+| extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
+| export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
+
+前端跨页事件：
+
+- confirm/withdraw 成功后发 `turnoverRelationUpdated` 和 `workbenchRelationUpdated`。
+- extra 保存成功后发 `turnoverLedgerExtraUpdated`。
+- 这些事件只提示当前浏览器刷新；后端 dirty/outbox/read model freshness 才是事实源。
 
 ## Read Model / Worker 状态
 
-- fresh/missing/refreshing/stale/failed/unavailable：待补充。
-- refresh 触发来源：待补充。
-- 失败恢复：待补充。
+Read model key：`turnover_ledger`
+
+Scope type：`turnover_ledger`
+
+Scope key：当前主路径为 `all`。
+
+Worker instance：`turnover-ledger`
+
+Refresh event：`turnover_ledger.read_model.refresh`
+
+状态：
+
+| 状态 | 含义 | 页面/API 行为 |
+| --- | --- | --- |
+| `fresh` | read model source versions 与当前事实源一致 | 可读可写 |
+| `refreshing` | 缺失或 stale 后已入队刷新 | 可展示当前 payload 或空 payload；前端禁用写动作 |
+| `stale` | source versions 不一致 | 不得伪装 fresh；应 enqueue `api_stale` refresh |
+| `missing` | required SQL read model 缺失 | 返回 empty refreshing payload 并 enqueue `api_miss` |
+| `failed` | worker 或 readiness 记录失败 | App Status 标记 domain blocked |
+| `unavailable` | runtime repository / queue / readiness 不可用 | App Status 不得显示 green；按 blocked/busy 暴露 |
+
+refresh 触发来源：
+
+- tag-selection 保存。
+- bank-row-tags batch。
+- relation extra 保存。
+- manual closure confirm。
+- withdraw。
+- 底层银行流水分类、relation、extra、settings、source versions 变化。
+
+worker 流程：
+
+```text
+job.outbox_events / job.read_model_dirty_scopes
+  -> turnover-ledger worker consumes turnover_ledger.read_model.refresh
+  -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
+  -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
+  -> save_turnover_ledger_rows
+  -> complete dirty scope and readiness
+```
+
+失败恢复：
+
+- worker handler event type 错误必须拒绝。
+- projection 失败不得保存半成品 read model。
+- dirty scope 未 complete 时 App Status 应保持 busy/blocked。
+- 本地测试不能证明真实 RabbitMQ/Redis/systemd drain，发布前按运维 smoke 验证。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| - | 初始骨架 | 待补充 | - |
+| 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |

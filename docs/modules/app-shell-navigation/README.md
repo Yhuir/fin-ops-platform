@@ -1,5 +1,4 @@
-# App Shell 与导航 模块维护入口
-
+# App Shell 与导航模块维护入口
 
 - Module key: `app-shell-navigation`
 - 类型: 资源模块
@@ -9,18 +8,56 @@
 ## 修改前必读
 
 - `docs/app-architecture/pages.md`
+- `docs/app-architecture/runtime-and-ownership.md`
+- `docs/modules/permissions-and-audit/README.md`
+- `docs/modules/app-health-operations/README.md`
+- `docs/modules/domain-events-lifecycle/README.md`
 - `docs/refactor-ui/module_inventory.md`
 
 ## 代码入口
 
-- `web/src/app/pageRegistry.tsx`
-- `web/src/app/router.tsx`
-- `web/src/app/PageRouteHost.tsx`
-- `web/src/components/shell/*`
+- `web/src/app/App.tsx`：provider 组合、BrowserRouter、shell layout、compact sidebar、本地 sidebar 展开状态。
+- `web/src/app/pageRegistry.tsx`：页面注册表、route chunks、sidebar groups 的唯一事实源。
+- `web/src/app/router.tsx`：把 `appPageRoutes` 交给 `PageRouteHost`。
+- `web/src/app/PageRouteHost.tsx`：route match、未知路由 redirect、当前页面挂载、lazy fallback、`PageRuntimeProvider`。
+- `web/src/components/shell/AppSidebar.tsx`：桌面/移动侧栏、active route、icon-only collapse、hover/focus/touch preload。
+- `web/src/components/shell/sidebarItems.ts`：只重导出 `pageRegistry` 的 `sidebarGroups`，不能维护第二份导航事实。
+- `web/src/components/shell/AppTopBar.tsx`：compact top bar 和移动端打开菜单。
+- `web/src/contexts/PageRuntimeContext.tsx`：当前页面激活上下文、active page event 订阅。
+- `web/src/contexts/PageSessionStateContext.tsx`：用户隔离的页面轻量 session state。
+- `web/src/hooks/useFinanceTableSession.ts`：表格分页、排序、选择、滚动位置的页面 session 绑定。
 
 ## 当前边界
 
-侧边栏分组从页面注册表派生，不能维护第二份路由事实。
+- 页面注册表是 route、page key、lazy chunk preload 和侧栏导航项的唯一事实源；侧栏不能维护第二份路由清单。
+- `PageRouteHost` 每次只挂载当前匹配 route。离开页面会卸载旧页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU snapshot 或旧页面 data payload。
+- `PageRuntimeProvider` 对当前页面提供 `active: true` 和 `pageKey`。inactive 页面不被保留；跨页面事件不 replay 给旧页面，依赖卸载时 listener cleanup。
+- `AppPageRoute.preload()` 和 sidebar item `preload()` 只预加载 lazy route chunk。预加载失败不能改变当前 route，也不能阻塞点击导航。
+- 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
+- `SessionGate` 是 shell 级入口。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
+- `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。
+- import pages 是独立 route，但其侧栏入口设置 `active: false`，避免进入导入页时误把导入入口高亮为当前业务页面。
+
+## 影响面
+
+| 改动点 | 可能影响 |
+| --- | --- |
+| `pageRegistry.tsx` 新增/删除/改 route | 页面入口、侧栏分组、App Status domain registry、测试里 route/sidebar 数量、未知路由 redirect |
+| `PageRouteHost.tsx` route match/mount 策略 | 页面状态清理、domain event listener、旧页面 API 请求和 toast、lazy fallback |
+| `AppSidebar.tsx` active/preload/mobile drawer | 侧栏高亮、移动端导航关闭、hover/focus 预加载、导入页 active 行为 |
+| `App.tsx` provider 顺序 | session、page session、import draft、background jobs、App Health、MonthProvider |
+| `PageSessionStateContext.tsx` key/scope/TTL | 所有页面筛选/分页/排序/选中状态恢复、用户切换隔离 |
+| `PageRuntimeContext.tsx` event activation | 跨页面刷新提示、旧页面卸载后的事件清理 |
+
+## 测试入口
+
+- `web/src/test/PageRouteHost.test.tsx`
+- `web/src/test/AppSidebar.test.tsx`
+- `web/src/test/App.test.tsx`
+- `web/src/test/SessionGate.test.tsx`
+- `web/src/test/PageSessionStateContext.test.tsx`
+- `web/src/test/useFinanceTableSession.test.tsx`
+- `web/src/test/domainEvents.test.ts`
 
 ## 维护触发器
 

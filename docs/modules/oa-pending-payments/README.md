@@ -10,16 +10,29 @@
 
 - `docs/architecture/oa-integration.md`
 - `docs/product-specs/invoice-lifecycle.md`
+- `docs/app-architecture/runtime-and-ownership.md`
 - `docs/app-architecture/pages.md`
+- `docs/dev/api-contracts.md`
+- `docs/operations/runtime-worker-governance.md`
 
 ## 代码入口
 
 - `web/src/pages/OaPendingPaymentsPage.tsx`
 - `web/src/components/oaPendingPayments/*`
+- `web/src/features/oaPendingPayments/api.ts`
+- `backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
+- `backend/src/fin_ops_platform/services/oa_pending_payment_service.py`
+- `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py`
+- `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_details.py`
+- `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`
+- `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`
+- `backend/src/fin_ops_platform/services/invoice_usage_collection_source_versions.py`
 
 ## 当前边界
 
-关注 OA 待付款、付款流水、进项发票、SQL read model 和异常反馈。
+关注 OA 单据、支出银行流水、进项发票、Workbench relation、SQL read model、invoice lifecycle 分发、详情 drawer 和异常反馈。OA 待付款以 OA 申请为主行，`paymentStatus` 由 `InvoiceLifecyclePolicy` 或等价 lifecycle read boundary 判定；页面不得自行定义付款状态。
+
+生产读路径必须先经过 `OaPendingPaymentReadModelService` 的 freshness/source-version gate。rows、filter-options、OA detail、bank detail、invoice detail 和 relation detail 在 read model missing/stale/source mismatch 时只能返回 refreshing/unavailable 语义并入队 `oa_pending_payment.read_model.refresh`，不能同步 live scan 旧事实并伪装 fresh。
 
 ## 维护触发器
 

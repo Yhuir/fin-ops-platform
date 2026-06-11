@@ -12,6 +12,18 @@ describe("domainEvents", () => {
     vi.unstubAllGlobals();
   });
 
+  test("declares the finance domain event contract", () => {
+    expect(FINANCE_DOMAIN_EVENTS).toEqual({
+      workbenchRelationUpdated: "workbenchRelationUpdated",
+      bankTransactionCategoryUpdated: "bankTransactionCategoryUpdated",
+      bankAutoTagRulesUpdated: "bankAutoTagRulesUpdated",
+      turnoverRelationUpdated: "turnoverRelationUpdated",
+      turnoverLedgerExtraUpdated: "turnoverLedgerExtraUpdated",
+      invoiceFactUpdated: "invoiceFactUpdated",
+      etcBusinessBatchUpdated: "etcBusinessBatchUpdated",
+    });
+  });
+
   test("normalizes affected months from camelCase and snake_case details", () => {
     expect(eventAffectedMonths(new CustomEvent("x", { detail: { affectedMonths: ["2026-03", ""] } }))).toEqual([
       "2026-03",

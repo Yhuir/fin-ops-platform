@@ -1,28 +1,100 @@
 # Runtime Worker 测试矩阵
 
-
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
+
+## 修改前影响面清单
+
+Runtime worker 是全局后台执行面，修改前必须逐项确认影响范围：
+
+| 影响面 | 当前事实源 | 需要关注的旧功能 |
+| --- | --- | --- |
+| Worker 注册与启动 | `runtime_worker_registry.py`、`app/worker.py`、manifest CLI、deploy env examples | required worker 是否完整、`--registration --worker-instance --check` 是否继续输出 registry 派生配置、systemd env 是否覆盖所有 event type |
+| Durable queue | `RuntimeQueueRepository`、`job.outbox_events` | enqueue/dedupe、claim、stale reclaim、complete、retry、dead-letter、publish 状态、operator resolution |
+| Read model dirty scope | `job.read_model_dirty_scopes`、`ReadModelRefreshGateway`、scope policy registry | dirty scope source version、source guard、非法 scope 清理、replacement enqueue、不可伪造 fresh |
+| Worker loop | `RuntimeWorker.run_once()`、handler registry | heartbeat、statement timeout、task timeout、retry delay、max attempts、无 handler 失败路径 |
+| Readiness / App Health | `RuntimeMonitoringRepository`、`ReadModelReadinessReporter` | missing/stale/mismatch/failed/unavailable 聚合、scope 级诊断、worker kind/event type mismatch |
+| RabbitMQ transport | `rabbitmq_runtime.py`、dispatcher/consumer/preflight | RabbitMQ 只传 envelope/wakeup，不携带业务 payload；Postgres 仍是事实源；ack 必须在 Postgres claim 成功后 |
+| 运维命令 | `runtime_queue_ops`、scope contract check、readiness backfill | inspect/requeue/resolve-dead-letter 必须保留审计和 freshness 前置条件 |
+| 跨模块 fan-out | import、ETC、workbench、bank detail、invoice lifecycle、cost/tax read models | 新增事件不能绕过 gateway、registry 或 readiness reporter；旧页面不能读取 stale projection 伪装 fresh |
+
+## 场景覆盖清单
+
+| 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
+| --- | --- | --- | --- | --- |
+| Worker 从 Postgres claim event 并 complete | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_infrastructure_postgres_integration.py` | covered | 覆盖内存 fake 与真实 Postgres integration。 |
+| Handler 失败进入 retry / dead-letter | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_queue.py` | covered | 覆盖 retry delay、max attempts、processing lock。 |
+| 无 handler / 无 event type 不误 claim | P0 | `tests/test_runtime_worker.py` | covered | 防止 worker 注册错误时吞事件。 |
+| Heartbeat 写入与 required worker mismatch | P0 | `tests/test_runtime_worker.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_worker_registry.py` | covered | 覆盖 instance、kind、event type mismatch。 |
+| Registry / manifest / deploy env 同步 | P0 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_runtime_convergence_closure.py` | covered | 防止新增 worker 没进 manifest 或 deploy helper。 |
+| Read model refresh scope 归一化、校验、去重 | P0 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered | 成本统计旧裸月份/裸 `all` 已有回归覆盖。 |
+| Readiness reporter 记录 fresh/failed/mismatch/refreshing | P0 | `tests/test_read_model_readiness_reporter.py`、`tests/test_app_status_readiness_backfill.py` | covered | 覆盖 handler wrapper 和禁止 fan-out 父 scope 伪 fresh。 |
+| App Health runtime snapshot | P0 | `tests/test_runtime_monitoring.py` | covered | 覆盖 backlog、failed job、stale dirty scope、worker metrics。 |
+| RabbitMQ envelope 不包含业务 payload | P0 | `tests/test_runtime_queue.py`、`tests/test_rabbitmq_runtime.py`、`tests/test_runtime_infrastructure_postgres_integration.py` | covered | RabbitMQ 只可承载 routing identity/version。 |
+| RabbitMQ dispatcher publish confirm 后才 mark published | P0 | `tests/test_rabbitmq_runtime.py` | covered | 防止未确认 publish 被标记成功。 |
+| RabbitMQ consumer 先 claim Postgres 再 ack | P0 | `tests/test_rabbitmq_runtime.py` | covered | 防止 RabbitMQ 消息成功但 Postgres 事实未锁定。 |
+| Runtime queue ops inspect/requeue/resolve dead-letter | P1 | `tests/test_runtime_queue_ops.py` | covered | resolve 要求 fresh readiness 且无 active dirty scope。 |
+| Runtime state policy / legacy snapshot boundary | P1 | `tests/test_runtime_state_policy.py`、`tests/test_runtime_bootstrap.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | 防止 worker 或生产 bootstrap 回退到 Application/full snapshot。 |
+| 真实 RabbitMQ topology publish/consume | P1 | `tests/test_rabbitmq_integration.py`、`tests/test_rabbitmq_staging_preflight.py` | documented-risk | 需要 `RABBITMQ_TEST_URL`；本地/nightly 默认可 skip。 |
+| 真实 Postgres migration + queue integration | P1 | `tests/test_runtime_infrastructure_postgres_integration.py` | documented-risk | 需要 `FIN_OPS_TEST_DATABASE_URL`；无环境时 skip。 |
+| 真实 systemd worker drain / 长时间运行 | P2 | `docs/operations/runtime-worker-governance.md` runbook | documented-risk | 需要 staging/生产环境，不作为本地单元测试前置。 |
 
 ## 七类测试适用性
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_read_model_refresh_gateway.py` | read model scope contract 属于刷新边界业务规则，覆盖合法/非法 scope。 |
-| 2. Service-layer tests | 适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | 覆盖 `_RuntimeWorkerDerivedLifecycle` 通过统一 gateway 入队，以及旧 runtime scope contract 检查/清理。 |
-| 3. API contract tests | 不适用 | N/A | 本阶段不改变 HTTP/API contract。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py` | 覆盖 worker lifecycle 不再投递非法成本统计 dirty/outbox scope。 |
-| 5. Frontend component and interaction tests | 不适用 | N/A | 本阶段不改前端交互。 |
-| 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py` | 当前以 lifecycle 边界测试覆盖 ETC/导入等 worker 触发链路的核心入队行为。 |
-| 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py` | 覆盖 worker 不依赖 Application/auth/HTTP 边界，非成本统计 scope 保持原样，并防止 app/service/tool/script producer 绕过 `ReadModelRefreshGateway` 直接调用 read model refresh queue。 |
+| 1. Business core unit tests | 适用 | `tests/test_runtime_queue.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_state_policy.py` | Queue 状态流转、scope contract、runtime state cleanup policy 都属于后台业务规则。 |
+| 2. Service-layer tests | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_queue_ops.py` | 覆盖 worker orchestration、repository 写入、monitoring、ops 命令前置条件。 |
+| 3. API contract tests | 间接适用 | `tests/test_app_health_*`、`tests/test_runtime_monitoring.py` | 本模块自身不暴露普通业务 API；通过 App Health/runtime snapshot 保护响应事实。若改 `/health` 或 `/api/app-health` shape，必须补 API contract test。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_read_model_readiness_reporter.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_app_status_readiness_backfill.py` | 覆盖 read model refresh handler wrapper、dirty scope、readiness convergence。 |
+| 5. Frontend component and interaction tests | 间接适用 | `web/src/test/AppHealth*.test.tsx` | 修改 App Health 展示、loading/stale/error 语义时必须补前端交互测试；纯 worker 内部改动不适用。 |
+| 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_infrastructure_postgres_integration.py`、`tests/test_rabbitmq_integration.py`、各业务模块 smoke | 修改跨模块事件或 worker fan-out 时，至少补一个关键业务流 integration/regression test。 |
+| 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` | 防止新增 worker/read model/event type 破坏旧 registry、deploy、auth/Application 边界。 |
 
-## 现有验证命令
+## 历史 bug 回归库
+
+| 日期 | Bug / 风险 | 回归测试 | 状态 |
+| --- | --- | --- | --- |
+| 2026-06-10 | Worker lifecycle 向 `cost_statistics.read_model.refresh` 投递裸月份/裸 `all`，SQL projection 拒绝 scope。 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered |
+| 2026-06-10 | 非事务 producer 可能绕过 `ReadModelRefreshGateway` 直接调用 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。 | `tests/test_platform_runtime_boundary_guards.py::test_read_model_refresh_producers_use_scope_gateway_boundary` | covered |
+| 2026-06-11 | 静态 boundary guard 误把 OA 登录 JSON 响应字段 `Admin-Token` 判定为 service 解析 HTTP cookie/header。 | `tests/test_platform_runtime_boundary_guards.py::test_services_do_not_import_http_auth_boundary_or_parse_cookie_token_headers`、`tests/test_target_oa_applicant_token_provider.py` | covered |
+
+## 关键 smoke flows
+
+保留少量高价值 smoke，不做全量巨型 E2E：
+
+1. `producer -> ReadModelRefreshGateway -> job.read_model_dirty_scopes/job.outbox_events -> RuntimeWorker -> ReadModelReadinessReporter -> App Health`
+2. `RabbitMQ dispatcher -> persistent envelope publish -> consumer receives wakeup -> Postgres claim -> handler complete -> RabbitMQ ack`
+3. `dead-letter event -> runtime_queue_ops inspect -> repair/requeue or guarded resolve -> readiness/App Health 收敛`
+4. `新增 worker registration -> manifest CLI -> deploy env examples -> runtime monitoring required worker metrics`
+5. `导入/ETC/关系变更 -> derived lifecycle -> affected read model scopes -> 页面 read model refreshing/fresh 状态`
+
+## 本模块验证命令
+
+本模块最小闭环：
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes -v
-PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_scope_contract -v
-PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_worker_registry tests.test_runtime_queue tests.test_runtime_monitoring -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract tests.test_read_model_readiness_reporter -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_runtime tests.test_runtime_queue_ops tests.test_runtime_state_policy tests.test_deploy_runtime_examples -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards tests.test_app_status_readiness_backfill -v
+bash scripts/verify.sh docs
 ```
+
+有真实基础设施时追加：
+
+```bash
+FIN_OPS_TEST_DATABASE_URL=postgresql://... PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_infrastructure_postgres_integration -v
+RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_integration -v
+FIN_OPS_TEST_DATABASE_URL=postgresql://... RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_staging_preflight -v
+```
+
+## Nightly CI 覆盖
+
+`bash scripts/verify.sh all` 会跑 backend unittest discover、frontend vitest/build 和 docs guard。默认夜间 CI 不依赖真实 Postgres/RabbitMQ URL；因此真实基础设施 smoke 属于 staging/手动 gate。
 
 ## 未测风险
 
-- 未覆盖完整 import worker 处理真实文件到 read model worker 完成投影的端到端链路；当前通过 lifecycle/gateway/architecture guard 锁住入队合同。
+- 当前默认 CI 不证明真实 RabbitMQ broker、真实 Postgres migration、systemd unit 和 worker 长时间 drain。
+- RabbitMQ 作为可选 transport 的端到端 broker 测试需要 `RABBITMQ_TEST_URL`，没有该环境变量时只能依赖 fake channel/consumer 测试。
+- `resolve-dead-letter` 等运维命令的真实生产执行仍需 operator review 和 readiness 事实核对；测试只保护命令前置条件和 SQL 行为。
+- 业务页面层面的 loading/stale/error 展示不在本模块完全覆盖，必须由具体页面模块补前端交互和关键业务流回归。

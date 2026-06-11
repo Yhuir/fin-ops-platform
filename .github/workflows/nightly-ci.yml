@@ -1,0 +1,41 @@
+name: Nightly CI
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 18 * * *"
+  push:
+    branches:
+      - main
+
+jobs:
+  verify:
+    name: Verify backend, frontend, and docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Run verification
+        run: bash scripts/verify.sh all

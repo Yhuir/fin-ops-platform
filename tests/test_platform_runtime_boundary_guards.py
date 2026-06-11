@@ -65,6 +65,31 @@ def _attribute_calls(tree: ast.Module, names: set[str]) -> list[str]:
     return calls
 
 
+def _parses_http_auth_headers_or_cookies(tree: ast.Module) -> bool:
+    imported_modules = _imported_modules(tree)
+    if "http.cookies" in imported_modules:
+        return True
+    if _imports_name_from_module(tree, module="http.cookies", name="SimpleCookie"):
+        return True
+
+    forbidden_header_names = {"authorization", "cookie", "admin-token"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != "get":
+            continue
+        owner_name = _attribute_chain(node.func.value).lower()
+        if not owner_name.endswith("headers") and not owner_name.endswith(".headers"):
+            continue
+        if not node.args:
+            continue
+        key_arg = node.args[0]
+        if isinstance(key_arg, ast.Constant) and isinstance(key_arg.value, str):
+            if key_arg.value.strip().lower() in forbidden_header_names:
+                return True
+    return False
+
+
 def _attribute_chain(node: ast.AST) -> str:
     if isinstance(node, ast.Name):
         return node.id
@@ -252,10 +277,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for path in _python_files(SERVICES_ROOT):
             tree = _parse(path)
             modules = _imported_modules(tree)
-            source = path.read_text(encoding="utf-8")
             if "fin_ops_platform.app.auth" in modules:
                 violations.append(f"{_relative(path)} imports app.auth")
-            if re.search(r"\bAdmin-Token\b|\bSimpleCookie\b", source):
+            if _parses_http_auth_headers_or_cookies(tree):
                 violations.append(f"{_relative(path)} parses OA token cookie/header")
 
         self.assertEqual(violations, [])

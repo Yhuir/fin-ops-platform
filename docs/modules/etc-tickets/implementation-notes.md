@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-11 - 首轮测试闭环
+
+- 目标：完成 `etc-tickets` 模块 codebase 影响面分析、七类测试矩阵补强、状态机更新和主控依赖图登记。
+- 影响范围：ETC 票据管理页面/API mapper，`/api/etc*` business batch/reconciliation task/import/source file/legacy routes，`EtcService`、`EtcBusinessBatchApplicationService`、`EtcReconciliationTaskService`、import worker、Workbench SQL projection、App Status 和相关测试。
+- 关键决策：维持 documented-risk 状态；已有测试覆盖业务批次状态、删除/reset、source file、canonical invoice、导入 job、Workbench `etc_invoice_summary`、前端交互和历史迁移工具，本轮不新增重复测试。
+- 文档影响：更新本模块 `README.md`、`tests.md`、`state-machine.md`，并在 `docs/dev/testing-closure-dependency-map.md` 登记模块细化。
+- 测试覆盖：确认 `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`tests/test_import_service.py`、`tests/test_postgres_core_repository.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_pair_relation_service.py`、`tests/test_platform_runtime_boundary_guards.py`、ETC cleanup/migration tool tests、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/CandidateGroupGrid.test.tsx`。
+- 验证命令：见 `docs/dev/testing-closure-state.md` 最近验证命令。
+- 未测风险：真实大 ZIP/票根网混合包、真实对象存储/Nginx 上传、真实 OA 草稿系统、生产历史迁移 dry-run/execute、Workbench/税金/成本/search 全量重建最终页面 smoke。
+- 后续事项：由 `settings` 模块继续测试闭环；ETC 相关真实环境 smoke 保留在发布前 gate。
+
 ## 2026-06-10 - ETC删除后部署重启复活修复
 
 - 目标：修复用户已删除未提交 ETC 批次后，下一次部署/重启进入 ETC 页面又出现 task-only 空批次的问题。

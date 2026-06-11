@@ -1,31 +1,94 @@
 # 部署 测试矩阵
 
-
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
+
+## 影响面清单
+
+| 影响面 | 当前入口 | 必测原因 |
+| --- | --- | --- |
+| Nightly CI | `.github/workflows/nightly-ci.yml`、`scripts/verify.sh` | 防止 solo 开发漏跑后端、前端、build 和 docs |
+| Release deploy script | `scripts/deploy_oa.py`、`scripts/deploy-oa.sh` | 发布顺序、storage preflight、helper contract、readiness/public route smoke 不能漂移 |
+| Deploy control helper | `deploy/oa/bin/finops-deploy-control.sh` | root-owned helper 负责 migration、drop-in、restart、readiness 和 cleanup |
+| Worker ensure helper | `deploy/oa/bin/finops-ensure-runtime-workers.sh` | required worker 矩阵必须来自 registry/manifest，不维护第二份清单 |
+| Runtime worker registry | `runtime_worker_registry.py`、`runtime_worker_manifest.py` | worker/env/event/heartbeat/App Health 必须同步 |
+| Nginx 同域路径 | `deploy/oa/nginx.fin-ops.conf.example` | `/fin-ops/` SPA 和 `/fin-ops-api/`、`/fin-ops/api/` API proxy 不能互相吞路由 |
+| Health/readiness | `/health`、`/health/ready` | release 激活后必须等 API 和 required workers ready |
+| Runtime env/secrets | `deploy/oa/env/*.example`、systemd drop-ins | DSN、secrets、migrator env、RabbitMQ/Redis/OA env 不能泄露或错用 |
+| Backup/rollback | operations docs、deploy helper cleanup/active refs | 本地只能保护脚本契约；真实备份恢复要 staging/生产 runbook |
+
+## 场景覆盖清单
+
+| 场景 | 覆盖入口 | 状态 |
+| --- | --- | --- |
+| nightly 支持手动、定时、main push，并运行 `bash scripts/verify.sh all` | `tests/test_nightly_ci.py` | 2026-06-11 新增 |
+| `verify.sh all` 运行后端 check、全量 unittest、前端 Vitest/build、docs check | `tests/test_nightly_ci.py` | 2026-06-11 新增 |
+| release remote script 使用 versioned release、deploy-control、worker ensure、storage preflight、cleanup | `tests/test_deploy_oa_script.py` | 已覆盖 |
+| release 激活后先等 `/health/ready`，再检查公网 session API route JSON proxy | `tests/test_deploy_oa_script.py` | 已覆盖 |
+| no-activate 只上传和校验，不激活、不清理、不启动 worker ensure | `tests/test_deploy_oa_script.py` | 已覆盖 |
+| legacy-current 仍保留旧覆盖部署行为 | `tests/test_deploy_oa_script.py` | 已覆盖 |
+| deploy-control helper 使用 `/etc/fin-ops` secret contract、migration env、drop-in reset、worker readiness | `tests/test_deploy_oa_script.py` | 已覆盖 |
+| runtime worker ensure 从 manifest 派生 required workers/env/check command | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py` | 已覆盖 |
+| Nginx SPA fallback、assets 404/cache、index no-store、API proxy 顺序 | `tests/test_deploy_oa_nginx_config.py` | 已覆盖 |
+| RabbitMQ dispatcher/env examples 覆盖 registry events | `tests/test_deploy_runtime_examples.py`、`tests/test_runtime_worker_registry.py` | 已覆盖 |
+| `/health/ready` 不执行重 self-test，暴露 runtime infrastructure contract | `tests/test_app.py`、`tests/test_app_postgres_mode.py` | 已覆盖 |
 
 ## 七类测试适用性
 
-| 类别 | 是否适用 | 当前测试入口 | 说明 |
-| --- | --- | --- | --- |
-| 1. Business core unit tests | 待判断 | 待补充 | 业务规则、金额、状态、分类、权限、去重、幂等时适用。 |
-| 2. Service-layer tests | 待判断 | 待补充 | service、repository、audit、read model、cache、worker 编排时适用。 |
-| 3. API contract tests | 待判断 | 待补充 | HTTP/API contract 或 DTO shape 变化时适用。 |
-| 4. Read model/cache/background job tests | 待判断 | 待补充 | list、summary、search、workbench、ledger、import、worker 变化时适用。 |
-| 5. Frontend component and interaction tests | 待判断 | 待补充 | 页面、表格、drawer、dialog、按钮、筛选、权限渲染变化时适用。 |
-| 6. End-to-end business-flow integration tests | 待判断 | 待补充 | 跨模块业务链路变化时适用。 |
-| 7. Existing feature regression tests | 待判断 | 待补充 | 每次变更都要判断受影响旧行为。 |
+| 类别 | 是否适用 | 当前测试入口 | 当前结论 | 缺口等级 | 维护要求 |
+| --- | --- | --- | --- | --- | --- |
+| 1. Business core unit tests | 不直接适用 | N/A | deploy 模块没有业务金额/状态规则；核心规则是脚本/环境契约 | N/A | 若新增发布策略算法或 release retention 规则，补脚本级 unit tests |
+| 2. Service-layer tests | 适用 | `tests/test_deploy_oa_script.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` | 覆盖 deploy helper、worker registry、env examples、RabbitMQ dispatch contract | 无 P0 | 修改 helper/systemd/env/worker manifest 时必须补 |
+| 3. API contract tests | 间接适用 | `tests/test_app.py`、`tests/test_app_postgres_mode.py`、`tests/test_deploy_oa_script.py` | 覆盖 `/health/ready` 和 session route proxy smoke 脚本契约 | 无 P0 | 修改 health/session/Nginx path 时补 route contract |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 worker manifest、read model event、RabbitMQ dispatcher env、runtime boundary | P1 | 真 systemd/RabbitMQ/Redis/worker drain 需要 staging |
+| 5. Frontend component and interaction tests | 间接适用 | `scripts/verify.sh frontend`、nightly CI | deploy 不改页面；通过全量 Vitest/build 防旧页面破坏 | P1 | 真实浏览器/OA iframe/缓存刷新需 smoke |
+| 6. End-to-end business-flow integration tests | 适用但本地有限 | deploy release script tests + health tests | 覆盖发布脚本顺序，不执行真实 SSH/systemd/migration | P1 | 真实 release -> migration -> restart -> worker ready -> App Health 绿灯需 staging/生产前 smoke |
+| 7. Existing feature regression tests | 适用 | `scripts/verify.sh all`、nightly CI、全量测试 | 保证部署/CI 改动不会漏跑旧模块测试 | 无 P0 | 改验证入口时必须保护 backend/frontend/docs 都仍被 all 覆盖 |
 
-## 现有验证命令
+## 历史 bug 回归库
+
+| 日期 | 失败模式 | 回归测试 | 验证 |
+| --- | --- | --- | --- |
+| 2026-06-11 | nightly workflow 或 `verify.sh all` 被改坏后漏跑后端/前端/docs，导致远端 CI 失去门禁价值 | `tests/test_nightly_ci.py` | `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v` |
+| 既有 | deploy-control helper 使用旧 `/root` env、未加载 secrets、未 reset EnvironmentFile、未校验 OA env | `test_deploy_control_script_uses_canonical_etc_finops_secret_contract` | 模块后端验证 |
+| 既有 | release 激活后未等待 `/health/ready` 就检查公网 route | `test_release_remote_script_waits_for_backend_before_public_route_smoke` | 模块后端验证 |
+| 既有 | Nginx 把 `/fin-ops/api/*` 吃成 SPA index.html | `test_fin_ops_relative_api_routes_do_not_fall_back_to_index_html` | 模块后端验证 |
+| 既有 | required worker 清单在 deploy helper 中硬编码，新增 worker 后生产漏启 | `test_required_workers_match_deploy_helper_defaults`、`test_manifest_cli_lists_required_instances_and_env_examples` | 模块后端验证 |
+
+## 关键 smoke flows
+
+- Nightly smoke：手动触发 GitHub Actions `Nightly CI`，确认 checkout、pip install、npm ci、`bash scripts/verify.sh all` 成功。
+- Release dry-run：`./scripts/deploy-oa.sh --dry-run --no-activate --allow-dirty`，检查远端命令不执行激活但包含 release layout/check-release/storage preflight。
+- Staging release：上传 release -> check-release -> activate -> `/health/ready` ready -> worker readiness zero missing/stale/mismatch -> public session API returns JSON 401 without token。
+- Nginx smoke：刷新 `/fin-ops/`、深链 route、hashed assets、`/fin-ops-api/api/session/me`、`/fin-ops/api/session/me`。
+- Worker smoke：required worker instances 来自 manifest；systemd active；App Health 无 missing/stale/mismatch worker；dirty scope backlog 不增长。
+- Rollback smoke：切回上一个 release 或恢复备份，确认 frontend hash、API release identity、worker drop-in 和 App Health 收敛。
+
+## 模块验证命令
 
 ```bash
-# 后端示例，按实际模块替换
-PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
+PYTHONPATH=backend/src python3 -m unittest \
+  tests.test_deploy_oa_script \
+  tests.test_deploy_oa_nginx_config \
+  tests.test_nightly_ci \
+  tests.test_deploy_runtime_examples \
+  tests.test_runtime_worker_registry \
+  tests.test_app \
+  tests.test_app_postgres_mode \
+  -v
 
-# 前端示例，按实际模块替换
-cd web && npm test
-cd web && npm run build
+bash scripts/verify.sh docs
 ```
+
+## Nightly CI 覆盖
+
+- nightly 调用 `bash scripts/verify.sh all`，覆盖全量后端 unittest、前端 Vitest、前端 build 和 docs。
+- `tests/test_nightly_ci.py` 保护 workflow 和 verify script 不被改成漏跑。
+- nightly 仍不能证明真实 SSH、sudo、systemd、PostgreSQL migration、Redis/RabbitMQ、Nginx live config 和 OA cookie 行为。
 
 ## 未测风险
 
-- 待补充。
+- 真实服务器 SSH/sudo 权限、root-owned helper 安装、systemd drop-in、worker restart 和 journal 日志只靠 staging/生产前 smoke。
+- PostgreSQL migration、备份/PITR、对象存储、Redis/RabbitMQ 真连接和大生产库 worker drain 不由本地 unittest 证明。
+- Nginx live config 可能与仓库 example 偏离，必须在服务器上 `nginx -T` 或实际 route smoke。
+- GitHub Actions 是否在远端仓库启用、secret/cache 配置和权限需要在 GitHub 侧确认。
+- 浏览器真实缓存、OA iframe cookie、下载和移动端布局仍由真实浏览器 smoke 覆盖。
