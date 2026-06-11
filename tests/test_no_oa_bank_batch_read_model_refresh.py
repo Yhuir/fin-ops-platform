@@ -3,11 +3,143 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.no_oa_bank_batch_read_model_refresh import NoOaBankBatchReadModelRefreshService
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
 
 class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
+    def test_refresh_does_not_repair_workbench_relations_from_read_model_path(self) -> None:
+        class ImportService:
+            def list_transactions(self, *, month: str = "all"):
+                return [
+                    {
+                        "id": "fee-1",
+                        "txn_date": "2026-03-10",
+                        "txn_direction": "outflow",
+                        "amount": "3.00",
+                        "bank_name": "CCB",
+                        "account_no": "6222000000008106",
+                        "counterparty_name": "云南三源",
+                    }
+                ]
+
+        class EffectiveCategoryProvider:
+            def bulk_get_for_rows(self, rows):
+                return {
+                    str(row["id"]): {
+                        "transaction_id": row["id"],
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_source": "auto",
+                    }
+                    for row in rows
+                }
+
+        class StateStore:
+            def __init__(self) -> None:
+                self.saved_no_oa_snapshots: list[dict[str, object]] = []
+
+            def save_no_oa_bank_batches(self, snapshot) -> None:
+                self.saved_no_oa_snapshots.append(dict(snapshot))
+
+            def save_workbench_pair_relations(self, *_args, **_kwargs) -> None:
+                raise AssertionError("no-OA read model refresh must not repair pair relations")
+
+            def save_no_oa_bank_batch_mutation(self, **_kwargs) -> None:
+                raise AssertionError("no-OA read model refresh must not persist relation mutations")
+
+        pair_relation_service = WorkbenchPairRelationService()
+        batch_id = NoOaBankBatchService._batch_id("single:fee:2026-03:CCB:8106")
+        no_oa_service = NoOaBankBatchService.from_snapshot(
+            {
+                "batches": {
+                    batch_id: {
+                        "batch_id": batch_id,
+                        "batch_key": "single:fee:2026-03:CCB:8106",
+                        "batch_type": "fee",
+                        "batch_label": "手续费",
+                        "scope_month": "2026-03",
+                        "account_key": "CCB:8106",
+                        "bank_name": "CCB",
+                        "account_last4": "8106",
+                        "status": "submitted",
+                        "row_ids": ["fee-1"],
+                        "row_count": 1,
+                        "total_amount": "3.00",
+                        "tag_counts": {"fee": 1},
+                        "direction_counts": {"income": 0, "expense": 1},
+                        "relation_case_id": batch_id,
+                        "source_versions": {},
+                        "evidence": {"source": "test"},
+                        "category_source": "auto",
+                        "created_by": "finance-user",
+                        "created_at": "2026-03-10T00:00:00+00:00",
+                        "submitted_by": "finance-user",
+                        "submitted_at": "2026-03-10T00:00:00+00:00",
+                        "version": 1,
+                        "updated_at": "2026-03-10T00:00:00+00:00",
+                    }
+                }
+            },
+            pair_relation_service=pair_relation_service,
+        )
+        state_store = StateStore()
+        service = NoOaBankBatchReadModelRefreshService(
+            import_service=ImportService(),
+            effective_category_provider=EffectiveCategoryProvider(),
+            no_oa_bank_batch_service=no_oa_service,
+            app_settings_service=type(
+                "Settings",
+                (),
+                {
+                    "get_no_oa_bank_batch_tag_selection_payload": lambda _self: {
+                        "version": 1,
+                        "selected_tag_codes": ["fee"],
+                    }
+                },
+            )(),
+            bank_transaction_category_service=type("CategoryService", (), {"snapshot": lambda _self: {}})(),
+            pair_relation_service=pair_relation_service,
+            workbench_read_model_service=type("WorkbenchReadModel", (), {"snapshot": lambda _self: {}})(),
+            state_store=state_store,
+            workbench_matching_source_versions_provider=lambda: {},
+            relation_facade=type(
+                "RelationFacade",
+                (),
+                {
+                    "list_by_month": lambda _self, *_args, **_kwargs: {
+                        "status": "fresh",
+                        "rows": [],
+                        "groups": [],
+                        "source_versions": {},
+                    }
+                },
+            )(),
+        )
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-no-repair",
+                tenant_id="default",
+                event_type="no_oa_bank_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="all",
+                scope_type="no_oa_bank_batch",
+                scope_key="all",
+                dedupe_key="no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:all",
+                payload={"scope_type": "no_oa_bank_batch", "scope_key": "all", "source_version": 5},
+                attempts=1,
+                status="processing",
+                source_version=5,
+            )
+        )
+
+        self.assertEqual(result["scope_key"], "all")
+        self.assertEqual(pair_relation_service.list_active_relations(), [])
+        self.assertEqual(len(state_store.saved_no_oa_snapshots), 1)
+
     def test_source_versions_include_bank_detail_source_versions_from_tag_facade(self) -> None:
         class EffectiveCategoryProvider:
             last_source_versions = {"bank_detail": {"scope_key": "2026-04", "source_version": 11}}

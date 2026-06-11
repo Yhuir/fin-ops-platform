@@ -24,6 +24,7 @@
 | Module key | 名称 | 类型 | Route | 入口文档 |
 | --- | --- | --- | --- | --- |
 | `reconciliation-workbench` | 关联台 | 页面模块 | `/` | `reconciliation-workbench/README.md` |
+| `workbench-relations` | 关联台关系事实源 | 资源模块 | `N/A` | `workbench-relations/README.md` |
 | `tax-offset` | 税金抵扣 | 页面模块 | `/tax-offset` | `tax-offset/README.md` |
 | `cost-statistics` | 成本统计 | 页面模块 | `/cost-statistics` | `cost-statistics/README.md` |
 | `bank-details` | 银行明细 | 页面模块 | `/bank-details` | `bank-details/README.md` |

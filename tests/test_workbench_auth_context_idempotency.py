@@ -62,6 +62,10 @@ class _InProgressUoW:
 
 
 class _PairRelationService:
+    def __init__(self) -> None:
+        self.replace_calls: list[object] = []
+        self.cancel_calls: list[object] = []
+
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
         return []
 
@@ -76,13 +80,100 @@ class _PairRelationService:
             "version": 3,
         }
 
+    def replace_with_confirmed_relation(self, **kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
+        self.replace_calls.append(kwargs)
+        raise AssertionError("WorkbenchWriteFacade must delegate confirm relation writes to WorkbenchRelationCommandService.")
 
-def _new_facade(*, confirm_uow: object | None = None, cancel_uow: object | None = None) -> WorkbenchWriteFacade:
+    def cancel_relation_for_row_id(self, row_id: str) -> dict[str, object]:
+        self.cancel_calls.append(row_id)
+        raise AssertionError("WorkbenchWriteFacade must delegate cancel relation writes to WorkbenchRelationCommandService.")
+
+
+class _RecordingRelationCommandService:
+    def __init__(self) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+        self.cancel_calls: list[dict[str, object]] = []
+
+    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+        self.confirm_calls.append(dict(kwargs))
+        relation = {
+            "case_id": str(kwargs["case_id"]),
+            "row_ids": list(kwargs["row_ids"]),
+            "row_types": list(kwargs["row_types"]),
+            "status": "active",
+            "relation_mode": str(kwargs["relation_mode"]),
+            "month_scope": str(kwargs["month_scope"]),
+            "amount_check": dict(kwargs.get("amount_check") or {}),
+            "version": 1,
+        }
+        return {
+            "status": "confirmed",
+            "relation": relation,
+            "changed_case_ids": [relation["case_id"]],
+            "affected_months": ["2026-05"],
+            "version": 1,
+            "read_model_status": "fresh",
+            "read_model_stale_reasons": [],
+            "read_model_scope_keys": ["2026-05"],
+            "refresh_enqueued": False,
+            "idempotent_replay": False,
+        }
+
+    def cancel_relation(self, **kwargs: object) -> dict[str, object]:
+        self.cancel_calls.append(dict(kwargs))
+        return {
+            "status": "cancelled",
+            "relation": {
+                "case_id": str(kwargs["case_id"]),
+                "row_ids": ["oa-1", "bank-1"],
+                "status": "cancelled",
+                "version": 4,
+            },
+            "changed_case_ids": [str(kwargs["case_id"])],
+            "affected_months": ["2026-05"],
+            "version": 4,
+            "read_model_status": "fresh",
+            "read_model_stale_reasons": [],
+            "read_model_scope_keys": ["2026-05"],
+            "refresh_enqueued": False,
+            "idempotent_replay": False,
+        }
+
+
+class _RecordingExceptionCaseService:
+    def __init__(self) -> None:
+        self.created_cases: list[dict[str, object]] = []
+        self._snapshot = {"cases": []}
+
+    def snapshot(self) -> dict[str, object]:
+        return dict(self._snapshot)
+
+    def create_settlement_case(self, **kwargs: object) -> dict[str, object]:
+        self.created_cases.append(dict(kwargs))
+        return {"id": "ADV-1"}
+
+
+def _personal_advance_rows() -> list[dict[str, object]]:
+    return [
+        {"id": "oa-advance-1", "type": "oa", "amount": "1000.00"},
+        {"id": "bank-advance-out", "type": "bank", "debit_amount": "1000.00", "credit_amount": ""},
+        {"id": "bank-advance-in", "type": "bank", "debit_amount": "", "credit_amount": "1000.00"},
+    ]
+
+
+def _new_facade(
+    *,
+    confirm_uow: object | None = None,
+    cancel_uow: object | None = None,
+    relation_command_service: object | None = None,
+    exception_case_service: object | None = None,
+    live_rows: list[dict[str, object]] | None = None,
+) -> WorkbenchWriteFacade:
     pair_relation_service = _PairRelationService()
     return WorkbenchWriteFacade(
         pair_relation_service=pair_relation_service,
         exception_service=object(),
-        exception_case_service=object(),
+        exception_case_service=exception_case_service or object(),
         override_service=object(),
         candidate_match_service=object(),
         next_case_id=lambda: "CASE-NEW",
@@ -97,7 +188,7 @@ def _new_facade(*, confirm_uow: object | None = None, cancel_uow: object | None 
         month_scope_for_selected_row_ids=lambda **_: "2026-05",
         scope_keys_for_row_ids=lambda **_: {"2026-05"},
         scope_keys_for_rows=lambda rows, **_: ["2026-05"],
-        resolve_live_rows_direct=lambda *_, **__: [],
+        resolve_live_rows_direct=lambda *_, **__: list(live_rows or []),
         resolve_live_row=lambda row_id, **_: {"id": row_id},
         relation_groups=lambda *_, **__: [],
         withdraw_rows_and_after_relations=lambda *_, **__: ([], [], []),
@@ -121,6 +212,7 @@ def _new_facade(*, confirm_uow: object | None = None, cancel_uow: object | None 
         confirm_link_uow=confirm_uow,
         cancel_link_uow=cancel_uow,
         persist_pair_relations_in_transaction=lambda **_: None,
+        relation_command_service=relation_command_service,
     )
 
 
@@ -215,6 +307,122 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(cancel.status_code, HTTPStatus.CONFLICT)
         self.assertEqual(cancel.payload["error"], "idempotency_key_in_progress")
         self.assertTrue(cancel.payload["retryable"])
+
+    def test_confirm_and_cancel_link_delegate_relation_writes_to_command_service_without_uow(self) -> None:
+        relation_command = _RecordingRelationCommandService()
+        facade = _new_facade(relation_command_service=relation_command)
+
+        confirm = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "case_id": "CASE-REL-1",
+                "note": "人工确认",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+        cancel = facade.cancel_link(
+            {
+                "month": "2026-05",
+                "row_id": "oa-1",
+                "comment": "误关联",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(confirm.status_code, HTTPStatus.OK)
+        self.assertEqual(cancel.status_code, HTTPStatus.OK)
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        self.assertEqual(relation_command.confirm_calls[0]["case_id"], "CASE-REL-1")
+        self.assertEqual(relation_command.confirm_calls[0]["relation_mode"], "manual_confirmed")
+        self.assertEqual(relation_command.confirm_calls[0]["actor_id"], "oa-user-1")
+        self.assertEqual(relation_command.confirm_calls[0]["history_operation_type"], "confirm_link")
+        self.assertIs(relation_command.confirm_calls[0]["replace_existing"], True)
+        self.assertEqual(len(relation_command.cancel_calls), 1)
+        self.assertEqual(relation_command.cancel_calls[0]["case_id"], "CASE-1")
+        self.assertEqual(relation_command.cancel_calls[0]["actor_id"], "oa-user-1")
+        self.assertEqual(relation_command.cancel_calls[0]["reason"], "误关联")
+
+    def test_confirm_and_cancel_link_fail_fast_without_relation_command_service(self) -> None:
+        facade = _new_facade()
+
+        confirm = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "case_id": "CASE-REL-MISSING-COMMAND",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+        cancel = facade.cancel_link(
+            {
+                "month": "2026-05",
+                "row_id": "oa-1",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(confirm.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(confirm.payload["error"], "workbench_relation_command_unavailable")
+        self.assertEqual(cancel.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(cancel.payload["error"], "workbench_relation_command_unavailable")
+
+    def test_personal_advance_repayment_delegates_relation_write_to_command_service(self) -> None:
+        relation_command = _RecordingRelationCommandService()
+        exception_cases = _RecordingExceptionCaseService()
+        rows = _personal_advance_rows()
+        facade = _new_facade(
+            relation_command_service=relation_command,
+            exception_case_service=exception_cases,
+            live_rows=rows,
+        )
+
+        result = facade.confirm_personal_advance_repayment(
+            {
+                "month": "2026-05",
+                "row_ids": [str(row["id"]) for row in rows],
+                "note": "个人暂借款还清",
+            },
+            request_id="req-personal-advance",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(len(exception_cases.created_cases), 1)
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["case_id"], "CASE-ADV-1")
+        self.assertEqual(call["row_ids"], ["oa-advance-1", "bank-advance-out", "bank-advance-in"])
+        self.assertEqual(call["row_types"], ["oa", "bank", "bank"])
+        self.assertEqual(call["relation_mode"], "personal_advance_repayment_settlement")
+        self.assertEqual(call["history_operation_type"], "confirm_personal_advance_repayment")
+        self.assertIs(call["replace_existing"], True)
+        self.assertEqual(call["special_metadata"]["cost_policy"], "exclude_all")
+        self.assertEqual(call["amount_check"]["status"], "matched")
+        self.assertEqual(result.payload["case_id"], "CASE-ADV-1")
+
+    def test_personal_advance_repayment_fails_fast_without_relation_command_service(self) -> None:
+        exception_cases = _RecordingExceptionCaseService()
+        rows = _personal_advance_rows()
+        facade = _new_facade(
+            exception_case_service=exception_cases,
+            live_rows=rows,
+        )
+
+        result = facade.confirm_personal_advance_repayment(
+            {
+                "month": "2026-05",
+                "row_ids": [str(row["id"]) for row in rows],
+            },
+            request_id="req-personal-advance-missing-command",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(result.payload["error"], "workbench_relation_command_unavailable")
+        self.assertEqual(exception_cases.created_cases, [])
 
     def test_workbench_handlers_pass_request_local_oa_session_actor_to_live_write_path(self) -> None:
         session = _session()

@@ -6,6 +6,7 @@ from fin_ops_platform.services.postgres_repositories.ops_tax_etc import Postgres
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 __all__ = [
     "PostgresOAProjectionAdapter",
@@ -15,4 +16,5 @@ __all__ = [
     "PostgresReadModelRepository",
     "PostgresWorkbenchRepository",
     "PostgresWorkbenchIdempotencyRepository",
+    "PostgresWorkbenchRelationRepository",
 ]

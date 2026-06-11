@@ -12,6 +12,7 @@
 - Phase 2 已落地后端一步创建草稿：`POST /api/input-invoice-usage/oa-reverse/oa-draft` 校验 preview hash 后，使用目标 OA 申请人凭据登录 OA 并创建 `isDraft=true` 暂存草稿；当前操作人的 request token 不参与目标申请人草稿创建。
 - `已提交 OA` 由用户手动确认后进入本地 `submitted_confirmed` 历史；`未提交 OA` 只清理 FinOps 本地草稿字段并回到可重新创建状态，不调用 OA 删除暂存草稿。
 - 目标 OA 申请人登录需要 `FIN_OPS_OA_BASE_URL`、`FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY`、可选 `FIN_OPS_OA_LOGIN_PATH` 和 OpenSSL runtime；密码登录前必须用 OA 公钥 RSA 加密。
+- OA reverse evidence detected 后的 OA/发票 relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`，relation mode 为 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
 
 ## 记录模板
@@ -30,6 +31,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-12 - OA reverse relation command boundary Phase 7C
+
+- 目标：把 OA reverse 检测到 OA evidence 后建立 OA/发票关系的写入口迁入统一 workbench relation command boundary，避免直接写 pair relation 事实源。
+- 影响范围：`WorkbenchInputInvoiceUsageOaReverseRelationWriter`、Application OA reverse service wiring、OA reverse status refresh API error mapping、workbench relation/input invoice usage 测试矩阵。
+- 关键决策：writer 写 `input_invoice_oa_reverse`，并把 `case_id`、row identity、actor、month scope、metadata、evidence、idempotency key 和 history operation 交给 `WorkbenchRelationCommandService.confirm_relation(...)`；缺 command service 或 read model non-fresh 时返回结构化错误，不保存本地 detected batch。
+- 文档影响：更新本实施记录、`tests.md`，并同步 `docs/modules/workbench-relations/`。
+- 测试覆盖：新增 service 测试覆盖 writer command delegation 和缺 command fail-fast；新增 API 测试覆盖 command stale/conflict 409 且无半写入；新增 runtime boundary guard 防止重新注入 pair service 或 direct pair mutation。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_input_invoice_usage_oa_reverse_service.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_input_invoice_usage_api.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py -q`。
+- 未测风险：真实 OA evidence 来源仍使用本地 fake projection 测试；完整跨页面 read model smoke 和真实 worker drain 仍需后续闭环。
+- 后续事项：继续收口 no-OA/turnover/batch accounting legacy repair/fallback，以及 relation command service 的生产级并发占用约束。
 
 ## 2026-06-11 - 测试闭环矩阵与 API 契约同步
 

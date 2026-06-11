@@ -5,8 +5,12 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application, StatePersistenceError, build_application
-from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
+from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import (
+    CallbackWorkbenchRelationRepository,
+    WorkbenchRelationCommandService,
+)
 
 
 class FakeBatchRelationFacade:
@@ -160,6 +164,110 @@ class NonFreshBatchRelationFacade(FakeBatchRelationFacade):
             "refresh_enqueued": bool(self._refresh_enqueued),
             "stale_reasons": list(self._stale_reasons),
         }
+
+
+class WriteBlockingPairRelationService(WorkbenchPairRelationService):
+    def replace_with_confirmed_relation(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("BatchAccountingService must delegate submit relation writes to WorkbenchRelationCommandService.")
+
+    def withdraw_latest_for_row_ids(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("BatchAccountingService must delegate withdraw relation writes to WorkbenchRelationCommandService.")
+
+
+class RepairWriteBlockingPairRelationService(WorkbenchPairRelationService):
+    def create_active_relation(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("BatchAccountingService must delegate repair relation writes to WorkbenchRelationCommandService.")
+
+    def record_history(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("BatchAccountingService must delegate repair relation history to WorkbenchRelationCommandService.")
+
+
+class RecordingBatchRelationCommandService:
+    def __init__(self) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+        self.withdraw_calls: list[dict[str, object]] = []
+
+    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+        self.confirm_calls.append(dict(kwargs))
+        relation = {
+            "case_id": str(kwargs["case_id"]),
+            "row_ids": list(kwargs["row_ids"]),
+            "row_types": list(kwargs["row_types"]),
+            "status": "active",
+            "relation_mode": str(kwargs["relation_mode"]),
+            "month_scope": str(kwargs["month_scope"]),
+            "created_by": str(kwargs["actor_id"]),
+            "note": str(kwargs.get("note") or ""),
+            "amount_check": dict(kwargs.get("amount_check") or {}),
+            "special_metadata": dict(kwargs.get("special_metadata") or {}),
+            "version": 1,
+        }
+        return {
+            "status": "confirmed",
+            "relation": relation,
+            "history": {"operation_type": str(kwargs.get("history_operation_type") or "confirm_link")},
+            "changed_case_ids": [relation["case_id"]],
+            "affected_months": ["2026-01"],
+            "version": 1,
+            "read_model_status": "fresh",
+            "read_model_stale_reasons": [],
+            "read_model_scope_keys": ["2026-01"],
+            "refresh_enqueued": False,
+            "idempotent_replay": False,
+        }
+
+    def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        self.withdraw_calls.append(dict(kwargs))
+        return {
+            "status": "withdrawn",
+            "relation": {
+                "case_id": str(kwargs["case_id"]),
+                "row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+                "status": "cancelled",
+                "month_scope": "2026-01",
+                "version": 2,
+            },
+            "history": {"operation_type": "withdraw_link"},
+            "restored_relations": [],
+            "changed_case_ids": [str(kwargs["case_id"])],
+            "affected_row_ids": ["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+            "affected_months": ["2026-01"],
+            "version": 2,
+            "read_model_status": "fresh",
+            "read_model_stale_reasons": [],
+            "read_model_scope_keys": ["2026-01"],
+            "refresh_enqueued": False,
+            "idempotent_replay": False,
+        }
+
+
+def relation_command_service_for(pair_relation_service: WorkbenchPairRelationService) -> WorkbenchRelationCommandService:
+    def save_snapshot(snapshot: dict[str, object], *, changed_case_ids: list[str]) -> None:
+        changed_ids = {str(case_id).strip() for case_id in list(changed_case_ids or []) if str(case_id).strip()}
+        current = pair_relation_service.snapshot()
+        current_relations = dict(current.get("pair_relations") if isinstance(current.get("pair_relations"), dict) else {})
+        incoming_relations = dict(snapshot.get("pair_relations") if isinstance(snapshot.get("pair_relations"), dict) else {})
+        for case_id in changed_ids:
+            if case_id in incoming_relations:
+                current_relations[case_id] = incoming_relations[case_id]
+            else:
+                current_relations.pop(case_id, None)
+        restored = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": current_relations,
+                "pair_relation_history": list(snapshot.get("pair_relation_history") or []),
+            }
+        )
+        pair_relation_service._pair_relations = restored._pair_relations
+        pair_relation_service._pair_relation_history = restored._pair_relation_history
+
+    return WorkbenchRelationCommandService(
+        relation_repository=CallbackWorkbenchRelationRepository(
+            load_snapshot=pair_relation_service.snapshot,
+            save_snapshot=save_snapshot,
+        ),
+        relation_facade=FakeBatchRelationFacade(),
+    )
 
 
 class BatchAccountingApiTests(unittest.TestCase):
@@ -614,6 +722,50 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(history["note"], "OA合计不含员工餐补扣款，财务确认闭环")
         self.assertEqual(history["amount_check"]["status"], "mismatch")
 
+    def test_submit_delegates_relation_write_to_command_service(self) -> None:
+        pair_service = WriteBlockingPairRelationService()
+        relation_command = RecordingBatchRelationCommandService()
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            pair_relation_service=pair_service,
+            relation_facade=FakeBatchRelationFacade(),
+            relation_command_service=relation_command,
+        )
+
+        result = service.submit(
+            year="2026",
+            bank_row_id="txn_imported_202601_batch_001",
+            oa_row_ids=["oa-exp-ba-001", "oa-exp-ba-002"],
+            actor="finance-user",
+        )
+
+        self.assertEqual(result["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["relation_mode"], "batch_accounting")
+        self.assertEqual(call["actor_id"], "finance-user")
+        self.assertEqual(call["history_operation_type"], "confirm_link")
+        self.assertIs(call["replace_existing"], True)
+        self.assertEqual(result["pair_relation"]["relation_mode"], "batch_accounting")
+
+    def test_submit_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
+        pair_service = WriteBlockingPairRelationService()
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            pair_relation_service=pair_service,
+            relation_facade=FakeBatchRelationFacade(),
+        )
+
+        with self.assertRaises(BatchAccountingError) as context:
+            service.submit(
+                year="2026",
+                bank_row_id="txn_imported_202601_batch_001",
+                oa_row_ids=["oa-exp-ba-001", "oa-exp-ba-002"],
+                actor="finance-user",
+            )
+
+        self.assertEqual(context.exception.code, "batch_accounting_relation_command_unavailable")
+
     def test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
         previous_snapshot = app._workbench_pair_relation_service.snapshot()
@@ -661,7 +813,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
         relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(payload["relation_id"])
         assert relation is not None
-        self.assertEqual(relation["relation_mode"], "manual_confirmed")
+        self.assertEqual(relation["relation_mode"], "batch_accounting")
         self.assertCountEqual(
             relation["row_ids"],
             [
@@ -764,6 +916,87 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
         self.assertEqual(app._workbench_override_service._next_case_id(), "CASE-AUTO-0001")
 
+    def test_repair_legacy_case_id_collision_delegates_relation_write_to_command_service(self) -> None:
+        lost_relation = {
+            "case_id": "CASE-AUTO-0002",
+            "row_ids": ["txn_imported_1263", "oa-exp-1981"],
+            "row_types": ["bank", "oa"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-01",
+            "created_by": "local_finops_admin",
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_1263",
+                "oa_row_ids": ["oa-exp-1981"],
+            },
+        }
+        pair_service = RepairWriteBlockingPairRelationService(
+            pair_relation_history=[
+                {
+                    "operation_type": "confirm_link",
+                    "before_relations": [],
+                    "after_relations": [lost_relation],
+                    "affected_row_ids": list(lost_relation["row_ids"]),
+                    "created_by": "local_finops_admin",
+                }
+            ]
+        )
+        relation_command = RecordingBatchRelationCommandService()
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: {},
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command,
+        )
+
+        result = service.repair_legacy_case_id_collisions(actor="repair-user")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["changed_case_ids"], ["CASE-BATCH-txn_imported_1263"])
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["case_id"], "CASE-BATCH-txn_imported_1263")
+        self.assertEqual(call["history_operation_type"], "repair_batch_accounting_relation_id_collision")
+        self.assertEqual(call["actor_id"], "repair-user")
+        self.assertEqual(call["special_metadata"]["legacy_case_id"], "CASE-AUTO-0002")
+        self.assertEqual(call["special_metadata"]["repair_source"], "batch_accounting_case_id_collision")
+
+    def test_repair_legacy_case_id_collision_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
+        lost_relation = {
+            "case_id": "CASE-AUTO-0002",
+            "row_ids": ["txn_imported_1263", "oa-exp-1981"],
+            "row_types": ["bank", "oa"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-01",
+            "created_by": "local_finops_admin",
+            "special_metadata": {
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_1263",
+                "oa_row_ids": ["oa-exp-1981"],
+            },
+        }
+        pair_service = RepairWriteBlockingPairRelationService(
+            pair_relation_history=[
+                {
+                    "operation_type": "confirm_link",
+                    "before_relations": [],
+                    "after_relations": [lost_relation],
+                    "affected_row_ids": list(lost_relation["row_ids"]),
+                    "created_by": "local_finops_admin",
+                }
+            ]
+        )
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: {},
+            pair_relation_service=pair_service,
+        )
+
+        with self.assertRaises(BatchAccountingError) as context:
+            service.repair_legacy_case_id_collisions()
+
+        self.assertEqual(context.exception.code, "batch_accounting_relation_command_unavailable")
+
     def test_repair_legacy_case_id_collision_restores_lost_batch_relation_from_history(self) -> None:
         pair_service = WorkbenchPairRelationService()
         lost_relation = {
@@ -824,6 +1057,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
             pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
         )
 
         result = service.repair_legacy_case_id_collisions()
@@ -873,6 +1107,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
             pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
         )
 
         result = service.repair_legacy_case_id_collisions()
@@ -913,6 +1148,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
             pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
         )
 
         result = service.repair_legacy_case_id_collisions()
@@ -948,6 +1184,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         service = BatchAccountingService(
             grouped_workbench_loader=lambda _month: {},
             pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
         )
 
         result = service.repair_legacy_case_id_collisions()
@@ -1127,6 +1364,44 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(restored["case_id"], "CASE-OA-INVOICE")
         self.assertCountEqual(restored["row_ids"], ["oa-exp-ba-001", "oa-att-inv-oa-exp-ba-001-01"])
         self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["operation_type"], "withdraw_link")
+
+    def test_withdraw_delegates_relation_write_to_command_service(self) -> None:
+        pair_service = WriteBlockingPairRelationService()
+        pair_service.create_active_relation(
+            case_id="CASE-BATCH-txn_imported_202601_batch_001",
+            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+            row_types=["bank", "oa"],
+            relation_mode="batch_accounting",
+            created_by="finance-user",
+            month_scope="2026-01",
+            special_metadata={
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_202601_batch_001",
+                "oa_row_ids": ["oa-exp-ba-001"],
+                "year": "2026",
+            },
+        )
+        relation_command = RecordingBatchRelationCommandService()
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            pair_relation_service=pair_service,
+            relation_facade=FakeBatchRelationFacade(),
+            relation_command_service=relation_command,
+        )
+
+        result = service.withdraw(
+            relation_id="CASE-BATCH-txn_imported_202601_batch_001",
+            actor="finance-user",
+            reason="选择错误",
+        )
+
+        self.assertEqual(result["action"], "withdraw_batch_accounting")
+        self.assertEqual(len(relation_command.withdraw_calls), 1)
+        call = relation_command.withdraw_calls[0]
+        self.assertEqual(call["case_id"], "CASE-BATCH-txn_imported_202601_batch_001")
+        self.assertEqual(call["actor_id"], "finance-user")
+        self.assertEqual(call["reason"], "选择错误")
+        self.assertEqual(call["history_operation_type"], "withdraw_link")
 
     def test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

@@ -7,11 +7,11 @@
 | 影响面 | 当前事实源 | 需要保护的行为 |
 | --- | --- | --- |
 | 页面和 API client | `web/src/pages/NoOaBankBatchPage.tsx`、`web/src/features/noOaBankBatches/api.ts` | 三栏布局、标签抽屉、提交选择、内部往来提交、撤回 dialog、stale retry、跨账户选择保护 |
-| API contract | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`、`docs/dev/api-contracts.md` | list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit 的 response shape、错误码、version、affected months |
-| Business core | `NoOaBankBatchService`、`NoOaManagedRulePolicy` | draft/submitted/withdrawn/stale/conflict、内部往来配对、active relation 占用排除、legacy relation migration |
-| Application service | `NoOaBankBatchApplicationService` | read model fallback、tag selection、submit/withdraw、after_mutation、derived lifecycle、durable queue enqueue |
+| API contract | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`、`docs/dev/api-contracts.md` | list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit 的 response shape、错误码、version、affected months、relation read model freshness 字段 |
+| Business core | `NoOaBankBatchService`、`NoOaManagedRulePolicy` | draft/submitted/withdrawn/stale/conflict、内部往来配对、active relation 占用排除、legacy relation migration/repair/consolidation command 委托 |
+| Application service | `NoOaBankBatchApplicationService` | read model fallback、tag selection、submit/withdraw、relation command service 委托、rollback、after_mutation、derived lifecycle、durable queue enqueue |
 | Write contract | `bankdetail_write_uow.py`、`tests/test_bankdetail_write_uow_contract.py` | stale expected version、batch + Workbench pair relation + audit + dirty/outbox 同事务目标 |
-| Read model / worker | `NoOaBankBatchReadModelRefreshService`、`runtime_worker_registry.py` | missing/stale 不同步重建、source version 保护、worker complete dirty scope |
+| Read model / worker | `NoOaBankBatchReadModelRefreshService`、`runtime_worker_registry.py` | missing/stale 不同步重建、source version 保护、worker complete dirty scope、refresh 不执行 relation repair 写入 |
 | 跨页面影响 | Bank Details、Workbench、Cost Statistics、Search、App Status | no-OA 提交/撤回影响 Workbench relation、银行明细关系状态、成本统计、搜索候选和 App Status |
 | 前端跨页事件 | `web/src/features/domainEvents.ts` | submit/withdraw 后发 `workbenchRelationUpdated`；分类/规则更新刷新 no-OA list/detail/tag drawer |
 
@@ -45,13 +45,13 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 当前结论 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_no_oa_bank_batch_service.py` | 已覆盖 fee/salary/bonus/internal_transfer draft 生成、active relation 排除、stale/superseded、legacy relation migration、两行 manual internal-transfer active relation 迁移、submit/withdraw、audit/snapshot。 |
-| 2. Service-layer tests | 适用 | `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_bankdetail_write_uow_contract.py` | 已覆盖 after_mutation persist/non-persist、durable queue enqueue、stale expected version、batch/relation/audit/dirty/outbox 同事务目标和 rollback。 |
-| 3. API contract tests | 适用 | `tests/test_no_oa_bank_batch_api.py`、`tests/test_no_oa_bank_batch_routes.py`、`tests/test_no_oa_bank_batch_tag_selection_api.py` | 已覆盖 list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit、409 version conflict、404 unknown、invalid JSON、persistence error、partial results。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 missing SQL read model 不同步重建、stale SQL source versions 不伪装 fresh、detail 不刷新全量、PostgreSQL save full snapshot 清理缺席旧 no-OA read model row、worker stale source version skip、worker registry/App Status 登记。 |
+| 1. Business core unit tests | 适用 | `tests/test_no_oa_bank_batch_service.py` | 已覆盖 fee/salary/bonus/internal_transfer draft 生成、active relation 排除、stale/superseded、legacy relation migration/repair/consolidation、两行 manual internal-transfer active relation 迁移、同 row set existing submitted batch 复用、submit/withdraw、audit/snapshot；submit 不再直写 relation，只暴露 command payload。 |
+| 2. Service-layer tests | 适用 | `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_bankdetail_write_uow_contract.py` | 已覆盖 relation command service 委托、after_mutation persist/non-persist、durable queue enqueue、stale expected version、batch/relation/audit/dirty/outbox 同事务目标和 rollback。 |
+| 3. API contract tests | 适用 | `tests/test_no_oa_bank_batch_api.py`、`tests/test_no_oa_bank_batch_routes.py`、`tests/test_no_oa_bank_batch_tag_selection_api.py` | 已覆盖 list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit、409 version conflict、relation read model stale 409、404 unknown、invalid JSON、persistence error、partial results。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 missing SQL read model 不同步重建、stale SQL source versions 不伪装 fresh、detail 不刷新全量、PostgreSQL save full snapshot 清理缺席旧 no-OA read model row、worker stale source version skip、worker refresh 不执行 relation repair 写入、worker registry/App Status 登记。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts` | 已覆盖三栏布局、tag drawer、主/子标签键盘操作、提交选择、跨账户选择保护、内部往来 batch submit、撤回、stale polling、route unmount cleanup、保持 stale rows 可见。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py` | 已覆盖 Workbench confirm internal transfer 走 no-OA batch、no-OA 页面先提交后 Workbench 再确认同一组时复用同一 fact、非内部往来保持 manual relation、混合 internal transfer 拒绝、no-OA relation 配对/撤回回到 open。 |
-| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_pair_relation_service.py`、`tests/test_bank_auto_tag_rules_api.py`、domain event tests | 已保护旧 summary/category labels、legacy relation collapsed summaries、active relation row 独占、Bankdetail tag/rule changes refresh no-OA、前端事件不在 route unmount 后 replay。 |
+| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_pair_relation_service.py`、`tests/test_bank_auto_tag_rules_api.py`、domain event tests | 已保护旧 summary/category labels、legacy relation collapsed summaries、active relation row 独占、legacy repair 不回退 direct pair write、Bankdetail tag/rule changes refresh no-OA、前端事件不在 route unmount 后 replay。 |
 
 当前闭环新增了内部往来双入口幂等、两行 manual internal-transfer 历史迁移、active relation row 独占、PostgreSQL no-OA read model 缺席行清理测试。后续不为了覆盖率新增低价值测试，但任何线上复现都必须先补最小失败测试。
 
@@ -69,13 +69,16 @@
 | no-OA 页面先提交后关联台再次确认同一组 internal transfer | `test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact` |
 | mixed internal transfer 拒绝普通 manual relation | `test_workbench_confirm_mixed_internal_transfer_bank_rows_rejects_no_oa_conflict` |
 | submitted/withdraw relation 生命周期 | `test_submit_persists_batch_and_pair_relation_and_invalidates_workbench`、`test_withdraw_cancels_pair_relation_and_persists_snapshot` |
+| relation command service 写入委托 | `test_submit_batch_delegates_relation_write_to_command_service`、`test_withdraw_batch_delegates_relation_cancel_to_command_service`、`test_internal_transfer_from_workbench_delegates_relation_write_to_command_service` |
+| relation read model stale fail-fast | `test_submit_fails_fast_when_relation_read_model_is_not_fresh` |
 | active manual internal-transfer relation 迁移并排除 unsubmitted | `test_unsubmitted_list_moves_internal_transfer_rows_occupied_by_manual_relation_to_submitted` |
 | 两行 manual_confirmed 历史内部往来迁移 | `test_manual_confirmed_internal_transfer_relation_migrates_to_submitted_no_oa_batch` |
+| legacy manual relation 与 existing submitted no-OA batch 同 row set 时复用同一 case | `test_submitted_internal_transfer_with_active_non_no_oa_relation_does_not_duplicate_as_unsubmitted_conflict` |
 | active relation row 独占 | `test_create_active_relation_rejects_active_row_reuse_by_different_case_id` |
 | PostgreSQL no-OA read model 清理缺席旧批次 | `test_save_no_oa_bank_batches_replaces_absent_read_model_rows` |
 | stale/category drift | `test_stale_batch_after_category_drift_clears_relation_and_is_not_withdrawable` |
 | read model stale/missing | `test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh`、`test_no_oa_bank_batches_missing_sql_read_model_does_not_refresh_in_get_path` |
-| worker stale source version | `test_stale_source_version_does_not_rebuild_or_overwrite_read_model` |
+| worker stale source version / relation repair 边界 | `test_stale_source_version_does_not_rebuild_or_overwrite_read_model`、`test_refresh_does_not_repair_workbench_relations_from_read_model_path` |
 | 前端 stale polling | `shows read model stale state and reloads until the no OA read model is fresh`、`cleans up stale read model retry reload after route unmount` |
 | 前端分类/规则事件刷新 | `refreshes tag selection, list, and detail cache after bank transaction category updates`、`refreshes tag selection, list, and detail cache after bank auto tag rules update` |
 
@@ -89,6 +92,8 @@
 | no-OA 页面和关联台对同一组 internal transfer 形成两条 active relation | `test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact`、`test_create_active_relation_rejects_active_row_reuse_by_different_case_id` |
 | 存量两行 manual_confirmed internal transfer 长期占用流水但不进入 no-OA 已提交区域 | `test_manual_confirmed_internal_transfer_relation_migrates_to_submitted_no_oa_batch` |
 | 旧 unsubmitted/conflict no-OA SQL read model row 残留，导致页面显示“已被 active relation 占用” | `test_save_no_oa_bank_batches_replaces_absent_read_model_rows` |
+| no-OA read model refresh 隐式创建/取消 pair relation，造成隐藏写入口 | `test_refresh_does_not_repair_workbench_relations_from_read_model_path`、`test_no_oa_read_model_refresh_does_not_run_relation_repairs` |
+| no-OA legacy repair/consolidation 回退 direct pair service mutation | `test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback` |
 | submitted no-OA relation 被未提交候选重复出现 | `test_unsubmitted_list_moves_internal_transfer_rows_occupied_by_manual_relation_to_submitted`、service active relation tests |
 | 标签规则变更后 no-OA 标签选择或候选未刷新 | `tests/test_bank_auto_tag_rules_api.py`、前端 category/rules event tests |
 | route unmount 后 stale polling 继续 replay | `web/src/test/NoOaBankBatchPage.test.tsx` route unmount cleanup test |

@@ -160,6 +160,26 @@
 - 未测风险：未重新跑前端构建；本次没有改 ETC 页面 UI 代码。
 - 后续事项：如果 all 聚合同步重建继续耗时，应由 worker 异步刷新并配合 generation retention 清理旧生成版本。
 
+## 2026-06-12 - ETC relation command边界与stale删除保护
+
+- 目标：把 ETC 业务批次删除、历史 repair、historical business batch migration 和 existing batch link 的 Workbench relation 写入收敛到统一 command 边界，并避免 relation read model stale 时发生本地批次已删但 relation 未可靠取消的半写入。
+- 影响范围：`Application` ETC business batch delete 和 reconciliation task delete、`WorkbenchRelationCommandService`、历史 ETC repair/migration/link 工具、ETC API 错误契约、Workbench relation 模块文档。
+- 关键决策：已提交业务批次删除/reset 在调用 `EtcService.delete_business_batch(...)` 前先执行 relation write precondition；如果 `workbench_relation` 非 fresh，返回 409 `workbench_relation_read_model_not_fresh`，不修改 business batch、ETC 发票占用或 active relation。summary relation 取消走 `cancel_relations_for_row_ids(...)`，历史 repair 走 `confirm_relation(...)` 写 `etc_batch_invoice_link`，historical migration/existing link 走 `update_relation_metadata_for_case_id(...)`。
+- 文档影响：更新 ETC 模块 README、状态机、测试矩阵、关联台关系事实源模块和 API 契约。
+- 测试覆盖：新增/更新 command service row-id cancel 和 metadata update 单测、ETC summary cancel command delegation、已提交批次 stale fail-fast、历史 repair/existing link/historical migration command delegation，以及 runtime boundary guard。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_summary_relation_delete_uses_workbench_relation_command_boundary -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_historical_etc_business_batch_migration_service.py tests/test_migrate_historical_etc_business_batches_tool.py -q`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：ETC repair/link/migration 仍用 pair service 做 active relation 读校验；前端未改，仍需最终闭环验证 409 提示和 mutation 后 refetch。
+
+## 2026-06-12 - ETC legacy relation fallback删除
+
+- 目标：删除历史 ETC repair、historical business batch migration 和 existing batch link service 中缺少 command service 时的 direct pair relation 写入 fallback。
+- 影响范围：`HistoricalEtcRepairService`、`HistoricalEtcBusinessBatchMigrationService`、`ExistingEtcBatchLinkService`、ETC 工具 execute wiring、Workbench relation boundary guard。
+- 关键决策：这些 service 在会导入/创建本地 ETC batch 或更新 relation metadata 前必须先拿到 `WorkbenchRelationCommandService` 的对应方法。缺少 command service 时抛 `workbench_relation_command_unavailable`，不得先写本地批次，也不得调用 `pair_relation_service.create_active_relation` 或 `update_relation_metadata_for_case_id` 兜底。
+- 文档影响：更新 ETC 模块 README、状态机、测试矩阵和关联台关系事实源模块。
+- 测试覆盖：新增 historical repair、existing link、historical migration 缺 command fail-fast 测试；更新 existing link 幂等测试显式注入 command service；新增 runtime boundary guard 禁止 direct relation write fallback。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_historical_etc_business_batch_migration_service.py tests/test_migrate_historical_etc_business_batches_tool.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py -q`；`python3 -m compileall -q backend/src/fin_ops_platform/services/historical_etc_repair_service.py backend/src/fin_ops_platform/services/historical_etc_business_batch_migration_service.py backend/src/fin_ops_platform/services/existing_etc_batch_link_service.py backend/src/fin_ops_platform/app/server.py`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：ETC repair/link/migration 仍用 pair service 做 active relation 读校验；前端未改，仍需最终闭环验证 409 提示和 mutation 后 refetch。
+
 ## 2026-06-09 - ETC人工已提交闭环与关联台summary修复
 
 - 目标：修复人工点击“已提交”后批次仍留在未提交区、关联台未配对区找不到上报金额 ETC 汇总发票的问题。

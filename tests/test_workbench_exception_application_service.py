@@ -9,6 +9,10 @@ from fin_ops_platform.services.workbench_exception_application_service import (
 )
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import (
+    CallbackWorkbenchRelationRepository,
+    WorkbenchRelationCommandService,
+)
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_CONSUMED,
@@ -26,6 +30,39 @@ class StaticWorkbenchRows:
 
     def __call__(self, month: str, row_ids: list[str]) -> list[dict[str, object]]:
         return [dict(self._rows[row_id]) for row_id in row_ids]
+
+
+class FreshRelationFacade:
+    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+        return {
+            "status": "fresh",
+            "rows": [],
+            "groups": [],
+            "read_model_scope_keys": list(kwargs.get("scope_keys_hint") or ["2026-05"]),
+            "stale_reasons": [],
+            "refresh_enqueued": False,
+        }
+
+
+class WriteBlockingPairRelationService(WorkbenchPairRelationService):
+    def create_active_relation(self, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("WorkbenchExceptionApplicationService must delegate relation writes to command service.")
+
+
+def relation_command_service_for(pair_relation_service: WorkbenchPairRelationService) -> WorkbenchRelationCommandService:
+    def save_snapshot(snapshot: dict[str, object], *, changed_case_ids: list[str]) -> None:
+        _ = changed_case_ids
+        restored = WorkbenchPairRelationService.from_snapshot(snapshot)
+        pair_relation_service._pair_relations = restored._pair_relations
+        pair_relation_service._pair_relation_history = restored._pair_relation_history
+
+    return WorkbenchRelationCommandService(
+        relation_repository=CallbackWorkbenchRelationRepository(
+            load_snapshot=pair_relation_service.snapshot,
+            save_snapshot=save_snapshot,
+        ),
+        relation_facade=FreshRelationFacade(),
+    )
 
 
 def oa_row(row_id: str = "oa-001", amount: str = "100.00") -> dict[str, object]:
@@ -114,13 +151,16 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         pair_relation_service: WorkbenchPairRelationService | None = None,
         candidate_match_service: WorkbenchCandidateMatchService | None = None,
         decision_store: WorkbenchReconciliationDecisionStore | None = None,
+        relation_command_service: object | None = None,
     ) -> WorkbenchExceptionApplicationService:
+        pair_service = pair_relation_service or WorkbenchPairRelationService()
         return WorkbenchExceptionApplicationService(
             row_provider=StaticWorkbenchRows(rows),
             case_service=case_service or WorkbenchExceptionCaseService(),
-            pair_relation_service=pair_relation_service or WorkbenchPairRelationService(),
+            pair_relation_service=pair_service,
             candidate_match_service=candidate_match_service or WorkbenchCandidateMatchService(),
             decision_store=decision_store,
+            relation_command_service=relation_command_service or relation_command_service_for(pair_service),
             source_versions_provider=lambda: {"workbench_exception_rules_version": "exception_rules_v1"},
         )
 
@@ -269,6 +309,28 @@ class WorkbenchExceptionApplicationServiceTests(unittest.TestCase):
         self.assertEqual(relation["exception_case_id"], result["case"]["id"])
         self.assertEqual(relation["relation_mode"], "normal_match")
         self.assertCountEqual(relation["row_ids"], ["oa-001", "bank-001", "invoice-001"])
+        self.assertEqual(pair_relation_service.get_active_relation_by_case_id(result["case"]["id"]), relation)
+
+    def test_apply_closed_exception_delegates_pair_relation_to_command_service(self) -> None:
+        pair_relation_service = WriteBlockingPairRelationService()
+        service = self.build_service(
+            [oa_row(), expense_bank_row(), input_invoice_row()],
+            pair_relation_service=pair_relation_service,
+        )
+
+        result = service.apply(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-001", "bank-001", "invoice-001"],
+                "scenario_code": "expense_all_equal",
+                "action_code": "confirm_closed",
+                "payload": {},
+            },
+            actor="finance-user",
+        )
+
+        relation = result["pair_relation"]
+        self.assertEqual(relation["relation_mode"], "normal_match")
         self.assertEqual(pair_relation_service.get_active_relation_by_case_id(result["case"]["id"]), relation)
 
     def test_apply_closed_exception_consumes_overlapping_reconciliation_decisions(self) -> None:

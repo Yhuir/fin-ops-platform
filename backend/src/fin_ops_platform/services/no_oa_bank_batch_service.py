@@ -13,6 +13,7 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
     NO_OA_MANAGED_LABELS,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 NO_OA_BANK_BATCH_SCHEMA_VERSION = "2026-05-no-oa-bank-batch-v1"
@@ -40,6 +41,7 @@ class NoOaBankBatchService:
         batches: dict[str, dict[str, Any]] | None = None,
         audit_log: list[dict[str, Any]] | None = None,
         pair_relation_service: WorkbenchPairRelationService | None = None,
+        relation_command_service: Any | None = None,
     ) -> None:
         self._batches = {
             str(batch_id): self._normalize_batch(batch)
@@ -52,10 +54,16 @@ class NoOaBankBatchService:
             if isinstance(entry, dict)
         ]
         self._pair_relation_service = pair_relation_service or WorkbenchPairRelationService()
+        self._relation_command_service = relation_command_service
         self._legacy_migration_service = NoOaLegacyRelationMigrationService(
-            pair_relation_service=self._pair_relation_service
+            pair_relation_service=self._pair_relation_service,
+            relation_command_service=self._relation_command_service,
         )
-        self._last_legacy_migration_result: dict[str, Any] = {
+        self._last_legacy_migration_result: dict[str, Any] = self._empty_legacy_migration_result()
+
+    @staticmethod
+    def _empty_legacy_migration_result() -> dict[str, Any]:
+        return {
             "changed": False,
             "changed_case_ids": [],
             "affected_months": [],
@@ -69,15 +77,20 @@ class NoOaBankBatchService:
         snapshot: dict[str, Any] | None,
         *,
         pair_relation_service: WorkbenchPairRelationService | None = None,
+        relation_command_service: Any | None = None,
     ) -> "NoOaBankBatchService":
         if not isinstance(snapshot, dict):
-            return cls(pair_relation_service=pair_relation_service)
+            return cls(
+                pair_relation_service=pair_relation_service,
+                relation_command_service=relation_command_service,
+            )
         batches = snapshot.get("batches")
         audit_log = snapshot.get("audit_log")
         return cls(
             batches=batches if isinstance(batches, dict) else {},
             audit_log=audit_log if isinstance(audit_log, list) else [],
             pair_relation_service=pair_relation_service,
+            relation_command_service=relation_command_service,
         )
 
     def snapshot(self) -> dict[str, Any]:
@@ -94,32 +107,35 @@ class NoOaBankBatchService:
         active_relations: list[dict[str, Any]],
         source_versions: dict[str, Any] | None,
         eligible_batch_types: set[str] | list[str] | tuple[str, ...] | None = None,
+        apply_relation_repairs: bool = True,
     ) -> list[dict[str, Any]]:
         rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
         categories = categories_by_transaction_id if isinstance(categories_by_transaction_id, dict) else {}
         source_version_payload = dict(source_versions or {})
         eligible_types = self._eligible_batch_types(eligible_batch_types)
+        self._last_legacy_migration_result = self._empty_legacy_migration_result()
 
-        self._migrate_legacy_active_relations(
-            rows=rows,
-            categories=categories,
-            active_relations=active_relations,
-            source_versions=source_version_payload,
-            eligible_batch_types=eligible_types,
-        )
-        self._consolidate_submitted_single_side_batches(
-            rows=rows,
-            categories=categories,
-            source_versions=source_version_payload,
-        )
-        self._prune_submitted_single_side_batches_for_category_drift(
-            rows=rows,
-            categories=categories,
-        )
-        self._repair_submitted_no_oa_relation_consistency(
-            rows=rows,
-            categories=categories,
-        )
+        if apply_relation_repairs:
+            self._migrate_legacy_active_relations(
+                rows=rows,
+                categories=categories,
+                active_relations=active_relations,
+                source_versions=source_version_payload,
+                eligible_batch_types=eligible_types,
+            )
+            self._consolidate_submitted_single_side_batches(
+                rows=rows,
+                categories=categories,
+                source_versions=source_version_payload,
+            )
+            self._prune_submitted_single_side_batches_for_category_drift(
+                rows=rows,
+                categories=categories,
+            )
+            self._repair_submitted_no_oa_relation_consistency(
+                rows=rows,
+                categories=categories,
+            )
         effective_active_relations = self._effective_active_relations_after_migration(
             active_relations,
             rows,
@@ -389,38 +405,6 @@ class NoOaBankBatchService:
 
         timestamp = self._timestamp()
         relation_case_id = str(batch.get("relation_case_id") or batch["batch_id"])
-        row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id)]
-        relation = self._pair_relation_service.get_active_relation_by_case_id(relation_case_id)
-        if relation is None:
-            relation = self._pair_relation_service.create_active_relation(
-                case_id=relation_case_id,
-                row_ids=row_ids,
-                row_types=["bank" for _ in row_ids],
-                relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
-                created_by=str(actor or ""),
-                month_scope=str(batch.get("scope_month") or ""),
-                created_at=timestamp,
-                note=str(note or "") or f"免OA流水批量处理：{batch.get('batch_label')}",
-                special_metadata={
-                    "source": "no_oa_bank_batch",
-                    "source_batch_id": batch["batch_id"],
-                    "batch_type": batch["batch_type"],
-                    "batch_label": batch["batch_label"],
-                    "cost_policy": "exclude_all" if batch["batch_type"] == "internal_transfer" else "normal",
-                    "withdrawable": True,
-                    "relation_mode": NO_OA_BANK_BATCH_RELATION_MODE,
-                    "display_tags": self._display_tags(str(batch["batch_type"])),
-                },
-                evidence={
-                    "batch_key": batch.get("batch_key"),
-                    "category_source": batch.get("category_source"),
-                    "row_count": batch.get("row_count"),
-                    "total_amount": batch.get("total_amount"),
-                    **(deepcopy(batch.get("evidence")) if isinstance(batch.get("evidence"), dict) else {}),
-                },
-                display_tags=self._display_tags(str(batch["batch_type"])),
-            )
-
         submitted = deepcopy(batch)
         submitted.update(
             {
@@ -439,7 +423,7 @@ class NoOaBankBatchService:
             actor=actor,
             note=note,
             status="submitted",
-            relation_case_id=str(relation.get("case_id") or relation_case_id),
+            relation_case_id=relation_case_id,
         )
         return self.get_batch(str(submitted["batch_id"]))
 
@@ -462,7 +446,6 @@ class NoOaBankBatchService:
 
         timestamp = self._timestamp()
         relation_case_id = str(batch.get("relation_case_id") or batch["batch_id"])
-        self._pair_relation_service.cancel_relation(relation_case_id, cancelled_at=timestamp)
         withdrawn = deepcopy(batch)
         withdrawn.update(
             {
@@ -484,6 +467,110 @@ class NoOaBankBatchService:
             relation_case_id=relation_case_id,
         )
         return self.get_batch(str(withdrawn["batch_id"]))
+
+    def relation_command_payload_for_batch(self, batch: dict[str, Any], *, note: str | None = None) -> dict[str, Any]:
+        batch_payload = dict(batch)
+        batch_type = str(batch_payload.get("batch_type") or "")
+        row_ids = [
+            str(row_id).strip()
+            for row_id in list(batch_payload.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        evidence = {
+            "batch_key": batch_payload.get("batch_key"),
+            "category_source": batch_payload.get("category_source"),
+            "row_count": batch_payload.get("row_count"),
+            "total_amount": batch_payload.get("total_amount"),
+            **(deepcopy(batch_payload.get("evidence")) if isinstance(batch_payload.get("evidence"), dict) else {}),
+        }
+        return {
+            "case_id": str(batch_payload.get("relation_case_id") or batch_payload.get("batch_id") or ""),
+            "row_ids": row_ids,
+            "row_types": ["bank" for _ in row_ids],
+            "relation_mode": NO_OA_BANK_BATCH_RELATION_MODE,
+            "month_scope": str(batch_payload.get("scope_month") or "all"),
+            "note": str(note or "") or f"免OA流水批量处理：{batch_payload.get('batch_label')}",
+            "special_metadata": self._no_oa_relation_metadata(batch_payload),
+            "evidence": evidence,
+            "display_tags": self._display_tags(batch_type),
+        }
+
+    def _require_relation_command_service(self) -> Any:
+        if self._relation_command_service is None:
+            raise ValueError("no_oa_relation_command_unavailable")
+        return self._relation_command_service
+
+    def _confirm_no_oa_relation(
+        self,
+        *,
+        case_id: str,
+        row_ids: list[str],
+        month_scope: str,
+        occurred_at: str,
+        note: str,
+        special_metadata: dict[str, Any],
+        evidence: dict[str, Any] | None = None,
+        display_tags: list[str] | None = None,
+        history_operation_type: str,
+    ) -> tuple[dict[str, Any], list[str]]:
+        command_service = self._require_relation_command_service()
+        try:
+            result = command_service.confirm_relation(
+                case_id=case_id,
+                row_ids=row_ids,
+                row_types=["bank" for _ in row_ids],
+                relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
+                actor_id=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
+                month_scope=month_scope,
+                occurred_at=occurred_at,
+                note=note,
+                special_metadata=deepcopy(special_metadata),
+                evidence=deepcopy(evidence if isinstance(evidence, dict) else {}),
+                display_tags=[
+                    str(tag).strip()
+                    for tag in list(display_tags or [])
+                    if str(tag).strip()
+                ],
+                history_operation_type=history_operation_type,
+            )
+        except WorkbenchRelationCommandError as exc:
+            raise ValueError(exc.error_code) from exc
+        relation = result.get("relation") if isinstance(result, dict) else None
+        raw_changed_case_ids = result.get("changed_case_ids") if isinstance(result, dict) else []
+        changed_case_ids = [
+            str(case_id).strip()
+            for case_id in list(raw_changed_case_ids or [])
+            if str(case_id).strip()
+        ]
+        return deepcopy(relation) if isinstance(relation, dict) else {}, changed_case_ids
+
+    def _cancel_no_oa_relation(
+        self,
+        case_id: str,
+        *,
+        occurred_at: str,
+        reason: str,
+        history_operation_type: str,
+    ) -> list[str]:
+        command_service = self._require_relation_command_service()
+        try:
+            result = command_service.cancel_relation(
+                case_id=case_id,
+                actor_id=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
+                reason=reason,
+                occurred_at=occurred_at,
+                history_operation_type=history_operation_type,
+            )
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                return []
+            raise ValueError(exc.error_code) from exc
+        raw_changed_case_ids = result.get("changed_case_ids") if isinstance(result, dict) else []
+        return [
+            str(changed_case_id).strip()
+            for changed_case_id in list(raw_changed_case_ids or [])
+            if str(changed_case_id).strip()
+        ]
 
     def audit_log(self) -> list[dict[str, Any]]:
         return deepcopy(self._audit_log)
@@ -541,10 +628,15 @@ class NoOaBankBatchService:
                 if self._category_code(row, categories) != batch_type
             ]
             if mismatched_row_ids:
-                cancelled = self._pair_relation_service.cancel_relation(relation_case_id, cancelled_at=self._timestamp())
-                if cancelled is not None:
+                changed_ids = self._cancel_no_oa_relation(
+                    relation_case_id,
+                    occurred_at=self._timestamp(),
+                    reason="历史免OA候选关系分类已变化，取消旧关系。",
+                    history_operation_type="no_oa_legacy_relation_category_mismatch",
+                )
+                if changed_ids:
                     result["changed"] = True
-                    result["changed_case_ids"].append(relation_case_id)
+                    result["changed_case_ids"].extend(changed_ids)
                     result["affected_months"].extend(
                         month
                         for month in [self._legacy_relation_scope_month(legacy_relation, resolved_rows)]
@@ -574,13 +666,29 @@ class NoOaBankBatchService:
                 continue
 
             migrated_at = self._timestamp()
-            batch = self._migrated_submitted_batch(
+            migrated_batch = self._migrated_submitted_batch(
                 legacy_relation=legacy_relation,
                 batch_type=batch_type,
                 rows=resolved_rows,
                 row_ids=row_ids,
                 source_versions=source_versions,
                 migrated_at=migrated_at,
+            )
+            existing_submitted_batch = self._existing_submitted_batch_for_legacy_relation(
+                batch_type=batch_type,
+                row_ids=row_ids,
+                rows=rows,
+                categories=categories,
+            )
+            batch = (
+                self._merge_legacy_relation_into_submitted_batch(
+                    existing_submitted_batch,
+                    migrated_batch=migrated_batch,
+                    source_versions=source_versions,
+                    migrated_at=migrated_at,
+                )
+                if existing_submitted_batch is not None
+                else migrated_batch
             )
             batch_id = str(batch["batch_id"])
             existing_batch = self._batches.get(batch_id)
@@ -948,9 +1056,14 @@ class NoOaBankBatchService:
                 self._batches[batch_id] = self._normalize_batch(existing)
                 relation_case_id = str(existing.get("relation_case_id") or "")
                 if relation_case_id:
-                    cancelled = self._pair_relation_service.cancel_relation(relation_case_id, cancelled_at=deduped_at)
-                    if cancelled is not None:
-                        changed_case_ids.append(relation_case_id)
+                    changed_case_ids.extend(
+                        self._cancel_no_oa_relation(
+                            relation_case_id,
+                            occurred_at=deduped_at,
+                            reason="已提交单边免OA批次去重，取消重复批次关系。",
+                            history_operation_type="dedupe_consolidated_no_oa_relation_cancel_duplicate",
+                        )
+                    )
             if changed_case_ids:
                 self._merge_legacy_migration_result(
                     changed_case_ids=changed_case_ids,
@@ -1013,20 +1126,18 @@ class NoOaBankBatchService:
                 evidence["category_drift_pruned_at"] = repaired_at
                 updated_batch["evidence"] = evidence
                 self._batches[batch_id] = self._normalize_batch(updated_batch)
-                relation = self._pair_relation_service.create_active_relation(
+                relation, relation_changed_case_ids = self._confirm_no_oa_relation(
                     case_id=relation_case_id,
                     row_ids=current_row_ids,
-                    row_types=["bank" for _ in current_row_ids],
-                    relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
-                    created_by=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
                     month_scope=str(updated_batch.get("scope_month") or "all"),
-                    created_at=repaired_at,
+                    occurred_at=repaired_at,
                     note="按当前流水分类剔除免OA批次明细",
                     special_metadata=self._no_oa_relation_metadata(updated_batch),
                     evidence=deepcopy(evidence),
                     display_tags=self._display_tags(batch_type),
+                    history_operation_type="prune_submitted_no_oa_batch_rows",
                 )
-                changed_case_ids.append(str(relation.get("case_id") or relation_case_id))
+                changed_case_ids.extend(relation_changed_case_ids or [str(relation.get("case_id") or relation_case_id)])
                 self._append_audit(
                     operation="prune_submitted_no_oa_batch_rows",
                     batch_id=batch_id,
@@ -1042,9 +1153,14 @@ class NoOaBankBatchService:
                 )
                 continue
 
-            cancelled = self._pair_relation_service.cancel_relation(relation_case_id, cancelled_at=repaired_at)
-            if cancelled is not None:
-                changed_case_ids.append(relation_case_id)
+            changed_case_ids.extend(
+                self._cancel_no_oa_relation(
+                    relation_case_id,
+                    occurred_at=repaired_at,
+                    reason="源流水分类变化，清理已提交免OA批次关系。",
+                    history_operation_type="clear_submitted_no_oa_batch_relation_after_category_drift",
+                )
+            )
             self._append_audit(
                 operation="clear_submitted_no_oa_batch_relation_after_category_drift",
                 batch_id=batch_id,
@@ -1079,6 +1195,33 @@ class NoOaBankBatchService:
             active_relation = self._pair_relation_service.get_active_relation_by_case_id(relation_case_id)
             if self._active_relation_matches_submitted_no_oa_batch(active_relation, batch):
                 continue
+            blocking_relations = [
+                relation
+                for relation in self._pair_relation_service.active_relations_for_row_ids(row_ids)
+                if isinstance(relation, dict)
+                and str(relation.get("case_id") or "").strip() != relation_case_id
+                and not self._is_no_oa_relation(relation)
+            ]
+            if blocking_relations:
+                result = deepcopy(self._last_legacy_migration_result)
+                result["skipped"] = [
+                    *list(result.get("skipped") or []),
+                    {
+                        "batch_id": batch_id,
+                        "relation_case_id": relation_case_id,
+                        "reason": "submitted_no_oa_rows_occupied_by_non_no_oa_relation",
+                        "blocking_case_ids": sorted(
+                            {
+                                str(relation.get("case_id") or "").strip()
+                                for relation in blocking_relations
+                                if str(relation.get("case_id") or "").strip()
+                            }
+                        ),
+                        "row_ids": row_ids,
+                    },
+                ]
+                self._last_legacy_migration_result = result
+                continue
 
             repaired_at = self._timestamp()
             changed_case_ids: list[str] = []
@@ -1086,9 +1229,14 @@ class NoOaBankBatchService:
             for stale_case_id in stale_case_ids:
                 if stale_case_id == relation_case_id:
                     continue
-                cancelled = self._pair_relation_service.cancel_relation(stale_case_id, cancelled_at=repaired_at)
-                if cancelled is not None:
-                    changed_case_ids.append(stale_case_id)
+                changed_case_ids.extend(
+                    self._cancel_no_oa_relation(
+                        stale_case_id,
+                        occurred_at=repaired_at,
+                        reason="修复已提交免OA批次关联关系，取消旧 relation。",
+                        history_operation_type="repair_submitted_no_oa_relation_cancel_stale",
+                    )
+                )
 
             for stale_relation in self._pair_relation_service.active_relations_for_row_ids(row_ids):
                 if not self._is_no_oa_relation(stale_relation):
@@ -1099,24 +1247,27 @@ class NoOaBankBatchService:
                 stale_source_batch_id = self._relation_source_batch_id(stale_relation)
                 if stale_case_id not in stale_case_ids and stale_source_batch_id not in stale_case_ids:
                     continue
-                cancelled = self._pair_relation_service.cancel_relation(stale_case_id, cancelled_at=repaired_at)
-                if cancelled is not None:
-                    changed_case_ids.append(stale_case_id)
+                changed_case_ids.extend(
+                    self._cancel_no_oa_relation(
+                        stale_case_id,
+                        occurred_at=repaired_at,
+                        reason="修复已提交免OA批次关联关系，取消旧 relation。",
+                        history_operation_type="repair_submitted_no_oa_relation_cancel_stale",
+                    )
+                )
 
-            repaired_relation = self._pair_relation_service.create_active_relation(
+            repaired_relation, repaired_changed_case_ids = self._confirm_no_oa_relation(
                 case_id=relation_case_id,
                 row_ids=row_ids,
-                row_types=["bank" for _ in row_ids],
-                relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
-                created_by=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
                 month_scope=str(batch.get("scope_month") or "all"),
-                created_at=repaired_at,
+                occurred_at=repaired_at,
                 note="修复已提交免OA批次关联关系",
                 special_metadata=self._no_oa_relation_metadata(batch),
                 evidence=deepcopy(batch.get("evidence") if isinstance(batch.get("evidence"), dict) else {}),
                 display_tags=self._display_tags(str(batch.get("batch_type") or "")),
+                history_operation_type="repair_submitted_no_oa_relation",
             )
-            changed_case_ids.append(str(repaired_relation.get("case_id") or relation_case_id))
+            changed_case_ids.extend(repaired_changed_case_ids or [str(repaired_relation.get("case_id") or relation_case_id)])
             self._append_audit(
                 operation="repair_submitted_no_oa_relation",
                 batch_id=batch_id,
@@ -1230,25 +1381,28 @@ class NoOaBankBatchService:
             ).strip()
             if not source_case_id or source_case_id == relation_case_id:
                 continue
-            cancelled = self._pair_relation_service.cancel_relation(source_case_id, cancelled_at=consolidated_at)
-            if cancelled is not None:
-                changed_case_ids.append(source_case_id)
+            changed_case_ids.extend(
+                self._cancel_no_oa_relation(
+                    source_case_id,
+                    occurred_at=consolidated_at,
+                    reason="已提交单边免OA批次归并，取消来源批次关系。",
+                    history_operation_type="replace_consolidated_no_oa_relation_cancel_source",
+                )
+            )
 
         row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id)]
-        relation = self._pair_relation_service.create_active_relation(
+        relation, relation_changed_case_ids = self._confirm_no_oa_relation(
             case_id=relation_case_id,
             row_ids=row_ids,
-            row_types=["bank" for _ in row_ids],
-            relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
-            created_by=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
             month_scope=str(batch.get("scope_month") or "all"),
-            created_at=consolidated_at,
+            occurred_at=consolidated_at,
             note="已提交单边免OA批次归并",
             special_metadata=self._no_oa_relation_metadata(batch),
             evidence=deepcopy(batch.get("evidence") if isinstance(batch.get("evidence"), dict) else {}),
             display_tags=self._display_tags(str(batch.get("batch_type") or "")),
+            history_operation_type="replace_consolidated_no_oa_relation",
         )
-        changed_case_ids.append(str(relation.get("case_id") or relation_case_id))
+        changed_case_ids.extend(relation_changed_case_ids or [str(relation.get("case_id") or relation_case_id)])
         relation_batch_id = str(relation.get("special_metadata", {}).get("source_batch_id") or "")
         if relation_batch_id and relation_batch_id != str(batch.get("batch_id") or ""):
             changed_case_ids.extend(superseded_batch_ids)
@@ -1456,6 +1610,64 @@ class NoOaBankBatchService:
         )
         result["skipped"] = list(result.get("skipped") or [])
         self._last_legacy_migration_result = result
+
+    def _existing_submitted_batch_for_legacy_relation(
+        self,
+        *,
+        batch_type: str,
+        row_ids: list[str],
+        rows: list[dict[str, Any]],
+        categories: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        target_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
+        if not target_row_ids:
+            return None
+        for batch in self._batches.values():
+            if str(batch.get("status") or "") != "submitted":
+                continue
+            if str(batch.get("batch_type") or "") != batch_type:
+                continue
+            batch_row_ids = {
+                str(row_id).strip()
+                for row_id in list(batch.get("row_ids") or [])
+                if str(row_id).strip()
+            }
+            if batch_row_ids != target_row_ids:
+                continue
+            if not self._submitted_batch_still_current(batch, rows, categories):
+                continue
+            return deepcopy(batch)
+        return None
+
+    def _merge_legacy_relation_into_submitted_batch(
+        self,
+        existing_batch: dict[str, Any],
+        *,
+        migrated_batch: dict[str, Any],
+        source_versions: dict[str, Any],
+        migrated_at: str,
+    ) -> dict[str, Any]:
+        existing_evidence = existing_batch.get("evidence") if isinstance(existing_batch.get("evidence"), dict) else {}
+        migrated_evidence = migrated_batch.get("evidence") if isinstance(migrated_batch.get("evidence"), dict) else {}
+        batch_id = str(existing_batch.get("batch_id") or migrated_batch.get("batch_id") or "").strip()
+        relation_case_id = str(existing_batch.get("relation_case_id") or batch_id).strip()
+        return self._normalize_batch(
+            {
+                **deepcopy(migrated_batch),
+                **deepcopy(existing_batch),
+                "batch_id": batch_id,
+                "batch_key": str(existing_batch.get("batch_key") or migrated_batch.get("batch_key") or "").strip(),
+                "status": "submitted",
+                "relation_case_id": relation_case_id,
+                "source_versions": deepcopy(source_versions),
+                "evidence": {
+                    **deepcopy(existing_evidence),
+                    **deepcopy(migrated_evidence),
+                    "reused_submitted_batch_id": batch_id,
+                },
+                "updated_at": migrated_at,
+            }
+        )
 
     def _migrated_submitted_batch(
         self,

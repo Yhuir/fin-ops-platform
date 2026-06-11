@@ -30,6 +30,7 @@
 | export preview/download | P1 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` | covered | 当前筛选导出、read model refreshing、文件下载。 |
 | OA 反提 preview | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py` | covered | 候选、rejections、display rows、preview hash、已有 active OA 关系排除。 |
 | 一键创建 OA 草稿 | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py` | covered | 创建内部 batch 后使用目标申请人 provider 生成 OA draft；凭据缺失不创建 batch。 |
+| OA 反提 relation 写入 | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | evidence detected 后通过 `WorkbenchRelationCommandService.confirm_relation` 写 `input_invoice_oa_reverse`；缺 command 或 relation read model stale/conflict 时 fail fast，不推进本地 batch。 |
 | 目标申请人凭据 service/API/PG | P0 | `tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`、`tests/test_postgres_migrations.py` | covered | admin-only、必填校验、pgcrypto 加密、列表不解密、不泄漏普通 settings payload。 |
 | 目标申请人 token provider | P0 | `tests/test_target_oa_applicant_token_provider.py` | covered | RSA 加密密码、登录失败不暴露密码、目标申请人 draft client、缺凭据不登录。 |
 | 已提交/未提交确认 | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered | `submitted_confirmed` 历史、`not_submitted` 回到可创建状态并可重新创建。 |
@@ -42,9 +43,9 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_read_model_freshness.py` | OA 反提状态、preview hash、已提交/未提交流转、freshness 判断属于业务核心。 |
-| 2. Service-layer tests | 适用 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_oa_applicant_credentials_service.py`、`tests/test_target_oa_applicant_token_provider.py`、`tests/test_postgres_input_invoice_usage_oa_reverse_repository.py` | 覆盖服务编排、repository、凭据、token provider、外部 OA client 边界和本地 batch 状态。 |
-| 3. API contract tests | 适用 | `tests/test_input_invoice_usage_api.py`、`tests/test_oa_applicant_credentials_api.py` | 覆盖 rows/filter/detail/export/OA reverse/credential API、权限、错误码、响应 shape 和敏感信息不泄漏。 |
+| 1. Business core unit tests | 适用 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_read_model_freshness.py` | OA 反提状态、preview hash、已提交/未提交流转、relation writer mode/idempotency/fail-fast、freshness 判断属于业务核心。 |
+| 2. Service-layer tests | 适用 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_oa_applicant_credentials_service.py`、`tests/test_target_oa_applicant_token_provider.py`、`tests/test_postgres_input_invoice_usage_oa_reverse_repository.py` | 覆盖服务编排、repository、凭据、token provider、外部 OA client 边界、本地 batch 状态和 relation command service 写入边界。 |
+| 3. API contract tests | 适用 | `tests/test_input_invoice_usage_api.py`、`tests/test_oa_applicant_credentials_api.py` | 覆盖 rows/filter/detail/export/OA reverse/credential API、权限、错误码、响应 shape、relation command 409/no half-write 和敏感信息不泄漏。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_read_model_freshness.py` | 覆盖 input/output/OA usage collection repository、all scope、source versions、worker all-scope fan-out、RabbitMQ event types。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/src/test/SettingsPage.test.tsx` | 覆盖页面、表格、drawer、tabs、确认弹窗、设置页凭据管理、权限隐藏和 mapper。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | 覆盖管理员保存凭据 -> full-access 用户创建 OA 草稿 -> 用户确认已提交 -> 已提交历史；真实 OA 外部联调仍为 documented-risk。 |
@@ -59,6 +60,7 @@
 | 2026-06-10 | 凭据可能进入普通 settings payload 或前端回显密码。 | `tests/test_oa_applicant_credentials_api.py`、`web/src/test/SettingsPage.test.tsx`、`tests/test_postgres_oa_applicant_credentials_repository.py` | covered |
 | 2026-06-10 | `未提交 OA` 后不能重新创建草稿，或被误记为已提交历史。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |
 | 2026-06-10 | 已提交历史展示内部 batch/draft/preview/status 字段。 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |
+| 2026-06-12 | OA reverse evidence detected 直接写 pair service，导致 relation 事实源绕过 command service/read model freshness。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered |
 | 长期 | read model stale/missing 时页面显示假空态。 | `tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` | covered |
 
 ## 关键 smoke flows

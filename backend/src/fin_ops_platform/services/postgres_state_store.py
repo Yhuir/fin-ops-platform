@@ -19,6 +19,7 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresOpsTaxEtcRepository,
     PostgresReadModelRepository,
     PostgresWorkbenchRepository,
+    PostgresWorkbenchRelationRepository,
 )
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
 from fin_ops_platform.services.postgres_snapshot_contracts import (
@@ -131,6 +132,7 @@ class PostgresStateStore:
         self._read_model_repository = PostgresReadModelRepository(connection)
         self._sql_read_model_repository = PostgresReadModelRepository(self._sql_read_connection)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
+        self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
         self._file_root = self._data_dir / "postgres_files"
         if self._object_storage_repository is None:
             self._file_root.mkdir(parents=True, exist_ok=True)
@@ -530,7 +532,7 @@ class PostgresStateStore:
         self._save_snapshot("app_health_alerts", snapshot)
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
-        snapshot = self._workbench_repository.load_workbench_pair_relations()
+        snapshot = self._workbench_relation_repository.load_workbench_pair_relations()
         fallback = self._load_snapshot("workbench_pair_relations")
         if snapshot or fallback:
             pair_relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
@@ -543,7 +545,7 @@ class PostgresStateStore:
         return {}
 
     def save_workbench_pair_relations(self, snapshot: dict[str, Any], *, changed_case_ids: set[str] | None = None) -> None:
-        self._workbench_repository.save_workbench_pair_relations(snapshot, changed_case_ids=changed_case_ids)
+        self._workbench_relation_repository.save_workbench_pair_relations(snapshot, changed_case_ids=changed_case_ids)
         self._save_snapshot("workbench_pair_relations", snapshot)
 
     def load_no_oa_bank_batches(self) -> dict[str, Any]:

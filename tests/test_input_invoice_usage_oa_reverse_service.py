@@ -9,14 +9,17 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InMemoryInputInvoiceUsageOaReverseBatchRepository,
     InputInvoiceUsageOaEvidence,
+    InputInvoiceUsageOaReverseBatch,
     InputInvoiceUsageOaReverseMissingClientError,
     InputInvoiceUsageOaReverseService,
     InputInvoiceUsageOaReverseStatus,
     InputInvoiceUsageOaReverseVersionConflictError,
+    WorkbenchInputInvoiceUsageOaReverseRelationWriter,
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
@@ -59,7 +62,88 @@ class StaticEvidenceProvider:
         return self.evidence
 
 
+class RecordingRelationCommandService:
+    def __init__(self) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+
+    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+        self.confirm_calls.append(dict(kwargs))
+        return {"status": "confirmed", "relation": {"case_id": kwargs.get("case_id")}}
+
+
 class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
+    def test_workbench_relation_writer_delegates_to_relation_command_service(self) -> None:
+        command_service = RecordingRelationCommandService()
+        writer = WorkbenchInputInvoiceUsageOaReverseRelationWriter(command_service)
+        batch = InputInvoiceUsageOaReverseBatch(
+            batch_id="batch-oa-reverse-1",
+            status=InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value,
+            version=3,
+            target_applicant_code="chen_xiuyun",
+            target_applicant_name="陈秀云",
+            invoice_ids=["inv-1", "inv-2"],
+            preview_id="preview-1",
+            preview_hash="hash-1",
+            preview_summary={},
+            invoice_display_rows=[
+                {"invoiceId": "inv-1", "invoiceDate": "2026-05-20"},
+                {"invoiceId": "inv-2", "invoiceDate": "2026-05-21"},
+            ],
+            oa_draft_id="oa-draft-1",
+            created_by="creator-user",
+            updated_by="operator-user",
+        )
+        evidence = InputInvoiceUsageOaEvidence(
+            oa_row_id="oa-row-1",
+            process_status="进行中",
+            candidates=[{"id": "oa-row-1"}],
+            raw_payload={"caseId": "OA-001"},
+        )
+
+        writer(batch, evidence)
+
+        self.assertEqual(len(command_service.confirm_calls), 1)
+        call = command_service.confirm_calls[0]
+        self.assertEqual(call["case_id"], "case_input_invoice_usage_oa_reverse_batch-oa-reverse-1")
+        self.assertEqual(call["row_ids"], ["oa-row-1", "inv-1", "inv-2"])
+        self.assertEqual(call["row_types"], ["oa", "invoice", "invoice"])
+        self.assertEqual(call["relation_mode"], "input_invoice_oa_reverse")
+        self.assertEqual(call["actor_id"], "operator-user")
+        self.assertEqual(call["month_scope"], "2026-05")
+        self.assertEqual(call["idempotency_key"], "input_invoice_oa_reverse:batch-oa-reverse-1:oa-row-1")
+        self.assertEqual(call["history_operation_type"], "input_invoice_oa_reverse_confirm")
+        self.assertEqual(
+            call["special_metadata"],
+            {
+                "input_invoice_usage_oa_reverse_batch_id": "batch-oa-reverse-1",
+                "oa_draft_id": "oa-draft-1",
+                "oa_row_id": "oa-row-1",
+                "invoice_ids": ["inv-1", "inv-2"],
+            },
+        )
+
+    def test_workbench_relation_writer_requires_relation_command_service(self) -> None:
+        writer = WorkbenchInputInvoiceUsageOaReverseRelationWriter(object())
+        batch = InputInvoiceUsageOaReverseBatch(
+            batch_id="batch-oa-reverse-1",
+            status=InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value,
+            version=3,
+            target_applicant_code="chen_xiuyun",
+            target_applicant_name="陈秀云",
+            invoice_ids=["inv-1"],
+            preview_id="preview-1",
+            preview_hash="hash-1",
+            preview_summary={},
+            invoice_display_rows=[{"invoiceId": "inv-1", "invoiceDate": "2026-05-20"}],
+            created_by="creator-user",
+        )
+        evidence = InputInvoiceUsageOaEvidence(oa_row_id="oa-row-1")
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            writer(batch, evidence)
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_command_unavailable")
+
     def test_preview_returns_backend_candidates_rejections_display_rows_and_hash(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         available = self._invoice("inv-available", "9401", vendor, total_with_tax="99.72")

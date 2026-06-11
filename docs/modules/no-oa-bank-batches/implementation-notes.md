@@ -8,6 +8,7 @@
 - 本模块是 Bankdetail 高风险子域。后续不要把 no-OA 机械拆成脱离 Bankdetail 的独立事实源。
 - `GET /api/no-oa-bank-batches` 和 detail 读路径不得在 missing/stale 时同步重建全量批次；必须返回 read model status 并 enqueue refresh。
 - Workbench confirm-link 的 internal transfer 特例必须最终写 no-OA submitted batch 和 `relation_mode=no_oa_bank_batch`，不得绕过批次写普通 `manual_confirmed`。
+- no-OA legacy migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 必须通过 `WorkbenchRelationCommandService` 写 relation；缺 command service 时 fail fast，不回退 direct pair mutation。
 - no-OA submit/withdraw 的长期目标是 facts/audit/dirty/outbox 同事务；当前目标契约由 `tests/test_bankdetail_write_uow_contract.py` 保护，真实收敛前保持 `documented-risk`。
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。
 
@@ -57,3 +58,70 @@
   - `test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact`
   - `test_create_active_relation_rejects_active_row_reuse_by_different_case_id`
   - `test_save_no_oa_bank_batches_replaces_absent_read_model_rows`
+
+## 2026-06-12 - Relation command service 写入口收敛
+
+- 目标：把 no-OA submit、submit-selection、Workbench internal transfer submit 和 withdraw 的 relation 写入收敛到 `WorkbenchRelationCommandService`，避免 no-OA 页面和 Workbench 形成独立事实源。
+- 决策：
+  - `NoOaBankBatchService` 保留为批次领域状态机，只产出 `relation_command_payload_for_batch(...)`，不再直接调用 `create_active_relation` 或 `cancel_relation`。
+  - `NoOaBankBatchApplicationService` 负责调用 relation command service，并在失败时回滚 no-OA batch snapshot 与 relation snapshot。
+  - 写前 relation 占用读取复用 `WorkbenchRelationReadFacade` distribution；`submit_selected_rows` 不再读取 pair service list。
+  - relation read model non-fresh 时返回 409，保留 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`，不写入 batch/relation。
+  - no-OA legacy migration、submitted repair、category drift cleanup 后续已在 Phase 7L 迁入 relation command service。
+- 验收测试：
+  - `test_submit_batch_delegates_relation_write_to_command_service`
+  - `test_withdraw_batch_delegates_relation_cancel_to_command_service`
+  - `test_internal_transfer_from_workbench_delegates_relation_write_to_command_service`
+  - `test_submit_batch_marks_submitted_and_exposes_relation_command_payload_idempotently`
+  - `test_submit_fails_fast_when_relation_read_model_is_not_fresh`
+  - `test_no_oa_salary_batch_relation_pairs_then_cancel_returns_to_open`
+  - `test_no_oa_internal_transfer_relation_groups_bank_rows_until_cancelled`
+
+## 2026-06-12 - Read model refresh 不再隐式修复 relation
+
+- 目标：把 `no_oa_bank_batch.read_model.refresh` 从 relation 写入口中剥离，避免 worker 在重建 no-OA projection 时顺手创建/取消 pair relation，形成隐藏事实源写入。
+- 决策：
+  - `NoOaBankBatchService.build_batches(...)` 增加 `apply_relation_repairs` 参数；默认保持 legacy 兼容行为。
+  - `NoOaBankBatchApplicationService.refresh_batches(...)` 暴露同名参数，并且只有启用 repair 时才根据 `last_legacy_migration_result` 触发 relation/workbench persist。
+  - `NoOaBankBatchReadModelRefreshService` 固定调用 `refresh_batches(apply_relation_repairs=False)`；worker 只保存 no-OA snapshot，不保存 pair relation，不执行 legacy migration/repair/consolidation。
+  - legacy migration、submitted repair、category drift cleanup 仍是待迁移兼容路径，后续应收敛为显式 repair command/离线 repair 工具。
+- 验收测试：
+  - `test_refresh_does_not_repair_workbench_relations_from_read_model_path`
+  - `test_no_oa_read_model_refresh_does_not_run_relation_repairs`
+
+## 2026-06-12 - Legacy relation repair 写入口收敛
+
+- 目标：把 no-OA legacy relation migration、submitted relation repair、category drift cleanup 和 submitted single-side consolidation 从 direct pair service mutation 收敛到 `WorkbenchRelationCommandService`。
+- 决策：
+  - `NoOaLegacyRelationMigrationService` 通过 command service cancel legacy relation，再 confirm `relation_mode=no_oa_bank_batch`；缺 command service 时抛 `no_oa_relation_command_unavailable`。
+  - `NoOaBankBatchService` 的 legacy/repair/consolidation 路径通过 `_confirm_no_oa_relation(...)` / `_cancel_no_oa_relation(...)` 委托 command service，不再调用 `_pair_relation_service.create_active_relation/cancel_relation/record_history`。
+  - `Application` 为 no-OA batch service 注入 `WorkbenchRelationCommandService(require_fresh_relations=False)`，使显式 repair 路径复用统一 command/history/snapshot 边界，同时避免 read model worker 隐式 repair。
+  - 已有 current submitted no-OA batch 与 legacy active relation 命中同一 row set 时，迁移复用 existing submitted batch 的 `relation_case_id`，避免新建 legacy batch case 后与旧 submitted batch 形成两个 active relation。
+  - submitted repair 遇到 row 已被非 no-OA active relation 占用时跳过重建 no-OA relation，保留 active row 独占事实，并在 migration result 的 `skipped` 中记录 blocking case。
+- 验收测试：
+  - `test_submitted_internal_transfer_with_active_non_no_oa_relation_does_not_duplicate_as_unsubmitted_conflict`
+  - `test_legacy_salary_relation_migrates_to_submitted_no_oa_batch_idempotently`
+  - `test_existing_submitted_single_row_salary_batches_consolidate_by_month_and_account`
+  - `test_consolidated_submitted_salary_batch_repairs_stale_single_row_relations`
+  - `test_submitted_single_side_batch_prunes_rows_that_no_longer_match_category`
+  - `test_submitted_batch_that_becomes_stale_clears_active_relation`
+  - `test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback`
+- 验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_service.py tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_service.py tests/test_no_oa_bank_batch_application_service.py tests/test_no_oa_bank_batch_read_model_refresh.py tests/test_no_oa_bank_batch_api.py tests/test_no_oa_bank_batch_workbench_integration.py -q
+```
+
+- 七类测试覆盖：
+  - Business core unit tests：适用并覆盖 legacy migration、submitted repair、category drift、single-side consolidation、active row occupation 和同 row set case reuse。
+  - Service-layer tests：适用并覆盖 no-OA service 到 relation command service 的委托、缺 command fail-fast 和 read model worker 不隐式 repair。
+  - API contract tests：本阶段未改 HTTP response shape；通过 no-OA API 回归保护旧 contract。
+  - Read model/cache/background job tests：适用并继续覆盖 worker refresh 不写 relation。
+  - Frontend component and interaction tests：本阶段未改前端，未新增。
+  - End-to-end business-flow integration tests：适用并通过 no-OA workbench integration 回归保护 no-OA/Workbench 同一 relation fact。
+  - Existing feature regression tests：适用并保留 legacy salary/internal transfer、stale/category drift、snapshot round-trip 和 API 回归。
+- 剩余风险：
+  - 真实 PostgreSQL 历史数据的全量回放和 repair dry-run 仍需 staging/生产前 smoke。
+  - relation command service 的生产级并发 row occupation 仍未引入 PostgreSQL 锁或唯一占用约束。
+  - 前端跨页面即时反馈仍需完整浏览器 smoke；domain event 仍只是刷新提示，不是事实源。

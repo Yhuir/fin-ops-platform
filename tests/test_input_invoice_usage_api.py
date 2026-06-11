@@ -14,11 +14,13 @@ from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import InputInvoiceUsageOaReverseStatus
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantTokenProvider
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
 
@@ -73,6 +75,24 @@ class RecordingOaLoginClient:
     def login(self, username: str, password: str) -> str:
         self.calls.append((username, password))
         return self.token
+
+
+class FailingRelationCommandService:
+    def __init__(self) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+
+    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+        self.confirm_calls.append(dict(kwargs))
+        raise WorkbenchRelationCommandError(
+            "workbench_relation_read_model_not_fresh",
+            "Workbench relation read model is not fresh. Refresh and retry the mutation.",
+            payload={
+                "read_model_status": "stale",
+                "read_model_stale_reasons": ["dirty_scope:2026-05"],
+                "read_model_scope_keys": ["2026-05"],
+                "refresh_enqueued": True,
+            },
+        )
 
 
 class InputInvoiceUsageApiTests(unittest.TestCase):
@@ -609,6 +629,74 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertNotEqual(recreated_payload["batchId"], first_draft_payload["batchId"])
         self.assertEqual(provider.requested_codes, ["chen_xiuyun", "chen_xiuyun"])
 
+    def test_oa_reverse_status_refresh_returns_relation_command_conflict_without_saving_detected_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            provider = FakeTargetOaDraftClientProvider()
+            app._target_oa_applicant_token_provider_instance = provider
+            relation_command = FailingRelationCommandService()
+            app._workbench_relation_command_service = lambda *args, **kwargs: relation_command
+            oa_projection = StaticOAProjection([])
+            self._install_service(
+                app,
+                invoices=[self._invoice("inv-refresh", "3401", "刷新供应商", total_with_tax="99.72")],
+                oa_projection=oa_projection,
+            )
+            preview_payload = json.loads(
+                app.handle_request(
+                    "POST",
+                    "/api/input-invoice-usage/oa-reverse/preview",
+                    body=json.dumps({"invoiceIds": ["inv-refresh"], "targetApplicantCode": "chen_xiuyun"}),
+                ).body
+            )
+            draft_payload = json.loads(
+                app.handle_request(
+                    "POST",
+                    "/api/input-invoice-usage/oa-reverse/oa-draft",
+                    body=json.dumps(
+                        {
+                            "invoiceIds": ["inv-refresh"],
+                            "targetApplicantCode": "chen_xiuyun",
+                            "expectedPreviewHash": preview_payload["previewHash"],
+                            "idempotencyKey": "oa-reverse-refresh-conflict",
+                        }
+                    ),
+                ).body
+            )
+            oa_projection.records.append(
+                self._oa(
+                    "oa-refresh-409",
+                    "陈秀云",
+                    "99.72",
+                    reason=f"created from {draft_payload['oaDraftId']}",
+                )
+            )
+            service = app._input_invoice_usage_oa_reverse_service()
+            batch = service._repository.get_batch(str(draft_payload["batchId"]))
+            batch.status = InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value
+            batch.oa_detection_status = "legacy_detection_pending"
+            batch.version = int(draft_payload["version"]) + 1
+            service._repository.save_batch(batch)
+
+            refresh_response = app.handle_request(
+                "POST",
+                f"/api/input-invoice-usage/oa-reverse/batches/{draft_payload['batchId']}/oa-status/refresh",
+                body=json.dumps({"expectedVersion": batch.version}),
+            )
+            saved_batch = service._repository.get_batch(str(draft_payload["batchId"]))
+
+        payload = json.loads(refresh_response.body)
+        self.assertEqual(refresh_response.status_code, 409)
+        self.assertEqual(payload["error"], "workbench_relation_read_model_not_fresh")
+        self.assertEqual(payload["details"]["read_model_status"], "stale")
+        self.assertTrue(payload["details"]["refresh_enqueued"])
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        self.assertEqual(relation_command.confirm_calls[0]["relation_mode"], "input_invoice_oa_reverse")
+        self.assertEqual(saved_batch.status, InputInvoiceUsageOaReverseStatus.OA_SUBMISSION_DETECTING.value)
+        self.assertEqual(saved_batch.version, int(draft_payload["version"]) + 1)
+        self.assertIsNone(saved_batch.oa_row_id)
+        self.assertEqual(saved_batch.oa_detection_status, "legacy_detection_pending")
+
     def test_export_preview_and_download_use_current_input_invoice_usage_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -763,7 +851,14 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _oa(oa_id: str, applicant: str, amount: str, *, apply_type: str = "报销") -> OAApplicationRecord:
+    def _oa(
+        oa_id: str,
+        applicant: str,
+        amount: str,
+        *,
+        apply_type: str = "报销",
+        reason: str = "费用报销",
+    ) -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
             month="2026-05",
@@ -774,7 +869,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             apply_type=apply_type,
             amount=amount,
             counterparty_name="供应商",
-            reason="费用报销",
+            reason=reason,
             relation_code="in_progress",
             relation_label="进行中",
             relation_tone="success",

@@ -31,6 +31,7 @@ from fin_ops_platform.services.pending_invoice_relation_identity import (
     pending_invoice_relation_identity,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 
@@ -1712,11 +1713,13 @@ class PendingInvoiceApplicationService:
         finalizer: Callable[[dict[str, Any]], None] | None = None,
         row_provider: Callable[[str, str], dict[str, Any]] | None = None,
         relation_facade: Any | None = None,
+        relation_command_service: Any | None = None,
         fault_injector: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
         self._relation_facade = relation_facade
+        self._relation_command_service = relation_command_service
         self._command_repository = command_repository or InMemoryPendingInvoiceCommandRepository(command_store)
         self._audit_recorder = audit_recorder
         self._finalizer = finalizer
@@ -1905,6 +1908,10 @@ class PendingInvoiceApplicationService:
         try:
             relation_case_id = str(command.get("relation_case_id") or "")
             if not relation_case_id:
+                self._assert_relation_write_precondition(
+                    row_ids=[transaction_id, invoice_id],
+                    month_scope="all",
+                )
                 relation_case_id = self._create_attach_existing_relation(
                     transaction_id=transaction_id,
                     invoice_id=invoice_id,
@@ -1955,7 +1962,8 @@ class PendingInvoiceApplicationService:
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
-        except PendingInvoiceError:
+        except PendingInvoiceError as exc:
+            self._mark_relation_precondition_error(command, exc)
             raise
         except Exception as exc:
             command["error"] = str(exc)
@@ -2083,6 +2091,10 @@ class PendingInvoiceApplicationService:
         try:
             relation_case_id = str(command.get("relation_case_id") or "")
             if not relation_case_id:
+                self._assert_relation_write_precondition(
+                    row_ids=[*transaction_ids, *invoice_ids],
+                    month_scope="all",
+                )
                 relation_case_id = self._create_attach_existing_batch_relation(
                     transaction_ids=transaction_ids,
                     invoice_ids=invoice_ids,
@@ -2132,7 +2144,8 @@ class PendingInvoiceApplicationService:
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
-        except PendingInvoiceError:
+        except PendingInvoiceError as exc:
+            self._mark_relation_precondition_error(command, exc)
             raise
         except Exception as exc:
             command["error"] = str(exc)
@@ -2170,6 +2183,12 @@ class PendingInvoiceApplicationService:
 
         try:
             invoice_id = str(command.get("invoice_id") or "")
+            relation_case_id = str(command.get("relation_case_id") or "")
+            if not relation_case_id:
+                self._assert_relation_write_precondition(
+                    row_ids=[transaction_id],
+                    month_scope=affected_months[0] if len(affected_months) == 1 else "all",
+                )
             if not invoice_id:
                 orphan_invoice = self._find_invoice_by_request_key(request_key)
                 if orphan_invoice is not None and not self._invoice_has_pending_relation(
@@ -2197,7 +2216,6 @@ class PendingInvoiceApplicationService:
                 self._mark_command(command, "invoice_created")
                 self._inject_fault("after_invoice_created", command)
 
-            relation_case_id = str(command.get("relation_case_id") or "")
             if not relation_case_id:
                 relation_case_id = self._create_relation(
                     transaction_id=transaction_id,
@@ -2238,7 +2256,8 @@ class PendingInvoiceApplicationService:
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
-        except PendingInvoiceError:
+        except PendingInvoiceError as exc:
+            self._mark_relation_precondition_error(command, exc)
             raise
         except Exception as exc:
             command["error"] = str(exc)
@@ -2456,8 +2475,90 @@ class PendingInvoiceApplicationService:
             raise PendingInvoiceError("invalid_invoice_payload", "Invoice creation did not return an invoice id.")
         return str(linked_invoice_id)
 
+    def _confirm_relation_via_command_service(
+        self,
+        *,
+        case_id: str,
+        row_ids: list[str],
+        row_types: list[str],
+        relation_mode: str,
+        actor_id: str,
+        request_key: str,
+        special_metadata: dict[str, Any],
+        before_relations: list[dict[str, Any]] | None = None,
+        month_scope: str = "all",
+    ) -> str:
+        relation_command_service = self._require_relation_command_service()
+        try:
+            result = relation_command_service.confirm_relation(
+                case_id=case_id,
+                row_ids=list(row_ids),
+                row_types=list(row_types),
+                relation_mode=relation_mode,
+                actor_id=actor_id,
+                month_scope=month_scope,
+                special_metadata=dict(special_metadata),
+                idempotency_key=request_key,
+                before_relations=list(before_relations or []),
+                replace_existing=True,
+                history_operation_type="confirm_link",
+            )
+        except WorkbenchRelationCommandError as exc:
+            raise self._command_error(exc) from exc
+        relation = result.get("relation") if isinstance(result, dict) else {}
+        if not isinstance(relation, dict):
+            return str(case_id)
+        return str(relation.get("case_id") or case_id)
+
+    def _assert_relation_write_precondition(self, *, row_ids: list[str], month_scope: str) -> None:
+        relation_command_service = self._require_relation_command_service()
+        preflight = getattr(relation_command_service, "assert_write_precondition", None)
+        if not callable(preflight):
+            return
+        try:
+            preflight(
+                row_ids=[
+                    str(row_id).strip()
+                    for row_id in list(row_ids or [])
+                    if str(row_id).strip()
+                ],
+                month_scope=month_scope,
+            )
+        except WorkbenchRelationCommandError as exc:
+            raise self._command_error(exc) from exc
+
+    def _require_relation_command_service(self) -> Any:
+        if self._relation_command_service is None:
+            raise PendingInvoiceError(
+                "pending_invoice_relation_command_unavailable",
+                "Pending invoice relation writes require WorkbenchRelationCommandService.",
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            )
+        return self._relation_command_service
+
+    @staticmethod
+    def _command_error(exc: WorkbenchRelationCommandError) -> PendingInvoiceError:
+        if exc.error_code == "workbench_relation_read_model_not_fresh":
+            return PendingInvoiceError(
+                "pending_invoice_relation_read_model_not_fresh",
+                "关联台关系读模型不是 fresh，请刷新后再处理。",
+                status_code=HTTPStatus.CONFLICT,
+                details=dict(exc.payload),
+            )
+        if exc.error_code == "workbench_relation_active_row_conflict":
+            return PendingInvoiceError(
+                "active_relation_conflict",
+                "The invoice already has an active conflicting relation.",
+                status_code=HTTPStatus.CONFLICT,
+                details=dict(exc.payload),
+            )
+        return PendingInvoiceError(exc.error_code, exc.message, details=dict(exc.payload))
+
     def _create_relation(self, *, transaction_id: str, invoice_id: str, request_key: str, actor_id: str) -> str:
-        existing_relations = self._pair_relation_service.active_relations_for_row_ids([transaction_id, invoice_id])
+        existing_relations = self._active_relation_dicts_for_row_ids(
+            [transaction_id, invoice_id],
+            reason="pending_invoice_manual_invoice_confirm",
+        )
         expected_rows = {transaction_id, invoice_id}
         for relation in existing_relations:
             row_ids = {str(row_id) for row_id in list(relation.get("row_ids") or [])}
@@ -2486,45 +2587,38 @@ class PendingInvoiceApplicationService:
                         "invoice_id": invoice_id,
                     }
                 )
-                updated_relation = self._pair_relation_service.create_active_relation(
+                return self._confirm_relation_via_command_service(
                     case_id=str(relation.get("case_id") or ""),
                     row_ids=[*existing_row_ids, invoice_id],
                     row_types=[*resolved_row_types, "invoice"],
                     relation_mode=str(relation.get("relation_mode") or PENDING_INVOICE_RELATION_MODE),
-                    created_by=actor_id,
-                    month_scope=str(relation.get("month_scope") or "all"),
-                    note=str(relation.get("note") or ""),
-                    amount_check=relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None,
+                    actor_id=actor_id,
+                    request_key=request_key,
                     special_metadata=metadata,
-                    exception_case_id=str(relation.get("exception_case_id") or ""),
-                    rule_version=str(relation.get("rule_version") or ""),
-                    evidence=relation.get("evidence") if isinstance(relation.get("evidence"), dict) else None,
-                    oa_exemption=relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None,
-                    display_tags=[
-                        str(tag).strip()
-                        for tag in list(relation.get("display_tags") or [])
-                        if str(tag).strip()
-                    ],
+                    before_relations=[relation],
+                    month_scope=str(relation.get("month_scope") or "all"),
                 )
-                return str(updated_relation.get("case_id") or "")
         case_id = self._relation_case_id(request_key)
-        relation = self._pair_relation_service.create_active_relation(
+        return self._confirm_relation_via_command_service(
             case_id=case_id,
             row_ids=[transaction_id, invoice_id],
             row_types=["bank", "invoice"],
             relation_mode=PENDING_INVOICE_RELATION_MODE,
-            created_by=actor_id,
+            actor_id=actor_id,
+            request_key=request_key,
             special_metadata={
                 "pending_invoice_request_key": request_key,
                 "bank_transaction_id": transaction_id,
                 "invoice_id": invoice_id,
             },
         )
-        return str(relation["case_id"])
 
     def _create_attach_existing_relation(self, *, transaction_id: str, invoice_id: str, request_key: str, actor_id: str) -> str:
         expected_rows = {transaction_id, invoice_id}
-        for relation in self._pair_relation_service.active_relations_for_row_ids([transaction_id, invoice_id]):
+        for relation in self._active_relation_dicts_for_row_ids(
+            [transaction_id, invoice_id],
+            reason="pending_invoice_attach_existing_confirm",
+        ):
             row_ids = {str(row_id) for row_id in list(relation.get("row_ids") or [])}
             if expected_rows.issubset(row_ids):
                 return str(relation.get("case_id"))
@@ -2549,27 +2643,17 @@ class PendingInvoiceApplicationService:
                         "source": "pending_invoice_attach_existing_invoice",
                     }
                 )
-                updated_relation = self._pair_relation_service.create_active_relation(
+                return self._confirm_relation_via_command_service(
                     case_id=str(relation.get("case_id") or ""),
                     row_ids=[*existing_row_ids, transaction_id],
                     row_types=[*resolved_row_types, "bank"],
                     relation_mode=str(relation.get("relation_mode") or ATTACH_EXISTING_INVOICE_RELATION_MODE),
-                    created_by=actor_id,
-                    month_scope=str(relation.get("month_scope") or "all"),
-                    note=str(relation.get("note") or ""),
-                    amount_check=relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None,
+                    actor_id=actor_id,
+                    request_key=request_key,
                     special_metadata=metadata,
-                    exception_case_id=str(relation.get("exception_case_id") or ""),
-                    rule_version=str(relation.get("rule_version") or ""),
-                    evidence=relation.get("evidence") if isinstance(relation.get("evidence"), dict) else None,
-                    oa_exemption=relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None,
-                    display_tags=[
-                        str(tag).strip()
-                        for tag in list(relation.get("display_tags") or [])
-                        if str(tag).strip()
-                    ],
+                    before_relations=[relation],
+                    month_scope=str(relation.get("month_scope") or "all"),
                 )
-                return str(updated_relation.get("case_id") or "")
             if invoice_id in row_ids:
                 raise PendingInvoiceError(
                     "active_relation_conflict",
@@ -2578,12 +2662,13 @@ class PendingInvoiceApplicationService:
                     details={"invoice_id": invoice_id, "relation_case_id": str(relation.get("case_id") or "")},
                 )
         case_id = f"case_attach_existing_{hashlib.sha1(request_key.encode('utf-8')).hexdigest()[:20]}"
-        relation = self._pair_relation_service.create_active_relation(
+        return self._confirm_relation_via_command_service(
             case_id=case_id,
             row_ids=[transaction_id, invoice_id],
             row_types=["bank", "invoice"],
             relation_mode=ATTACH_EXISTING_INVOICE_RELATION_MODE,
-            created_by=actor_id,
+            actor_id=actor_id,
+            request_key=request_key,
             special_metadata={
                 "pending_invoice_request_key": request_key,
                 "bank_transaction_id": transaction_id,
@@ -2591,7 +2676,6 @@ class PendingInvoiceApplicationService:
                 "source": "pending_invoice_attach_existing_invoice",
             },
         )
-        return str(relation["case_id"])
 
     def _create_attach_existing_batch_relation(
         self,
@@ -2641,13 +2725,13 @@ class PendingInvoiceApplicationService:
                 combined_row_ids.append(invoice_id)
                 combined_row_types.append("invoice")
         case_id = f"case_attach_existing_batch_{hashlib.sha1(request_key.encode('utf-8')).hexdigest()[:20]}"
-        relation, _history = self._pair_relation_service.replace_with_confirmed_relation(
+        return self._confirm_relation_via_command_service(
             case_id=case_id,
             row_ids=combined_row_ids,
             row_types=combined_row_types,
             relation_mode=ATTACH_EXISTING_INVOICE_RELATION_MODE,
-            created_by=actor_id,
-            month_scope="all",
+            actor_id=actor_id,
+            request_key=request_key,
             special_metadata={
                 "pending_invoice_request_key": request_key,
                 "bank_transaction_ids": list(transaction_ids),
@@ -2655,12 +2739,14 @@ class PendingInvoiceApplicationService:
                 "source": "pending_invoice_attach_existing_invoice_batch",
             },
             before_relations=existing_relations,
+            month_scope="all",
         )
-        return str(relation["case_id"])
 
     def _active_relation_dicts_for_row_ids(self, row_ids: list[str], *, reason: str) -> list[dict[str, Any]]:
         normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
-        if not normalized_row_ids or self._relation_facade is None:
+        if not normalized_row_ids:
+            return []
+        if self._relation_facade is None:
             return []
         reader = getattr(self._relation_facade, "get_by_row_ids", None)
         if not callable(reader):
@@ -3007,6 +3093,14 @@ class PendingInvoiceApplicationService:
     def _inject_fault(self, phase: str, command: dict[str, Any]) -> None:
         if self._fault_injector is not None:
             self._fault_injector(phase, command)
+
+    def _mark_relation_precondition_error(self, command: dict[str, Any], exc: PendingInvoiceError) -> None:
+        if exc.error_code != "pending_invoice_relation_read_model_not_fresh":
+            return
+        command["error"] = str(exc)
+        command["error_code"] = exc.error_code
+        command["last_successful_status"] = self._last_successful_status(command)
+        self._mark_command(command, "failed_recoverable")
 
     def _mark_command(self, command: dict[str, Any], status: str, *, error_code: str | None = None) -> None:
         if status not in COMMAND_STATUSES:

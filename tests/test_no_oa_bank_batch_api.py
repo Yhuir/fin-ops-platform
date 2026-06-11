@@ -534,6 +534,41 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(app._no_oa_bank_batch_service.snapshot(), before_snapshot)
         self.assertEqual(app._workbench_pair_relation_service.snapshot(), before_relations)
 
+    def test_submit_fails_fast_when_relation_read_model_is_not_fresh(self) -> None:
+        class StaleRelationFacade(FakeNoOaRelationFacade):
+            def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+                return {
+                    "status": "stale",
+                    "rows": [],
+                    "groups": [],
+                    "source_versions": {"schema_version": 52},
+                    "read_model_scope_keys": ["2026-03"],
+                    "stale_reasons": ["source_version_mismatch"],
+                    "refresh_enqueued": True,
+                }
+
+        app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
+        app._workbench_relation_facade = StaleRelationFacade([])
+        batch = self._list_batches(app)["batches"][0]
+        before_snapshot = app._no_oa_bank_batch_service.snapshot()
+        before_relations = app._workbench_pair_relation_service.snapshot()
+
+        response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{batch['batch_id']}/submit",
+            body=json.dumps({"expected_version": batch["version"], "note": "确认免OA"}),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 409, response.body)
+        self.assertEqual(payload["error"], "no_oa_bank_batch_relation_read_model_not_fresh")
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertEqual(payload["read_model_stale_reasons"], ["source_version_mismatch"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(app._no_oa_bank_batch_service.snapshot(), before_snapshot)
+        self.assertEqual(app._workbench_pair_relation_service.snapshot(), before_relations)
+
     def test_withdraw_cancels_pair_relation_and_persists_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])

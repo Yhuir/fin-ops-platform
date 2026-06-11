@@ -14,6 +14,7 @@ from fin_ops_platform.services.workbench_idempotency import (
 )
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
@@ -129,6 +130,8 @@ class WorkbenchWriteFacade:
         consume_reconciliation_decisions_in_transaction: Callable[..., int] | None = None,
         bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
         submit_internal_transfer_rows_from_workbench: Callable[..., dict[str, object]] | None = None,
+        relation_command_service: Any | None = None,
+        relation_command_service_factory: Callable[..., Any] | None = None,
     ) -> None:
         self._pair_relation_service = pair_relation_service
         self._exception_service = exception_service
@@ -174,6 +177,8 @@ class WorkbenchWriteFacade:
         self._consume_reconciliation_decisions_in_transaction = consume_reconciliation_decisions_in_transaction
         self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
         self._submit_internal_transfer_rows_from_workbench = submit_internal_transfer_rows_from_workbench
+        self._relation_command_service = relation_command_service
+        self._relation_command_service_factory = relation_command_service_factory
 
     def confirm_link(
         self,
@@ -282,62 +287,73 @@ class WorkbenchWriteFacade:
                 changed_case_ids=changed_case_ids,
             )
 
-        pair_relation_started_at = monotonic()
-        self._pair_relation_service.replace_with_confirmed_relation(
-            case_id=resolved_case_id,
-            row_ids=row_ids,
-            row_types=row_types,
-            relation_mode="manual_confirmed",
-            created_by="system",
-            month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-            note=note,
-            amount_check=amount_check,
-            before_relations=history_before_relations,
-        )
-        self._emit_timing_if_requested(
-            request_id=request_id,
-            action_name=action_name,
-            phase="pair_relation_update",
-            started_at=pair_relation_started_at,
-            detail=f"case_id={resolved_case_id}",
-        )
-        schedule_started_at = monotonic()
-        try:
-            self._schedule_pair_relation_persist(
-                changed_case_ids=changed_case_ids,
+        relation_command = self._relation_command_service_for()
+        if relation_command is not None:
+            pair_relation_started_at = monotonic()
+            try:
+                command_result = self._confirm_relation_via_command_service(
+                    relation_command,
+                    payload=payload,
+                    case_id=resolved_case_id,
+                    row_ids=row_ids,
+                    row_types=row_types,
+                    actor_id=actor_id,
+                    month=month,
+                    note=note,
+                    amount_check=amount_check,
+                    history_before_relations=history_before_relations,
+                    idempotency_key=self._idempotency_key_from_payload(payload),
+                )
+            except WorkbenchRelationCommandError as exc:
+                return self._relation_command_error_result(exc)
+            self._emit_timing_if_requested(
                 request_id=request_id,
                 action_name=action_name,
+                phase="pair_relation_update",
+                started_at=pair_relation_started_at,
+                detail=f"case_id={resolved_case_id}",
             )
-            self._consume_reconciliation_decisions(
-                row_ids=row_ids,
-                relation_id=resolved_case_id,
+            schedule_started_at = monotonic()
+            try:
+                self._schedule_pair_relation_persist(
+                    changed_case_ids=list(command_result.get("changed_case_ids") or changed_case_ids),
+                    request_id=request_id,
+                    action_name=action_name,
+                )
+                self._consume_reconciliation_decisions(
+                    row_ids=row_ids,
+                    relation_id=resolved_case_id,
+                )
+            except Exception:
+                self._restore_pair_relation_snapshot(
+                    previous_pair_snapshot,
+                    changed_case_ids=changed_case_ids,
+                )
+                return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
+            self._invalidate_and_schedule_read_model(
+                action_name=action_name,
+                changed_scope_keys=changed_scope_keys,
+                metadata={"source": action_name, "case_id": resolved_case_id},
+                request_id=request_id,
+                schedule_started_at=schedule_started_at,
             )
-        except Exception:
-            self._restore_pair_relation_snapshot(
-                previous_pair_snapshot,
-                changed_case_ids=changed_case_ids,
+            return WorkbenchWriteResult(
+                HTTPStatus.OK,
+                self._confirm_link_response_payload(
+                    {
+                        "success": True,
+                        "action": action_name,
+                        "month": month,
+                        "case_id": resolved_case_id,
+                        "affected_row_ids": list(row_ids),
+                        "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
+                        "amount_check": amount_check,
+                        "message": f"已确认 {len(row_ids)} 条记录关联。",
+                    }
+                ),
             )
-            return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
-        self._invalidate_and_schedule_read_model(
-            action_name=action_name,
-            changed_scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": resolved_case_id},
-            request_id=request_id,
-            schedule_started_at=schedule_started_at,
-        )
-        return WorkbenchWriteResult(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "confirm_link",
-                "month": month,
-                "case_id": resolved_case_id,
-                "affected_row_ids": row_ids,
-                "affected_months": changed_scope_keys,
-                "amount_check": amount_check,
-                "message": f"已确认 {len(row_ids)} 条记录关联。",
-            },
-        )
+
+        return self._relation_command_unavailable_result()
 
     def _confirm_link_with_uow(
         self,
@@ -382,16 +398,21 @@ class WorkbenchWriteFacade:
             if self._persist_pair_relations_in_transaction is None:
                 raise _WorkbenchWritePersistenceError("confirm-link UoW requires transaction-bound pair relation persistence.")
             pair_relation_started_at = monotonic()
-            self._pair_relation_service.replace_with_confirmed_relation(
+            relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
+            if relation_command is None:
+                raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
+            self._confirm_relation_via_command_service(
+                relation_command,
+                payload=payload,
                 case_id=resolved_case_id,
                 row_ids=row_ids,
                 row_types=row_types,
-                relation_mode="manual_confirmed",
-                created_by="system",
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+                actor_id=actor_id,
+                month=month,
                 note=note,
                 amount_check=amount_check,
-                before_relations=history_before_relations,
+                history_before_relations=history_before_relations,
+                idempotency_key=None,
             )
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -399,10 +420,6 @@ class WorkbenchWriteFacade:
                 phase="pair_relation_update",
                 started_at=pair_relation_started_at,
                 detail=f"case_id={resolved_case_id}",
-            )
-            self._persist_pair_relations_in_transaction(
-                transaction=transaction,
-                changed_case_ids=changed_case_ids,
             )
             if self._consume_reconciliation_decisions_in_transaction is not None:
                 self._consume_reconciliation_decisions_in_transaction(
@@ -445,6 +462,40 @@ class WorkbenchWriteFacade:
             )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
         return WorkbenchWriteResult(HTTPStatus.OK, self._confirm_link_response_payload(result))
+
+    def _confirm_relation_via_command_service(
+        self,
+        relation_command: Any,
+        *,
+        payload: dict[str, object],
+        case_id: str,
+        row_ids: list[str],
+        row_types: list[str],
+        actor_id: str | None,
+        month: str,
+        note: str,
+        amount_check: dict[str, object],
+        history_before_relations: list[dict[str, object]],
+        idempotency_key: str | None,
+    ) -> dict[str, object]:
+        confirm_relation = getattr(relation_command, "confirm_relation", None)
+        if not callable(confirm_relation):
+            raise _WorkbenchWritePersistenceError("relation command service must expose confirm_relation.")
+        return confirm_relation(
+            case_id=case_id,
+            row_ids=list(row_ids),
+            row_types=list(row_types),
+            relation_mode="manual_confirmed",
+            actor_id=_normalize_actor_id(actor_id),
+            month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            note=note,
+            amount_check=dict(amount_check or {}),
+            special_metadata={},
+            idempotency_key=idempotency_key,
+            before_relations=list(history_before_relations),
+            replace_existing=True,
+            history_operation_type="confirm_link",
+        )
 
     def _bank_only_internal_transfer_confirm_status(
         self,
@@ -550,6 +601,45 @@ class WorkbenchWriteFacade:
             "message": str(result.get("message") or ""),
         }
 
+    def _relation_command_service_for(self, *, repository: Any | None = None) -> Any | None:
+        if self._relation_command_service_factory is not None:
+            try:
+                return self._relation_command_service_factory(repository=repository)
+            except TypeError:
+                return self._relation_command_service_factory(repository)
+        return self._relation_command_service
+
+    @staticmethod
+    def _relation_command_unavailable_result() -> WorkbenchWriteResult:
+        return WorkbenchWriteResult(
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            {
+                "error": "workbench_relation_command_unavailable",
+                "message": "Workbench relation command service is not configured.",
+            },
+        )
+
+    @staticmethod
+    def _relation_command_error_result(exc: WorkbenchRelationCommandError) -> WorkbenchWriteResult:
+        conflict_errors = {
+            "workbench_relation_active_row_conflict",
+            "workbench_relation_idempotency_conflict",
+            "workbench_relation_read_model_not_fresh",
+        }
+        unavailable_errors = {
+            "workbench_relation_command_unavailable",
+            "workbench_relation_read_model_unavailable",
+            "workbench_relation_repository_unavailable",
+        }
+        status_code = HTTPStatus.BAD_REQUEST
+        if exc.error_code in conflict_errors:
+            status_code = HTTPStatus.CONFLICT
+        if exc.error_code in unavailable_errors:
+            status_code = HTTPStatus.SERVICE_UNAVAILABLE
+        payload: dict[str, object] = {"error": exc.error_code, "message": exc.message}
+        payload.update(exc.payload)
+        return WorkbenchWriteResult(status_code, payload)
+
     def cancel_link(
         self,
         payload: dict[str, object],
@@ -623,43 +713,64 @@ class WorkbenchWriteFacade:
                 changed_case_ids=changed_case_ids,
             )
 
-        pair_relation_started_at = monotonic()
-        cancelled_relation = self._pair_relation_service.cancel_relation_for_row_id(row_id)
-        self._emit_timing_if_requested(
-            request_id=request_id,
-            action_name=action_name,
-            phase="pair_relation_update",
-            started_at=pair_relation_started_at,
-            detail=f"row_id={row_id}",
-        )
-        changed_case_ids = []
-        if isinstance(cancelled_relation, dict):
-            changed_case_ids.append(str(cancelled_relation.get("case_id", "")))
-        schedule_started_at = monotonic()
-        self._schedule_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        self._invalidate_and_schedule_read_model(
-            action_name=action_name,
-            changed_scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
-            request_id=request_id,
-            schedule_started_at=schedule_started_at,
-        )
-        return WorkbenchWriteResult(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "action": "cancel_link",
-                "month": month,
-                "case_id": str(active_relation.get("case_id") or ""),
-                "affected_row_ids": affected_row_ids,
-                "affected_months": changed_scope_keys,
-                "message": "已取消关联并回退为待处理。",
-            },
-        )
+        relation_command = self._relation_command_service_for()
+        if relation_command is not None:
+            previous_pair_snapshot = self._pair_relation_service.snapshot()
+            pair_relation_started_at = monotonic()
+            try:
+                command_result = self._cancel_relation_via_command_service(
+                    relation_command,
+                    payload=payload,
+                    case_id=str(active_relation.get("case_id") or ""),
+                    actor_id=actor_id,
+                    reason=_comment,
+                    idempotency_key=self._idempotency_key_from_payload(payload),
+                )
+            except WorkbenchRelationCommandError as exc:
+                return self._relation_command_error_result(exc)
+            self._emit_timing_if_requested(
+                request_id=request_id,
+                action_name=action_name,
+                phase="pair_relation_update",
+                started_at=pair_relation_started_at,
+                detail=f"row_id={row_id}",
+            )
+            schedule_started_at = monotonic()
+            try:
+                self._schedule_pair_relation_persist(
+                    changed_case_ids=list(command_result.get("changed_case_ids") or changed_case_ids),
+                    request_id=request_id,
+                    action_name=action_name,
+                )
+                self._invalidate_and_schedule_read_model(
+                    action_name=action_name,
+                    changed_scope_keys=changed_scope_keys,
+                    metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
+                    request_id=request_id,
+                    schedule_started_at=schedule_started_at,
+                )
+            except Exception:
+                self._restore_pair_relation_snapshot(
+                    previous_pair_snapshot,
+                    changed_case_ids=changed_case_ids,
+                )
+                return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
+            return WorkbenchWriteResult(
+                HTTPStatus.OK,
+                self._cancel_link_response_payload(
+                    {
+                        "success": True,
+                        "action": action_name,
+                        "month": month,
+                        "case_id": str(active_relation.get("case_id") or ""),
+                        "affected_row_ids": affected_row_ids,
+                        "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
+                        "message": "已取消关联并回退为待处理。",
+                    }
+                ),
+            )
+
+        return self._relation_command_unavailable_result()
 
     def _cancel_link_replay_if_committed(
         self,
@@ -738,10 +849,19 @@ class WorkbenchWriteFacade:
             transaction = getattr(ctx, "transaction", None)
             if transaction is None:
                 raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
-            if self._persist_pair_relations_in_transaction is None:
-                raise _WorkbenchWritePersistenceError("cancel-link UoW requires transaction-bound pair relation persistence.")
+            relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
+            if relation_command is None:
+                raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
             pair_relation_started_at = monotonic()
-            cancelled_relation = self._pair_relation_service.cancel_relation_for_row_id(row_id)
+            self._cancel_relation_via_command_service(
+                relation_command,
+                payload=payload,
+                case_id=str(active_relation.get("case_id") or ""),
+                actor_id=actor_id,
+                reason=str(payload.get("comment") or "") if payload.get("comment") is not None else None,
+                idempotency_key=None,
+            )
+            cancelled_relation = active_relation
             self._emit_timing_if_requested(
                 request_id=request_id,
                 action_name=action_name,
@@ -751,10 +871,6 @@ class WorkbenchWriteFacade:
             )
             if not isinstance(cancelled_relation, dict):
                 raise _WorkbenchWritePersistenceError("cancel-link relation disappeared during UoW handler.")
-            self._persist_pair_relations_in_transaction(
-                transaction=transaction,
-                changed_case_ids=changed_case_ids,
-            )
             return {
                 "success": True,
                 "action": action_name,
@@ -784,6 +900,28 @@ class WorkbenchWriteFacade:
             )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
         return WorkbenchWriteResult(HTTPStatus.OK, self._cancel_link_response_payload(result))
+
+    def _cancel_relation_via_command_service(
+        self,
+        relation_command: Any,
+        *,
+        payload: dict[str, object],
+        case_id: str,
+        actor_id: str | None,
+        reason: str | None,
+        idempotency_key: str | None,
+    ) -> dict[str, object]:
+        _ = payload
+        cancel_relation = getattr(relation_command, "cancel_relation", None)
+        if not callable(cancel_relation):
+            raise _WorkbenchWritePersistenceError("relation command service must expose cancel_relation.")
+        return cancel_relation(
+            case_id=case_id,
+            actor_id=_normalize_actor_id(actor_id),
+            reason=reason,
+            idempotency_key=idempotency_key,
+            history_operation_type="cancel_link",
+        )
 
     @staticmethod
     def _cancel_link_response_payload(result: dict[str, object]) -> dict[str, object]:
@@ -1350,6 +1488,9 @@ class WorkbenchWriteFacade:
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             ),
         )
+        relation_command = self._relation_command_service_for()
+        if relation_command is None:
+            return self._relation_command_unavailable_result()
         previous_exception_snapshot = self._exception_case_service.snapshot()
         previous_pair_snapshot = self._pair_relation_service.snapshot()
         try:
@@ -1367,12 +1508,15 @@ class WorkbenchWriteFacade:
                 "direction": PERSONAL_ADVANCE_REPAYMENT_MODE,
                 **amount_summary,
             }
-            relation, _history = self._pair_relation_service.replace_with_confirmed_relation(
+            confirm_relation = getattr(relation_command, "confirm_relation", None)
+            if not callable(confirm_relation):
+                raise _WorkbenchWritePersistenceError("relation command service must expose confirm_relation.")
+            command_result = confirm_relation(
                 case_id=case_id,
                 row_ids=row_ids,
                 row_types=[str(row.get("type") or "") for row in rows],
                 relation_mode=PERSONAL_ADVANCE_REPAYMENT_MODE,
-                created_by="system",
+                actor_id="system",
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
                 note=note,
                 amount_check=amount_check,
@@ -1382,8 +1526,17 @@ class WorkbenchWriteFacade:
                     "note": note,
                 },
                 before_relations=history_before_relations,
+                replace_existing=True,
+                history_operation_type=action_name,
             )
+            relation = dict(command_result.get("relation") or {})
             self._save_exception_cases_snapshot()
+        except WorkbenchRelationCommandError as exc:
+            self._restore_exception_pair_snapshots(
+                previous_exception_snapshot=previous_exception_snapshot,
+                previous_pair_snapshot=previous_pair_snapshot,
+            )
+            return self._relation_command_error_result(exc)
         except Exception as exc:
             self._restore_exception_pair_snapshots(
                 previous_exception_snapshot=previous_exception_snapshot,
@@ -1441,6 +1594,8 @@ class WorkbenchWriteFacade:
                 request_id=request_id,
                 action_name=action_name,
             )
+        except WorkbenchRelationCommandError as exc:
+            return self._relation_command_error_result(exc)
         except WorkbenchExceptionApplicationConflict as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.CONFLICT,
@@ -1983,7 +2138,16 @@ class WorkbenchWriteFacade:
         previous_pair_snapshot = self._pair_relation_service.snapshot()
         previous_candidate_snapshot = self._candidate_match_service.snapshot()
         previous_override_snapshot = self._override_service.snapshot()
-        result = self._exception_service.apply(payload, actor=actor)
+        try:
+            result = self._exception_service.apply(payload, actor=actor)
+        except WorkbenchRelationCommandError:
+            self._restore_exception_write_snapshots(
+                previous_exception_snapshot=previous_exception_snapshot,
+                previous_pair_snapshot=previous_pair_snapshot,
+                previous_candidate_snapshot=previous_candidate_snapshot,
+                previous_override_snapshot=previous_override_snapshot,
+            )
+            raise
         row_ids = [
             str(row_id)
             for row_id in list(result.get("affected_row_ids") or [])

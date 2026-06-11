@@ -33,6 +33,31 @@ def _json_response(response) -> dict[str, object]:
     return json.loads(response.body)
 
 
+class _RelationCommandRepositoryFactory(_RecordingRepositoryFactory):
+    def __init__(self, persisted: list[dict[str, object]]) -> None:
+        super().__init__()
+        self._persisted = persisted
+
+    def __call__(self, transaction: object):
+        repository = super().__call__(transaction)
+
+        def save_workbench_pair_relations(
+            snapshot: dict[str, object],
+            *,
+            changed_case_ids: list[str] | None = None,
+        ) -> None:
+            self._persisted.append(
+                {
+                    "transaction": transaction,
+                    "changed_case_ids": list(changed_case_ids or []),
+                    "snapshot": dict(snapshot),
+                }
+            )
+
+        repository.pair_relations.save_workbench_pair_relations = save_workbench_pair_relations
+        return repository
+
+
 class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
@@ -83,18 +108,13 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     def _install_confirm_link_uow(self, app: Application) -> tuple[_RecordingConnection, _RecordingDirtyOutboxWriter, list[dict[str, object]]]:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter()
+        persisted: list[dict[str, object]] = []
         app._workbench_confirm_link_uow_override = WorkbenchWriteUnitOfWork(
             connection=connection,
-            repository_factory=_RecordingRepositoryFactory(),
+            repository_factory=_RelationCommandRepositoryFactory(persisted),
             read_model_refresh_writer=writer,
             idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
         )
-        persisted: list[dict[str, object]] = []
-
-        def persist_in_transaction(*, transaction: object, changed_case_ids: list[str] | None = None) -> None:
-            persisted.append({"transaction": transaction, "changed_case_ids": list(changed_case_ids or [])})
-
-        app._persist_workbench_pair_relations_in_transaction = persist_in_transaction  # type: ignore[method-assign]
         return connection, writer, persisted
 
     def _install_cancel_link_uow(
@@ -105,18 +125,13 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     ) -> tuple[_RecordingConnection, _RecordingDirtyOutboxWriter, list[dict[str, object]]]:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter(fail=fail_outbox)
+        persisted: list[dict[str, object]] = []
         app._workbench_cancel_link_uow_override = WorkbenchWriteUnitOfWork(
             connection=connection,
-            repository_factory=_RecordingRepositoryFactory(),
+            repository_factory=_RelationCommandRepositoryFactory(persisted),
             read_model_refresh_writer=writer,
             idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
         )
-        persisted: list[dict[str, object]] = []
-
-        def persist_in_transaction(*, transaction: object, changed_case_ids: list[str] | None = None) -> None:
-            persisted.append({"transaction": transaction, "changed_case_ids": list(changed_case_ids or [])})
-
-        app._persist_workbench_pair_relations_in_transaction = persist_in_transaction  # type: ignore[method-assign]
         return connection, writer, persisted
 
     def _create_cash_special_relation(
@@ -250,19 +265,14 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         row_ids = self._default_open_row_ids(app)
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter()
-        repository_factory = _RecordingRepositoryFactory()
+        persisted: list[dict[str, object]] = []
+        repository_factory = _RelationCommandRepositoryFactory(persisted)
         app._workbench_confirm_link_uow_override = WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=repository_factory,
             read_model_refresh_writer=writer,
             idempotency_store=_RecordingIdempotencyStore(),
         )
-        persisted: list[dict[str, object]] = []
-
-        def persist_in_transaction(*, transaction: object, changed_case_ids: list[str] | None = None) -> None:
-            persisted.append({"transaction": transaction, "changed_case_ids": list(changed_case_ids or [])})
-
-        app._persist_workbench_pair_relations_in_transaction = persist_in_transaction  # type: ignore[method-assign]
 
         with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
             response = self._post(

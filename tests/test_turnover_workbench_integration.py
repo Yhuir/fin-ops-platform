@@ -217,6 +217,44 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 
+    def test_manual_closure_fails_fast_when_workbench_relation_read_model_is_stale(self) -> None:
+        class StaleWorkbenchRelationFacade:
+            def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+                return {
+                    "status": "stale",
+                    "rows": [],
+                    "groups": [],
+                    "read_model_scope_keys": ["2026-03"],
+                    "stale_reasons": ["source_version_mismatch"],
+                    "refresh_enqueued": True,
+                }
+
+        with self._temporary_app() as app:
+            transaction_ids = self._import_bank_rows(app)
+            self._tag_borrow_in_rows(app, transaction_ids)
+            app._workbench_relation_facade = StaleWorkbenchRelationFacade()
+            before_turnover_snapshot = app._turnover_relation_service.snapshot()
+            before_pair_snapshot = app._workbench_pair_relation_service.snapshot()
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "外部往来手动闭环"}),
+            )
+            payload = json.loads(response.body)
+
+            after_turnover_snapshot = app._turnover_relation_service.snapshot()
+            after_pair_snapshot = app._workbench_pair_relation_service.snapshot()
+
+        self.assertEqual(response.status_code, 409, response.body)
+        self.assertEqual(payload["error"], "turnover_relation_conflict")
+        self.assertEqual(payload["read_model_status"], "stale")
+        self.assertEqual(payload["read_model_stale_reasons"], ["source_version_mismatch"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(after_turnover_snapshot, before_turnover_snapshot)
+        self.assertEqual(after_pair_snapshot, before_pair_snapshot)
+
     def test_manual_closure_accepts_source_bank_row_ids_from_grouped_read_model(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app, principal_amount="40000.00", settlement_amount="40000.00")

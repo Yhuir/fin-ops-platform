@@ -32,6 +32,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             etc_service=app._etc_service,
             import_service=app._import_service,
             pair_relation_service=app._workbench_pair_relation_service,
+            relation_command_service=app._workbench_relation_command_service(),
             sync_import_result_to_canonical_invoices=lambda result: _sync_import_result_to_canonical_invoices(app, result),
             sync_etc_invoices_to_canonical_invoices=lambda invoices: _sync_etc_invoices_to_canonical_invoices(app, invoices),
             refresh_after_etc_invoice_sync=lambda _months, _reason: None,

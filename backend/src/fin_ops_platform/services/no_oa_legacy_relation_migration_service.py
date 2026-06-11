@@ -9,11 +9,13 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import (
     no_oa_batch_type_for_legacy_relation_mode,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 class NoOaLegacyRelationMigrationService:
-    def __init__(self, *, pair_relation_service: WorkbenchPairRelationService) -> None:
+    def __init__(self, *, pair_relation_service: WorkbenchPairRelationService, relation_command_service: Any | None = None) -> None:
         self._pair_relation_service = pair_relation_service
+        self._relation_command_service = relation_command_service
 
     def batch_type_for_relation(self, relation: dict[str, Any]) -> str:
         return no_oa_batch_type_for_legacy_relation_mode(str(relation.get("relation_mode") or ""))
@@ -91,30 +93,89 @@ class NoOaLegacyRelationMigrationService:
         existing_relation = self._pair_relation_service.get_active_relation_by_case_id(no_oa_relation_case_id)
         if not self._is_matching_no_oa_relation(existing_relation, no_oa_relation_case_id, row_ids, special_metadata):
             for legacy_case_id in legacy_case_ids:
-                cancelled = self._pair_relation_service.cancel_relation(legacy_case_id, cancelled_at=created_at)
-                if cancelled is not None:
-                    changed_case_ids.append(legacy_case_id)
-            relation = self._pair_relation_service.create_active_relation(
+                changed_case_ids.extend(
+                    self._cancel_relation(
+                        legacy_case_id,
+                        occurred_at=created_at,
+                        reason="历史工资/内部往来款自动配对迁移为免OA批次",
+                        history_operation_type="no_oa_legacy_relation_migration_cancel",
+                    )
+                )
+            relation, changed_ids = self._confirm_relation(
                 case_id=no_oa_relation_case_id,
                 row_ids=row_ids,
                 row_types=["bank" for _ in row_ids],
                 relation_mode="no_oa_bank_batch",
-                created_by=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
+                actor_id=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
                 month_scope=month_scope or str(first_legacy_relation.get("month_scope") or "all"),
-                created_at=created_at,
+                occurred_at=created_at,
                 note="历史工资/内部往来款自动配对迁移为免OA批次",
                 special_metadata=deepcopy(special_metadata),
                 evidence=deepcopy(evidence),
                 display_tags=display_tags,
+                history_operation_type="no_oa_legacy_relation_migration",
             )
-            changed_case_ids.append(no_oa_relation_case_id)
+            changed_case_ids.extend(changed_ids)
             return relation, changed_case_ids
 
         for legacy_case_id in legacy_case_ids:
-            cancelled = self._pair_relation_service.cancel_relation(legacy_case_id, cancelled_at=created_at)
-            if cancelled is not None:
-                changed_case_ids.append(legacy_case_id)
+            changed_case_ids.extend(
+                self._cancel_relation(
+                    legacy_case_id,
+                    occurred_at=created_at,
+                    reason="历史工资/内部往来款自动配对迁移为免OA批次",
+                    history_operation_type="no_oa_legacy_relation_migration_cancel",
+                )
+            )
         return deepcopy(existing_relation), changed_case_ids
+
+    def _require_relation_command_service(self) -> Any:
+        if self._relation_command_service is None:
+            raise ValueError("no_oa_relation_command_unavailable")
+        return self._relation_command_service
+
+    def _confirm_relation(self, **kwargs: Any) -> tuple[dict[str, Any], list[str]]:
+        command_service = self._require_relation_command_service()
+        try:
+            result = command_service.confirm_relation(**kwargs)
+        except WorkbenchRelationCommandError as exc:
+            raise ValueError(exc.error_code) from exc
+        relation = result.get("relation") if isinstance(result, dict) else None
+        raw_changed_case_ids = result.get("changed_case_ids") if isinstance(result, dict) else []
+        changed_case_ids = [
+            str(case_id).strip()
+            for case_id in list(raw_changed_case_ids or [])
+            if str(case_id).strip()
+        ]
+        return deepcopy(relation) if isinstance(relation, dict) else {}, changed_case_ids
+
+    def _cancel_relation(
+        self,
+        case_id: str,
+        *,
+        occurred_at: str,
+        reason: str,
+        history_operation_type: str,
+    ) -> list[str]:
+        command_service = self._require_relation_command_service()
+        try:
+            result = command_service.cancel_relation(
+                case_id=case_id,
+                actor_id=NO_OA_LEGACY_RELATION_MIGRATION_SOURCE,
+                reason=reason,
+                occurred_at=occurred_at,
+                history_operation_type=history_operation_type,
+            )
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                return []
+            raise ValueError(exc.error_code) from exc
+        raw_changed_case_ids = result.get("changed_case_ids") if isinstance(result, dict) else []
+        return [
+            str(changed_case_id).strip()
+            for changed_case_id in list(raw_changed_case_ids or [])
+            if str(changed_case_id).strip()
+        ]
 
     @staticmethod
     def legacy_metadata(legacy_relation: dict[str, Any], *, migrated_at: str) -> dict[str, Any]:

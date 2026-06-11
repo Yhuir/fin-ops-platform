@@ -40,8 +40,9 @@
 
 - 银行流水、OA 行和已有关联关系来自 Workbench / Workbench relation read model。
 - `GET /api/batch-accounting` 必须返回 `summary`、`bank_rows`、`oa_rows`、`relations_by_bank_row_id`、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
-- `POST /api/batch-accounting/submit` 写入 Workbench pair relation，`special_metadata.source` 必须是 `batch_accounting`。
+- `POST /api/batch-accounting/submit` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注。
+- `repair_legacy_case_id_collisions(...)` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 恢复历史 batch relation；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - 前端提交/撤回成功后发送 `workbenchRelationUpdated`，作为同浏览器会话刷新提示；事实源仍以后端 dirty scope、read model freshness 和 worker readiness 为准。
 
 ## 当前边界
@@ -49,7 +50,7 @@
 - 必须透出 `workbench_relation` read model 状态，不能把非 fresh 空关系显示为真实未提交。
 - `read_model_status !== "fresh"` 时，页面可以展示当前可用 payload，但必须阻止提交和撤回。
 - `GET /api/batch-accounting` 的 relation 读取必须通过现有 relation read facade/freshness 边界请求 `require_fresh`；缺失或 stale scope 只能经 facade/gateway 入队刷新，不能在页面 GET 路径同步 rebuild 或直接写 durable queue。
-- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须在后端再次校验 relation read model fresh；非 fresh 返回 `batch_accounting_read_model_not_fresh`，并携带 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
+- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须在后端再次校验 relation read model fresh；非 fresh 返回 `batch_accounting_read_model_not_fresh`，并携带 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。提交/撤回 relation 写入必须走 command service，不允许在缺少 command service 时静默写旧 pair service。
 - 批量账务关系变化会影响关联台、银行明细、成本统计、搜索、进项/销项/OA 待付款等依赖关系 read model 或 invoice lifecycle 的页面。
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。
@@ -60,7 +61,7 @@
 | --- | --- |
 | 页面筛选、bucket、选择、差额说明、提交/撤回 | `BatchAccountingPage.test.tsx` 的 loading/empty/error/stale/筛选/提交/撤回/事件回归 |
 | API DTO 或错误码 | `tests/test_batch_accounting_api.py`、`web/src/features/batchAccounting/api.ts` mapper |
-| 关系提交/撤回规则 | `BatchAccountingService`、`WorkbenchPairRelationService`、Workbench relation projection、历史修复回归 |
+| 关系提交/撤回/修复规则 | `BatchAccountingService`、`WorkbenchRelationCommandService`、Workbench relation projection、历史修复回归 |
 | `workbench_relation` freshness | `WorkbenchRelationReadFacade`、`workbench_relation` worker、App Status / App Health |
 | Dirty/outbox/lifecycle event | `DerivedDataLifecycleService`、runtime worker registry、下游页面 stale/fresh 回归 |
 | Bank/OA identity 字段 | 银行明细、关联台、待找发票、进项/销项/OA 待付款和成本统计关系标签 |

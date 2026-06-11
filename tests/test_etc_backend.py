@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
+from types import SimpleNamespace
 import unittest
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -43,6 +44,7 @@ from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkSpec,
 )
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from unittest.mock import patch
 
 
@@ -3397,6 +3399,148 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(len([row for row in after_rows if row.get("source_kind") == "etc_invoice"]), 2)
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
 
+    def test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            batch = SimpleNamespace(
+                business_batch_id="etc_business_batch_command",
+                submission_batch_id="etc_batch_command",
+                external_etc_batch_id="ETC-COMMAND-202602",
+            )
+            summary_row_id = app._etc_invoice_summary_row_id("ETC-COMMAND-202602")
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-ETC-COMMAND",
+                row_ids=["oa-etc-command", "txn-etc-command", summary_row_id],
+                row_types=["oa", "bank", "invoice"],
+                relation_mode="manual_confirmed",
+                created_by="finance",
+                month_scope="2026-02",
+                note="ETC三栏配对",
+            )
+            original_cancel_relation = app._workbench_pair_relation_service.cancel_relation
+
+            def forbidden_direct_cancel(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("ETC summary relation cancel must not use direct pair service batch cancel.")
+
+            app._workbench_pair_relation_service.cancel_active_relations_for_row_ids = forbidden_direct_cancel
+
+            class FreshRelationFacade:
+                def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+                    self.requested_row_ids = list(row_ids)
+                    return {
+                        "read_model_status": "fresh",
+                        "read_model_scope_keys": ["2026-02"],
+                        "stale_reasons": [],
+                        "refresh_enqueued": False,
+                        "rows": [
+                            {
+                                "row_id": summary_row_id,
+                                "group_ids": ["CASE-ETC-COMMAND"],
+                            }
+                        ],
+                        "groups": [
+                            {
+                                "group_id": "CASE-ETC-COMMAND",
+                                "scope_month": "2026-02",
+                                "payload": {
+                                    "relation_mode": "manual_confirmed",
+                                    "row_ids": ["oa-etc-command", "txn-etc-command", summary_row_id],
+                                    "row_types": ["oa", "bank", "invoice"],
+                                    "amount_check": {"external_etc_batch_id": "ETC-COMMAND-202602"},
+                                },
+                            }
+                        ],
+                        "source_versions": {},
+                    }
+
+            class RecordingRelationCommandService:
+                def __init__(self) -> None:
+                    self.cancel_calls: list[dict[str, object]] = []
+
+                def cancel_relation(self, **kwargs: object) -> dict[str, object]:
+                    self.cancel_calls.append(dict(kwargs))
+                    relation = original_cancel_relation(str(kwargs["case_id"]))
+                    return {
+                        "status": "cancelled",
+                        "relation": relation,
+                        "changed_case_ids": [str(kwargs["case_id"])],
+                        "affected_months": ["2026-02"],
+                        "read_model_status": "fresh",
+                        "read_model_stale_reasons": [],
+                        "read_model_scope_keys": ["2026-02"],
+                        "refresh_enqueued": False,
+                    }
+
+            command_service = RecordingRelationCommandService()
+            persisted_case_ids: list[list[str]] = []
+            app._workbench_relation_read_facade = lambda: FreshRelationFacade()
+            app._workbench_relation_command_service = lambda **_kwargs: command_service
+            app._persist_workbench_pair_relations = lambda *, changed_case_ids: persisted_case_ids.append(list(changed_case_ids))
+
+            changed_months = app._cancel_etc_summary_relations_for_batch(batch)
+            active_after = app._workbench_pair_relation_service.get_active_relation_by_row_id(summary_row_id)
+
+        self.assertEqual(changed_months, ["2026-02"])
+        self.assertIsNone(active_after)
+        self.assertEqual(len(command_service.cancel_calls), 1)
+        self.assertEqual(command_service.cancel_calls[0]["case_id"], "CASE-ETC-COMMAND")
+        self.assertEqual(command_service.cancel_calls[0]["history_operation_type"], "etc_summary_unmerged")
+        self.assertEqual(persisted_case_ids, [["CASE-ETC-COMMAND"]])
+
+    def test_submitted_etc_business_batch_delete_fails_fast_when_workbench_relation_read_model_is_stale(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            batch = app._etc_service.create_business_batch(task_id="ETC-STALE-TASK")
+            mutable_batch = app._etc_service._business_batches[batch.business_batch_id]
+            mutable_batch.status = EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value
+            mutable_batch.external_etc_batch_id = "ETC-STALE-202602"
+            mutable_batch.submission_batch_id = "etc_batch_stale"
+            mutable_batch.amount_breakdown = {"scope_month": "2026-02"}
+            summary_row_id = app._etc_invoice_summary_row_id("ETC-STALE-202602")
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-ETC-STALE",
+                row_ids=["oa-etc-stale", "txn-etc-stale", summary_row_id],
+                row_types=["oa", "bank", "invoice"],
+                relation_mode="manual_confirmed",
+                created_by="finance",
+                month_scope="2026-02",
+                note="ETC三栏配对",
+            )
+
+            class StaleRelationFacade:
+                def get_by_row_ids(self, _row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+                    return {
+                        "status": "stale",
+                        "read_model_status": "stale",
+                        "read_model_scope_keys": ["2026-02"],
+                        "stale_reasons": ["test_stale_relation_projection"],
+                        "refresh_enqueued": True,
+                        "rows": [],
+                        "groups": [],
+                    }
+
+            app._workbench_relation_read_facade = lambda: StaleRelationFacade()
+
+            delete_response = app.handle_request(
+                "DELETE",
+                f"/api/etc/business-batches/{batch.business_batch_id}",
+                json.dumps({
+                    "expectedVersion": 1,
+                    "reason": "用户删除已提交 ETC 批次并取消三栏配对。",
+                }),
+            )
+            response_payload = json.loads(delete_response.body)
+            batch_after = app._etc_service.get_business_batch(batch.business_batch_id)
+            relation_after = app._workbench_pair_relation_service.get_active_relation_by_row_id(summary_row_id)
+
+        self.assertEqual(delete_response.status_code, 409)
+        self.assertEqual(response_payload["error"]["code"], "workbench_relation_read_model_not_fresh")
+        self.assertEqual(response_payload["error"]["details"]["read_model_status"], "stale")
+        self.assertEqual(response_payload["error"]["details"]["read_model_stale_reasons"], ["test_stale_relation_projection"])
+        self.assertEqual(batch_after.status, EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)
+        self.assertEqual(batch_after.version, 1)
+        self.assertIsNotNone(relation_after)
+
     def test_reconciliation_task_delete_cancels_submitted_business_summary_relation(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -4926,10 +5070,46 @@ class EtcApiTests(unittest.TestCase):
                 oa_row_id="oa-exp-test",
                 oa_amount=Decimal("30.00"),
             )
+            original_create_relation = app._workbench_pair_relation_service.create_active_relation
+
+            def forbidden_direct_relation_create(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("historical ETC repair must create relation via command service.")
+
+            app._workbench_pair_relation_service.create_active_relation = forbidden_direct_relation_create
+
+            class RecordingRelationCommandService:
+                def __init__(self) -> None:
+                    self.confirm_calls: list[dict[str, object]] = []
+
+                def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+                    self.confirm_calls.append(dict(kwargs))
+                    relation = original_create_relation(
+                        case_id=str(kwargs["case_id"]),
+                        row_ids=list(kwargs["row_ids"]),
+                        row_types=list(kwargs["row_types"]),
+                        relation_mode=str(kwargs["relation_mode"]),
+                        created_by=str(kwargs["actor_id"]),
+                        month_scope=str(kwargs.get("month_scope") or "all"),
+                        note=str(kwargs.get("note") or ""),
+                        amount_check=dict(kwargs.get("amount_check") or {}),
+                    )
+                    return {
+                        "status": "confirmed",
+                        "relation": relation,
+                        "changed_case_ids": [str(kwargs["case_id"])],
+                        "affected_months": [],
+                        "read_model_status": "fresh",
+                        "read_model_stale_reasons": [],
+                        "read_model_scope_keys": ["all"],
+                        "refresh_enqueued": False,
+                    }
+
+            relation_command_service = RecordingRelationCommandService()
             service = HistoricalEtcRepairService(
                 state_store=app._state_store,
                 etc_service=app._etc_service,
                 pair_relation_service=app._workbench_pair_relation_service,
+                relation_command_service=relation_command_service,
                 specs=[spec],
                 oa_row_exists=lambda row_id: row_id == "oa-exp-test",
                 sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
@@ -4981,6 +5161,54 @@ class EtcApiTests(unittest.TestCase):
         assert relation is not None
         self.assertEqual(relation["relation_mode"], "etc_batch_invoice_link")
         self.assertEqual(persisted_state["ETC-HIST-TEST"]["status"], "ok")
+        self.assertEqual(relation_command_service.confirm_calls[-1]["case_id"], "etc-historical-test")
+        self.assertEqual(relation_command_service.confirm_calls[-1]["relation_mode"], "etc_batch_invoice_link")
+
+    def test_historical_etc_repair_requires_relation_command_service_before_local_writes(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            spec = HistoricalEtcRepairBatchSpec(
+                label="测试历史批次",
+                bundle_id="ETC-HIST-NO-COMMAND",
+                case_id="etc-historical-no-command",
+                external_batch_id="ETC-HIST-NO-COMMAND",
+                oa_row_id="oa-exp-no-command",
+                oa_amount=Decimal("30.00"),
+            )
+
+            def forbidden_direct_relation_create(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("historical ETC repair must fail fast instead of using pair service fallback.")
+
+            app._workbench_pair_relation_service.create_active_relation = forbidden_direct_relation_create
+            service = HistoricalEtcRepairService(
+                state_store=app._state_store,
+                etc_service=app._etc_service,
+                pair_relation_service=app._workbench_pair_relation_service,
+                specs=[spec],
+                oa_row_exists=lambda row_id: row_id == "oa-exp-no-command",
+                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
+                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
+                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
+                    changed_case_ids=case_ids,
+                ),
+                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
+                persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
+            )
+            service.seed_bundle_from_upload(
+                spec,
+                UploadedEtcZipFile("historical-no-command.zip", etc_zip(["ETC001", "ETC002"])),
+            )
+
+            with self.assertRaises(WorkbenchRelationCommandError) as context:
+                service.reconcile(reason="test")
+
+            submitted_batches = app._etc_service.list_batches(status="submitted")
+            relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("etc-historical-no-command")
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_command_unavailable")
+        self.assertEqual(submitted_batches, [])
+        self.assertIsNone(relation)
 
     def test_existing_etc_batch_link_extends_active_oa_bank_relation_and_renders_summary(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -5035,10 +5263,45 @@ class EtcApiTests(unittest.TestCase):
                     "amount_delta": "0.00",
                 },
             )
+            original_update_relation_metadata = app._workbench_pair_relation_service.update_relation_metadata_for_case_id
+
+            def forbidden_direct_relation_metadata_update(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("existing ETC batch link must update relation metadata via command service.")
+
+            app._workbench_pair_relation_service.update_relation_metadata_for_case_id = forbidden_direct_relation_metadata_update
+
+            class RecordingRelationCommandService:
+                def __init__(self) -> None:
+                    self.metadata_calls: list[dict[str, object]] = []
+
+                def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
+                    self.metadata_calls.append(dict(kwargs))
+                    pair_kwargs = {
+                        key: value
+                        for key, value in kwargs.items()
+                        if key not in {"actor_id", "history_operation_type"}
+                    }
+                    pair_kwargs["updated_by"] = kwargs["actor_id"]
+                    pair_kwargs["operation_type"] = kwargs["history_operation_type"]
+                    relation, history = original_update_relation_metadata(**pair_kwargs)
+                    return {
+                        "status": "updated",
+                        "relation": relation,
+                        "history": history,
+                        "changed_case_ids": [str(kwargs["case_id"])],
+                        "affected_months": ["2026-02"],
+                        "read_model_status": "fresh",
+                        "read_model_stale_reasons": [],
+                        "read_model_scope_keys": ["2026-02"],
+                        "refresh_enqueued": False,
+                    }
+
+            relation_command_service = RecordingRelationCommandService()
             service = ExistingEtcBatchLinkService(
                 etc_service=app._etc_service,
                 import_service=app._import_service,
                 pair_relation_service=app._workbench_pair_relation_service,
+                relation_command_service=relation_command_service,
                 sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
                 sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
                 refresh_after_etc_invoice_sync=lambda months, reason: None,
@@ -5127,6 +5390,8 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(relation["amount_check"]["invoice_total"], "26.14")
         self.assertEqual(relation["amount_check"]["delta"], "3.86")
         self.assertEqual(relation["amount_check"]["external_etc_batch_id"], "ETC-EXISTING-2026-02")
+        self.assertEqual(relation_command_service.metadata_calls[-1]["case_id"], "CASE-EXISTING-ETC")
+        self.assertEqual(relation_command_service.metadata_calls[-1]["history_operation_type"], "link_existing_etc_batch")
         self.assertEqual(invoices["ETC001"].workbench_visibility, "hidden_after_etc_submission")
         self.assertEqual(invoices["ETC001"].etc_submission_status, "submitted")
         self.assertEqual(invoices["ETC002"].workbench_visibility, "hidden_after_etc_submission")
@@ -5134,6 +5399,76 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(invoice_rows[0]["source_kind"], "etc_invoice_summary")
         self.assertEqual(invoice_rows[0]["seller_name"], "ETC发票 2 张")
         self.assertEqual(invoice_rows[0]["total_with_tax"], "26.14")
+
+    def test_existing_etc_batch_link_requires_relation_command_service_before_local_writes(self) -> None:
+        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            manual_preview = app._import_service.preview_import(
+                batch_type=BatchType.INPUT_INVOICE,
+                source_name="manual-etc.xlsx",
+                imported_by="finance",
+                rows=[
+                    {
+                        "digital_invoice_no": "ETC001",
+                        "invoice_no": "ETC001",
+                        "counterparty_name": "云南高速公路联网收费管理有限公司",
+                        "seller_name": "云南高速公路联网收费管理有限公司",
+                        "seller_tax_no": "915300007194052520",
+                        "buyer_name": "云南溯源科技有限公司",
+                        "buyer_tax_no": "915300007194052521",
+                        "amount": "12.68",
+                        "total_with_tax": "13.07",
+                        "tax_amount": "0.39",
+                        "invoice_date": "2026-02-27",
+                    },
+                ],
+            )
+            app._import_service.confirm_import(manual_preview.id)
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="CASE-EXISTING-NO-COMMAND",
+                row_ids=["txn-existing-no-command", "oa-existing-no-command"],
+                row_types=["bank", "oa"],
+                relation_mode="manual_confirmed",
+                created_by="system",
+                month_scope="2026-02",
+                amount_check={"status": "matched", "oa_amount": "13.07", "bank_amount": "13.07", "amount_delta": "0.00"},
+            )
+
+            def forbidden_direct_relation_metadata_update(*_args: object, **_kwargs: object) -> None:
+                raise AssertionError("existing ETC link must fail fast instead of using pair service fallback.")
+
+            app._workbench_pair_relation_service.update_relation_metadata_for_case_id = forbidden_direct_relation_metadata_update
+            service = ExistingEtcBatchLinkService(
+                etc_service=app._etc_service,
+                import_service=app._import_service,
+                pair_relation_service=app._workbench_pair_relation_service,
+                sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
+                sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
+                refresh_after_etc_invoice_sync=lambda months, reason: None,
+                persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
+                    changed_case_ids=case_ids,
+                ),
+                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
+                persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
+            )
+
+            with self.assertRaises(WorkbenchRelationCommandError) as context:
+                service.link_existing_invoices(
+                    ExistingEtcBatchLinkSpec(
+                        label="缺少 command ETC 批次",
+                        case_id="CASE-EXISTING-NO-COMMAND",
+                        external_batch_id="ETC-EXISTING-NO-COMMAND",
+                        oa_row_id="oa-existing-no-command",
+                        bank_row_id="txn-existing-no-command",
+                        oa_amount=Decimal("13.07"),
+                        bank_amount=Decimal("13.07"),
+                        invoice_numbers=("ETC001",),
+                    )
+                )
+            batches = app._etc_service.list_batches(status="submitted")
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_command_unavailable")
+        self.assertEqual(batches, [])
 
     def test_existing_etc_batch_link_is_idempotent_and_does_not_create_parallel_relation(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
@@ -5168,10 +5503,40 @@ class EtcApiTests(unittest.TestCase):
                 month_scope="2026-02",
                 amount_check={"status": "matched", "oa_amount": "13.07", "bank_amount": "13.07", "amount_delta": "0.00"},
             )
+            original_update_relation_metadata = app._workbench_pair_relation_service.update_relation_metadata_for_case_id
+
+            class RecordingRelationCommandService:
+                def __init__(self) -> None:
+                    self.metadata_calls: list[dict[str, object]] = []
+
+                def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
+                    self.metadata_calls.append(dict(kwargs))
+                    pair_kwargs = {
+                        key: value
+                        for key, value in kwargs.items()
+                        if key not in {"actor_id", "history_operation_type"}
+                    }
+                    pair_kwargs["updated_by"] = kwargs["actor_id"]
+                    pair_kwargs["operation_type"] = kwargs["history_operation_type"]
+                    relation, history = original_update_relation_metadata(**pair_kwargs)
+                    return {
+                        "status": "updated",
+                        "relation": relation,
+                        "history": history,
+                        "changed_case_ids": [str(kwargs["case_id"])],
+                        "affected_months": ["2026-02"],
+                        "read_model_status": "fresh",
+                        "read_model_stale_reasons": [],
+                        "read_model_scope_keys": ["2026-02"],
+                        "refresh_enqueued": False,
+                    }
+
+            relation_command_service = RecordingRelationCommandService()
             service = ExistingEtcBatchLinkService(
                 etc_service=app._etc_service,
                 import_service=app._import_service,
                 pair_relation_service=app._workbench_pair_relation_service,
+                relation_command_service=relation_command_service,
                 sync_import_result_to_canonical_invoices=app._sync_etc_import_result_to_canonical_invoices,
                 sync_etc_invoices_to_canonical_invoices=app._sync_etc_invoices_to_canonical_invoices,
                 refresh_after_etc_invoice_sync=lambda months, reason: None,

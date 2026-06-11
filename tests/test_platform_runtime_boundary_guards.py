@@ -106,6 +106,13 @@ def _function_source(tree: ast.Module, source: str, function_name: str) -> str:
     return ""
 
 
+def _class_source(tree: ast.Module, source: str, class_name: str) -> str:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return ast.get_source_segment(source, node) or ""
+    return ""
+
+
 class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
     def __init__(self, *, path: Path) -> None:
         self._path = path
@@ -171,13 +178,11 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
                 "BatchAccountingService._withdraw_unlocked",
             },
             "backend/src/fin_ops_platform/services/no_oa_bank_batch_application_service.py": {
-                "NoOaBankBatchApplicationService.submit_selected_rows",
                 "NoOaBankBatchApplicationService._validate_internal_transfer_selection",
                 "NoOaBankBatchApplicationService._restore_snapshots",
                 "NoOaBankBatchApplicationService.pair_relation_snapshot_by_case_id",
             },
             "backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py": {
-                "NoOaBankBatchService.submit_batch",
                 "NoOaBankBatchService._repair_submitted_no_oa_relation_consistency",
                 "NoOaBankBatchService._has_active_no_oa_relation",
             },
@@ -456,6 +461,320 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                     and node.module == "fin_ops_platform.services.workbench_pair_relation_service"
                 ):
                     violations.append(f"{rel_path}:{node.lineno} imports WorkbenchPairRelationService")
+
+        self.assertEqual(violations, [])
+
+    def test_etc_summary_relation_delete_uses_workbench_relation_command_boundary(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        cancel_method = _function_source(tree, source, "_cancel_etc_summary_relations_for_batch")
+        delete_method = _function_source(tree, source, "_handle_api_etc_business_batch_delete")
+        task_delete_method = _function_source(tree, source, "_delete_reconciliation_task_business_batch_sources")
+
+        violations: list[str] = []
+        if "cancel_relations_for_row_ids" not in cancel_method:
+            violations.append("_cancel_etc_summary_relations_for_batch does not delegate row cancellation to command service")
+        if "cancel_active_relations_for_row_ids" in cancel_method:
+            violations.append("_cancel_etc_summary_relations_for_batch directly mutates pair relation service")
+        if "_workbench_pair_relation_service" in cancel_method:
+            violations.append("_cancel_etc_summary_relations_for_batch reaches app pair relation service directly")
+        if "_assert_etc_summary_relation_write_precondition_for_batch(batch)" not in delete_method:
+            violations.append("ETC business batch API delete lacks relation freshness preflight before local mutation")
+        if "_assert_etc_summary_relation_write_precondition_for_batch(business_batch)" not in task_delete_method:
+            violations.append("ETC reconciliation task delete lacks relation freshness preflight before local mutation")
+
+        self.assertEqual(violations, [])
+
+    def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
+        checks = {
+            "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {
+                "_reconcile_batch": "_pair_relation_service.create_active_relation",
+            },
+            "backend/src/fin_ops_platform/services/historical_etc_business_batch_migration_service.py": {
+                "_update_relation_metadata": "_pair_relation_service.update_relation_metadata_for_case_id",
+            },
+            "backend/src/fin_ops_platform/services/existing_etc_batch_link_service.py": {
+                "link_existing_invoices": "_pair_relation_service.update_relation_metadata_for_case_id",
+            },
+        }
+        violations: list[str] = []
+        for rel_path, method_checks in checks.items():
+            path = REPO_ROOT / rel_path
+            source = path.read_text(encoding="utf-8")
+            tree = _parse(path)
+            for method_name, forbidden in method_checks.items():
+                method_source = _function_source(tree, source, method_name)
+                if forbidden in method_source:
+                    violations.append(f"{rel_path}:{method_name} keeps direct relation write fallback {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_input_invoice_oa_reverse_relation_writer_uses_command_boundary(self) -> None:
+        service_path = SERVICES_ROOT / "input_invoice_usage_oa_reverse_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+        writer_source = _class_source(service_tree, service_source, "WorkbenchInputInvoiceUsageOaReverseRelationWriter")
+
+        app_path = APP_ROOT / "server.py"
+        app_source = app_path.read_text(encoding="utf-8")
+        app_tree = _parse(app_path)
+        factory_source = _function_source(app_tree, app_source, "_input_invoice_usage_oa_reverse_service")
+
+        violations: list[str] = []
+        if "confirm_relation" not in writer_source:
+            violations.append("OA reverse relation writer does not delegate writes to WorkbenchRelationCommandService")
+        for forbidden in (
+            "_pair_relation_service",
+            "active_relations_for_row_ids",
+            "create_active_relation",
+        ):
+            if forbidden in writer_source:
+                violations.append(f"OA reverse relation writer keeps direct pair relation fallback {forbidden}")
+        if "WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_relation_command_service())" not in factory_source:
+            violations.append("Application does not inject WorkbenchRelationCommandService into OA reverse relation writer")
+        if "WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_pair_relation_service)" in factory_source:
+            violations.append("Application still injects WorkbenchPairRelationService into OA reverse relation writer")
+
+        self.assertEqual(violations, [])
+
+    def test_batch_accounting_submit_has_no_direct_pair_write_fallback(self) -> None:
+        path = SERVICES_ROOT / "batch_accounting_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        submit_source = _function_source(tree, source, "_submit_unlocked")
+
+        violations: list[str] = []
+        for forbidden in (
+            "replace_with_confirmed_relation",
+            "_pair_relation_service.create_active_relation",
+            "_pair_relation_service.record_history",
+        ):
+            if forbidden in submit_source:
+                violations.append(f"BatchAccountingService.submit keeps direct pair write fallback {forbidden}")
+        if "batch_accounting_relation_command_unavailable" not in submit_source:
+            violations.append("BatchAccountingService.submit does not fail fast when relation command service is unavailable")
+
+        self.assertEqual(violations, [])
+
+    def test_batch_accounting_repair_has_no_direct_pair_write_fallback(self) -> None:
+        path = SERVICES_ROOT / "batch_accounting_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        repair_source = _function_source(tree, source, "repair_legacy_case_id_collisions")
+
+        violations: list[str] = []
+        if "confirm_relation" not in repair_source:
+            violations.append("BatchAccountingService.repair does not delegate relation repair to command service")
+        if "batch_accounting_relation_command_unavailable" not in repair_source:
+            violations.append("BatchAccountingService.repair does not fail fast when relation command service is unavailable")
+        for forbidden in (
+            "_pair_relation_service.create_active_relation",
+            "_pair_relation_service.record_history",
+        ):
+            if forbidden in repair_source:
+                violations.append(f"BatchAccountingService.repair keeps direct pair write fallback {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_turnover_workbench_pair_port_has_no_direct_pair_write_fallback(self) -> None:
+        path = SERVICES_ROOT / "turnover_ledger_write_adapters.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        port_source = _class_source(tree, source, "TurnoverLedgerWorkbenchPairPort")
+
+        violations: list[str] = []
+        for forbidden in (
+            "replace_with_confirmed_relation",
+            "cancel_relation(case_id)",
+            "_persist_pair_relations(",
+        ):
+            if forbidden in port_source:
+                violations.append(f"TurnoverLedgerWorkbenchPairPort keeps direct pair write fallback {forbidden}")
+        if "workbench_relation_command_unavailable" not in port_source:
+            violations.append("TurnoverLedgerWorkbenchPairPort does not fail fast when relation command service is unavailable")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback(self) -> None:
+        path = SERVICES_ROOT / "workbench_write_facade.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        checked_sources = {
+            method_name: _function_source(tree, source, method_name)
+            for method_name in (
+                "confirm_link",
+                "_confirm_link_with_uow",
+                "cancel_link",
+                "_cancel_link_with_uow",
+            )
+        }
+
+        violations: list[str] = []
+        for method_name, method_source in checked_sources.items():
+            if (
+                "_relation_command_unavailable_result" not in method_source
+                and "workbench_relation_command_unavailable" not in method_source
+            ):
+                violations.append(f"{method_name} does not fail fast when relation command service is unavailable")
+            for forbidden in (
+                "replace_with_confirmed_relation",
+                "cancel_relation_for_row_id",
+                "_persist_pair_relations_in_transaction(",
+            ):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} keeps direct pair relation fallback {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_personal_advance_repayment_uses_relation_command_boundary(self) -> None:
+        path = SERVICES_ROOT / "workbench_write_facade.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        method_source = _function_source(tree, source, "confirm_personal_advance_repayment")
+
+        violations: list[str] = []
+        if "confirm_relation" not in method_source:
+            violations.append("confirm_personal_advance_repayment does not delegate relation creation to command service")
+        if "_relation_command_unavailable_result" not in method_source:
+            violations.append("confirm_personal_advance_repayment does not fail fast when relation command service is unavailable")
+        for forbidden in (
+            "replace_with_confirmed_relation",
+            "create_active_relation",
+            "_persist_pair_relations_in_transaction(",
+        ):
+            if forbidden in method_source:
+                violations.append(f"confirm_personal_advance_repayment keeps direct pair relation fallback {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_workbench_exception_application_uses_relation_command_boundary(self) -> None:
+        service_path = SERVICES_ROOT / "workbench_exception_application_service.py"
+        service_source = service_path.read_text(encoding="utf-8")
+        service_tree = _parse(service_path)
+        apply_source = _function_source(service_tree, service_source, "apply")
+        create_relation_source = _function_source(service_tree, service_source, "_create_pair_relation")
+
+        app_path = APP_ROOT / "server.py"
+        app_source = app_path.read_text(encoding="utf-8")
+        app_tree = _parse(app_path)
+        factory_source = _function_source(app_tree, app_source, "_configure_workbench_exception_application_service")
+
+        violations: list[str] = []
+        if "_require_relation_command_service()" not in apply_source:
+            violations.append("Workbench exception apply does not fail fast when relation command service is unavailable")
+        if "assert_write_precondition" not in apply_source:
+            violations.append("Workbench exception apply lacks relation freshness preflight before local case creation")
+        if "confirm_relation" not in create_relation_source:
+            violations.append("Workbench exception relation creation does not delegate writes to command service")
+        for forbidden in (
+            "create_active_relation",
+            "replace_with_confirmed_relation",
+            "_pair_relation_service.",
+        ):
+            if forbidden in create_relation_source:
+                violations.append(f"Workbench exception relation creation keeps direct pair write fallback {forbidden}")
+        if "relation_command_service=self._workbench_relation_command_service()" not in factory_source:
+            violations.append("Application does not inject WorkbenchRelationCommandService into WorkbenchExceptionApplicationService")
+
+        self.assertEqual(violations, [])
+
+    def test_server_active_relation_repairs_use_relation_command_boundary(self) -> None:
+        path = APP_ROOT / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        checked_sources = {
+            method_name: _function_source(tree, source, method_name)
+            for method_name in (
+                "_sync_oa_invoice_offset_auto_pair_relations",
+                "_repair_active_relations_with_oa_attachment_context",
+            )
+        }
+
+        violations: list[str] = []
+        for method_name, method_source in checked_sources.items():
+            if "confirm_relation" not in method_source:
+                violations.append(f"{method_name} does not delegate relation creation/repair to command service")
+            for forbidden in (
+                "_workbench_pair_relation_service.create_active_relation",
+                "_workbench_pair_relation_service.cancel_relation",
+                "_workbench_pair_relation_service.record_history",
+            ):
+                if forbidden in method_source:
+                    violations.append(f"{method_name} keeps direct pair relation write {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_no_oa_read_model_refresh_does_not_run_relation_repairs(self) -> None:
+        path = SERVICES_ROOT / "no_oa_bank_batch_read_model_refresh.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        handler_source = _function_source(tree, source, "handle_runtime_event")
+
+        violations: list[str] = []
+        if "apply_relation_repairs=False" not in handler_source:
+            violations.append("No-OA read model refresh must call refresh_batches with apply_relation_repairs=False")
+        for forbidden in (
+            "save_workbench_pair_relations",
+            "save_no_oa_bank_batch_mutation",
+            "create_active_relation",
+            "cancel_relation",
+        ):
+            if forbidden in handler_source:
+                violations.append(f"No-OA read model refresh keeps relation write side effect {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
+        checks = {
+            "backend/src/fin_ops_platform/services/no_oa_legacy_relation_migration_service.py": (
+                "migrate_relations_to_no_oa",
+            ),
+            "backend/src/fin_ops_platform/services/no_oa_bank_batch_service.py": (
+                "_migrate_legacy_active_relations",
+                "_consolidate_submitted_single_side_batches",
+                "_prune_submitted_single_side_batches_for_category_drift",
+                "_repair_submitted_no_oa_relation_consistency",
+                "_replace_consolidated_no_oa_relation",
+            ),
+        }
+        violations: list[str] = []
+        for rel_path, method_names in checks.items():
+            path = REPO_ROOT / rel_path
+            source = path.read_text(encoding="utf-8")
+            tree = _parse(path)
+            class_source = _class_source(
+                tree,
+                source,
+                "NoOaLegacyRelationMigrationService"
+                if rel_path.endswith("no_oa_legacy_relation_migration_service.py")
+                else "NoOaBankBatchService",
+            )
+            command_markers = (
+                ("_confirm_relation", "confirm_relation")
+                if rel_path.endswith("no_oa_legacy_relation_migration_service.py")
+                else ("_confirm_no_oa_relation", "confirm_relation")
+            )
+            cancel_markers = (
+                ("_cancel_relation", "cancel_relation")
+                if rel_path.endswith("no_oa_legacy_relation_migration_service.py")
+                else ("_cancel_no_oa_relation", "cancel_relation")
+            )
+            if command_markers[0] not in class_source or command_markers[1] not in class_source:
+                violations.append(f"{rel_path} lacks command-backed relation confirm helper")
+            if cancel_markers[0] not in class_source or cancel_markers[1] not in class_source:
+                violations.append(f"{rel_path} lacks command-backed relation cancel helper")
+            if "no_oa_relation_command_unavailable" not in class_source:
+                violations.append(f"{rel_path} does not fail fast when relation command service is unavailable")
+            for method_name in method_names:
+                method_source = _function_source(tree, source, method_name)
+                for forbidden in (
+                    "_pair_relation_service.create_active_relation",
+                    "_pair_relation_service.cancel_relation",
+                    "_pair_relation_service.record_history",
+                ):
+                    if forbidden in method_source:
+                        violations.append(f"{rel_path}:{method_name} keeps direct pair write fallback {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -747,6 +1066,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/postgres_repositories/read_model_scope_contracts.py",
             "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
             "backend/src/fin_ops_platform/services/postgres_repositories/workbench.py",
+            "backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py",
             "backend/src/fin_ops_platform/services/runtime_queue.py",
         }
         violations: list[str] = []

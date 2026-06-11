@@ -14,6 +14,8 @@
 
 `以发票反提 OA` 使用后端内部 batch 记录本地状态。batch 是内部状态对象，不作为前端用户概念暴露；前端只展示 `创建 OA 草稿`、确认弹窗和 `已提交` 历史。
 
+OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实源。检测到 OA evidence 后建立关系必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 不可用时，本地 batch 不得先推进到 detected。
+
 ### 目标申请人凭据状态
 
 - `unconfigured`：目标 OA 申请人尚未配置可用于后端登录 OA 的账号密码，不能创建 OA 草稿。
@@ -89,3 +91,4 @@
 | 2026-06-10 | 落地目标 OA 申请人 token provider 和一步创建草稿后端状态 | `创建 OA 草稿` 后端使用目标申请人凭据登录 OA；`未提交 OA` 清理本地草稿字段后可重新创建；`已提交 OA` 进入已提交历史 | `tests.test_target_oa_applicant_token_provider`、`tests.test_input_invoice_usage_oa_reverse_service`、`tests.test_input_invoice_usage_api`、`tests.test_postgres_input_invoice_usage_oa_reverse_repository` |
 | 2026-06-10 | 落地反提 OA 前端 `待处理 | 已提交` 状态 | 前端只暴露 `创建 OA 草稿`，草稿创建后弹窗确认 `已提交 OA` 或 `未提交 OA`；已提交 tab 只展示业务历史字段 | `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`cd web && npm run build` |
 | 2026-06-11 | 补齐测试闭环状态机引用 | 将 all scope、OA 反提、目标申请人凭据、submitted history、UI/read model 状态纳入本轮闭环验证 | `tests.test_invoice_usage_collection_sql_runtime`、`tests.test_input_invoice_usage_api`、`tests.test_input_invoice_usage_oa_reverse_service`、`web/src/test/InputInvoiceUsagePage.test.tsx` 等本轮最小闭环 |
+| 2026-06-12 | 收口 OA reverse relation 写入口 | OA reverse batch 不作为 relation 事实源；evidence detected 后通过 `WorkbenchRelationCommandService` 写 `input_invoice_oa_reverse`，non-fresh 时 fail fast 且不保存 detected batch | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` |

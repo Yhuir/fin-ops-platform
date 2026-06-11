@@ -46,16 +46,16 @@
 
 - 候选来源：银行明细有效分类和外部往来标签规则；`deterministic` 只表示零差额候选，不表示已闭环。
 - 台账读取：优先走 `turnover_ledger` SQL read model；`TurnoverLedgerQueryService` 通过 `ReadModelQueryGateway` 处理 fresh/stale/missing/refreshing。
-- 写入入口：tag-selection、bank-row-tags batch、relation extra、confirm、withdraw 通过 `TurnoverLedgerWriteFacade` / UoW 或 legacy fallback 边界。
-- 手动闭环：用户在页面选择同一往来组多条真实银行流水，至少一收一支且收支合计差额为 `0.00`，后端写 Turnover manual relation 和 Workbench active pair relation；bank-only 外部往来闭环在关联台保持 open，只有补齐 OA + 银行 + 发票三栏后才进入 paired。
-- 撤回：只允许撤回 manual/source 合法的外部往来关系；system/generated relation 必须拒绝。
+- 写入入口：tag-selection、bank-row-tags batch、relation extra、confirm、withdraw 通过 `TurnoverLedgerWriteFacade` / UoW 或 legacy fallback 边界；涉及 Workbench relation 的 manual closure/withdraw 必须统一委托 `WorkbenchRelationCommandService`，缺 command service 时 fail fast，不回退 direct pair relation mutation。
+- 手动闭环：用户在页面选择同一往来组多条真实银行流水，至少一收一支且收支合计差额为 `0.00`，后端写 Turnover manual relation，并通过 `WorkbenchRelationCommandService` 写 Workbench active pair relation；bank-only 外部往来闭环在关联台保持 open，只有补齐 OA + 银行 + 发票三栏后才进入 paired。
+- 撤回：只允许撤回 manual/source 合法的外部往来关系；system/generated relation 必须拒绝。Workbench relation 撤回通过 command service cancel，撤回前用 `WorkbenchRelationReadFacade` 检查仍是 bank-only `turnover_manual_closure`。
 - 下游影响：外部往来关系变更影响 `turnover_ledger`、`workbench`、`workbench_relation`、成本统计、搜索和前端跨页刷新提示。
 - App Status：`turnover_ledger` domain 绑定 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type。
 
 不属于本模块事实源：
 
 - 银行明细分类规则的长期业务口径归 `bank-details` 和产品规格维护。
-- Workbench 已配对区事实由 Workbench pair relation/read model 维护，不能由 Turnover query 层临时拼接。
+- Workbench 已配对区事实由 Workbench pair relation/read model 维护，不能由 Turnover query 层临时拼接或直接读取 pair service snapshot。
 - 前端 domain event 只作为同浏览器刷新提示，不是跨页面一致性的事实源。
 
 ## 维护触发器

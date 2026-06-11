@@ -59,7 +59,9 @@ class NoOaBankBatchReadModelRefreshService:
                 "source_version": event.source_version or event.payload.get("source_version"),
             }
 
-        bank_rows, _categories = self._application_service.refresh_batches()
+        bank_rows, _categories = self._application_service.refresh_batches(
+            apply_relation_repairs=False
+        )
         snapshot = self._no_oa_bank_batch_service.snapshot()
         self._state_store.save_no_oa_bank_batches(snapshot)
         self._complete_dirty_scope(event, scope_key=scope_key)

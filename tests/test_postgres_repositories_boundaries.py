@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
 class TransactionRecorder:
@@ -45,6 +48,16 @@ class RecordingConnection:
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         return None
+
+
+class WorkbenchRelationWriteConnection(RecordingConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.fetch_one_calls.append((" ".join(sql.split()), params))
+        return {"source_version": 3}
 
 
 class WorkbenchReadConnection:
@@ -320,11 +333,78 @@ def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
 
 
 def test_workbench_pair_history_load_preserves_original_mongo_array_order() -> None:
+    repository = PostgresWorkbenchRelationRepository(WorkbenchReadConnection())
+
+    snapshot = repository.load_workbench_pair_relations()
+
+    assert [item["operation"] for item in snapshot["pair_relation_history"]] == ["earlier", "later"]
+
+
+def test_workbench_relation_repository_save_writes_relation_history_and_refresh_scopes() -> None:
+    connection = WorkbenchRelationWriteConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        {
+            "pair_relations": {
+                "case-1": {
+                    "case_id": "case-1",
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "month_scope": "2026-05",
+                    "row_ids": ["oa-1", "bank-1"],
+                    "row_types": ["oa", "bank"],
+                }
+            },
+            "pair_relation_history": [
+                {
+                    "case_id": "case-1",
+                    "operation_type": "manual_confirmed",
+                    "before_relations": [],
+                    "after_relations": [{"case_id": "case-1"}],
+                }
+            ],
+        },
+        changed_case_ids={"case-1"},
+    )
+
+    executed_sql = " ".join(sql for sql, _params in connection.executed)
+    fetch_one_sql = " ".join(sql for sql, _params in connection.fetch_one_calls)
+    assert connection.transaction_enters == 1
+    assert connection.transaction_exits == 1
+    assert "insert into app.workbench_pair_relations" in executed_sql
+    assert "delete from app.workbench_pair_relation_history" in executed_sql
+    assert "insert into app.workbench_pair_relation_history" in executed_sql
+    assert "insert into job.read_model_dirty_scopes" in fetch_one_sql
+    assert "insert into job.outbox_events" in executed_sql
+    assert any(params[1] == "workbench_relation" and params[2] == "2026-05" for _sql, params in connection.fetch_one_calls)
+    outbox_params = [params for sql, params in connection.executed if "insert into job.outbox_events" in sql]
+    assert any(params[1] == "workbench_relation.read_model.refresh" for params in outbox_params)
+    assert any(params[1] == "cost_statistics.read_model.refresh" for params in outbox_params)
+
+
+def test_workbench_repository_delegates_pair_relation_load_to_relation_repository() -> None:
     repository = PostgresWorkbenchRepository(WorkbenchReadConnection())
 
     snapshot = repository.load_workbench_pair_relations()
 
     assert [item["operation"] for item in snapshot["pair_relation_history"]] == ["earlier", "later"]
+
+
+def test_workbench_repository_no_longer_owns_pair_relation_sql() -> None:
+    repository_source = (
+        Path(__file__).resolve().parents[1]
+        / "backend/src/fin_ops_platform/services/postgres_repositories/workbench.py"
+    ).read_text(encoding="utf-8")
+    forbidden_snippets = {
+        "from app.workbench_pair_relations",
+        "insert into app.workbench_pair_relations",
+        "app.workbench_pair_relation_history",
+        "_workbench_relation_dirty_scope_keys",
+        "_enqueue_read_model_refresh_in_transaction",
+    }
+
+    assert {snippet for snippet in forbidden_snippets if snippet in repository_source} == set()
 
 
 def test_read_model_loaders_strip_export_only_rebuildable_marker() -> None:

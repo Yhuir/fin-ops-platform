@@ -8,6 +8,7 @@
 - 批量账务不拥有独立 read model；列表和 mutation 前置判断依赖 `workbench_relation` read model freshness。
 - `GET /api/batch-accounting` 必须保持只读，不能为了修复历史关系在 GET 路径写入。
 - `read_model_status !== "fresh"` 时前端必须显示 warning 并禁用提交/撤回；不能把空关系当作真实未提交。
+- 批量账务 submit relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`；缺少 command service 时 fail fast，不回退 direct `WorkbenchPairRelationService.replace_with_confirmed_relation(...)`。
 - 提交/撤回成功后的前端 `workbenchRelationUpdated` 只是刷新提示，不替代后端 dirty scope、worker 和 readiness。
 - 历史 case id collision 修复保留在 service 显式路径和 mutation/repair 语义中，不能重新散落到列表读取。
 
@@ -27,6 +28,28 @@
 ```
 
 ## 历史记录
+
+## 2026-06-12 - legacy repair relation command fallback 删除
+
+- 目标：删除 `BatchAccountingService.repair_legacy_case_id_collisions` 直接调用 `WorkbenchPairRelationService.create_active_relation/record_history` 的历史修复写入口。
+- 影响范围：`BatchAccountingService.repair_legacy_case_id_collisions`、`tests/test_batch_accounting_api.py`、`tests/test_platform_runtime_boundary_guards.py` 和本模块文档。
+- 关键决策：repair 仅在确实需要恢复 relation 时要求 `WorkbenchRelationCommandService`；缺 command service 代表 wiring 错误，应返回 `batch_accounting_relation_command_unavailable`。恢复 relation 使用 `confirm_relation(..., history_operation_type="repair_batch_accounting_relation_id_collision")`，保留 legacy case id、repair source、repaired_at 和 amount metadata。
+- 文档影响：更新 `README.md`、`tests.md`、`implementation-notes.md`，并同步 `workbench-relations` 模块。
+- 测试覆盖：新增 `test_repair_legacy_case_id_collision_delegates_relation_write_to_command_service`、`test_repair_legacy_case_id_collision_requires_relation_command_service_without_direct_pair_fallback` 和 `test_batch_accounting_repair_has_no_direct_pair_write_fallback`；完整 batch accounting API/service 回归通过。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_batch_accounting_api.py -q`。
+- 未测风险：真实 PostgreSQL 历史数据中 legacy relation / 半迁移 / 重复 case id 的全量回放仍需 staging 或生产前 dry-run。
+- 后续事项：继续收口 no-OA legacy repair/consolidation。
+
+## 2026-06-12 - submit relation command fallback 删除
+
+- 目标：删除 `BatchAccountingService.submit` 在缺少 relation command service 时的 direct pair relation fallback，避免批量账务提交绕过统一 relation 事实源。
+- 影响范围：`BatchAccountingService._submit_unlocked`、`tests/test_batch_accounting_api.py`、`tests/test_platform_runtime_boundary_guards.py` 和本模块文档。
+- 关键决策：生产 `Application._batch_accounting_service()` 已注入 `WorkbenchRelationCommandService`；缺少 command service 代表 wiring 错误，应返回 `batch_accounting_relation_command_unavailable`，不能调用 `replace_with_confirmed_relation(...)`。legacy collision repair 后续已在同日迁移到 command service。
+- 文档影响：更新 `README.md`、`tests.md`、`implementation-notes.md`，并同步 `workbench-relations` 模块。
+- 测试覆盖：新增 `test_submit_requires_relation_command_service_without_direct_pair_fallback`；新增 runtime boundary guard 防止 `_submit_unlocked` 重新出现 direct pair write fallback。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_batch_accounting_api.py::BatchAccountingApiTests::test_submit_delegates_relation_write_to_command_service tests/test_batch_accounting_api.py::BatchAccountingApiTests::test_submit_requires_relation_command_service_without_direct_pair_fallback tests/test_batch_accounting_api.py::BatchAccountingApiTests::test_submit_amount_mismatch_with_note_persists_relation_and_history -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_submit_has_no_direct_pair_write_fallback -q`。
+- 未测风险：本阶段不迁移 `repair_legacy_case_id_collisions`；该路径后续已在同日迁移到 command service。
+- 后续事项：继续收口 no-OA legacy repair/consolidation。
 
 ## 2026-06-11 - relation read model missing/stale 闭环
 

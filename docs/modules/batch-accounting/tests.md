@@ -9,7 +9,7 @@
 | 页面交互 | 加载、空态、错误、筛选、bucket 切换、银行/OA 选择、差额说明、提交、撤回、feedback、侧栏入口 | `web/src/test/BatchAccountingPage.test.tsx` |
 | API contract | `GET /api/batch-accounting`、`POST /api/batch-accounting/submit`、`POST /api/batch-accounting/{relation_id}/withdraw` 的状态码、错误码、DTO shape、freshness 字段 | `tests/test_batch_accounting_api.py` |
 | 业务核心 | 日常报销 OA 过滤、批量账务银行流水过滤、金额差异说明、version conflict、active relation 排除、跨年选择、撤回原因 | `tests/test_batch_accounting_api.py` |
-| Service / repository | `BatchAccountingService` 调用 Workbench payload、Workbench pair relation、relation facade、legacy collision repair；提交失败回滚 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py` |
+| Service / repository | `BatchAccountingService` 调用 Workbench payload、relation command service、relation facade、legacy collision repair；提交失败回滚 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py` |
 | Relation read model | `workbench_relation` fresh/missing/stale、row id 去重、linked/unlinked projection、refresh enqueue、source version | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_batch_accounting_api.py` |
 | Worker / App Status | `workbench-relation` worker registry、`workbench_relation.read_model.refresh` job、App Status domain/job 映射 | `tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` |
 | Cross-page fan-out | 批量账务关系变化影响关联台、银行明细、成本统计、搜索、发票 lifecycle 相关页面；前端事件只做刷新提示 | `tests/test_derived_data_lifecycle_service.py`、`web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx` |
@@ -23,8 +23,8 @@
 | 未提交列表排除已经被其他关系占用的银行行 | covered | `test_unsubmitted_list_excludes_bank_rows_already_linked_elsewhere` |
 | relation read model missing/stale 透传到 API 和页面，列表通过 freshness 边界入队刷新，页面和后端共同阻止提交/撤回 | covered | `test_unsubmitted_list_exposes_relation_read_model_missing_status`、`test_submitted_list_exposes_relation_read_model_stale_status`、`test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh`、`test_submit_rejects_when_relation_read_model_is_not_fresh`、`test_withdraw_rejects_when_relation_read_model_is_not_fresh`、`pauses submission when relation read model is not fresh`、`shows operation guidance when relation read model refresh is not enqueued`、`shows backend read model status and scope when mutation is rejected as non-fresh` |
 | 金额不一致必须填写 trim 后非空差额说明，金额一致忽略说明 | covered | `test_submit_amount_mismatch_requires_difference_note`、`test_submit_amount_mismatch_rejects_whitespace_note`、`test_submit_matched_amount_ignores_supplied_difference_note` |
-| 提交写入 batch relation、当前 invoice rows、历史备注，且失败回滚 | covered | `test_submit_creates_batch_accounting_relation_with_current_invoice_rows`、`test_submit_amount_mismatch_with_note_persists_relation_and_history`、`test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails` |
-| 旧 case_id collision repair 只恢复合法 batch relation，不覆盖当前非 batch relation | covered | `test_repair_legacy_case_id_collision_*` |
+| 提交通过 relation command service 写入 batch relation、当前 invoice rows、历史备注，且失败回滚；缺 command service 时 fail fast，不 direct pair fallback | covered | `test_submit_creates_batch_accounting_relation_with_current_invoice_rows`、`test_submit_amount_mismatch_with_note_persists_relation_and_history`、`test_submit_delegates_relation_write_to_command_service`、`test_submit_requires_relation_command_service_without_direct_pair_fallback`、`test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails` |
+| 旧 case_id collision repair 通过 relation command service 恢复合法 batch relation，缺 command service 时 fail fast，不覆盖当前非 batch relation | covered | `test_repair_legacy_case_id_collision_*`、`test_batch_accounting_repair_has_no_direct_pair_write_fallback` |
 | submitted 列表来自 active batch relation，并按 relation distribution 归桶 | covered | `test_submitted_list_is_derived_from_active_batch_accounting_relations`、`test_submitted_list_relation_bucket_uses_workbench_relation_distribution` |
 | 撤回恢复旧 OA invoice snapshot、保留历史说明、要求撤回原因且只能撤回 batch relation | covered | `test_withdraw_restores_previous_oa_invoice_snapshot`、`test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes`、`test_withdraw_requires_reason_and_batch_accounting_relation` |
 | 前端提交/撤回后广播 `workbenchRelationUpdated`，选中行和差额说明在刷新/bucket/选择变化时正确清理 | covered | `BatchAccountingPage.test.tsx` |
@@ -34,7 +34,7 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_batch_accounting_api.py` | 覆盖金额差异说明、合法银行/OA 行、active relation 排除、version conflict、撤回原因、legacy collision repair。后续如改匹配/金额/状态规则，必须继续补。 |
-| 2. Service-layer tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py` | 覆盖 `BatchAccountingService` 与 Workbench pair relation、relation facade、提交失败回滚、历史关系恢复，以及 submit/withdraw 的 relation read model fresh gate。 |
+| 2. Service-layer tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `BatchAccountingService` 与 relation command service、relation facade、提交失败回滚、历史关系 command 恢复，以及 submit/withdraw 的 relation read model fresh gate。 |
 | 3. API contract tests | 适用 | `tests/test_batch_accounting_api.py` | 覆盖 GET/submit/withdraw 的成功 shape、错误码、freshness 字段、summary/relations/mutation result；non-fresh mutation 返回 `batch_accounting_read_model_not_fresh` 和 freshness payload。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 `workbench_relation` facade、projection、non-fresh enqueue、worker registry 和 App Status 绑定；批量账务列表读取必须通过 facade `require_fresh` 触发入队。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/BatchAccountingPage.test.tsx` | 覆盖 loading/empty/error、stale 禁用、刷新未入队提示、后端 non-fresh mutation reason/scope feedback、筛选、搜索、选择、提交、撤回、CSS/组件契约和侧栏入口。 |
@@ -45,8 +45,9 @@
 
 | 来源 | 回归点 | 当前状态 |
 | --- | --- | --- |
-| Legacy case id collision | 历史批量账务关系被同 case_id 覆盖后，可从历史合法 relation 恢复；已撤回或当前非 batch relation 不恢复 | covered |
+| Legacy case id collision | 历史批量账务关系被同 case_id 覆盖后，可通过 relation command service 从历史合法 relation 恢复；已撤回或当前非 batch relation 不恢复 | covered |
 | Relation read model non-fresh | missing/stale 不能被解释成“无关联，可提交”；列表读取必须入队刷新，submit/withdraw 必须由后端 fresh gate 拒绝 | covered |
+| Submit command boundary | submit 缺少 relation command service 时不能 direct 写 pair service，必须返回结构化错误 | covered |
 | Mismatch note | 金额不一致必须填写非空说明；切换银行、bucket、OA 选择时清空旧说明 | covered |
 | Submit rollback | pair relation 持久化或调度失败不能留下半写入关系 | covered |
 | Withdraw history | 撤回差额批量账务时保留提交和撤回备注，恢复前一 OA invoice snapshot | covered |

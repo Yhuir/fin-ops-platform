@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any, Callable
 
 from fin_ops_platform.services.etc_service import EtcService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +62,7 @@ class HistoricalEtcBusinessBatchMigrationService:
         *,
         etc_service: EtcService,
         pair_relation_service: Any,
+        relation_command_service: Any | None = None,
         sync_etc_invoices_to_canonical_invoices: Callable[[list[Any]], list[str]] | None = None,
         refresh_after_etc_invoice_sync: Callable[[list[str], str], None] | None = None,
         persist_pair_relations: Callable[[list[str]], None] | None = None,
@@ -69,6 +71,7 @@ class HistoricalEtcBusinessBatchMigrationService:
     ) -> None:
         self._etc_service = etc_service
         self._pair_relation_service = pair_relation_service
+        self._relation_command_service = relation_command_service
         self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices or (lambda _invoices: [])
         self._refresh_after_etc_invoice_sync = refresh_after_etc_invoice_sync or (lambda _months, _reason: None)
         self._persist_pair_relations = persist_pair_relations or (lambda _case_ids: None)
@@ -77,6 +80,7 @@ class HistoricalEtcBusinessBatchMigrationService:
 
     def migrate(self, spec: HistoricalEtcBusinessBatchMigrationSpec) -> HistoricalEtcBusinessBatchMigrationResult:
         relation = self._validated_relation(spec)
+        command_update = self._relation_metadata_update_command()
         batch = self._etc_service.create_historical_submitted_business_batch(
             business_batch_id=spec.business_batch_id,
             task_id=spec.task_id,
@@ -102,7 +106,14 @@ class HistoricalEtcBusinessBatchMigrationService:
         )
         if changed_months:
             self._refresh_after_etc_invoice_sync(changed_months, f"historical_etc_business_batch_migration:{spec.external_batch_id}")
-        self._update_relation_metadata(spec, relation, invoice_count=len(invoices), invoice_total=invoice_total, amount_delta=amount_delta)
+        self._update_relation_metadata(
+            spec,
+            relation,
+            invoice_count=len(invoices),
+            invoice_total=invoice_total,
+            amount_delta=amount_delta,
+            command_update=command_update,
+        )
         self._persist_pair_relations([spec.relation_case_id])
         self._invalidate_workbench_scopes(["all", *changed_months])
         self._persist_etc_state()
@@ -148,6 +159,7 @@ class HistoricalEtcBusinessBatchMigrationService:
         invoice_count: int,
         invoice_total: Decimal,
         amount_delta: Decimal,
+        command_update: Callable[..., dict[str, Any]],
     ) -> None:
         amount_check = dict(relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {})
         amount_check.update(
@@ -163,23 +175,38 @@ class HistoricalEtcBusinessBatchMigrationService:
                 "source": "historical_etc_business_batch_migration",
             }
         )
-        self._pair_relation_service.update_relation_metadata_for_case_id(
-            spec.relation_case_id,
-            amount_check=amount_check,
-            special_metadata={
-                "historical_etc_business_batch_migration": {
-                    "label": spec.label,
-                    "business_batch_id": spec.business_batch_id,
-                    "submission_batch_id": spec.submission_batch_id,
-                    "external_etc_batch_id": spec.external_batch_id,
-                    "gap_reason": str(spec.gap_reason or "").strip(),
-                },
+        special_metadata = {
+            "historical_etc_business_batch_migration": {
+                "label": spec.label,
+                "business_batch_id": spec.business_batch_id,
+                "submission_batch_id": spec.submission_batch_id,
+                "external_etc_batch_id": spec.external_batch_id,
+                "gap_reason": str(spec.gap_reason or "").strip(),
             },
+        }
+        note = spec.gap_reason or f"{spec.label} 迁移到 ETC 业务批次模型。"
+        command_update(
+            case_id=spec.relation_case_id,
+            amount_check=amount_check,
+            special_metadata=special_metadata,
             display_tags=["ETC批次"],
-            updated_by="system_historical_etc_business_batch_migration",
-            note=spec.gap_reason or f"{spec.label} 迁移到 ETC 业务批次模型。",
-            operation_type="historical_etc_business_batch_migration",
+            actor_id="system_historical_etc_business_batch_migration",
+            note=note,
+            history_operation_type="historical_etc_business_batch_migration",
         )
+
+    def _relation_metadata_update_command(self) -> Callable[..., dict[str, Any]]:
+        command_update = (
+            getattr(self._relation_command_service, "update_relation_metadata_for_case_id", None)
+            if self._relation_command_service is not None
+            else None
+        )
+        if not callable(command_update):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Historical ETC business batch migration requires WorkbenchRelationCommandService.update_relation_metadata_for_case_id.",
+            )
+        return command_update
 
     @staticmethod
     def _changed_months(months: list[str]) -> list[str]:

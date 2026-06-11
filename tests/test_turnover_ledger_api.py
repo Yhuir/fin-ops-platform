@@ -1425,6 +1425,19 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn("TurnoverLedgerDirtyOutboxWriter(", withdraw_builder_source)
         self.assertIn("TurnoverLedgerLocalDirtyOutboxWriter(", withdraw_builder_source)
 
+    def test_turnover_closure_and_withdraw_wiring_use_workbench_relation_command_service(self) -> None:
+        sources = {
+            "closure": inspect.getsource(Application._turnover_ledger_closure_write_facade),
+            "closure_fallback": inspect.getsource(Application._turnover_ledger_closure_legacy_fallback_facade),
+            "withdraw": inspect.getsource(Application._turnover_ledger_withdraw_write_facade),
+            "withdraw_fallback": inspect.getsource(Application._turnover_ledger_withdraw_legacy_fallback_facade),
+        }
+
+        for name, source in sources.items():
+            with self.subTest(source=name):
+                self.assertIn("relation_command_service_factory=self._turnover_workbench_relation_command_service", source)
+                self.assertIn("relation_facade=self._workbench_relation_read_facade()", source)
+
     def test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports(self) -> None:
         builder_methods = [
             Application._turnover_ledger_tag_selection_write_facade.__globals__["TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder"].build,

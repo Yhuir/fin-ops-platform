@@ -17,6 +17,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     TARGET_APPLICANTS,
 )
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 ZERO = Decimal("0.00")
@@ -161,34 +162,39 @@ class OAProjectionInputInvoiceUsageOaEvidenceProvider:
 
 
 class WorkbenchInputInvoiceUsageOaReverseRelationWriter:
-    relation_mode = "input_invoice_usage_oa_reverse"
+    relation_mode = "input_invoice_oa_reverse"
 
-    def __init__(self, pair_relation_service: Any) -> None:
-        self._pair_relation_service = pair_relation_service
+    def __init__(self, relation_command_service: Any) -> None:
+        self._relation_command_service = relation_command_service
 
     def __call__(self, batch: "InputInvoiceUsageOaReverseBatch", evidence: InputInvoiceUsageOaEvidence) -> None:
         oa_row_id = str(evidence.oa_row_id or "").strip()
-        invoice_ids = [invoice_id for invoice_id in list(batch.invoice_ids or []) if str(invoice_id).strip()]
+        invoice_ids = [
+            str(invoice_id).strip()
+            for invoice_id in list(batch.invoice_ids or [])
+            if str(invoice_id).strip()
+        ]
         if not oa_row_id or not invoice_ids:
             return
         row_ids = [oa_row_id, *invoice_ids]
-        expected = set(row_ids)
-        active_for_rows = getattr(self._pair_relation_service, "active_relations_for_row_ids", None)
-        if callable(active_for_rows):
-            for relation in list(active_for_rows(row_ids) or []):
-                relation_row_ids = {str(row_id) for row_id in list(relation.get("row_ids") or [])}
-                if expected.issubset(relation_row_ids):
-                    return
         case_id = f"case_input_invoice_usage_oa_reverse_{batch.batch_id}"
-        create_active_relation = getattr(self._pair_relation_service, "create_active_relation", None)
-        if not callable(create_active_relation):
-            return
-        create_active_relation(
+        confirm_relation = getattr(self._relation_command_service, "confirm_relation", None)
+        if not callable(confirm_relation):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Workbench relation command service does not expose confirm_relation.",
+                payload={
+                    "batch_id": batch.batch_id,
+                    "oa_row_id": oa_row_id,
+                    "invoice_ids": invoice_ids,
+                },
+            )
+        confirm_relation(
             case_id=case_id,
             row_ids=row_ids,
             row_types=["oa", *(["invoice"] * len(invoice_ids))],
             relation_mode=self.relation_mode,
-            created_by=str(batch.updated_by or batch.created_by or "input_invoice_usage_oa_reverse"),
+            actor_id=str(batch.updated_by or batch.created_by or "input_invoice_usage_oa_reverse"),
             month_scope=_batch_month_scope(batch),
             special_metadata={
                 "input_invoice_usage_oa_reverse_batch_id": batch.batch_id,
@@ -196,6 +202,13 @@ class WorkbenchInputInvoiceUsageOaReverseRelationWriter:
                 "oa_row_id": oa_row_id,
                 "invoice_ids": invoice_ids,
             },
+            evidence={
+                "oa_process_status": evidence.process_status,
+                "candidate_count": len(list(evidence.candidates or [])),
+                "raw_payload": dict(evidence.raw_payload or {}),
+            },
+            idempotency_key=f"input_invoice_oa_reverse:{batch.batch_id}:{oa_row_id}",
+            history_operation_type="input_invoice_oa_reverse_confirm",
         )
 
 

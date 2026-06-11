@@ -12,6 +12,7 @@ from fin_ops_platform.services.workbench_exception_classifier import WorkbenchEx
 from fin_ops_platform.services.workbench_exception_rules import ACTION_DEFINITIONS, RULE_VERSION, action
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 RowProvider = Callable[[str, list[str]], list[dict[str, Any]]]
@@ -36,6 +37,7 @@ class WorkbenchExceptionApplicationService:
         decision_store: WorkbenchReconciliationDecisionStore | None = None,
         classifier: WorkbenchExceptionClassifier | None = None,
         source_versions_provider: SourceVersionsProvider | None = None,
+        relation_command_service: Any | None = None,
     ) -> None:
         self._row_provider = row_provider
         self._case_service = case_service
@@ -44,6 +46,7 @@ class WorkbenchExceptionApplicationService:
         self._decision_store = decision_store
         self._classifier = classifier or WorkbenchExceptionClassifier()
         self._source_versions_provider = source_versions_provider or (lambda: {})
+        self._relation_command_service = relation_command_service
 
     def preview(self, request: dict[str, Any]) -> dict[str, Any]:
         month, row_ids = self._request_month_and_row_ids(request)
@@ -130,6 +133,12 @@ class WorkbenchExceptionApplicationService:
             **deepcopy(resolved_action),
             "relation_mode": self._relation_mode_for_action(action_code, resolved_action, resolution_payload),
         }
+        relation_command_service = None
+        if str(action_for_case.get("result_status") or "") == "closed":
+            relation_command_service = self._require_relation_command_service()
+            preflight = getattr(relation_command_service, "assert_write_precondition", None)
+            if callable(preflight):
+                preflight(row_ids=row_ids, month_scope=month)
         case_payload = self._case_service.create_case_from_action(
             rows=self._resolve_rows(month, row_ids),
             scenario={
@@ -160,6 +169,7 @@ class WorkbenchExceptionApplicationService:
                 row_ids=row_ids,
                 month=month,
                 actor=actor,
+                relation_command_service=relation_command_service,
             )
 
         consumed_candidates = self._mark_candidates_consumed(
@@ -439,6 +449,7 @@ class WorkbenchExceptionApplicationService:
         row_ids: list[str],
         month: str,
         actor: str,
+        relation_command_service: Any,
     ) -> dict[str, Any]:
         relation_mode = self._relation_mode_for_action(action_code, action_payload, resolution_payload)
         oa_exemption = resolution_payload.get("oa_exemption") if isinstance(resolution_payload.get("oa_exemption"), dict) else None
@@ -448,12 +459,15 @@ class WorkbenchExceptionApplicationService:
             else []
         )
         evidence = deepcopy(oa_exemption.get("evidence") if isinstance(oa_exemption, dict) and isinstance(oa_exemption.get("evidence"), dict) else {})
-        return self._pair_relation_service.create_active_relation(
+        confirm_relation = getattr(relation_command_service, "confirm_relation", None)
+        if not callable(confirm_relation):
+            raise self._relation_command_unavailable_error()
+        result = confirm_relation(
             case_id=str(case_payload["id"]),
             row_ids=row_ids,
             row_types=[str(row_type) for row_type in list(case_payload.get("row_types") or [])],
             relation_mode=relation_mode,
-            created_by=actor or "system",
+            actor_id=actor or "system",
             month_scope=month,
             note=str(case_payload.get("resolution", {}).get("note") or ""),
             amount_check=deepcopy(case_payload.get("amount_summary") if isinstance(case_payload.get("amount_summary"), dict) else {}),
@@ -467,6 +481,23 @@ class WorkbenchExceptionApplicationService:
             evidence=evidence,
             oa_exemption=oa_exemption,
             display_tags=display_tags,
+            idempotency_key=f"workbench_exception:{case_payload['id']}:relation",
+            history_operation_type="workbench_exception_apply",
+        )
+        relation = result.get("relation") if isinstance(result, dict) else None
+        return deepcopy(relation) if isinstance(relation, dict) else {}
+
+    def _require_relation_command_service(self) -> Any:
+        if self._relation_command_service is None:
+            raise self._relation_command_unavailable_error()
+        return self._relation_command_service
+
+    @staticmethod
+    def _relation_command_unavailable_error() -> WorkbenchRelationCommandError:
+        return WorkbenchRelationCommandError(
+            "workbench_relation_command_unavailable",
+            "Workbench relation command service is not configured.",
+            payload={"read_model_status": "unavailable"},
         )
 
     def _mark_candidates_consumed(

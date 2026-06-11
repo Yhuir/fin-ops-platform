@@ -178,6 +178,9 @@ class WorkbenchPairRelationService:
         special_metadata: dict[str, Any] | None = None,
         created_at: str | None = None,
         before_relations: list[dict[str, Any]] | None = None,
+        operation_type: str = "confirm_link",
+        history_created_by: str | None = None,
+        history_note: str | None = None,
         exception_case_id: str | None = None,
         rule_version: str | None = None,
         evidence: dict[str, Any] | None = None,
@@ -212,12 +215,12 @@ class WorkbenchPairRelationService:
             display_tags=display_tags,
         )
         history = self.record_history(
-            operation_type="confirm_link",
+            operation_type=operation_type,
             before_relations=history_before_relations,
             after_relations=[after_relation],
             affected_row_ids=normalized_row_ids,
-            created_by=created_by,
-            note=note,
+            created_by=history_created_by or created_by,
+            note=history_note if history_note is not None else note,
             amount_check=amount_check,
             created_at=timestamp,
         )

@@ -266,6 +266,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions, source_version_mismatch_reasons
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
@@ -382,6 +383,12 @@ from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_P
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import (
+    CallbackWorkbenchRelationRepository,
+    WorkbenchRelationCommandError,
+    WorkbenchRelationCommandService,
+)
+from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import (
@@ -773,6 +780,7 @@ class Application:
                 "load_no_oa_bank_batches",
             ),
             pair_relation_service=self._workbench_pair_relation_service,
+            relation_command_service=self._workbench_relation_command_service(require_fresh_relations=False),
         )
         self._workbench_amount_check_service = WorkbenchAmountCheckService()
         self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
@@ -987,6 +995,7 @@ class Application:
                 direction=direction,
             ),
             relation_facade=self._workbench_relation_read_facade(),
+            relation_command_service=self._workbench_relation_command_service(),
         )
         self._turnover_ledger_extra_service = self._build_turnover_ledger_extra_service(
             persisted_state.get("turnover_ledger_extras")
@@ -1016,6 +1025,7 @@ class Application:
                 state_store=self._state_store,
                 etc_service=self._etc_service,
                 pair_relation_service=self._workbench_pair_relation_service,
+                relation_command_service=self._workbench_relation_command_service(),
                 oa_row_exists=self._historical_etc_oa_row_exists,
                 sync_import_result_to_canonical_invoices=self._sync_etc_import_result_to_canonical_invoices,
                 sync_etc_invoices_to_canonical_invoices=self._sync_etc_invoices_to_canonical_invoices,
@@ -1290,6 +1300,7 @@ class Application:
             candidate_match_service=self._workbench_candidate_match_service,
             decision_store=getattr(self, "_workbench_reconciliation_decision_store", None),
             source_versions_provider=self._workbench_matching_source_versions,
+            relation_command_service=self._workbench_relation_command_service(),
         )
 
     def _consume_workbench_reconciliation_decisions(self, *, row_ids: list[str], relation_id: str) -> int:
@@ -2828,6 +2839,9 @@ class Application:
             submit_internal_transfer_rows_from_workbench=lambda **kwargs: (
                 self._no_oa_bank_batch_application_service().submit_internal_transfer_rows_from_workbench(**kwargs)
             ),
+            relation_command_service_factory=lambda repository=None: self._workbench_relation_command_service(
+                repository=repository,
+            ),
         )
 
     def _bank_transaction_category_codes_for_workbench_row_ids(self, row_ids: list[str]) -> dict[str, str]:
@@ -2853,6 +2867,101 @@ class Application:
             if category_code:
                 codes[row_id] = category_code
         return codes
+
+    def _workbench_relation_command_repository(self, *, repository: object | None = None) -> CallbackWorkbenchRelationRepository:
+        return CallbackWorkbenchRelationRepository(
+            load_snapshot=lambda: self._workbench_pair_relation_service.snapshot(),
+            save_snapshot=lambda snapshot, *, changed_case_ids: self._save_workbench_relation_command_snapshot(
+                snapshot,
+                changed_case_ids=changed_case_ids,
+                repository=repository,
+            ),
+        )
+
+    def _workbench_relation_command_service(
+        self,
+        *,
+        repository: object | None = None,
+        require_fresh_relations: bool | None = None,
+    ) -> WorkbenchRelationCommandService:
+        relation_facade = self._workbench_relation_read_facade()
+        return WorkbenchRelationCommandService(
+            relation_repository=self._workbench_relation_command_repository(repository=repository),
+            relation_facade=relation_facade,
+            require_fresh_relations=bool(relation_facade is not None) if require_fresh_relations is None else require_fresh_relations,
+        )
+
+    def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
+        storage_backend = str(getattr(getattr(self, "_state_store", None), "storage_backend", "") or "").strip()
+        repository = (
+            PostgresWorkbenchRelationRepository(transaction)
+            if storage_backend == "postgres" and transaction is not None
+            else None
+        )
+        return self._workbench_relation_command_service(repository=repository)
+
+    def _save_workbench_relation_command_snapshot(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: list[str],
+        repository: object | None = None,
+    ) -> None:
+        saver = getattr(repository, "save_workbench_pair_relations", None)
+        if callable(saver):
+            saver(snapshot, changed_case_ids=changed_case_ids)
+        self._apply_workbench_relation_command_snapshot(snapshot, changed_case_ids=changed_case_ids)
+
+    def _apply_workbench_relation_command_snapshot(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: list[str],
+    ) -> None:
+        changed_ids = {
+            str(case_id).strip()
+            for case_id in list(changed_case_ids or [])
+            if str(case_id).strip()
+        }
+        current = self._workbench_pair_relation_service.snapshot()
+        current_relations = dict(current.get("pair_relations") if isinstance(current.get("pair_relations"), dict) else {})
+        incoming_relations = dict(snapshot.get("pair_relations") if isinstance(snapshot.get("pair_relations"), dict) else {})
+        if changed_ids:
+            for case_id in changed_ids:
+                if case_id in incoming_relations:
+                    current_relations[case_id] = deepcopy(incoming_relations[case_id])
+                else:
+                    current_relations.pop(case_id, None)
+        else:
+            current_relations.update(deepcopy(incoming_relations))
+
+        current_history = [
+            deepcopy(history)
+            for history in list(current.get("pair_relation_history") or [])
+            if isinstance(history, dict) and not self._relation_history_touches_cases(history, changed_ids)
+        ]
+        incoming_history = [
+            deepcopy(history)
+            for history in list(snapshot.get("pair_relation_history") or [])
+            if isinstance(history, dict)
+        ]
+        merged_snapshot: dict[str, object] = {"pair_relations": current_relations}
+        if current_history or incoming_history:
+            merged_snapshot["pair_relation_history"] = [*current_history, *incoming_history]
+        merged_service = WorkbenchPairRelationService.from_snapshot(merged_snapshot)
+        self._workbench_pair_relation_service._pair_relations = deepcopy(merged_service._pair_relations)
+        self._workbench_pair_relation_service._pair_relation_history = deepcopy(merged_service._pair_relation_history)
+        self._configure_workbench_exception_application_service()
+
+    @staticmethod
+    def _relation_history_touches_cases(history: dict[str, object], case_ids: set[str]) -> bool:
+        if not case_ids:
+            return False
+        for key in ("before_relations", "after_relations"):
+            for relation in list(history.get(key) or []):
+                if isinstance(relation, dict) and str(relation.get("case_id") or "").strip() in case_ids:
+                    return True
+        return False
 
     def _workbench_confirm_link_unit_of_work(self) -> WorkbenchWriteUnitOfWork | None:
         override = getattr(self, "_workbench_confirm_link_uow_override", None)
@@ -3047,6 +3156,8 @@ class Application:
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
             pair_relation_service=self._workbench_pair_relation_service,
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
+            relation_command_service_factory=self._turnover_workbench_relation_command_service,
+            relation_facade=self._workbench_relation_read_facade(),
         ).build()
         if facade is not None:
             return facade
@@ -3062,6 +3173,8 @@ class Application:
             after_mutation=invalidation_adapter.after_relation_mutation,
             pair_relation_service=self._workbench_pair_relation_service,
             persist_pair_relations=self._persist_workbench_pair_relations,
+            relation_command_service_factory=self._turnover_workbench_relation_command_service,
+            relation_facade=self._workbench_relation_read_facade(),
         )
 
     def _turnover_ledger_closure_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
@@ -3096,6 +3209,8 @@ class Application:
             local_idempotency_store_provider=self._turnover_ledger_withdraw_local_idempotency_store,
             pair_relation_service=self._workbench_pair_relation_service,
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
+            relation_command_service_factory=self._turnover_workbench_relation_command_service,
+            relation_facade=self._workbench_relation_read_facade(),
         ).build()
         if facade is not None:
             return facade
@@ -3115,6 +3230,8 @@ class Application:
             after_mutation=invalidation_adapter.after_relation_mutation,
             pair_relation_service=self._workbench_pair_relation_service,
             persist_pair_relations=self._persist_workbench_pair_relations,
+            relation_command_service_factory=self._turnover_workbench_relation_command_service,
+            relation_facade=self._workbench_relation_read_facade(),
         )
 
     def _postgres_turnover_ledger_persistence_repository(
@@ -3364,8 +3481,9 @@ class Application:
     @staticmethod
     def _workbench_uow_repository_factory(transaction: object) -> SimpleNamespace:
         workbench_repository = PostgresWorkbenchRepository(transaction)
+        relation_repository = PostgresWorkbenchRelationRepository(transaction)
         return SimpleNamespace(
-            pair_relations=workbench_repository,
+            pair_relations=relation_repository,
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,
             candidate_matches=workbench_repository,
@@ -4941,6 +5059,8 @@ class Application:
         canonical_deleted = 0
         for linked_import_batch_id in import_batch_ids:
             canonical_deleted += self._import_service.remove_etc_invoices_by_import_batch_id(linked_import_batch_id)
+        if str(getattr(business_batch, "status", "") or "") in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
+            self._assert_etc_summary_relation_write_precondition_for_batch(business_batch)
         delete_result = self._etc_service.delete_business_batch(
             str(getattr(business_batch, "business_batch_id", "")),
             expected_version=int(getattr(business_batch, "version", 0) or 0),
@@ -5022,25 +5142,34 @@ class Application:
         summary_row_ids = self._etc_business_batch_summary_row_ids(batch)
         if not summary_row_ids:
             return []
-        cancelled_relations, _history = self._workbench_pair_relation_service.cancel_active_relations_for_row_ids(
-            summary_row_ids,
-            created_by="system",
-            note="ETC业务批次删除，取消对应 summary 关联。",
-            operation_type="etc_summary_unmerged",
-        )
-        if not cancelled_relations:
-            return []
+        command_service = self._workbench_relation_command_service()
+        cancel_for_row_ids = getattr(command_service, "cancel_relations_for_row_ids", None)
+        if callable(cancel_for_row_ids):
+            result = cancel_for_row_ids(
+                row_ids=summary_row_ids,
+                actor_id="system",
+                reason="ETC业务批次删除，取消对应 summary 关联。",
+                history_operation_type="etc_summary_unmerged",
+            )
+        else:
+            result = self._cancel_etc_summary_relations_for_batch_via_facade(
+                summary_row_ids,
+                command_service=command_service,
+            )
+        raw_changed_case_ids = result.get("changed_case_ids") if isinstance(result, dict) else []
         changed_case_ids = [
-            str(relation.get("case_id") or "").strip()
-            for relation in cancelled_relations
-            if str(relation.get("case_id") or "").strip()
+            str(case_id).strip()
+            for case_id in list(raw_changed_case_ids or [])
+            if str(case_id).strip()
         ]
+        if not changed_case_ids:
+            return []
         self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
+        raw_affected_months = result.get("affected_months") if isinstance(result, dict) else []
         changed_months = [
-            str(relation.get("month_scope") or "").strip()
-            for relation in cancelled_relations
-            if str(relation.get("month_scope") or "").strip()
-            and str(relation.get("month_scope") or "").strip().lower() != "all"
+            str(month).strip()
+            for month in list(raw_affected_months or [])
+            if str(month).strip() and str(month).strip().lower() != "all"
         ]
         if changed_months:
             self._invalidate_workbench_read_model_scopes(
@@ -5049,6 +5178,152 @@ class Application:
                 schedule_cost_statistics_warmup=False,
             )
         return sorted(set(changed_months))
+
+    def _assert_etc_summary_relation_write_precondition_for_batch(self, batch: object) -> None:
+        summary_row_ids = self._etc_business_batch_summary_row_ids(batch)
+        if not summary_row_ids:
+            return
+        command_service = self._workbench_relation_command_service()
+        assert_write_precondition = getattr(command_service, "assert_write_precondition", None)
+        if callable(assert_write_precondition):
+            assert_write_precondition(
+                row_ids=summary_row_ids,
+                month_scope=self._etc_business_batch_relation_month_scope(batch),
+            )
+            return
+        relation_facade = self._workbench_relation_read_facade()
+        if relation_facade is None:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_read_model_unavailable",
+                "Workbench relation read facade is not configured.",
+                payload={
+                    "read_model_status": "unavailable",
+                    "read_model_stale_reasons": ["relation_facade_unavailable"],
+                    "read_model_scope_keys": ["all"],
+                    "refresh_enqueued": False,
+                },
+            )
+        month_scope = self._etc_business_batch_relation_month_scope(batch)
+        payload = relation_facade.get_by_row_ids(
+            summary_row_ids,
+            require_fresh=True,
+            reason="etc_summary_relation_write_precondition",
+            month_hint=month_scope,
+            scope_keys_hint=[month_scope],
+        )
+        status = str(payload.get("status") or payload.get("read_model_status") or "missing") if isinstance(payload, dict) else "missing"
+        if status != "fresh":
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_read_model_not_fresh",
+                "Workbench relation read model is not fresh. Refresh and retry the mutation.",
+                payload=self._workbench_relation_command_error_payload(payload if isinstance(payload, dict) else {}),
+            )
+
+    @staticmethod
+    def _etc_business_batch_relation_month_scope(batch: object) -> str:
+        amount_breakdown = getattr(batch, "amount_breakdown", None)
+        if isinstance(amount_breakdown, dict):
+            scope_month = str(amount_breakdown.get("scope_month") or "").strip()
+            if len(scope_month) == 7 and scope_month[4:5] == "-":
+                return scope_month
+        return "all"
+
+    def _cancel_etc_summary_relations_for_batch_via_facade(
+        self,
+        summary_row_ids: list[str],
+        *,
+        command_service: object,
+    ) -> dict[str, object]:
+        relation_facade = self._workbench_relation_read_facade()
+        if relation_facade is None:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_read_model_unavailable",
+                "Workbench relation read facade is not configured.",
+                payload={
+                    "read_model_status": "unavailable",
+                    "read_model_stale_reasons": ["relation_facade_unavailable"],
+                    "read_model_scope_keys": ["all"],
+                    "refresh_enqueued": False,
+                },
+            )
+        payload = relation_facade.get_by_row_ids(
+            summary_row_ids,
+            require_fresh=True,
+            reason="etc_summary_relation_cancel",
+            scope_keys_hint=["all"],
+        )
+        status = str(payload.get("status") or payload.get("read_model_status") or "missing") if isinstance(payload, dict) else "missing"
+        if status != "fresh":
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_read_model_not_fresh",
+                "Workbench relation read model is not fresh. Refresh and retry the mutation.",
+                payload=self._workbench_relation_command_error_payload(payload if isinstance(payload, dict) else {}),
+            )
+        summary_row_id_set = {str(row_id).strip() for row_id in list(summary_row_ids or []) if str(row_id).strip()}
+        relations = [
+            relation
+            for relation in relation_dicts_from_distribution_payload(payload)
+            if summary_row_id_set.intersection(
+                {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
+            )
+        ]
+        changed_case_ids: list[str] = []
+        affected_months: list[str] = []
+        cancel_relation = getattr(command_service, "cancel_relation", None)
+        if not callable(cancel_relation):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Workbench relation command service does not expose cancel_relation.",
+            )
+        for relation in relations:
+            case_id = str(relation.get("case_id") or "").strip()
+            if not case_id:
+                continue
+            result = cancel_relation(
+                case_id=case_id,
+                actor_id="system",
+                reason="ETC业务批次删除，取消对应 summary 关联。",
+                history_operation_type="etc_summary_unmerged",
+            )
+            raw_result_case_ids = result.get("changed_case_ids") if isinstance(result, dict) else []
+            changed_case_ids.extend(
+                str(item).strip()
+                for item in list(raw_result_case_ids or [])
+                if str(item).strip()
+            )
+            raw_result_months = result.get("affected_months") if isinstance(result, dict) else []
+            affected_months.extend(
+                str(item).strip()
+                for item in list(raw_result_months or [])
+                if str(item).strip()
+            )
+        return {
+            "changed_case_ids": list(dict.fromkeys(changed_case_ids)),
+            "affected_months": list(dict.fromkeys(affected_months)),
+        }
+
+    @staticmethod
+    def _workbench_relation_command_error_payload(payload: dict[str, object]) -> dict[str, object]:
+        stale_reasons = payload.get("stale_reasons")
+        if not isinstance(stale_reasons, list):
+            stale_reasons = payload.get("read_model_stale_reasons")
+        scope_keys = payload.get("read_model_scope_keys")
+        if not isinstance(scope_keys, list):
+            scope_keys = ["all"]
+        return {
+            "read_model_status": str(payload.get("status") or payload.get("read_model_status") or "missing"),
+            "read_model_stale_reasons": [
+                str(reason)
+                for reason in list(stale_reasons or [])
+                if str(reason).strip()
+            ],
+            "read_model_scope_keys": [
+                str(scope_key)
+                for scope_key in list(scope_keys or [])
+                if str(scope_key).strip()
+            ],
+            "refresh_enqueued": bool(payload.get("refresh_enqueued")),
+        }
 
     @staticmethod
     def _expected_version_from_payload(payload: dict[str, object]) -> int:
@@ -6180,6 +6455,8 @@ class Application:
                 except KeyError:
                     task = None
             changed_months = self._etc_invoice_changed_months(self._existing_etc_invoices_by_ids(invoice_ids))
+            if str(getattr(batch, "status", "") or "") in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
+                self._assert_etc_summary_relation_write_precondition_for_batch(batch)
             result = self._etc_service.delete_business_batch(
                 business_batch_id,
                 expected_version=expected_version,
@@ -6276,6 +6553,14 @@ class Application:
                     "expectedVersion": error.expected_version,
                     "actualVersion": error.actual_version,
                 },
+            )
+        if isinstance(error, WorkbenchRelationCommandError):
+            return self._etc_business_response(
+                HTTPStatus.CONFLICT,
+                None,
+                code=error.error_code,
+                message=error.message,
+                details=dict(error.payload or {}),
             )
         if isinstance(error, EtcBusinessBatchInvalidTransitionError):
             return self._etc_business_response(
@@ -8189,7 +8474,7 @@ class Application:
             evidence_provider=OAProjectionInputInvoiceUsageOaEvidenceProvider(
                 getattr(self._input_invoice_usage_service(), "_oa_projection", None)
             ),
-            relation_writer=WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_pair_relation_service),
+            relation_writer=WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_relation_command_service()),
             audit_recorder=self._record_input_invoice_usage_oa_reverse_audit,
             read_model_invalidator=self._invalidate_input_invoice_usage_oa_reverse_read_models,
         )
@@ -8484,7 +8769,7 @@ class Application:
                 actor_id=actor_id,
                 can_mutate=can_mutate,
             )
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
@@ -8508,7 +8793,7 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_reverse_history_query", "message": "limit must be a positive integer."},
             )
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
@@ -8533,7 +8818,7 @@ class Application:
                 can_mutate=can_mutate,
                 oa_client_provider=self._target_oa_applicant_token_provider(),
             )
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
@@ -8550,7 +8835,7 @@ class Application:
             return auth_error
         try:
             result = self._input_invoice_usage_oa_reverse_service().get_batch(batch_id)
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
@@ -8579,7 +8864,7 @@ class Application:
                 can_mutate=can_mutate,
                 oa_client=self._input_invoice_usage_oa_draft_client_for_batch(batch_id),
             )
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
@@ -8608,7 +8893,7 @@ class Application:
                 actor_id=actor_id,
                 can_mutate=can_mutate,
             )
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
@@ -8635,7 +8920,7 @@ class Application:
                 actor_id=actor_id,
                 can_mutate=can_mutate,
             )
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
@@ -8666,11 +8951,23 @@ class Application:
                 can_mutate=can_mutate,
                 candidate_oa_row_id=str(request.get("candidateOaRowId", request.get("candidate_oa_row_id")) or "") or None,
             )
-        except InputInvoiceUsageOaReverseServiceError as exc:
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
-    def _input_invoice_usage_oa_reverse_error_response(self, exc: InputInvoiceUsageOaReverseServiceError) -> Response:
+    def _input_invoice_usage_oa_reverse_error_response(
+        self,
+        exc: InputInvoiceUsageOaReverseServiceError | WorkbenchRelationCommandError,
+    ) -> Response:
+        if isinstance(exc, WorkbenchRelationCommandError):
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": exc.error_code,
+                    "message": exc.message,
+                    "details": dict(exc.payload or {}),
+                },
+            )
         if isinstance(exc, InputInvoiceUsageOaReverseNotFoundError):
             status = HTTPStatus.NOT_FOUND
         elif isinstance(exc, (InputInvoiceUsageOaReverseVersionConflictError, InputInvoiceUsageOaReverseStalePreviewError)):
@@ -12498,6 +12795,7 @@ class Application:
             search_cache_clearer=self._search_service.clear_cache,
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             relation_facade=self._workbench_relation_read_facade(),
+            relation_command_service=self._workbench_relation_command_service(),
         )
 
     def _no_oa_bank_batch_routes(self) -> NoOaBankBatchApiRoutes:
@@ -12605,6 +12903,7 @@ class Application:
             pair_relation_service=self._workbench_pair_relation_service,
             batch_workbench_loader=batch_workbench_loader,
             relation_facade=self._workbench_relation_read_facade(),
+            relation_command_service=self._workbench_relation_command_service(),
         )
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
@@ -13175,7 +13474,7 @@ class Application:
         except TurnoverLedgerWritePreconditionError as exc:
             return self._json_response(
                 exc.status_code,
-                {"error": exc.error_code, "message": str(exc)},
+                self._turnover_write_precondition_error_payload(exc),
             )
         except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
             return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
@@ -13230,7 +13529,7 @@ class Application:
         except TurnoverLedgerWritePreconditionError as exc:
             return self._json_response(
                 exc.status_code,
-                {"error": exc.error_code, "message": str(exc)},
+                self._turnover_write_precondition_error_payload(exc),
             )
         except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
             return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
@@ -13274,7 +13573,7 @@ class Application:
         except TurnoverLedgerWritePreconditionError as exc:
             return self._json_response(
                 exc.status_code,
-                {"error": exc.error_code, "message": str(exc)},
+                self._turnover_write_precondition_error_payload(exc),
             )
         except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
             return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
@@ -13316,7 +13615,7 @@ class Application:
         except TurnoverLedgerWritePreconditionError as exc:
             return self._json_response(
                 exc.status_code,
-                {"error": exc.error_code, "message": str(exc)},
+                self._turnover_write_precondition_error_payload(exc),
             )
         except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
             return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
@@ -13326,6 +13625,28 @@ class Application:
                 {"error": exc.error_code, "message": str(exc)},
             )
         return self._json_response(HTTPStatus.OK, result)
+
+    @staticmethod
+    def _turnover_write_precondition_error_payload(exc: TurnoverLedgerWritePreconditionError) -> dict[str, object]:
+        payload: dict[str, object] = {"error": exc.error_code, "message": str(exc)}
+        details = getattr(exc, "payload", None)
+        if isinstance(details, dict):
+            payload.update(
+                {
+                    str(key): value
+                    for key, value in details.items()
+                    if str(key)
+                    in {
+                        "read_model_status",
+                        "read_model_stale_reasons",
+                        "read_model_scope_keys",
+                        "refresh_enqueued",
+                        "conflicting_case_ids",
+                        "row_ids",
+                    }
+                }
+            )
+        return payload
 
     def _turnover_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
         session = resolve_oa_request_session(
@@ -17884,6 +18205,7 @@ class Application:
         changed = False
         changed_case_ids: list[str] = []
         changed_scope_keys: set[str] = {"all"}
+        command_service = self._workbench_relation_command_service(require_fresh_relations=False)
 
         for case_id, desired_relation in desired_relations.items():
             existing_relation = active_auto_relations.get(case_id)
@@ -17895,16 +18217,21 @@ class Application:
                 and str(existing_relation.get("status")) == "active"
             ):
                 continue
-            self._workbench_pair_relation_service.create_active_relation(
+            command_result = command_service.confirm_relation(
                 case_id=case_id,
                 row_ids=list(desired_relation["row_ids"]),
                 row_types=list(desired_relation["row_types"]),
                 relation_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE,
-                created_by="system_auto_match",
+                actor_id="system_auto_match",
                 month_scope=str(desired_relation["month_scope"]),
+                history_operation_type="oa_invoice_offset_auto_pair",
             )
             changed = True
-            changed_case_ids.append(case_id)
+            changed_case_ids.extend(
+                str(changed_case_id)
+                for changed_case_id in list(command_result.get("changed_case_ids") or [case_id])
+                if str(changed_case_id).strip()
+            )
             if str(desired_relation["month_scope"]) != "all":
                 changed_scope_keys.add(str(desired_relation["month_scope"]))
 
@@ -17912,16 +18239,25 @@ class Application:
             relation_row_ids = {str(row_id) for row_id in list(active_auto_relations[case_id].get("row_ids") or [])}
             if not scanned_row_ids or not relation_row_ids.intersection(scanned_row_ids):
                 continue
-            self._workbench_pair_relation_service.cancel_relation(case_id)
+            command_result = command_service.cancel_relation(
+                case_id=case_id,
+                actor_id="system_auto_match",
+                reason="OA 发票冲抵自动关系已不在当前工作台 payload 中。",
+                history_operation_type="oa_invoice_offset_auto_pair_removed",
+            )
             changed = True
-            changed_case_ids.append(case_id)
+            changed_case_ids.extend(
+                str(changed_case_id)
+                for changed_case_id in list(command_result.get("changed_case_ids") or [case_id])
+                if str(changed_case_id).strip()
+            )
             month_scope = str(active_auto_relations[case_id].get("month_scope", ""))
             if month_scope and month_scope != "all":
                 changed_scope_keys.add(month_scope)
 
         if not changed:
             return
-        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
+        self._persist_workbench_pair_relations(changed_case_ids=sorted(set(changed_case_ids)))
         self._execute_derived_data_lifecycle_event(
             "pair_relation_changed",
             scope_keys=list(changed_scope_keys),
@@ -17939,6 +18275,7 @@ class Application:
         changed_case_ids: list[str] = []
         changed_scope_keys: set[str] = {"all"}
         timestamp = datetime.now(UTC).isoformat()
+        command_service = self._workbench_relation_command_service(require_fresh_relations=False)
         for relation in self._workbench_pair_relation_service.list_active_relations():
             if self._relation_requires_dedicated_withdraw_action(relation):
                 continue
@@ -17977,12 +18314,13 @@ class Application:
             repaired_rows = [rows_by_id[row_id] for row_id in repaired_row_ids if row_id in rows_by_id]
             before_relation = self._serialize_value(relation)
             amount_check = self._amount_check_for_rows_by_type(self._rows_by_type(repaired_rows))
-            repaired_relation = self._workbench_pair_relation_service.create_active_relation(
+            command_result = command_service.confirm_relation(
                 case_id=str(relation.get("case_id") or ""),
                 row_ids=repaired_row_ids,
                 row_types=repaired_row_types,
                 relation_mode=str(relation.get("relation_mode") or "manual_confirmed"),
-                created_by=str(relation.get("created_by") or "system_repair"),
+                actor_id="system_repair",
+                relation_created_by=str(relation.get("created_by") or "system_repair"),
                 month_scope=str(relation.get("month_scope") or "all"),
                 note=str(relation.get("note") or ""),
                 amount_check=amount_check,
@@ -17996,21 +18334,20 @@ class Application:
                     for tag in list(relation.get("display_tags") or [])
                     if str(tag).strip()
                 ],
-                created_at=timestamp,
-            )
-            self._workbench_pair_relation_service.record_history(
-                operation_type="repair_missing_oa_attachment_context",
+                occurred_at=timestamp,
                 before_relations=[before_relation],
-                after_relations=[repaired_relation],
-                affected_row_ids=repaired_row_ids,
-                created_by="system_repair",
-                note="修复已有关联缺失的 OA 附件证据行。",
-                amount_check=amount_check,
-                created_at=timestamp,
+                replace_existing=True,
+                history_operation_type="repair_missing_oa_attachment_context",
+                history_note="修复已有关联缺失的 OA 附件证据行。",
             )
+            repaired_relation = dict(command_result.get("relation") or {})
             case_id = str(repaired_relation.get("case_id") or "").strip()
             if case_id:
-                changed_case_ids.append(case_id)
+                changed_case_ids.extend(
+                    str(changed_case_id)
+                    for changed_case_id in list(command_result.get("changed_case_ids") or [case_id])
+                    if str(changed_case_id).strip()
+                )
             changed_scope_keys.update(
                 self._scope_keys_for_row_ids(
                     month=str(payload.get("month") or "all"),
@@ -18021,7 +18358,7 @@ class Application:
 
         if not changed_case_ids:
             return
-        self._persist_workbench_pair_relations(changed_case_ids=changed_case_ids)
+        self._persist_workbench_pair_relations(changed_case_ids=sorted(set(changed_case_ids)))
         self._execute_derived_data_lifecycle_event(
             "pair_relation_changed",
             scope_keys=list(changed_scope_keys),

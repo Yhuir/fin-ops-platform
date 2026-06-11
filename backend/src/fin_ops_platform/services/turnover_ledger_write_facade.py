@@ -317,6 +317,15 @@ class TurnoverLedgerWriteFacade:
         )
 
         def handler(context: Any) -> dict[str, object]:
+            workbench_pair_port = getattr(context, "workbench_pair_port", None)
+            if workbench_pair_port is not None:
+                precheck = getattr(workbench_pair_port, "assert_turnover_manual_closure_write_precondition", None)
+                if callable(precheck):
+                    precheck(
+                        bank_row_ids=list(normalized_bank_row_ids),
+                        affected_months=list(normalized_months),
+                        transaction=context.transaction,
+                    )
             result = context.relation_repository.confirm_zero_difference_closure(
                 bank_row_ids=list(normalized_bank_row_ids),
                 actor_id=actor_id,
@@ -324,7 +333,7 @@ class TurnoverLedgerWriteFacade:
                 transaction=context.transaction,
             )
             relation = dict(result.get("relation") if isinstance(result.get("relation"), dict) else result)
-            pair_relation = context.workbench_pair_port.create_turnover_manual_closure(
+            pair_relation = workbench_pair_port.create_turnover_manual_closure(
                 relation=relation,
                 bank_row_ids=list(normalized_bank_row_ids),
                 actor_id=actor_id,

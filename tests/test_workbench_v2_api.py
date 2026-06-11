@@ -5414,7 +5414,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(
             schedule_pair_relation_persist.call_args.kwargs,
             {
-                "changed_case_ids": ["CASE-ASYNC-PERSIST-001"],
+                "changed_case_ids": ["CASE-202603-102", "CASE-ASYNC-PERSIST-001"],
                 "request_id": None,
                 "action_name": "confirm_link",
             },

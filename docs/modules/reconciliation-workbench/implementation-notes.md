@@ -26,6 +26,46 @@
 
 ## 历史记录
 
+## 2026-06-12 - server active relation repair command 写入口收敛
+
+- 目标：删除 `server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 对 `WorkbenchPairRelationService` 的直接写入，避免 Workbench payload build/repair 路径成为第二个 relation 写事实源。
+- 影响范围：`Application._sync_oa_invoice_offset_auto_pair_relations`、`_repair_active_relations_with_oa_attachment_context`、`WorkbenchRelationCommandService` mode registry/history override、runtime boundary guard。
+- 关键决策：本阶段只迁移 direct mutation，保留原有 read-build repair 触发点、scanned row 保护、外层 persist/lifecycle 行为；server relation 读/展示/persist helper 后续继续抽离。
+- 文档影响：更新本模块 `implementation-notes.md`、`tests.md` 和 `workbench-relations` 模块文档。
+- 测试覆盖：新增 `test_confirm_relation_allows_oa_invoice_offset_auto_match_mode`、`test_replace_existing_confirm_uses_requested_history_operation_type`、`test_server_active_relation_repairs_use_relation_command_boundary`，并运行 OA offset auto pair、source link、防误取消、missing attachment repair 回归。
+- 验证命令：见 `workbench-relations` Phase 7J 记录。
+- 未测风险：no-OA legacy repair/consolidation 和 batch accounting repair 仍待后续切片迁移或降级为 repair port。
+
+## 2026-06-12 - Workbench exception apply relation command 写入口收敛
+
+- 目标：删除 `WorkbenchExceptionApplicationService` closed apply 直接创建 pair relation 的写入口，把 `normal_match` / `oa_exempt` 纳入统一 relation command lifecycle。
+- 影响范围：`WorkbenchExceptionApplicationService.apply`、`WorkbenchRelationCommandService` mode registry、`WorkbenchWriteFacade.apply_exception` rollback/error mapping、Application wiring、runtime boundary guard。
+- 关键决策：closed action 在创建本地 exception case 前先执行 relation command preflight；缺 command service 或 relation read model non-fresh 时 fail fast，不留下半写入 case。成功路径通过 `confirm_relation(..., history_operation_type="workbench_exception_apply")` 写 relation，保留 OA exemption/evidence/display tags 等展示字段。
+- 文档影响：更新本模块 `README.md`、`tests.md` 和 `workbench-relations` 模块文档。
+- 测试覆盖：新增 `test_apply_closed_exception_delegates_pair_relation_to_command_service` 和 `test_workbench_exception_application_uses_relation_command_boundary`，并运行三方闭环、自动/手动免 OA structured fields 回归。
+- 验证命令：见 `workbench-relations` Phase 7I 记录。
+- 未测风险：`server.py` active relation repair、no-OA legacy repair/consolidation 和 batch accounting repair 仍待后续切片迁移或降级为 repair port。
+
+## 2026-06-12 - 个人暂借款 relation command 写入口收敛
+
+- 目标：删除 `confirm_personal_advance_repayment` 直接调用 `WorkbenchPairRelationService.replace_with_confirmed_relation` 的写入口，把 `personal_advance_repayment_settlement` 纳入统一 relation command lifecycle。
+- 影响范围：`WorkbenchWriteFacade.confirm_personal_advance_repayment`、`WorkbenchRelationCommandService` mode registry、Workbench personal advance API 回归、runtime boundary guard。
+- 关键决策：缺少 relation command service 时先 fail fast，不创建 exception case；成功路径通过 `confirm_relation(..., replace_existing=True)` 写 relation，保留原有 amount summary、cost exclude metadata 和 response shape。
+- 文档影响：更新本模块 `README.md`、`tests.md` 和 `workbench-relations` 模块文档。
+- 测试覆盖：新增 `test_personal_advance_repayment_delegates_relation_write_to_command_service`、`test_personal_advance_repayment_fails_fast_without_relation_command_service`、`test_workbench_personal_advance_repayment_uses_relation_command_boundary`，并运行既有个人暂借款 API 成功/失败回归。
+- 验证命令：见 `workbench-relations` Phase 7H 记录。
+- 未测风险：其他 exception application relation mode 族仍待单独迁移，不能与个人暂借款混为同一切片。
+
+## 2026-06-12 - confirm/cancel relation command 写入口收敛
+
+- 目标：删除关联台 `confirm-link` / `cancel-link` 在缺少 `WorkbenchRelationCommandService` 时回退到 `WorkbenchPairRelationService` 直接写 pair snapshot 的 legacy fallback。
+- 影响范围：`WorkbenchWriteFacade.confirm_link`、`_confirm_link_with_uow`、`cancel_link`、`_cancel_link_with_uow`、Workbench idempotency/UoW characterization tests、workbench relation boundary guard。
+- 关键决策：非 UoW 路径缺 relation command service 返回 `workbench_relation_command_unavailable`；UoW handler 中也必须通过 transaction-bound command repository 写入，不再调用 `_persist_workbench_pair_relations_in_transaction` 旧 hook。idempotency replay/in-progress 判断仍优先于 handler 内 command 可用性。
+- 文档影响：更新本模块 `README.md`、`tests.md` 和 `workbench-relations` 模块实施记录。
+- 测试覆盖：`test_confirm_and_cancel_link_fail_fast_without_relation_command_service`、`test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback`，并更新 `tests/test_workbench_write_characterization.py` 的 UoW fakes 以记录 command repository 写入。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_auth_context_idempotency.py tests/test_workbench_write_characterization.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback -q`。
+- 未测风险：个人暂借款、exception application、server active relation repair 等 Workbench-adjacent relation 写入口仍待后续切片迁移。
+
 ## 2026-06-11 - 外部往来 bank-only 闭环保持 open
 
 - 目标：修正外部往来手动闭环在关联台的分区语义，移除 `bank-only + turnover_manual_closure + exactly 2 bank rows` 进入 paired 的例外。

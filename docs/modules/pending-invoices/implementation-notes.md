@@ -9,6 +9,7 @@
 - 支出规则版本是 `pending_invoice_tag_groups.version`，收入规则版本是 `pending_output_invoice_tag_groups.version`；二者独立，且都不同于 `bank_transaction_tags.version`。
 - `requires_invoice` 是 active tag complement，由后端实时派生；保存规则时即使请求包含该字段也必须忽略。
 - rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
+- OA/流水/发票 relation 不是待找发票私有事实；manual invoice 和 attach existing 写入必须委托 `WorkbenchRelationCommandService`，读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖支出/收入状态、规则保存、人工补票、attach existing、income status、API 契约、SQL read model、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 
 ## 记录模板
@@ -49,3 +50,14 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service tests.test_pending_invoice_api tests.test_invoice_lifecycle_page_integration -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_pending_invoice_relation_identity tests.test_pending_invoice_oa_identity_backfill -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_app_status_overview_service tests.test_runtime_worker_registry -v`；`cd web && npm test -- --run src/test/PendingInvoicesApi.test.ts src/test/PendingInvoicesPage.test.tsx`。
 - 未测风险：未连接真实生产 Postgres 大数据量，不验证真实 SQL projection EXPLAIN、锁等待或长尾分页性能；未跑真实 RabbitMQ/Redis/systemd search-pending 与 invoice-lifecycle worker drain；未做真实浏览器大文件导出和网络中断恢复 smoke。
 - 后续事项：下一轮处理 `oa-pending-payments`，重点审计 OA/bank/invoice detail、read model freshness、filter-options 和 invoice lifecycle fan-out。
+
+## 2026-06-12 - relation 写入口迁入 workbench relation command service
+
+- 目标：让待找发票 manual invoice confirm、attach existing 单条和批量不再直接写 `WorkbenchPairRelationService`，统一委托 workbench relation 模块，避免待找发票页面形成独立关系事实源。
+- 影响范围：`PendingInvoiceApplicationService`、`WorkbenchRelationCommandService`、`Application` dependency wiring、`tests/test_pending_invoice_service.py`、本模块 README/tests 和 `docs/modules/workbench-relations/*`。
+- 关键决策：manual/attach 写 relation 走 `WorkbenchRelationCommandService.confirm_relation(...)`；写前读取既有 active relation 只走 `WorkbenchRelationReadFacade.get_by_row_ids(...)` 的 distribution payload；缺少 command service 时 fail fast。manual invoice confirm 在创建发票前先调用 relation write precondition，relation read model stale 时不创建发票并把 pending command 标记为 `failed_recoverable`。
+- 文档影响：更新本模块 `README.md`、`tests.md`、本实施记录，以及 `workbench-relations` 模块 README/tests/implementation-notes。
+- 测试覆盖：新增/更新 `tests/test_pending_invoice_service.py`，覆盖 manual/attach 单条/批量委托 command service、stale fail-fast、不产生孤儿发票、命令可恢复状态；保留 pending invoice API 旧 shape 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_service.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_api.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_downstream_relation_read_models_use_workbench_relation_distribution -q`；`python3 -m compileall -q backend/src/fin_ops_platform/services/pending_invoice_service.py backend/src/fin_ops_platform/services/workbench_relation_command_service.py`。
+- 未测风险：HTTP 层尚未单独断言 relation read model stale 的 error shape；真实 Postgres 并发 row occupation 仍未用锁或唯一占用约束保护；跨页面真实 worker drain 仍需 staging smoke。
+- 后续事项：迁移 no-OA submit/withdraw/internal transfer confirm-link，继续消除剩余 relation 写事实源。

@@ -13,6 +13,7 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
     parse_etc_xml,
 )
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 HISTORICAL_ETC_REPAIR_RELATION_MODE = "etc_batch_invoice_link"
@@ -119,6 +120,7 @@ class HistoricalEtcRepairService:
         state_store: Any,
         etc_service: EtcService,
         pair_relation_service: Any,
+        relation_command_service: Any | None = None,
         specs: Iterable[HistoricalEtcRepairBatchSpec] = DEFAULT_HISTORICAL_ETC_REPAIR_SPECS,
         oa_row_exists: Callable[[str], bool] | None = None,
         sync_import_result_to_canonical_invoices: Callable[[Any], list[str]] | None = None,
@@ -131,6 +133,7 @@ class HistoricalEtcRepairService:
         self._state_store = state_store
         self._etc_service = etc_service
         self._pair_relation_service = pair_relation_service
+        self._relation_command_service = relation_command_service
         self._specs = list(specs)
         self._oa_row_exists = oa_row_exists or (lambda _row_id: True)
         self._sync_import_result_to_canonical_invoices = sync_import_result_to_canonical_invoices or (lambda _result: [])
@@ -293,6 +296,8 @@ class HistoricalEtcRepairService:
                     message=f"{spec.label} parsed seed 缺少部分发票结构化记录。",
                     invoice_count=len(invoice_numbers),
                 )
+        command_confirm = self._relation_confirm_command()
+        if missing_numbers:
             import_result = self._etc_service.import_historical_invoices_from_records(
                 records=missing_records,
                 source_name=f"{spec.bundle_id}.parsed_seed",
@@ -313,24 +318,29 @@ class HistoricalEtcRepairService:
         changed_months = self._sync_etc_invoices_to_canonical_invoices(invoices)
         self._refresh_after_etc_invoice_sync(changed_months, f"historical_etc_repair_link:{reason}")
 
-        relation = self._pair_relation_service.create_active_relation(
+        amount_check = {
+            "status": "matched" if batch.amount_delta == Decimal("0.00") else "mismatch",
+            "oa_amount": f"{spec.oa_amount:.2f}",
+            "invoice_total": f"{batch.total_amount:.2f}",
+            "delta": f"{batch.amount_delta:.2f}",
+            "etc_batch_id": batch.id,
+            "external_etc_batch_id": batch.etc_batch_id,
+            "source": "historical_repair",
+        }
+        command_result = command_confirm(
             case_id=spec.case_id,
             row_ids=[spec.oa_row_id],
             row_types=["oa"],
             relation_mode=HISTORICAL_ETC_REPAIR_RELATION_MODE,
-            created_by="system_historical_repair",
+            actor_id="system_historical_repair",
             month_scope="all",
             note=f"{spec.label} ETC 历史补关联",
-            amount_check={
-                "status": "matched" if batch.amount_delta == Decimal("0.00") else "mismatch",
-                "oa_amount": f"{spec.oa_amount:.2f}",
-                "invoice_total": f"{batch.total_amount:.2f}",
-                "delta": f"{batch.amount_delta:.2f}",
-                "etc_batch_id": batch.id,
-                "external_etc_batch_id": batch.etc_batch_id,
-                "source": "historical_repair",
-            },
+            amount_check=amount_check,
+            history_operation_type="historical_etc_repair_confirm",
         )
+        relation = command_result.get("relation") if isinstance(command_result, dict) else None
+        if not isinstance(relation, dict):
+            relation = {"case_id": spec.case_id}
         self._persist_pair_relations([str(relation["case_id"])])
         self._invalidate_workbench_scopes(["all", *changed_months])
         self._persist_etc_state()
@@ -345,6 +355,19 @@ class HistoricalEtcRepairService:
             relation_case_id=str(relation["case_id"]),
             amount_delta=batch.amount_delta,
         )
+
+    def _relation_confirm_command(self) -> Callable[..., dict[str, Any]]:
+        command_confirm = (
+            getattr(self._relation_command_service, "confirm_relation", None)
+            if self._relation_command_service is not None
+            else None
+        )
+        if not callable(command_confirm):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Historical ETC repair requires WorkbenchRelationCommandService.confirm_relation.",
+            )
+        return command_confirm
 
     def _parse_unique_zip_invoices(self, upload: UploadedEtcZipFile) -> list[Any]:
         parsed_by_number: OrderedDict[str, Any] = OrderedDict()

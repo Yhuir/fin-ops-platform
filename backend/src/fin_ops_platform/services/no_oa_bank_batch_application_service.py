@@ -14,6 +14,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
 )
 from fin_ops_platform.services.no_oa_bank_batch_service import (
+    NO_OA_BANK_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     NoOaBankBatchService,
 )
@@ -21,6 +22,7 @@ from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LA
 from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
@@ -30,6 +32,19 @@ SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 class NoOaBankBatchPersistenceError(RuntimeError):
     error_code = "no_oa_bank_batch_persistence_failed"
+
+
+class NoOaBankBatchRelationMutationError(ValueError):
+    def __init__(
+        self,
+        error_code: str,
+        message: str | None = None,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message or error_code)
+        self.error_code = error_code
+        self.payload = dict(payload or {})
 
 
 class NoOaBankBatchApplicationService:
@@ -53,6 +68,7 @@ class NoOaBankBatchApplicationService:
         search_cache_clearer: Callable[[], Any] | None = None,
         queue_repository: Any | None = None,
         relation_facade: Any | None = None,
+        relation_command_service: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._effective_category_provider = effective_category_provider
@@ -75,6 +91,7 @@ class NoOaBankBatchApplicationService:
         self._search_cache_clearer = search_cache_clearer or (lambda: None)
         self._queue_repository = queue_repository
         self._relation_facade = relation_facade
+        self._relation_command_service = relation_command_service
 
     def list_batches_payload(self, query: dict[str, list[str]]) -> dict[str, object]:
         filters = {
@@ -188,12 +205,16 @@ class NoOaBankBatchApplicationService:
         previous_relation_snapshot = self._pair_relation_service.snapshot()
         try:
             self.refresh_batches()
+            before_batch = self._no_oa_bank_batch_service.get_batch(batch_id)
+            already_submitted = str(before_batch.get("status") or "") == "submitted"
             batch = self._no_oa_bank_batch_service.submit_batch(
                 batch_id,
                 actor=actor,
                 expected_version=expected_version,
                 note=note,
             )
+            if not already_submitted:
+                self._confirm_relation_for_batch(batch, actor=actor, note=note)
             result = self._mutation_result(batch, status="submitted", persist=persist)
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
@@ -219,13 +240,14 @@ class NoOaBankBatchApplicationService:
             batch = self._no_oa_bank_batch_service.submit_selected_rows(
                 bank_rows=bank_rows,
                 categories_by_transaction_id=categories_by_transaction_id,
-                active_relations=self._pair_relation_service.list_active_relations(),
+                active_relations=self._workbench_relation_active_relations_for_bank_rows(bank_rows),
                 source_versions=self.no_oa_bank_batch_source_versions(),
                 eligible_batch_types=self.selected_tag_codes(),
                 row_ids=row_ids,
                 actor=actor,
                 note=note,
             )
+            self._confirm_relation_for_batch(batch, actor=actor, note=note)
             result = self._mutation_result(batch, status="submitted", persist=True)
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
@@ -248,12 +270,15 @@ class NoOaBankBatchApplicationService:
                 categories_by_transaction_id=categories_by_transaction_id,
                 row_ids=row_ids,
             )
+            already_submitted = str(batch.get("status") or "") == "submitted"
             submitted = self._no_oa_bank_batch_service.submit_batch(
                 str(batch["batch_id"]),
                 actor=actor,
                 expected_version=int(batch.get("version") or 1),
                 note=note,
             )
+            if not already_submitted:
+                self._confirm_relation_for_batch(submitted, actor=actor, note=note)
             result = self._mutation_result(submitted, status="submitted", persist=True)
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
@@ -271,19 +296,110 @@ class NoOaBankBatchApplicationService:
         previous_batch_snapshot = self._no_oa_bank_batch_service.snapshot()
         previous_relation_snapshot = self._pair_relation_service.snapshot()
         try:
+            before_batch = self._no_oa_bank_batch_service.get_batch(batch_id)
+            already_withdrawn = str(before_batch.get("status") or "") == "withdrawn"
             batch = self._no_oa_bank_batch_service.withdraw_batch(
                 batch_id,
                 actor=actor,
                 expected_version=expected_version,
                 reason=reason,
             )
+            if not already_withdrawn:
+                self._cancel_relation_for_batch(batch, actor=actor, reason=reason)
             result = self._mutation_result(batch, status="withdrawn", persist=True)
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
             raise
         return result
 
-    def refresh_batches(self) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+    def _confirm_relation_for_batch(self, batch: dict[str, object], *, actor: str, note: str | None) -> None:
+        relation_command_service = self._require_relation_command_service()
+        payload = self._no_oa_bank_batch_service.relation_command_payload_for_batch(batch, note=note)
+        case_id = str(payload.get("case_id") or "").strip()
+        if not case_id:
+            raise ValueError("no_oa_bank_batch_relation_case_id_required")
+        try:
+            relation_command_service.confirm_relation(
+                case_id=case_id,
+                row_ids=list(payload.get("row_ids") or []),
+                row_types=list(payload.get("row_types") or []),
+                relation_mode=NO_OA_BANK_BATCH_RELATION_MODE,
+                actor_id=str(actor or ""),
+                month_scope=str(payload.get("month_scope") or "all"),
+                note=str(payload.get("note") or ""),
+                special_metadata=payload.get("special_metadata") if isinstance(payload.get("special_metadata"), dict) else {},
+                evidence=payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {},
+                display_tags=[
+                    str(tag).strip()
+                    for tag in list(payload.get("display_tags") or [])
+                    if str(tag).strip()
+                ],
+                idempotency_key=self._relation_idempotency_key(batch, operation="submit"),
+                history_operation_type="no_oa_bank_batch_submit",
+            )
+        except WorkbenchRelationCommandError as exc:
+            raise self._relation_command_error(exc) from exc
+
+    def _cancel_relation_for_batch(self, batch: dict[str, object], *, actor: str, reason: str | None) -> None:
+        relation_command_service = self._require_relation_command_service()
+        case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+        if not case_id:
+            raise ValueError("no_oa_bank_batch_relation_case_id_required")
+        try:
+            relation_command_service.cancel_relation(
+                case_id=case_id,
+                actor_id=str(actor or ""),
+                reason=reason,
+                idempotency_key=self._relation_idempotency_key(batch, operation="withdraw"),
+                history_operation_type="no_oa_bank_batch_withdraw",
+            )
+        except WorkbenchRelationCommandError as exc:
+            raise self._relation_command_error(exc) from exc
+
+    def _require_relation_command_service(self) -> Any:
+        if self._relation_command_service is None:
+            raise ValueError("no_oa_bank_batch_relation_command_unavailable")
+        return self._relation_command_service
+
+    @staticmethod
+    def _relation_idempotency_key(batch: dict[str, object], *, operation: str) -> str:
+        return ":".join(
+            [
+                "no_oa_bank_batch",
+                operation,
+                str(batch.get("batch_id") or ""),
+                str(batch.get("relation_case_id") or batch.get("batch_id") or ""),
+                str(batch.get("version") or ""),
+            ]
+        )
+
+    @staticmethod
+    def _relation_command_error(exc: WorkbenchRelationCommandError) -> NoOaBankBatchRelationMutationError:
+        if exc.error_code in {"workbench_relation_read_model_not_fresh", "workbench_relation_read_model_unavailable"}:
+            return NoOaBankBatchRelationMutationError(
+                "no_oa_bank_batch_relation_read_model_not_fresh",
+                "no_oa_bank_batch_relation_read_model_not_fresh",
+                payload=exc.payload,
+            )
+        if exc.error_code == "workbench_relation_active_row_conflict":
+            return NoOaBankBatchRelationMutationError(
+                "no_oa_bank_batch_relation_active_row_conflict",
+                "no_oa_bank_batch_relation_active_row_conflict",
+                payload=exc.payload,
+            )
+        if exc.error_code == "workbench_relation_not_found":
+            return NoOaBankBatchRelationMutationError(
+                "no_oa_bank_batch_relation_not_found",
+                "no_oa_bank_batch_relation_not_found",
+                payload=exc.payload,
+            )
+        return NoOaBankBatchRelationMutationError(exc.error_code, exc.error_code, payload=exc.payload)
+
+    def refresh_batches(
+        self,
+        *,
+        apply_relation_repairs: bool = True,
+    ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
         bank_rows = self.no_oa_bank_transaction_rows()
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
         self._no_oa_bank_batch_service.build_batches(
@@ -292,9 +408,10 @@ class NoOaBankBatchApplicationService:
             self._workbench_relation_active_relations_for_bank_rows(bank_rows),
             self.no_oa_bank_batch_source_versions(),
             eligible_batch_types=self.selected_tag_codes(),
+            apply_relation_repairs=apply_relation_repairs,
         )
         migration_result = self._no_oa_bank_batch_service.last_legacy_migration_result()
-        if migration_result.get("changed"):
+        if apply_relation_repairs and migration_result.get("changed"):
             self.after_mutation(
                 [
                     str(month)

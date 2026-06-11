@@ -7,6 +7,52 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     NoOaBankBatchService,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import (
+    CallbackWorkbenchRelationRepository,
+    WorkbenchRelationCommandService,
+)
+
+
+class FreshNoOaRelationFacade:
+    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+        return {
+            "status": "fresh",
+            "rows": [],
+            "groups": [],
+            "read_model_scope_keys": list(kwargs.get("scope_keys_hint") or ["2026-03"]),
+            "stale_reasons": [],
+            "refresh_enqueued": False,
+        }
+
+
+def relation_command_service_for(pair_relation_service: WorkbenchPairRelationService) -> WorkbenchRelationCommandService:
+    def save_snapshot(snapshot: dict[str, object], *, changed_case_ids: list[str]) -> None:
+        changed_ids = {str(case_id).strip() for case_id in list(changed_case_ids or []) if str(case_id).strip()}
+        current = pair_relation_service.snapshot()
+        current_relations = dict(current.get("pair_relations") if isinstance(current.get("pair_relations"), dict) else {})
+        incoming_relations = dict(snapshot.get("pair_relations") if isinstance(snapshot.get("pair_relations"), dict) else {})
+        for case_id in changed_ids:
+            if case_id in incoming_relations:
+                current_relations[case_id] = incoming_relations[case_id]
+            else:
+                current_relations.pop(case_id, None)
+        restored = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": current_relations,
+                "pair_relation_history": list(snapshot.get("pair_relation_history") or []),
+            }
+        )
+        pair_relation_service._pair_relations = restored._pair_relations
+        pair_relation_service._pair_relation_history = restored._pair_relation_history
+
+    return WorkbenchRelationCommandService(
+        relation_repository=CallbackWorkbenchRelationRepository(
+            load_snapshot=pair_relation_service.snapshot,
+            save_snapshot=save_snapshot,
+        ),
+        relation_facade=FreshNoOaRelationFacade(),
+        require_fresh_relations=False,
+    )
 
 
 def bank_row(
@@ -91,7 +137,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
 
     def test_new_fee_rows_after_submitted_same_month_account_batch_generate_incremental_draft(self) -> None:
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         submitted_rows = [bank_row("fee-submitted", category_code="fee", debit_amount="0.90")]
         submitted_batch = self.assert_single_batch(
             service.build_batches(submitted_rows, categories_for(submitted_rows), [], {}),
@@ -186,7 +235,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
                 "total_amount": "0.90",
             },
         )
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         batches = service.build_batches(
             [bank_row("fee-submitted", category_code="fee", debit_amount="0.90")],
@@ -438,6 +490,15 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         ]
         batch_key = "internal_transfer:2026-03:500.00:transfer-in:transfer-out"
         batch_id = NoOaBankBatchService._batch_id(batch_key)
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="manual-internal-transfer",
+            row_ids=["transfer-in", "transfer-out"],
+            row_types=["bank", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="finance-user",
+            month_scope="2026-03",
+        )
         service = NoOaBankBatchService.from_snapshot(
             {
                 "batches": {
@@ -460,25 +521,22 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
                         "version": 2,
                     }
                 }
-            }
+            },
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
         )
-        active_relations = [
-            {
-                "case_id": "manual-internal-transfer",
-                "status": "active",
-                "row_ids": ["transfer-in", "transfer-out"],
-                "row_types": ["bank", "bank"],
-                "relation_mode": "manual_confirmed",
-                "month_scope": "2026-03",
-            }
-        ]
 
-        batches = service.build_batches(rows, categories_for(rows), active_relations, {})
+        batches = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
 
         self.assertEqual([batch["status"] for batch in batches], ["submitted"])
         self.assertEqual(batches[0]["batch_id"], batch_id)
         self.assertEqual(service.list_batches({"bucket": "unsubmitted"}), [])
         self.assertEqual([batch["batch_id"] for batch in service.list_batches({"bucket": "submitted"})], [batch_id])
+        active_relations = pair_service.list_active_relations()
+        self.assertEqual(len(active_relations), 1)
+        self.assertEqual(active_relations[0]["case_id"], batch_id)
+        self.assertEqual(active_relations[0]["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(active_relations[0]["special_metadata"]["legacy_case_id"], "manual-internal-transfer")
 
     def test_submitted_internal_transfer_no_oa_relation_does_not_rebuild_as_conflict(self) -> None:
         rows = [
@@ -494,7 +552,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
             ),
         ]
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         batch = self.assert_single_batch(
             service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {}),
             "draft",
@@ -519,7 +580,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
             month_scope="2026-03",
             special_metadata={"legacy_marker": "keep"},
         )
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         migrated = self.assert_single_batch(
             service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {}),
@@ -561,7 +625,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
                 month_scope="2026-03",
                 special_metadata={"legacy_marker": row_id},
             )
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         first_refresh = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
         migrated = self.assert_single_batch(first_refresh, "submitted")
@@ -666,7 +733,11 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
                 },
                 display_tags=["免OA", "工资"],
             )
-        service = NoOaBankBatchService(batches=old_batches, pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            batches=old_batches,
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         first_refresh = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
         second_refresh = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
@@ -779,7 +850,11 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
                 },
                 display_tags=["免OA", "工资"],
             )
-        service = NoOaBankBatchService(batches=batches, pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            batches=batches,
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         refreshed = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
 
@@ -815,7 +890,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
             created_by="system_auto_match",
             month_scope="2026-03",
         )
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         batches = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
         migrated = self.assert_single_batch(batches, "submitted")
@@ -854,7 +932,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
             created_by="finance-user",
             month_scope="2026-03",
         )
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         batches = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
         migrated = self.assert_single_batch(batches, "submitted")
@@ -881,7 +962,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
             created_by="system_auto_match",
             month_scope="2026-03",
         )
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
 
         draft = self.assert_single_batch(
             service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {}),
@@ -896,10 +980,13 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(migration_result["changed_case_ids"], ["salary_auto_history"])
         self.assertEqual(migration_result["skipped"][0]["reason"], "legacy_relation_category_mismatch")
 
-    def test_submit_batch_writes_no_oa_pair_relation_metadata_idempotently(self) -> None:
+    def test_submit_batch_marks_submitted_and_exposes_relation_command_payload_idempotently(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         batch = self.assert_single_batch(service.build_batches(rows, categories_for(rows), [], {}), "draft")
 
         submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="确认")
@@ -911,19 +998,26 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertTrue(submitted["can_withdraw"])
         self.assertEqual(submitted["blocked_reason"], "批次已提交，不能重复提交。")
         self.assertEqual(submitted_again["batch_id"], submitted["batch_id"])
-        relation = pair_service.get_active_relation_by_case_id(submitted["relation_case_id"])
-        assert relation is not None
-        self.assertEqual(relation["relation_mode"], "no_oa_bank_batch")
-        self.assertEqual(relation["special_metadata"]["source_batch_id"], submitted["batch_id"])
-        self.assertEqual(relation["special_metadata"]["batch_type"], "fee")
-        self.assertTrue(relation["special_metadata"]["withdrawable"])
-        self.assertEqual(relation["display_tags"], ["免OA", "手续费"])
-        self.assertEqual(len(pair_service.list_active_relations()), 1)
+        self.assertEqual(pair_service.list_active_relations(), [])
+        payload = service.relation_command_payload_for_batch(submitted, note="确认")
+        self.assertEqual(payload["case_id"], submitted["relation_case_id"])
+        self.assertEqual(payload["row_ids"], ["fee-1"])
+        self.assertEqual(payload["row_types"], ["bank"])
+        self.assertEqual(payload["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(payload["month_scope"], "2026-03")
+        self.assertEqual(payload["special_metadata"]["source_batch_id"], submitted["batch_id"])
+        self.assertEqual(payload["special_metadata"]["batch_type"], "fee")
+        self.assertTrue(payload["special_metadata"]["withdrawable"])
+        self.assertEqual(payload["display_tags"], ["免OA", "手续费"])
+        self.assertEqual(payload["evidence"]["row_count"], 1)
 
     def test_withdraw_batch_cancels_relation_and_marks_batch_withdrawn(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         batch = self.assert_single_batch(service.build_batches(rows, categories_for(rows), [], {}), "draft")
         submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="")
 
@@ -942,7 +1036,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
     def test_withdrawn_batch_rebuilds_as_draft_when_source_rows_remain_current(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         batch = self.assert_single_batch(service.build_batches(rows, categories_for(rows), [], {}), "draft")
         submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="")
         withdrawn = service.withdraw_batch(submitted["batch_id"], actor="finance-user", expected_version=2, reason="误提交")
@@ -960,7 +1057,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
             bank_row("service-fee-1", category_code="fee", debit_amount="10000.00"),
         ]
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         batch = self.assert_single_batch(service.build_batches(rows, categories_for(rows), [], {}), "draft")
         submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="")
         changed_categories = {
@@ -997,7 +1097,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
     def test_submitted_batch_that_becomes_stale_clears_active_relation(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         batch = self.assert_single_batch(service.build_batches(rows, categories_for(rows), [], {}), "draft")
         submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="")
         changed_categories = categories_for([{**rows[0], "category_code": "salary"}])
@@ -1019,7 +1122,10 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
     def test_stale_without_active_no_oa_relation_is_not_withdrawable(self) -> None:
         rows = [bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         pair_service = WorkbenchPairRelationService()
-        service = NoOaBankBatchService(pair_relation_service=pair_service)
+        service = NoOaBankBatchService(
+            pair_relation_service=pair_service,
+            relation_command_service=relation_command_service_for(pair_service),
+        )
         batch = self.assert_single_batch(service.build_batches(rows, categories_for(rows), [], {}), "draft")
         submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="")
         changed_categories = categories_for([{**rows[0], "category_code": "salary"}])

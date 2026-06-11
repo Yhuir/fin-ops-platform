@@ -8,6 +8,7 @@ from threading import RLock
 from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 
@@ -107,12 +108,14 @@ class BatchAccountingService:
         batch_workbench_loader: Callable[[str, str], dict[str, Any] | None] | None = None,
         case_id_provider: Callable[[str], str] | None = None,
         relation_facade: Any | None = None,
+        relation_command_service: Any | None = None,
     ) -> None:
         self._grouped_workbench_loader = grouped_workbench_loader
         self._pair_relation_service = pair_relation_service
         self._batch_workbench_loader = batch_workbench_loader
         self._case_id_provider = case_id_provider or self._default_case_id_for_bank_row
         self._relation_facade = relation_facade
+        self._relation_command_service = relation_command_service
         self._mutation_lock = RLock()
 
     def build_payload(
@@ -240,40 +243,50 @@ class BatchAccountingService:
             before_relations,
             self._synthetic_existing_case_relations(rows, existing_relations=before_relations, month_scope=self._month_scope(rows)),
         )
-        relation, _history = self._pair_relation_service.replace_with_confirmed_relation(
-            case_id=self._case_id_provider(normalized_bank_row_id),
-            row_ids=row_ids,
-            row_types=row_types,
-            relation_mode="manual_confirmed",
-            created_by=actor,
-            month_scope=self._month_scope(rows),
-            note=relation_note,
-            amount_check=amount_check,
-            special_metadata={
-                "source": BATCH_ACCOUNTING_SOURCE,
-                "bank_row_id": normalized_bank_row_id,
-                "oa_row_ids": normalized_oa_row_ids,
-                "invoice_row_ids": invoice_row_ids,
-                "year": resolved_bank_year,
-                "bank_year": resolved_bank_year,
-                "oa_year": resolved_oa_year,
-                "oa_years": selected_oa_years,
-                "created_by": actor,
-            },
-            before_relations=history_before_relations,
-        )
+        special_metadata = {
+            "source": BATCH_ACCOUNTING_SOURCE,
+            "bank_row_id": normalized_bank_row_id,
+            "oa_row_ids": normalized_oa_row_ids,
+            "invoice_row_ids": invoice_row_ids,
+            "year": resolved_bank_year,
+            "bank_year": resolved_bank_year,
+            "oa_year": resolved_oa_year,
+            "oa_years": selected_oa_years,
+            "created_by": actor,
+        }
+        case_id = self._case_id_provider(normalized_bank_row_id)
+        if self._relation_command_service is None:
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联写入服务不可用，请稍后重试。",
+                payload={"case_id": case_id, "row_ids": row_ids},
+            )
+        try:
+            command_result = self._relation_command_service.confirm_relation(
+                case_id=case_id,
+                row_ids=row_ids,
+                row_types=row_types,
+                relation_mode=BATCH_ACCOUNTING_SOURCE,
+                actor_id=actor,
+                month_scope=self._month_scope(rows),
+                note=relation_note,
+                amount_check=amount_check,
+                special_metadata=special_metadata,
+                before_relations=history_before_relations,
+                replace_existing=True,
+                history_operation_type="confirm_link",
+            )
+        except WorkbenchRelationCommandError as exc:
+            raise self._command_error(exc) from exc
+        relation = dict(command_result.get("relation") or {})
+        changed_case_ids = self._dedupe([str(case_id) for case_id in list(command_result.get("changed_case_ids") or [])])
         return {
             "success": True,
             "action": "submit_batch_accounting",
             "relation_id": str(relation.get("case_id") or ""),
             "pair_relation": relation,
             "affected_row_ids": row_ids,
-            "changed_case_ids": self._dedupe(
-                [
-                    *[str(item.get("case_id") or "") for item in before_relations],
-                    str(relation.get("case_id") or ""),
-                ]
-            ),
+            "changed_case_ids": changed_case_ids,
             "month_scope": str(relation.get("month_scope") or "all"),
             "amount_check": amount_check,
             "message": f"已关联批量账务流水与 {len(normalized_oa_row_ids)} 项 OA。",
@@ -340,38 +353,43 @@ class BatchAccountingService:
                     "repaired_at": repaired_at,
                 }
             )
-            repaired_relation = self._pair_relation_service.create_active_relation(
-                case_id=target_case_id,
-                row_ids=row_ids,
-                row_types=row_types,
-                relation_mode=str(relation.get("relation_mode") or "manual_confirmed"),
-                created_by=actor,
-                month_scope=str(relation.get("month_scope") or "all"),
-                created_at=repaired_at,
-                note=repair_note,
-                amount_check=deepcopy(relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {}),
-                special_metadata=metadata,
-                exception_case_id=str(relation.get("exception_case_id") or ""),
-                rule_version=str(relation.get("rule_version") or ""),
-                evidence=deepcopy(relation.get("evidence") if isinstance(relation.get("evidence"), dict) else {}),
-                oa_exemption=deepcopy(relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None),
-                display_tags=[
-                    str(tag).strip()
-                    for tag in list(relation.get("display_tags") or [])
-                    if str(tag).strip()
-                ],
+            if self._relation_command_service is None:
+                raise BatchAccountingError(
+                    "batch_accounting_relation_command_unavailable",
+                    "批量账务关联写入服务不可用，请稍后重试。",
+                    payload={"case_id": target_case_id, "row_ids": row_ids},
+                )
+            try:
+                command_result = self._relation_command_service.confirm_relation(
+                    case_id=target_case_id,
+                    row_ids=row_ids,
+                    row_types=row_types,
+                    relation_mode=str(relation.get("relation_mode") or "manual_confirmed"),
+                    actor_id=actor,
+                    month_scope=str(relation.get("month_scope") or "all"),
+                    note=repair_note,
+                    amount_check=deepcopy(relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {}),
+                    special_metadata=metadata,
+                    exception_case_id=str(relation.get("exception_case_id") or ""),
+                    rule_version=str(relation.get("rule_version") or ""),
+                    evidence=deepcopy(relation.get("evidence") if isinstance(relation.get("evidence"), dict) else {}),
+                    oa_exemption=deepcopy(relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None),
+                    display_tags=[
+                        str(tag).strip()
+                        for tag in list(relation.get("display_tags") or [])
+                        if str(tag).strip()
+                    ],
+                    occurred_at=repaired_at,
+                    history_operation_type="repair_batch_accounting_relation_id_collision",
+                )
+            except WorkbenchRelationCommandError as exc:
+                raise self._command_error(exc) from exc
+            repaired_relation = dict(command_result.get("relation") or {})
+            repaired_case_ids.extend(
+                str(case_id)
+                for case_id in list(command_result.get("changed_case_ids") or [target_case_id])
+                if str(case_id).strip()
             )
-            self._pair_relation_service.record_history(
-                operation_type="repair_batch_accounting_relation_id_collision",
-                before_relations=[],
-                after_relations=[repaired_relation],
-                affected_row_ids=row_ids,
-                created_by=actor,
-                note=repair_note,
-                amount_check=dict(repaired_relation.get("amount_check") or {}),
-                created_at=repaired_at,
-            )
-            repaired_case_ids.append(target_case_id)
             affected_row_ids.extend(row_ids)
             month_scope = str(repaired_relation.get("month_scope") or "").strip()
             if month_scope:
@@ -427,31 +445,48 @@ class BatchAccountingService:
             reason="batch_accounting_withdraw_relation_readiness",
         )
         self._ensure_relation_read_model_fresh(relation_read_model_status)
-        restored_relations, _history = self._pair_relation_service.withdraw_latest_for_row_ids(
-            row_ids,
-            created_by=actor,
-            note=note,
-        )
-        affected_row_ids = self._dedupe(
-            [
-                *row_ids,
-                *[
-                    str(row_id)
-                    for relation in restored_relations
-                    for row_id in list(relation.get("row_ids") or [])
-                    if str(row_id).strip()
-                ],
-            ]
-        )
+        if self._relation_command_service is not None:
+            try:
+                command_result = self._relation_command_service.withdraw_relation(
+                    case_id=normalized_relation_id,
+                    actor_id=actor,
+                    reason=note,
+                    history_operation_type="withdraw_link",
+                )
+            except WorkbenchRelationCommandError as exc:
+                raise self._command_error(exc) from exc
+            restored_relations = list(command_result.get("restored_relations") or [])
+            affected_row_ids = self._dedupe(list(command_result.get("affected_row_ids") or row_ids))
+            changed_case_ids = self._dedupe(
+                [str(case_id) for case_id in list(command_result.get("changed_case_ids") or [])]
+            )
+        else:
+            restored_relations, _history = self._pair_relation_service.withdraw_latest_for_row_ids(
+                row_ids,
+                created_by=actor,
+                note=note,
+            )
+            affected_row_ids = self._dedupe(
+                [
+                    *row_ids,
+                    *[
+                        str(row_id)
+                        for relation in restored_relations
+                        for row_id in list(relation.get("row_ids") or [])
+                        if str(row_id).strip()
+                    ],
+                ]
+            )
+            changed_case_ids = self._dedupe(
+                [normalized_relation_id, *[str(relation.get("case_id") or "") for relation in restored_relations]]
+            )
         return {
             "success": True,
             "action": "withdraw_batch_accounting",
             "relation_id": normalized_relation_id,
             "affected_row_ids": affected_row_ids,
             "restored_relations": restored_relations,
-            "changed_case_ids": self._dedupe(
-                [normalized_relation_id, *[str(relation.get("case_id") or "") for relation in restored_relations]]
-            ),
+            "changed_case_ids": changed_case_ids,
             "month_scope": str(active_relation.get("month_scope") or "all"),
             "message": "已撤回批量账务关联。",
         }
@@ -967,6 +1002,28 @@ class BatchAccountingService:
             f"关联台关系读模型 {status.status}，请刷新后再处理。",
             payload=status.as_payload(),
         )
+
+    @staticmethod
+    def _command_error(exc: WorkbenchRelationCommandError) -> BatchAccountingError:
+        if exc.error_code == "workbench_relation_read_model_not_fresh":
+            return BatchAccountingError(
+                "batch_accounting_read_model_not_fresh",
+                "关联台关系读模型不是 fresh，请刷新后再处理。",
+                payload=dict(exc.payload),
+            )
+        if exc.error_code == "workbench_relation_active_row_conflict":
+            return BatchAccountingError(
+                "batch_accounting_relation_conflict",
+                "所选流水或 OA 已有关联关系，请刷新后重试。",
+                payload=dict(exc.payload),
+            )
+        if exc.error_code == "workbench_relation_not_found":
+            return BatchAccountingError(
+                "batch_accounting_relation_not_found",
+                "批量账务关联不存在或不可撤回。",
+                payload=dict(exc.payload),
+            )
+        return BatchAccountingError(exc.error_code, exc.message, payload=dict(exc.payload))
 
     @classmethod
     def _scope_keys_for_rows(cls, rows: Iterable[dict[str, Any]]) -> list[str]:

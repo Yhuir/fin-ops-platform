@@ -201,11 +201,42 @@ class NoOaBankBatchApiRoutes:
     @classmethod
     def _value_error_response(cls, exc: ValueError) -> tuple[HTTPStatus, dict[str, Any]]:
         error_code = cls._error_code(exc)
-        status = HTTPStatus.CONFLICT if error_code == "no_oa_bank_batch_version_conflict" else HTTPStatus.BAD_REQUEST
-        return status, {"error": error_code, "message": str(exc)}
+        status = (
+            HTTPStatus.CONFLICT
+            if error_code
+            in {
+                "no_oa_bank_batch_version_conflict",
+                "no_oa_bank_batch_relation_read_model_not_fresh",
+                "no_oa_bank_batch_relation_active_row_conflict",
+            }
+            else HTTPStatus.BAD_REQUEST
+        )
+        response: dict[str, Any] = {"error": error_code, "message": str(exc)}
+        details = getattr(exc, "payload", None)
+        if isinstance(details, dict):
+            response.update(
+                {
+                    str(key): value
+                    for key, value in details.items()
+                    if str(key)
+                    in {
+                        "read_model_status",
+                        "read_model_stale_reasons",
+                        "read_model_scope_keys",
+                        "refresh_enqueued",
+                        "conflicting_case_ids",
+                        "row_ids",
+                        "case_id",
+                    }
+                }
+            )
+        return status, response
 
     @staticmethod
     def _error_code(exc: ValueError) -> str:
+        error_code = getattr(exc, "error_code", None)
+        if isinstance(error_code, str) and error_code.strip():
+            return error_code.strip()
         message = str(exc).strip()
         if message == "no_oa_bank_batch_version_conflict":
             return message

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from decimal import Decimal
-from typing import Callable
+from typing import Any, Callable
 import unittest
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
@@ -16,6 +17,94 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceQueryService,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_command_service import (
+    WorkbenchRelationCommandError,
+    WorkbenchRelationCommandService,
+)
+
+
+class WriteBlockingPendingInvoicePairRelationService(WorkbenchPairRelationService):
+    def create_active_relation(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("PendingInvoiceApplicationService must delegate relation writes to WorkbenchRelationCommandService.")
+
+    def replace_with_confirmed_relation(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("PendingInvoiceApplicationService must delegate relation writes to WorkbenchRelationCommandService.")
+
+
+class RecordingPendingInvoiceRelationCommandService:
+    def __init__(self) -> None:
+        self.confirm_calls: list[dict[str, object]] = []
+
+    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+        self.confirm_calls.append(dict(kwargs))
+        relation = {
+            "case_id": str(kwargs["case_id"]),
+            "row_ids": list(kwargs["row_ids"]),
+            "row_types": list(kwargs["row_types"]),
+            "status": "active",
+            "relation_mode": str(kwargs["relation_mode"]),
+            "month_scope": str(kwargs.get("month_scope") or "all"),
+            "created_by": str(kwargs["actor_id"]),
+            "special_metadata": dict(kwargs.get("special_metadata") or {}),
+            "version": 1,
+        }
+        return {
+            "status": "confirmed",
+            "relation": relation,
+            "history": {"operation_type": str(kwargs.get("history_operation_type") or "confirm_link")},
+            "changed_case_ids": [relation["case_id"]],
+            "affected_months": ["2026-05"],
+            "version": 1,
+            "read_model_status": "fresh",
+            "read_model_stale_reasons": [],
+            "read_model_scope_keys": ["2026-05"],
+            "refresh_enqueued": False,
+            "idempotent_replay": False,
+        }
+
+
+class StalePendingInvoiceRelationCommandService:
+    def assert_write_precondition(self, **_kwargs: object) -> dict[str, object]:
+        raise WorkbenchRelationCommandError(
+            "workbench_relation_read_model_not_fresh",
+            "Workbench relation read model is stale.",
+            payload={
+                "read_model_status": "stale",
+                "read_model_stale_reasons": ["dirty_scope"],
+                "read_model_scope_keys": ["2026-05"],
+                "refresh_enqueued": True,
+            },
+        )
+
+    def confirm_relation(self, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("stale relation writes must fail before confirm_relation")
+
+
+class PairServiceWorkbenchRelationRepository:
+    def __init__(self, pair_service: WorkbenchPairRelationService) -> None:
+        self._pair_service = pair_service
+
+    def load_workbench_pair_relations(self) -> dict[str, object]:
+        return deepcopy(self._pair_service.snapshot())
+
+    def save_workbench_pair_relations(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: set[str] | list[str] | None = None,
+    ) -> None:
+        current = deepcopy(self._pair_service.snapshot())
+        current_relations = current.setdefault("pair_relations", {})
+        snapshot_relations = snapshot.get("pair_relations") if isinstance(snapshot.get("pair_relations"), dict) else {}
+        for case_id in list(changed_case_ids or []):
+            case_text = str(case_id).strip()
+            if case_text and case_text in snapshot_relations and isinstance(current_relations, dict):
+                current_relations[case_text] = deepcopy(snapshot_relations[case_text])
+        if isinstance(snapshot.get("pair_relation_history"), list):
+            current["pair_relation_history"] = deepcopy(snapshot["pair_relation_history"])
+        replacement = WorkbenchPairRelationService.from_snapshot(current)
+        self._pair_service._pair_relations = replacement._pair_relations
+        self._pair_service._pair_relation_history = replacement._pair_relation_history
 
 
 class RepositoryOnlyPendingInvoiceFacts:
@@ -1327,16 +1416,43 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.audit_events: list[dict[str, object]] = []
         self.finalize_events: list[dict[str, object]] = []
         self.command_store: dict[str, dict[str, object]] = {}
+        relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
             pair_relation_service=self.pair_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
-            relation_facade=LiveWorkbenchRelationFacade(
-                pair_service=self.pair_service,
-                import_service_provider=lambda: self.import_service,
+            relation_facade=relation_facade,
+            relation_command_service=self._relation_command_service(
+                relation_facade=relation_facade,
+                import_service=self.import_service,
             ),
+        )
+
+    def _relation_facade(
+        self,
+        *,
+        import_service: ImportNormalizationService | None = None,
+        pair_service: WorkbenchPairRelationService | None = None,
+    ) -> LiveWorkbenchRelationFacade:
+        resolved_import_service = import_service or self.import_service
+        resolved_pair_service = pair_service or self.pair_service
+        return LiveWorkbenchRelationFacade(
+            pair_service=resolved_pair_service,
+            import_service_provider=lambda: resolved_import_service,
+        )
+
+    def _relation_command_service(
+        self,
+        *,
+        relation_facade: LiveWorkbenchRelationFacade,
+        pair_service: WorkbenchPairRelationService | None = None,
+        import_service: ImportNormalizationService | None = None,
+    ) -> WorkbenchRelationCommandService:
+        return WorkbenchRelationCommandService(
+            relation_repository=PairServiceWorkbenchRelationRepository(pair_service or self.pair_service),
+            relation_facade=relation_facade,
         )
 
     def test_preview_validates_without_writes_and_returns_identity_relation_impact(self) -> None:
@@ -1371,6 +1487,60 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(self.audit_events[0]["actor_id"], "finance-user")
         self.assertEqual(self.audit_events[0]["invoice_id"], result["invoice_id"])
         self.assertEqual(self.finalize_events[0]["affected_months"], ["2026-05"])
+
+    def test_confirm_manual_invoice_delegates_relation_write_to_command_service(self) -> None:
+        relation_command = RecordingPendingInvoiceRelationCommandService()
+        blocking_pair_service = WriteBlockingPendingInvoicePairRelationService()
+        service = PendingInvoiceApplicationService(
+            import_service=self.import_service,
+            pair_relation_service=blocking_pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository({}),
+            relation_facade=LiveWorkbenchRelationFacade(
+                pair_service=blocking_pair_service,
+                import_service_provider=lambda: self.import_service,
+            ),
+            relation_command_service=relation_command,
+        )
+        preview = service.preview_manual_invoice(self._payload(invoice_no="MAN-CMD"))
+
+        result = service.confirm_manual_invoice(
+            {**self._payload(invoice_no="MAN-CMD"), "preview_id": preview["preview_id"], "request_id": "request-command"},
+            actor_id="finance-user",
+        )
+
+        self.assertTrue(str(result["relation_case_id"]).startswith("case_pending_invoice_"))
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["relation_mode"], "pending_invoice_manual_invoice")
+        self.assertEqual(call["actor_id"], "finance-user")
+        self.assertEqual(call["row_ids"], ["txn_expense", result["invoice_id"]])
+        self.assertEqual(call["row_types"], ["bank", "invoice"])
+        self.assertEqual(call["history_operation_type"], "confirm_link")
+
+    def test_confirm_manual_invoice_fails_fast_when_relation_read_model_is_stale(self) -> None:
+        command_store: dict[str, dict[str, object]] = {}
+        service = PendingInvoiceApplicationService(
+            import_service=self.import_service,
+            pair_relation_service=self.pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository(command_store),
+            relation_facade=self._relation_facade(import_service=self.import_service),
+            relation_command_service=StalePendingInvoiceRelationCommandService(),
+        )
+        preview = service.preview_manual_invoice(self._payload(invoice_no="MAN-STALE"))
+
+        with self.assertRaises(PendingInvoiceError) as context:
+            service.confirm_manual_invoice(
+                {**self._payload(invoice_no="MAN-STALE"), "preview_id": preview["preview_id"], "request_id": "request-stale"},
+                actor_id="finance-user",
+            )
+
+        self.assertEqual(context.exception.error_code, "pending_invoice_relation_read_model_not_fresh")
+        self.assertEqual(context.exception.details["read_model_status"], "stale")
+        self.assertEqual(context.exception.details["read_model_stale_reasons"], ["dirty_scope"])
+        self.assertEqual(self.import_service.list_invoices(), [])
+        self.assertEqual(self.pair_service.list_active_relations(), [])
+        self.assertEqual(command_store["request-stale"]["status"], "failed_recoverable")
+        self.assertNotIn("invoice_created", command_store["request-stale"]["status_history"])
 
     def test_confirm_allows_existing_bank_oa_relation_when_creating_invoice_relation(self) -> None:
         self.pair_service.create_active_relation(
@@ -1408,10 +1578,16 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
 
     def test_retry_recovers_invoice_created_before_relation_created(self) -> None:
         preview = self.service.preview_manual_invoice(self._payload())
+        relation_facade = self._relation_facade(import_service=self.import_service)
         failing = PendingInvoiceApplicationService(
             import_service=self.import_service,
             pair_relation_service=self.pair_service,
             command_store=self.command_store,
+            relation_facade=relation_facade,
+            relation_command_service=self._relation_command_service(
+                relation_facade=relation_facade,
+                import_service=self.import_service,
+            ),
             fault_injector=lambda phase, _command: (_ for _ in ()).throw(RuntimeError("boom"))
             if phase == "after_invoice_created"
             else None,
@@ -1432,10 +1608,16 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
 
     def test_retry_recovers_relation_created_before_finalization(self) -> None:
         preview = self.service.preview_manual_invoice(self._payload(invoice_no="MAN-REL"))
+        relation_facade = self._relation_facade(import_service=self.import_service)
         failing = PendingInvoiceApplicationService(
             import_service=self.import_service,
             pair_relation_service=self.pair_service,
             command_store=self.command_store,
+            relation_facade=relation_facade,
+            relation_command_service=self._relation_command_service(
+                relation_facade=relation_facade,
+                import_service=self.import_service,
+            ),
             fault_injector=lambda phase, _command: (_ for _ in ()).throw(RuntimeError("boom"))
             if phase == "after_relation_created"
             else None,
@@ -1508,15 +1690,17 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             buyer_name="云南溯源科技有限公司",
         )
         self.import_service = ImportNormalizationService(existing_transactions=[self.expense_txn], existing_invoices=[invoice])
+        relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
             pair_relation_service=self.pair_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
-            relation_facade=LiveWorkbenchRelationFacade(
-                pair_service=self.pair_service,
-                import_service_provider=lambda: self.import_service,
+            relation_facade=relation_facade,
+            relation_command_service=self._relation_command_service(
+                relation_facade=relation_facade,
+                import_service=self.import_service,
             ),
         )
 
@@ -1542,6 +1726,51 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["relation_mode"], "pending_invoice_attach_existing_invoice")
         self.assertEqual(len(self.pair_service.list_active_relations()), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
+
+    def test_confirm_attach_existing_invoice_delegates_relation_write_to_command_service(self) -> None:
+        invoice = Invoice(
+            id="inv_existing_command",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="EXISTING-CMD",
+            counterparty=self.vendor,
+            amount=Decimal("118.00"),
+            signed_amount=Decimal("118.00"),
+            invoice_date="2026-05-20",
+            total_with_tax=Decimal("118.00"),
+            seller_name="Vendor A",
+            buyer_name="云南溯源科技有限公司",
+        )
+        import_service = ImportNormalizationService(existing_transactions=[self.expense_txn], existing_invoices=[invoice])
+        blocking_pair_service = WriteBlockingPendingInvoicePairRelationService()
+        relation_command = RecordingPendingInvoiceRelationCommandService()
+        service = PendingInvoiceApplicationService(
+            import_service=import_service,
+            pair_relation_service=blocking_pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository({}),
+            relation_facade=LiveWorkbenchRelationFacade(
+                pair_service=blocking_pair_service,
+                import_service_provider=lambda: import_service,
+            ),
+            relation_command_service=relation_command,
+        )
+        preview = service.preview_attach_existing_invoice(
+            transaction_id=self.expense_txn.id,
+            payload={"invoice_id": invoice.id},
+        )
+
+        result = service.confirm_attach_existing_invoice(
+            transaction_id=self.expense_txn.id,
+            payload={"preview_id": preview["preview_id"], "invoice_id": invoice.id, "request_id": "attach-command"},
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["relation_mode"], "pending_invoice_attach_existing_invoice")
+        self.assertEqual(call["row_ids"], ["txn_expense", invoice.id])
+        self.assertEqual(call["row_types"], ["bank", "invoice"])
+        self.assertEqual(call["history_operation_type"], "confirm_link")
 
     def test_attach_existing_allows_invoice_already_linked_to_another_bank_payment(self) -> None:
         previous_txn = BankTransaction(
@@ -1584,15 +1813,17 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             created_by="tester",
         )
         self.import_service = ImportNormalizationService(existing_transactions=[previous_txn, current_txn], existing_invoices=[invoice])
+        relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
             pair_relation_service=self.pair_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
-            relation_facade=LiveWorkbenchRelationFacade(
-                pair_service=self.pair_service,
-                import_service_provider=lambda: self.import_service,
+            relation_facade=relation_facade,
+            relation_command_service=self._relation_command_service(
+                relation_facade=relation_facade,
+                import_service=self.import_service,
             ),
         )
 
@@ -1667,15 +1898,17 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             existing_transactions=[first_txn, second_txn],
             existing_invoices=[first_invoice, second_invoice],
         )
+        relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
             pair_relation_service=self.pair_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
             finalizer=self.finalize_events.append,
-            relation_facade=LiveWorkbenchRelationFacade(
-                pair_service=self.pair_service,
-                import_service_provider=lambda: self.import_service,
+            relation_facade=relation_facade,
+            relation_command_service=self._relation_command_service(
+                relation_facade=relation_facade,
+                import_service=self.import_service,
             ),
         )
 
@@ -1721,6 +1954,92 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(self.finalize_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
         self.assertEqual(self.finalize_events[0]["transaction_ids"], [first_txn.id, second_txn.id])
         self.assertEqual(self.finalize_events[0]["invoice_ids"], [first_invoice.id, second_invoice.id])
+
+    def test_confirm_attach_existing_invoices_batch_delegates_relation_write_to_command_service(self) -> None:
+        first_txn = BankTransaction(
+            id="txn_batch_cmd_a",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor A",
+            amount=Decimal("60.00"),
+            signed_amount=Decimal("-60.00"),
+            txn_date="2026-05-19",
+            trade_time="2026-05-19 10:00:00",
+        )
+        second_txn = BankTransaction(
+            id="txn_batch_cmd_b",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor A",
+            amount=Decimal("40.00"),
+            signed_amount=Decimal("-40.00"),
+            txn_date="2026-05-20",
+            trade_time="2026-05-20 10:00:00",
+        )
+        first_invoice = Invoice(
+            id="inv_batch_cmd_a",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="BATCH-CMD-A",
+            counterparty=self.vendor,
+            amount=Decimal("60.00"),
+            signed_amount=Decimal("60.00"),
+            invoice_date="2026-05-20",
+            total_with_tax=Decimal("60.00"),
+            seller_name="Vendor A",
+            buyer_name="云南溯源科技有限公司",
+        )
+        second_invoice = Invoice(
+            id="inv_batch_cmd_b",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="BATCH-CMD-B",
+            counterparty=self.vendor,
+            amount=Decimal("40.00"),
+            signed_amount=Decimal("40.00"),
+            invoice_date="2026-05-20",
+            total_with_tax=Decimal("40.00"),
+            seller_name="Vendor A",
+            buyer_name="云南溯源科技有限公司",
+        )
+        import_service = ImportNormalizationService(
+            existing_transactions=[first_txn, second_txn],
+            existing_invoices=[first_invoice, second_invoice],
+        )
+        blocking_pair_service = WriteBlockingPendingInvoicePairRelationService()
+        relation_command = RecordingPendingInvoiceRelationCommandService()
+        service = PendingInvoiceApplicationService(
+            import_service=import_service,
+            pair_relation_service=blocking_pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository({}),
+            relation_facade=LiveWorkbenchRelationFacade(
+                pair_service=blocking_pair_service,
+                import_service_provider=lambda: import_service,
+            ),
+            relation_command_service=relation_command,
+        )
+        preview = service.preview_attach_existing_invoices(
+            payload={
+                "transaction_ids": [first_txn.id, second_txn.id],
+                "invoice_ids": [first_invoice.id, second_invoice.id],
+            },
+        )
+
+        result = service.confirm_attach_existing_invoices(
+            payload={
+                "preview_id": preview["preview_id"],
+                "transaction_ids": [first_txn.id, second_txn.id],
+                "invoice_ids": [first_invoice.id, second_invoice.id],
+                "request_id": "attach-batch-command",
+            },
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["relation_mode"], "pending_invoice_attach_existing_invoice")
+        self.assertEqual(call["row_ids"], [first_txn.id, second_txn.id, first_invoice.id, second_invoice.id])
+        self.assertEqual(call["row_types"], ["bank", "bank", "invoice", "invoice"])
+        self.assertEqual(call["history_operation_type"], "confirm_link")
 
     def _payload(self, *, invoice_no: str = "MAN-001") -> dict[str, object]:
         return {

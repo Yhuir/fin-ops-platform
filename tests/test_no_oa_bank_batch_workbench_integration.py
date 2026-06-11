@@ -515,16 +515,27 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         )
         app._import_service.confirm_import(preview.id)
         salary_row_id = app._import_service.list_transactions()[0].id
-        bank_rows = app._live_workbench_service.get_workbench("all")["open"]["bank"]
-        service = app._no_oa_bank_batch_service
-        batch = service.build_batches(
-            bank_rows,
-            {salary_row_id: {"category_code": "salary", "source": "auto"}},
-            [],
-            {},
-        )[0]
+        app._bank_transaction_category_service.apply_updates(
+            [{"transaction_id": salary_row_id, "category_code": "salary"}],
+            actor="tester",
+        )
+        self._enable_no_oa_tags(app, ["salary"])
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        application_service = app._no_oa_bank_batch_application_service()
+        application_service.refresh_batches()
+        batch = next(
+            batch
+            for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
+            if salary_row_id in list(batch.get("row_ids") or [])
+        )
 
-        submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="确认工资")
+        submit_result = application_service.submit_batch(
+            batch["batch_id"],
+            actor="finance-user",
+            expected_version=int(batch["version"]),
+            note="确认工资",
+        )
+        submitted = submit_result["batch"]
         app._invalidate_workbench_read_models()
         paired_response = app.handle_request("GET", "/api/workbench?month=all")
         paired_payload = json.loads(paired_response.body)
@@ -546,7 +557,12 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertIn("免OA", paired_row["tags"])
         self.assertIn("工资", paired_row["tags"])
 
-        service.withdraw_batch(submitted["batch_id"], actor="finance-user", expected_version=2, reason="误提交")
+        application_service.withdraw_batch(
+            submitted["batch_id"],
+            actor="finance-user",
+            expected_version=int(submitted["version"]),
+            reason="误提交",
+        )
         app._invalidate_workbench_read_models()
         open_response = app.handle_request("GET", "/api/workbench?month=all")
         open_payload = json.loads(open_response.body)
@@ -555,48 +571,25 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in flatten_groups(open_payload["open"]["groups"], "bank")], [salary_row_id])
 
     def test_no_oa_internal_transfer_relation_groups_bank_rows_until_cancelled(self) -> None:
-        app = build_application()
-        preview = app._import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="internal-transfer.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62220001",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-02-03",
-                    "trade_time": "2026-02-03 09:15:00",
-                    "pay_receive_time": "2026-02-03 09:15:00",
-                    "counterparty_name": "云南溯源科技有限公司",
-                    "debit_amount": "50000.00",
-                    "credit_amount": "",
-                    "summary": "内部往来支出",
-                },
-                {
-                    "account_no": "62220002",
-                    "account_name": "云南溯源科技有限公司招商银行一般户",
-                    "txn_date": "2026-02-03",
-                    "trade_time": "2026-02-03 10:02:00",
-                    "pay_receive_time": "2026-02-03 10:02:00",
-                    "counterparty_name": "云南溯源科技有限公司",
-                    "debit_amount": "",
-                    "credit_amount": "50000.00",
-                    "summary": "内部往来收入",
-                },
-            ],
+        app, row_ids = self._app_with_balanced_bank_rows(
+            category_codes=["internal_transfer", "internal_transfer"]
         )
-        app._import_service.confirm_import(preview.id)
-        row_ids = [transaction.id for transaction in app._import_service.list_transactions()]
-        bank_rows = app._live_workbench_service.get_workbench("all")["open"]["bank"]
-        service = app._no_oa_bank_batch_service
-        batch = service.build_batches(
-            bank_rows,
-            {row_id: {"category_code": "internal_transfer", "source": "auto"} for row_id in row_ids},
-            [],
-            {},
-        )[0]
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        application_service = app._no_oa_bank_batch_application_service()
+        application_service.refresh_batches()
+        batch = next(
+            batch
+            for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
+            if set(batch.get("row_ids") or []) == set(row_ids)
+        )
 
-        submitted = service.submit_batch(batch["batch_id"], actor="finance-user", expected_version=1, note="确认内部往来")
+        submit_result = application_service.submit_batch(
+            batch["batch_id"],
+            actor="finance-user",
+            expected_version=int(batch["version"]),
+            note="确认内部往来",
+        )
+        submitted = submit_result["batch"]
         app._invalidate_workbench_read_models()
         paired_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
         paired_group = paired_payload["paired"]["groups"][0]
@@ -614,7 +607,12 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(summary_row["amount"], "50000.00")
         self.assertEqual(summary_row["special_metadata"]["total_amount"], "50000.00")
 
-        service.withdraw_batch(submitted["batch_id"], actor="finance-user", expected_version=2, reason="误提交")
+        application_service.withdraw_batch(
+            submitted["batch_id"],
+            actor="finance-user",
+            expected_version=int(submitted["version"]),
+            reason="误提交",
+        )
         app._invalidate_workbench_read_models()
         open_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
 

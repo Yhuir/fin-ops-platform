@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.etc_service import EtcService
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,7 @@ class ExistingEtcBatchLinkService:
         etc_service: EtcService,
         import_service: Any,
         pair_relation_service: Any,
+        relation_command_service: Any | None = None,
         object_identity_repository: Any | None = None,
         sync_import_result_to_canonical_invoices: Callable[[Any], list[str]] | None = None,
         sync_etc_invoices_to_canonical_invoices: Callable[[list[Any]], list[str]] | None = None,
@@ -70,6 +72,7 @@ class ExistingEtcBatchLinkService:
         self._etc_service = etc_service
         self._import_service = import_service
         self._pair_relation_service = pair_relation_service
+        self._relation_command_service = relation_command_service
         self._object_identity_repository = object_identity_repository or import_service
         self._sync_import_result_to_canonical_invoices = sync_import_result_to_canonical_invoices or (lambda _result: [])
         self._sync_etc_invoices_to_canonical_invoices = sync_etc_invoices_to_canonical_invoices or (lambda _invoices: [])
@@ -103,6 +106,7 @@ class ExistingEtcBatchLinkService:
                 missing_invoice_numbers=missing_numbers,
             )
 
+        command_update = self._relation_metadata_update_command()
         imported_count = 0
         if missing_etc_numbers := [invoice_number for invoice_number in requested_numbers if invoice_number not in etc_by_number]:
             records = [
@@ -152,26 +156,31 @@ class ExistingEtcBatchLinkService:
         if bank_amount is not None:
             amount_check["bank_amount"] = f"{bank_amount:.2f}"
 
-        updated_relation, _history = self._pair_relation_service.update_relation_metadata_for_case_id(
-            spec.case_id,
-            amount_check=amount_check,
-            special_metadata={
-                "etc_batch_link": {
-                    "source": "existing_etc_batch_link",
-                    "label": spec.label,
-                    "external_etc_batch_id": batch.etc_batch_id,
-                    "etc_batch_id": batch.id,
-                    "invoice_numbers": requested_numbers,
-                    "invoice_count": len(batch_invoices),
-                    "invoice_total": f"{invoice_total:.2f}",
-                    "delta": f"{delta:.2f}",
-                },
+        special_metadata = {
+            "etc_batch_link": {
+                "source": "existing_etc_batch_link",
+                "label": spec.label,
+                "external_etc_batch_id": batch.etc_batch_id,
+                "etc_batch_id": batch.id,
+                "invoice_numbers": requested_numbers,
+                "invoice_count": len(batch_invoices),
+                "invoice_total": f"{invoice_total:.2f}",
+                "delta": f"{delta:.2f}",
             },
+        }
+        note = spec.note or f"{spec.label} ETC 发票关联到现有配对批次。"
+        command_result = command_update(
+            case_id=spec.case_id,
+            amount_check=amount_check,
+            special_metadata=special_metadata,
             display_tags=["ETC发票已关联"],
-            updated_by="system_existing_etc_batch_link",
-            note=spec.note or f"{spec.label} ETC 发票关联到现有配对批次。",
-            operation_type="link_existing_etc_batch",
+            actor_id="system_existing_etc_batch_link",
+            note=note,
+            history_operation_type="link_existing_etc_batch",
         )
+        updated_relation = command_result.get("relation") if isinstance(command_result, dict) else None
+        if not isinstance(updated_relation, dict):
+            updated_relation = {"case_id": spec.case_id}
         relation_case_id = str(updated_relation.get("case_id") or spec.case_id)
         self._persist_pair_relations([relation_case_id])
         self._invalidate_workbench_scopes(["all", *changed_months])
@@ -190,6 +199,19 @@ class ExistingEtcBatchLinkService:
             relation_case_id=relation_case_id,
             missing_invoice_numbers=[],
         )
+
+    def _relation_metadata_update_command(self) -> Callable[..., dict[str, Any]]:
+        command_update = (
+            getattr(self._relation_command_service, "update_relation_metadata_for_case_id", None)
+            if self._relation_command_service is not None
+            else None
+        )
+        if not callable(command_update):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_command_unavailable",
+                "Existing ETC batch link requires WorkbenchRelationCommandService.update_relation_metadata_for_case_id.",
+            )
+        return command_update
 
     def _active_relation_for_spec(self, spec: ExistingEtcBatchLinkSpec) -> dict[str, Any]:
         relation = self._pair_relation_service.get_active_relation_by_case_id(spec.case_id)
