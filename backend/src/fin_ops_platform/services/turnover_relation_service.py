@@ -31,6 +31,12 @@ LEGACY_TURNOVER_CATEGORY_CODES = {
 }
 MONEY_QUANT = Decimal("0.01")
 ZERO = Decimal("0.00")
+MANUAL_ZERO_DIFFERENCE_PAIR_CLOSURE_MODE = "manual_zero_difference_pair"
+MANUAL_ZERO_DIFFERENCE_GROUP_CLOSURE_MODE = "manual_zero_difference_group"
+MANUAL_ZERO_DIFFERENCE_CLOSURE_MODES = {
+    MANUAL_ZERO_DIFFERENCE_PAIR_CLOSURE_MODE,
+    MANUAL_ZERO_DIFFERENCE_GROUP_CLOSURE_MODE,
+}
 
 
 class TurnoverRelationError(ValueError):
@@ -270,10 +276,10 @@ class TurnoverRelationService:
     ) -> dict[str, Any]:
         normalized_actor = self._require_actor(actor)
         row_ids = self._normalize_row_ids(bank_row_ids)
-        if len(row_ids) != 2:
+        if len(row_ids) < 2:
             raise TurnoverRelationValidationError(
                 "invalid_turnover_closure_selection",
-                "turnover closure requires exactly two bank rows.",
+                "turnover closure requires at least two bank rows.",
             )
         with self._lock:
             prepared_rows = [self._require_prepared_row(row_id) for row_id in row_ids]
@@ -289,7 +295,11 @@ class TurnoverRelationService:
                 evidence={
                     "matched_fields": ["category_code", "counterparty_name", "amount", "manual_selection"],
                     "manual_reason": "zero_difference_closure",
-                    "closure_mode": "manual_zero_difference_pair",
+                    "closure_mode": (
+                        MANUAL_ZERO_DIFFERENCE_PAIR_CLOSURE_MODE
+                        if len(row_ids) == 2
+                        else MANUAL_ZERO_DIFFERENCE_GROUP_CLOSURE_MODE
+                    ),
                     "amount_delta": "0.00",
                     "note": note,
                 },
@@ -583,7 +593,7 @@ class TurnoverRelationService:
         if directions != {"inflow", "outflow"}:
             raise TurnoverRelationValidationError(
                 "turnover_closure_direction_mismatch",
-                "turnover closure requires one income row and one expense row.",
+                "turnover closure requires income and expense rows.",
             )
         principal_amount = sum((row.amount for row in rows if self._resolved_side(row) == "principal"), ZERO)
         settled_amount = sum((row.amount for row in rows if self._resolved_side(row) == "settlement"), ZERO)
@@ -600,7 +610,7 @@ class TurnoverRelationService:
                 continue
             evidence = relation.get("evidence")
             closure_mode = str(evidence.get("closure_mode") or "") if isinstance(evidence, dict) else ""
-            if closure_mode != "manual_zero_difference_pair":
+            if closure_mode not in MANUAL_ZERO_DIFFERENCE_CLOSURE_MODES:
                 continue
             existing_row_ids = {
                 str(row_id)

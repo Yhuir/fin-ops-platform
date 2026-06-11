@@ -5,6 +5,7 @@ import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
+import { ApiClientError } from "../features/apiClient";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -97,6 +98,35 @@ function oaSearchText(row: BatchAccountingOaRow) {
 
 function mutationEventDetail(result: { affectedMonths?: string[] }) {
   return { affectedMonths: result.affectedMonths ?? [] };
+}
+
+function stringListFromPayload(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+function scopeMessage(scopeKeys: string[]) {
+  return scopeKeys.length > 0 ? `影响范围：${scopeKeys.join("、")}` : "";
+}
+
+function mutationErrorMessage(caught: unknown, fallback: string) {
+  if (caught instanceof ApiClientError && caught.code === "batch_accounting_read_model_not_fresh") {
+    const payload = caught.payload && typeof caught.payload === "object"
+      ? caught.payload as Record<string, unknown>
+      : {};
+    const staleReasons = stringListFromPayload(payload.read_model_stale_reasons ?? payload.readModelStaleReasons);
+    const scopeKeys = stringListFromPayload(payload.read_model_scope_keys ?? payload.readModelScopeKeys);
+    return [
+      caught.message,
+      staleReasons.join("、"),
+      scopeMessage(scopeKeys),
+    ].filter(Boolean).join(" ");
+  }
+  return caught instanceof Error ? caught.message : fallback;
 }
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -231,9 +261,10 @@ export default function BatchAccountingPage() {
   const differenceCents = bankAmountCents - selectedOaTotalCents;
   const readModelStatus = payload.readModelStatus || "fresh";
   const readModelNeedsRefresh = readModelStatus !== "fresh";
+  const readModelScopeMessage = scopeMessage(payload.readModelScopeKeys);
   const readModelStatusMessage = payload.refreshEnqueued
     ? `关联台关系读模型 ${readModelStatus}，正在刷新。`
-    : `关联台关系读模型 ${readModelStatus}，请刷新后再处理。`;
+    : `关联台关系读模型 ${readModelStatus}，刷新未入队，请检查系统状态。`;
   const isAmountMismatch = bucket === "unsubmitted"
     && Boolean(selectedBankRow)
     && selectedOaRows.length > 0
@@ -366,7 +397,7 @@ export default function BatchAccountingPage() {
       });
       handleMutationComplete("已关联批量账务流水与 OA。", result);
     } catch (caught) {
-      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "关联OA项与流水失败" });
+      setFeedback({ severity: "error", message: mutationErrorMessage(caught, "关联OA项与流水失败") });
     } finally {
       setMutating(false);
     }
@@ -387,7 +418,7 @@ export default function BatchAccountingPage() {
       setWithdrawReason("");
       handleMutationComplete("已撤回批量账务关联。", result);
     } catch (caught) {
-      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "撤回关联失败" });
+      setFeedback({ severity: "error", message: mutationErrorMessage(caught, "撤回关联失败") });
     } finally {
       setMutating(false);
     }
@@ -433,6 +464,7 @@ export default function BatchAccountingPage() {
       {!error && readModelNeedsRefresh ? (
         <StatePanel tone="warning" title={readModelStatusMessage}>
           <span>{payload.readModelStaleReasons.join("、") || "等待关联台关系读模型恢复 fresh 后再提交或撤回。"}</span>
+          {readModelScopeMessage ? <span>{readModelScopeMessage}</span> : null}
         </StatePanel>
       ) : null}
 

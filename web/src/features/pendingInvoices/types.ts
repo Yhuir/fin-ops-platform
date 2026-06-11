@@ -372,6 +372,15 @@ export type FetchPendingInvoiceCandidatesRequest = {
   signal?: AbortSignal;
 };
 
+export type FetchPendingInvoiceBatchCandidatesRequest = Omit<FetchPendingInvoiceCandidatesRequest, "transactionId"> & {
+  transactionIds: string[];
+};
+
+export type PendingInvoiceCandidateSelectionSummary = {
+  transactionCount: number;
+  bankTotal: string;
+};
+
 export type PendingInvoiceCandidate = PendingInvoiceSummary & {
   invoiceId: string;
   relatedPaidTotal: string;
@@ -382,12 +391,22 @@ export type PendingInvoiceCandidate = PendingInvoiceSummary & {
 };
 
 export type PendingInvoiceCandidatesResponse = {
+  transactionIds: string[];
+  selectionSummary: PendingInvoiceCandidateSelectionSummary | null;
   rows: PendingInvoiceCandidate[];
   pagination: {
     page: number;
     pageSize: number;
     total: number;
   };
+};
+
+export type AttachExistingInvoicesSelectionSummary = {
+  transactionCount: number;
+  invoiceCount: number;
+  bankTotal: string;
+  invoiceTotal: string;
+  differenceAmount: string;
 };
 
 export type AttachExistingInvoicePreviewRequest = {
@@ -415,6 +434,26 @@ export type AttachExistingInvoicePreview = {
   expiresAt: string;
 };
 
+export type AttachExistingInvoicesPreviewRequest = {
+  transactionIds: string[];
+  invoiceIds: string[];
+  requestId: string;
+};
+
+export type AttachExistingInvoicesPreview = {
+  previewId: string;
+  requestKey: string;
+  canConfirm: boolean;
+  transactionSummaries: PendingInvoiceRelationDetail["transactionSummary"][];
+  invoiceSummaries: PendingInvoiceSummary[];
+  selectionSummary: AttachExistingInvoicesSelectionSummary;
+  paymentImpact: AttachExistingInvoicePreview["paymentImpact"];
+  affectedMonths: string[];
+  warnings: string[];
+  conflicts: string[];
+  expiresAt: string;
+};
+
 export type AttachExistingInvoiceConfirmRequest = {
   transactionId: string;
   invoiceId: string;
@@ -428,6 +467,27 @@ export type AttachExistingInvoiceResult = {
   requestKey: string;
   transactionId: string;
   invoiceId: string;
+  relationCaseId: string;
+  relationMode: string;
+  affectedTransactionIds: string[];
+  affectedInvoiceIds: string[];
+  affectedMonths: string[];
+  row: PendingInvoiceRow | null;
+};
+
+export type AttachExistingInvoicesConfirmRequest = {
+  transactionIds: string[];
+  invoiceIds: string[];
+  previewId: string;
+  requestId: string;
+};
+
+export type AttachExistingInvoicesResult = {
+  status: string;
+  requestId: string;
+  requestKey: string;
+  transactionIds: string[];
+  invoiceIds: string[];
   relationCaseId: string;
   relationMode: string;
   affectedTransactionIds: string[];

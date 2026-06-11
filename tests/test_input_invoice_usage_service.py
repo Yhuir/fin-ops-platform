@@ -289,8 +289,12 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         bank_exact = self._bank_transaction("bank-exact", "100.00", trade_time="2026-05-02 10:00:00")
         oa_records = [self._oa("oa-small", "张三", "20.00"), self._oa("oa-exact", "李四", "100.00")]
         pair_service = WorkbenchPairRelationService()
-        self._relation(pair_service, "case-small", [invoice.id, "oa-small", bank_old.id], amount_matched=False)
-        self._relation(pair_service, "case-exact", [invoice.id, "oa-exact", bank_exact.id], amount_matched=True)
+        self._relation(
+            pair_service,
+            "case-many",
+            [invoice.id, "oa-small", bank_old.id, "oa-exact", bank_exact.id],
+            amount_matched=True,
+        )
         service = self._service(
             invoices=[invoice],
             transactions=[bank_old, bank_exact],

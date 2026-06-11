@@ -66,12 +66,12 @@
 | tag-selection queue failure rollback | `test_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save`、`test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit` |
 | grouped read model stale/missing | `test_stale_sql_read_model_is_not_returned_as_fresh_and_enqueues_refresh`、`test_missing_required_sql_read_model_returns_empty_refreshing_payload_and_enqueues_miss` |
 | grouped table 金额和真实 flow rows | `test_grouped_ledger_places_flow_amounts_by_turnover_action_type_and_exposes_breakdowns`、`test_expands_Jia_Xiaohua_with_real_flow_rows_instead_of_allocation_lot_rows` |
-| 人工零差额闭环 | `test_manual_zero_difference_closure_pairs_turnover_rows_in_workbench`、`test_confirms_a_manual_zero_difference_turnover_closure_from_two_selected_same_group_flow_rows` |
+| 人工零差额闭环 | `test_manual_zero_difference_closure_creates_open_bank_only_workbench_relation`、`test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_open`、`test_confirms_a_manual_zero-difference_turnover_closure_from_three_same-group_flow_rows` |
 | 非法闭环拒绝 | `test_confirm_zero_difference_closure_rejects_duplicate_row_ids`、`test_confirm_zero_difference_closure_rejects_cross_counterparty_rows`、`test_confirm_zero_difference_closure_rejects_non_zero_difference`、`test_confirm_zero_difference_closure_rejects_same_direction_pair` |
 | stale/idempotency | `test_target_confirm_request_expected_versions_reach_write_command`、`test_target_confirm_idempotency_key_replays_without_duplicate_confirm_or_refresh`、`test_withdraw_stale_precondition_rejects_changed_relation_before_mutation_or_refresh` |
 | relation extra | `test_relation_extra_get_returns_default_structure_and_put_persists`、`test_target_relation_extra_stale_expected_version_rejects_without_save_or_refresh`、`test_relation_extra_outbox_failure_does_not_return_best_effort_success` |
 | Bankdetail tag batch fan-out | `test_turnover_bank_row_tag_batch_refreshes_all_required_scopes`、`test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save` |
-| Workbench 回归 | `test_deterministic_turnover_relation_does_not_group_bank_rows_in_workbench`、`test_manual_pair_relation_occupied_bank_row_is_not_overridden_by_turnover_relation` |
+| Workbench 回归 | `test_deterministic_turnover_relation_does_not_group_bank_rows_in_workbench`、`test_bank_only_turnover_manual_closure_rows_remain_open_even_when_linked`、`test_manual_pair_relation_occupied_bank_row_is_not_overridden_by_turnover_relation` |
 | Worker / App Status | `test_worker_handler_rebuilds_scope_and_completes_dirty_scope`、`test_domain_registry_covers_frontend_routes`、`test_required_worker_missing_marks_critical_domain_blocked` |
 | 前端 stale 写禁用 | `disables turnover write actions while grouped read model is stale` |
 
@@ -93,8 +93,8 @@
 本地自动化重点保护：
 
 1. 银行明细已确认外部往来分类 -> tag-selection 生效 -> grouped ledger 展示。
-2. grouped table 选择同组两条真实 flow rows -> 人工零差额闭环 -> Turnover manual relation + Workbench pair relation -> 前端刷新。
-3. 手动 relation 撤回 -> Turnover read model 和 Workbench relation 恢复。
+2. grouped table 选择同组多条真实 flow rows -> 人工零差额闭环 -> Turnover manual relation + Workbench pair relation -> 关联台 bank-only open -> 前端刷新。
+3. bank-only 手动 relation 撤回 -> Turnover read model 和 Workbench relation 恢复；已升级为三栏 paired 时必须从关联台撤回。
 4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。
 5. tag-selection / bank-row-tags / confirm / withdraw / extra 的 outbox 失败必须 rollback 或显式暴露失败。
 

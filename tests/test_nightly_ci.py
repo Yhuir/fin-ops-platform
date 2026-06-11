@@ -29,7 +29,7 @@ class NightlyCITests(unittest.TestCase):
     def test_verify_all_runs_backend_frontend_and_docs_checks(self) -> None:
         script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check", script)
+        self.assertIn("run_clean_app_check", script)
         self.assertIn("PYTHONPATH=backend/src python3 -m unittest discover -s tests -v", script)
         self.assertIn("npm test -- --run", script)
         self.assertIn("npm run build", script)
@@ -40,6 +40,36 @@ class NightlyCITests(unittest.TestCase):
             script,
             re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_docs\s+;;", re.MULTILINE),
         )
+
+    def test_backend_verification_uses_clean_app_state_by_default(self) -> None:
+        script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('verify_data_dir="$(mktemp -d)"', script)
+        self.assertIn(
+            'FIN_OPS_DATA_DIR="$verify_data_dir" PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check',
+            script,
+        )
+        self.assertIn('rm -rf "$verify_data_dir"', script)
+        self.assertRegex(
+            script,
+            re.compile(
+                r"run_backend\(\) \{.*run_clean_app_check.*python3 -m unittest discover -s tests -v",
+                re.DOTALL,
+            ),
+        )
+
+    def test_runtime_check_is_explicit_opt_in_for_current_runtime_state(self) -> None:
+        script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("runtime-check", script)
+        self.assertRegex(
+            script,
+            re.compile(
+                r"run_runtime_check\(\) \{.*PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check",
+                re.DOTALL,
+            ),
+        )
+        self.assertRegex(script, re.compile(r"runtime-check\)\s+run_runtime_check\s+;;", re.MULTILINE))
 
 
 if __name__ == "__main__":

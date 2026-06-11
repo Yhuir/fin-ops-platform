@@ -832,6 +832,44 @@ class NoOaBankBatchServiceTests(unittest.TestCase):
         self.assertEqual(relation["special_metadata"]["cost_policy"], "exclude_all")
         self.assertEqual([batch for batch in batches if batch["status"] == "conflict"], [])
 
+    def test_manual_confirmed_internal_transfer_relation_migrates_to_submitted_no_oa_batch(self) -> None:
+        rows = [
+            bank_row("transfer-out", category_code="internal_transfer", debit_amount="500.00"),
+            bank_row(
+                "transfer-in",
+                category_code="internal_transfer",
+                credit_amount="500.00",
+                account_key="BOCOM:3847",
+                bank_name="交行",
+                account_no="6222000000003847",
+                pay_receive_time="2026-03-10T10:00:00",
+            ),
+        ]
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="manual_internal_transfer_history",
+            row_ids=["transfer-out", "transfer-in"],
+            row_types=["bank", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="finance-user",
+            month_scope="2026-03",
+        )
+        service = NoOaBankBatchService(pair_relation_service=pair_service)
+
+        batches = service.build_batches(rows, categories_for(rows), pair_service.list_active_relations(), {})
+        migrated = self.assert_single_batch(batches, "submitted")
+
+        self.assertEqual(migrated["batch_type"], "internal_transfer")
+        self.assertEqual(migrated["income_row_ids"], ["transfer-in"])
+        self.assertEqual(migrated["expense_row_ids"], ["transfer-out"])
+        self.assertEqual(migrated["evidence"]["legacy_relation_mode"], "manual_confirmed")
+        self.assertEqual(migrated["evidence"]["legacy_case_id"], "manual_internal_transfer_history")
+        self.assertIsNone(pair_service.get_active_relation_by_case_id("manual_internal_transfer_history"))
+        relation = pair_service.list_active_relations()[0]
+        self.assertEqual(relation["relation_mode"], "no_oa_bank_batch")
+        self.assertEqual(relation["special_metadata"]["batch_type"], "internal_transfer")
+        self.assertEqual(service.list_batches({"bucket": "unsubmitted"}), [])
+
     def test_reclassified_legacy_relation_is_cancelled_instead_of_remaining_paired(self) -> None:
         rows = [bank_row("salary-1", category_code="fee", debit_amount="10.00")]
         pair_service = WorkbenchPairRelationService()

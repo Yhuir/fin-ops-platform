@@ -429,7 +429,7 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         : null;
     return {
       business_batch_id: businessBatchId,
-      task_id: batchId === "etc-batch-unsubmitted-01" ? "etc-recon-task-001" : "",
+      task_id: textField(rawBatch, "task_id", "taskId") || (batchId === "etc-batch-unsubmitted-01" ? "etc-recon-task-001" : ""),
       status: businessStatusForBatch(batch),
       version: numberField(rawBatch, 7, "version"),
       owner_user_id: "web_finance_user",
@@ -600,6 +600,38 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
             page_size: 100,
             total: rows.length,
           },
+        },
+        error: null,
+      };
+    },
+    createBusinessBatch(taskId: string) {
+      const id = `etc_business_batch_new_${String(batches.length + 1).padStart(4, "0")}`;
+      const batch = {
+        id,
+        business_batch_id: id,
+        task_id: taskId,
+        etc_batch_id: "新建ETC批次",
+        external_batch_id: "新建ETC批次",
+        business_status: "draft",
+        version: 1,
+        status: "unsubmitted" as const,
+        source_type: "etc_business_batch",
+        invoice_ids: [],
+        import_batch_ids: [],
+        invoice_summary: { count: 0, amount: "0.00" },
+        linked_oa_row_id: null,
+        linked_oa_case_id: null,
+        linked_oa_applicant: null,
+        linked_oa_apply_date: null,
+        linked_oa_amount: null,
+        amount_delta: "0.00",
+        note: "",
+      };
+      batches = [batch as (typeof batches)[number], ...batches];
+      return {
+        ok: true,
+        data: {
+          businessBatch: cloneJson(hydrateBusinessBatch(batch as (typeof batches)[number], true)),
         },
         error: null,
       };
@@ -5217,14 +5249,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         keyword: url.searchParams.get("keyword"),
       }),
     }),
-    "/api/etc/business-batches": ({ url }) => ({
-      body: etcInvoiceStore.listBusinessBatches({
-        status: url.searchParams.get("status"),
-        month: url.searchParams.get("month"),
-        plate: url.searchParams.get("plate"),
-        keyword: url.searchParams.get("keyword"),
-      }),
-    }),
+    "/api/etc/business-batches": ({ url, init }) => {
+      if (init?.method === "POST") {
+        const task = etcReconciliationTaskStore.create("新建ETC对账批次");
+        return { status: 201, body: etcInvoiceStore.createBusinessBatch(String(task.taskId ?? "")) };
+      }
+      return {
+        body: etcInvoiceStore.listBusinessBatches({
+          status: url.searchParams.get("status"),
+          month: url.searchParams.get("month"),
+          plate: url.searchParams.get("plate"),
+          keyword: url.searchParams.get("keyword"),
+        }),
+      };
+    },
     "/api/etc/reconciliation-tasks/ready-for-import": () => ({
       body: etcReconciliationTaskStore.ready(),
     }),

@@ -42,3 +42,18 @@
   - 修改 submit/withdraw 前，优先补 service/UoW/API characterization test。
   - 修改 read model freshness 前，必须运行 no-OA read model integration 和 worker refresh tests。
   - 修改前端 stale polling、route activation 或 domain event 时，必须运行 no-OA page tests 和 `useActiveFinanceDomainEvent` tests。
+
+## 2026-06-11 - 内部往来双入口闭环
+
+- 目标：修复同一组内部往来在免 OA 页面和关联台两个入口之间可能出现重复 active relation、旧未提交/冲突批次残留、历史 `manual_confirmed` 占用后不进入免 OA 已提交区域的问题。
+- 决策：
+  - 关联台仍允许作为内部往来提交入口，但成功事实必须委托并收敛到 no-OA submitted batch。
+  - 如果免 OA 页面已经提交同一组 `row_ids`，关联台再次 confirm-link 复用 existing submitted batch 和同一个 `case_id`，保持幂等。
+  - 存量两行、全银行流水、同金额、不同账户、收支成对且有效分类均为 `internal_transfer` 的 `manual_confirmed` active relation，刷新时迁移为 submitted no-OA internal transfer batch。
+  - Workbench pair relation service 增加 active row 独占保护，不同 active case 不能共享同一 row。
+  - PostgreSQL no-OA snapshot 保存必须删除新 snapshot 中缺席的旧 batch row，防止 SQL read model 继续返回旧 unsubmitted/conflict。
+- 验收测试：
+  - `test_manual_confirmed_internal_transfer_relation_migrates_to_submitted_no_oa_batch`
+  - `test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact`
+  - `test_create_active_relation_rejects_active_row_reuse_by_different_case_id`
+  - `test_save_no_oa_bank_batches_replaces_absent_read_model_rows`

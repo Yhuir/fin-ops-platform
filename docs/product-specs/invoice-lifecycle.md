@@ -58,7 +58,9 @@ OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票：
 
 - rows/read model 必须返回 payment、invoice、status、candidate、refresh 状态。
 - filter-options 需要与列表事实一致，不能前端自造枚举。
-- 详情 API 返回可解释的来源、匹配关系和异常原因。
+- 关联关系必须来自关联台 Workbench active relation；同一 relation 下出现多条 OA、支出流水或进项发票时，OA 待付款只展示一条核对行，金额为各自合计，并通过明细展开所有 OA、流水或发票。
+- 付款状态不展示“支付多了”或“已支付（多条OA合并支付）”；多 OA 合并付款先按 relation group 合计，支出流水合计大于 OA 合计时进入待核对。
+- 详情 API 返回可解释的来源、匹配关系和异常原因；relation 明细必须支持 OA、支出流水和进项发票三类。
 - SQL read model 刷新失败时，页面必须展示 stale/refreshing 状态。
 
 ## 发票关系影响

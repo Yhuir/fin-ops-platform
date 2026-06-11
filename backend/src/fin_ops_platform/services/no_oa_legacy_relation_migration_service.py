@@ -36,6 +36,13 @@ class NoOaLegacyRelationMigrationService:
             relations.append(deepcopy(current_relation))
         return relations
 
+    def current_active_relation(self, case_id: str) -> dict[str, Any] | None:
+        resolved_case_id = str(case_id or "").strip()
+        if not resolved_case_id:
+            return None
+        current_relation = self._pair_relation_service.get_active_relation_by_case_id(resolved_case_id)
+        return deepcopy(current_relation) if isinstance(current_relation, dict) else None
+
     def migrate_relation_to_no_oa(
         self,
         *,

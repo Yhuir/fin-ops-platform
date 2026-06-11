@@ -57,6 +57,89 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         assert active_relation is not None
         self.assertCountEqual(active_relation["row_ids"], ["oa-001", "bk-001"])
 
+    def test_create_active_relation_rejects_active_row_reuse_by_different_case_id(self) -> None:
+        service = WorkbenchPairRelationService()
+        service.create_active_relation(
+            case_id="CASE-PAIR-001",
+            row_ids=["oa-001", "bk-001"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+            month_scope="all",
+            created_at="2026-04-08T10:00:00+00:00",
+        )
+
+        with self.assertRaisesRegex(ValueError, "row already active"):
+            service.create_active_relation(
+                case_id="CASE-PAIR-002",
+                row_ids=["oa-001", "bk-002"],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="YNSYLP005",
+                month_scope="all",
+                created_at="2026-04-08T11:00:00+00:00",
+            )
+
+        self.assertIsNone(service.get_active_relation_by_case_id("CASE-PAIR-002"))
+        self.assertEqual(len(service.list_active_relations()), 1)
+
+    def test_create_active_relation_dedupes_duplicate_row_ids_and_keeps_row_types_aligned(self) -> None:
+        service = WorkbenchPairRelationService()
+
+        relation = service.create_active_relation(
+            case_id="CASE-PAIR-DUPE",
+            row_ids=["oa-001", "bk-001", "oa-001", "iv-001"],
+            row_types=["oa", "bank", "oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="YNSYLP005",
+            month_scope="all",
+            created_at="2026-04-08T10:00:00+00:00",
+        )
+
+        self.assertEqual(relation["row_ids"], ["oa-001", "bk-001", "iv-001"])
+        self.assertEqual(relation["row_types"], ["oa", "bank", "invoice"])
+        self.assertEqual(service.get_active_relation_by_row_id("oa-001"), relation)
+
+    def test_create_active_relation_rejects_duplicate_row_id_with_conflicting_type(self) -> None:
+        service = WorkbenchPairRelationService()
+
+        with self.assertRaisesRegex(ValueError, "conflicting row type"):
+            service.create_active_relation(
+                case_id="CASE-PAIR-CONFLICT",
+                row_ids=["oa-001", "oa-001"],
+                row_types=["oa", "invoice"],
+                relation_mode="manual_confirmed",
+                created_by="YNSYLP005",
+                month_scope="all",
+                created_at="2026-04-08T10:00:00+00:00",
+            )
+
+        self.assertIsNone(service.get_active_relation_by_case_id("CASE-PAIR-CONFLICT"))
+
+    def test_from_snapshot_dedupes_duplicate_row_ids(self) -> None:
+        service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {
+                    "CASE-PAIR-DUPE": {
+                        "case_id": "CASE-PAIR-DUPE",
+                        "row_ids": ["oa-001", "bk-001", "oa-001"],
+                        "row_types": ["oa", "bank", "oa"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "all",
+                        "created_by": "YNSYLP005",
+                        "created_at": "2026-04-08T10:00:00+00:00",
+                        "updated_at": "2026-04-08T10:00:00+00:00",
+                    }
+                }
+            }
+        )
+
+        relation = service.get_active_relation_by_case_id("CASE-PAIR-DUPE")
+        assert relation is not None
+        self.assertEqual(relation["row_ids"], ["oa-001", "bk-001"])
+        self.assertEqual(relation["row_types"], ["oa", "bank"])
+
     def test_cancel_relation_marks_relation_cancelled_and_removes_active_lookup(self) -> None:
         service = WorkbenchPairRelationService.from_snapshot(
             {

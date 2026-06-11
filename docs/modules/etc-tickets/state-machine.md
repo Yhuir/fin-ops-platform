@@ -14,6 +14,7 @@
 - 状态事实源：`etc_business_batches` 业务批次、绑定的 ETC 对账任务状态、ETC 提交批次及审计事件。
 - 允许流转：
   - 导入确认后创建或更新同一个业务批次，不在前端拆成“导入任务”和“对账任务”两个用户可见任务。
+  - 用户点击“新建批次”时，由 `POST /api/etc/business-batches` 闭环编排创建 reconciliation task 和 active business batch，并返回统一业务批次 payload；前端不得先创建空 task 再把 task 当作批次显示。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
@@ -30,6 +31,7 @@
 - loading：页面加载业务批次、导入/草稿/人工确认动作执行中时显示按钮级 loading，不展示后台英文状态码作为主文案。
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
 - initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
+- batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 事实；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
 - submitted delete confirm：已提交批次删除确认框必须说明“取消发票合并，OA 系统中的草稿和已提交记录不会删除”，不得展示为撤销 OA。
 - stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
@@ -49,6 +51,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-11 | 新建批次改为 `POST /api/etc/business-batches` 后端闭环创建 task + business batch，前端批次列表收敛到 business batch 事实源，task-only orphan 不再混入左侧列表 | `EtcBusinessBatchApplicationService`、ETC 页面、前端 API mapper/mock、API 契约、生产 orphan task 清理口径 | `tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts`；ETC cleanup tool tests |
 | 2026-06-10 | 将 ETC reconciliation task 删除改为持久 deleted tombstone，并新增显式 allowlist 的 orphan task 清理工具，防止部署/重启后 task-only 批次复活 | `EtcReconciliationTaskService`、Postgres ETC repository、业务批次删除 API、生产维护工具 | `tests.test_etc_reconciliation_service`；`tests.test_etc_backend`；`tests.test_postgres_repositories_boundaries`；`tests.test_cleanup_orphan_etc_reconciliation_tasks_tool` |
 | 2026-06-11 | 首轮测试闭环文档化，补充模块影响面、smoke flows 和主控依赖图 | ETC 页面、business batch、reconciliation task、import worker、Workbench summary、App Status | `tests.test_etc_backend`；`tests.test_etc_reconciliation_service`；`tests.test_import_service`；`tests.test_workbench_sql_runtime`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts`；`bash scripts/verify.sh docs` |
 | 2026-06-10 | 修复 ETC 导入/OA 草稿后本地 canonical invoice 持久化弱 fingerprint 冲突，并补齐导入失败 job 的同 session 重试语义，清理旧 ETC OA detection 部署残留 | ImportNormalizationService、Postgres invoice repository、runtime import worker、BackgroundJobService、ETC import confirm API、migration、RabbitMQ 部署样例 | `tests.test_import_service`；`tests.test_postgres_core_repository`；`tests.test_platform_runtime_boundary_guards`；`tests.test_postgres_migrations`；`tests.test_rabbitmq_staging_preflight`；`tests.test_etc_backend` |

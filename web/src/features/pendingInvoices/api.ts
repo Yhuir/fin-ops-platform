@@ -3,8 +3,13 @@ import type {
   AttachExistingInvoicePreview,
   AttachExistingInvoicePreviewRequest,
   AttachExistingInvoiceResult,
+  AttachExistingInvoicesConfirmRequest,
+  AttachExistingInvoicesPreview,
+  AttachExistingInvoicesPreviewRequest,
+  AttachExistingInvoicesResult,
   BankTransactionTagDefinition,
   BankTransactionTagDictionary,
+  FetchPendingInvoiceBatchCandidatesRequest,
   FetchPendingInvoiceCandidatesRequest,
   FetchPendingInvoiceRowsRequest,
   ManualPendingInvoicePreview,
@@ -245,6 +250,11 @@ type ApiDetailPayload = {
 } & Record<string, unknown>;
 
 type ApiCandidatesResponse = {
+  transaction_ids?: unknown[] | null;
+  selection_summary?: Partial<{
+    transaction_count: number | string | null;
+    bank_total: string | null;
+  }> | null;
   rows?: Array<ApiInvoiceSummary & Partial<{
     invoice_id: string | null;
     related_paid_total: string | null;
@@ -265,7 +275,16 @@ type ApiAttachPreview = {
   request_key?: string | null;
   can_confirm?: boolean | null;
   transaction_summary?: ApiRelationDetail["transaction_summary"];
+  transaction_summaries?: ApiRelationDetail["transaction_summary"][] | null;
   invoice_summary?: ApiInvoiceSummary | null;
+  invoice_summaries?: ApiInvoiceSummary[] | null;
+  selection_summary?: Partial<{
+    transaction_count: number | string | null;
+    invoice_count: number | string | null;
+    bank_total: string | null;
+    invoice_total: string | null;
+    difference_amount: string | null;
+  }> | null;
   payment_impact?: Partial<{
     paid_total_before: string | null;
     paid_total_after: string | null;
@@ -285,6 +304,8 @@ type ApiAttachResult = {
   request_key?: string | null;
   transaction_id?: string | null;
   invoice_id?: string | null;
+  transaction_ids?: unknown[] | null;
+  invoice_ids?: unknown[] | null;
   relation_case_id?: string | null;
   relation_mode?: string | null;
   affected_transaction_ids?: unknown[] | null;
@@ -860,6 +881,38 @@ export async function fetchPendingInvoiceObjectDetail(target: PendingInvoiceObje
   return mapDetail(payload, target);
 }
 
+function mapPendingInvoiceCandidatesResponse(
+  payload: ApiCandidatesResponse,
+  fallback: { transactionIds: string[]; page?: number; pageSize?: number; selectionSummary?: PendingInvoiceCandidatesResponse["selectionSummary"] },
+): PendingInvoiceCandidatesResponse {
+  return {
+    transactionIds: stringList(payload.transaction_ids).length > 0 ? stringList(payload.transaction_ids) : fallback.transactionIds,
+    selectionSummary: payload.selection_summary ? {
+      transactionCount: numberValue(payload.selection_summary.transaction_count),
+      bankTotal: stringValue(payload.selection_summary.bank_total),
+    } : fallback.selectionSummary ?? null,
+    rows: (payload.rows ?? []).map((row): PendingInvoiceCandidate => {
+      const invoice = mapInvoice(row);
+      const invoiceId = stringValue(row.invoice_id, invoice.id);
+      return {
+        ...invoice,
+        id: invoice.id || invoiceId,
+        invoiceId,
+        relatedPaidTotal: stringValue(row.related_paid_total),
+        remainingAmount: stringValue(row.remaining_amount),
+        amountDifferenceAbs: stringValue(row.amount_difference_abs),
+        candidateStatus: stringValue(row.candidate_status, "available") as PendingInvoiceCandidate["candidateStatus"],
+        conflictReason: stringValue(row.conflict_reason),
+      };
+    }),
+    pagination: {
+      page: payload.pagination?.page ?? fallback.page ?? 1,
+      pageSize: payload.pagination?.page_size ?? fallback.pageSize ?? 20,
+      total: payload.pagination?.total ?? payload.rows?.length ?? 0,
+    },
+  };
+}
+
 export async function fetchPendingInvoiceCandidates(request: FetchPendingInvoiceCandidatesRequest): Promise<PendingInvoiceCandidatesResponse> {
   const params = new URLSearchParams();
   params.set("transaction_id", request.transactionId);
@@ -897,26 +950,67 @@ export async function fetchPendingInvoiceCandidates(request: FetchPendingInvoice
     method: "GET",
     signal: request.signal,
   });
+  return mapPendingInvoiceCandidatesResponse(payload, {
+    transactionIds: [request.transactionId],
+    page: request.page,
+    pageSize: request.pageSize,
+  });
+}
+
+export async function fetchPendingInvoiceCandidatesBatch(request: FetchPendingInvoiceBatchCandidatesRequest): Promise<PendingInvoiceCandidatesResponse> {
+  const body: Record<string, unknown> = {
+    transaction_ids: request.transactionIds,
+  };
+  if (request.keyword?.trim()) {
+    body.keyword = request.keyword.trim();
+  }
+  if (request.sellerName?.trim()) {
+    body.seller_name = request.sellerName.trim();
+  }
+  if (request.issueDateFrom) {
+    body.issue_date_from = request.issueDateFrom;
+  }
+  if (request.issueDateTo) {
+    body.issue_date_to = request.issueDateTo;
+  }
+  if (request.amountMin) {
+    body.amount_min = request.amountMin;
+  }
+  if (request.amountMax) {
+    body.amount_max = request.amountMax;
+  }
+  if (request.sortField) {
+    body.sort_field = request.sortField;
+  }
+  if (request.sortDirection) {
+    body.sort_direction = request.sortDirection;
+  }
+  if (request.page) {
+    body.page = request.page;
+  }
+  if (request.pageSize) {
+    body.page_size = request.pageSize;
+  }
+  const payload = await requestJson<ApiCandidatesResponse>("/api/pending-invoices/invoice-candidates/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: request.signal,
+  });
+  return mapPendingInvoiceCandidatesResponse(payload, {
+    transactionIds: request.transactionIds,
+    page: request.page,
+    pageSize: request.pageSize,
+  });
+}
+
+function mapAttachPaymentImpact(payload: ApiAttachPreview["payment_impact"]): AttachExistingInvoicePreview["paymentImpact"] {
   return {
-    rows: (payload.rows ?? []).map((row): PendingInvoiceCandidate => {
-      const invoice = mapInvoice(row);
-      const invoiceId = stringValue(row.invoice_id, invoice.id);
-      return {
-        ...invoice,
-        id: invoice.id || invoiceId,
-        invoiceId,
-        relatedPaidTotal: stringValue(row.related_paid_total),
-        remainingAmount: stringValue(row.remaining_amount),
-        amountDifferenceAbs: stringValue(row.amount_difference_abs),
-        candidateStatus: stringValue(row.candidate_status, "available") as PendingInvoiceCandidate["candidateStatus"],
-        conflictReason: stringValue(row.conflict_reason),
-      };
-    }),
-    pagination: {
-      page: payload.pagination?.page ?? request.page ?? 1,
-      pageSize: payload.pagination?.page_size ?? request.pageSize ?? 20,
-      total: payload.pagination?.total ?? payload.rows?.length ?? 0,
-    },
+    paidTotalBefore: stringValue(payload?.paid_total_before),
+    paidTotalAfter: stringValue(payload?.paid_total_after),
+    invoiceTotal: stringValue(payload?.invoice_total),
+    remainingAmountAfter: stringValue(payload?.remaining_amount_after),
+    differenceAmountAfter: stringValue(payload?.difference_amount_after),
   };
 }
 
@@ -935,13 +1029,41 @@ export async function previewAttachExistingInvoice(request: AttachExistingInvoic
     canConfirm: payload.can_confirm === true,
     transactionSummary: mapRelationDetail({ transaction_summary: payload.transaction_summary }).transactionSummary,
     invoiceSummary: mapInvoice(payload.invoice_summary),
-    paymentImpact: {
-      paidTotalBefore: stringValue(payload.payment_impact?.paid_total_before),
-      paidTotalAfter: stringValue(payload.payment_impact?.paid_total_after),
-      invoiceTotal: stringValue(payload.payment_impact?.invoice_total),
-      remainingAmountAfter: stringValue(payload.payment_impact?.remaining_amount_after),
-      differenceAmountAfter: stringValue(payload.payment_impact?.difference_amount_after),
+    paymentImpact: mapAttachPaymentImpact(payload.payment_impact),
+    affectedMonths: stringList(payload.affected_months),
+    warnings: stringList(payload.warnings),
+    conflicts: stringList(payload.conflicts),
+    expiresAt: stringValue(payload.expires_at),
+  };
+}
+
+export async function previewAttachExistingInvoices(request: AttachExistingInvoicesPreviewRequest): Promise<AttachExistingInvoicesPreview> {
+  const payload = await requestJson<ApiAttachPreview>(
+    "/api/pending-invoices/attach-existing-invoices/preview",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transaction_ids: request.transactionIds,
+        invoice_ids: request.invoiceIds,
+        request_id: request.requestId,
+      }),
     },
+  );
+  return {
+    previewId: stringValue(payload.preview_id),
+    requestKey: stringValue(payload.request_key),
+    canConfirm: payload.can_confirm === true,
+    transactionSummaries: (payload.transaction_summaries ?? []).map((summary) => mapRelationDetail({ transaction_summary: summary }).transactionSummary),
+    invoiceSummaries: (payload.invoice_summaries ?? []).map(mapInvoice),
+    selectionSummary: {
+      transactionCount: numberValue(payload.selection_summary?.transaction_count),
+      invoiceCount: numberValue(payload.selection_summary?.invoice_count),
+      bankTotal: stringValue(payload.selection_summary?.bank_total),
+      invoiceTotal: stringValue(payload.selection_summary?.invoice_total),
+      differenceAmount: stringValue(payload.selection_summary?.difference_amount),
+    },
+    paymentImpact: mapAttachPaymentImpact(payload.payment_impact),
     affectedMonths: stringList(payload.affected_months),
     warnings: stringList(payload.warnings),
     conflicts: stringList(payload.conflicts),
@@ -964,6 +1086,35 @@ export async function confirmAttachExistingInvoice(request: AttachExistingInvoic
     requestKey: stringValue(payload.request_key),
     transactionId: stringValue(payload.transaction_id),
     invoiceId: stringValue(payload.invoice_id),
+    relationCaseId: stringValue(payload.relation_case_id),
+    relationMode: stringValue(payload.relation_mode),
+    affectedTransactionIds: stringList(payload.affected_transaction_ids),
+    affectedInvoiceIds: stringList(payload.affected_invoice_ids),
+    affectedMonths: stringList(payload.affected_months),
+    row: payload.row ? mapPendingInvoiceRow(payload.row) : null,
+  };
+}
+
+export async function confirmAttachExistingInvoices(request: AttachExistingInvoicesConfirmRequest): Promise<AttachExistingInvoicesResult> {
+  const payload = await requestJson<ApiAttachResult>(
+    "/api/pending-invoices/attach-existing-invoices",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        preview_id: request.previewId,
+        transaction_ids: request.transactionIds,
+        invoice_ids: request.invoiceIds,
+        request_id: request.requestId,
+      }),
+    },
+  );
+  return {
+    status: stringValue(payload.status),
+    requestId: stringValue(payload.request_id),
+    requestKey: stringValue(payload.request_key),
+    transactionIds: stringList(payload.transaction_ids),
+    invoiceIds: stringList(payload.invoice_ids),
     relationCaseId: stringValue(payload.relation_case_id),
     relationMode: stringValue(payload.relation_mode),
     affectedTransactionIds: stringList(payload.affected_transaction_ids),

@@ -7,6 +7,7 @@
 - 生产运行应使用轻量 bootstrap 和明确依赖注入，不把 legacy `Application` 作为 service 或 worker 依赖。
 - Repository、queue、store、settings provider 和 orchestrator 通过构造函数显式传入。
 - legacy snapshot / app Mongo 旧路径只作为迁移观察期回滚、shadow-read 或审计工具，不作为新增事实源。
+- `scripts/verify.sh backend` 和 `scripts/verify.sh all` 使用临时 `FIN_OPS_DATA_DIR` 做 clean app check，保护代码启动契约不受开发机 legacy app Mongo 残留影响；当前配置 runtime 状态必须用 `scripts/verify.sh runtime-check` 显式检查。
 
 ## Read model 查询边界
 
@@ -56,3 +57,5 @@
 ## 本地与服务器一致性
 
 本地开发可以使用轻量依赖，但不能改变运行时语义：freshness、queue、worker、权限、审计和回滚边界应与服务器一致。确实无法完全一致时，必须在对应测试或文档中写明差异。
+
+本地 PostgreSQL primary 验收应优先使用 `./scripts/check-local-runtime.sh` 和 `scripts/verify.sh runtime-check` 检查真实依赖；日常 `scripts/verify.sh all` 只证明代码和测试闭环，不证明本地 `.runtime` 或生产历史数据没有迁移残留。

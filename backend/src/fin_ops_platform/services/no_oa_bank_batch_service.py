@@ -105,6 +105,7 @@ class NoOaBankBatchService:
             categories=categories,
             active_relations=active_relations,
             source_versions=source_version_payload,
+            eligible_batch_types=eligible_types,
         )
         self._consolidate_submitted_single_side_batches(
             rows=rows,
@@ -494,6 +495,7 @@ class NoOaBankBatchService:
         categories: dict[str, dict[str, Any]],
         active_relations: list[dict[str, Any]],
         source_versions: dict[str, Any],
+        eligible_batch_types: set[str],
     ) -> None:
         result: dict[str, Any] = {
             "changed": False,
@@ -504,8 +506,22 @@ class NoOaBankBatchService:
         }
         rows_by_id = {self._row_id(row): row for row in rows if self._row_id(row)}
         single_side_groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-        for legacy_relation in self._legacy_migration_service.active_legacy_relations(active_relations):
-            batch_type = self._legacy_migration_service.batch_type_for_relation(legacy_relation)
+        for legacy_relation in self._active_relations_for_no_oa_migration(
+            active_relations,
+            rows_by_id=rows_by_id,
+            categories=categories,
+            eligible_batch_types=eligible_batch_types,
+        ):
+            batch_type = (
+                self._legacy_migration_service.batch_type_for_relation(legacy_relation)
+                or self._manual_confirmed_internal_transfer_relation_batch_type(
+                    legacy_relation,
+                    rows_by_id=rows_by_id,
+                    categories=categories,
+                )
+            )
+            if not batch_type:
+                continue
             row_ids = [str(row_id).strip() for row_id in list(legacy_relation.get("row_ids") or []) if str(row_id).strip()]
             relation_case_id = str(legacy_relation.get("case_id") or "").strip()
             relation_rows = [rows_by_id.get(row_id) for row_id in row_ids]
@@ -677,6 +693,89 @@ class NoOaBankBatchService:
         result["affected_months"] = sorted({str(month) for month in result["affected_months"] if str(month)})
         result["migrated_batch_ids"] = sorted({str(batch_id) for batch_id in result["migrated_batch_ids"] if str(batch_id)})
         self._last_legacy_migration_result = result
+
+    def _active_relations_for_no_oa_migration(
+        self,
+        active_relations: list[dict[str, Any]],
+        *,
+        rows_by_id: dict[str, dict[str, Any]],
+        categories: dict[str, dict[str, Any]],
+        eligible_batch_types: set[str],
+    ) -> list[dict[str, Any]]:
+        relations: list[dict[str, Any]] = []
+        seen_case_ids: set[str] = set()
+        for relation in self._legacy_migration_service.active_legacy_relations(active_relations):
+            case_id = str(relation.get("case_id") or "").strip()
+            if not case_id or case_id in seen_case_ids:
+                continue
+            seen_case_ids.add(case_id)
+            relations.append(relation)
+
+        if "internal_transfer" not in eligible_batch_types:
+            return relations
+
+        for relation in list(active_relations or []):
+            if not isinstance(relation, dict):
+                continue
+            if str(relation.get("status") or "active") != "active":
+                continue
+            case_id = str(relation.get("case_id") or "").strip()
+            if not case_id or case_id in seen_case_ids:
+                continue
+            current_relation = self._legacy_migration_service.current_active_relation(case_id)
+            if current_relation is None:
+                continue
+            if not self._manual_confirmed_internal_transfer_relation_batch_type(
+                current_relation,
+                rows_by_id=rows_by_id,
+                categories=categories,
+            ):
+                continue
+            seen_case_ids.add(case_id)
+            relations.append(current_relation)
+        return relations
+
+    def _manual_confirmed_internal_transfer_relation_batch_type(
+        self,
+        relation: dict[str, Any],
+        *,
+        rows_by_id: dict[str, dict[str, Any]],
+        categories: dict[str, dict[str, Any]],
+    ) -> str:
+        if str(relation.get("relation_mode") or "").strip() != "manual_confirmed":
+            return ""
+        row_ids = [
+            str(row_id).strip()
+            for row_id in list(relation.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        row_types = [
+            str(row_type).strip()
+            for row_type in list(relation.get("row_types") or [])
+            if str(row_type).strip()
+        ]
+        if len(row_ids) != 2 or len(row_types) != len(row_ids):
+            return ""
+        if any(row_type not in {"bank", "bank_transaction"} for row_type in row_types):
+            return ""
+        relation_rows = [rows_by_id.get(row_id) for row_id in row_ids]
+        if any(row is None for row in relation_rows):
+            return ""
+        resolved_rows = [row for row in relation_rows if isinstance(row, dict)]
+        if any(self._category_code(row, categories) != "internal_transfer" for row in resolved_rows):
+            return ""
+        directions = {self._direction(row) for row in resolved_rows}
+        if not {"inflow", "outflow"}.issubset(directions):
+            return ""
+        account_keys = {self._account_key(row) for row in resolved_rows if self._account_key(row)}
+        if len(account_keys) < 2:
+            return ""
+        amounts = [self._amount(row) for row in resolved_rows]
+        if any(amount is None for amount in amounts):
+            return ""
+        if len({self._format_amount(amount) for amount in amounts if amount is not None}) != 1:
+            return ""
+        return "internal_transfer"
 
     def _consolidate_submitted_single_side_batches(
         self,

@@ -20,8 +20,8 @@ import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJ
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import {
   confirmEtcReconciliationTask,
+  createEtcBusinessBatch,
   createEtcBusinessBatchOaDraft,
-  createEtcReconciliationTask,
   deleteEtcBusinessBatch,
   deleteEtcBatch,
   deleteEtcReconciliationTask,
@@ -413,10 +413,6 @@ function taskHasSubmittedConfirmation(task: Pick<EtcReconciliationTask, "status"
   return task.status === "closed" || Boolean(task.submittedConfirmedAt?.trim());
 }
 
-function taskCanAppearAsStandaloneBatch(task: EtcReconciliationTask) {
-  return !taskHasSubmittedConfirmation(task);
-}
-
 function isBusinessBatchSource(batch: EtcBatchSummary) {
   return batch.sourceType === "business_batch" || batch.sourceType === "etc_business_batch";
 }
@@ -621,47 +617,6 @@ function businessBatchToBatchDetail(batch: EtcBusinessBatchDetail): EtcBatchDeta
   };
 }
 
-function reconciliationTaskToBatchSummary(task: EtcReconciliationTask): EtcBatchSummary {
-  const invoiceCount = task.importedInvoiceCount > 0 ? task.importedInvoiceCount : task.etcInvoiceCount;
-  const totalAmount = Number(task.oaTotalAmount) > 0
-    ? task.oaTotalAmount
-    : Number(task.importedInvoiceAmount) > 0
-      ? task.importedInvoiceAmount
-      : task.etcInvoiceAmount;
-  const plateSummary = task.vehiclePlates.map((plateNumber) => ({
-    plateNumber,
-    invoiceCount: 0,
-    totalAmount: "0.00",
-  }));
-  return {
-    id: task.taskId,
-    etcBatchId: formatTaskTitle(task),
-    externalBatchId: formatTaskTitle(task),
-    status: task.status === "closed" ? "submitted" : "unsubmitted",
-    sourceType: "reconciliation_task",
-    invoiceCount,
-    totalAmount: totalAmount || "0.00",
-    taxAmount: "0.00",
-    issueStartDate: task.periodStart,
-    issueEndDate: task.periodEnd,
-    passageStartDate: task.periodStart,
-    passageEndDate: task.periodEnd,
-    plateCount: task.vehiclePlates.length,
-    plateSummary,
-    linkedOaRowId: "",
-    linkedOaCaseId: "",
-    linkedOaApplicant: "",
-    linkedOaApplyDate: "",
-    linkedOaAmount: task.oaTotalAmount,
-    amountDelta: task.approvedDelta,
-    etcInvoiceCount: task.etcInvoiceCount,
-    supplementCount: task.supplementCount,
-    supplementAmount: task.supplementAmount,
-    displayCountText: taskCountText(task),
-    note: reconciliationStatusLabel(task.status),
-  };
-}
-
 const DESCRIPTION_EXPANSION_UNITS = 12;
 
 function estimatedDescriptionUnits(text: string) {
@@ -768,7 +723,7 @@ export default function EtcTicketManagementPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [workflowExpandedKeys, setWorkflowExpandedKeys] = useState<Set<Key>>(() => new Set(["upload", "reconciliation"]));
   const [batchDetailExpandedKeys, setBatchDetailExpandedKeys] = useState<Set<Key>>(() => new Set(["summary", "invoices"]));
-  const [locallySubmittedTaskIds, setLocallySubmittedTaskIds] = useState<Set<string>>(() => new Set());
+  const [, setLocallySubmittedTaskIds] = useState<Set<string>>(() => new Set());
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [removeImportedInvoicesDialogOpen, setRemoveImportedInvoicesDialogOpen] = useState(false);
   const [removeImportedInvoicesSubmitting, setRemoveImportedInvoicesSubmitting] = useState(false);
@@ -937,66 +892,17 @@ export default function EtcTicketManagementPage() {
     () => reconciliationTasks.find((task) => task.taskId === selectedTaskId) ?? null,
     [reconciliationTasks, selectedTaskId],
   );
-  const businessBatchTaskIds = useMemo(
-    () => new Set(businessBatches.map((batch) => batch.taskId).filter(Boolean)),
-    [businessBatches],
-  );
-  const businessBatchLinkIds = useMemo(() => {
-    const ids = new Set<string>();
-    businessBatches.forEach((batch) => {
-      if (batch.businessBatchId) {
-        ids.add(batch.businessBatchId);
-      }
-      if (batch.externalEtcBatchId) {
-        ids.add(batch.externalEtcBatchId);
-      }
-      if (batch.submissionBatchId) {
-        ids.add(batch.submissionBatchId);
-      }
-      batch.importBatchIds.forEach((importBatchId) => {
-        if (importBatchId) {
-          ids.add(importBatchId);
-        }
-      });
-    });
-    return ids;
-  }, [businessBatches]);
-  const taskOnlyBatches = useMemo(
-    () => activeStatus === "unsubmitted"
-      ? reconciliationTasks
-        .filter((task) =>
-          !businessBatchTaskIds.has(task.taskId)
-          && !(task.importBatchId && businessBatchLinkIds.has(task.importBatchId))
-          && !(task.etcBatchId && businessBatchLinkIds.has(task.etcBatchId))
-          && taskCanAppearAsStandaloneBatch(task)
-          && !locallySubmittedTaskIds.has(task.taskId)
-        )
-        .map(reconciliationTaskToBatchSummary)
-      : [],
-    [activeStatus, businessBatchLinkIds, businessBatchTaskIds, locallySubmittedTaskIds, reconciliationTasks],
-  );
   const visibleBusinessBatchSummaries = useMemo(
     () => batches,
     [batches],
   );
   const visibleBatches = useMemo(
-    () => [...taskOnlyBatches, ...visibleBusinessBatchSummaries],
-    [taskOnlyBatches, visibleBusinessBatchSummaries],
+    () => visibleBusinessBatchSummaries,
+    [visibleBusinessBatchSummaries],
   );
   const visibleWorkflowTaskIds = useMemo(() => {
-    const ids = new Set<string>();
-    visibleBatches.forEach((batch) => {
-      if (batch.sourceType === "reconciliation_task") {
-        ids.add(batch.id);
-        return;
-      }
-      const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
-      if (businessBatch?.taskId) {
-        ids.add(businessBatch.taskId);
-      }
-    });
-    return ids;
-  }, [businessBatches, visibleBatches]);
+    return new Set(reconciliationTasks.filter((task) => !taskHasSubmittedConfirmation(task)).map((task) => task.taskId));
+  }, [reconciliationTasks]);
   useEffect(() => {
     setSelectedTaskId((current) => {
       if (!current || visibleWorkflowTaskIds.has(current)) {
@@ -1495,7 +1401,37 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleCreateReconciliationTask = async () => {
-    await runTaskAction(() => createEtcReconciliationTask({ title: "新建ETC对账批次" }));
+    setTaskActionLoading(true);
+    setActionError(null);
+    try {
+      const businessBatch = await createEtcBusinessBatch({});
+      const summary = businessBatchToBatchSummary(businessBatch);
+      setBusinessBatches((current) => [
+        businessBatch,
+        ...current.filter((item) => item.businessBatchId !== businessBatch.businessBatchId),
+      ]);
+      setBatches((current) => [
+        summary,
+        ...current.filter((item) => item.id !== summary.id),
+      ]);
+      const bucket = businessBatchListBucket(businessBatch.status);
+      if (bucket === "unsubmitted") {
+        setCounts((current) => ({ ...current, unsubmitted: current.unsubmitted + 1 }));
+        setActiveStatus("unsubmitted");
+      } else if (bucket === "submitted") {
+        setCounts((current) => ({ ...current, submitted: current.submitted + 1 }));
+        setActiveStatus("submitted");
+      }
+      setSelectedBatchId(businessBatch.businessBatchId);
+      if (businessBatch.taskId) {
+        setSelectedTaskId(businessBatch.taskId);
+      }
+      await loadReconciliationTasks();
+    } catch (caught) {
+      setActionError(formatEtcUiErrorMessage(caught, "新建 ETC 批次失败，请稍后重试。"));
+    } finally {
+      setTaskActionLoading(false);
+    }
   };
 
   const handleUploadCreditCardStatement = async (files: File[]) => {
@@ -1719,8 +1655,8 @@ export default function EtcTicketManagementPage() {
     }
   };
 
-  const openDeleteTaskDialog = (task: EtcReconciliationTask, event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
+  const openDeleteTaskDialog = (task: EtcReconciliationTask, event?: MouseEvent<HTMLButtonElement>) => {
+    event?.stopPropagation();
     if (!canDeleteTask(task)) {
       return;
     }
@@ -2350,6 +2286,19 @@ export default function EtcTicketManagementPage() {
                       {selectedTask && selectedTask.status === "ready_for_import" ? (
                         <Button className="etc-secondary-action" isDisabled={taskActionLoading} onPress={handleReopenReconciliationTask} size="sm" variant="secondary">
                           重新打开
+                        </Button>
+                      ) : null}
+                      {selectedTask && !selectedTaskBusinessBatch ? (
+                        <Button
+                          className="etc-secondary-action"
+                          aria-label={`删除批次 ${formatTaskTitle(selectedTask)}`}
+                          isDisabled={!canDeleteTask(selectedTask) || deleteSubmitting}
+                          onPress={() => openDeleteTaskDialog(selectedTask)}
+                          size="sm"
+                          variant="secondary"
+                        >
+                          <Trash2 aria-hidden="true" size={16} />
+                          删除批次
                         </Button>
                       ) : null}
                       <Button

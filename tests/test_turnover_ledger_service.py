@@ -395,7 +395,7 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(closed_row["row_tone"], "success")
         self.assertEqual(closed_row["bank_account_labels"], ["建行 8106"])
         self.assertIn("暂借款", closed_row["summary_text"])
-        self.assertTrue(closed_row["sync_to_workbench"])
+        self.assertFalse(closed_row["sync_to_workbench"])
 
     def test_ledger_uses_effective_category_provider_and_only_turnover_taxonomy(self) -> None:
         transactions = [

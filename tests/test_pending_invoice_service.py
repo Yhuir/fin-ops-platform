@@ -279,26 +279,12 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         unrelated_output = self._invoice("inv_output_1", InvoiceType.OUTPUT, "OUT-001", vendor, buyer_name="Vendor A")
         pair_service = WorkbenchPairRelationService()
         pair_service.create_active_relation(
-            case_id="case_input_1",
-            row_ids=[txn.id, inv_1.id],
-            row_types=["bank", "invoice"],
+            case_id="case_input",
+            row_ids=[txn.id, inv_1.id, inv_2.id, unrelated_output.id],
+            row_types=["bank", "invoice", "invoice", "invoice"],
             relation_mode="manual_confirmed",
             created_by="tester",
             special_metadata={"applicant": "张三"},
-        )
-        pair_service.create_active_relation(
-            case_id="case_input_2",
-            row_ids=[txn.id, inv_2.id],
-            row_types=["bank", "invoice"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-        )
-        pair_service.create_active_relation(
-            case_id="case_output_ignored",
-            row_ids=[txn.id, unrelated_output.id],
-            row_types=["bank", "invoice"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
         )
         service = self._query_service(
             transactions=[txn],
@@ -313,7 +299,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual([invoice["id"] for invoice in payload["rows"][0]["invoices"]], ["inv_input_1", "inv_input_2"])
         self.assertEqual(payload["rows"][0]["oa_applicant"], "张三")
         self.assertFalse(payload["rows"][0]["can_create_invoice"])
-        self.assertEqual(payload["rows"][0]["relation_case_ids"], ["case_input_1", "case_input_2"])
+        self.assertEqual(payload["rows"][0]["relation_case_ids"], ["case_input"])
         self.assertEqual(payload["rows"][0]["invoice_acquisition_status"]["code"], "paid_invoiced")
         self.assertEqual(payload["rows"][0]["input_invoices"]["relation_count"], 2)
         self.assertEqual(payload["rows"][0]["input_invoices"]["primary"]["invoice_no"], "IN-001")
@@ -547,15 +533,8 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         pair_service = WorkbenchPairRelationService()
         pair_service.create_active_relation(
             case_id="case_income_output",
-            row_ids=[txn.id, output_invoice.id],
-            row_types=["bank", "invoice"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-        )
-        pair_service.create_active_relation(
-            case_id="case_income_input_ignored",
-            row_ids=[txn.id, ignored_input_invoice.id],
-            row_types=["bank", "invoice"],
+            row_ids=[txn.id, output_invoice.id, ignored_input_invoice.id],
+            row_types=["bank", "invoice", "invoice"],
             relation_mode="manual_confirmed",
             created_by="tester",
         )
@@ -580,15 +559,8 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         pair_service = WorkbenchPairRelationService()
         pair_service.create_active_relation(
             case_id="case_output",
-            row_ids=[txn.id, output_invoice.id],
-            row_types=["bank", "invoice"],
-            relation_mode="manual_confirmed",
-            created_by="tester",
-        )
-        pair_service.create_active_relation(
-            case_id="case_input_ignored",
-            row_ids=[txn.id, input_invoice.id],
-            row_types=["bank", "invoice"],
+            row_ids=[txn.id, output_invoice.id, input_invoice.id],
+            row_types=["bank", "invoice", "invoice"],
             relation_mode="manual_confirmed",
             created_by="tester",
         )
@@ -1178,6 +1150,40 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["candidate_status"], "available")
         self.assertEqual(payload["rows"][0]["related_paid_total"], "60.00")
 
+    def test_invoice_candidates_batch_uses_selected_transaction_total_for_difference(self) -> None:
+        vendor = self._counterparty("cp_vendor", "Vendor A")
+        first_txn = self._bank_transaction("txn_batch_candidate_a", TransactionDirection.OUTFLOW, "Vendor A", "60.00")
+        second_txn = self._bank_transaction("txn_batch_candidate_b", TransactionDirection.OUTFLOW, "Vendor A", "40.00")
+        matching_invoice = self._invoice(
+            "inv_batch_matching",
+            InvoiceType.INPUT,
+            "IN-BATCH-100",
+            vendor,
+            seller_name="Vendor A",
+            total_with_tax="100.00",
+        )
+        near_invoice = self._invoice(
+            "inv_batch_near",
+            InvoiceType.INPUT,
+            "IN-BATCH-90",
+            vendor,
+            seller_name="Vendor A",
+            total_with_tax="90.00",
+        )
+        service = self._query_service(
+            transactions=[first_txn, second_txn],
+            invoices=[near_invoice, matching_invoice],
+        )
+
+        payload = service.invoice_candidates_batch(transaction_ids=[first_txn.id, second_txn.id])
+
+        self.assertEqual(payload["transaction_ids"], [first_txn.id, second_txn.id])
+        self.assertEqual(payload["selection_summary"]["transaction_count"], 2)
+        self.assertEqual(payload["selection_summary"]["bank_total"], "100.00")
+        self.assertEqual([row["invoice_id"] for row in payload["rows"]], ["inv_batch_matching", "inv_batch_near"])
+        self.assertEqual(payload["rows"][0]["amount_difference_abs"], "0.00")
+        self.assertEqual(payload["rows"][1]["amount_difference_abs"], "10.00")
+
     def test_income_rejects_expense_only_filters(self) -> None:
         service = self._query_service(transactions=[])
 
@@ -1382,13 +1388,12 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             actor_id="finance-user",
         )
 
-        relation_modes = {
-            relation["relation_mode"]
-            for relation in self.pair_service.active_relations_for_row_ids([self.expense_txn.id])
-        }
-        self.assertIn("manual_confirmed", relation_modes)
-        self.assertIn("pending_invoice_manual_invoice", relation_modes)
-        self.assertEqual(self.command_store["request-oa-bank"]["relation_case_id"], result["relation_case_id"])
+        relations = self.pair_service.active_relations_for_row_ids([self.expense_txn.id])
+        self.assertEqual(len(relations), 1)
+        self.assertEqual(relations[0]["case_id"], "case_existing_oa_bank")
+        self.assertEqual(relations[0]["row_types"], ["oa", "bank", "invoice"])
+        self.assertIn(result["invoice_id"], relations[0]["row_ids"])
+        self.assertEqual(self.command_store["request-oa-bank"]["relation_case_id"], "case_existing_oa_bank")
 
     def test_same_request_id_is_idempotent(self) -> None:
         preview = self.service.preview_manual_invoice(self._payload())
@@ -1605,9 +1610,117 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(preview["payment_impact"]["paid_total_before"], "60.00")
         self.assertEqual(preview["payment_impact"]["paid_total_after"], "100.00")
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(len(self.pair_service.list_active_relations()), 2)
+        self.assertEqual(len(self.pair_service.list_active_relations()), 1)
+        relation = self.pair_service.get_active_relation_by_case_id("case_previous_payment")
+        assert relation is not None
+        self.assertEqual(relation["row_ids"], ["txn_previous_payment", "inv_multi_payment", "txn_current_payment"])
+        self.assertEqual(relation["row_types"], ["bank", "invoice", "bank"])
         self.assertEqual(self.audit_events[0]["entity_type"], "pending_invoice_attach_existing_invoice")
         self.assertEqual(self.finalize_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
+
+    def test_preview_and_confirm_attach_existing_invoices_batch_are_idempotent(self) -> None:
+        first_txn = BankTransaction(
+            id="txn_batch_a",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor A",
+            amount=Decimal("60.00"),
+            signed_amount=Decimal("-60.00"),
+            txn_date="2026-05-19",
+            trade_time="2026-05-19 10:00:00",
+        )
+        second_txn = BankTransaction(
+            id="txn_batch_b",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor A",
+            amount=Decimal("40.00"),
+            signed_amount=Decimal("-40.00"),
+            txn_date="2026-05-20",
+            trade_time="2026-05-20 10:00:00",
+        )
+        first_invoice = Invoice(
+            id="inv_batch_a",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="BATCH-A",
+            counterparty=self.vendor,
+            amount=Decimal("70.00"),
+            signed_amount=Decimal("70.00"),
+            invoice_date="2026-05-20",
+            total_with_tax=Decimal("70.00"),
+            seller_name="Vendor A",
+            buyer_name="云南溯源科技有限公司",
+        )
+        second_invoice = Invoice(
+            id="inv_batch_b",
+            invoice_type=InvoiceType.INPUT,
+            invoice_no="BATCH-B",
+            counterparty=self.vendor,
+            amount=Decimal("30.00"),
+            signed_amount=Decimal("30.00"),
+            invoice_date="2026-05-20",
+            total_with_tax=Decimal("30.00"),
+            seller_name="Vendor A",
+            buyer_name="云南溯源科技有限公司",
+        )
+        self.import_service = ImportNormalizationService(
+            existing_transactions=[first_txn, second_txn],
+            existing_invoices=[first_invoice, second_invoice],
+        )
+        self.service = PendingInvoiceApplicationService(
+            import_service=self.import_service,
+            pair_relation_service=self.pair_service,
+            command_store=self.command_store,
+            audit_recorder=self.audit_events.append,
+            finalizer=self.finalize_events.append,
+            relation_facade=LiveWorkbenchRelationFacade(
+                pair_service=self.pair_service,
+                import_service_provider=lambda: self.import_service,
+            ),
+        )
+
+        preview = self.service.preview_attach_existing_invoices(
+            payload={
+                "transaction_ids": [first_txn.id, second_txn.id],
+                "invoice_ids": [first_invoice.id, second_invoice.id],
+            },
+        )
+        result = self.service.confirm_attach_existing_invoices(
+            payload={
+                "preview_id": preview["preview_id"],
+                "transaction_ids": [first_txn.id, second_txn.id],
+                "invoice_ids": [first_invoice.id, second_invoice.id],
+                "request_id": "attach-batch-001",
+            },
+            actor_id="finance-user",
+        )
+        retry = self.service.confirm_attach_existing_invoices(
+            payload={
+                "preview_id": preview["preview_id"],
+                "transaction_ids": [first_txn.id, second_txn.id],
+                "invoice_ids": [first_invoice.id, second_invoice.id],
+                "request_id": "attach-batch-001",
+            },
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(preview["selection_summary"]["bank_total"], "100.00")
+        self.assertEqual(preview["selection_summary"]["invoice_total"], "100.00")
+        self.assertEqual(preview["selection_summary"]["difference_amount"], "0.00")
+        self.assertTrue(preview["can_confirm"])
+        self.assertEqual(result, retry)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["affected_transaction_ids"], [first_txn.id, second_txn.id])
+        self.assertEqual(result["affected_invoice_ids"], [first_invoice.id, second_invoice.id])
+        relation = self.pair_service.get_active_relation_by_case_id(result["relation_case_id"])
+        assert relation is not None
+        self.assertEqual(relation["row_ids"], [first_txn.id, second_txn.id, first_invoice.id, second_invoice.id])
+        self.assertEqual(relation["row_types"], ["bank", "bank", "invoice", "invoice"])
+        self.assertEqual(len(self.pair_service.list_active_relations()), 1)
+        self.assertEqual(self.audit_events[0]["action"], "pending_invoice_attach_existing_invoice_batch_confirmed")
+        self.assertEqual(self.finalize_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
+        self.assertEqual(self.finalize_events[0]["transaction_ids"], [first_txn.id, second_txn.id])
+        self.assertEqual(self.finalize_events[0]["invoice_ids"], [first_invoice.id, second_invoice.id])
 
     def _payload(self, *, invoice_no: str = "MAN-001") -> dict[str, object]:
         return {

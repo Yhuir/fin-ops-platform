@@ -2309,7 +2309,7 @@ function mergeWorkbenchGroupsByIdReplacingExisting(
   return Array.from(byId.values());
 }
 
-function updateWorkbenchAfterConfirmLink(data: WorkbenchData, rowIds: string[], caseId?: string) {
+export function updateWorkbenchAfterConfirmLink(data: WorkbenchData, rowIds: string[], caseId?: string) {
   const targetRowIds = new Set(rowIds);
   const selectedRows: WorkbenchRecord[] = [];
   const nextOpenGroups = data.open.groups.flatMap((group) => {
@@ -2350,6 +2350,37 @@ function updateWorkbenchAfterConfirmLink(data: WorkbenchData, rowIds: string[], 
   const resolvedCaseId = caseId
     || selectedRows.find((row) => row.caseId)?.caseId
     || `LOCAL-CONFIRM-${selectedRows[0].id}`;
+  const selectedTypes = new Set(selectedRows.map((row) => row.recordType));
+  const hasThreePaneSelection = selectedTypes.has("oa") && selectedTypes.has("bank") && selectedTypes.has("invoice");
+  if (resolvedCaseId.startsWith("turnover:") && !hasThreePaneSelection) {
+    const nextOpenGroup: WorkbenchCandidateGroup = {
+      id: `local-open-${resolvedCaseId}`,
+      groupType: "open",
+      rawGroupType: "candidate",
+      matchConfidence: "medium",
+      reason: "外部往来款闭环待补齐三栏",
+      rows: {
+        oa: selectedRows
+          .filter((row) => row.recordType === "oa")
+          .map((row) => updateWorkbenchRowForOpen(row, "外部往来款闭环待补齐三栏")),
+        bank: selectedRows
+          .filter((row) => row.recordType === "bank")
+          .map((row) => updateWorkbenchRowForOpen(row, "外部往来款闭环待补齐三栏")),
+        invoice: selectedRows
+          .filter((row) => row.recordType === "invoice")
+          .map((row) => updateWorkbenchRowForOpen(row, "外部往来款闭环待补齐三栏")),
+      },
+    };
+    return rebuildWorkbenchSummary({
+      ...data,
+      paired: {
+        groups: data.paired.groups,
+      },
+      open: {
+        groups: [nextOpenGroup, ...nextOpenGroups],
+      },
+    });
+  }
   const nextPairedGroup: WorkbenchCandidateGroup = {
     id: `local-paired-${resolvedCaseId}`,
     groupType: "paired",

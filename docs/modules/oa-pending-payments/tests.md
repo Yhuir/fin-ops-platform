@@ -9,7 +9,7 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | 影响面 | 当前事实源 | 需要关注的旧功能 |
 | --- | --- | --- |
 | 主行身份 | OA application record / OA projection | 列表以 OA 申请为主行；缺少银行或发票时不能丢掉 OA 行。 |
-| 付款状态 | `InvoiceLifecyclePolicy`、`OaPendingPaymentQueryService` | `unpaid`、`paid`、`partially_paid`、`overpaid`、`merged_paid`、`pending_review` 必须以 OA 金额、支出流水和关系事实判定。 |
+| 付款状态 | `InvoiceLifecyclePolicy`、`OaPendingPaymentQueryService` | `unpaid`、`paid`、`partially_paid`、`pending_review` 必须以 OA 金额、支出流水和 Workbench relation 事实判定；不得输出 `overpaid` 或 `merged_paid`。 |
 | 支出流水证据 | `ImportNormalizationService`、Workbench relation read facade | 只允许支出流水作为付款证据；收入流水或缺失流水事实必须进入异常/待复核，不得算已付。 |
 | 发票证据 | 进项发票事实、Workbench relation read facade | 发票详情使用进项发票字段；不得显示销项发票字段或把 relation case id 当发票 id。 |
 | API/read model | `OaPendingPaymentReadModelService`、`PostgresReadModelRepository` | rows、filter-options、detail 都必须经过 fresh/source-version gate；非 fresh 只能 refreshing，不 live scan。 |
@@ -23,10 +23,11 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| OA 付款状态判定 | P0 | `tests/test_oa_pending_payment_service.py`、`tests/test_invoice_lifecycle_page_integration.py` | covered | OA 主行、decimal total、多流水合并、少付/多付/已付/未付、lifecycle policy delegate。 |
+| OA 付款状态判定 | P0 | `tests/test_oa_pending_payment_service.py`、`tests/test_invoice_lifecycle_policy.py`、`tests/test_invoice_lifecycle_page_integration.py` | covered | OA 主行、decimal total、多流水合并、少付/已付/未付、支出流水大于 OA 合计进入 `pending_review`、lifecycle policy delegate。 |
+| 关联台分组关系 | P0 | `tests/test_oa_pending_payment_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` | covered | 多 OA/多流水/多发票 relation 只生成一条 OA 待付款行，金额显示合计和 `+N`，详情可分别展开 OA/流水/发票。 |
 | 缺失或非法付款证据 | P0 | `tests/test_oa_pending_payment_service.py` | covered | 收入流水不算付款证据；缺失关联银行事实进入 `pending_review`。 |
 | 服务端筛选/排序/分页 | P0 | `tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | covered | keyword、month、bank account、bank direction、payment status、native SQL columns 和非法参数。 |
-| API contract | P0 | `tests/test_oa_pending_payment_api.py` | covered | rows、filter-options、OA/bank/invoice/detail、relation detail、错误 shape、权限 403。 |
+| API contract | P0 | `tests/test_oa_pending_payment_api.py` | covered | rows、filter-options、OA/bank/invoice/detail、`kind=oa|bank|invoice` relation detail、错误 shape、权限 403。 |
 | read model freshness | P0 | `tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | covered | repository unavailable、miss、stale/source mismatch、detail stale/missing 都返回 refreshing 并入队，不 live scan。 |
 | SQL projection/repository | P0 | `tests/test_invoice_usage_collection_sql_runtime.py` | covered | rows 保存 source versions/bank total、detail lookup native columns、all scope source version 聚合、空 scope 标记。 |
 | worker fan-out | P0 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_runtime_worker_registry.py` | covered | `oa_pending_payment.read_model.refresh` all scope 扩展月份 shard，RabbitMQ/default dispatch event 覆盖。 |
@@ -59,6 +60,7 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | all scope 没有单独 scope row 被误判 missing | `tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | all scope 聚合月份 rows/source versions，不要求 all scope row。 |
 | 收入流水被当作付款证据 | `tests/test_oa_pending_payment_service.py` | 只有 outflow bank relation 计入付款。 |
 | detail read model 正刷新时 drawer 显示崩溃或空白 | `web/src/test/OaPendingPaymentsPage.test.tsx` | 展示中性“详情暂不可用”。 |
+| 多条 OA 共用同一 relation 被拆成多行并显示“支付多了” | `tests/test_oa_pending_payment_service.py`、`tests/test_invoice_lifecycle_policy.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` | relation group 合并为一条行；状态不输出 `overpaid`/`merged_paid`；前端以合计金额和 `+N` 展示。 |
 
 ## 关键 Smoke Flows
 

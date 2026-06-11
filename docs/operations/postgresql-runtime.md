@@ -91,6 +91,18 @@ order by pg_total_relation_size(c.oid) desc;
 - 差异修复必须走补偿脚本、outbox 重投递或明确审计 repair。
 - OA Mongo 禁止作为 app 写入目标。
 
+## App Mongo 退役边界
+
+App Mongo 旧数据可以在迁移观察期继续保留，用于回滚参考、shadow-read 差异分析或审计取证；它不是 PostgreSQL primary runtime 的 app 事实源，也不应参与日常 clean-state 验证。
+
+移除或停用 App Mongo 前必须完成：
+
+- 确认生产 API、worker、read model refresh、维护脚本和导出工具均使用 PostgreSQL primary。
+- 导出并归档 app Mongo 旧集合或 snapshot，记录归档位置、时间和负责人。
+- 先禁用 `FIN_OPS_APP_MONGO_*` 与 `.runtime/fin_ops_platform/app_mongo_config.json`，观察 `runtime-check`、`/health`、worker、关键页面和导出。
+- 禁止用 app Mongo 旧 snapshot 回写 PostgreSQL；差异只能通过审计 repair、补偿脚本或 outbox 重投递修复。
+- 不得删除 OA Mongo 配置或数据。OA Mongo 是外部只读来源，和 app Mongo 退役不是同一件事。
+
 ## 备份和恢复
 
 最低要求：
@@ -104,10 +116,16 @@ order by pg_total_relation_size(c.oid) desc;
 
 ## 验证命令
 
-本地 app check：
+干净 app check 和全量本地回归：
 
 ```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh backend
+```
+
+当前配置 runtime app check：
+
+```bash
+bash scripts/verify.sh runtime-check
 ```
 
 运行时 SQL/read-model 收敛报告：

@@ -65,6 +65,31 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
         self.assertEqual(pending["code"], "pending_certification")
         self.assertEqual(pending["certified_status"], "待认证")
 
+    def test_oa_payment_statuses_do_not_expose_grouping_or_overpaid_codes(self) -> None:
+        policy = InvoiceLifecyclePolicy()
+
+        statuses = [
+            policy.evaluate_oa_payment(oa_amount=Decimal("100.00"), paid_total=Decimal("0.00"), has_bank=False),
+            policy.evaluate_oa_payment(oa_amount=Decimal("100.00"), paid_total=Decimal("100.00"), has_bank=True),
+            policy.evaluate_oa_payment(oa_amount=Decimal("100.00"), paid_total=Decimal("80.00"), has_bank=True),
+            policy.evaluate_oa_payment(oa_amount=Decimal("100.00"), paid_total=Decimal("120.00"), has_bank=True),
+            policy.evaluate_oa_payment(
+                oa_amount=Decimal("150.00"),
+                paid_total=Decimal("150.00"),
+                has_bank=True,
+                merged_payment=True,
+            ),
+        ]
+
+        self.assertEqual(
+            [status["code"] for status in statuses],
+            ["unpaid", "paid", "partially_paid", "pending_review", "paid"],
+        )
+        for status in statuses:
+            self.assertNotIn(status["code"], {"overpaid", "merged_paid"})
+            self.assertNotIn("支付多了", status["label"])
+            self.assertNotIn("多条OA合并支付", status["label"])
+
 
 if __name__ == "__main__":
     unittest.main()

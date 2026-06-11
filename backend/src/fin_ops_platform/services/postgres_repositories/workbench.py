@@ -157,7 +157,25 @@ class PostgresWorkbenchRepository:
     def save_no_oa_bank_batches(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:
             batches = snapshot.get("batches") if isinstance(snapshot, dict) else None
-            for batch_id, payload in iter_mapping(batches):
+            batch_items = list(iter_mapping(batches))
+            batch_ids = [
+                str(batch_id).strip()
+                for batch_id, _payload in batch_items
+                if str(batch_id).strip()
+            ]
+            if batch_ids:
+                connection.execute(
+                    "delete from read_model.no_oa_bank_batch_rows where not (batch_id = any(%s))",
+                    (batch_ids,),
+                )
+                connection.execute(
+                    "delete from app.no_oa_bank_batches where not (batch_id = any(%s))",
+                    (batch_ids,),
+                )
+            else:
+                connection.execute("delete from read_model.no_oa_bank_batch_rows")
+                connection.execute("delete from app.no_oa_bank_batches")
+            for batch_id, payload in batch_items:
                 connection.execute(
                     """
                     insert into app.no_oa_bank_batches(

@@ -230,8 +230,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         bank_b = self._bank("bank-b", "60.00", TransactionDirection.INFLOW, trade_time="2026-05-03 10:00:00")
         pair_service = WorkbenchPairRelationService()
         self._relation(pair_service, "case-single", [single_invoice.id, single_bank.id], amount_matched=True)
-        self._relation(pair_service, "case-a", [multi_invoice.id, bank_a.id], amount_matched=False)
-        self._relation(pair_service, "case-b", [multi_invoice.id, bank_b.id], amount_matched=False)
+        self._relation(pair_service, "case-multi", [multi_invoice.id, bank_a.id, bank_b.id], amount_matched=False)
         service = self._service(
             invoices=[multi_invoice, single_invoice],
             transactions=[single_bank, bank_a, bank_b],

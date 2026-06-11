@@ -10,18 +10,19 @@
 | 付款状态 | `unpaid` | `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` | 没有有效支出流水付款证据时保持未付。 |
 | 付款状态 | `paid` | 同上 | 有支出流水且付款合计等于 OA 金额。 |
 | 付款状态 | `partially_paid` | 同上 | 支出流水合计小于 OA 金额。 |
-| 付款状态 | `overpaid` | 同上 | 支出流水合计大于 OA 金额。 |
-| 付款状态 | `merged_paid` | 同上 | 多个 OA 申请共享一组付款关系，且 relation 语义表示合并支付。 |
-| 付款状态 | `pending_review` | 同上 | OA 金额缺失、关联银行事实缺失、收入流水误关联或证据不完整。 |
+| 付款状态 | `pending_review` | 同上 | OA 金额缺失、关联银行事实缺失、收入流水误关联、支出流水合计大于 OA 金额或证据不完整。 |
 | 银行证据 | `bank_present` / `bank_missing` | bank import facts + Workbench relation | 只有 `outflow` 支出流水计入付款证据；缺失事实不能退化成 `unpaid`。 |
 | 发票证据 | `invoice_present` / `invoice_missing` | input invoice import facts + Workbench relation | 发票详情只展示进项发票字段；缺失发票不影响 OA 主行存在。 |
-| relation detail | `bank` / `invoice` | OA pending payment row payload | 只允许 `kind=bank|invoice`；非法 kind 返回业务错误。 |
+| relation detail | `oa` / `bank` / `invoice` | OA pending payment row payload | 允许 `kind=oa|bank|invoice`；非法 kind 返回业务错误。 |
 
 关键规则：
 
 - 列表以 OA application 为主行，不能因为没有银行流水或发票而隐藏 OA。
+- 当 Workbench active relation 明确包含多条 OA、支出流水或进项发票时，OA 待付款只能按该 relation 生成一条核对行；OA 金额、支出流水已付金额和发票价税合计使用该 relation 下各自事实的合计。
 - `paymentStatus` 必须由 lifecycle policy 或 query service 统一判定，页面不按金额字段自行计算。
+- `paymentStatus` 不再输出 `overpaid` 或 `merged_paid`；多 OA 合并付款通过 relation group 合计后判定为 `paid`，支出流水合计大于 OA 合计时进入 `pending_review`。
 - 支出流水付款合计使用所有有效 outflow relation 的 decimal total；收入流水、缺失银行事实或无效 relation 进入 `pending_review`。
+- OA、支出流水和发票的 `relationCount`/`summaries` 必须完全来自 Workbench relation payload，不得由金额、日期或名称相似度推断。
 - all scope 允许聚合月份 rows/source versions，不要求存在单独 `all` scope row。
 - detail lookup 使用 read model native columns：`oa_id`、`bank_transaction_id`、`invoice_id`、`row_id`。
 - pending invoice rules 影响 OA 待付款时，当前执行层通过 workbench invalidation 间接入队 invoice usage collection 三个 read model；该行为由 API 回归保护。
@@ -32,6 +33,7 @@
 - 禁止把 refreshing payload 的空 rows 当作真实“暂无 OA 待付款”。
 - 禁止前端自造 filter-options 枚举或 payment status 枚举。
 - 禁止把 relation case id 当 OA id、bank transaction id 或 invoice id 请求详情。
+- 禁止用单条 OA 金额和同一 relation 下多条支出流水/发票逐行交叉展开，造成“支付多了”或重复显示同一发票。
 - 禁止用销项发票字段渲染进项发票详情。
 - 禁止把 App Status / domain event 当成付款事实源。
 
@@ -47,6 +49,7 @@
 | detail unavailable | detail API 返回 202 / `detailAvailable=false` | drawer 展示“详情暂不可用”和后端业务原因。 |
 | rules drawer | 用户打开“支出流水无需开票规则设置” | 复用 pending invoice rules endpoint，保存后不重挂载父页面。 |
 | filters/sort | 表头筛选菜单和排序按钮 | 参数必须映射到后端支持字段；多筛选为 AND 语义。 |
+| grouped relation display | row payload 的 `relationCount` / `summaries` | 多 OA、流水或发票只显示合计金额和 `+N`，点击 `+N` 打开对应 `kind=oa|bank|invoice` 的关联明细。 |
 | missing bank/invoice display | row payload 缺少银行或发票详情 | 表格显示 `-`，不显示 `0.00`、方向 chip、空日期提示或详情按钮。 |
 | permission denied | API 403 | 页面显示错误；后端必须强制权限，前端隐藏不是权限事实。 |
 
@@ -102,4 +105,5 @@ Worker 流程：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-11 | 关联台分组关系收敛 | 移除 `overpaid`/`merged_paid` 展示口径；多 OA/流水/发票 relation 合并为一条核对行；详情支持 `kind=oa` | `tests.test_oa_pending_payment_service`、`tests.test_invoice_lifecycle_policy`、`tests.test_oa_pending_payment_api`、`tests.test_invoice_usage_collection_sql_runtime`、`web/src/test/OaPendingPaymentsPage.test.tsx` 通过 |
 | 2026-06-11 | 补齐测试闭环状态机 | OA 主行、付款状态、详情、UI、read model 和 worker 状态边界 | `tests.test_oa_pending_payment_service`、`tests.test_oa_pending_payment_api`、`tests.test_invoice_lifecycle_page_integration`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_runtime_worker_registry`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts` 通过 |

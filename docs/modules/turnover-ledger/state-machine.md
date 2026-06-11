@@ -71,22 +71,25 @@
 
 ```text
 same group flow rows selected
-  -> one income + one expense
+  -> one or more income rows + one or more expense rows
   -> amount delta == 0.00
   -> backend stale precondition passes
   -> Turnover manual confirmed relation
   -> Workbench active pair relation
+  -> Workbench bank-only open relation，等待 OA + 银行 + 发票三栏补齐
   -> turnover/workbench/workbench_relation dirty-outbox refresh
 ```
 
 校验：
 
-- `bank_row_ids` 必须正好两条，不能重复。
-- 两条流水必须同组、同对方、同语义。
-- 必须一收一支，差额为 `0.00`。
+- `bank_row_ids` 必须至少两条，不能重复；不再限制为正好两条。
+- 全部流水必须同组、同对方、同语义。
+- 必须至少一收一支，收支合计差额为 `0.00`。
 - 不得被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用。
 - `expected_versions` 必须在写 relation 和 Workbench pair relation 前校验。
 - `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
+- 已确认后不能追加流水；漏选时必须先撤回原 bank-only 闭环，再重新选择完整流水确认。
+- 两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`；三笔及以上使用 `manual_zero_difference_group`。
 
 ### 撤回
 
@@ -99,6 +102,7 @@ same group flow rows selected
 ```text
 manual confirmed relation
   -> stale precondition passes
+  -> Workbench relation scope check passes
   -> withdrawn
   -> turnover/workbench/workbench_relation dirty-outbox refresh
 ```
@@ -108,6 +112,7 @@ manual confirmed relation
 - system/generated relation 撤回。
 - stale relation version 撤回。
 - duplicate withdraw 产生第二次 mutation 或第二次 refresh。
+- 若 Workbench active relation 已从 bank-only 外部往来 open 组升级为 OA + 银行 + 发票三栏 paired，外部往来页不得撤回整组关系；必须去关联台撤回完整 relation，避免误删 OA/发票关系。
 
 ### Relation extra
 
@@ -137,7 +142,7 @@ extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `tu
 | stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据但禁用写动作 | `disables turnover write actions while grouped read model is stale` |
 | permission disabled | `canMutateData=false` 时禁用保存、确认、撤回等写动作 | API 403 + 前端 disabled tests |
 | tag drawer | 加载 active tags，保存 selected codes 后 reload ledger | `opens tag selection drawer, saves selected bank detail labels, and reloads ledger` |
-| closure drawer | 只允许同组两条 flow rows；非零差额禁用确认 | manual closure/cross-group tests |
+| closure drawer | 允许同组多条 flow rows；至少一收一支且收支合计差额为 0 才允许确认 | manual closure/cross-group tests |
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
 

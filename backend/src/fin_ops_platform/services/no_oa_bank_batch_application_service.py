@@ -897,6 +897,14 @@ class NoOaBankBatchApplicationService:
         ]
         if matching_drafts:
             return dict(matching_drafts[0])
+        matching_submitted = [
+            batch for batch in refreshed
+            if str(batch.get("batch_type") or "") == "internal_transfer"
+            and str(batch.get("status") or "") == "submitted"
+            and set(str(item) for item in list(batch.get("row_ids") or [])) == selected_set
+        ]
+        if matching_submitted:
+            return dict(matching_submitted[0])
 
         conflict_batches = [
             batch for batch in refreshed

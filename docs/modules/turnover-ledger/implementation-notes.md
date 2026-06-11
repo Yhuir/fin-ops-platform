@@ -6,10 +6,26 @@
 
 - 外部往来款管理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、service/UoW、API contract、read model/worker、前端交互、跨页面集成和旧功能回归。
 - 本轮不新增低价值测试。后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `tests.md` 中七类矩阵补测试。
-- 手动零差额闭环是外部往来进入 Workbench 已配对区的唯一入口；系统 `deterministic` 只表示候选，不是已闭环事实。
+- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。bank-only 外部往来闭环在关联台保持 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
+- 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回 bank-only 闭环再重新选择。
+- 外部往来页撤回只允许 bank-only open 外部往来闭环；若已在关联台补齐三栏并进入 paired，必须去关联台撤回完整关系。
 - `readModelStatus !== "fresh"` 时前端必须禁用确认、撤回、流水选择、extra 保存等写动作。
 - 写路径应优先保持 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` 边界；legacy fallback 只作为兼容风险存在，不能继续扩大。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
+
+## 2026-06-11 - 外部往来多流水闭环与 Workbench 三栏规则
+
+- 目标：取消外部往来手动闭环只能选择两笔银行流水的限制，并让外部往来闭环完全复用 Workbench active pair relation 事实源。
+- 影响范围：`TurnoverRelationService`、`TurnoverLedgerWriteFacade`、`TurnoverLedgerWorkbenchPairPort`、Workbench candidate grouping、server relation display payload、外部往来页 closure drawer、关联台本地 optimistic update。
+- 关键决策：
+  - 两笔闭环保留旧 `manual_zero_difference_pair` evidence；三笔及以上使用 `manual_zero_difference_group`。
+  - `turnover_manual_closure` bank-only active relation 只能留在关联台 open，不再享受 exactly 2 bank rows paired 例外。
+  - 外部往来页撤回前检查 `turnover:{relation_id}` 是否仍是 bank-only turnover relation；若已升级为三栏关系，返回 `turnover_closure_withdraw_requires_workbench`。
+  - confirm 和 withdraw 都通过 UoW dirty/outbox 刷新 `turnover_ledger`、`workbench`、`workbench_relation`、`cost_statistics`、`search`。
+- 文档影响：同步更新产品规格、API contract、app architecture、本模块 README/state-machine/tests/implementation-notes，以及关联台模块状态和测试矩阵。
+- 测试覆盖：新增/更新 `tests/test_turnover_relation_service.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`。
+- 验证命令：见本轮最终执行记录；目标后端和前端测试均已覆盖多流水、bank-only open、withdraw cancel/reject 和 optimistic update。
+- 未测风险：未运行真实生产库 Workbench active generation 全量回放；真实大数据滚动和视觉检查仍需浏览器/staging smoke。
 
 ## 2026-06-11 - 首轮测试闭环审计
 

@@ -29,48 +29,103 @@ class StaticOAProjection:
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
-    def test_statuses_use_oa_as_primary_row_and_decimal_payment_totals(self) -> None:
-        bank_paid = self._bank("bank-paid", "100.00")
-        bank_less = self._bank("bank-less", "80.00")
-        bank_more = self._bank("bank-more", "140.00")
-        bank_merged = self._bank("bank-merged", "150.00")
-        invoice = self._invoice("inv-paid", "SD-001", "供应商A", "100.00")
+    def test_active_relation_group_returns_one_row_with_aggregated_totals(self) -> None:
+        bank_group = self._bank("bank-group", "4450.00")
+        invoice_group = self._invoice("inv-group", "SD-GROUP", "住宿供应商", "4450.00")
         pair_service = WorkbenchPairRelationService()
-        self._relation(pair_service, "case-paid", ["oa-paid", bank_paid.id, invoice.id], matched=True)
-        self._relation(pair_service, "case-less", ["oa-less", bank_less.id], matched=False)
-        self._relation(pair_service, "case-more", ["oa-more", bank_more.id], matched=False)
-        self._relation(pair_service, "case-merged-a", ["oa-merged-a", bank_merged.id], matched=True)
-        self._relation(pair_service, "case-merged-b", ["oa-merged-b", bank_merged.id], matched=True)
+        self._relation(
+            pair_service,
+            "case-grouped",
+            ["oa-group-a", "oa-group-b", "oa-group-c", bank_group.id, invoice_group.id],
+            matched=True,
+        )
         service = self._service(
             oa_records=[
-                self._oa("oa-unpaid", "张三", "30.00"),
-                self._oa("oa-paid", "李四", "100.00"),
-                self._oa("oa-less", "王五", "100.00"),
-                self._oa("oa-more", "赵六", "100.00"),
-                self._oa("oa-merged-a", "钱七", "60.00"),
-                self._oa("oa-merged-b", "孙八", "90.00"),
-                self._oa("oa-bad", "周九", ""),
+                self._oa("oa-group-a", "刘际涛", "1690.00", project_name="昭通卷烟厂平台维护"),
+                self._oa("oa-group-b", "刘际涛", "1980.00", project_name="红塔集团应急维护"),
+                self._oa("oa-group-c", "刘际涛", "780.00", project_name="昭通卷烟厂采购项目"),
             ],
-            transactions=[bank_paid, bank_less, bank_more, bank_merged],
-            invoices=[invoice],
+            transactions=[bank_group],
+            invoices=[invoice_group],
             pair_service=pair_service,
         )
 
-        rows = {row["oa"]["id"]: row for row in service.list_rows(page_size=20)["rows"]}
+        payload = service.list_rows(page_size=20)
 
-        self.assertEqual(rows["oa-unpaid"]["paymentStatus"]["code"], "unpaid")
-        self.assertEqual(rows["oa-paid"]["paymentStatus"]["code"], "paid")
-        self.assertEqual(rows["oa-less"]["paymentStatus"]["code"], "partially_paid")
-        self.assertEqual(rows["oa-more"]["paymentStatus"]["code"], "overpaid")
-        self.assertEqual(rows["oa-merged-a"]["paymentStatus"]["code"], "merged_paid")
-        self.assertEqual(rows["oa-merged-b"]["paymentStatus"]["code"], "merged_paid")
-        self.assertEqual(rows["oa-bad"]["paymentStatus"]["code"], "pending_review")
-        self.assertEqual(rows["oa-paid"]["bankTransaction"]["primaryBankTransactionId"], "bank-paid")
-        self.assertEqual(rows["oa-paid"]["bankTransaction"]["accountNo"], "622200001234")
-        self.assertEqual(rows["oa-paid"]["bankTransaction"]["accountLast4"], "1234")
-        self.assertEqual(rows["oa-paid"]["bankTransaction"]["directionLabel"], "支出")
-        self.assertEqual(rows["oa-paid"]["invoice"]["primaryInvoiceId"], "inv-paid")
-        self.assertEqual(rows["oa-paid"]["invoice"]["digitalInvoiceNo"], "SD-001")
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertNotIn(row["paymentStatus"]["code"], {"overpaid", "merged_paid"})
+        self.assertEqual(row["oa"]["amount"], "4450.00")
+        self.assertEqual(row["oa"]["relationCount"], 3)
+        self.assertTrue(row["oa"]["hasMultiple"])
+        self.assertEqual(row["oa"]["detailMode"], "list")
+        self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], ["oa-group-a", "oa-group-b", "oa-group-c"])
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "4450.00")
+        self.assertEqual(row["bankTransaction"]["relationCount"], 1)
+        self.assertEqual(row["invoice"]["totalWithTax"], "4450.00")
+        self.assertEqual(row["invoice"]["relationCount"], 1)
+        self.assertEqual(payload["summary"]["oaAmountTotal"], "4450.00")
+        self.assertEqual(payload["summary"]["bankPaidTotal"], "4450.00")
+
+    def test_grouped_multiple_oa_and_multiple_banks_are_not_marked_overpaid(self) -> None:
+        bank_first = self._bank("bank-group-first", "21966.70")
+        bank_second = self._bank("bank-group-second", "9414.30")
+        invoice_group = self._invoice("inv-bank-group", "SD-BANK-GROUP", "北京标志卓信科技有限公司", "31381.00")
+        pair_service = WorkbenchPairRelationService()
+        self._relation(
+            pair_service,
+            "case-bank-group",
+            ["oa-bank-group-a", "oa-bank-group-b", bank_first.id, bank_second.id, invoice_group.id],
+            matched=True,
+        )
+        service = self._service(
+            oa_records=[
+                self._oa("oa-bank-group-a", "刘际涛", "21966.70", project_name="昭通卷烟厂能源集控维护"),
+                self._oa("oa-bank-group-b", "杨丽萍", "9414.30", project_name="昭通卷烟厂能源集控维护"),
+            ],
+            transactions=[bank_first, bank_second],
+            invoices=[invoice_group],
+            pair_service=pair_service,
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertNotEqual(row["paymentStatus"]["code"], "overpaid")
+        self.assertEqual(row["oa"]["amount"], "31381.00")
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "31381.00")
+        self.assertEqual(row["bankTransaction"]["relationCount"], 2)
+        self.assertTrue(row["bankTransaction"]["hasMultiple"])
+
+    def test_grouped_payment_above_oa_total_is_pending_review_not_overpaid(self) -> None:
+        bank = self._bank("bank-above-group-total", "120.00")
+        pair_service = WorkbenchPairRelationService()
+        self._relation(
+            pair_service,
+            "case-above-group-total",
+            ["oa-above-a", "oa-above-b", bank.id],
+            matched=False,
+        )
+        service = self._service(
+            oa_records=[
+                self._oa("oa-above-a", "张三", "50.00"),
+                self._oa("oa-above-b", "李四", "40.00"),
+            ],
+            transactions=[bank],
+            pair_service=pair_service,
+        )
+
+        payload = service.list_rows(page_size=20)
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        row = payload["rows"][0]
+        self.assertEqual(row["oa"]["amount"], "90.00")
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "120.00")
+        self.assertEqual(row["paymentStatus"]["code"], "pending_review")
+        self.assertNotEqual(row["paymentStatus"]["code"], "overpaid")
 
     def test_oa_summary_exposes_application_time_from_detail_fields(self) -> None:
         service = self._service(
@@ -87,6 +142,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         row = service.list_rows()["rows"][0]
 
         self.assertEqual(row["oa"]["applicationTime"], "2026-05-25")
+        self.assertEqual(row["paymentStatus"]["code"], "unpaid")
 
     def test_filter_sort_pagination_and_validation_are_server_side_contracts(self) -> None:
         service = self._service(
@@ -142,12 +198,19 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         invoice_fields = invoice_detail["sections"][0]["fields"]
         self.assertIn({"label": "进项发票方名称", "value": "详情供应商"}, invoice_fields)
         self.assertNotIn("销方名称", [field["label"] for field in invoice_fields])
+        try:
+            oa_relations = service.row_relation_details(row_id, kind="oa")
+        except OaPendingPaymentError as exc:
+            self.fail(f"kind=oa relation details should be supported: {exc.error_code}")
         bank_relations = service.row_relation_details(row_id, kind="bank")
         invoice_relations = service.row_relation_details(row_id, kind="invoice")
+        self.assertEqual(oa_relations["kind"], "oa")
         self.assertEqual(bank_relations["kind"], "bank")
         self.assertEqual(invoice_relations["kind"], "invoice")
+        self.assertEqual(oa_relations["title"], "OA关联明细")
         self.assertEqual(bank_relations["title"], "支出流水关联明细")
         self.assertEqual(invoice_relations["title"], "发票关联明细")
+        self.assertTrue(oa_relations["sections"])
         self.assertTrue(bank_relations["sections"])
         self.assertTrue(invoice_relations["sections"])
 
@@ -155,8 +218,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         bank_a = self._bank("bank-split-a", "40.00")
         bank_b = self._bank("bank-split-b", "60.00")
         pair_service = WorkbenchPairRelationService()
-        self._relation(pair_service, "case-split-a", ["oa-split", bank_a.id], matched=False)
-        self._relation(pair_service, "case-split-b", ["oa-split", bank_b.id], matched=False)
+        self._relation(pair_service, "case-split", ["oa-split", bank_a.id, bank_b.id], matched=True)
         service = self._service(
             oa_records=[self._oa("oa-split", "刘一", "100.00")],
             transactions=[bank_a, bank_b],

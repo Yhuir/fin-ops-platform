@@ -50,6 +50,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - `GET /health` 返回健康。
 - `GET /api/session/me` 返回 JSON，不返回 HTML。
 - `GET /api/etc/business-batches` 返回 JSON envelope；无权限时返回结构化 403 JSON。
+- `POST /api/etc/business-batches` 可省略 `taskId`，成功响应必须返回已绑定 `taskId` 的 business batch；随后 `GET /api/etc/business-batches?status=active` 能看到该批次，且 `/api/etc/reconciliation-tasks` 中的 task-only 记录不得额外混入 ETC 左侧批次列表。
 - `POST /api/etc/business-batches`、`POST /api/etc/business-batches/{id}/etc-import/preview`、`POST /api/etc/business-batches/{id}/etc-import/confirm`、`POST /api/etc/business-batches/{id}/manual-oa-status` 和 `DELETE /api/etc/business-batches/{id}` 的代理路径都命中后端。
 - Nginx `/api/` 与 `/fin-ops-api/` 下的 GET、POST、DELETE 都不返回 HTML 502、官网 HTML 或 React shell。
 - 旧 `/api/etc/batches` 在过渡期仍可读取，且不会创建第二个用户可见业务批次。
@@ -99,6 +100,35 @@ ETC 批次删除是本地清理操作，不是 OA 撤销。删除入口包括：
 - 删除后 submitted bucket 不再显示该业务批次；已提交批次释放出的散票会留在关联台未配对区，等待未来 OA 和银行流水按普通三栏配对规则闭环。
 
 排查时如果用户反馈“删除已提交批次后 1673 汇总仍存在”，优先检查 active relation 是否仍包含 summary row、canonical ETC 发票是否仍为 `hidden_after_etc_submission` 或 `etc_submission_status=submitted`，再重跑对应 Workbench read model refresh。
+
+## Orphan task 排查与清理
+
+如果刷新、重新部署后 ETC 未提交列表出现多条“新建ETC批次”，先确认这些记录是否是没有 active business batch 绑定的历史 reconciliation task，不要直接 SQL 删除：
+
+```bash
+curl -sS -H 'Accept: application/json' 'https://<host>/fin-ops-api/api/etc/business-batches?status=active&page=1&page_size=500'
+curl -sS -H 'Accept: application/json' 'https://<host>/fin-ops-api/api/etc/reconciliation-tasks'
+```
+
+只读 SQL 核对 orphan task：
+
+```sql
+select t.task_id, t.status, t.version, t.created_at, t.updated_at,
+       b.business_batch_id, b.status as business_batch_status
+from app.etc_reconciliation_tasks t
+left join app.etc_business_batches b
+  on b.task_id = t.task_id and b.status <> 'deleted'
+where t.status <> 'deleted'
+  and b.business_batch_id is null
+order by t.created_at desc, t.task_id;
+```
+
+清理必须使用现有工具逐个 task id 先 dry-run，再 execute；该工具复用 service 删除边界，会写入 deleted tombstone 并清理本地 source/import 关系，不允许绕过 service 直接改表：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.cleanup_orphan_etc_reconciliation_tasks --task-id ETC-RECON-000001
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.cleanup_orphan_etc_reconciliation_tasks --task-id ETC-RECON-000001 --execute --reason cleanup_orphan_etc_task_after_business_batch_delete
+```
 
 ## 回滚
 

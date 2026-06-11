@@ -6,6 +6,9 @@ import { fetchWorkbenchSettings, saveWorkbenchSettings } from "../features/workb
 import type {
   AttachExistingInvoiceConfirmRequest,
   AttachExistingInvoicePreviewRequest,
+  AttachExistingInvoicesConfirmRequest,
+  AttachExistingInvoicesPreviewRequest,
+  FetchPendingInvoiceBatchCandidatesRequest,
   FetchPendingInvoiceCandidatesRequest,
   FetchPendingInvoiceRowsRequest,
   ManualPendingInvoiceRequest,
@@ -26,8 +29,11 @@ function api() {
     fetchPendingInvoiceRelationDetail: (transactionId: string, direction?: string) => Promise<unknown>;
     fetchPendingInvoiceObjectDetail: (target: PendingInvoiceObjectDetailTarget) => Promise<unknown>;
     fetchPendingInvoiceCandidates: (request: FetchPendingInvoiceCandidatesRequest) => Promise<unknown>;
+    fetchPendingInvoiceCandidatesBatch: (request: FetchPendingInvoiceBatchCandidatesRequest) => Promise<unknown>;
     previewAttachExistingInvoice: (request: AttachExistingInvoicePreviewRequest) => Promise<unknown>;
     confirmAttachExistingInvoice: (request: AttachExistingInvoiceConfirmRequest) => Promise<unknown>;
+    previewAttachExistingInvoices: (request: AttachExistingInvoicesPreviewRequest) => Promise<unknown>;
+    confirmAttachExistingInvoices: (request: AttachExistingInvoicesConfirmRequest) => Promise<unknown>;
     fetchPendingInvoiceExportPreview: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
     downloadPendingInvoiceExport: (request: FetchPendingInvoiceRowsRequest) => Promise<{ blob: Blob; fileName: string }>;
   };
@@ -275,8 +281,11 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(api().fetchPendingInvoiceRelationDetail).toBeTypeOf("function");
     expect(api().fetchPendingInvoiceObjectDetail).toBeTypeOf("function");
     expect(api().fetchPendingInvoiceCandidates).toBeTypeOf("function");
+    expect(api().fetchPendingInvoiceCandidatesBatch).toBeTypeOf("function");
     expect(api().previewAttachExistingInvoice).toBeTypeOf("function");
     expect(api().confirmAttachExistingInvoice).toBeTypeOf("function");
+    expect(api().previewAttachExistingInvoices).toBeTypeOf("function");
+    expect(api().confirmAttachExistingInvoices).toBeTypeOf("function");
     expect(api().fetchPendingInvoiceExportPreview).toBeTypeOf("function");
     expect(api().downloadPendingInvoiceExport).toBeTypeOf("function");
 
@@ -510,6 +519,143 @@ describe("pending invoices and tag settings API mapping", () => {
     const downloaded = await api().downloadPendingInvoiceExport({ direction: "expense", filter: "requires_invoice", page: 7, pageSize: 25 });
     expect(downloaded.fileName).toBe("pending-invoices.xlsx");
     expect(downloaded.blob).toBeInstanceOf(Blob);
+  });
+
+  test("maps batch candidate, preview, and confirm attach-existing invoice endpoints", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      if (url.pathname === "/api/pending-invoices/invoice-candidates/batch" && method === "POST") {
+        expect(body).toMatchObject({
+          transaction_ids: ["txn_001", "txn_002"],
+          seller_name: "云南供应商",
+          sort_field: "amount_difference_abs",
+          sort_direction: "asc",
+          page: 1,
+          page_size: 20,
+        });
+        return new Response(JSON.stringify({
+          transaction_ids: ["txn_001", "txn_002"],
+          selection_summary: { transaction_count: 2, bank_total: "236.00" },
+          rows: [
+            {
+              invoice_id: "inv_001",
+              digital_invoice_no: "DIG-001",
+              seller_name: "云南供应商",
+              total_with_tax: "120.00",
+              related_paid_total: "0.00",
+              remaining_amount: "120.00",
+              amount_difference_abs: "116.00",
+              candidate_status: "available",
+            },
+          ],
+          pagination: { page: 1, page_size: 20, total: 1 },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/attach-existing-invoices/preview" && method === "POST") {
+        expect(body).toMatchObject({
+          transaction_ids: ["txn_001", "txn_002"],
+          invoice_ids: ["inv_001", "inv_002"],
+          request_id: "preview-batch",
+        });
+        return new Response(JSON.stringify({
+          preview_id: "attach_batch_preview_001",
+          request_key: "pending_invoice_attach_existing_batch:hash",
+          can_confirm: true,
+          transaction_summaries: [
+            { id: "txn_001", counterparty_name: "云南供应商", trade_time: "2026-05-02", debit_amount: "120.00" },
+            { id: "txn_002", counterparty_name: "云南供应商二号", trade_time: "2026-05-03", debit_amount: "116.00" },
+          ],
+          invoice_summaries: [
+            { id: "inv_001", digital_invoice_no: "DIG-001", issue_date: "2026-05-04", seller_name: "云南供应商", total_with_tax: "120.00" },
+            { id: "inv_002", digital_invoice_no: "DIG-002", issue_date: "2026-05-05", seller_name: "云南供应商二号", total_with_tax: "116.00" },
+          ],
+          selection_summary: {
+            transaction_count: 2,
+            invoice_count: 2,
+            bank_total: "236.00",
+            invoice_total: "236.00",
+            difference_amount: "0.00",
+          },
+          payment_impact: {
+            paid_total_before: "0.00",
+            paid_total_after: "236.00",
+            invoice_total: "236.00",
+            remaining_amount_after: "0.00",
+            difference_amount_after: "0.00",
+          },
+          affected_months: ["2026-05"],
+          warnings: [],
+          conflicts: [],
+          expires_at: "2026-05-25T10:10:00+08:00",
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/pending-invoices/attach-existing-invoices" && method === "POST") {
+        expect(body).toMatchObject({
+          preview_id: "attach_batch_preview_001",
+          transaction_ids: ["txn_001", "txn_002"],
+          invoice_ids: ["inv_001", "inv_002"],
+          request_id: "confirm-batch",
+        });
+        return new Response(JSON.stringify({
+          status: "completed",
+          request_id: "confirm-batch",
+          request_key: "pending_invoice_attach_existing_batch:hash",
+          transaction_ids: ["txn_001", "txn_002"],
+          invoice_ids: ["inv_001", "inv_002"],
+          relation_case_id: "case_batch",
+          relation_mode: "pending_invoice_attach_existing_invoice",
+          affected_transaction_ids: ["txn_001", "txn_002"],
+          affected_invoice_ids: ["inv_001", "inv_002"],
+          affected_months: ["2026-05"],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error(`Unhandled request ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const candidates = await api().fetchPendingInvoiceCandidatesBatch({
+      transactionIds: ["txn_001", "txn_002"],
+      sellerName: "云南供应商",
+      sortField: "amount_difference_abs",
+      sortDirection: "asc",
+      page: 1,
+      pageSize: 20,
+    });
+    expect(candidates).toMatchObject({
+      transactionIds: ["txn_001", "txn_002"],
+      selectionSummary: { transactionCount: 2, bankTotal: "236.00" },
+      rows: [{ invoiceId: "inv_001", amountDifferenceAbs: "116.00" }],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+    });
+
+    const preview = await api().previewAttachExistingInvoices({
+      transactionIds: ["txn_001", "txn_002"],
+      invoiceIds: ["inv_001", "inv_002"],
+      requestId: "preview-batch",
+    });
+    expect(preview).toMatchObject({
+      previewId: "attach_batch_preview_001",
+      transactionSummaries: [{ id: "txn_001" }, { id: "txn_002" }],
+      invoiceSummaries: [{ id: "inv_001" }, { id: "inv_002" }],
+      selectionSummary: { bankTotal: "236.00", invoiceTotal: "236.00", differenceAmount: "0.00" },
+    });
+
+    const confirm = await api().confirmAttachExistingInvoices({
+      previewId: "attach_batch_preview_001",
+      transactionIds: ["txn_001", "txn_002"],
+      invoiceIds: ["inv_001", "inv_002"],
+      requestId: "confirm-batch",
+    });
+    expect(confirm).toMatchObject({
+      status: "completed",
+      transactionIds: ["txn_001", "txn_002"],
+      invoiceIds: ["inv_001", "inv_002"],
+      relationCaseId: "case_batch",
+      affectedTransactionIds: ["txn_001", "txn_002"],
+      affectedInvoiceIds: ["inv_001", "inv_002"],
+    });
   });
 
   test("previews and confirms manual invoice with request id preserved", async () => {

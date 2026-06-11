@@ -5,6 +5,28 @@ from fin_ops_platform.app.server import build_application
 
 
 class WorkbenchApiTests(unittest.TestCase):
+    def test_relation_groups_dedupes_duplicate_relation_row_ids(self) -> None:
+        app = build_application()
+
+        groups = app._relation_groups(  # pylint: disable=protected-access
+            [
+                {
+                    "case_id": "CASE-DUPE-OA",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["oa-exp-1", "bank-1", "oa-exp-1"],
+                    "row_types": ["oa", "bank", "oa"],
+                    "special_metadata": {},
+                }
+            ],
+            selected_rows=[
+                {"id": "oa-exp-1", "type": "oa", "amount": "100.00"},
+                {"id": "bank-1", "type": "bank", "amount": "100.00"},
+            ],
+        )
+
+        self.assertEqual([row["id"] for row in groups[0]["oa_rows"]], ["oa-exp-1"])
+        self.assertEqual([row["id"] for row in groups[0]["bank_rows"]], ["bank-1"])
+
     def test_workbench_query_and_confirm_action_round_trip(self) -> None:
         app = build_application()
         self._preview_and_confirm(

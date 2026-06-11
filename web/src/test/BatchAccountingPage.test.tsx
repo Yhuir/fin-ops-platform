@@ -534,6 +534,55 @@ describe("BatchAccountingPage", () => {
     );
   });
 
+  test("shows operation guidance when relation read model refresh is not enqueued", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      ...unsubmittedPayload,
+      read_model_status: "missing",
+      read_model_stale_reasons: ["read_model_missing"],
+      read_model_scope_keys: ["2026-01"],
+      refresh_enqueued: false,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    expect(await screen.findByText("关联台关系读模型 missing，刷新未入队，请检查系统状态。")).toBeInTheDocument();
+    expect(screen.getByText("read_model_missing")).toBeInTheDocument();
+    expect(screen.getByText("影响范围：2026-01")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
+  });
+
+  test("shows backend read model status and scope when mutation is rejected as non-fresh", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
+        return jsonResponse(unsubmittedPayload);
+      }
+      if (url.pathname === "/api/batch-accounting/submit") {
+        return jsonResponse({
+          error: "batch_accounting_read_model_not_fresh",
+          message: "关联台关系读模型 stale，请刷新后再处理。",
+          read_model_status: "stale",
+          read_model_stale_reasons: ["dirty_scope:2026-01"],
+          read_model_scope_keys: ["2026-01"],
+          refresh_enqueued: true,
+        }, 400);
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByRole("heading", { name: "日常报销批量账务管理" });
+
+    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
+    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
+
+    expect(await screen.findByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01")).toBeInTheDocument();
+  });
+
   test("clears cached bank and OA selection when refreshed bank rows disappear", async () => {
     const user = userEvent.setup();
     let getCount = 0;

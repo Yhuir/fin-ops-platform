@@ -42,6 +42,8 @@
 当前事实边界：
 
 - 用户可见事实源是 `/api/etc/business-batches*` 与 `etc_business_batches`；`etc_reconciliation_tasks` 保留为导入、核对、source file 和 workflow 状态。
+- “新建批次”入口调用 `POST /api/etc/business-batches`；前端不直接把空 reconciliation task 当作批次展示，后端 application service 负责编排 task + active business batch 并返回统一 business batch payload。
+- 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。
 - 旧 `/api/etc/batches*` 只作为过渡兼容入口，不应新增能力。
 - ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。

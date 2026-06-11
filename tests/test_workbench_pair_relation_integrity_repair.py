@@ -95,6 +95,39 @@ class WorkbenchPairRelationIntegrityRepairTests(unittest.TestCase):
         self.assertEqual(plan["repaired_case_ids"], ["case-parent-only"])
         self.assertEqual(relation["row_ids"], ["oa-exp-1", "bank-1", "oa-att-inv-oa-exp-1-new"])
 
+    def test_repair_plan_removes_duplicate_row_ids_from_active_relation(self) -> None:
+        snapshot = {
+            "pair_relations": {
+                "case-duplicate-oa": {
+                    "case_id": "case-duplicate-oa",
+                    "status": "active",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["oa-exp-1", "bank-1", "oa-exp-1", "invoice-1"],
+                    "row_types": ["oa", "bank", "oa", "invoice"],
+                    "special_metadata": {},
+                }
+            },
+            "pair_relation_history": [],
+        }
+
+        plan = build_repair_plan(
+            snapshot,
+            current_rows=[
+                {"row_id": "oa-exp-1", "source_kind": "oa"},
+                {"row_id": "bank-1", "source_kind": "bank"},
+                {"row_id": "invoice-1", "source_kind": "invoice"},
+            ],
+            existing_oa_row_ids={"oa-exp-1"},
+            actor_id="test",
+        )
+
+        relation = plan["snapshot"]["pair_relations"]["case-duplicate-oa"]
+        self.assertEqual(plan["repaired_case_ids"], ["case-duplicate-oa"])
+        self.assertEqual(plan["changed_case_ids"], ["case-duplicate-oa"])
+        self.assertEqual(relation["row_ids"], ["oa-exp-1", "bank-1", "invoice-1"])
+        self.assertEqual(relation["row_types"], ["oa", "bank", "invoice"])
+        self.assertEqual(plan["snapshot"]["pair_relation_history"][0]["operation_type"], "repair_relation_rows")
+
 
 if __name__ == "__main__":
     unittest.main()

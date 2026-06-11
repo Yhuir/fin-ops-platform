@@ -370,6 +370,32 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(service.audit_log()[0]["action"], "confirm_zero_difference_closure")
         self.assertEqual(service.audit_log()[0]["actor"], "YNSYLP005")
 
+    def test_confirm_zero_difference_closure_accepts_multiple_bank_rows_zero_delta(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+                bank_row("txn-in-2", category_code="borrow_in_personal_pending_repayment", credit_amount="100000.00"),
+                bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="300000.00"),
+            ],
+        )
+
+        relation = service.confirm_zero_difference_closure(
+            ["txn-in-1", "txn-in-2", "txn-out-1"],
+            actor="YNSYLP005",
+            note="三笔流水闭环",
+        )
+
+        self.assertEqual(relation["status"], "confirmed")
+        self.assertEqual(relation["source"], "manual")
+        self.assertEqual(set(relation["principal_row_ids"]), {"txn-in-1", "txn-in-2"})
+        self.assertEqual(relation["settlement_row_ids"], ["txn-out-1"])
+        self.assertEqual(relation["principal_amount"], "300000.00")
+        self.assertEqual(relation["settled_amount"], "300000.00")
+        self.assertEqual(relation["balance_amount"], "0.00")
+        self.assertEqual(relation["evidence"]["closure_mode"], "manual_zero_difference_group")
+        self.assertEqual(set(service.audit_log()[0]["affected_row_ids"]), {"txn-in-1", "txn-in-2", "txn-out-1"})
+
     def test_confirm_zero_difference_closure_accepts_source_bank_row_ids(self) -> None:
         income = bank_row(
             "canonical-in-1",

@@ -415,7 +415,7 @@ OA_INVOICE_OFFSET_TAG = "冲"
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
-WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-06-09-etc-linked-summary-filter"
+WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-06-11-turnover-bank-only-open"
 PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 APP_HEALTH_DASHBOARD_STALE_WARNING_CODES = {
@@ -1599,6 +1599,8 @@ class Application:
             return self._handle_api_pending_invoice_filter_options(query, headers)
         if method == "GET" and route_path == "/api/pending-invoices/invoice-candidates":
             return self._handle_api_pending_invoice_candidates(query, headers)
+        if method == "POST" and route_path == "/api/pending-invoices/invoice-candidates/batch":
+            return self._handle_api_pending_invoice_batch_candidates(body, headers)
         if method == "GET" and route_path == "/api/pending-invoices/rules":
             return self._handle_api_pending_invoice_rules(query, headers)
         if method == "PUT" and route_path == "/api/pending-invoices/rules":
@@ -1619,6 +1621,10 @@ class Application:
         if method == "POST" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/attach-existing-invoice"):
             transaction_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_pending_invoice_attach_existing_confirm(transaction_id, body, headers)
+        if method == "POST" and route_path == "/api/pending-invoices/attach-existing-invoices/preview":
+            return self._handle_api_pending_invoice_attach_existing_batch_preview(body, headers)
+        if method == "POST" and route_path == "/api/pending-invoices/attach-existing-invoices":
+            return self._handle_api_pending_invoice_attach_existing_batch_confirm(body, headers)
         if method == "GET" and route_path.startswith("/api/pending-invoices/bank-transactions/") and route_path.endswith("/detail"):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_pending_invoice_bank_transaction_detail(bank_transaction_id, headers)
@@ -3088,6 +3094,8 @@ class Application:
             ),
             postgres_idempotency_store_factory=self._turnover_ledger_withdraw_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_withdraw_local_idempotency_store,
+            pair_relation_service=self._workbench_pair_relation_service,
+            persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
         ).build()
         if facade is not None:
             return facade
@@ -3105,6 +3113,8 @@ class Application:
         return TurnoverLedgerWithdrawLegacyFallbackFacade(
             routes=self._turnover_ledger_api_routes,
             after_mutation=invalidation_adapter.after_relation_mutation,
+            pair_relation_service=self._workbench_pair_relation_service,
+            persist_pair_relations=self._persist_workbench_pair_relations,
         )
 
     def _postgres_turnover_ledger_persistence_repository(
@@ -9504,6 +9514,23 @@ class Application:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, payload)
 
+    def _handle_api_pending_invoice_batch_candidates(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            candidates = self._pending_invoice_routes().invoice_candidates_batch(payload)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, candidates)
+
     def _handle_api_pending_invoice_attach_existing_preview(
         self,
         transaction_id: str,
@@ -9518,6 +9545,23 @@ class Application:
             return error
         try:
             preview = self._pending_invoice_routes().attach_existing_preview(transaction_id, payload)
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        return self._json_response(HTTPStatus.OK, preview)
+
+    def _handle_api_pending_invoice_attach_existing_batch_preview(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        _session, auth_error = self._resolve_pending_invoice_read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            preview = self._pending_invoice_routes().attach_existing_batch_preview(payload)
         except PendingInvoiceError as exc:
             return self._pending_invoice_error_response(exc)
         return self._json_response(HTTPStatus.OK, preview)
@@ -9539,6 +9583,33 @@ class Application:
         try:
             result = self._pending_invoice_routes().attach_existing_confirm(
                 transaction_id,
+                payload,
+                session=session,
+            )
+        except PendingInvoiceError as exc:
+            self._persist_state()
+            return self._pending_invoice_error_response(exc)
+        except Exception:
+            self._persist_state()
+            raise
+        self._persist_state()
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_pending_invoice_attach_existing_batch_confirm(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session = resolve_oa_request_session(
+            headers,
+            identity_service=self._oa_identity_service,
+            access_control_service=self._access_control_service,
+        )
+        try:
+            result = self._pending_invoice_routes().attach_existing_batch_confirm(
                 payload,
                 session=session,
             )
@@ -19257,7 +19328,11 @@ class Application:
             }
             row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
             row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+            relation_grouped_row_ids: set[str] = set()
             for index, row_id in enumerate(row_ids):
+                if not row_id or row_id in relation_grouped_row_ids:
+                    continue
+                relation_grouped_row_ids.add(row_id)
                 grouped_row_ids.add(row_id)
                 row_type = row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)
                 row = dict(rows_by_id.get(row_id) or {"id": row_id, "type": row_type})
@@ -19915,7 +19990,7 @@ class Application:
         if relation_mode == PERSONAL_ADVANCE_REPAYMENT_MODE:
             return {"code": PERSONAL_ADVANCE_REPAYMENT_MODE, "label": "已匹配：还清个人暂借款", "tone": "success"}
         if relation_mode == "turnover_manual_closure":
-            return {"code": "fully_linked", "label": "已匹配：外部往来款闭环", "tone": "success"}
+            return {"code": "turnover_manual_closure", "label": "外部往来款闭环", "tone": "success"}
         if relation_mode == OA_INVOICE_OFFSET_AUTO_MATCH_MODE:
             if row_type == "invoice":
                 return {"code": OA_INVOICE_OFFSET_AUTO_MATCH_MODE, "label": "已关联OA", "tone": "success"}

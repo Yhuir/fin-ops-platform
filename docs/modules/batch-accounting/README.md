@@ -48,6 +48,8 @@
 
 - 必须透出 `workbench_relation` read model 状态，不能把非 fresh 空关系显示为真实未提交。
 - `read_model_status !== "fresh"` 时，页面可以展示当前可用 payload，但必须阻止提交和撤回。
+- `GET /api/batch-accounting` 的 relation 读取必须通过现有 relation read facade/freshness 边界请求 `require_fresh`；缺失或 stale scope 只能经 facade/gateway 入队刷新，不能在页面 GET 路径同步 rebuild 或直接写 durable queue。
+- `POST /api/batch-accounting/submit` 和 `POST /api/batch-accounting/{relation_id}/withdraw` 必须在后端再次校验 relation read model fresh；非 fresh 返回 `batch_accounting_read_model_not_fresh`，并携带 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
 - 批量账务关系变化会影响关联台、银行明细、成本统计、搜索、进项/销项/OA 待付款等依赖关系 read model 或 invoice lifecycle 的页面。
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。

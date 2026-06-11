@@ -22,7 +22,7 @@
 
 ### 禁止流转
 
-- `read_model_status !== "fresh"` 时禁止提交和撤回。
+- `read_model_status !== "fresh"` 时禁止提交和撤回；前端禁用按钮只是体验层保护，submit/withdraw 后端必须再次执行 relation read model fresh gate。
 - 已有关联关系占用的银行流水不能再次作为 `unsubmitted` 提交。
 - 非日常报销 OA 行、已有关联关系的 OA 行、空 OA 列表、空银行流水 ID、非法年份或非法 bucket 必须拒绝。
 - 金额不一致但差额说明为空或仅空白字符时必须拒绝。
@@ -37,7 +37,7 @@
 | empty | 银行列表或 OA 表无行时分别展示空态；空态不能替代 non-fresh warning。 |
 | error | GET 失败时显示页面错误 fallback；mutation 失败通过 feedback 展示错误信息。 |
 | fresh | 可按 bucket 操作；unsubmitted 可提交，submitted 可打开撤回 dialog。 |
-| stale/refreshing/missing/failed/unavailable | 显示 relation read model warning；提交/撤回按钮禁用；用户可刷新等待 worker 收敛。 |
+| stale/refreshing/missing/failed/unavailable | 显示 relation read model warning、后端 stale reason 和 scope；提交/撤回按钮禁用；用户可刷新等待 worker 收敛。`refresh_enqueued=false` 时提示刷新未入队并转向系统状态排查。 |
 | mismatch | 显示金额不一致提示和差额说明输入；说明为空时前端阻止提交，后端再次校验。 |
 | bucket 切换 | `unsubmitted` 与 `submitted` 切换时清空 bank/OA selection、差额说明、撤回状态。 |
 | OA 年份切换 | 只切换 OA 年份时尽量保留仍存在的选中银行/OA 行；刷新后不存在的行必须清理。 |
@@ -53,13 +53,14 @@
 | `fresh` | `workbench_relation` read model 与 source version 一致。 | 可以提交/撤回。 |
 | `refreshing` | refresh 已入队或正在运行。 | API 可返回当前 payload，但页面禁用 mutation。 |
 | `stale` | projection source version 落后。 | API 透出 stale reason/scope key，页面禁用 mutation并提示刷新。 |
-| `missing` | 目标 scope 尚无 relation read model。 | facade enqueue refresh，页面禁用 mutation。 |
+| `missing` | 目标 scope 尚无 relation read model。 | facade/gateway enqueue refresh，页面禁用 mutation；mutation 后端 fresh gate 返回 `batch_accounting_read_model_not_fresh`。 |
 | `failed` | 最近 refresh 失败。 | App Status 应标记阻塞或忙碌；页面禁用 mutation。 |
 | `schema_mismatch` | read model schema 版本不匹配。 | 必须重建后再允许 mutation。 |
 | `unavailable` | SQL runtime 或 repository 不可用。 | 不能展示为 green/fresh；需要 App Health/App Status 暴露。 |
 
 Refresh 触发来源：
 
+- 批量账务列表读取：通过 `WorkbenchRelationReadFacade` 以 `require_fresh=true` 请求 relation read model；缺失/stale scope 经现有 freshness/gateway 边界去重入队，GET 不同步 rebuild、不直接写 queue。
 - 批量账务提交/撤回：`batch_accounting_relation_changed` -> `workbench_relation_read_model` invalidate/refresh。
 - 关联台关系确认/撤回：`pair_relation_changed`。
 - 银行流水或发票导入、OA rebuild、标签规则等影响 Workbench relation 的生命周期事件。
@@ -77,3 +78,4 @@ Refresh 触发来源：
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确业务、UI、relation read model、worker 状态和禁止流转 | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、relation facade/projection tests |
+| 2026-06-11 | relation read model missing/stale 闭环 | 列表读取走 require_fresh 入队；submit/withdraw 后端 fresh gate 拒绝 non-fresh；页面展示 reason/scope 和未入队提示 | `test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh`、`test_submit_rejects_when_relation_read_model_is_not_fresh`、`test_withdraw_rejects_when_relation_read_model_is_not_fresh`、`shows operation guidance when relation read model refresh is not enqueued`、`shows backend read model status and scope when mutation is rejected as non-fresh` |

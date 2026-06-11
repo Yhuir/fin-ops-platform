@@ -374,6 +374,7 @@ class TurnoverLedgerWriteFacade:
                 action_name=action_name,
                 payload=dict(command_payload),
             )
+        refresh_scope_keys = sorted({"all", *normalized_months})
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=["all"],
@@ -383,7 +384,27 @@ class TurnoverLedgerWriteFacade:
                     "scope_type": "turnover_ledger",
                     "scope_keys": ["all"],
                     "reason": "turnover_relation_changed",
-                }
+                },
+                {
+                    "scope_type": "workbench",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "search",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
             ],
             actor_id=actor_id,
             tenant_id=tenant_id,
@@ -393,13 +414,39 @@ class TurnoverLedgerWriteFacade:
         )
 
         def handler(context: Any) -> dict[str, object]:
+            workbench_pair_port = getattr(context, "workbench_pair_port", None)
+            if workbench_pair_port is not None:
+                precheck = getattr(workbench_pair_port, "assert_turnover_manual_closure_withdrawable", None)
+                if callable(precheck):
+                    precheck(
+                        relation_id=normalized_relation_id,
+                        transaction=context.transaction,
+                    )
             result = context.relation_repository.withdraw_relation(
                 relation_id=normalized_relation_id,
                 actor_id=actor_id,
                 note=note,
                 transaction=context.transaction,
             )
-            return dict(result or {})
+            public_result = dict(result or {})
+            relation = dict(
+                public_result.get("relation")
+                if isinstance(public_result.get("relation"), dict)
+                else public_result
+            )
+            if workbench_pair_port is not None:
+                withdraw_pair = getattr(workbench_pair_port, "withdraw_turnover_manual_closure", None)
+                if callable(withdraw_pair):
+                    pair_relation = withdraw_pair(
+                        relation=relation,
+                        actor_id=actor_id,
+                        note=note,
+                        transaction=context.transaction,
+                    )
+                    public_result["workbench_pair_relation"] = dict(pair_relation or {})
+            public_result["turnover_relation"] = relation
+            public_result["relation"] = relation
+            return public_result
 
         return self._uow.run(command, handler)
 

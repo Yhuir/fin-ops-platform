@@ -21,7 +21,9 @@
 - `oa_bank_exact_sum`：1 条 OA 与唯一一组 2 到 6 条同方向银行流水，且每条银行流水均有 OA-bank 业务证据，金额按分精度唯一闭合时，生成 open OA-bank candidate；缺少发票时不得进入三方 paired。
 - 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合、任一流水缺少证据、或已有更高优先级候选时，不自动选择。
 - 已有 active relation 的 ETC summary 不得继续出现在 open 区；paired 区仍可展示展开明细。
+- active relation 的 `row_ids` 是集合语义：同一 relation 内重复 row id 必须在写入/normalize/repair/query grouping 层去重；同一 row id 不能跨不同 active case 复用。重复 row id 的真实结果是列表详情重复渲染同一个 OA/银行/发票，不代表存在两条业务事实。
 - 关联台确认/撤回是跨页面事实，必须产生 affected scopes/months、审计和下游 refresh 信号。
+- 外部往来 `relation_mode=turnover_manual_closure` 是 Workbench active pair relation 事实源，但不是 bank-only paired 例外；仅银行流水的外部往来闭环必须留在 open，只有 OA + 银行 + 发票三栏都存在时才进入 paired。
 
 禁止流转：
 
@@ -29,6 +31,7 @@
 - 禁止 read model 非 fresh 时把空 open rows 当成真实无候选。
 - 禁止 ETC 批次人工确认后直接进入 paired；必须仍经过普通 OA/银行/发票关系确认。
 - 禁止 failed generation、building generation 或 stale Redis payload 被展示为 fresh。
+- 禁止 active relation payload 保留重复 row id，或以不同 active case 复用同一 row id 来表达多付款/多发票场景；这类场景必须合并到同一 relation 并通过 summaries/+N 展开。
 
 ## UI 状态
 
@@ -76,6 +79,8 @@ Refresh 触发来源：
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐测试闭环状态机 | open/paired/exception/dirty/active generation/UI/read model 状态边界 | 待本轮 Workbench 验证 |
+| 2026-06-11 | active pair relation 增加 row id 去重和跨 active case 复用防线，修复 paired 详情重复 OA 展示 | WorkbenchPairRelationService、server relation grouping、integrity repair、pending invoice attach relation 合并 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py`、`tests/test_pending_invoice_service.py` |
+| 2026-06-11 | 外部往来 bank-only 手动闭环移除 paired 例外，只有 OA + 银行 + 发票三栏完整才进入 paired | WorkbenchCandidateGroupingService、server relation display payload、关联台本地 optimistic update | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-10 | 新增 `oa_bank_exact_sum` 自动候选：1 条 OA 可与唯一一组 2..6 条银行流水合计闭合付款金额，并保持待发票 open candidate group | Workbench matching rules、free decision engine、candidate grouping、API payload/read model invalidation | `tests.test_workbench_matching_rules`；`tests.test_workbench_free_matching_engine`；`tests.test_workbench_matching_orchestrator`；`tests.test_workbench_v2_api` |
 | 2026-06-09 | 已有 active relation 的 ETC summary 在 open 区增加 projection/repository 双重排除，并保留 paired 区展开明细 | Workbench open/paired 查询、历史 ETC 批次迁移、陈旧 active generation 防线 | `tests.test_workbench_sql_runtime`；生产库只读验证 |
 | 2026-06-08 | 已提交 ETC 批次在 open 区投影折叠 `etc_invoice_summary`，等待普通三项配对 | 关联台 open/paired 分区、Workbench projection | `tests.test_etc_backend` |

@@ -329,6 +329,73 @@ class WorkbenchTurnoverGroupingTests(unittest.TestCase):
         ]
         self.assertEqual(open_bank_ids, ["bank-open"])
 
+    def test_bank_only_turnover_manual_closure_rows_remain_open_even_when_linked(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[],
+            bank_rows=[
+                {
+                    **_bank_row("bank-in-1", credit_amount="200000.00", case_id="turnover:rel-1", relation_code="fully_linked"),
+                    "relation_mode": "turnover_manual_closure",
+                },
+                {
+                    **_bank_row("bank-out-1", debit_amount="200000.00", case_id="turnover:rel-1", relation_code="fully_linked"),
+                    "relation_mode": "turnover_manual_closure",
+                },
+            ],
+            invoice_rows=[],
+            turnover_relations=[],
+        )
+
+        self.assertFalse(payload["paired"]["groups"])
+        matching_open_groups = [
+            group
+            for group in payload["open"]["groups"]
+            if set(_group_bank_ids(group)) == {"bank-in-1", "bank-out-1"}
+        ]
+        self.assertEqual(len(matching_open_groups), 1)
+        self.assertEqual(matching_open_groups[0]["group_type"], "candidate")
+
+    def test_two_pane_turnover_manual_closure_rows_remain_open_even_when_linked(self) -> None:
+        service = WorkbenchCandidateGroupingService()
+
+        payload = service.group_payload(
+            "2026-03",
+            oa_rows=[
+                {
+                    "id": "oa-turnover-1",
+                    "type": "oa",
+                    "case_id": "turnover:rel-2",
+                    "payment_date": "2026-03-05",
+                    "counterparty_name": "贾小花",
+                    "amount": "200000.00",
+                    "oa_bank_relation": {"code": "fully_linked", "label": "完全关联", "tone": "success"},
+                    "relation_mode": "turnover_manual_closure",
+                }
+            ],
+            bank_rows=[
+                {
+                    **_bank_row("bank-turnover-1", credit_amount="200000.00", case_id="turnover:rel-2", relation_code="fully_linked"),
+                    "relation_mode": "turnover_manual_closure",
+                }
+            ],
+            invoice_rows=[],
+            turnover_relations=[],
+        )
+
+        self.assertFalse(payload["paired"]["groups"])
+        matching_open_groups = [
+            group
+            for group in payload["open"]["groups"]
+            if group["group_id"] == "case:turnover:rel-2"
+        ]
+        self.assertEqual(len(matching_open_groups), 1)
+        self.assertEqual(matching_open_groups[0]["group_type"], "candidate")
+        self.assertEqual([row["id"] for row in matching_open_groups[0].get("oa_rows", [])], ["oa-turnover-1"])
+        self.assertEqual(_group_bank_ids(matching_open_groups[0]), ["bank-turnover-1"])
+
 
 class WorkbenchTurnoverReadModelCacheTests(unittest.TestCase):
     def _import_and_tag_closed_turnover_rows(self, app) -> None:

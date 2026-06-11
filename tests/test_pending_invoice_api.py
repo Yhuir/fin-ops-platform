@@ -163,6 +163,59 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(rules_response.status_code, 200)
         self.assertIn("pending_invoice_tag_groups", rules_payload)
 
+    def test_batch_attach_existing_invoice_endpoints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            first_transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Batch A")
+            second_transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Batch B")
+            first_invoice_id = self._create_input_invoice(app, seller_name="Vendor Batch A", invoice_no="BATCH-ATTACH-001")
+            second_invoice_id = self._create_input_invoice(app, seller_name="Vendor Batch B", invoice_no="BATCH-ATTACH-002")
+            self._install_pending_invoice_sql_read_model(app)
+
+            candidates_response = app.handle_request(
+                "POST",
+                "/api/pending-invoices/invoice-candidates/batch",
+                body=json.dumps({"transaction_ids": [first_transaction_id, second_transaction_id]}),
+            )
+            preview_response = app.handle_request(
+                "POST",
+                "/api/pending-invoices/attach-existing-invoices/preview",
+                body=json.dumps(
+                    {
+                        "transaction_ids": [first_transaction_id, second_transaction_id],
+                        "invoice_ids": [first_invoice_id, second_invoice_id],
+                    }
+                ),
+            )
+            preview_payload = json.loads(preview_response.body)
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/pending-invoices/attach-existing-invoices",
+                body=json.dumps(
+                    {
+                        "preview_id": preview_payload["preview_id"],
+                        "transaction_ids": [first_transaction_id, second_transaction_id],
+                        "invoice_ids": [first_invoice_id, second_invoice_id],
+                        "request_id": "batch-attach-api-001",
+                    }
+                ),
+            )
+
+        candidates_payload = json.loads(candidates_response.body)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(candidates_response.status_code, 200)
+        self.assertEqual(candidates_payload["selection_summary"]["transaction_count"], 2)
+        self.assertEqual(candidates_payload["selection_summary"]["bank_total"], "236.00")
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(preview_payload["selection_summary"]["bank_total"], "236.00")
+        self.assertEqual(preview_payload["selection_summary"]["invoice_total"], "236.00")
+        self.assertEqual(preview_payload["selection_summary"]["difference_amount"], "0.00")
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(confirm_payload["status"], "completed")
+        self.assertEqual(confirm_payload["affected_transaction_ids"], [first_transaction_id, second_transaction_id])
+        self.assertEqual(confirm_payload["affected_invoice_ids"], [first_invoice_id, second_invoice_id])
+        self.assertEqual(confirm_payload["relation_mode"], "pending_invoice_attach_existing_invoice")
+
     def test_income_endpoint_accepts_rule_group_filter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

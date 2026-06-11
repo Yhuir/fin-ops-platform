@@ -44,6 +44,9 @@ type PendingInvoicesTableProps = {
   onApplyColumnFilters: (filters: PendingInvoiceColumnFilter[]) => void;
   onClearColumnFilters: (fields: string[]) => void;
   pendingActionRowIds?: Set<string>;
+  selectedTransactionIds?: Set<string>;
+  onToggleTransactionSelection?: (row: PendingInvoiceRow) => void;
+  isTransactionSelectable?: (row: PendingInvoiceRow) => boolean;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
 
@@ -414,6 +417,9 @@ export default function PendingInvoicesTable({
   onApplyColumnFilters,
   onClearColumnFilters,
   pendingActionRowIds,
+  selectedTransactionIds,
+  onToggleTransactionSelection,
+  isTransactionSelectable,
   tableWrapRef,
 }: PendingInvoicesTableProps) {
   const bankGroupLabel = direction === "income" ? "收入流水" : direction === "all" ? "流水" : "支出流水";
@@ -540,7 +546,10 @@ export default function PendingInvoicesTable({
                   onOpenManualInvoice={onOpenManualInvoice}
                   onOpenObjectDetail={onOpenObjectDetail}
                   onOpenRelation={onOpenRelation}
+                  onToggleTransactionSelection={onToggleTransactionSelection}
                   row={row}
+                  selectedTransactionIds={selectedTransactionIds}
+                  isTransactionSelectable={isTransactionSelectable}
                 />
               ))}
             </Table.Body>
@@ -592,6 +601,9 @@ function PendingInvoiceTableRow({
   onOpenManualInvoice,
   onOpenObjectDetail,
   onMarkIncomeStatus,
+  selectedTransactionIds,
+  onToggleTransactionSelection,
+  isTransactionSelectable,
   actionPending = false,
 }: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters" | "pendingActionRowIds"> & { row: PendingInvoiceRow; actionPending?: boolean }) {
   const primaryInvoice = row.inputInvoices.primary;
@@ -601,28 +613,45 @@ function PendingInvoiceTableRow({
   const oaDetailAvailable = canOpenOaDetail(row);
   const moneyDirection = rowMoneyDirection(row, direction);
   const invoiceNumberLabel = primaryInvoice ? invoiceNumber(primaryInvoice) : "";
+  const transactionId = row.bankTransaction.id || row.id;
+  const transactionSelectable = isTransactionSelectable?.(row) === true;
+  const transactionSelected = selectedTransactionIds?.has(transactionId) === true;
+  const invoiceTotal = row.inputInvoices.paymentSummary?.invoiceTotal || primaryInvoice?.totalWithTax || "";
 
   return (
     <Table.Row className="pending-invoices-table-row" id={row.id} textValue={row.bankTransaction.counterpartyName || row.id}>
       <Table.Cell className="pending-invoices-table-cell pending-invoices-col-counterparty" data-column-role="identity">
-        <span className="pending-invoices-counterparty-cell">
-          <span className="pending-invoices-counterparty-row">
-            <span className="pending-invoices-counterparty-name" title={row.bankTransaction.counterpartyName}>
-              {row.bankTransaction.counterpartyName}
-            </span>
-            <button
-              aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
-              className="pending-invoices-icon-button"
-              onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
-              title="流水详情"
-              type="button"
-            >
-              <Info aria-hidden="true" size={14} strokeWidth={2.3} />
-            </button>
+        <span className="pending-invoices-counterparty-cell pending-invoices-counterparty-cell--selectable">
+          <span className="pending-invoices-row-select-slot">
+            {transactionSelectable ? (
+              <input
+                aria-label={`选择流水 ${row.bankTransaction.counterpartyName || row.id}`}
+                checked={transactionSelected}
+                className="pending-invoices-row-select"
+                onChange={() => onToggleTransactionSelection?.(row)}
+                type="checkbox"
+              />
+            ) : null}
           </span>
-          <span className="pending-invoices-cell-secondary">{row.bankTransaction.tradeTime || "-"}</span>
-          <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
-            {tagPathLabel(row.bankTransaction)}
+          <span className="pending-invoices-counterparty-content">
+            <span className="pending-invoices-counterparty-row">
+              <span className="pending-invoices-counterparty-name" title={row.bankTransaction.counterpartyName}>
+                {row.bankTransaction.counterpartyName}
+              </span>
+              <button
+                aria-label={`流水详情 ${row.bankTransaction.counterpartyName}`}
+                className="pending-invoices-icon-button"
+                onClick={() => onOpenObjectDetail({ kind: "bankTransaction", id: row.bankTransaction.id, rowId: row.id })}
+                title="流水详情"
+                type="button"
+              >
+                <Info aria-hidden="true" size={14} strokeWidth={2.3} />
+              </button>
+            </span>
+            <span className="pending-invoices-cell-secondary">{row.bankTransaction.tradeTime || "-"}</span>
+            <span className="pending-invoices-tag pending-invoices-tag--neutral" title={tagPathLabel(row.bankTransaction)}>
+              {tagPathLabel(row.bankTransaction)}
+            </span>
           </span>
         </span>
       </Table.Cell>
@@ -693,7 +722,10 @@ function PendingInvoiceTableRow({
       <Table.Cell className="pending-invoices-table-cell pending-invoices-table-cell--amount pending-invoices-col-invoice-amount" data-column-role="amount">
         {primaryInvoice ? (
           <span className="pending-invoices-money-stack">
-            <span className="pending-invoices-money-primary">{formatMoney(primaryInvoice.totalWithTax)}</span>
+            <span className="pending-invoices-money-primary">
+              {formatMoney(invoiceTotal)}
+              {invoiceExtraCount > 0 ? <span className="pending-invoices-money-extra"> +{invoiceExtraCount}</span> : null}
+            </span>
             {row.inputInvoices.paymentSummary ? (
               <>
                 <span className="pending-invoices-cell-secondary">已付 {formatMoney(row.inputInvoices.paymentSummary.paidTotal)}</span>

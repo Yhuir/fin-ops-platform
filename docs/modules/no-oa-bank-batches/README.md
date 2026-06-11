@@ -41,7 +41,9 @@
 - 标签准入：`GET/PUT /api/no-oa-bank-batches/tag-selection` 只读取银行明细自动标签规则中的可用标签，不保存第三层外部往来分类字段。
 - 读取路径：`GET /api/no-oa-bank-batches` 优先读 `no_oa_bank_batch` SQL read model；missing/stale 时只 enqueue refresh，不在 GET 热路径同步重建批次。
 - 提交路径：`submit-selection` 只提交用户当前选择的流水；要求同月、同银行账户、同 `category_code`，且 code 在当前免 OA 标签准入范围内。
-- 内部往来：关联台 confirm-link 选中两条 `internal_transfer` 银行流水时，最终事实必须归入免 OA 批次，并写 `relation_mode=no_oa_bank_batch`，不能直接写普通 `manual_confirmed`。
+- 内部往来：关联台 confirm-link 选中两条 `internal_transfer` 银行流水时，最终事实必须归入免 OA 批次，并写 `relation_mode=no_oa_bank_batch`，不能直接写普通 `manual_confirmed`；免 OA 页面先提交或关联台先提交都必须收敛到同一个 submitted batch / active relation，不能形成第二条 active relation。
+- 历史归并：当 `internal_transfer` 已纳入免 OA 标签准入时，存量两行、全银行流水、同金额、不同账户、收支成对且有效分类均为 `internal_transfer` 的 `manual_confirmed` active relation，刷新时视为内部往来历史入口并迁移为 submitted no-OA 批次。
+- Read model 保存：`save_no_oa_bank_batches` 写入的是当前完整 no-OA snapshot；缺席于新 snapshot 的旧 draft/conflict/submitted row 必须从 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows` 移除，避免旧未提交/冲突批次残留。
 - 撤回路径：已提交批次必须从 no-OA 批次 API 撤回，撤回后取消 Workbench pair relation 并使流水回到可匹配状态。
 - App Status：`no_oa_bank_batches` domain 绑定 `no-oa-bank-batch` worker、`no_oa_bank_batch` read model、`no_oa_bank_batch.read_model.refresh` job type。
 

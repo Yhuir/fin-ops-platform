@@ -1193,8 +1193,9 @@ describe("Turnover ledger page", () => {
         return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
       });
       expect(request).toBeDefined();
-      expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
         bank_row_ids: ["bank-company-expense-1000", "bank-company-income-1000"],
+        idempotency_key: expect.stringMatching(/^turnover-manual-closure:/),
       });
     });
     await waitFor(() => {
@@ -1212,6 +1213,46 @@ describe("Turnover ledger page", () => {
     });
     window.removeEventListener("turnoverRelationUpdated", turnoverListener);
     window.removeEventListener("workbenchRelationUpdated", workbenchListener);
+  });
+
+  test("confirms a manual zero-difference turnover closure from three same-group flow rows", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+    const openButton = within(page).getByRole("button", { name: "确认闭环" });
+    expect(openButton).toBeDisabled();
+
+    await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-100000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    expect(openButton).toBeEnabled();
+    await user.click(openButton);
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    expect(within(drawer).getByText("bank-jia-income-200000")).toBeInTheDocument();
+    expect(within(drawer).getByText("bank-jia-income-100000")).toBeInTheDocument();
+    expect(within(drawer).getByText("bank-jia-expense-300000")).toBeInTheDocument();
+    expect(within(drawer).getByText("收入合计").nextElementSibling).toHaveTextContent("300,000.00");
+    expect(within(drawer).getByText("支出合计").nextElementSibling).toHaveTextContent("300,000.00");
+    expect(within(drawer).getByTestId("turnover-closure-delta")).toHaveTextContent("0.00");
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+      });
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+        bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
+        idempotency_key: expect.stringMatching(/^turnover-manual-closure:/),
+      });
+    });
   });
 
   test("confirms closure when cash direction crosses turnover stage columns", async () => {
@@ -1245,8 +1286,9 @@ describe("Turnover ledger page", () => {
         return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
       });
       expect(request).toBeDefined();
-      expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
         bank_row_ids: ["bank-company-borrow-expense-40000", "bank-company-repayment-income-40000"],
+        idempotency_key: expect.stringMatching(/^turnover-manual-closure:/),
       });
     });
   });
@@ -1264,7 +1306,7 @@ describe("Turnover ledger page", () => {
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
-    expect(await screen.findByText("一次只能选择同一往来组内的两条流水")).toBeInTheDocument();
+    expect(await screen.findByText("一次只能选择同一往来组内的流水")).toBeInTheDocument();
 
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));

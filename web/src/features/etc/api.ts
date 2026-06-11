@@ -1528,7 +1528,7 @@ export async function createEtcBusinessBatch(payload: EtcCreateBusinessBatchPayl
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      taskId: payload.taskId,
+      ...(payload.taskId ? { taskId: payload.taskId } : {}),
       ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
     }),
   });

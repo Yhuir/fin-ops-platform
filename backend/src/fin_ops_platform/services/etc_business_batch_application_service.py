@@ -111,12 +111,30 @@ class EtcBusinessBatchApplicationService:
         }
 
     def create_batch_payload(self, payload: dict[str, Any], *, actor: EtcBusinessBatchActor) -> dict[str, object]:
-        batch = self._etc_service.create_business_batch(
-            task_id=str(payload.get("taskId") or payload.get("task_id") or ""),
-            owner_user_id=self._first_text(actor.username, actor.user_id, payload.get("ownerUserId"), payload.get("owner_user_id")),
-            owner_org_id=self._first_text(actor.dept_id, payload.get("ownerOrgId"), payload.get("owner_org_id")),
-            idempotency_key=self._first_text(payload.get("idempotencyKey"), payload.get("idempotency_key")),
-        )
+        task_id = self._first_text(payload.get("taskId"), payload.get("task_id"))
+        created_task = None
+        if not task_id:
+            created_task = self._reconciliation_task_service.create_task(
+                title=self._first_text(payload.get("title"), payload.get("name")) or "新建ETC对账批次",
+                created_by=actor.actor_id,
+            )
+            task_id = str(getattr(created_task, "task_id", "") or "").strip()
+        try:
+            batch = self._etc_service.create_business_batch(
+                task_id=task_id,
+                owner_user_id=self._first_text(actor.username, actor.user_id, payload.get("ownerUserId"), payload.get("owner_user_id")),
+                owner_org_id=self._first_text(actor.dept_id, payload.get("ownerOrgId"), payload.get("owner_org_id")),
+                idempotency_key=self._first_text(payload.get("idempotencyKey"), payload.get("idempotency_key")),
+            )
+        except Exception:
+            if created_task is not None:
+                self._reconciliation_task_service.delete_task(
+                    task_id=task_id,
+                    expected_version=getattr(created_task, "version", None),
+                    actor=actor.actor_id,
+                    import_cleanup_confirmed=True,
+                )
+            raise
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def detail_payload(self, business_batch_id: str, *, actor: EtcBusinessBatchActor) -> dict[str, object]:

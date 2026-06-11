@@ -44,6 +44,27 @@
 
 `read_model_status` 的优先级按后端聚合：`unavailable > schema_mismatch > missing > failed > stale > refreshing > fresh`。接口仍返回当前可用 payload；前端需要展示刷新/陈旧状态并避免在非 fresh 时把缺失关系误解释成真实未提交。
 
+列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。
+
+`POST /api/batch-accounting/submit`
+
+`POST /api/batch-accounting/{relation_id}/withdraw`
+
+写操作在业务校验和持久化前必须再次校验 `workbench_relation` read model fresh，避免页面加载后到点击提交/撤回之间发生 stale/missing race。非 fresh 时返回 `400`：
+
+```json
+{
+  "error": "batch_accounting_read_model_not_fresh",
+  "message": "关联台关系读模型 stale，请刷新后再处理。",
+  "read_model_status": "stale",
+  "read_model_stale_reasons": ["dirty_scope:2026-01"],
+  "read_model_scope_keys": ["2026-01"],
+  "refresh_enqueued": true
+}
+```
+
+前端必须优先展示 `message`，并附带 `read_model_stale_reasons` 与 `read_model_scope_keys`；不能只靠按钮禁用作为唯一保护。
+
 ## 待找发票规则 API
 
 `GET /api/pending-invoices/rules?direction=expense|income`
@@ -182,11 +203,13 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 
 响应中的 `summary.categories[*]` 和 `batches[*]` 需要携带 `category_primary_label`、`category_sub_label`、`category_label_path`，供前端构造主/子标签三栏。未提交候选批次只来自当前保存的免 OA 标签准入范围，且必须排除已被关联台 active relation 占用的银行流水；已提交历史批次即使标签不再准入也继续返回。
 
-当接口命中 SQL read model 且发现 source version 陈旧时，响应会携带 `read_model_status="stale"` 与 `read_model_stale_reasons`，并返回当前可用数据。前端需要像银行明细页一样显示读模型刷新/陈旧状态并自动重试，直到后续响应恢复 `read_model_status="fresh"`。未返回 `read_model_status` 时按 `fresh` 处理。
+当接口命中 SQL read model 且发现 source version 陈旧时，响应会携带 `read_model_status="stale"` 与 `read_model_stale_reasons`，并返回当前可用数据。前端需要像银行明细页一样显示读模型刷新/陈旧状态并自动重试，直到后续响应恢复 `read_model_status="fresh"`。未返回 `read_model_status` 时按 `fresh` 处理。后台 `save_no_oa_bank_batches` 写入的是当前完整 no-OA snapshot；不在新 snapshot 中的旧 draft/conflict/submitted 批次必须从 `app.no_oa_bank_batches` 和 `read_model.no_oa_bank_batch_rows` 清理，不能继续作为 fresh 列表数据返回。
 
 `POST /api/workbench/actions/confirm-link`
 
-关联台确认两条银行流水时，如果选中流水当前分类全部为 `internal_transfer`，后端必须委托免 OA 批次统一提交入口：刷新免 OA 候选、找到完全匹配这组 `row_ids` 的内部往来 draft batch，并按批次提交。成功响应仍保持关联台 `confirm_link` 兼容结构，但最终事实必须是一个 `status=submitted` 的内部往来免 OA 批次，以及一条 `relation_mode=no_oa_bank_batch` 的 Workbench active pair relation；关联台已配对区消费该 relation，免 OA 已提交区域消费同一批次。
+关联台确认两条银行流水时，如果选中流水当前分类全部为 `internal_transfer`，后端必须委托免 OA 批次统一提交入口：刷新免 OA 候选，优先复用完全匹配这组 `row_ids` 的 submitted no-OA internal transfer batch；若不存在 submitted fact，再找到完全匹配的内部往来 draft batch 并按批次提交。成功响应仍保持关联台 `confirm_link` 兼容结构，但最终事实必须是一个 `status=submitted` 的内部往来免 OA 批次，以及一条 `relation_mode=no_oa_bank_batch` 的 Workbench active pair relation；关联台已配对区消费该 relation，免 OA 已提交区域消费同一批次。免 OA 页面先提交或关联台先提交同一组流水都必须返回同一个 `case_id`，不得创建第二条 active relation。
+
+存量 active `manual_confirmed` 关系只有在 `internal_transfer` 已纳入免 OA 标签准入，且两行、全银行流水、同金额、不同账户、收支成对、有效分类均为 `internal_transfer` 时，刷新 no-OA 批次时才迁移为 submitted no-OA internal transfer batch；其他普通 `manual_confirmed` 关系保持关联台语义，不由 no-OA 模块接管。Workbench active pair relation 对 row 是独占事实，不同 active case 不允许复用同一 row。
 
 如果选中银行流水中只有部分为 `internal_transfer`，接口返回 `400 no_oa_bank_batch_selection_internal_transfer_conflict`，不得静默写入 `manual_confirmed`。非内部往来的银行-only 平衡确认保持原有关联台普通确认语义，可写入 `relation_mode=manual_confirmed`。
 
@@ -296,15 +319,15 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 
 当响应携带 `read_model_status` 且不为 `fresh` 时，前端可以展示当前可用数据，但必须把闭环确认、流水选择、补充信息编辑等写操作置为不可用，直到后续查询恢复 fresh。未返回 `read_model_status` 时按 `fresh` 处理。
 
-外部往来款 `deterministic` 只表示系统识别到零差额候选，不表示已闭环，也不得作为关联台 open 分组或已配对事实。外部往来进入关联台已配对区的唯一入口是人工确认闭环后写入的 Workbench active pair relation。
+外部往来款 `deterministic` 只表示系统识别到零差额候选，不表示已闭环，也不得作为关联台 open 分组或已配对事实。外部往来闭环的共同事实源是人工确认闭环后写入的 Workbench active pair relation；该 relation 只是占用和闭环事实，Workbench 分区仍必须遵守三栏规则：bank-only 外部往来闭环留在 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
 
 `POST /api/turnover-ledger/closures/confirm`
 
-人工确认两条外部往来流水闭环。请求示例：
+人工确认同一往来组内多笔外部往来流水闭环。请求示例：
 
 ```json
 {
-  "bank_row_ids": ["bank-income-001", "bank-expense-001"],
+  "bank_row_ids": ["bank-income-001", "bank-income-002", "bank-expense-001"],
   "expected_versions": {"turnover_bank_row:bank-income-001": "v1"},
   "idempotency_key": "closure-20260605-001",
   "note": "人工确认零差额闭环"
@@ -313,10 +336,10 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 
 校验规则：
 
-- `bank_row_ids` 必须正好两条且不能重复。
-- 后端必须重新读取当前银行流水和分类事实；两条流水必须属于同一往来台账组、同一往来语义、同一对方，一收一支。
+- `bank_row_ids` 必须至少两条且不能重复；不再限制为正好两条。
+- 后端必须重新读取当前银行流水和分类事实；全部流水必须属于同一往来台账组、同一往来语义、同一对方，并同时包含收入和支出。
 - 收入金额与支出金额差额必须为 `0.00`；否则返回 `400 turnover_closure_amount_mismatch` 或方向/语义相关业务错误。
-- 两条流水不得已被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用；占用返回 `409 turnover_relation_conflict`。
+- 流水不得已被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用；占用返回 `409 turnover_relation_conflict`。已确认 2 笔后如需补第 3 笔，必须先撤回原 bank-only 闭环，再重新选择完整流水确认。
 - `expected_versions` 进入写 UoW 的 stale precondition；版本冲突必须在写 relation 和 pair relation 前失败。
 - `idempotency_key` 进入写 UoW 的幂等边界；相同 payload 重放返回第一次结果，不同 payload 返回 `409 idempotency_key_conflict`。
 
@@ -324,11 +347,13 @@ read model readiness details 可以放入 `domains[*].details`，用于 hover �
 
 | 字段 | 说明 |
 | --- | --- |
-| `turnover_relation` / `relation` | Turnover 手动闭环关系，`status=confirmed`、`source=manual`、`evidence.closure_mode=manual_zero_difference_pair`。该 relation 自身不再依赖 `sync_to_workbench` 表示闭环。 |
-| `workbench_pair_relation` | 同一写事务内创建的 Workbench active pair relation，`relation_mode=turnover_manual_closure`，驱动关联台已配对区。 |
+| `turnover_relation` / `relation` | Turnover 手动闭环关系，`status=confirmed`、`source=manual`；两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`，三笔及以上为 `manual_zero_difference_group`。该 relation 自身不再依赖 `sync_to_workbench` 表示闭环。 |
+| `workbench_pair_relation` | 同一写事务内创建的 Workbench active pair relation，`relation_mode=turnover_manual_closure`，作为共同事实源。bank-only 关系不得直接驱动关联台 paired 区；三栏补齐后才进入 paired。 |
 | `affected_months` | 受影响月份，用于前端刷新外部往来、关联台和 relation read model。 |
 
 成功写入必须通过 dirty/outbox 标记 `turnover_ledger`、`workbench`、`workbench_relation` 相关 scope 刷新；不得在页面或 Workbench 查询层用 `turnover_relation` 重新拼 open 分组。
+
+`POST /api/turnover-ledger/relations/{relation_id}/withdraw` 撤回外部往来手动闭环时，若对应 Workbench active relation 仍是 `turnover:{relation_id}` 的 bank-only `relation_mode=turnover_manual_closure`，后端必须在同一写事务中撤回 Turnover relation 并取消 Workbench pair relation，同时刷新 `turnover_ledger`、`workbench`、`workbench_relation`、`cost_statistics`、`search`。若该 Workbench relation 已补齐 OA + 银行 + 发票或被升级为普通三栏关系，接口必须返回 `409 turnover_closure_withdraw_requires_workbench`，提示用户到关联台撤回完整关系。
 
 ## 银行明细自动标签规则 API
 
@@ -592,6 +617,10 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 - filter-options 必须来自后端事实，前端不能根据当前页 rows 自行构造全局选项；表头下拉筛选通过 `filters` JSON 提交，字段之间按 AND 组合，同一字段内多值按 IN 组合。
 - `filters` 支持四区表字段：`counterparty_name`、`transaction_tag`、`bank_account`、`direction`、`seller_name`、`oa_applicant`、`oa_application_type`、`project_name` 等；SQL read model 和 query service 必须保持同一字段语义。
 - 关系详情和候选发票接口必须返回来源、匹配原因、冲突原因和可操作权限；关系详情必须能表达同一关系中的全部付款流水、发票、OA 和 relation case id。
+- 支出状态下拉中的 `已支付待开票` / `已支付已开票` 是 `requires_invoice` 规则组下的状态快捷筛选，前端通过 `filter=requires_invoice` 加 `filters=[{"field":"status_code","operator":"in","values":[...]}]` 提交，不把状态码伪装成规则组。
+- `POST /api/pending-invoices/invoice-candidates/batch` 接收 `transaction_ids` 和候选发票筛选/排序/分页字段，返回 `selection_summary.transaction_count`、`selection_summary.bank_total`、候选发票 rows 和 pagination。该接口按选中流水合计金额计算 `amount_difference_abs`，只支持支出流水选择进项发票。
+- `POST /api/pending-invoices/attach-existing-invoices/preview` 接收 `transaction_ids`、`invoice_ids` 和可选 request id，返回 `transaction_summaries`、`invoice_summaries`、`selection_summary.bank_total`、`selection_summary.invoice_total`、`selection_summary.difference_amount`、`payment_impact`、`warnings`、`conflicts` 和 `can_confirm`。preview 不写最终 relation。
+- `POST /api/pending-invoices/attach-existing-invoices` 接收 preview id、`transaction_ids`、`invoice_ids` 和 request id；confirm 必须幂等写入一条 Workbench active pair relation，返回 `affected_transaction_ids`、`affected_invoice_ids`、`affected_months`、`relation_case_id` 和 `relation_mode`。
 - 写入类接口需要返回 affected months/objects、version 或 job，供页面局部刷新和跨页事件使用。
 - 导出字段应与当前筛选和权限一致，不能绕过列表口径。
 
@@ -621,7 +650,9 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 
 - rows、filter-options 和详情接口使用同一 SQL read model 或同一 query service 事实源。
 - 响应必须表达 `read_model_status`、stale/refreshing 详情和必要的 refresh job。
-- 详情接口返回 OA、付款流水、发票、候选关系和异常原因。
+- rows 中 `oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
+- `paymentStatus` 不返回 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计时返回 `pending_review`，多 OA 合并付款按 relation group 合计后判定。
+- 详情接口返回 OA、付款流水、发票、候选关系和异常原因；`/rows/{row_id}/relation-details` 支持 `kind=oa|bank|invoice`。
 - `filterConfig`/`filter-options` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
 - 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
 
@@ -672,6 +703,8 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 
 - 响应必须区分导入批次、业务批次、OA 草稿和人工提交确认状态；ETC 专用 OA 自动检测状态不再作为业务批次 API 合同输出。
 - `GET /api/etc/business-batches` 的 `month` 参数按 ETC 发票开票日期、通行开始日期和通行结束日期任一月份匹配业务批次。响应中的 `counts.active`、`counts.submitted` 必须先应用同一组 scope、`month`、`plate`、`keyword` 筛选，再按状态 bucket 统计；`items` 在同一筛选结果上继续应用请求的 `status` 和分页。
+- 用户可见批次列表必须以 `/api/etc/business-batches*` 为事实源；`/api/etc/reconciliation-tasks` 只承载导入、核对、source file 和 workflow 状态，前端不得把 task-only 记录无条件混入批次列表或批次计数。
+- `POST /api/etc/business-batches` 可以省略 `taskId`。省略时后端 application service 必须复用现有 reconciliation task service 先创建任务，再通过 business batch service 创建 active 业务批次，并返回统一 `businessBatch` payload；若业务批次创建失败，必须通过 reconciliation task service 删除/tombstone 本次新建任务，避免留下 task-only 空批次。传入 `taskId` 时仍按既有绑定任务语义校验 active business batch 约束。
 - 幂等 key、重复提交、撤销草稿和释放发票规则必须由后端校验。
 - 权限不足、状态冲突、发票占用、OA 草稿失败和撤销失败需要返回稳定错误码。
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。

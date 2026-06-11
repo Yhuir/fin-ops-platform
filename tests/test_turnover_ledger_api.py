@@ -1115,7 +1115,29 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.request_fingerprint, "")
         self.assertEqual(
             command.refresh_requests,
-            [{"scope_type": "turnover_ledger", "scope_keys": ["all"], "reason": "turnover_relation_changed"}],
+            [
+                {"scope_type": "turnover_ledger", "scope_keys": ["all"], "reason": "turnover_relation_changed"},
+                {
+                    "scope_type": "workbench",
+                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "search",
+                    "scope_keys": ["2026-02", "2026-03", "all"],
+                    "reason": "turnover_relation_changed",
+                },
+            ],
         )
 
     def test_withdraw_stale_precondition_rejects_changed_relation_before_mutation_or_refresh(self) -> None:
@@ -3626,7 +3648,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual([item[:3] for item in queue.transactional], [("turnover_ledger", "all", "turnover_relation_changed")])
+        self.assertEqual(
+            [item[:3] for item in queue.transactional],
+            [("turnover_ledger", "all", "turnover_relation_changed")],
+        )
         self.assertEqual(queue.enqueued, [])
 
     def test_confirm_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:
@@ -3883,7 +3908,24 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual([item[:3] for item in queue.transactional], [("turnover_ledger", "all", "turnover_relation_changed")])
+        self.assertEqual(
+            [item[:3] for item in queue.transactional],
+            [
+                ("turnover_ledger", "all", "turnover_relation_changed"),
+                ("workbench", "2026-02", "turnover_relation_changed"),
+                ("workbench", "2026-03", "turnover_relation_changed"),
+                ("workbench", "all", "turnover_relation_changed"),
+                ("workbench_relation", "2026-02", "turnover_relation_changed"),
+                ("workbench_relation", "2026-03", "turnover_relation_changed"),
+                ("workbench_relation", "all", "turnover_relation_changed"),
+                ("cost_statistics", "2026-02", "turnover_relation_changed"),
+                ("cost_statistics", "2026-03", "turnover_relation_changed"),
+                ("cost_statistics", "all", "turnover_relation_changed"),
+                ("search", "2026-02", "turnover_relation_changed"),
+                ("search", "2026-03", "turnover_relation_changed"),
+                ("search", "all", "turnover_relation_changed"),
+            ],
+        )
         self.assertEqual(queue.enqueued, [])
 
     def test_withdraw_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:

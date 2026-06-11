@@ -33,6 +33,8 @@
 | Refresh handler / dirty scope done | P0 | `tests/test_workbench_sql_runtime.py` | covered | worker refresh 后发布 generation 并完成 dirty scope。 |
 | Matching dirty queue | P0 | `tests/test_workbench_dirty_queue_wiring.py`、`tests/test_workbench_matching_dirty_scope_worker.py` | covered | DB dirty queue 是主路径，失败不回退 legacy dirty scopes。 |
 | Relation tags 下游投影 | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_read_facade.py`、`tests/test_bank_details_service.py` | covered | 银行明细、批量账务和下游页面不能读旧 relation。 |
+| Active relation row 去重 | P0 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py` | covered | 同一 relation 重复 row id 被 normalize/repair/query grouping 去重，跨 active case 复用 row 被拒绝。 |
+| 外部往来 bank-only open 规则 | P0 | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx` | covered | `turnover_manual_closure` 是共同事实源但不再是 bank-only paired 例外；三栏补齐前留 open。 |
 | 前端 action 后 emit `workbenchRelationUpdated` | P1 | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/CandidateGroupGrid.test.tsx`、页面事件 listener tests | covered | 保护当前页面/同会话刷新提示。 |
 | 前端 loading/stale/error/permission | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx` | partial | 需要随具体 UI 改动补更细交互测试。 |
 | 真实生产 active generation 回放 | P2 | 运维 runbook / SQL dry-run | documented-risk | 需要真实历史数据和 worker/staging 环境。 |
@@ -56,6 +58,8 @@
 | 2026-06-10 | `oa_bank_exact_sum` 多流水合计候选需要同时覆盖 legacy candidate 和 decision/free engine。 | `tests/test_workbench_matching_rules.py`、`tests/test_workbench_free_matching_engine.py`、`tests/test_workbench_matching_orchestrator.py`、`tests/test_workbench_v2_api.py` | covered |
 | 2026-06-09 | 已有 active relation 的 ETC summary 不得继续出现在 open 区。 | `tests/test_workbench_sql_runtime.py`、`tests/test_etc_backend.py` | covered |
 | 2026-06-08 | 已提交 ETC 批次需要折叠为 `etc_invoice_summary` open 行，不能散票进入关联台。 | `tests/test_etc_backend.py`、`tests/test_workbench_candidate_grouping.py` | covered |
+| 2026-06-11 | paired 详情出现两个一模一样 OA：active relation payload 中重复 row id 被 UI/query 原样展开。 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py::WorkbenchApiTests::test_relation_groups_dedupes_duplicate_relation_row_ids` | covered |
+| 2026-06-11 | 外部往来 bank-only 手动闭环被 exactly 2 bank rows 例外错误放入 paired。 | `tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_bank_only_turnover_manual_closure_rows_remain_open_even_when_linked`、`tests/test_turnover_workbench_integration.py::TurnoverWorkbenchIntegrationTests::test_manual_zero_difference_closure_creates_open_bank_only_workbench_relation` | covered |
 | 长期 | stale/failed active generation 被读成 fresh 或缓存到 Redis。 | `tests/test_workbench_sql_runtime.py`、`tests/test_workbench_query_facade.py` | covered |
 | 长期 | 关系确认/撤回影响银行明细、批量账务、往来款、成本统计等旧页面。 | `tests/test_workbench_v2_api.py`、`tests/test_batch_accounting_api.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/*` | covered / per-module continuation |
 

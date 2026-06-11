@@ -16,6 +16,7 @@
 | 目录 | 用途 |
 | --- | --- |
 | `app-architecture/` | 当前 app 架构、页面、运行时调用链、页面间影响关系 |
+| `business-flows/` | 面向业务读者的页面目的、操作流程、数据流向和页面间影响关系 |
 | `modules/` | 按页面和关键功能域组织的维护入口、状态机、测试矩阵和实施记录 |
 | `product-specs/` | 面向产品和业务的需求、口径、验收标准 |
 | `architecture/` | 系统边界、数据模型、持久化、部署形态 |
@@ -38,10 +39,12 @@
 
 ### 产品和业务梳理
 
-1. `product-specs/index.md`
-2. `product-specs/reconciliation-and-workbench.md`
-3. `product-specs/imports-and-etc.md`
-4. 按业务域继续阅读发票生命周期、银行/往来款、成本/税金、平台设置和健康状态文档。
+1. `business-flows/README.md`
+2. 按页面阅读 `business-flows/` 下的具体页面流程文档。
+3. `product-specs/index.md`
+4. `product-specs/reconciliation-and-workbench.md`
+5. `product-specs/imports-and-etc.md`
+6. 按业务域继续阅读发票生命周期、银行/往来款、成本/税金、平台设置和健康状态文档。
 
 ### 生产部署和运维
 

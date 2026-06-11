@@ -5,18 +5,35 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/verify.sh [backend|frontend|docs|all]
+Usage: scripts/verify.sh [backend|frontend|docs|runtime-check|all]
 
-backend   Run backend check and full backend unittest discovery.
+backend   Run clean backend check and full backend unittest discovery.
 frontend  Run frontend Vitest and production build.
 docs      Run lightweight documentation structure checks.
+runtime-check
+          Run app check against the current configured runtime state.
 all       Run backend, frontend, and docs checks. This is the default.
 USAGE
 }
 
-run_backend() {
+run_clean_app_check() {
+  cd "$ROOT_DIR"
+  local verify_data_dir
+  verify_data_dir="$(mktemp -d)"
+  trap 'rm -rf "$verify_data_dir"' RETURN
+  FIN_OPS_DATA_DIR="$verify_data_dir" PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+  trap - RETURN
+  rm -rf "$verify_data_dir"
+}
+
+run_runtime_check() {
   cd "$ROOT_DIR"
   PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+}
+
+run_backend() {
+  cd "$ROOT_DIR"
+  run_clean_app_check
   PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 }
 
@@ -60,6 +77,9 @@ case "$target" in
     ;;
   docs)
     run_docs
+    ;;
+  runtime-check)
+    run_runtime_check
     ;;
   all)
     run_backend

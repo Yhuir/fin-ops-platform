@@ -206,7 +206,7 @@ export type EtcBusinessBatchListPayload = {
 };
 
 export type EtcCreateBusinessBatchPayload = {
-  taskId: string;
+  taskId?: string;
   idempotencyKey?: string;
 };
 

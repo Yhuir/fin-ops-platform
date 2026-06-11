@@ -31,6 +31,7 @@ from fin_ops_platform.services.pending_invoice_relation_identity import (
     pending_invoice_relation_identity,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 
 PENDING_INVOICE_RELATION_MODE = "pending_invoice_manual_invoice"
@@ -1095,6 +1096,89 @@ class PendingInvoiceQueryService:
             "pagination": {"page": page_number, "page_size": page_limit, "total": len(rows)},
         }
 
+    def invoice_candidates_batch(
+        self,
+        *,
+        transaction_ids: list[str],
+        keyword: str | None = None,
+        seller_name: str | None = None,
+        issue_date_from: str | None = None,
+        issue_date_to: str | None = None,
+        amount_min: str | None = None,
+        amount_max: str | None = None,
+        sort_field: str | None = None,
+        sort_direction: str | None = None,
+        page: int | str | None = 1,
+        page_size: int | str | None = 50,
+    ) -> dict[str, Any]:
+        normalized_transaction_ids = _normalize_id_list(transaction_ids, "transaction_ids")
+        transactions = [self._get_transaction(transaction_id) for transaction_id in normalized_transaction_ids]
+        if any(transaction.txn_direction != TransactionDirection.OUTFLOW for transaction in transactions):
+            raise PendingInvoiceError("invalid_direction", "invoice candidates are only supported for expense rows.")
+        selected_bank_total = sum((transaction.amount for transaction in transactions), Decimal("0.00")).quantize(Decimal("0.01"))
+        field = str(sort_field or "").strip()
+        if field and field not in INVOICE_CANDIDATE_SORT_FIELDS:
+            raise PendingInvoiceError("invalid_sort_field", f"Unsupported candidate sort field: {field}", details={"field": field})
+        direction = str(sort_direction or "asc").strip().lower() or "asc"
+        if direction not in {"asc", "desc"}:
+            raise PendingInvoiceError("invalid_sort_direction", "sort_direction must be asc or desc.")
+        min_amount = _decimal_or_none(amount_min)
+        max_amount = _decimal_or_none(amount_max)
+        rows: list[dict[str, Any]] = []
+        for invoice in self._import_service.list_invoices(invoice_type=InvoiceType.INPUT):
+            invoice_total = self._invoice_total(invoice)
+            if seller_name and str(seller_name).strip().lower() not in str(invoice.seller_name or "").lower():
+                continue
+            if issue_date_from and str(invoice.invoice_date or "") < str(issue_date_from):
+                continue
+            if issue_date_to and str(invoice.invoice_date or "") > str(issue_date_to):
+                continue
+            if min_amount is not None and invoice_total < min_amount:
+                continue
+            if max_amount is not None and invoice_total > max_amount:
+                continue
+            haystack = " ".join(str(part or "") for part in (invoice.invoice_no, invoice.digital_invoice_no, invoice.seller_name, invoice.remark)).lower()
+            if keyword and str(keyword).strip().lower() not in haystack:
+                continue
+            relation_row = self._relation_distribution_row(invoice.id, reason="pending_invoice_batch_candidate_payment_summary")
+            paid_summary = (
+                self._payment_summary_from_distribution(relation_row, [self._invoice_payload(invoice, direction="expense")])
+                if relation_row is not None
+                else self._empty_payment_summary([self._invoice_payload(invoice, direction="expense")])
+            )
+            candidate_status = self._batch_candidate_status(normalized_transaction_ids, invoice.id)
+            amount_difference = (invoice_total - selected_bank_total).copy_abs()
+            rows.append(
+                {
+                    "invoice_id": invoice.id,
+                    "invoice_no": invoice.invoice_no,
+                    "digital_invoice_no": invoice.digital_invoice_no,
+                    "issue_date": invoice.invoice_date,
+                    "seller_name": invoice.seller_name,
+                    "seller_tax_no": invoice.seller_tax_no,
+                    "buyer_name": invoice.buyer_name,
+                    "total_with_tax": _decimal_to_str(invoice_total),
+                    "paid_total": paid_summary["paid_total"],
+                    "related_paid_total": paid_summary["paid_total"],
+                    "remaining_amount": paid_summary["remaining_amount"],
+                    "candidate_status": candidate_status,
+                    "amount_difference_abs": _decimal_to_str(amount_difference),
+                }
+            )
+        rows = self._sort_candidate_rows(rows, sort_field=field, sort_direction=direction)
+        page_number = max(_optional_int(page, default=1), 1)
+        page_limit = min(max(_optional_int(page_size, default=50), 1), 200)
+        start = (page_number - 1) * page_limit
+        return {
+            "transaction_ids": normalized_transaction_ids,
+            "selection_summary": {
+                "transaction_count": len(normalized_transaction_ids),
+                "bank_total": _decimal_to_str(selected_bank_total),
+            },
+            "rows": rows[start : start + page_limit],
+            "pagination": {"page": page_number, "page_size": page_limit, "total": len(rows)},
+        }
+
     def filter_options(
         self,
         *,
@@ -1571,6 +1655,14 @@ class PendingInvoiceQueryService:
             return "already_related"
         return "available" if linked_bank_ids else ("conflict" if list(relation_row.get("group_ids") or []) else "available")
 
+    def _batch_candidate_status(self, transaction_ids: list[str], invoice_id: str) -> str:
+        statuses = [self._candidate_status(transaction_id, invoice_id) for transaction_id in transaction_ids]
+        if any(status == "conflict" for status in statuses):
+            return "conflict"
+        if statuses and all(status == "already_related" for status in statuses):
+            return "already_related"
+        return "available"
+
     @staticmethod
     def _sort_candidate_rows(
         rows: list[dict[str, Any]],
@@ -1871,6 +1963,183 @@ class PendingInvoiceApplicationService:
             self._mark_command(command, "failed_recoverable")
             raise
 
+    def preview_attach_existing_invoices(self, *, payload: dict[str, Any]) -> dict[str, Any]:
+        transaction_ids = _normalize_id_list(payload.get("transaction_ids"), "transaction_ids")
+        invoice_ids = _normalize_id_list(payload.get("invoice_ids"), "invoice_ids")
+        transactions = [self._get_transaction(transaction_id) for transaction_id in transaction_ids]
+        invoices = [self._get_invoice(invoice_id) for invoice_id in invoice_ids]
+        if any(self.direction_for_transaction(transaction) != "expense" for transaction in transactions):
+            raise PendingInvoiceError("invalid_direction", "Only expense rows can attach existing input invoices.")
+        if any(invoice.invoice_type != InvoiceType.INPUT for invoice in invoices):
+            raise PendingInvoiceError("invalid_invoice_type", "Only input invoices can be attached to expense rows.")
+        request_key = self.attach_existing_batch_request_key(transaction_ids=transaction_ids, invoice_ids=invoice_ids)
+        preview_id = f"pending_invoice_attach_batch_preview_{hashlib.sha1(request_key.encode('utf-8')).hexdigest()[:16]}"
+        conflicts = self._attach_existing_batch_conflicts(transaction_ids=transaction_ids, invoice_ids=invoice_ids)
+        selected_bank_total = sum((transaction.amount for transaction in transactions), Decimal("0.00")).quantize(Decimal("0.01"))
+        selected_invoice_total = sum((_invoice_total(invoice) for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        paid_total_before = sum((self._paid_total_for_invoice(invoice.id) for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
+        paid_total_after = paid_total_before + selected_bank_total if not conflicts else paid_total_before
+        remaining_after = selected_invoice_total - paid_total_after
+        if remaining_after < Decimal("0.00"):
+            remaining_after = Decimal("0.00")
+        affected_months = sorted(
+            {
+                month
+                for transaction in transactions
+                for month in self._affected_months_for_transaction(transaction)
+            }
+        )
+        result = {
+            "preview_id": preview_id,
+            "request_key": request_key,
+            "can_confirm": not conflicts,
+            "transaction_summaries": [
+                {
+                    "id": transaction.id,
+                    "counterparty_name": transaction.counterparty_name_raw,
+                    "trade_time": transaction.trade_time or transaction.txn_date,
+                    "debit_amount": _decimal_to_str(transaction.amount),
+                }
+                for transaction in transactions
+            ],
+            "invoice_summaries": [
+                {
+                    "id": invoice.id,
+                    "invoice_no": invoice.invoice_no,
+                    "digital_invoice_no": invoice.digital_invoice_no,
+                    "issue_date": invoice.invoice_date,
+                    "seller_name": invoice.seller_name,
+                    "seller_tax_no": invoice.seller_tax_no,
+                    "total_with_tax": _decimal_to_str(_invoice_total(invoice)),
+                }
+                for invoice in invoices
+            ],
+            "selection_summary": {
+                "transaction_count": len(transaction_ids),
+                "invoice_count": len(invoice_ids),
+                "bank_total": _decimal_to_str(selected_bank_total),
+                "invoice_total": _decimal_to_str(selected_invoice_total),
+                "difference_amount": _decimal_to_str(selected_invoice_total - selected_bank_total),
+            },
+            "payment_impact": {
+                "paid_total_before": _decimal_to_str(paid_total_before),
+                "paid_total_after": _decimal_to_str(paid_total_after),
+                "invoice_total": _decimal_to_str(selected_invoice_total),
+                "remaining_amount_after": _decimal_to_str(remaining_after),
+                "difference_amount_after": _decimal_to_str(selected_invoice_total - paid_total_after),
+            },
+            "affected_months": affected_months,
+            "warnings": [],
+            "conflicts": conflicts,
+            "expires_at": "",
+        }
+        self._previews[preview_id] = {
+            "request_key": request_key,
+            "transaction_ids": list(transaction_ids),
+            "invoice_ids": list(invoice_ids),
+            "direction": "expense",
+            "operation": "attach_existing_invoices",
+        }
+        return result
+
+    def confirm_attach_existing_invoices(self, *, payload: dict[str, Any], actor_id: str) -> dict[str, Any]:
+        preview_id = str(payload.get("preview_id") or "").strip()
+        request_id = str(payload.get("request_id") or "").strip()
+        transaction_ids = _normalize_id_list(payload.get("transaction_ids"), "transaction_ids")
+        invoice_ids = _normalize_id_list(payload.get("invoice_ids"), "invoice_ids")
+        if not preview_id or not request_id:
+            raise PendingInvoiceError("invalid_attach_existing_invoice_payload", "preview_id and request_id are required.")
+        preview = self.preview_attach_existing_invoices(payload={"transaction_ids": transaction_ids, "invoice_ids": invoice_ids})
+        if preview["preview_id"] != preview_id:
+            raise PendingInvoiceError("invalid_attach_existing_invoice_payload", "preview_id does not match the attach payload.")
+        if not preview["can_confirm"]:
+            raise PendingInvoiceError(
+                "active_relation_conflict",
+                "One or more invoices already have an active conflicting relation.",
+                status_code=HTTPStatus.CONFLICT,
+                details={"invoice_ids": invoice_ids, "conflicts": preview["conflicts"]},
+            )
+        request_key = str(preview["request_key"])
+        command = self._get_command(request_id)
+        if isinstance(command, dict) and command.get("status") == "completed":
+            return deepcopy(command["result"])
+        if not isinstance(command, dict):
+            command = {
+                "request_id": request_id,
+                "request_key": request_key,
+                "operation": "attach_existing_invoices",
+                "status": "started",
+                "status_history": ["started"],
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            self._save_command(command)
+        elif command.get("request_key") != request_key:
+            raise PendingInvoiceError(
+                "invalid_attach_existing_invoice_payload",
+                "request_id was already used for another attach-existing invoice payload.",
+            )
+
+        try:
+            relation_case_id = str(command.get("relation_case_id") or "")
+            if not relation_case_id:
+                relation_case_id = self._create_attach_existing_batch_relation(
+                    transaction_ids=transaction_ids,
+                    invoice_ids=invoice_ids,
+                    request_key=request_key,
+                    actor_id=actor_id,
+                )
+                command["transaction_ids"] = list(transaction_ids)
+                command["invoice_ids"] = list(invoice_ids)
+                command["relation_case_id"] = relation_case_id
+                self._mark_command(command, "relation_created")
+                self._inject_fault("after_relation_created", command)
+            affected_months = [str(month) for month in list(preview["affected_months"])]
+            result = {
+                "status": "completed",
+                "request_id": request_id,
+                "request_key": request_key,
+                "transaction_ids": transaction_ids,
+                "invoice_ids": invoice_ids,
+                "relation_case_id": relation_case_id,
+                "relation_mode": ATTACH_EXISTING_INVOICE_RELATION_MODE,
+                "affected_transaction_ids": transaction_ids,
+                "affected_invoice_ids": invoice_ids,
+                "affected_months": affected_months,
+            }
+            self._record_attach_existing_batch_audit(
+                actor_id=actor_id,
+                transaction_ids=transaction_ids,
+                invoice_ids=invoice_ids,
+                relation_case_id=relation_case_id,
+                request_id=request_id,
+                request_key=request_key,
+                affected_months=affected_months,
+            )
+            self._finalize(
+                {
+                    "action": "pending_invoice_attach_existing_invoice_confirmed",
+                    "source": "pending_invoice_attach_existing_invoice",
+                    "entity_type": "pending_invoice_attach_existing_invoice",
+                    "transaction_ids": list(transaction_ids),
+                    "invoice_ids": list(invoice_ids),
+                    "relation_case_id": relation_case_id,
+                    "request_id": request_id,
+                    "request_key": request_key,
+                    "affected_months": affected_months,
+                }
+            )
+            command["result"] = deepcopy(result)
+            self._mark_command(command, "completed")
+            return result
+        except PendingInvoiceError:
+            raise
+        except Exception as exc:
+            command["error"] = str(exc)
+            command["last_successful_status"] = self._last_successful_status(command)
+            self._mark_command(command, "failed_recoverable")
+            raise
+
     def confirm_manual_invoice(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         preview_id = str(payload.get("preview_id") or "").strip()
         request_id = str(payload.get("request_id") or "").strip()
@@ -2136,6 +2405,15 @@ class PendingInvoiceApplicationService:
     def attach_existing_request_key(*, transaction_id: str, invoice_id: str) -> str:
         return f"pending_invoice_attach_existing:{transaction_id}:{invoice_id}"
 
+    @staticmethod
+    def attach_existing_batch_request_key(*, transaction_ids: list[str], invoice_ids: list[str]) -> str:
+        payload = {
+            "transaction_ids": sorted(str(transaction_id).strip() for transaction_id in transaction_ids if str(transaction_id).strip()),
+            "invoice_ids": sorted(str(invoice_id).strip() for invoice_id in invoice_ids if str(invoice_id).strip()),
+        }
+        digest = hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:24]
+        return f"pending_invoice_attach_existing_batch:{digest}"
+
     def _get_transaction(self, transaction_id: str) -> BankTransaction:
         if not transaction_id:
             raise PendingInvoiceError("bank_transaction_not_found", "bank_transaction_id is required.", status_code=HTTPStatus.NOT_FOUND)
@@ -2191,6 +2469,44 @@ class PendingInvoiceApplicationService:
                     "Invoice already has a conflicting active relation.",
                     status_code=HTTPStatus.CONFLICT,
                 )
+            if transaction_id in row_ids:
+                existing_row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
+                existing_row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
+                resolved_row_types = [
+                    existing_row_types[index]
+                    if index < len(existing_row_types) and existing_row_types[index]
+                    else _row_type_for_relation_row_id(row_id)
+                    for index, row_id in enumerate(existing_row_ids)
+                ]
+                metadata = dict(relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {})
+                metadata.update(
+                    {
+                        "pending_invoice_request_key": request_key,
+                        "bank_transaction_id": transaction_id,
+                        "invoice_id": invoice_id,
+                    }
+                )
+                updated_relation = self._pair_relation_service.create_active_relation(
+                    case_id=str(relation.get("case_id") or ""),
+                    row_ids=[*existing_row_ids, invoice_id],
+                    row_types=[*resolved_row_types, "invoice"],
+                    relation_mode=str(relation.get("relation_mode") or PENDING_INVOICE_RELATION_MODE),
+                    created_by=actor_id,
+                    month_scope=str(relation.get("month_scope") or "all"),
+                    note=str(relation.get("note") or ""),
+                    amount_check=relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None,
+                    special_metadata=metadata,
+                    exception_case_id=str(relation.get("exception_case_id") or ""),
+                    rule_version=str(relation.get("rule_version") or ""),
+                    evidence=relation.get("evidence") if isinstance(relation.get("evidence"), dict) else None,
+                    oa_exemption=relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None,
+                    display_tags=[
+                        str(tag).strip()
+                        for tag in list(relation.get("display_tags") or [])
+                        if str(tag).strip()
+                    ],
+                )
+                return str(updated_relation.get("case_id") or "")
         case_id = self._relation_case_id(request_key)
         relation = self._pair_relation_service.create_active_relation(
             case_id=case_id,
@@ -2212,7 +2528,49 @@ class PendingInvoiceApplicationService:
             row_ids = {str(row_id) for row_id in list(relation.get("row_ids") or [])}
             if expected_rows.issubset(row_ids):
                 return str(relation.get("case_id"))
-            if invoice_id in row_ids and not _relation_links_invoice_to_bank_payment(relation, invoice_id):
+            if invoice_id in row_ids and _relation_links_invoice_to_bank_payment(relation, invoice_id):
+                existing_row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
+                existing_row_types = [
+                    str(row_type).strip()
+                    for row_type in list(relation.get("row_types") or [])
+                ]
+                resolved_row_types = [
+                    existing_row_types[index]
+                    if index < len(existing_row_types) and existing_row_types[index]
+                    else _row_type_for_relation_row_id(row_id)
+                    for index, row_id in enumerate(existing_row_ids)
+                ]
+                metadata = dict(relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {})
+                metadata.update(
+                    {
+                        "pending_invoice_request_key": request_key,
+                        "bank_transaction_id": transaction_id,
+                        "invoice_id": invoice_id,
+                        "source": "pending_invoice_attach_existing_invoice",
+                    }
+                )
+                updated_relation = self._pair_relation_service.create_active_relation(
+                    case_id=str(relation.get("case_id") or ""),
+                    row_ids=[*existing_row_ids, transaction_id],
+                    row_types=[*resolved_row_types, "bank"],
+                    relation_mode=str(relation.get("relation_mode") or ATTACH_EXISTING_INVOICE_RELATION_MODE),
+                    created_by=actor_id,
+                    month_scope=str(relation.get("month_scope") or "all"),
+                    note=str(relation.get("note") or ""),
+                    amount_check=relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None,
+                    special_metadata=metadata,
+                    exception_case_id=str(relation.get("exception_case_id") or ""),
+                    rule_version=str(relation.get("rule_version") or ""),
+                    evidence=relation.get("evidence") if isinstance(relation.get("evidence"), dict) else None,
+                    oa_exemption=relation.get("oa_exemption") if isinstance(relation.get("oa_exemption"), dict) else None,
+                    display_tags=[
+                        str(tag).strip()
+                        for tag in list(relation.get("display_tags") or [])
+                        if str(tag).strip()
+                    ],
+                )
+                return str(updated_relation.get("case_id") or "")
+            if invoice_id in row_ids:
                 raise PendingInvoiceError(
                     "active_relation_conflict",
                     "The invoice already has an active conflicting relation.",
@@ -2234,6 +2592,84 @@ class PendingInvoiceApplicationService:
             },
         )
         return str(relation["case_id"])
+
+    def _create_attach_existing_batch_relation(
+        self,
+        *,
+        transaction_ids: list[str],
+        invoice_ids: list[str],
+        request_key: str,
+        actor_id: str,
+    ) -> str:
+        expected_rows = set(transaction_ids) | set(invoice_ids)
+        existing_relations = self._active_relation_dicts_for_row_ids(
+            [*transaction_ids, *invoice_ids],
+            reason="pending_invoice_attach_existing_batch_confirm",
+        )
+        for relation in existing_relations:
+            relation_row_ids = {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
+            if expected_rows.issubset(relation_row_ids):
+                return str(relation.get("case_id") or "")
+            for invoice_id in invoice_ids:
+                if invoice_id in relation_row_ids and not _relation_links_invoice_to_bank_payment(relation, invoice_id):
+                    raise PendingInvoiceError(
+                        "active_relation_conflict",
+                        "One or more invoices already have an active conflicting relation.",
+                        status_code=HTTPStatus.CONFLICT,
+                        details={"invoice_id": invoice_id, "relation_case_id": str(relation.get("case_id") or "")},
+                    )
+        combined_row_ids: list[str] = []
+        combined_row_types: list[str] = []
+        for relation in existing_relations:
+            relation_row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
+            relation_row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
+            for index, row_id in enumerate(relation_row_ids):
+                if row_id in combined_row_ids:
+                    continue
+                combined_row_ids.append(row_id)
+                combined_row_types.append(
+                    relation_row_types[index]
+                    if index < len(relation_row_types) and relation_row_types[index]
+                    else _row_type_for_relation_row_id(row_id)
+                )
+        for transaction_id in transaction_ids:
+            if transaction_id not in combined_row_ids:
+                combined_row_ids.append(transaction_id)
+                combined_row_types.append("bank")
+        for invoice_id in invoice_ids:
+            if invoice_id not in combined_row_ids:
+                combined_row_ids.append(invoice_id)
+                combined_row_types.append("invoice")
+        case_id = f"case_attach_existing_batch_{hashlib.sha1(request_key.encode('utf-8')).hexdigest()[:20]}"
+        relation, _history = self._pair_relation_service.replace_with_confirmed_relation(
+            case_id=case_id,
+            row_ids=combined_row_ids,
+            row_types=combined_row_types,
+            relation_mode=ATTACH_EXISTING_INVOICE_RELATION_MODE,
+            created_by=actor_id,
+            month_scope="all",
+            special_metadata={
+                "pending_invoice_request_key": request_key,
+                "bank_transaction_ids": list(transaction_ids),
+                "invoice_ids": list(invoice_ids),
+                "source": "pending_invoice_attach_existing_invoice_batch",
+            },
+            before_relations=existing_relations,
+        )
+        return str(relation["case_id"])
+
+    def _active_relation_dicts_for_row_ids(self, row_ids: list[str], *, reason: str) -> list[dict[str, Any]]:
+        normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+        if not normalized_row_ids or self._relation_facade is None:
+            return []
+        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        if not callable(reader):
+            return []
+        try:
+            payload = reader(normalized_row_ids, require_fresh=False, reason=reason)
+        except TypeError:
+            payload = reader(normalized_row_ids)
+        return relation_dicts_from_distribution_payload(payload if isinstance(payload, dict) else {})
 
     def _attach_existing_conflicts(self, *, transaction_id: str, invoice_id: str) -> list[dict[str, Any]]:
         conflicts: list[dict[str, Any]] = []
@@ -2290,6 +2726,19 @@ class PendingInvoiceApplicationService:
                     }
                 ]
             return []
+        return conflicts
+
+    def _attach_existing_batch_conflicts(self, *, transaction_ids: list[str], invoice_ids: list[str]) -> list[dict[str, Any]]:
+        conflicts: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for invoice_id in invoice_ids:
+            for transaction_id in transaction_ids:
+                for conflict in self._attach_existing_conflicts(transaction_id=transaction_id, invoice_id=invoice_id):
+                    key = json.dumps(conflict, sort_keys=True, ensure_ascii=False)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    conflicts.append(conflict)
         return conflicts
 
     def _paid_total_for_invoice(self, invoice_id: str) -> Decimal:
@@ -2497,6 +2946,34 @@ class PendingInvoiceApplicationService:
             }
         )
 
+    def _record_attach_existing_batch_audit(
+        self,
+        *,
+        actor_id: str,
+        transaction_ids: list[str],
+        invoice_ids: list[str],
+        relation_case_id: str,
+        request_id: str,
+        request_key: str,
+        affected_months: list[str],
+    ) -> None:
+        if self._audit_recorder is None:
+            return
+        self._audit_recorder(
+            {
+                "actor_id": actor_id,
+                "action": "pending_invoice_attach_existing_invoice_batch_confirmed",
+                "source": "pending_invoice_attach_existing_invoice",
+                "entity_type": "pending_invoice_attach_existing_invoice",
+                "transaction_ids": list(transaction_ids),
+                "invoice_ids": list(invoice_ids),
+                "relation_case_id": relation_case_id,
+                "request_id": request_id,
+                "request_key": request_key,
+                "affected_months": list(affected_months),
+            }
+        )
+
     def _record_income_status_override_audit(
         self,
         *,
@@ -2588,6 +3065,27 @@ def _optional_int(value: int | str | None, *, default: int) -> int:
         return default
 
 
+def _normalize_id_list(value: Any, field_name: str) -> list[str]:
+    if isinstance(value, str):
+        raw_values = [value]
+    else:
+        try:
+            raw_values = list(value or [])
+        except TypeError as exc:
+            raise PendingInvoiceError("invalid_id_list", f"{field_name} must be a list of ids.") from exc
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        item = str(raw_value or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        normalized.append(item)
+    if not normalized:
+        raise PendingInvoiceError("invalid_id_list", f"{field_name} must include at least one id.")
+    return normalized
+
+
 def _decimal_or_none(value: Any) -> Decimal | None:
     if value in (None, ""):
         return None
@@ -2616,6 +3114,26 @@ def _relation_links_invoice_to_bank_payment(relation: dict[str, Any], invoice_id
     has_invoice = any(row_id == invoice_id and row_type == "invoice" for row_id, row_type in zip(row_ids, row_types, strict=False))
     has_bank = any(row_type == "bank" for row_type in row_types)
     return has_invoice and has_bank
+
+
+def _row_type_for_relation_row_id(row_id: str) -> str:
+    lowered_row_id = str(row_id).strip().lower()
+    if lowered_row_id.startswith("oa-att-inv-"):
+        return "invoice"
+    if lowered_row_id.startswith("oa-"):
+        return "oa"
+    if (
+        lowered_row_id.startswith("bk-")
+        or lowered_row_id.startswith("txn-")
+        or lowered_row_id.startswith("txn_")
+        or lowered_row_id.startswith("bank-")
+    ):
+        return "bank"
+    if lowered_row_id.startswith("iv-") or lowered_row_id.startswith("invoice-"):
+        return "invoice"
+    if lowered_row_id.startswith("etc-summary-"):
+        return "invoice"
+    return "unknown"
 
 
 def _decimal_to_str(value: Decimal | None) -> str:

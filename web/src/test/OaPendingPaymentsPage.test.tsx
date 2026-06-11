@@ -69,20 +69,53 @@ const rowsPayload = {
       },
     },
     {
-      id: "oa-payment-row-002",
+      id: "oa-payment-group-case-001",
       oa: {
-        id: "oa-002",
-        applicantName: "李四",
-        applicationType: "付款",
-        projectName: "多关联项目",
-        applicationTime: "2026-01-04 10:30:00",
-        amount: "15000.00",
+        id: "oa-group-001",
+        primaryOaId: "oa-group-001",
+        applicantName: "刘际涛",
+        applicationType: "支付申请",
+        projectName: "昭通卷烟厂能源集控平台维护",
+        applicationTime: "2026-01-20 02:51:26",
+        amount: "4450.00",
         detailAvailable: true,
+        relationCount: 3,
+        hasMultiple: true,
+        detailMode: "list",
+        summaries: [
+          {
+            oaId: "oa-group-001",
+            applicantName: "刘际涛",
+            applicationType: "支付申请",
+            projectName: "昭通卷烟厂2023-2025年度能源集控平台系统维护",
+            applicationTime: "2026-01-20 02:51:26",
+            amount: "1690.00",
+            relationCaseId: "case-group-001",
+          },
+          {
+            oaId: "oa-group-002",
+            applicantName: "刘际涛",
+            applicationType: "支付申请",
+            projectName: "红塔集团2025年度信息化不可预见维护采购项目",
+            applicationTime: "2026-01-20 02:50:23",
+            amount: "1980.00",
+            relationCaseId: "case-group-001",
+          },
+          {
+            oaId: "oa-group-003",
+            applicantName: "刘际涛",
+            applicationType: "支付申请",
+            projectName: "昭通卷烟厂2025-2028年度能源集控平台维护采购项目",
+            applicationTime: "2026-01-20 02:51:06",
+            amount: "780.00",
+            relationCaseId: "case-group-001",
+          },
+        ],
       },
       paymentStatus: {
-        code: "merged_paid",
-        label: "已支付（多条OA合并支付）",
-        reason: "多条OA共享同一支出流水且合计金额匹配",
+        code: "paid",
+        label: "已支付",
+        reason: "关联台配对组内支出流水合计等于 OA 合计金额",
       },
       bankTransaction: {
         primaryBankTransactionId: "bank-002",
@@ -93,19 +126,22 @@ const rowsPayload = {
         bankName: "建设银行",
         accountNo: "622200005678",
         accountLast4: "5678",
+        bankAccount: "建设银行 5678",
         directionLabel: "支出",
         accountName: "云南溯源科技有限公司",
-        tradeTime: "20260106 09:50:25",
-        debitAmount: "15000.00",
+        tradeTime: "2026-01-20 10:42:09",
+        debitAmount: "3000.00",
         creditAmount: "0.00",
         balance: "129698.00",
         currency: "人民币元",
-        counterpartyName: "多流水供应商",
+        counterpartyName: "张丽芬",
         counterpartyAccountNo: "2502124119024521402",
         counterpartyBankName: "中国建设银行昆明支行",
         bookedDate: "20260106",
-        summary: "多流水转账",
-        remark: "多流水备注",
+        summary: "住宿费",
+        remark: "昭通市昭阳区豪然精品酒店",
+        amount: "3000.00",
+        paidTotal: "4450.00",
         relationCount: 2,
         hasMultiple: true,
         detailMode: "list",
@@ -115,38 +151,58 @@ const rowsPayload = {
             bankName: "建设银行",
             accountNo: "622200005678",
             accountLast4: "5678",
+            bankAccount: "建设银行 5678",
             directionLabel: "支出",
-            tradeTime: "20260106 09:50:25",
-            amount: "15000.00",
-            counterpartyName: "多流水供应商",
-            summary: "多流水转账",
-            remark: "多流水备注",
-            relationCaseId: "case-bank-002",
+            tradeTime: "2026-01-20 10:42:09",
+            amount: "3000.00",
+            counterpartyName: "张丽芬",
+            summary: "住宿费",
+            remark: "昭通市昭阳区豪然精品酒店",
+            relationCaseId: "case-group-001",
           },
           {
             bankTransactionId: "bank-003",
             bankName: "建设银行",
             accountNo: "622200009999",
             accountLast4: "9999",
+            bankAccount: "建设银行 9999",
             directionLabel: "支出",
-            tradeTime: "20260106 11:20:00",
-            amount: "2000.00",
-            counterpartyName: "多流水供应商",
-            summary: "补充流水摘要",
+            tradeTime: "2026-01-20 11:20:00",
+            amount: "1450.00",
+            counterpartyName: "张丽芬",
+            summary: "补充住宿费",
             remark: "补充流水备注",
-            relationCaseId: "case-bank-003",
+            relationCaseId: "case-group-001",
           },
         ],
       },
       invoice: {
         primaryInvoiceId: "inv-002",
-        digitalInvoiceNo: "26532000000999999999",
-        sellerName: "多发票供应商",
-        invoiceDate: "2026-01-09",
-        totalWithTax: "15000.00",
+        digitalInvoiceNo: "2653400000008252281",
+        sellerName: "昭通市昭阳区豪然精品酒店",
+        invoiceDate: "2026-01-20",
+        totalWithTax: "4450.00",
         relationCount: 2,
         hasMultiple: true,
         detailMode: "list",
+        summaries: [
+          {
+            invoiceId: "inv-002",
+            digitalInvoiceNo: "2653400000008252281",
+            sellerName: "昭通市昭阳区豪然精品酒店",
+            invoiceDate: "2026-01-20",
+            totalWithTax: "3000.00",
+            relationCaseId: "case-group-001",
+          },
+          {
+            invoiceId: "inv-003",
+            digitalInvoiceNo: "2653400000008252282",
+            sellerName: "昭通市昭阳区豪然精品酒店",
+            invoiceDate: "2026-01-20",
+            totalWithTax: "1450.00",
+            relationCaseId: "case-group-001",
+          },
+        ],
       },
     },
     {
@@ -454,13 +510,15 @@ function installOaPendingPaymentsFetch(overrides?: {
         sections: [{ title: "发票情况", fields: [{ label: "进项发票方名称", value: "云南恒昆机电设备有限公司" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
-    if (url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details") {
+    if (url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details") {
       const kind = url.searchParams.get("kind");
+      const title = kind === "oa" ? "OA关联明细" : kind === "invoice" ? "发票关联明细" : "支出流水关联明细";
+      const sectionTitle = kind === "oa" ? "OA 1" : kind === "invoice" ? "发票 1" : "流水 1";
       return new Response(JSON.stringify({
-        title: kind === "invoice" ? "发票关联明细" : "支出流水关联明细",
-        subtitle: "李四",
+        title,
+        subtitle: "刘际涛",
         detailAvailable: true,
-        sections: [{ title: kind === "invoice" ? "发票 1" : "流水 1", fields: [{ label: "数量", value: "2" }] }],
+        sections: [{ title: sectionTitle, fields: [{ label: "数量", value: kind === "oa" ? "3" : "2" }] }],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/rules") {
@@ -679,7 +737,16 @@ describe("OA pending payments page", () => {
     expect(within(page).getByText("2026-01-08")).toBeInTheDocument();
     expect(within(page).queryByText("进项发票方名称")).not.toBeInTheDocument();
     expect(within(page).getByText("建设银行 1234")).toBeInTheDocument();
-    expect(within(page).getByText(/补充流水摘要/)).toBeInTheDocument();
+    const groupedRow = within(page).getByRole("row", { name: /刘际涛/ });
+    const groupedCells = groupedRow.querySelectorAll(".oa-pending-payments-table-cell");
+    expect(groupedCells[2]).toHaveTextContent("4450.00");
+    expect(groupedCells[2]).toHaveTextContent("+2");
+    expect(groupedCells[5]).toHaveTextContent("4450.00");
+    expect(groupedCells[5]).toHaveTextContent("+1");
+    expect(groupedCells[8]).toHaveTextContent("4450.00");
+    expect(groupedCells[8]).toHaveTextContent("+1");
+    expect(groupedCells[5]).not.toHaveTextContent("3000.00");
+    expect(within(page).getByText(/补充住宿费/)).toBeInTheDocument();
     expect(within(page).getByText(/补充流水备注/)).toBeInTheDocument();
     const noInvoiceRow = within(page).getByRole("row", { name: /王五/ });
     const noInvoiceCell = noInvoiceRow.querySelector(".oa-pending-payments-empty-invoice-cell");
@@ -789,11 +856,15 @@ describe("OA pending payments page", () => {
     expect(await screen.findByRole("heading", { name: "发票详情" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "查看李四关联流水 2 条" }));
+    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联OA 3 条" }));
+    expect(await screen.findByRole("heading", { name: "OA关联明细" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联流水 2 条" }));
     expect(await screen.findByRole("heading", { name: "支出流水关联明细" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "查看李四关联发票 2 张" }));
+    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联发票 2 张" }));
     expect(await screen.findByRole("heading", { name: "发票关联明细" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
@@ -814,11 +885,15 @@ describe("OA pending payments page", () => {
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details" && url.searchParams.get("kind") === "bank";
+      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "oa";
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-row-002/relation-details" && url.searchParams.get("kind") === "invoice";
+      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "bank";
+    })).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "invoice";
     })).toBe(true);
   });
 
@@ -835,7 +910,7 @@ describe("OA pending payments page", () => {
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
     const initialRowsRequestCount = rowsRequests(fetchMock).length;
-    await user.type(within(tableFrame).getByLabelText("搜索OA待付款核对"), "李四");
+    await user.type(within(tableFrame).getByLabelText("搜索OA待付款核对"), "刘际涛");
     await user.click(within(tableFrame).getByRole("button", { name: "查询" }));
 
     await waitFor(() => {

@@ -12,22 +12,23 @@ import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvo
 import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import {
-  confirmAttachExistingInvoice,
+  confirmAttachExistingInvoices,
   downloadPendingInvoiceExport,
-  fetchPendingInvoiceCandidates,
+  fetchPendingInvoiceCandidatesBatch,
   fetchPendingInvoiceExportPreview,
   fetchPendingInvoiceFilterOptions,
   fetchPendingInvoiceObjectDetail,
   fetchPendingInvoiceRelationDetail,
   fetchPendingInvoiceRows,
   fetchPendingInvoiceRules,
-  previewAttachExistingInvoice,
+  previewAttachExistingInvoices,
   savePendingInvoiceRules,
   savePendingInvoiceIncomeStatus,
 } from "../features/pendingInvoices/api";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import type {
   AttachExistingInvoiceResult,
+  AttachExistingInvoicesResult,
   FetchPendingInvoiceRowsRequest,
   ManualPendingInvoiceResult,
   PendingInvoiceDirection,
@@ -48,6 +49,8 @@ const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
 type ActiveDrawer = "rules" | "relation" | "invoicePicker" | "detail" | "export" | null;
 type RelationTarget = { transactionId: string } | null;
 type RulesDirection = Exclude<PendingInvoiceDirection, "all">;
+type ExpenseStatusShortcut = "paid_pending_invoice" | "paid_invoiced";
+type StatusFilterSelection = PendingInvoiceFilter | ExpenseStatusShortcut;
 
 const EXPENSE_FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
   all: "全部",
@@ -65,8 +68,50 @@ const INCOME_FILTER_LABELS: Record<PendingInvoiceFilter, string> = {
   cash_income: "现金收入",
 };
 
-function filterLabel(direction: PendingInvoiceDirection, filter: PendingInvoiceFilter) {
-  return (direction === "income" ? INCOME_FILTER_LABELS : EXPENSE_FILTER_LABELS)[filter];
+const EXPENSE_STATUS_SHORTCUT_LABELS: Record<ExpenseStatusShortcut, string> = {
+  paid_pending_invoice: "已支付待开票",
+  paid_invoiced: "已支付已开票",
+};
+
+function isExpenseStatusShortcut(filter: StatusFilterSelection): filter is ExpenseStatusShortcut {
+  return filter === "paid_pending_invoice" || filter === "paid_invoiced";
+}
+
+function effectiveBackendFilter(filter: StatusFilterSelection): PendingInvoiceFilter {
+  return isExpenseStatusShortcut(filter) ? "requires_invoice" : filter;
+}
+
+function filterLabel(direction: PendingInvoiceDirection, filter: StatusFilterSelection) {
+  if (direction === "expense" && isExpenseStatusShortcut(filter)) {
+    return EXPENSE_STATUS_SHORTCUT_LABELS[filter];
+  }
+  return (direction === "income" ? INCOME_FILTER_LABELS : EXPENSE_FILTER_LABELS)[filter as PendingInvoiceFilter];
+}
+
+function transactionIdForRow(row: PendingInvoiceRow) {
+  return row.bankTransaction.id || row.id;
+}
+
+function numericMoney(value: string | null | undefined) {
+  const parsed = Number(String(value ?? "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoney(value: number | string) {
+  const parsed = typeof value === "number" ? value : numericMoney(value);
+  return Number.isFinite(parsed) ? parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(value || "-");
+}
+
+function setsEqual(left: Set<string>, right: Set<string>) {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isAbortLikeError(caught: unknown) {
@@ -120,7 +165,7 @@ export default function PendingInvoicesPage() {
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
-  const [filter, setFilter] = useState<PendingInvoiceFilter>("all");
+  const [filter, setFilter] = useState<StatusFilterSelection>("all");
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
   const [total, setTotal] = useState(0);
   const [sourceSummary, setSourceSummary] = useState<PendingInvoiceSourceSummary | null>(null);
@@ -135,6 +180,8 @@ export default function PendingInvoicesPage() {
   const [rulesDirection, setRulesDirection] = useState<RulesDirection>("expense");
   const [detailTarget, setDetailTarget] = useState<PendingInvoiceObjectDetailTarget | null>(null);
   const [relationTarget, setRelationTarget] = useState<RelationTarget>(null);
+  const [invoicePickerTransactionIds, setInvoicePickerTransactionIds] = useState<string[]>([]);
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [readModelStatus, setReadModelStatus] = useState("");
@@ -147,16 +194,25 @@ export default function PendingInvoicesPage() {
 
   const filterOpen = filterMenuOpen;
 
+  const queryFilters = useMemo<PendingInvoiceColumnFilter[]>(() => {
+    const baseFilters = isExpenseStatusShortcut(filter)
+      ? columnFilters.filter((item) => item.field !== "status_code")
+      : columnFilters;
+    return isExpenseStatusShortcut(filter)
+      ? [...baseFilters, { field: "status_code", operator: "in" as const, values: [filter] }]
+      : baseFilters;
+  }, [columnFilters, filter]);
+
   const query = useMemo<FetchPendingInvoiceRowsRequest>(() => ({
     direction,
-    filter,
+    filter: effectiveBackendFilter(filter),
     keyword,
     page,
     pageSize,
-    filters: columnFilters,
+    filters: queryFilters,
     sortField,
     sortDirection,
-  }), [columnFilters, direction, filter, keyword, page, pageSize, sortDirection, sortField]);
+  }), [direction, filter, keyword, page, pageSize, queryFilters, sortDirection, sortField]);
 
   const loadRows = useCallback((signal?: AbortSignal) => {
     setLoading(true);
@@ -199,9 +255,9 @@ export default function PendingInvoicesPage() {
     const controller = new AbortController();
     fetchPendingInvoiceFilterOptions({
       direction,
-      filter,
+      filter: query.filter,
       keyword,
-      filters: columnFilters,
+      filters: queryFilters,
       sortField,
       sortDirection,
       signal: controller.signal,
@@ -211,9 +267,9 @@ export default function PendingInvoicesPage() {
         if (!isAbortLikeError(caught)) {
           setColumnFilterFields([]);
         }
-      });
+    });
     return () => controller.abort();
-  }, [columnFilters, direction, filter, keyword, sortDirection, sortField, refreshToken]);
+  }, [direction, keyword, query.filter, queryFilters, sortDirection, sortField, refreshToken]);
 
   useEffect(() => {
     pageActiveRef.current = active;
@@ -269,10 +325,12 @@ export default function PendingInvoicesPage() {
     };
   }, []);
 
-  const filterOptions = useMemo<PendingInvoiceFilter[]>(() => (
+  const filterOptions = useMemo<StatusFilterSelection[]>(() => (
     direction === "expense" ? [
     "all",
     "requires_invoice",
+    "paid_pending_invoice",
+    "paid_invoiced",
     "bank_statement_as_invoice",
     "no_invoice_required",
   ] : direction === "income" ? [
@@ -288,8 +346,29 @@ export default function PendingInvoicesPage() {
     sortDirection,
   }), [sortDirection, sortField]);
   const exportDisabled = Boolean(readModelStatus && readModelStatus !== "fresh");
+  const isTransactionSelectable = useCallback((row: PendingInvoiceRow) => (
+    direction !== "income" && row.availableActions.includes("attach_existing_invoice")
+  ), [direction]);
+  const selectedRows = useMemo(() => (
+    rows.filter((row) => selectedTransactionIds.has(transactionIdForRow(row)) && isTransactionSelectable(row))
+  ), [isTransactionSelectable, rows, selectedTransactionIds]);
+  const selectedBankTotal = useMemo(() => (
+    selectedRows.reduce((totalAmount, row) => totalAmount + numericMoney(row.bankTransaction.amount || row.bankTransaction.debitAmount || row.bankTransaction.creditAmount), 0)
+  ), [selectedRows]);
+  const clearSelectedTransactions = useCallback(() => {
+    setSelectedTransactionIds(new Set());
+  }, []);
+
+  useEffect(() => {
+    const selectableIds = new Set(rows.filter(isTransactionSelectable).map(transactionIdForRow));
+    setSelectedTransactionIds((current) => {
+      const next = new Set([...current].filter((id) => selectableIds.has(id)));
+      return setsEqual(current, next) ? current : next;
+    });
+  }, [isTransactionSelectable, rows]);
 
   const handleSortChange = useCallback((field: PendingInvoiceSortField, nextDirection?: PendingInvoiceSortDirection) => {
+    clearSelectedTransactions();
     setPage(1);
     if (nextDirection) {
       setSortField(field);
@@ -302,7 +381,7 @@ export default function PendingInvoicesPage() {
     }
     setSortField(field);
     setSortDirection("asc");
-  }, [sortField]);
+  }, [clearSelectedTransactions, sortField]);
 
   const handleOpenRelation = useCallback((row: PendingInvoiceRow) => {
     setRelationTarget({ transactionId: row.bankTransaction.id || row.id });
@@ -310,14 +389,39 @@ export default function PendingInvoicesPage() {
   }, []);
 
   const handleOpenInvoicePicker = useCallback((row: PendingInvoiceRow) => {
-    setRelationTarget({ transactionId: row.bankTransaction.id || row.id });
+    setInvoicePickerTransactionIds([transactionIdForRow(row)]);
     setActiveDrawer("invoicePicker");
   }, []);
 
   const handleOpenInvoicePickerById = useCallback((transactionId: string) => {
-    setRelationTarget({ transactionId });
+    setInvoicePickerTransactionIds([transactionId]);
     setActiveDrawer("invoicePicker");
   }, []);
+
+  const handleToggleTransactionSelection = useCallback((row: PendingInvoiceRow) => {
+    if (!isTransactionSelectable(row)) {
+      return;
+    }
+    const transactionId = transactionIdForRow(row);
+    setSelectedTransactionIds((current) => {
+      const next = new Set(current);
+      if (next.has(transactionId)) {
+        next.delete(transactionId);
+      } else {
+        next.add(transactionId);
+      }
+      return next;
+    });
+  }, [isTransactionSelectable]);
+
+  const handleOpenSelectedInvoicePicker = useCallback(() => {
+    const transactionIds = selectedRows.map(transactionIdForRow);
+    if (transactionIds.length === 0) {
+      return;
+    }
+    setInvoicePickerTransactionIds(transactionIds);
+    setActiveDrawer("invoicePicker");
+  }, [selectedRows]);
 
   const handleOpenDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => {
     setDetailTarget(target);
@@ -328,6 +432,7 @@ export default function PendingInvoicesPage() {
     setActiveDrawer(null);
     setDetailTarget(null);
     setRelationTarget(null);
+    setInvoicePickerTransactionIds([]);
   }
 
   function handleManualConfirmed(result: ManualPendingInvoiceResult) {
@@ -350,7 +455,7 @@ export default function PendingInvoicesPage() {
     setRefreshToken((current) => current + 1);
   }
 
-  function handleAttachConfirmed(result: AttachExistingInvoiceResult) {
+  function handleAttachConfirmed(result: AttachExistingInvoiceResult | AttachExistingInvoicesResult) {
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, {
       affectedMonths: result.affectedMonths,
       affectedRowIds: [...result.affectedTransactionIds, ...result.affectedInvoiceIds],
@@ -366,6 +471,7 @@ export default function PendingInvoicesPage() {
     } else {
       setRefreshToken((current) => current + 1);
     }
+    clearSelectedTransactions();
     closeDrawer();
   }
 
@@ -373,7 +479,7 @@ export default function PendingInvoicesPage() {
   const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => fetchPendingInvoiceObjectDetail(target), []);
   const loadRules = useCallback(() => fetchPendingInvoiceRules(rulesDirection), [rulesDirection]);
   const saveRules = useCallback((payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, rulesDirection), [rulesDirection]);
-  const loadCandidates = useCallback(fetchPendingInvoiceCandidates, []);
+  const loadCandidates = useCallback(fetchPendingInvoiceCandidatesBatch, []);
   const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
   const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
 
@@ -381,10 +487,12 @@ export default function PendingInvoicesPage() {
     setDirection(nextDirection);
     setFilter("all");
     setColumnFilters([]);
+    clearSelectedTransactions();
     setPage(1);
-  }, []);
+  }, [clearSelectedTransactions]);
 
   const handleApplyColumnFilters = useCallback((nextFilters: PendingInvoiceColumnFilter[]) => {
+    clearSelectedTransactions();
     setColumnFilters((current) => {
       const fields = new Set(nextFilters.map((item) => item.field));
       return [
@@ -393,13 +501,14 @@ export default function PendingInvoicesPage() {
       ];
     });
     setPage(1);
-  }, []);
+  }, [clearSelectedTransactions]);
 
   const handleClearColumnFilters = useCallback((fields: string[]) => {
+    clearSelectedTransactions();
     const fieldSet = new Set(fields);
     setColumnFilters((current) => current.filter((item) => !fieldSet.has(item.field)));
     setPage(1);
-  }, []);
+  }, [clearSelectedTransactions]);
 
   const handleOpenRules = useCallback((nextRulesDirection: RulesDirection) => {
     setRulesDirection(nextRulesDirection);
@@ -472,6 +581,7 @@ export default function PendingInvoicesPage() {
               key={option}
               onClick={() => {
                 setFilter(option);
+                clearSelectedTransactions();
                 setPage(1);
                 setFilterMenuOpen(false);
               }}
@@ -546,6 +656,7 @@ export default function PendingInvoicesPage() {
                 className="pending-invoices-search"
                 onChange={(event) => {
                   setKeyword(event.target.value);
+                  clearSelectedTransactions();
                   setPage(1);
                 }}
                 placeholder="搜索流水"
@@ -561,6 +672,18 @@ export default function PendingInvoicesPage() {
         <div className="pending-invoices-loading-slot">
           {loading ? <div aria-label="待找发票加载中" className="pending-invoices-loading-bar" role="progressbar" /> : null}
         </div>
+        {selectedRows.length > 0 ? (
+          <div className="pending-invoices-selection-toolbar" role="status">
+            <span>已选 {selectedRows.length} 条流水</span>
+            <span>流水合计 {formatMoney(selectedBankTotal)}</span>
+            <button className="pending-invoices-button pending-invoices-button--primary" onClick={handleOpenSelectedInvoicePicker} type="button">
+              选择发票
+            </button>
+            <button className="pending-invoices-button" onClick={clearSelectedTransactions} type="button">
+              清除选择
+            </button>
+          </div>
+        ) : null}
         <PendingInvoicesTable
           rows={rows}
           config={tableConfig}
@@ -577,6 +700,9 @@ export default function PendingInvoicesPage() {
           direction={direction}
           statusFilterControl={statusFilterControl}
           pendingActionRowIds={pendingIncomeStatusRows}
+          selectedTransactionIds={selectedTransactionIds}
+          onToggleTransactionSelection={handleToggleTransactionSelection}
+          isTransactionSelectable={isTransactionSelectable}
         />
         <div className="pending-invoices-pagination">
           <label className="pending-invoices-pagination-size">
@@ -585,6 +711,7 @@ export default function PendingInvoicesPage() {
               aria-label="每页行数"
               onChange={(event) => {
                 setPageSize(Number(event.target.value));
+                clearSelectedTransactions();
                 setPage(1);
               }}
               value={pageSize}
@@ -601,7 +728,10 @@ export default function PendingInvoicesPage() {
             <button
               aria-label="上一页"
               disabled={currentPage <= 1}
-              onClick={() => setPage(currentPage - 1)}
+              onClick={() => {
+                clearSelectedTransactions();
+                setPage(currentPage - 1);
+              }}
               type="button"
             >
               上一页
@@ -609,7 +739,10 @@ export default function PendingInvoicesPage() {
             <button
               aria-label="下一页"
               disabled={currentPage >= totalPages}
-              onClick={() => setPage(currentPage + 1)}
+              onClick={() => {
+                clearSelectedTransactions();
+                setPage(currentPage + 1);
+              }}
               type="button"
             >
               下一页
@@ -638,10 +771,10 @@ export default function PendingInvoicesPage() {
       />
       <PendingInvoiceInvoicePickerDrawer
         open={activeDrawer === "invoicePicker"}
-        transactionId={relationTarget?.transactionId ?? null}
+        transactionIds={invoicePickerTransactionIds}
         loadCandidates={loadCandidates}
-        previewAttach={(transactionId, invoiceId, requestId) => previewAttachExistingInvoice({ transactionId, invoiceId, requestId })}
-        confirmAttach={(transactionId, invoiceId, previewId, requestId) => confirmAttachExistingInvoice({ transactionId, invoiceId, previewId, requestId })}
+        previewAttach={(transactionIds, invoiceIds, requestId) => previewAttachExistingInvoices({ transactionIds, invoiceIds, requestId })}
+        confirmAttach={(transactionIds, invoiceIds, previewId, requestId) => confirmAttachExistingInvoices({ transactionIds, invoiceIds, previewId, requestId })}
         onConfirmed={handleAttachConfirmed}
         onClose={closeDrawer}
       />

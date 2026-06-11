@@ -38,11 +38,13 @@ function getModalFinanceGrid(modal: HTMLElement, name: RegExp | string) {
   return grid;
 }
 
-function expectFinanceColumnRoles(grid: HTMLElement, expectedRoles: string[]) {
-  const headerRoles = within(grid)
-    .getAllByRole("columnheader")
-    .map((header) => header.getAttribute("data-column-role"));
-  expect(headerRoles).toEqual(expectedRoles);
+async function expectFinanceColumnRoles(grid: HTMLElement, expectedRoles: string[]) {
+  await waitFor(() => {
+    const headerRoles = within(grid)
+      .getAllByRole("columnheader")
+      .map((header) => header.getAttribute("data-column-role"));
+    expect(headerRoles).toEqual(expectedRoles);
+  });
 }
 
 function expectProjectDialogContract(dialog: HTMLElement) {
@@ -129,7 +131,7 @@ describe("Tax offset workbench", () => {
     expect(screen.queryByRole("link", { name: "返回关联台" })).not.toBeInTheDocument();
 
     const outputTable = getTaxFinanceGrid("销项票开票情况");
-    expectFinanceColumnRoles(outputTable, ["identity", "amount", "account", "amount"]);
+    await expectFinanceColumnRoles(outputTable, ["identity", "amount", "account", "amount"]);
     expect(within(outputTable).queryByRole("checkbox")).not.toBeInTheDocument();
     expect(within(outputTable).queryByText("发票类型")).not.toBeInTheDocument();
     expect(within(outputTable).getByText("销")).toBeInTheDocument();
@@ -149,7 +151,7 @@ describe("Tax offset workbench", () => {
     expect(screen.queryByLabelText("销项票开票情况横向滚动")).not.toBeInTheDocument();
 
     const inputTable = getTaxFinanceGrid("进项票认证计划");
-    expectFinanceColumnRoles(inputTable, ["selection", "identity", "amount", "account", "amount"]);
+    await expectFinanceColumnRoles(inputTable, ["selection", "identity", "amount", "account", "amount"]);
     expect(within(inputTable).getByRole("checkbox", { name: /11203490/ })).not.toBeDisabled();
     expect(within(inputTable).getByRole("checkbox", { name: /11203491/ })).not.toBeDisabled();
     expect(within(inputTable).queryByText("发票类型")).not.toBeInTheDocument();
@@ -365,7 +367,7 @@ describe("Tax offset workbench", () => {
     expect(within(modal).getAllByText(/未进入计划\s*1\s*条/).length).toBeGreaterThan(0);
     expect(within(modal).getByText(/无效记录\s*0\s*条/)).toBeInTheDocument();
     const previewRowTable = getModalFinanceGrid(modal, /行级预览结果/);
-    expectFinanceColumnRoles(previewRowTable, ["quantity", "identity", "account", "amount", "status", "status", "description"]);
+    await expectFinanceColumnRoles(previewRowTable, ["quantity", "identity", "account", "amount", "status", "status", "description"]);
     expect(within(previewRowTable).getByText("11203490")).toBeInTheDocument();
     expect(within(previewRowTable).getByText("11203999")).toBeInTheDocument();
     expect(within(previewRowTable).getByText("匹配计划")).toBeInTheDocument();

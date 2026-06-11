@@ -447,6 +447,8 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         persistence_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
+        pair_relation_service: Any | None = None,
+        persist_pair_relations_in_transaction: Callable[..., None] | None = None,
     ) -> None:
         self._state_store = state_store
         self._queue_repository = queue_repository
@@ -459,6 +461,8 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         self._persistence_repository_factory = persistence_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
+        self._pair_relation_service = pair_relation_service
+        self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
@@ -478,6 +482,14 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
                 tenant_id=self._tenant_id,
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
+            workbench_pair_port = (
+                TurnoverLedgerWorkbenchPairPort(
+                    pair_relation_service=self._pair_relation_service,
+                    persist_pair_relations=self._persist_pair_relations_in_transaction,
+                )
+                if self._pair_relation_service is not None
+                else None
+            )
         else:
             if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
                 return None
@@ -488,12 +500,27 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
                 replace_snapshot=self._replace_snapshot,
                 emit_persistence_warning=self._emit_persistence_warning,
             )
-            connection = local_adapters.connection()
+            connection = (
+                TurnoverLedgerLocalClosureConnection(
+                    relation_snapshot_provider=local_adapters.relation_snapshot,
+                    replace_relation_snapshot=self._replace_snapshot,
+                    save_relation_snapshot=local_adapters.save_snapshot,
+                    pair_relation_service=self._pair_relation_service,
+                    save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),
+                )
+                if self._pair_relation_service is not None
+                else local_adapters.connection()
+            )
             relation_repository = local_adapters.relation_repository()
             dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
                 queue_repository=self._queue_repository
             )
             idempotency_store = self._local_idempotency_store_provider()
+            workbench_pair_port = (
+                TurnoverLedgerWorkbenchPairPort(pair_relation_service=self._pair_relation_service)
+                if self._pair_relation_service is not None
+                else None
+            )
         stale_precondition_port = TurnoverLedgerRelationStalePreconditionPort(
             relation_detail_provider=self._routes.get_relation
         )
@@ -506,6 +533,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=stale_precondition_port,
             idempotency_store=idempotency_store,
+            workbench_pair_port=workbench_pair_port,
         )
         return TurnoverLedgerWriteFacade(uow=uow)
 
@@ -1404,9 +1432,21 @@ class TurnoverLedgerWithdrawLegacyFallbackFacade:
         *,
         routes: Any,
         after_mutation: Callable[[list[str]], None],
+        pair_relation_service: Any | None = None,
+        persist_pair_relations: Callable[..., None] | None = None,
     ) -> None:
         self._routes = routes
         self._after_mutation = after_mutation
+        self._pair_port = (
+            TurnoverLedgerWorkbenchPairPort(
+                pair_relation_service=pair_relation_service,
+                persist_pair_relations=lambda *, transaction, changed_case_ids: persist_pair_relations(
+                    changed_case_ids=changed_case_ids
+                ),
+            )
+            if pair_relation_service is not None and persist_pair_relations is not None
+            else None
+        )
 
     def withdraw_relation(
         self,
@@ -1419,11 +1459,24 @@ class TurnoverLedgerWithdrawLegacyFallbackFacade:
         expected_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         _ = tenant_id, expected_versions
+        if self._pair_port is not None:
+            self._pair_port.assert_turnover_manual_closure_withdrawable(
+                relation_id=relation_id,
+                transaction=SimpleNamespace(),
+            )
         result = self._routes.withdraw_relation(
             relation_id=relation_id,
             actor=actor_id,
             note=note,
         )
+        if self._pair_port is not None:
+            relation = dict(result.get("relation") if isinstance(result.get("relation"), dict) else result)
+            result["workbench_pair_relation"] = self._pair_port.withdraw_turnover_manual_closure(
+                relation=relation,
+                actor_id=actor_id,
+                note=note,
+                transaction=SimpleNamespace(),
+            )
         self._after_mutation(list(affected_months or []))
         return dict(result or {})
 
@@ -1623,6 +1676,12 @@ class TurnoverLedgerWorkbenchPairPort:
                 )
         principal_amount = str(relation.get("principal_amount") or "0.00")
         settled_amount = str(relation.get("settled_amount") or "0.00")
+        relation_evidence = relation.get("evidence")
+        turnover_closure_mode = (
+            str(relation_evidence.get("closure_mode") or "").strip()
+            if isinstance(relation_evidence, dict)
+            else ""
+        ) or "manual_zero_difference_pair"
         amount_check = {
             "status": "matched",
             "direction": "turnover_manual_closure",
@@ -1643,7 +1702,7 @@ class TurnoverLedgerWorkbenchPairPort:
             special_metadata={
                 "source": "turnover_ledger",
                 "turnover_relation_id": relation_id,
-                "turnover_closure_mode": "manual_zero_difference_pair",
+                "turnover_closure_mode": turnover_closure_mode,
             },
             evidence={
                 "source": "turnover_ledger",
@@ -1658,6 +1717,87 @@ class TurnoverLedgerWorkbenchPairPort:
                 changed_case_ids=[case_id],
             )
         return dict(pair_relation or {})
+
+    def assert_turnover_manual_closure_withdrawable(
+        self,
+        *,
+        relation_id: str,
+        transaction: Any,
+    ) -> None:
+        _ = transaction
+        case_id = self._turnover_case_id(relation_id)
+        if not case_id:
+            raise TurnoverLedgerWritePreconditionError(
+                error_code="invalid_relation_id",
+                message="relation_id is required.",
+            )
+        active_relation = self._active_relation_by_case_id(case_id)
+        if active_relation is None:
+            return
+        if not self._is_bank_only_turnover_manual_closure(active_relation):
+            raise TurnoverLedgerWritePreconditionError(
+                error_code="turnover_closure_withdraw_requires_workbench",
+                message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
+            )
+
+    def withdraw_turnover_manual_closure(
+        self,
+        *,
+        relation: dict[str, object],
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        _ = actor_id, note
+        relation_id = str(relation.get("relation_id") or "").strip()
+        self.assert_turnover_manual_closure_withdrawable(
+            relation_id=relation_id,
+            transaction=transaction,
+        )
+        case_id = self._turnover_case_id(relation_id)
+        if not case_id:
+            return {}
+        active_relation = self._active_relation_by_case_id(case_id)
+        if active_relation is None:
+            return {}
+        cancel_relation = getattr(self._pair_relation_service, "cancel_relation", None)
+        if not callable(cancel_relation):
+            raise RuntimeError("pair_relation_service must expose cancel_relation.")
+        cancelled = dict(cancel_relation(case_id) or {})
+        if self._persist_pair_relations is not None:
+            self._persist_pair_relations(
+                transaction=transaction,
+                changed_case_ids=[case_id],
+            )
+        return cancelled
+
+    @staticmethod
+    def _turnover_case_id(relation_id: str) -> str:
+        normalized_relation_id = str(relation_id or "").strip()
+        return f"turnover:{normalized_relation_id}" if normalized_relation_id else ""
+
+    def _active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+        get_by_case_id = getattr(self._pair_relation_service, "get_active_relation_by_case_id", None)
+        if callable(get_by_case_id):
+            active_relation = get_by_case_id(case_id)
+            return dict(active_relation) if isinstance(active_relation, dict) else None
+        list_active = getattr(self._pair_relation_service, "list_active_relations", None)
+        if callable(list_active):
+            for relation in list(list_active() or []):
+                if isinstance(relation, dict) and str(relation.get("case_id") or "") == case_id:
+                    return dict(relation)
+        return None
+
+    @staticmethod
+    def _is_bank_only_turnover_manual_closure(relation: dict[str, object]) -> bool:
+        if str(relation.get("relation_mode") or "").strip() != TURNOVER_MANUAL_CLOSURE_RELATION_MODE:
+            return False
+        row_types = [
+            str(row_type).strip()
+            for row_type in list(relation.get("row_types") or [])
+            if str(row_type).strip()
+        ]
+        return bool(row_types) and all(row_type == "bank" for row_type in row_types)
 
     @staticmethod
     def _month_scope(affected_months: list[str]) -> str:

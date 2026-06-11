@@ -1145,17 +1145,6 @@ class WorkbenchCandidateGroupingService:
             return True
         row_type_count = sum(1 for rows in (group.oa_rows, group.bank_rows, group.invoice_rows) if rows)
         if row_type_count == 1 and group.bank_rows and not group.oa_rows and not group.invoice_rows:
-            relation_modes = {
-                str(row.get("relation_mode") or "").strip()
-                for row in group.bank_rows
-                if str(row.get("relation_mode") or "").strip()
-            }
-            if (
-                relation_modes
-                and relation_modes.issubset({TURNOVER_MANUAL_CLOSURE_RELATION_MODE})
-                and len(group.bank_rows) == 2
-            ):
-                return True
             relation_codes = {
                 str(row.get("invoice_relation", {}).get("code", ""))
                 for row in group.bank_rows

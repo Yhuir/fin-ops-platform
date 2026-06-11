@@ -21,6 +21,8 @@
 
 保留 active generation 原子发布模型；不要机械套成普通 read model gateway。
 
+Workbench active pair relation 是 OA、银行流水、发票跨页面关系的唯一已配对事实。同一 active relation 内的 `row_ids` 必须按 row id 去重并保持 `row_types` 对齐；同一个 row 不能同时属于两个不同 active case。页面展示多 OA/多流水/多发票时应使用 relation summaries 和 `+N` 展开详情，不能把重复 row 当成两条业务事实。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

@@ -47,7 +47,7 @@
 - 候选来源：银行明细有效分类和外部往来标签规则；`deterministic` 只表示零差额候选，不表示已闭环。
 - 台账读取：优先走 `turnover_ledger` SQL read model；`TurnoverLedgerQueryService` 通过 `ReadModelQueryGateway` 处理 fresh/stale/missing/refreshing。
 - 写入入口：tag-selection、bank-row-tags batch、relation extra、confirm、withdraw 通过 `TurnoverLedgerWriteFacade` / UoW 或 legacy fallback 边界。
-- 手动闭环：用户在页面选择同一往来组两条真实银行流水，一收一支且差额为 `0.00`，后端写 Turnover manual relation 和 Workbench active pair relation。
+- 手动闭环：用户在页面选择同一往来组多条真实银行流水，至少一收一支且收支合计差额为 `0.00`，后端写 Turnover manual relation 和 Workbench active pair relation；bank-only 外部往来闭环在关联台保持 open，只有补齐 OA + 银行 + 发票三栏后才进入 paired。
 - 撤回：只允许撤回 manual/source 合法的外部往来关系；system/generated relation 必须拒绝。
 - 下游影响：外部往来关系变更影响 `turnover_ledger`、`workbench`、`workbench_relation`、成本统计、搜索和前端跨页刷新提示。
 - App Status：`turnover_ledger` domain 绑定 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type。

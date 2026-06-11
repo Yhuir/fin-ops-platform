@@ -253,6 +253,52 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(set(result["batch"]["row_ids"]), set(row_ids))
         self.assertEqual(result["pair_relation"]["relation_mode"], "no_oa_bank_batch")
 
+    def test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact(self) -> None:
+        app, row_ids = self._app_with_balanced_bank_rows(
+            category_codes=["internal_transfer", "internal_transfer"]
+        )
+        application_service = app._no_oa_bank_batch_application_service()
+        application_service.refresh_batches()
+        draft = next(
+            batch
+            for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
+            if batch["batch_type"] == "internal_transfer"
+            and set(batch["row_ids"]) == set(row_ids)
+        )
+        submit_response = app.handle_request(
+            "POST",
+            f"/api/no-oa-bank-batches/{draft['batch_id']}/submit",
+            body=json.dumps({"expected_version": draft["version"], "note": "免OA页面提交内部往来"}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(submit_response.status_code, 200, submit_response.body)
+        submitted_payload = json.loads(submit_response.body)
+        original_case_id = submitted_payload["pair_relation"]["case_id"]
+
+        app._workbench_relation_facade = PairSnapshotRelationFacade(app._workbench_pair_relation_service)
+        confirm_response = self._post_confirm_link(app, row_ids)
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        confirm_payload = json.loads(confirm_response.body)
+        self.assertEqual(confirm_payload["case_id"], original_case_id)
+        active_relations = app._workbench_pair_relation_service.list_active_relations()
+        self.assertEqual(len(active_relations), 1)
+        self.assertEqual(active_relations[0]["case_id"], original_case_id)
+        self.assertEqual(active_relations[0]["relation_mode"], "no_oa_bank_batch")
+        self.assertCountEqual(active_relations[0]["row_ids"], row_ids)
+
+        application_service.refresh_batches()
+        submitted = [
+            batch
+            for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
+            if batch["batch_type"] == "internal_transfer"
+            and set(batch["row_ids"]) == set(row_ids)
+        ]
+        self.assertEqual(len(submitted), 1)
+        self.assertEqual(submitted[0]["relation_case_id"], original_case_id)
+        unsubmitted = app._no_oa_bank_batch_service.list_batches({"bucket": "unsubmitted"})
+        self.assertFalse(any(set(batch.get("row_ids") or []).intersection(row_ids) for batch in unsubmitted))
+
     def test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh(self) -> None:
         class StaleNoOaReadRepository:
             def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:

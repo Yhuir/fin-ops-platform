@@ -70,6 +70,14 @@ EXPECTED_MIGRATION_FILES = [
     "0056_app_status_readiness.sql",
     "0057_app_health_dashboard_metrics_indexes.sql",
     "0058_workbench_object_identity.sql",
+    "0059_input_invoice_usage_bank_filters.sql",
+    "0060_oa_pending_payment_bank_filters.sql",
+    "0061_output_invoice_collection_bank_filters.sql",
+    "0062_workbench_relation_etc_external_batch_idx.sql",
+    "0063_etc_remove_oa_detection_runtime.sql",
+    "0064_etc_scrub_oa_detection_metadata.sql",
+    "0065_invoice_canonical_identity_fingerprint_invariant.sql",
+    "0066_oa_applicant_credentials.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

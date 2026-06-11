@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-11 - 多流水选择已有进项发票闭环
+
+- 目标：待找发票页面支持选择多条支出流水，在“选择已有进项发票”右侧抽屉中选择多张进项发票，并展示已选流水金额、已选发票金额和差额；同时保留原页面四区表 UI 和单条行菜单入口。
+- 影响范围：`PendingInvoiceQueryService`、`PendingInvoiceApplicationService`、`routes_pending_invoices.py`、`server.py` pending invoice routes、`PendingInvoicesPage`、`PendingInvoicesTable`、`PendingInvoiceInvoicePickerDrawer`、前端 pending invoices API/types、模块/API 文档和相关测试。
+- 关键决策：批量选择复用 Workbench active pair relation 作为关系事实源；单条入口也走同一批量抽屉。状态下拉中的 `已支付待开票` / `已支付已开票` 不新增后端规则组，而是前端映射为 `filter=requires_invoice` 加 `status_code` 表头筛选。
+- 文档影响：更新 `docs/dev/api-contracts.md`、本模块 `README.md`、`state-machine.md`、`tests.md` 和本实施记录。
+- 测试覆盖：新增/更新 `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx`，覆盖批量 candidates、preview、confirm、幂等、页面多选和状态快捷筛选。
+- 验证命令：`pytest tests/test_pending_invoice_service.py tests/test_pending_invoice_api.py -q`；`cd web && npm test -- PendingInvoicesApi.test.ts PendingInvoicesPage.test.tsx --run`；`cd web && npm run build`。
+- 未测风险：本地未连接真实生产 Postgres/Redis/RabbitMQ，不验证真实 worker drain 或大数据量页面滚动性能；需要 staging 用真实月份做批量选择 smoke。
+- 后续事项：发布前可用包含多 OA、多付款流水、多发票的真实 relation 样本核对待找发票、OA 待付款和关联台详情展示一致性。
+
 ## 2026-06-11 - 待找发票测试闭环矩阵与状态机补齐
 
 - 目标：执行 testing closure master goal 的 `pending-invoices` 模块轮次，确认新功能改动不会绕过规则版本、人工补票、选择已有发票、收入状态、read model freshness、invoice lifecycle 或页面交互回归保护。

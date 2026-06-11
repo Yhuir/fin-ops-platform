@@ -4,7 +4,7 @@ Nightly CI 是 solo 开发流程里的自动化验证门禁。它不替代本地
 
 ## 目标
 
-- 每天运行后端全量 unittest、前端 Vitest 和前端 build。
+- 每天运行干净 app 状态检查、后端全量 unittest、前端 Vitest 和前端 build。
 - 发现新功能破坏旧功能时尽早失败。
 - 给 `docs/modules/<module>/tests.md` 提供稳定的 nightly 覆盖入口。
 - 防止依赖本地记忆手动运行验证。
@@ -30,11 +30,21 @@ bash scripts/verify.sh all
 该命令包括：
 
 ```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+FIN_OPS_DATA_DIR="$(mktemp -d)" PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
 PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 cd web && npm test -- --run
 cd web && npm run build
 ```
+
+`scripts/verify.sh backend` 和 `scripts/verify.sh all` 默认使用临时 `FIN_OPS_DATA_DIR` 做 clean app check，不读取开发机 `.runtime/fin_ops_platform/app_mongo_config.json` 或其他本地残留状态。这个检查证明当前代码可以从干净状态启动，但不证明开发机或生产当前 runtime 数据可用。
+
+需要显式检查当前配置的 runtime 状态时使用：
+
+```bash
+bash scripts/verify.sh runtime-check
+```
+
+`runtime-check` 会读取当前环境变量和 `.runtime/fin_ops_platform/*_config.json`。如果本地仍保留旧 app Mongo 配置，它可能暴露历史 pickle、迁移残留或 PostgreSQL runtime 配置问题；这类问题应按 runtime 数据问题处理，不应阻塞 nightly clean-state 回归入口。
 
 文档结构验证可单独运行：
 

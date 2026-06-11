@@ -7,6 +7,8 @@ import { installMockApiFetch } from "./apiMock";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderAppAt, renderAuthenticatedAppAt } from "./renderHelpers";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
+import { updateWorkbenchAfterConfirmLink } from "../pages/ReconciliationWorkbenchPage";
+import type { WorkbenchCandidateGroup, WorkbenchData, WorkbenchRecord } from "../features/workbench/types";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -52,7 +54,81 @@ function isWorkbenchSummaryRequest(input: RequestInfo | URL) {
   return fetchPath(input).startsWith("/api/workbench/summary?");
 }
 
+function workbenchRecord(id: string, recordType: WorkbenchRecord["recordType"], caseId: string): WorkbenchRecord {
+  return {
+    id,
+    caseId,
+    recordType,
+    label: id,
+    status: "待关联",
+    statusCode: "pending_match",
+    statusTone: "warn",
+    exceptionHandled: false,
+    amount: "100.00",
+    counterparty: "测试往来",
+    tableValues: {},
+    detailFields: [],
+    actionVariant: "open",
+    availableActions: [],
+  };
+}
+
+function minimalWorkbenchData(openGroups: WorkbenchCandidateGroup[], pairedGroups: WorkbenchCandidateGroup[] = []): WorkbenchData {
+  return {
+    month: "2026-03",
+    oaStatus: { synced: true, message: "" },
+    summary: {
+      oaCount: 0,
+      bankCount: 0,
+      invoiceCount: 0,
+      pairedCount: pairedGroups.length,
+      openCount: openGroups.length,
+      exceptionCount: 0,
+      totalCount: openGroups.length + pairedGroups.length,
+      zoneCounts: {
+        open: { total: openGroups.length, oa: 0, bank: 0, invoice: 0 },
+        paired: { total: pairedGroups.length, oa: 0, bank: 0, invoice: 0 },
+        ignored: { total: 0, oa: 0, bank: 0, invoice: 0 },
+      },
+    },
+    invoiceInventory: { importedCount: 0, linkedCount: 0, unlinkedCount: 0 },
+    paired: { groups: pairedGroups },
+    open: { groups: openGroups },
+  } as WorkbenchData;
+}
+
 describe("Workbench row selection and detail modal", () => {
+  test("turnover bank-only optimistic confirm stays in open zone", () => {
+    const bankRows = [
+      workbenchRecord("bank-turnover-in", "bank", "turnover:rel-1"),
+      workbenchRecord("bank-turnover-out", "bank", "turnover:rel-1"),
+    ];
+    const data = minimalWorkbenchData([
+      {
+        id: "open-turnover",
+        groupType: "open",
+        rawGroupType: "candidate",
+        matchConfidence: "medium",
+        reason: "existing_case_candidate",
+        rows: { oa: [], bank: bankRows, invoice: [] },
+      },
+    ]);
+
+    const nextData = updateWorkbenchAfterConfirmLink(
+      data,
+      ["bank-turnover-in", "bank-turnover-out"],
+      "turnover:rel-1",
+    );
+
+    expect(nextData.paired.groups).toHaveLength(0);
+    expect(nextData.open.groups).toHaveLength(1);
+    expect(nextData.open.groups[0].id).toBe("local-open-turnover:rel-1");
+    expect(nextData.open.groups[0].rows.bank.map((row) => row.id)).toEqual([
+      "bank-turnover-in",
+      "bank-turnover-out",
+    ]);
+  });
+
   test("clicking an open row toggles multi-selection without opening the detail modal", async () => {
     const user = userEvent.setup();
     installMockApiFetch();

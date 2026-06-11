@@ -1074,7 +1074,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
-    def test_target_withdraw_relation_facade_enqueues_turnover_refresh(self) -> None:
+    def test_target_withdraw_relation_facade_enqueues_turnover_and_workbench_refreshes(self) -> None:
         uow, deps = self._build_uow(
             relation_repository=_RecordingWithdrawRelationPort(),  # type: ignore[arg-type]
         )
@@ -1090,7 +1090,13 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(
             [(call["scope_type"], call["scope_keys"], call["reason"]) for call in deps.dirty_outbox_writer.calls],
-            [("turnover_ledger", ["all"], "turnover_relation_changed")],
+            [
+                ("turnover_ledger", ["all"], "turnover_relation_changed"),
+                ("workbench", ["2026-02", "all"], "turnover_relation_changed"),
+                ("workbench_relation", ["2026-02", "all"], "turnover_relation_changed"),
+                ("cost_statistics", ["2026-02", "all"], "turnover_relation_changed"),
+                ("search", ["2026-02", "all"], "turnover_relation_changed"),
+            ],
         )
 
     def test_target_confirm_relation_facade_passes_expected_versions_before_repository(self) -> None:
@@ -1392,6 +1398,162 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(result["relation"]["status"], "withdrawn")
         self.assertEqual(len(uow.commands), 1)
         self.assertEqual(len(uow.withdraw_calls), 1)
+
+    def test_target_withdraw_relation_facade_cancels_bank_only_workbench_relation(self) -> None:
+        class _CommandCapturingUoW:
+            def __init__(self) -> None:
+                self.commands: list[object] = []
+                self.withdraw_calls: list[dict[str, object]] = []
+                self.precheck_calls: list[dict[str, object]] = []
+                self.cancel_calls: list[dict[str, object]] = []
+
+            def run(self, command: object, handler: Callable[[object], object]) -> object:
+                self.commands.append(command)
+                assert [
+                    (request["scope_type"], request["scope_keys"], request["reason"])
+                    for request in getattr(command, "refresh_requests")
+                ] == [
+                    ("turnover_ledger", ["all"], "turnover_relation_changed"),
+                    ("workbench", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("workbench_relation", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("cost_statistics", ["2026-02", "all"], "turnover_relation_changed"),
+                    ("search", ["2026-02", "all"], "turnover_relation_changed"),
+                ]
+                return handler(
+                    SimpleNamespace(
+                        transaction=object(),
+                        relation_repository=SimpleNamespace(withdraw_relation=self.withdraw_relation),
+                        workbench_pair_port=SimpleNamespace(
+                            assert_turnover_manual_closure_withdrawable=self.assert_turnover_manual_closure_withdrawable,
+                            withdraw_turnover_manual_closure=self.withdraw_turnover_manual_closure,
+                        ),
+                    )
+                )
+
+            def assert_turnover_manual_closure_withdrawable(
+                self,
+                *,
+                relation_id: str,
+                transaction: object,
+            ) -> None:
+                self.precheck_calls.append({"relation_id": relation_id, "transaction": transaction})
+
+            def withdraw_relation(
+                self,
+                *,
+                relation_id: str,
+                actor_id: str,
+                note: str | None,
+                transaction: object,
+            ) -> dict[str, object]:
+                self.withdraw_calls.append(
+                    {
+                        "relation_id": relation_id,
+                        "actor_id": actor_id,
+                        "note": note,
+                        "transaction": transaction,
+                    }
+                )
+                return {
+                    "relation": {
+                        "relation_id": relation_id,
+                        "status": "withdrawn",
+                        "bank_row_ids": ["bank_txn_1", "bank_txn_2"],
+                    }
+                }
+
+            def withdraw_turnover_manual_closure(
+                self,
+                *,
+                relation: dict[str, object],
+                actor_id: str,
+                note: str | None,
+                transaction: object,
+            ) -> dict[str, object]:
+                self.cancel_calls.append(
+                    {
+                        "relation_id": relation.get("relation_id"),
+                        "actor_id": actor_id,
+                        "note": note,
+                        "transaction": transaction,
+                    }
+                )
+                return {"case_id": "turnover:turnover_rel_1", "status": "cancelled"}
+
+        uow = _CommandCapturingUoW()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.withdraw_relation(
+            relation_id="turnover_rel_1",
+            actor_id="finance-user",
+            tenant_id="default",
+            note="withdraw bank-only closure",
+            affected_months=["2026-02"],
+        )
+
+        self.assertEqual(result["relation"]["status"], "withdrawn")
+        self.assertEqual(result["workbench_pair_relation"]["status"], "cancelled")
+        self.assertEqual([call["relation_id"] for call in uow.precheck_calls], ["turnover_rel_1"])
+        self.assertEqual([call["relation_id"] for call in uow.withdraw_calls], ["turnover_rel_1"])
+        self.assertEqual([call["relation_id"] for call in uow.cancel_calls], ["turnover_rel_1"])
+
+    def test_target_withdraw_relation_facade_rejects_after_workbench_relation_is_upgraded(self) -> None:
+        class _CommandCapturingUoW:
+            def __init__(self) -> None:
+                self.withdraw_calls: list[dict[str, object]] = []
+
+            def run(self, command: object, handler: Callable[[object], object]) -> object:
+                _ = command
+                return handler(
+                    SimpleNamespace(
+                        transaction=object(),
+                        relation_repository=SimpleNamespace(withdraw_relation=self.withdraw_relation),
+                        workbench_pair_port=SimpleNamespace(
+                            assert_turnover_manual_closure_withdrawable=self.assert_turnover_manual_closure_withdrawable,
+                        ),
+                    )
+                )
+
+            def assert_turnover_manual_closure_withdrawable(
+                self,
+                *,
+                relation_id: str,
+                transaction: object,
+            ) -> None:
+                _ = relation_id, transaction
+                raise RuntimeError("turnover_closure_withdraw_requires_workbench")
+
+            def withdraw_relation(
+                self,
+                *,
+                relation_id: str,
+                actor_id: str,
+                note: str | None,
+                transaction: object,
+            ) -> dict[str, object]:
+                self.withdraw_calls.append(
+                    {
+                        "relation_id": relation_id,
+                        "actor_id": actor_id,
+                        "note": note,
+                        "transaction": transaction,
+                    }
+                )
+                return {"relation": {"relation_id": relation_id, "status": "withdrawn"}}
+
+        uow = _CommandCapturingUoW()
+        facade = self._write_facade_class()(uow=uow)
+
+        with self.assertRaisesRegex(RuntimeError, "turnover_closure_withdraw_requires_workbench"):
+            facade.withdraw_relation(
+                relation_id="turnover_rel_1",
+                actor_id="finance-user",
+                tenant_id="default",
+                note="should use workbench",
+                affected_months=["2026-02"],
+            )
+
+        self.assertEqual(uow.withdraw_calls, [])
 
     def test_relation_extra_outbox_failure_does_not_return_best_effort_success(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))

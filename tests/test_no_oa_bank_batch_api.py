@@ -259,7 +259,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(by_code["social_security"]["total_amount"], "0.00")
         self.assertEqual(by_code["internal_transfer"]["total_amount"], "0.00")
 
-    def test_unsubmitted_list_excludes_internal_transfer_rows_occupied_by_active_relation(self) -> None:
+    def test_unsubmitted_list_moves_internal_transfer_rows_occupied_by_manual_relation_to_submitted(self) -> None:
         app = self._app_with_transactions(
             [
                 bank_transaction(
@@ -304,7 +304,8 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         internal_transfer_summary = next(
             category for category in payload["summary"]["categories"] if category["code"] == "internal_transfer"
         )
-        self.assertEqual(internal_transfer_summary["total"], 0)
+        self.assertEqual(internal_transfer_summary["total"], 1)
+        self.assertEqual(internal_transfer_summary["submitted"], 1)
         self.assertEqual(internal_transfer_summary["conflict"], 0)
 
     def test_detail_returns_batch_and_serialized_rows(self) -> None:

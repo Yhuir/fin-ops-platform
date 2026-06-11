@@ -25,12 +25,31 @@ export type OaPendingPaymentFilterOption = {
 
 export type OaPendingPaymentOaSummary = {
   id: string;
+  primaryOaId?: string;
   applicantName: string;
   applicationType: string;
   projectName: string;
   applicationTime: string;
   amount: string;
   detailAvailable: boolean;
+  relationCount?: number;
+  hasMultiple?: boolean;
+  detailMode?: "none" | "single" | "list";
+  summaries?: OaPendingPaymentOaRelationSummary[];
+};
+
+export type OaPendingPaymentOaRelationSummary = {
+  oaId?: string;
+  applicantName?: string;
+  applicationType?: string;
+  projectName?: string;
+  applicationTime?: string;
+  amount?: string;
+  month?: string;
+  workflowNo?: string;
+  reason?: string;
+  counterpartyName?: string;
+  relationCaseId?: string;
 };
 
 export type OaPendingPaymentStatus = {
@@ -154,7 +173,7 @@ export type OaPendingPaymentDetailTarget = {
   kind: "oa" | "bank" | "invoice" | "relationList";
   id: string;
   rowId?: string;
-  relationKind?: "bank" | "invoice";
+  relationKind?: "oa" | "bank" | "invoice";
 };
 
 export type OaPendingPaymentDetailResponse = {

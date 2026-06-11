@@ -2344,6 +2344,61 @@ class EtcApiTests(unittest.TestCase):
         self.assertNotEqual(next_created["taskId"], created_task["taskId"])
         self.assertTrue(next_created["taskId"].endswith("000002"))
 
+    def test_business_batch_create_without_task_id_creates_linked_task_and_batch(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresLikeReconciliationStateStore(Path(temp_dir))
+            with patch("fin_ops_platform.app.server.build_state_store", return_value=store):
+                app = build_application(data_dir=Path(temp_dir))
+                create_response = app.handle_request(
+                    "POST",
+                    "/api/etc/business-batches",
+                    json.dumps({}),
+                )
+                self.assertEqual(create_response.status_code, 201, create_response.body)
+                created = json.loads(create_response.body)["data"]["businessBatch"]
+                task_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{created['taskId']}")
+                active_batches = json.loads(
+                    app.handle_request("GET", "/api/etc/business-batches?status=active").body
+                )["data"]
+                reloaded_app = build_application(data_dir=Path(temp_dir))
+                reloaded_batches = json.loads(
+                    reloaded_app.handle_request("GET", "/api/etc/business-batches?status=active").body
+                )["data"]
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertTrue(created["taskId"].startswith("ETC-RECON-"))
+        self.assertEqual(created["status"], "draft")
+        self.assertEqual(task_response.status_code, 200)
+        self.assertEqual(json.loads(task_response.body)["taskId"], created["taskId"])
+        self.assertEqual(active_batches["total"], 1)
+        self.assertEqual(active_batches["items"][0]["businessBatchId"], created["businessBatchId"])
+        self.assertEqual(reloaded_batches["total"], 1)
+        self.assertEqual(reloaded_batches["items"][0]["taskId"], created["taskId"])
+
+    def test_business_batch_create_without_task_id_tombstones_created_task_when_batch_create_fails(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresLikeReconciliationStateStore(Path(temp_dir))
+            with patch("fin_ops_platform.app.server.build_state_store", return_value=store):
+                app = build_application(data_dir=Path(temp_dir))
+
+                def fail_create_business_batch(**_kwargs: object) -> object:
+                    raise EtcBusinessBatchInvalidTransitionError("forced create failure.", code="forced_create_failure")
+
+                app._etc_service.create_business_batch = fail_create_business_batch
+                response = app.handle_request(
+                    "POST",
+                    "/api/etc/business-batches",
+                    json.dumps({}),
+                )
+                task_list = json.loads(app.handle_request("GET", "/api/etc/reconciliation-tasks").body)
+                reloaded_app = build_application(data_dir=Path(temp_dir))
+                reloaded_task_list = json.loads(reloaded_app.handle_request("GET", "/api/etc/reconciliation-tasks").body)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(json.loads(response.body)["error"]["code"], "forced_create_failure")
+        self.assertEqual(task_list["tasks"], [])
+        self.assertEqual(reloaded_task_list["tasks"], [])
+
     def test_delete_ready_for_import_reconciliation_task(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

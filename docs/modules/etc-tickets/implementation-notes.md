@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-11 - ETC新建批次闭环与task-only列表收敛
+
+- 目标：消除刷新、重新部署或删除后仍在未提交列表看到多条“新建ETC批次”的问题，并保证新建批次和删除批次都走同一套后端闭环语义。
+- 影响范围：`EtcBusinessBatchApplicationService.create_batch_payload`、`POST /api/etc/business-batches` 契约、ETC 页面批次列表与 workflow 选择逻辑、前端 API mapper/mock、ETC 模块测试和运维清理说明。
+- 关键决策：用户可见列表只以 `/api/etc/business-batches*` 为事实源，`etc_reconciliation_tasks` 只作为 workflow/internal 状态或异常恢复线索；“新建批次”由后端 application service 复用 reconciliation task service 创建 task，再复用 business batch service 创建 active business batch，并返回统一 business batch payload；若 business batch 创建失败，本次新建 task 立即通过 service 删除/tombstone，避免历史同类 task-only 行再次复活。生产已存在 orphan task 使用 `cleanup_orphan_etc_reconciliation_tasks` dry-run/execute 清理，不直接 SQL 改表。
+- 文档影响：更新 `docs/dev/api-contracts.md`、本模块 `README.md`、`state-machine.md`、`tests.md` 和 `docs/operations/etc-business-batches.md`。
+- 测试覆盖：新增后端 API/service 回归覆盖省略 `taskId` 创建 linked task + active business batch、业务批次创建失败时 tombstone 新 task；新增前端回归覆盖 orphan reconciliation task 不进入左侧批次列表、新建批次调用 `createEtcBusinessBatch({})`、workflow 内 standalone task 删除入口继续可用；更新前端 mock 以匹配后端闭环。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py -q`；`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_deleted_task_does_not_rehydrate_from_postgres_retained_row_or_reuse_id tests/test_postgres_repositories_boundaries.py::test_ops_tax_etc_deleted_reconciliation_task_clears_formal_file_rows tests/test_cleanup_orphan_etc_reconciliation_tasks_tool.py -q`；`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx`；`cd web && npm test -- --run src/test/EtcApi.test.ts`。
+- 未测风险：尚未在生产库执行 orphan task 清理；必须先核对 `/api/etc/business-batches?status=active` 与 `/api/etc/reconciliation-tasks`，再对没有 active business batch 绑定的 task id 逐个 dry-run/execute。真实浏览器 smoke、前端 build 和 docs verify 由最终验证阶段执行。
+- 后续事项：发布后 smoke 需确认新建批次接口返回 linked `taskId` 且左侧未提交列表只显示 business batch；若历史 orphan task 仍存在，按运维 runbook 清理。
+
 ## 2026-06-11 - 首轮测试闭环
 
 - 目标：完成 `etc-tickets` 模块 codebase 影响面分析、七类测试矩阵补强、状态机更新和主控依赖图登记。

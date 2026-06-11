@@ -15,7 +15,7 @@
 | 行状态 | `pending_invoice` / `paid_invoiced` / `no_invoice_required` 等 | `InvoiceLifecyclePolicy`、pending invoice read model | 列表只展示后端返回的 `invoice_acquisition_status`；页面不补推 primary action。 |
 | 人工补票 | `previewed` | `PendingInvoiceApplicationService.preview_manual_invoice` | preview 校验并返回 identity/relation impact，不写最终发票或关系事实。 |
 | 人工补票 | `confirmed` | `confirm_manual_invoice` | 创建或修复发票、relation、audit、command log，触发 lifecycle finalizer。 |
-| 选择已有发票 | `attach_previewed` / `attach_confirmed` | application service | 只允许 expense 行选择 input invoice；confirm 写 relation/audit/finalizer。 |
+| 选择已有发票 | `attach_previewed` / `attach_confirmed` | application service | 只允许 expense 行选择 input invoice；支持单条或多条流水选择一张或多张进项发票；confirm 写一条 Workbench active relation、audit、command log 和 finalizer。 |
 | 收入状态覆盖 | `income_no_invoice_required` / `cash_income` | income status override command | 只适用于收入行；事件只刷新 pending/search。 |
 | command log | `created` / `relation_created` / `finalized` / `failed_terminal` | command repository | confirm 中断后可重试恢复，不得重复创建发票或关系。 |
 
@@ -26,6 +26,7 @@
 - `requires_invoice` 即使出现在请求中也必须忽略；后端始终按 active tag complement 派生。
 - filter-options、export-preview 和 export 必须先读 fresh read model；非 fresh 时返回 accepted/refreshing。
 - 人工补票 preview 不写事实；confirm 必须返回 affected months/objects，供页面刷新和 lifecycle 使用。
+- 选择已有发票批量 preview 不写事实；confirm 必须返回 affected transaction/invoice arrays。已存在兼容的 bank+invoice relation 时应合并/扩展同一 active relation，不创建复用同一 row 的第二条 active case。
 - invoice lifecycle 必须先于待找发票、税金、成本、OA/进项/销项下游页面刷新。
 
 禁止流转：
@@ -49,7 +50,8 @@
 | error | rows/detail/rules/manual/attach/export 请求失败 | 展示业务错误，不暴露底层 SQL/worker internals。 |
 | rules drawer | 用户打开规则配置 | 读取当前 direction 规则和 active tags；支持 stale version conflict 反馈。 |
 | manual invoice dialog | 用户从状态 action 发起 | 必须 preview 后 confirm；confirm 成功后 refetch rows。 |
-| attach existing drawer/dialog | 用户选择候选发票 | preview 展示冲突和影响；confirm 成功后刷新行和关系详情。 |
+| attach existing drawer/dialog | 用户选择候选发票 | 单条或多条流水共用右侧抽屉；候选列表支持多选进项发票；抽屉展示已选流水金额、已选发票金额和差额；preview 展示冲突和影响；confirm 成功后刷新行和关系详情。 |
+| batch transaction selection | 用户在支出列表勾选流水 | 仅允许有 `attach_existing_invoice` action 的支出流水进入批量选择；筛选、排序、分页、搜索或确认后清理选择。 |
 | income status action | 收入行状态按钮 | 提交时禁用该行重复操作；成功后 row 状态以响应或 refetch 为准。 |
 | permission disabled/hidden | session permissions | 只读用户隐藏或禁用保存规则、manual、attach、income override 等 mutation。 |
 
@@ -106,3 +108,4 @@ Refresh 触发来源：
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐测试闭环状态机 | 支出/收入规则、manual/attach/income status、UI、read model 和 worker 状态边界 | `tests.test_pending_invoice_service`、`tests.test_pending_invoice_api`、`tests.test_invoice_lifecycle_page_integration`、`tests.test_search_pending_sql_runtime`、`tests.test_pending_invoice_relation_identity`、`tests.test_pending_invoice_oa_identity_backfill`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_runtime_worker_registry`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` 通过 |
+| 2026-06-11 | 选择已有进项发票支持多流水、多发票批量 preview/confirm，状态菜单新增已支付待开票/已支付已开票快捷筛选 | Pending invoice application service、Workbench active relation、PendingInvoicesPage、候选抽屉、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |

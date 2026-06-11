@@ -166,8 +166,28 @@ function moneyNumber(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function moneyCents(value: number) {
+  return Math.round(value * 100);
+}
+
 function flowBankRowId(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
+}
+
+function closureExpectedVersions(rows: TurnoverLedgerGroupedRow[]) {
+  const expectedVersions: Record<string, unknown> = {};
+  rows.forEach((row) => {
+    const bankRowId = flowBankRowId(row);
+    if (!bankRowId || !Number.isFinite(row.categoryVersion)) {
+      return;
+    }
+    expectedVersions[`turnover_bank_row:${bankRowId}`] = row.categoryVersion;
+  });
+  return Object.keys(expectedVersions).length > 0 ? expectedVersions : undefined;
+}
+
+function closureIdempotencyKey(bankRowIds: string[]) {
+  return `turnover-manual-closure:${Date.now()}:${bankRowIds.join(",")}`;
 }
 
 function relationDetailErrorMessage(caught: unknown) {
@@ -242,15 +262,17 @@ function buildClosurePreview(rows: TurnoverLedgerGroupedRow[]) {
   });
   const incomeItems = items.filter((item) => item.direction === "income");
   const expenseItems = items.filter((item) => item.direction === "expense");
-  const incomeAmount = incomeItems.reduce((sum, item) => sum + item.amount, 0);
-  const expenseAmount = expenseItems.reduce((sum, item) => sum + item.amount, 0);
-  const delta = Math.abs(incomeAmount - expenseAmount);
+  const incomeCents = incomeItems.reduce((sum, item) => sum + moneyCents(item.amount), 0);
+  const expenseCents = expenseItems.reduce((sum, item) => sum + moneyCents(item.amount), 0);
+  const incomeAmount = incomeCents / 100;
+  const expenseAmount = expenseCents / 100;
+  const delta = Math.abs(incomeCents - expenseCents) / 100;
   return {
     items,
     incomeAmount,
     expenseAmount,
     delta,
-    canConfirm: rows.length === 2 && incomeItems.length === 1 && expenseItems.length === 1 && delta === 0,
+    canConfirm: rows.length >= 2 && incomeItems.length >= 1 && expenseItems.length >= 1 && incomeCents === expenseCents,
   };
 }
 
@@ -424,17 +446,13 @@ export default function TurnoverLedgerPage() {
         };
       }
       if (current.groupId !== group.groupId) {
-        setToast({ severity: "error", message: "一次只能选择同一往来组内的两条流水" });
+        setToast({ severity: "error", message: "一次只能选择同一往来组内的流水" });
         return current;
       }
       const exists = current.rows.some((item) => flowBankRowId(item) === rowId);
       if (exists) {
         const rows = current.rows.filter((item) => flowBankRowId(item) !== rowId);
         return rows.length > 0 ? { ...current, rows } : null;
-      }
-      if (current.rows.length >= 2) {
-        setToast({ severity: "error", message: "一次最多选择两条流水" });
-        return current;
       }
       return { ...current, rows: [...current.rows, row] };
     });
@@ -445,12 +463,16 @@ export default function TurnoverLedgerPage() {
       return;
     }
     const bankRowIds = selectedClosureRows.map(flowBankRowId).filter(Boolean);
-    if (bankRowIds.length !== 2) {
+    if (bankRowIds.length < 2) {
       return;
     }
     setClosureSubmitting(true);
     try {
-      const result = await confirmTurnoverClosure({ bankRowIds });
+      const result = await confirmTurnoverClosure({
+        bankRowIds,
+        expectedVersions: closureExpectedVersions(selectedClosureRows),
+        idempotencyKey: closureIdempotencyKey(bankRowIds),
+      });
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
         relationId: result.relationId,
         affectedRowIds: bankRowIds,
@@ -563,6 +585,14 @@ export default function TurnoverLedgerPage() {
         action: kind,
         source: "turnover_relation_mutation",
       });
+      if (kind === "withdraw") {
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+          relationId: result.relationId || selectedRow.relationId,
+          affectedRowIds: selectedRow.bankRowIds,
+          action: "turnover_relation_withdraw",
+          source: "turnover_relation_mutation",
+        });
+      }
       setToast({ severity: "success", message: kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销" });
       loadLedger();
     } catch (caught) {
@@ -702,7 +732,7 @@ export default function TurnoverLedgerPage() {
               <div className="turnover-ledger-actions">
                 <button
                   className="turnover-ledger-button"
-                  disabled={!canMutateData || ledgerActionsDisabled || selectedClosureRows.length !== 2}
+                  disabled={!canMutateData || ledgerActionsDisabled || selectedClosureRows.length < 2}
                   onClick={() => setClosureDrawerOpen(true)}
                   type="button"
                 >
@@ -851,7 +881,7 @@ export default function TurnoverLedgerPage() {
               </div>
             </div>
             {!closurePreview.canConfirm ? (
-              <div className="turnover-ledger-drawer__notice" role="alert">只有一收一支且差额为 0.00 的两条流水可以确认闭环。</div>
+              <div className="turnover-ledger-drawer__notice" role="alert">需选择同一往来组内至少一笔收入和一笔支出，且收支合计差额为 0.00。</div>
             ) : null}
           </div>
           <div className="turnover-ledger-drawer__footer">

@@ -320,19 +320,28 @@ class OaPendingPaymentQueryService:
 
     def row_relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
         normalized_kind = str(kind or "").strip()
-        if normalized_kind not in {"bank", "invoice"}:
-            raise OaPendingPaymentError("invalid_relation_kind", "kind must be bank or invoice.")
+        if normalized_kind not in {"oa", "bank", "invoice"}:
+            raise OaPendingPaymentError("invalid_relation_kind", "kind must be oa, bank or invoice.")
         context = self._query_context()
         row = self._row_by_id(row_id, context=context)
         if row is None:
             raise OaPendingPaymentError("row_not_found", f"OA pending payment row not found: {row_id}", status_code=HTTPStatus.NOT_FOUND)
-        relation_payload = row["bankTransaction"] if normalized_kind == "bank" else row["invoice"]
+        relation_payload = {
+            "oa": row["oa"],
+            "bank": row["bankTransaction"],
+            "invoice": row["invoice"],
+        }[normalized_kind]
+        title = {
+            "oa": "OA关联明细",
+            "bank": "支出流水关联明细",
+            "invoice": "发票关联明细",
+        }[normalized_kind]
         summaries = list(relation_payload.get("summaries") or [])
         return {
             "rowId": row["id"],
             "oaId": row["oa"]["id"],
             "kind": normalized_kind,
-            "title": "支出流水关联明细" if normalized_kind == "bank" else "发票关联明细",
+            "title": title,
             "subtitle": row["oa"].get("applicantName") or row["oa"].get("projectName") or row["oa"]["id"],
             "detailAvailable": relation_payload.get("detailMode") != "none",
             "relationCount": relation_payload.get("relationCount", 0),
@@ -383,28 +392,160 @@ class OaPendingPaymentQueryService:
         bank_by_id = context.bank_transactions_by_id()
         invoices_by_id = self._input_invoices_by_id()
         rows = []
+        emitted_relation_ids: set[str] = set()
+        grouped_oa_ids: set[str] = set()
         for record in records:
             relations = context.distributed_relations_for_row_ids([record.id])
-            bank_payload = self._bank_relation_payload(record, relations=relations, bank_by_id=bank_by_id)
-            invoice_payload = self._invoice_relation_payload(record, relations=relations, invoices_by_id=invoices_by_id)
-            payment_status = self._payment_status(
-                record,
-                bank_payload,
-                relations,
-                bank_by_id=bank_by_id,
-                oa_by_id=oa_by_id,
-                context=context,
+            for relation in relations:
+                relation_id = _relation_row_identity(relation)
+                if not relation_id or relation_id in emitted_relation_ids:
+                    continue
+                relation_records = self._relation_oa_records(relation, oa_by_id)
+                if not relation_records or record.id not in {item.id for item in relation_records}:
+                    continue
+                row = self._relation_group_row(
+                    relation=relation,
+                    records=relation_records,
+                    bank_by_id=bank_by_id,
+                    invoices_by_id=invoices_by_id,
+                )
+                rows.append(row)
+                emitted_relation_ids.add(relation_id)
+                grouped_oa_ids.update(item.id for item in relation_records)
+        for record in records:
+            if record.id in grouped_oa_ids:
+                continue
+            rows.append(
+                self._single_oa_row(
+                    record,
+                    context=context,
+                    bank_by_id=bank_by_id,
+                    invoices_by_id=invoices_by_id,
+                )
             )
-            row = {
-                "id": _row_id(record.id),
-                "oa": self._oa_summary(record),
-                "paymentStatus": payment_status,
-                "bankTransaction": bank_payload,
-                "invoice": invoice_payload,
-            }
-            row["searchText"] = json.dumps(row, ensure_ascii=False, sort_keys=True)
-            rows.append(row)
         return rows
+
+    def _single_oa_row(
+        self,
+        record: OAApplicationRecord,
+        *,
+        context: DistributedInvoiceRelationContext,
+        bank_by_id: dict[str, BankTransaction],
+        invoices_by_id: dict[str, Invoice],
+    ) -> dict[str, Any]:
+        relations = context.distributed_relations_for_row_ids([record.id])
+        bank_payload = self._bank_relation_payload(record, relations=relations, bank_by_id=bank_by_id)
+        invoice_payload = self._invoice_relation_payload(record, relations=relations, invoices_by_id=invoices_by_id)
+        payment_status = self._payment_status_for_amount(record.amount, bank_payload)
+        row = {
+            "id": _row_id(record.id),
+            "oa": self._oa_summary(record),
+            "paymentStatus": payment_status,
+            "bankTransaction": bank_payload,
+            "invoice": invoice_payload,
+        }
+        row["searchText"] = json.dumps(row, ensure_ascii=False, sort_keys=True)
+        return row
+
+    def _relation_group_row(
+        self,
+        *,
+        relation: dict[str, Any],
+        records: list[OAApplicationRecord],
+        bank_by_id: dict[str, BankTransaction],
+        invoices_by_id: dict[str, Invoice],
+    ) -> dict[str, Any]:
+        oa_payload = self._oa_group_payload(records, relation)
+        oa_amount = _parse_decimal(oa_payload.get("amount")) or ZERO
+        relations = [relation]
+        bank_payload = self._bank_relation_payload(None, relations=relations, bank_by_id=bank_by_id, oa_amount=oa_amount)
+        invoice_payload = self._invoice_relation_payload(None, relations=relations, invoices_by_id=invoices_by_id, oa_amount=oa_amount)
+        payment_status = self._payment_status_for_amount(oa_payload.get("amount"), bank_payload)
+        row = {
+            "id": _relation_row_id(_relation_row_identity(relation)),
+            "oa": oa_payload,
+            "paymentStatus": payment_status,
+            "bankTransaction": bank_payload,
+            "invoice": invoice_payload,
+        }
+        row["searchText"] = json.dumps(row, ensure_ascii=False, sort_keys=True)
+        return row
+
+    @staticmethod
+    def _relation_oa_records(
+        relation: dict[str, Any],
+        oa_by_id: dict[str, OAApplicationRecord],
+    ) -> list[OAApplicationRecord]:
+        oa_ids: list[str] = []
+        for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
+            if row_type == "oa" and row_id in oa_by_id and row_id not in oa_ids:
+                oa_ids.append(row_id)
+        return [oa_by_id[oa_id] for oa_id in oa_ids]
+
+    @staticmethod
+    def _oa_group_payload(records: list[OAApplicationRecord], relation: dict[str, Any]) -> dict[str, Any]:
+        summaries = [OaPendingPaymentQueryService._oa_relation_summary(record, relation) for record in records]
+        primary = summaries[0] if summaries else {}
+        parsed_amounts = [_parse_decimal(summary.get("amount")) for summary in summaries]
+        has_complete_amounts = len(parsed_amounts) == len(summaries) and all(amount is not None for amount in parsed_amounts)
+        total = sum((amount or ZERO for amount in parsed_amounts), start=ZERO)
+        relation_count = len(summaries)
+        return {
+            "id": primary.get("oaId", ""),
+            "primaryOaId": primary.get("oaId", ""),
+            "applicantName": primary.get("applicantName", ""),
+            "applicationType": primary.get("applicationType", ""),
+            "projectName": primary.get("projectName", ""),
+            "applicationTime": primary.get("applicationTime", ""),
+            "amount": _money(total) if has_complete_amounts else "",
+            "detailAvailable": relation_count > 0,
+            "month": primary.get("month", ""),
+            "workflowNo": primary.get("workflowNo", ""),
+            "reason": primary.get("reason", ""),
+            "counterpartyName": primary.get("counterpartyName", ""),
+            "relationCount": relation_count,
+            "hasMultiple": relation_count > 1,
+            "detailMode": "none" if relation_count == 0 else "list" if relation_count > 1 else "single",
+            "summaries": summaries,
+        }
+
+    @staticmethod
+    def _oa_relation_summary(record: OAApplicationRecord, relation: dict[str, Any] | None = None) -> dict[str, Any]:
+        summary = {
+            "oaId": record.id,
+            "applicantName": record.applicant,
+            "applicationType": record.apply_type,
+            "projectName": record.project_name_display or record.project_name,
+            "applicationTime": _oa_application_time(record),
+            "amount": _money(record.amount) if _parse_decimal(record.amount) is not None else "",
+            "month": record.month,
+            "workflowNo": record.case_id or "",
+            "reason": record.reason,
+            "counterpartyName": record.counterparty_name,
+        }
+        if relation is not None:
+            summary["relationCaseId"] = relation.get("case_id", "")
+        return summary
+
+    def _payment_status_for_amount(self, oa_amount_value: Any, bank_payload: dict[str, Any]) -> dict[str, str]:
+        oa_amount = _parse_decimal(oa_amount_value)
+        if oa_amount is None:
+            return self._lifecycle_policy.evaluate_oa_payment(oa_amount=None, paid_total=ZERO, has_bank=False)
+        bank_ids = [str(summary.get("bankTransactionId") or "") for summary in list(bank_payload.get("summaries") or [])]
+        bank_ids = [bank_id for bank_id in bank_ids if bank_id]
+        if not bank_ids:
+            return self._lifecycle_policy.evaluate_oa_payment(
+                oa_amount=oa_amount,
+                paid_total=ZERO,
+                has_bank=False,
+                has_missing_bank_relation=int(bank_payload.get("missingBankRelationCount") or 0) > 0,
+                has_non_outflow_bank_relation=int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0,
+            )
+        return self._lifecycle_policy.evaluate_oa_payment(
+            oa_amount=oa_amount,
+            paid_total=_decimal(bank_payload.get("paidTotal")),
+            has_bank=True,
+        )
 
     def _oa_records(self, *, month: str | None) -> list[OAApplicationRecord]:
         records = list(self._oa_records_by_id(month=month).values())
@@ -432,32 +573,40 @@ class OaPendingPaymentQueryService:
 
     @staticmethod
     def _oa_summary(record: OAApplicationRecord) -> dict[str, Any]:
+        summary = OaPendingPaymentQueryService._oa_relation_summary(record)
         return {
-            "id": record.id,
-            "applicantName": record.applicant,
-            "applicationType": record.apply_type,
-            "projectName": record.project_name_display or record.project_name,
-            "applicationTime": _oa_application_time(record),
-            "amount": _money(record.amount) if _parse_decimal(record.amount) is not None else "",
+            "id": summary["oaId"],
+            "primaryOaId": summary["oaId"],
+            "applicantName": summary["applicantName"],
+            "applicationType": summary["applicationType"],
+            "projectName": summary["projectName"],
+            "applicationTime": summary["applicationTime"],
+            "amount": summary["amount"],
             "detailAvailable": True,
-            "month": record.month,
-            "workflowNo": record.case_id or "",
-            "reason": record.reason,
-            "counterpartyName": record.counterparty_name,
+            "month": summary["month"],
+            "workflowNo": summary["workflowNo"],
+            "reason": summary["reason"],
+            "counterpartyName": summary["counterpartyName"],
+            "relationCount": 1,
+            "hasMultiple": False,
+            "detailMode": "single",
+            "summaries": [summary],
         }
 
     def _bank_relation_payload(
         self,
-        record: OAApplicationRecord,
+        record: OAApplicationRecord | None,
         *,
         relations: list[dict[str, Any]],
         bank_by_id: dict[str, BankTransaction],
+        oa_amount: Decimal | None = None,
     ) -> dict[str, Any]:
         summaries = []
         seen: set[str] = set()
         missing_bank_relation_count = 0
         non_outflow_relation_count = 0
-        oa_amount = _parse_decimal(record.amount) or ZERO
+        resolved_oa_amount = oa_amount if oa_amount is not None else (_parse_decimal(record.amount) if record is not None else None)
+        resolved_oa_amount = resolved_oa_amount or ZERO
         for relation in relations:
             for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
                 if row_type != "bank":
@@ -471,7 +620,7 @@ class OaPendingPaymentQueryService:
                     continue
                 if bank.id not in seen:
                     seen.add(bank.id)
-                    summaries.append(self._bank_summary(bank, oa_amount, relation))
+                    summaries.append(self._bank_summary(bank, resolved_oa_amount, relation))
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
@@ -546,14 +695,16 @@ class OaPendingPaymentQueryService:
 
     def _invoice_relation_payload(
         self,
-        record: OAApplicationRecord,
+        record: OAApplicationRecord | None,
         *,
         relations: list[dict[str, Any]],
         invoices_by_id: dict[str, Invoice],
+        oa_amount: Decimal | None = None,
     ) -> dict[str, Any]:
         summaries = []
         seen: set[str] = set()
-        oa_amount = _parse_decimal(record.amount) or ZERO
+        resolved_oa_amount = oa_amount if oa_amount is not None else (_parse_decimal(record.amount) if record is not None else None)
+        resolved_oa_amount = resolved_oa_amount or ZERO
         for relation in relations:
             for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
                 if row_type != "invoice":
@@ -561,16 +712,17 @@ class OaPendingPaymentQueryService:
                 invoice = invoices_by_id.get(row_id)
                 if invoice is not None and invoice.id not in seen:
                     seen.add(invoice.id)
-                    summaries.append(self._invoice_summary(invoice, oa_amount, relation))
+                    summaries.append(self._invoice_summary(invoice, resolved_oa_amount, relation))
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
+        invoice_total = sum((_decimal(summary.get("totalWithTax")) for summary in public_summaries), start=ZERO)
         return {
             "primaryInvoiceId": primary.get("invoiceId"),
             "digitalInvoiceNo": primary.get("digitalInvoiceNo", ""),
             "sellerName": primary.get("sellerName", ""),
             "invoiceDate": primary.get("invoiceDate", ""),
-            "totalWithTax": primary.get("totalWithTax", ""),
+            "totalWithTax": _money(invoice_total) if public_summaries else "",
             "relationCount": len(public_summaries),
             "hasMultiple": len(public_summaries) > 1,
             "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
@@ -589,72 +741,6 @@ class OaPendingPaymentQueryService:
             "relationCaseId": relation.get("case_id", ""),
             "_sort": (abs(total - oa_amount), invoice.invoice_date or "", invoice.id),
         }
-
-    def _payment_status(
-        self,
-        record: OAApplicationRecord,
-        bank_payload: dict[str, Any],
-        relations: list[dict[str, Any]],
-        *,
-        bank_by_id: dict[str, BankTransaction],
-        oa_by_id: dict[str, OAApplicationRecord],
-        context: DistributedInvoiceRelationContext,
-    ) -> dict[str, str]:
-        oa_amount = _parse_decimal(record.amount)
-        if oa_amount is None:
-            return self._lifecycle_policy.evaluate_oa_payment(oa_amount=None, paid_total=ZERO, has_bank=False)
-        bank_ids = [str(summary.get("bankTransactionId") or "") for summary in list(bank_payload.get("summaries") or [])]
-        bank_ids = [bank_id for bank_id in bank_ids if bank_id]
-        if not bank_ids:
-            return self._lifecycle_policy.evaluate_oa_payment(
-                oa_amount=oa_amount,
-                paid_total=ZERO,
-                has_bank=False,
-                has_missing_bank_relation=int(bank_payload.get("missingBankRelationCount") or 0) > 0,
-                has_non_outflow_bank_relation=int(bank_payload.get("nonOutflowBankRelationCount") or 0) > 0,
-            )
-        merged_payment = self._is_merged_payment(
-            record.id,
-            bank_ids,
-            relations,
-            bank_by_id=bank_by_id,
-            oa_by_id=oa_by_id,
-            context=context,
-        )
-        paid_total = sum((abs(_decimal(bank_by_id[bank_id].amount)) for bank_id in bank_ids if bank_id in bank_by_id), start=ZERO)
-        return self._lifecycle_policy.evaluate_oa_payment(
-            oa_amount=oa_amount,
-            paid_total=paid_total,
-            has_bank=True,
-            merged_payment=merged_payment,
-        )
-
-    def _is_merged_payment(
-        self,
-        oa_id: str,
-        bank_ids: list[str],
-        relations: list[dict[str, Any]],
-        *,
-        bank_by_id: dict[str, BankTransaction],
-        oa_by_id: dict[str, OAApplicationRecord],
-        context: DistributedInvoiceRelationContext,
-    ) -> bool:
-        for bank_id in bank_ids:
-            bank = bank_by_id.get(bank_id)
-            if bank is None:
-                continue
-            related_oa_ids: list[str] = []
-            for relation in context.distributed_relations_for_row_ids([bank_id]):
-                for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
-                    if row_type == "oa" and row_id not in related_oa_ids:
-                        related_oa_ids.append(row_id)
-            if len(related_oa_ids) < 2 or oa_id not in related_oa_ids:
-                continue
-            amounts = [_parse_decimal(oa_by_id[related_oa_id].amount) for related_oa_id in related_oa_ids if related_oa_id in oa_by_id]
-            if len(amounts) == len(related_oa_ids) and all(amount is not None for amount in amounts):
-                if _within_cent(sum((amount or ZERO for amount in amounts), start=ZERO), abs(_decimal(bank.amount))):
-                    return True
-        return False
 
     @staticmethod
     def _filter_config() -> list[dict[str, Any]]:
@@ -842,12 +928,27 @@ def _parse_positive_int(value: int | str | None, field: str, *, maximum: int | N
 
 
 def _status(code: str, label: str, reason: str) -> dict[str, str]:
-    severity = "success" if code in {"paid", "merged_paid"} else "warning" if code in {"unpaid", "pending_review"} else "error"
+    severity = "success" if code == "paid" else "warning" if code in {"unpaid", "pending_review", "partially_paid"} else "error"
     return {"code": code, "label": label, "reason": reason, "severity": severity}
 
 
 def _row_id(oa_id: str) -> str:
     return "oa_pending_payment_row_" + sha1(str(oa_id).encode("utf-8")).hexdigest()[:16]
+
+
+def _relation_row_identity(relation: dict[str, Any]) -> str:
+    case_id = str(relation.get("case_id") or "").strip()
+    if case_id:
+        return case_id
+    typed_rows = [
+        f"{row_type}:{row_id}"
+        for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation)
+    ]
+    return "|".join(typed_rows)
+
+
+def _relation_row_id(identity: str) -> str:
+    return "oa_pending_payment_relation_" + sha1(str(identity).encode("utf-8")).hexdigest()[:16]
 
 
 def _parse_decimal(value: Any) -> Decimal | None:
@@ -951,6 +1052,23 @@ def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str,
     typed_summaries = [summary for summary in summaries if isinstance(summary, dict)]
     if not typed_summaries:
         return [{"title": "关联明细", "fields": [{"label": "状态", "value": "暂无关联记录"}]}]
+    if kind == "oa":
+        return [
+            {
+                "title": f"OA {index}",
+                "fields": [
+                    {"label": "申请人", "value": summary.get("applicantName")},
+                    {"label": "类型", "value": summary.get("applicationType")},
+                    {"label": "项目名称", "value": summary.get("projectName")},
+                    {"label": "申请时间", "value": summary.get("applicationTime")},
+                    {"label": "金额", "value": summary.get("amount")},
+                    {"label": "月份", "value": summary.get("month")},
+                    {"label": "事由", "value": summary.get("reason")},
+                    {"label": "往来方", "value": summary.get("counterpartyName")},
+                ],
+            }
+            for index, summary in enumerate(typed_summaries, start=1)
+        ]
     if kind == "bank":
         return [
             {

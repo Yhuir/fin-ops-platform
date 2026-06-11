@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type {
-  AttachExistingInvoicePreview,
-  AttachExistingInvoiceResult,
-  FetchPendingInvoiceCandidatesRequest,
+  AttachExistingInvoicesPreview,
+  AttachExistingInvoicesResult,
+  FetchPendingInvoiceBatchCandidatesRequest,
   PendingInvoiceCandidate,
   PendingInvoiceCandidatesResponse,
 } from "../../features/pendingInvoices/types";
@@ -11,11 +11,11 @@ import PendingInvoiceDrawerFrame from "./PendingInvoiceDrawerFrame";
 
 type PendingInvoiceInvoicePickerDrawerProps = {
   open: boolean;
-  transactionId: string | null;
-  loadCandidates: (request: FetchPendingInvoiceCandidatesRequest) => Promise<PendingInvoiceCandidatesResponse>;
-  previewAttach: (transactionId: string, invoiceId: string, requestId: string) => Promise<AttachExistingInvoicePreview>;
-  confirmAttach: (transactionId: string, invoiceId: string, previewId: string, requestId: string) => Promise<AttachExistingInvoiceResult>;
-  onConfirmed: (result: AttachExistingInvoiceResult) => void;
+  transactionIds: string[];
+  loadCandidates: (request: FetchPendingInvoiceBatchCandidatesRequest) => Promise<PendingInvoiceCandidatesResponse>;
+  previewAttach: (transactionIds: string[], invoiceIds: string[], requestId: string) => Promise<AttachExistingInvoicesPreview>;
+  confirmAttach: (transactionIds: string[], invoiceIds: string[], previewId: string, requestId: string) => Promise<AttachExistingInvoicesResult>;
+  onConfirmed: (result: AttachExistingInvoicesResult) => void;
   onClose: () => void;
 };
 
@@ -29,6 +29,15 @@ function createRequestId(prefix: string) {
 function formatMoney(value: string) {
   const parsed = Number(String(value ?? "").replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value || "-";
+}
+
+function numericMoney(value: string | null | undefined) {
+  const parsed = Number(String(value ?? "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoneyNumber(value: number) {
+  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function invoiceNumber(candidate: PendingInvoiceCandidate) {
@@ -56,7 +65,7 @@ function candidateStatusTone(status: PendingInvoiceCandidate["candidateStatus"])
 
 export default function PendingInvoiceInvoicePickerDrawer({
   open,
-  transactionId,
+  transactionIds,
   loadCandidates,
   previewAttach,
   confirmAttach,
@@ -64,8 +73,8 @@ export default function PendingInvoiceInvoicePickerDrawer({
   onClose,
 }: PendingInvoiceInvoicePickerDrawerProps) {
   const [payload, setPayload] = useState<PendingInvoiceCandidatesResponse | null>(null);
-  const [selected, setSelected] = useState<PendingInvoiceCandidate | null>(null);
-  const [preview, setPreview] = useState<AttachExistingInvoicePreview | null>(null);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(() => new Set());
+  const [preview, setPreview] = useState<AttachExistingInvoicesPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,17 +87,19 @@ export default function PendingInvoiceInvoicePickerDrawer({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const confirmRequestId = useMemo(() => createRequestId("attach-confirm"), [preview?.previewId]);
+  const transactionIdsKey = transactionIds.join("\n");
 
   const reloadCandidates = useCallback((guard: { active: boolean } = { active: true }) => {
-    if (!transactionId) {
+    if (transactionIds.length === 0) {
       return;
     }
     setLoading(true);
     setError(null);
     setPayload(null);
     setPreview(null);
+    setSelectedInvoiceIds(new Set());
     loadCandidates({
-      transactionId,
+      transactionIds,
       keyword,
       sellerName,
       issueDateFrom,
@@ -115,12 +126,12 @@ export default function PendingInvoiceInvoicePickerDrawer({
           setLoading(false);
         }
       });
-  }, [amountMax, amountMin, issueDateFrom, issueDateTo, keyword, loadCandidates, page, pageSize, sellerName, transactionId]);
+  }, [amountMax, amountMin, issueDateFrom, issueDateTo, keyword, loadCandidates, page, pageSize, sellerName, transactionIds, transactionIdsKey]);
 
   useEffect(() => {
-    if (!open || !transactionId) {
+    if (!open || transactionIds.length === 0) {
       setPayload(null);
-      setSelected(null);
+      setSelectedInvoiceIds(new Set());
       setPreview(null);
       setLoading(false);
       setBusy(false);
@@ -133,17 +144,43 @@ export default function PendingInvoiceInvoicePickerDrawer({
     return () => {
       guard.active = false;
     };
-  }, [open, reloadCandidates, transactionId]);
+  }, [open, reloadCandidates, transactionIds.length, transactionIdsKey]);
 
-  async function handlePreview(candidate: PendingInvoiceCandidate) {
-    if (!transactionId || busy) {
+  const selectedCandidates = useMemo(() => {
+    const selected = selectedInvoiceIds;
+    return (payload?.rows ?? []).filter((candidate) => selected.has(candidate.invoiceId));
+  }, [payload?.rows, selectedInvoiceIds]);
+  const selectedInvoiceTotal = useMemo(() => (
+    selectedCandidates.reduce((totalAmount, candidate) => totalAmount + numericMoney(candidate.totalWithTax), 0)
+  ), [selectedCandidates]);
+  const selectedBankTotal = payload?.selectionSummary?.bankTotal || preview?.selectionSummary.bankTotal || "0.00";
+  const selectedDifference = selectedInvoiceTotal - numericMoney(selectedBankTotal);
+  const selectedInvoiceIdsForSubmit = selectedCandidates.map((candidate) => candidate.invoiceId);
+
+  function toggleCandidate(candidate: PendingInvoiceCandidate) {
+    if (candidate.candidateStatus !== "available" || busy) {
       return;
     }
-    setSelected(candidate);
+    setPreview(null);
+    setSelectedInvoiceIds((current) => {
+      const next = new Set(current);
+      if (next.has(candidate.invoiceId)) {
+        next.delete(candidate.invoiceId);
+      } else {
+        next.add(candidate.invoiceId);
+      }
+      return next;
+    });
+  }
+
+  async function handlePreview() {
+    if (transactionIds.length === 0 || selectedInvoiceIdsForSubmit.length === 0 || busy) {
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      setPreview(await previewAttach(transactionId, candidate.invoiceId, createRequestId("attach-preview")));
+      setPreview(await previewAttach(transactionIds, selectedInvoiceIdsForSubmit, createRequestId("attach-preview")));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "关联预览失败");
     } finally {
@@ -152,13 +189,13 @@ export default function PendingInvoiceInvoicePickerDrawer({
   }
 
   async function handleConfirm() {
-    if (!transactionId || !selected || !preview || busy) {
+    if (transactionIds.length === 0 || selectedInvoiceIdsForSubmit.length === 0 || !preview || busy) {
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const result = await confirmAttach(transactionId, selected.invoiceId, preview.previewId, confirmRequestId);
+      const result = await confirmAttach(transactionIds, selectedInvoiceIdsForSubmit, preview.previewId, confirmRequestId);
       onConfirmed(result);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "关系确认失败");
@@ -173,6 +210,7 @@ export default function PendingInvoiceInvoicePickerDrawer({
   const currentPageSize = pagination?.pageSize ?? pageSize;
   const from = total === 0 ? 0 : (currentPage - 1) * currentPageSize + 1;
   const to = Math.min(total, currentPage * currentPageSize);
+  const subtitle = transactionIds.length > 1 ? `已选 ${transactionIds.length} 条流水` : transactionIds[0];
 
   return (
     <PendingInvoiceDrawerFrame
@@ -180,6 +218,14 @@ export default function PendingInvoiceInvoicePickerDrawer({
       footer={(
         <div className="pending-invoice-drawer-actions">
           <button className="pending-invoices-button" disabled={busy} onClick={onClose} type="button">关闭</button>
+          <button
+            className="pending-invoices-button"
+            disabled={selectedInvoiceIdsForSubmit.length === 0 || loading || busy}
+            onClick={handlePreview}
+            type="button"
+          >
+            预览关联
+          </button>
           <button
             className="pending-invoices-button pending-invoices-button--primary"
             disabled={!preview?.canConfirm || busy}
@@ -192,9 +238,9 @@ export default function PendingInvoiceInvoicePickerDrawer({
       )}
       onClose={onClose}
       open={open}
-      subtitle={transactionId ?? undefined}
+      subtitle={subtitle}
       title="选择已有进项发票"
-      width={820}
+      width={900}
     >
       {loading ? <LoadingMessage label="正在加载发票候选" text="正在加载发票候选" /> : null}
       {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
@@ -204,6 +250,11 @@ export default function PendingInvoiceInvoicePickerDrawer({
           <span>关联后待付 {formatMoney(preview.paymentImpact.remainingAmountAfter)}</span>
         </StatusMessage>
       ) : null}
+      <section aria-label="选择汇总" className="pending-invoice-metric-grid pending-invoice-picker-summary">
+        <Metric label="已选流水金额" value={formatMoney(selectedBankTotal)} />
+        <Metric label="已选发票金额" value={formatMoneyNumber(selectedInvoiceTotal)} />
+        <Metric label="差额" value={formatMoneyNumber(selectedDifference)} />
+      </section>
       <section className="pending-invoice-panel pending-invoice-filter-panel" aria-label="发票候选筛选">
         <Field label="关键词" value={keyword} onChange={(value) => { setKeyword(value); setPage(1); }} />
         <Field label="销方" value={sellerName} onChange={(value) => { setSellerName(value); setPage(1); }} />
@@ -217,12 +268,12 @@ export default function PendingInvoiceInvoicePickerDrawer({
         <table aria-label="发票候选" className="pending-invoice-simple-table">
           <thead>
             <tr>
+              <th scope="col">选择</th>
               <th scope="col">发票号码</th>
               <th scope="col">销方</th>
               <th className="pending-invoice-simple-table__amount" scope="col">价税合计</th>
               <th className="pending-invoice-simple-table__amount" scope="col">待支付</th>
               <th scope="col">状态</th>
-              <th className="pending-invoice-simple-table__amount" scope="col">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -233,6 +284,16 @@ export default function PendingInvoiceInvoicePickerDrawer({
             ) : null}
             {payload?.rows.map((candidate) => (
               <tr key={candidate.invoiceId || candidate.id}>
+                <td>
+                  <input
+                    aria-label={`选择发票 ${invoiceNumber(candidate)}`}
+                    checked={selectedInvoiceIds.has(candidate.invoiceId)}
+                    className="pending-invoice-candidate-select"
+                    disabled={candidate.candidateStatus !== "available" || busy}
+                    onChange={() => toggleCandidate(candidate)}
+                    type="checkbox"
+                  />
+                </td>
                 <td>
                   <span className="pending-invoice-table-stack">
                     <strong>{invoiceNumber(candidate)}</strong>
@@ -254,17 +315,6 @@ export default function PendingInvoiceInvoicePickerDrawer({
                     </span>
                     {candidate.conflictReason ? <span>{candidate.conflictReason}</span> : null}
                   </span>
-                </td>
-                <td className="pending-invoice-simple-table__amount">
-                  <button
-                    aria-label={`预览关联 ${invoiceNumber(candidate)}`}
-                    className="pending-invoices-button"
-                    disabled={candidate.candidateStatus !== "available" || busy}
-                    onClick={() => handlePreview(candidate)}
-                    type="button"
-                  >
-                    预览关联
-                  </button>
                 </td>
               </tr>
             ))}
@@ -298,6 +348,15 @@ export default function PendingInvoiceInvoicePickerDrawer({
         </div>
       </section>
     </PendingInvoiceDrawerFrame>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="pending-invoice-metric">
+      <span className="pending-invoice-metric__label">{label}</span>
+      <strong className="pending-invoice-metric__value">{value}</strong>
+    </div>
   );
 }
 

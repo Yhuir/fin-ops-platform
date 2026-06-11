@@ -577,6 +577,68 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "candidate-new,candidate-other",
         )
 
+    def test_save_no_oa_bank_batches_replaces_absent_read_model_rows(self) -> None:
+        self.store.save_no_oa_bank_batches(
+            {
+                "batches": {
+                    "old-conflict": {
+                        "batch_id": "old-conflict",
+                        "batch_type": "internal_transfer",
+                        "status": "conflict",
+                        "status_bucket": "unsubmitted",
+                        "version": 1,
+                        "scope_month": "2026-04",
+                        "account_key": "",
+                        "row_ids": ["transfer-in", "transfer-out"],
+                        "row_count": 2,
+                        "total_amount": "4000.00",
+                    }
+                }
+            }
+        )
+
+        self.store.save_no_oa_bank_batches(
+            {
+                "batches": {
+                    "submitted-internal-transfer": {
+                        "batch_id": "submitted-internal-transfer",
+                        "batch_type": "internal_transfer",
+                        "status": "submitted",
+                        "status_bucket": "submitted",
+                        "version": 2,
+                        "scope_month": "2026-04",
+                        "account_key": "",
+                        "row_ids": ["transfer-in", "transfer-out"],
+                        "row_count": 2,
+                        "total_amount": "4000.00",
+                        "relation_case_id": "submitted-internal-transfer",
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from app.no_oa_bank_batches where batch_id = 'old-conflict';",
+            ),
+            "0",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from read_model.no_oa_bank_batch_rows where batch_id = 'old-conflict';",
+            ),
+            "0",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select string_agg(batch_id, ',' order by batch_id) from read_model.no_oa_bank_batch_rows;",
+            ),
+            "submitted-internal-transfer",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

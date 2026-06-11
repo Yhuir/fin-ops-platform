@@ -129,18 +129,24 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 "GET",
                 f"/api/oa-pending-payments/rows/{row_id}/relation-details?kind=bank",
             )
+            oa_relation_response = app.handle_request(
+                "GET",
+                f"/api/oa-pending-payments/rows/{row_id}/relation-details?kind=oa",
+            )
 
         self.assertEqual(rows_response.status_code, 200)
         self.assertEqual(filter_response.status_code, 200)
         self.assertEqual(oa_response.status_code, 200)
         self.assertEqual(bank_response.status_code, 200)
         self.assertEqual(relation_response.status_code, 200)
+        self.assertEqual(oa_relation_response.status_code, 200)
         self.assertEqual(json.loads(rows_response.body)["rows"][0]["paymentStatus"]["code"], "paid")
         self.assertEqual(json.loads(rows_response.body)["rows"][0]["oa"]["applicationTime"], "2026-05-20")
         self.assertIn("oa_applicant", [field["field"] for field in json.loads(filter_response.body)["fields"]])
         self.assertEqual(json.loads(oa_response.body)["id"], "oa-api")
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-api")
         self.assertEqual(json.loads(relation_response.body)["kind"], "bank")
+        self.assertEqual(json.loads(oa_relation_response.body)["kind"], "oa")
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -368,6 +374,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 "/api/oa-pending-payments/bank-transactions/bank-api/detail",
                 "/api/oa-pending-payments/invoices/inv-api/detail",
                 "/api/oa-pending-payments/rows/row-api/relation-details?kind=bank",
+                "/api/oa-pending-payments/rows/row-api/relation-details?kind=oa",
             ]
 
             responses = [
@@ -394,6 +401,10 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             "oa-payment-row-api",
             {"kind": ["invoice"]},
         )
+        oa_relation_response = app._handle_api_oa_pending_payments_relation_details(
+            "oa-payment-row-api",
+            {"kind": ["oa"]},
+        )
 
         self.assertEqual(oa_response.status_code, 200)
         self.assertEqual(json.loads(oa_response.body)["id"], "oa-api")
@@ -405,6 +416,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertIn({"label": "进项发票方名称", "value": "API供应商"}, invoice_fields)
         self.assertEqual(relation_response.status_code, 200)
         self.assertEqual(json.loads(relation_response.body)["kind"], "invoice")
+        self.assertEqual(oa_relation_response.status_code, 200)
+        self.assertEqual(json.loads(oa_relation_response.body)["kind"], "oa")
+        self.assertEqual(json.loads(oa_relation_response.body)["title"], "OA关联明细")
         self.assertEqual(queue.refreshes, [])
 
     def test_production_detail_stale_or_missing_read_model_refreshes_without_live_scan(self) -> None:
@@ -605,6 +619,7 @@ def _read_model_row() -> dict[str, object]:
         "id": "oa-payment-row-api",
         "oa": {
             "id": "oa-api",
+            "primaryOaId": "oa-api",
             "applicantName": "张三",
             "applicationType": "报销",
             "projectName": "API项目",
@@ -614,6 +629,20 @@ def _read_model_row() -> dict[str, object]:
             "reason": "API测试",
             "counterpartyName": "API供应商",
             "detailAvailable": True,
+            "relationCount": 1,
+            "hasMultiple": False,
+            "detailMode": "single",
+            "summaries": [
+                {
+                    "oaId": "oa-api",
+                    "applicantName": "张三",
+                    "applicationType": "报销",
+                    "projectName": "API项目",
+                    "applicationTime": "2026-05-20",
+                    "amount": "100.00",
+                    "relationCaseId": "case-api",
+                }
+            ],
         },
         "paymentStatus": {"code": "paid", "label": "已支付", "reason": "支出流水合计等于OA金额"},
         "bankTransaction": {

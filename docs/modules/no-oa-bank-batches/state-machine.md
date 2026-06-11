@@ -92,6 +92,9 @@ draft candidate rows selected
 
 - 选中银行流水全部为 `internal_transfer` 时，后端必须委托 no-OA 批次提交入口。
 - 成功事实必须是 `status=submitted` 的 no-OA internal transfer batch，以及 `relation_mode=no_oa_bank_batch` 的 Workbench active pair relation。
+- 如果同一组 `row_ids` 已经存在 submitted no-OA internal transfer batch，关联台再次 confirm-link 必须返回同一个 `case_id` 并保持幂等，不能创建第二条 active relation。
+- 存量两行 `manual_confirmed` active relation 只有在 `internal_transfer` 已纳入免 OA 标签准入，且全银行流水、同金额、不同账户、收支成对、有效分类均为 `internal_transfer` 时，才作为历史内部往来入口迁移到 submitted no-OA 批次；其他 `manual_confirmed` 关系不归本模块迁移。
+- Workbench active pair relation 对 row 是独占事实；不同 active case 不允许复用同一 row。
 - 响应保持 Workbench `confirm_link` 兼容 shape。
 - 如果选中流水只有部分为 `internal_transfer`，必须返回 `400 no_oa_bank_batch_selection_internal_transfer_conflict`，不得静默写普通 `manual_confirmed`。
 - 非 internal transfer 的银行-only 平衡确认仍可保持普通 Workbench `manual_confirmed` 语义。
@@ -183,7 +186,7 @@ job.outbox_events / job.read_model_dirty_scopes
   -> no-oa-bank-batch worker consumes no_oa_bank_batch.read_model.refresh
   -> NoOaBankBatchReadModelRefreshService.handle_runtime_event
   -> NoOaBankBatchApplicationService.refresh_batches
-  -> save_no_oa_bank_batches
+  -> save_no_oa_bank_batches 以当前完整 snapshot 覆盖，并删除缺席批次行
   -> complete dirty scope and readiness
 ```
 
@@ -199,3 +202,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐免 OA 流水批量处理状态机 | 固定 tag selection、batch lifecycle、internal transfer from Workbench、UI stale polling、read model/worker 状态 | 待本轮模块验证命令 |
+| 2026-06-11 | 固定内部往来双入口闭环 | Workbench/no-OA 同一组内部往来幂等复用同一 no-OA fact；存量两行 manual internal-transfer relation 迁移；active relation row 独占；SQL read model 保存清理缺席旧批次 | `pytest` no-OA service/workbench integration、pair relation service 目标用例 |

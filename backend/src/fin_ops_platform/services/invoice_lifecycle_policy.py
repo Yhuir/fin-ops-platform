@@ -107,14 +107,12 @@ class InvoiceLifecyclePolicy:
             if has_non_outflow_bank_relation:
                 return _status("pending_review", "待核对", "关联流水不是支出流水，证据不完整")
             return _status("unpaid", "未支付", "未关联支出流水")
-        if merged_payment:
-            return _status("merged_paid", "已支付（多条OA合并支付）", "多条OA共享同一支出流水且合计金额匹配")
         paid = _decimal(paid_total)
         if _within_cent(paid, amount):
             return _status("paid", "已支付", "支出流水合计等于OA金额")
         if paid < amount:
             return _status("partially_paid", "支付少了", "支出流水合计小于OA金额")
-        return _status("overpaid", "支付多了", "支出流水合计大于OA金额")
+        return _status("pending_review", "待核对", "支出流水合计大于OA金额，需要复核关联台关系")
 
     def evaluate_output_invoice_collection(
         self,
@@ -164,7 +162,7 @@ class InvoiceLifecyclePolicy:
 
 
 def _status(code: str, label: str, reason: str) -> dict[str, str]:
-    severity = "success" if code in {"paid", "merged_paid"} else "warning"
+    severity = "success" if code == "paid" else "warning"
     return {"code": code, "label": label, "reason": reason, "severity": severity}
 
 

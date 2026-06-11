@@ -103,16 +103,25 @@ def oa_pending_payment_invoice_detail_from_row(row: dict[str, Any], invoice_id: 
 
 def oa_pending_payment_relation_details_from_row(row: dict[str, Any], *, kind: str) -> dict[str, Any]:
     normalized_kind = _text(kind)
-    if normalized_kind not in {"bank", "invoice"}:
-        raise ValueError("kind must be bank or invoice.")
-    relation_payload = _mapping(row.get("bankTransaction")) if normalized_kind == "bank" else _mapping(row.get("invoice"))
+    if normalized_kind not in {"oa", "bank", "invoice"}:
+        raise ValueError("kind must be oa, bank or invoice.")
+    relation_payload = {
+        "oa": _mapping(row.get("oa")),
+        "bank": _mapping(row.get("bankTransaction")),
+        "invoice": _mapping(row.get("invoice")),
+    }[normalized_kind]
+    title = {
+        "oa": "OA关联明细",
+        "bank": "支出流水关联明细",
+        "invoice": "发票关联明细",
+    }[normalized_kind]
     summaries = [summary for summary in list(relation_payload.get("summaries") or []) if isinstance(summary, dict)]
     oa = _mapping(row.get("oa"))
     return {
         "rowId": row.get("id"),
         "oaId": oa.get("id"),
         "kind": normalized_kind,
-        "title": "支出流水关联明细" if normalized_kind == "bank" else "发票关联明细",
+        "title": title,
         "subtitle": _text(oa.get("applicantName")) or _text(oa.get("projectName")) or _text(oa.get("id")),
         "detailAvailable": relation_payload.get("detailMode") != "none",
         "relationCount": relation_payload.get("relationCount", 0),
@@ -150,6 +159,23 @@ def _invoice_summary_for_detail(row: dict[str, Any], invoice_id: str) -> dict[st
 def _relation_detail_sections(kind: str, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not summaries:
         return [{"title": "关联明细", "fields": [{"label": "状态", "value": "暂无关联记录"}]}]
+    if kind == "oa":
+        return [
+            {
+                "title": f"OA {index}",
+                "fields": [
+                    {"label": "申请人", "value": summary.get("applicantName")},
+                    {"label": "类型", "value": summary.get("applicationType")},
+                    {"label": "项目名称", "value": summary.get("projectName")},
+                    {"label": "申请时间", "value": summary.get("applicationTime")},
+                    {"label": "金额", "value": summary.get("amount")},
+                    {"label": "月份", "value": summary.get("month")},
+                    {"label": "事由", "value": summary.get("reason")},
+                    {"label": "往来方", "value": summary.get("counterpartyName")},
+                ],
+            }
+            for index, summary in enumerate(summaries, start=1)
+        ]
     if kind == "bank":
         return [
             {
@@ -182,7 +208,7 @@ def _relation_detail_sections(kind: str, summaries: list[dict[str, Any]]) -> lis
 
 def _relation_summaries_from_row(row: dict[str, Any]) -> list[dict[str, Any]]:
     relations: dict[str, dict[str, Any]] = {}
-    for section_key in ("bankTransaction", "invoice"):
+    for section_key in ("oa", "bankTransaction", "invoice"):
         section = _mapping(row.get(section_key))
         for summary in list(section.get("summaries") or []):
             if not isinstance(summary, dict):

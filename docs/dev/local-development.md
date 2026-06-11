@@ -6,11 +6,25 @@
 python -m pip install -r backend/requirements.txt
 ```
 
-后端基础检查：
+后端基础检查默认使用干净临时 app 状态，适合提交前和日常开发验证：
 
 ```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check
+bash scripts/verify.sh backend
 ```
+
+需要检查当前机器配置的 runtime 状态时再显式运行：
+
+```bash
+bash scripts/verify.sh runtime-check
+```
+
+`runtime-check` 会读取当前环境变量和 `.runtime/fin_ops_platform/*_config.json`。如果 `.runtime/fin_ops_platform/app_mongo_config.json` 仍存在，后端会尝试加载 legacy app Mongo；旧 pickle snapshot 可能因为字段或 slot 迁移失败。PostgreSQL primary 开发环境不应依赖 app Mongo 旧路径，可先保留备份并禁用本地 app Mongo 配置：
+
+```bash
+mv .runtime/fin_ops_platform/app_mongo_config.json .runtime/fin_ops_platform/app_mongo_config.json.disabled
+```
+
+不要删除或重命名 `.runtime/fin_ops_platform/oa_mongo_config.json`，OA Mongo 仍是外部只读来源。
 
 后端启动：
 
@@ -98,10 +112,12 @@ App Mongo 可配置：
 - `.runtime/fin_ops_platform/app_mongo_config.json`
 - 或环境变量 `FIN_OPS_APP_MONGO_*`
 
+PostgreSQL primary runtime 下，App Mongo 只保留为迁移观察期回滚、shadow-read 或审计参考，不作为日常 app 事实源。保留该配置会让 `runtime-check` 继续读取旧 app Mongo 数据；`backend` / `all` 验证不会读取它。
+
 ## 常见检查
 
 ```bash
-PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
+bash scripts/verify.sh backend
 cd web && npm test
 cd web && npm run build
 ```

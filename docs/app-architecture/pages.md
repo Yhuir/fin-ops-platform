@@ -81,7 +81,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | 银行流水导入确认 | 新流水、标签和统计需要刷新 | 银行明细、关联台、往来款、成本统计、App Health |
 | OA/发票/ETC 导入确认 | 外部单据和候选关系变化 | 关联台、待找发票、OA 待付款、税金抵扣、ETC 批次 |
 | 关系确认 / 撤回 | 对象关系、流水状态、发票使用状态变化 | 关联台、银行明细、待找发票、税金抵扣、往来款 |
-| 外部往来手动闭环 | 同一往来组两条银行流水形成 Turnover 手动闭环和 Workbench pair relation | 往来款、关联台、成本统计、搜索 |
+| 外部往来手动闭环 | 同一往来组多笔银行流水形成 Turnover 手动闭环和 Workbench pair relation；bank-only 留在关联台 open，三栏补齐后才进 paired | 往来款、关联台、成本统计、搜索 |
 | 标签/规则配置保存 | 标签判定和候选建议变化 | 银行明细、关联台、待找发票、成本统计 |
 | 数据重置 / backfill | read model 状态和缓存失效 | 所有列表页、App Health |
 

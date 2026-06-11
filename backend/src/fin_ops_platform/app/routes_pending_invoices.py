@@ -70,6 +70,21 @@ class PendingInvoiceApiRoutes:
             page_size=query.get("page_size", [50])[0],
         )
 
+    def invoice_candidates_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._query_service.invoice_candidates_batch(
+            transaction_ids=list(payload.get("transaction_ids") or []),
+            keyword=payload.get("keyword"),
+            seller_name=payload.get("seller_name"),
+            issue_date_from=payload.get("issue_date_from"),
+            issue_date_to=payload.get("issue_date_to"),
+            amount_min=payload.get("amount_min"),
+            amount_max=payload.get("amount_max"),
+            sort_field=payload.get("sort_field"),
+            sort_direction=payload.get("sort_direction"),
+            page=payload.get("page", 1),
+            page_size=payload.get("page_size", 50),
+        )
+
     def relation_detail(self, transaction_id: str, query: dict[str, list[str]] | None = None) -> dict[str, Any]:
         request_query = query or {}
         return self._query_service.relation_detail(
@@ -102,6 +117,21 @@ class PendingInvoiceApiRoutes:
         self._require_mutation(session, "当前账户没有选择已有发票权限。")
         return self._application_service.confirm_attach_existing_invoice(
             transaction_id=transaction_id,
+            payload=payload,
+            actor_id=_actor_id(session, "pending_invoice"),
+        )
+
+    def attach_existing_batch_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._application_service.preview_attach_existing_invoices(payload=payload)
+
+    def attach_existing_batch_confirm(
+        self,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession | None,
+    ) -> dict[str, Any]:
+        self._require_mutation(session, "当前账户没有选择已有发票权限。")
+        return self._application_service.confirm_attach_existing_invoices(
             payload=payload,
             actor_id=_actor_id(session, "pending_invoice"),
         )

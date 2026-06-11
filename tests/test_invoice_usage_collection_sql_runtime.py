@@ -6,8 +6,9 @@ from http import HTTPStatus
 import unittest
 
 from fin_ops_platform.app.server import Application
-from fin_ops_platform.domain.enums import InvoiceType
+from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.invoice_usage_collection_read_model_refresh import (
     InvoiceUsageCollectionReadModelRefreshService,
 )
@@ -76,6 +77,65 @@ class FreshEmptyWorkbenchRelationFacade:
 
     def get_by_row_ids(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         return self.list_by_month()
+
+
+class FreshStaticWorkbenchRelationFacade:
+    def __init__(self, relations: list[dict[str, object]]) -> None:
+        self.relations = [dict(relation) for relation in relations]
+
+    @property
+    def last_source_versions(self) -> dict[str, object]:
+        return {}
+
+    def list_by_month(self, _month: str, **_kwargs: object) -> dict[str, object]:
+        return self._payload([self._group(relation) for relation in self.relations])
+
+    def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        wanted = {str(row_id) for row_id in list(row_ids or [])}
+        return self._payload([
+            self._group(relation)
+            for relation in self.relations
+            if wanted & {str(row_id) for row_id in list(relation.get("row_ids") or [])}
+        ])
+
+    def _payload(self, groups: list[dict[str, object]]) -> dict[str, object]:
+        rows: list[dict[str, object]] = []
+        seen: set[tuple[str, str]] = set()
+        for group in groups:
+            group_id = str(group["group_id"])
+            payload = group["payload"]
+            assert isinstance(payload, dict)
+            row_ids = [str(row_id) for row_id in list(payload["row_ids"])]
+            row_types = [str(row_type) for row_type in list(payload["row_types"])]
+            for row_id, row_type in zip(row_ids, row_types):
+                key = (row_id, group_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append({"row_id": row_id, "row_type": row_type, "relation_status": "linked", "group_ids": [group_id]})
+        return {"status": "fresh", "rows": rows, "groups": groups, "source_versions": {}, "read_model_scope_keys": []}
+
+    @staticmethod
+    def _group(relation: dict[str, object]) -> dict[str, object]:
+        case_id = str(relation.get("case_id") or "")
+        row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
+        row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+        return {
+            "group_id": case_id,
+            "scope_month": relation.get("month_scope") or "2026-05",
+            "oa_row_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "oa"],
+            "bank_transaction_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "bank"],
+            "input_invoice_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "invoice"],
+            "output_invoice_ids": [],
+            "payload": {
+                "case_id": case_id,
+                "row_ids": row_ids,
+                "row_types": row_types,
+                "relation_mode": relation.get("relation_mode") or "manual_confirmed",
+                "amount_check": dict(relation.get("amount_check") or {}),
+                "special_metadata": {},
+            },
+        }
 
 
 class InvoiceReadModelConnection:
@@ -213,6 +273,18 @@ class EmptyOAProjectionRepository:
 
     def list_all_application_records(self) -> list[object]:
         return []
+
+
+class StaticOAProjectionRepository:
+    def __init__(self, records: list[OAApplicationRecord]) -> None:
+        self.records = list(records)
+
+    def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[object]:
+        wanted = {str(row_id) for row_id in list(row_ids or [])}
+        return [record for record in self.records if record.id in wanted]
+
+    def list_all_application_records(self) -> list[object]:
+        return list(self.records)
 
 
 class RecordingInvoiceRelationReadRepository:
@@ -775,6 +847,56 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(output_result["row_count"], 1)
         self.assertEqual(oa_result["row_count"], 0)
 
+    def test_projection_builder_persists_grouped_oa_pending_payment_relation_as_one_row(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        bank = self._bank("bank-grouped-projection", "4450.00")
+        invoice = self._invoice("input-invoice-grouped-projection", InvoiceType.INPUT, total="4450.00")
+        relation_facade = FreshStaticWorkbenchRelationFacade([
+            {
+                "case_id": "case-grouped-projection",
+                "row_ids": [
+                    "oa-projection-a",
+                    "oa-projection-b",
+                    "oa-projection-c",
+                    bank.id,
+                    invoice.id,
+                ],
+                "row_types": ["oa", "oa", "oa", "bank", "invoice"],
+                "amount_check": {"matched": True},
+            }
+        ])
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=relation_facade,
+        )
+        builder._core_repository = ProjectionCoreRepository(invoices=[invoice], transactions=[bank])
+        builder._workbench_repository = EmptyWorkbenchRepository()
+        builder._oa_projection_repository = StaticOAProjectionRepository([
+            self._oa("oa-projection-a", "刘际涛", "1690.00"),
+            self._oa("oa-projection-b", "刘际涛", "1980.00"),
+            self._oa("oa-projection-c", "刘际涛", "780.00"),
+        ])
+        builder._read_repository = read_repository
+
+        result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05")
+
+        self.assertIsNotNone(read_repository.saved_oa)
+        rows = read_repository.saved_oa["rows"]
+        self.assertEqual(result["row_count"], 1)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["oa"]["amount"], "4450.00")
+        self.assertEqual(row["oa"]["relationCount"], 3)
+        self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], [
+            "oa-projection-a",
+            "oa-projection-b",
+            "oa-projection-c",
+        ])
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "4450.00")
+        self.assertEqual(row["invoice"]["totalWithTax"], "4450.00")
+        self.assertEqual(read_repository.saved_oa["source_versions"], oa_pending_payment_source_versions())
+
     def test_projection_builder_marks_empty_scopes_with_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
@@ -874,7 +996,54 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("oa_pending_payment.read_model.refresh", DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES)
 
     @staticmethod
-    def _invoice(invoice_id: str, invoice_type: InvoiceType) -> Invoice:
+    def _oa(oa_id: str, applicant: str, amount: str) -> OAApplicationRecord:
+        return OAApplicationRecord(
+            id=oa_id,
+            month="2026-05",
+            section="审批通过",
+            case_id=None,
+            applicant=applicant,
+            project_name="投影测试项目",
+            apply_type="支付申请",
+            amount=amount,
+            counterparty_name="测试往来单位",
+            reason="投影测试付款",
+            relation_code="",
+            relation_label="",
+            relation_tone="",
+            detail_fields={"申请日期": "2026-05-20"},
+            project_name_display="投影测试项目",
+        )
+
+    @staticmethod
+    def _bank(bank_id: str, amount: str) -> BankTransaction:
+        return BankTransaction(
+            id=bank_id,
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="测试往来单位",
+            amount=Decimal(amount),
+            signed_amount=-Decimal(amount),
+            txn_date="2026-05-21",
+            trade_time="2026-05-21 10:00:00",
+            account_name="云南溯源科技有限公司",
+            balance=Decimal("900.00"),
+            currency="人民币元",
+            counterparty_account_no="621700001",
+            counterparty_bank_name="建行昆明支行",
+            booked_date="20260521",
+            summary="电子转账",
+            remark="投影测试付款备注",
+            account_detail_no=f"detail-{bank_id}",
+            enterprise_serial_no=f"enterprise-{bank_id}",
+            voucher_kind="电子转账凭证",
+            voucher_no=f"voucher-{bank_id}",
+            imported_bank_name="建设银行",
+            imported_bank_last4="1234",
+        )
+
+    @staticmethod
+    def _invoice(invoice_id: str, invoice_type: InvoiceType, *, total: str = "118.00") -> Invoice:
         counterparty = Counterparty(
             id=f"cp-{invoice_id}",
             name="测试往来单位",
@@ -886,8 +1055,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             invoice_type=invoice_type,
             invoice_no=f"NO-{invoice_id}",
             counterparty=counterparty,
-            amount=Decimal("118.00"),
-            signed_amount=Decimal("118.00"),
+            amount=Decimal(total),
+            signed_amount=Decimal(total),
             invoice_date="2026-05-20",
             seller_name="测试销方",
             buyer_name="测试购方",
@@ -895,7 +1064,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             buyer_tax_no="91530000BUYER",
             tax_rate="6%",
             tax_amount=Decimal("6.68"),
-            total_with_tax=Decimal("118.00"),
+            total_with_tax=Decimal(total),
             taxable_item_name="服务费",
         )
 

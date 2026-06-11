@@ -40,7 +40,7 @@ from fin_ops_platform.services.workbench_special_pair_rule_service import (
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-workbench-object-identity-v1"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-06-turnover-bank-only-open-v1"
 ETC_BATCH_TAG = "ETC批量提交"
 
 
