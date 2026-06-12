@@ -1376,6 +1376,34 @@ Stage 25 结论：
 - 下一阶段应优先检查 `search` 与 `workbench` 的 refresh 触发范围、coalescing、worker 执行计划和索引命中；随后处理
   `cost_statistics`、`invoice_lifecycle`、`input_invoice_usage` 这三个 5-7s 级 event type。
 
+## Stage 26：defer workbench all aggregation from month shard refresh
+
+Stage 26 针对 Stage 25 暴露的 `workbench.read_model.refresh` 长尾先做一个小范围、可回滚的 worker 热路径收敛：
+
+- 保留 `PostgresReadModelRepository.save_workbench_read_models(...)` 默认旧行为，避免破坏仍直接调用 repository 的旧路径。
+- `WorkbenchSqlProjectionBuilder.rebuild_workbench_read_model_scope(month)` 保存单月 shard 时显式传
+  `refresh_all_scope_from_month_shards=False`，不再在同一事务内重建 `all` scope。
+- `all` scope 仍由既有 `WorkbenchReadModelRefreshService` aggregate event 通过
+  `refresh_workbench_all_scope_from_active_shards()` 原子发布，不绕过 active generation 模型。
+- `WorkbenchReadModelRefreshService`、`SearchPendingReadModelRefreshService` 在 rebuild/expand 前复用
+  `RuntimeQueueRepository.read_model_refresh_is_current(...)`，对过期 `source_version` 事件返回
+  `skipped/stale_source_version`，避免 stale outbox 占用 worker 做无效重建。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_workbench_sql_runtime tests.test_search_pending_sql_runtime -v`
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_queue tests.test_runtime_worker tests.test_rabbitmq_runtime tests.test_app_postgres_mode tests.test_platform_runtime_boundary_guards -v`
+- `python3 -m py_compile backend/src/fin_ops_platform/services/workbench_read_model_refresh.py backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py backend/src/fin_ops_platform/services/workbench_sql_projection.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+
+Stage 26 待发布验证：
+
+- 发布后 `/health/ready` 必须保持 `ready`、`failed_jobs=0`、DLQ `0`、required workers healthy。
+- `read_model_refresh_by_key` 中 `workbench.read_model.refresh` p95 应随新样本逐步下降；旧样本仍在 bounded window
+  内时不能把瞬时 p95 未变误判为失败。
+- 需要等待或触发真实 workbench refresh 才能证明月 shard 不再承担 all 聚合耗时。
+- deploy 用户没有 root-only PostgreSQL DSN，不能直接运行 production scope/event_id drilldown；如需 scope 级证据，
+  应新增受保护的只读诊断入口或由 root 环境执行只读 collector，不打印 secrets。
+
 ## 当前闭环状态
 
 已闭环：
@@ -1396,6 +1424,8 @@ Stage 25 结论：
   `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
 - health / Prometheus runtime percentile 热路径不再全历史排序 outbox，而是按 event type 使用 bounded recent samples。
 - health / Prometheus 已具备按 read model key 拆分的 refresh p95/failure/sample breakdown，可定位下一阶段优化目标。
+- workbench 月度 SQL projection refresh 已从内联 all-scope aggregation 中解耦，all scope 改由既有 aggregate event
+  发布；workbench/search/pending_invoice refresh handler 会跳过 stale source_version 事件。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 - 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
 - Prometheus `/metrics` 应用侧已具备，可输出 runtime/read-model/RabbitMQ/worker/API p95 指标；生产 token 未配置时保持 `404` 安全关闭。

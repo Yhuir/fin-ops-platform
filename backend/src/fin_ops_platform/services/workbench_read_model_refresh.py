@@ -28,6 +28,15 @@ class WorkbenchReadModelRefreshService:
         if scope_type != "workbench" or not scope_key:
             raise ValueError("Workbench read model refresh requires scope_type='workbench' and scope_key.")
 
+        source_version = event.source_version or event.payload.get("source_version")
+        if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
+            return {
+                "scope_key": scope_key,
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": source_version,
+            }
+
         if scope_key == "all" and not _truthy(event.payload.get("aggregate_only")):
             shard_result = self._enqueue_all_scope_shards(event, scope_key)
             if shard_result is not None:
@@ -39,7 +48,6 @@ class WorkbenchReadModelRefreshService:
             rebuild = getattr(self._projection_builder, "rebuild_workbench_read_model_scope", None)
         if not callable(rebuild):
             raise RuntimeError("Application does not expose rebuild_workbench_read_model_scope.")
-        source_version = event.payload.get("source_version")
         if "source_version" in signature(rebuild).parameters:
             result = rebuild(scope_key, source_version=source_version)
         else:
@@ -91,7 +99,12 @@ class WorkbenchReadModelRefreshService:
                 priority="low",
                 trace_id=event.trace_id,
             )
-        return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "aggregate_enqueued": callable(enqueue_event), "row_count": 0}
+        return {
+            "scope_key": scope_key,
+            "enqueued_scope_keys": enqueued_scope_keys,
+            "aggregate_enqueued": callable(enqueue_event),
+            "row_count": 0,
+        }
 
     def _enqueue_all_scope_aggregate_after_shard_publish(self, event: RuntimeQueueEvent, scope_key: str) -> bool | None:
         if scope_key == "all":
@@ -129,6 +142,25 @@ class WorkbenchReadModelRefreshService:
         except Exception as error:
             return {"status": "failed", "error": str(error) or error.__class__.__name__}
         return result if isinstance(result, dict) else None
+
+    def _event_source_version_is_current(
+        self,
+        event: RuntimeQueueEvent,
+        *,
+        scope_key: str,
+        source_version: object,
+    ) -> bool:
+        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
+        if not callable(is_current):
+            return True
+        return bool(
+            is_current(
+                tenant_id=event.tenant_id,
+                scope_type="workbench",
+                scope_key=scope_key,
+                source_version=source_version,
+            )
+        )
 
 
 def _truthy(value: Any) -> bool:

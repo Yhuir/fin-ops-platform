@@ -27,6 +27,19 @@ class SearchPendingReadModelRefreshService:
         if event.event_type == "search.read_model.refresh":
             if scope_type != "search" or not scope_key:
                 raise ValueError("Search refresh requires scope_type='search' and scope_key.")
+            source_version = event.source_version or event.payload.get("source_version")
+            if not self._event_source_version_is_current(
+                event,
+                scope_type="search",
+                scope_key=scope_key,
+                source_version=source_version,
+            ):
+                return {
+                    "scope_key": scope_key,
+                    "skipped": True,
+                    "skip_reason": "stale_source_version",
+                    "source_version": source_version,
+                }
             if scope_key == "all":
                 shard_result = self._enqueue_search_scope_shards(event, scope_key)
                 if shard_result is not None:
@@ -35,6 +48,19 @@ class SearchPendingReadModelRefreshService:
         elif event.event_type == "pending_invoice.read_model.refresh":
             if scope_type != "pending_invoice" or not scope_key:
                 raise ValueError("Pending invoice refresh requires scope_type='pending_invoice' and scope_key.")
+            source_version = event.source_version or event.payload.get("source_version")
+            if not self._event_source_version_is_current(
+                event,
+                scope_type="pending_invoice",
+                scope_key=scope_key,
+                source_version=source_version,
+            ):
+                return {
+                    "scope_key": scope_key,
+                    "skipped": True,
+                    "skip_reason": "stale_source_version",
+                    "source_version": source_version,
+                }
             if _pending_invoice_scope_requires_expansion(scope_key):
                 shard_result = self._enqueue_pending_invoice_scope_shards(event, scope_key)
                 if shard_result is not None:
@@ -73,11 +99,35 @@ class SearchPendingReadModelRefreshService:
             mark_empty = getattr(self._projection_builder, "mark_pending_invoice_scope_empty", None)
             if callable(mark_empty):
                 mark_empty(scope_key)
-        enqueued_scope_keys = refresh_gateway.enqueue_many("pending_invoice", shard_keys, reason="pending_invoice_month_shard")
+        enqueued_scope_keys = refresh_gateway.enqueue_many(
+            "pending_invoice",
+            shard_keys,
+            reason="pending_invoice_month_shard",
+        )
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(tenant_id=event.tenant_id, scope_type="pending_invoice", scope_key=scope_key)
         return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
+
+    def _event_source_version_is_current(
+        self,
+        event: RuntimeQueueEvent,
+        *,
+        scope_type: str,
+        scope_key: str,
+        source_version: object,
+    ) -> bool:
+        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
+        if not callable(is_current):
+            return True
+        return bool(
+            is_current(
+                tenant_id=event.tenant_id,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                source_version=source_version,
+            )
+        )
 
 
 def _pending_invoice_scope_requires_expansion(scope_key: str) -> bool:

@@ -4956,7 +4956,13 @@ class PostgresReadModelRepository:
             return {"read_models": {str(row.get("key")): _read_model_payload(row) for row in rows}}
         return {}
 
-    def save_workbench_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
+    def save_workbench_read_models(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_scope_keys: set[str] | None = None,
+        refresh_all_scope_from_month_shards: bool = True,
+    ) -> None:
         started_generations: list[tuple[str, str, dict[str, Any]]] = []
         published_scope_keys: set[str] = set()
 
@@ -4966,13 +4972,17 @@ class PostgresReadModelRepository:
             if changed_scope_keys is not None:
                 present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
                 for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
-                    if scope_key == "all" or MONTH_SCOPE_RE.match(str(scope_key or "")):
+                    if scope_key == "all" or (
+                        refresh_all_scope_from_month_shards and MONTH_SCOPE_RE.match(str(scope_key or ""))
+                    ):
                         refresh_all_scope = True
             for scope_key, payload in iter_mapping(read_models):
                 if changed_scope_keys is not None and scope_key not in changed_scope_keys:
                     continue
                 self._lock_workbench_generation_scope(connection, scope_key=scope_key)
-                if scope_key == "all" or MONTH_SCOPE_RE.match(str(scope_key or "")):
+                if scope_key == "all" or (
+                    refresh_all_scope_from_month_shards and MONTH_SCOPE_RE.match(str(scope_key or ""))
+                ):
                     refresh_all_scope = True
                 grouped_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}

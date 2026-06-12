@@ -1139,6 +1139,44 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from app.etc_business_batches", query)
         self.assertIn("from app.etc_invoices", query)
 
+    def test_sql_projection_month_rebuild_defers_all_scope_aggregation(self) -> None:
+        class SaveRecorder:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def save_workbench_read_models(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_scope_keys: set[str] | None = None,
+                refresh_all_scope_from_month_shards: bool = True,
+            ) -> None:
+                self.calls.append(
+                    {
+                        "snapshot": snapshot,
+                        "changed_scope_keys": changed_scope_keys,
+                        "refresh_all_scope_from_month_shards": refresh_all_scope_from_month_shards,
+                    }
+                )
+
+        recorder = SaveRecorder()
+        builder = WorkbenchSqlProjectionBuilder(connection=object(), read_model_repository=recorder)
+        builder._current_dirty_scope_source_version = lambda _scope_key: 11
+        builder._current_bank_auto_tag_rules_version = lambda: 1
+        builder._workbench_rows_for_month = lambda _month: {}
+        builder._active_pair_relations_for_month = lambda _month, _row_ids: []
+        builder._active_reconciliation_decisions_for_month = lambda _month: []
+        builder._supplement_missing_relation_rows = lambda _rows_by_id, _relations: None
+        builder._supplement_missing_decision_rows = lambda _rows_by_id, _decisions: None
+        builder._group_payload = lambda *_args, **_kwargs: {"paired": {"groups": []}, "open": {"groups": []}}
+
+        result = builder.rebuild_workbench_read_model_scope("2026-05", source_version=12)
+
+        self.assertEqual(result["scope_key"], "2026-05")
+        self.assertEqual(len(recorder.calls), 1)
+        self.assertEqual(recorder.calls[0]["changed_scope_keys"], {"2026-05"})
+        self.assertFalse(recorder.calls[0]["refresh_all_scope_from_month_shards"])
+
     def test_etc_state_repository_persists_business_batch_reported_submission_amount(self) -> None:
         connection = EtcStateWriteConnection()
         repository = PostgresOpsTaxEtcRepository(connection)
@@ -4052,6 +4090,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("delete from read_model.workbench_groups where scope_key", sql)
         self.assertNotIn("delete from read_model.workbench_group_rows where scope_key", sql)
 
+    def test_repository_can_defer_all_scope_aggregation_for_month_publish(self) -> None:
+        connection = WorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {"read_models": {}},
+            changed_scope_keys={"2026-05"},
+            refresh_all_scope_from_month_shards=False,
+        )
+
+        all_scope_queries = [
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from read_model.workbench_groups g" in sql
+            and "join read_model.workbench_generations gen" in sql
+            and "g.scope_key <> 'all'" in sql
+        ]
+        self.assertEqual(all_scope_queries, [])
+
     def test_repository_skips_stale_workbench_snapshot_write_by_source_version(self) -> None:
         connection = StaleWorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
@@ -4261,6 +4318,60 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 7)])
         self.assertEqual(result["scope_key"], "2026-05")
         self.assertEqual(result["row_count"], 1)
+
+    def test_workbench_refresh_handler_skips_stale_source_version(self) -> None:
+        class FakeBuilder:
+            def rebuild_workbench_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                raise AssertionError(f"stale event should not rebuild {scope_key}:{source_version}")
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.current_checks: list[tuple[str, str, str, object]] = []
+
+            def read_model_refresh_is_current(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object,
+            ) -> bool:
+                self.current_checks.append((tenant_id, scope_type, scope_key, source_version))
+                return False
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-stale",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="workbench",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05", "source_version": 2},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(queue.current_checks, [("tenant-a", "workbench", "2026-05", 2)])
+        self.assertEqual(
+            result,
+            {
+                "scope_key": "2026-05",
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": 2,
+            },
+        )
 
     def test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish(self) -> None:
         class FakeBuilder:

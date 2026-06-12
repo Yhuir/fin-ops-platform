@@ -160,7 +160,11 @@ class WorkbenchSqlProjectionBuilder:
                 }
             }
         }
-        self._read_model_repository.save_workbench_read_models(snapshot, changed_scope_keys={normalized_scope})
+        self._read_model_repository.save_workbench_read_models(
+            snapshot,
+            changed_scope_keys={normalized_scope},
+            refresh_all_scope_from_month_shards=False,
+        )
         row_count = sum(len(group.get(f"{kind}_rows") or []) for group in payload["paired"]["groups"] + payload["open"]["groups"] for kind in ("oa", "bank", "invoice"))
         return {
             "scope_key": normalized_scope,

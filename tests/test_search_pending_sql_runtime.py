@@ -1792,6 +1792,55 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             [("tenant-a", "search", "2026-05"), ("tenant-a", "pending_invoice", "expense:all")],
         )
 
+    def test_refresh_handler_skips_stale_search_source_version(self) -> None:
+        class FakeBuilder:
+            def rebuild_search_index_scope(self, scope_key: str) -> dict[str, object]:
+                raise AssertionError(f"stale event should not rebuild {scope_key}")
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.current_checks: list[tuple[str, str, str, object]] = []
+
+            def read_model_refresh_is_current(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object,
+            ) -> bool:
+                self.current_checks.append((tenant_id, scope_type, scope_key, source_version))
+                return False
+
+        queue = FakeQueue()
+        service = SearchPendingReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-stale",
+            tenant_id="tenant-a",
+            event_type="search.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-05",
+            scope_type="search",
+            scope_key="2026-05",
+            dedupe_key=None,
+            payload={"scope_key": "2026-05", "source_version": 3},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(queue.current_checks, [("tenant-a", "search", "2026-05", 3)])
+        self.assertEqual(
+            result,
+            {
+                "scope_key": "2026-05",
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": 3,
+            },
+        )
+
     def test_refresh_handler_rejects_application_fallback_dependency(self) -> None:
         with self.assertRaisesRegex(ValueError, "projection_builder is required"):
             SearchPendingReadModelRefreshService(application=object(), queue_repository=QueueRecorder())
