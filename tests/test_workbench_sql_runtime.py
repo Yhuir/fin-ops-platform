@@ -599,6 +599,17 @@ class WorkbenchWriteConnection:
         return 1
 
 
+class BulkWorkbenchWriteConnection(WorkbenchWriteConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.execute_many_calls: list[tuple[str, list[tuple]]] = []
+
+    def execute_many(self, sql: str, params_seq: list[tuple]) -> int:
+        rows = list(params_seq)
+        self.execute_many_calls.append((" ".join(sql.lower().split()), rows))
+        return len(rows)
+
+
 class EtcStateWriteConnection:
     def __init__(self) -> None:
         self.executed: list[tuple[str, tuple]] = []
@@ -4035,6 +4046,68 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             params for statement, params in connection.executed if "insert into read_model.workbench_group_rows" in statement
         )
         self.assertIn("1000.00", group_row_write[14])
+
+    def test_repository_batches_workbench_generation_rows_when_supported(self) -> None:
+        connection = BulkWorkbenchWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "scope_key": "2026-05",
+                        "payload": {
+                            "open": {
+                                "groups": [
+                                    {
+                                        "group_id": "case:BULK-1",
+                                        "group_type": "candidate",
+                                        "bank_rows": [
+                                            {
+                                                "id": "bank-row-1",
+                                                "source_kind": "bank_transaction",
+                                                "status": "open",
+                                                "counterparty_name": "供应商A",
+                                                "amount_value": "1000.00",
+                                            },
+                                            {
+                                                "id": "bank-row-2",
+                                                "source_kind": "bank_transaction",
+                                                "status": "open",
+                                                "counterparty_name": "供应商B",
+                                                "amount_value": "2000.00",
+                                            },
+                                        ],
+                                    }
+                                ]
+                            }
+                        },
+                        "source_versions": {"case_snapshot_version": "v1"},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-05"},
+        )
+
+        workbench_row_batches = [
+            params for statement, params in connection.execute_many_calls
+            if "insert into read_model.workbench_rows" in statement
+        ]
+        workbench_group_batches = [
+            params for statement, params in connection.execute_many_calls
+            if "insert into read_model.workbench_groups" in statement
+        ]
+        workbench_group_row_batches = [
+            params for statement, params in connection.execute_many_calls
+            if "insert into read_model.workbench_group_rows" in statement
+        ]
+
+        self.assertEqual([2], [len(batch) for batch in workbench_row_batches])
+        self.assertEqual([1], [len(batch) for batch in workbench_group_batches])
+        self.assertEqual([2], [len(batch) for batch in workbench_group_row_batches])
+        self.assertFalse(any("insert into read_model.workbench_rows" in statement for statement, _params in connection.executed))
+        self.assertFalse(any("insert into read_model.workbench_groups" in statement for statement, _params in connection.executed))
+        self.assertFalse(any("insert into read_model.workbench_group_rows" in statement for statement, _params in connection.executed))
 
     def test_repository_reads_workbench_row_detail_from_active_generation_rows(self) -> None:
         class RowDetailConnection(WorkbenchWriteConnection):
