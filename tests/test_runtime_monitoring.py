@@ -16,6 +16,25 @@ class FakeConnection:
         normalized = " ".join(sql.lower().split())
         if "like '%." in normalized:
             raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "current_refresh_event_samples" in normalized:
+            return [
+                {
+                    "event_id": "event-current-workbench-1",
+                    "event_type": "workbench.read_model.refresh",
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "status": "done",
+                    "source_version": 43,
+                    "priority": "normal",
+                    "duration_ms": 28000.0,
+                    "enqueue_to_fresh_ms": 35000.0,
+                    "created_at": "2026-06-13 03:08:00+08",
+                    "processed_at": "2026-06-13 03:08:35+08",
+                    "updated_at": "2026-06-13 03:08:35+08",
+                    "skipped": False,
+                    "skip_reason": "",
+                }
+            ]
         if "slow_refresh_event_samples" in normalized:
             return [
                 {
@@ -335,6 +354,10 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "2026-03")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 35150.0)
         self.assertFalse(summary["read_model_refresh_slow_events"][0]["skipped"])
+        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["event_id"], "event-current-workbench-1")
+        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["key"], "workbench")
+        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["scope_key"], "all")
+        self.assertEqual(summary["read_model_refresh_current_slow_events"][0]["duration_ms"], 28000.0)
         self.assertEqual(summary["read_model_refresh_current_windows"]["recent_15m"]["sample_count"], 3)
         self.assertEqual(
             summary["read_model_refresh_current_windows"]["recent_15m"]["enqueue_to_fresh_ms"]["p95"],
@@ -423,6 +446,9 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("cross join lateral", slow_event_sql)
         self.assertIn("limit %s", slow_event_sql)
         self.assertIn("order by greatest(coalesce(enqueue_to_fresh_ms, 0)", slow_event_sql)
+        current_slow_event_sql = next(sql for sql in normalized_calls if "current_refresh_event_samples" in sql)
+        self.assertIn("created_at >= now() - interval '6 hours'", current_slow_event_sql)
+        self.assertIn("duration_ms desc nulls last", current_slow_event_sql)
         publish_confirm_sql = next(sql for sql in normalized_calls if "recent_publish_confirms" in sql)
         self.assertIn("cross join lateral", publish_confirm_sql)
         self.assertIn("limit %s", publish_confirm_sql)
