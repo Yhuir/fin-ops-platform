@@ -19,6 +19,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
 READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = read_model_event_types()
 
 EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
+READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT = 512
 
 
 class RuntimeMonitoringRepository:
@@ -780,38 +781,42 @@ class RuntimeMonitoringRepository:
         event_types = tuple(READ_MODEL_EVENT_TYPES.keys())
         duration_rows = self._connection.fetch_all(
             """
-            with raw_refresh_events as (
+            with event_type_filter(event_type) as (
+              select unnest(%s::text[])
+            ),
+            refresh_events as (
               select
-                event_type,
-                updated_at,
+                refresh_event.event_type,
+                refresh_event.updated_at,
                 case
-                  when coalesce(aggregate_id, raw_payload->>'scope_key', raw_payload->'runtime_result'->>'scope_key', '') = 'all'
+                  when refresh_event.metric_scope_key = 'all'
                     then 'full'
-                  when coalesce(raw_payload->>'scope_key', raw_payload->'runtime_result'->>'scope_key', '') ~ '^\\d{4}-\\d{2}$'
+                  when refresh_event.metric_scope_key ~ '^\\d{4}-\\d{2}$'
                     then 'incremental'
                   else 'unknown'
                 end as refresh_kind,
-                ((raw_payload->'runtime_result'->>'duration_ms')::numeric) as duration_ms,
-                row_number() over (
-                  partition by event_type
-                  order by updated_at desc
-                ) as runtime_metric_rank
-              from job.outbox_events
-              where event_type = any(%s)
-                and status = 'done'
-                and raw_payload->'runtime_result' ? 'duration_ms'
-            ),
-            refresh_events as (
-              select *
-              from raw_refresh_events
-              where updated_at >= now() - (%s * interval '1 day')
-                 or runtime_metric_rank <= %s
+                refresh_event.duration_ms
+              from event_type_filter
+              cross join lateral (
+                select
+                  event_type,
+                  updated_at,
+                  coalesce(aggregate_id, raw_payload->>'scope_key', raw_payload->'runtime_result'->>'scope_key', '') as metric_scope_key,
+                  ((raw_payload->'runtime_result'->>'duration_ms')::numeric) as duration_ms
+                from job.outbox_events
+                where event_type = event_type_filter.event_type
+                  and event_type like '%%.read_model.refresh'
+                  and status = 'done'
+                  and raw_payload->'runtime_result' ? 'duration_ms'
+                order by updated_at desc
+                limit %s
+              ) refresh_event
             ),
             metric_windows(window_name, started_at) as (
               values
                 ('recent_15m', now() - interval '15 minutes'),
                 ('recent_1h', now() - interval '1 hour'),
-                ('all_time', now())
+                ('all_time', '-infinity'::timestamptz)
             )
             select
               event_type,
@@ -830,11 +835,10 @@ class RuntimeMonitoringRepository:
               )::float as p99_ms
             from refresh_events
             join metric_windows
-              on metric_windows.window_name = 'all_time'
-              or refresh_events.updated_at >= metric_windows.started_at
+              on refresh_events.updated_at >= metric_windows.started_at
             group by event_type, window_name, refresh_kind
             """,
-            (list(event_types), 7, 512),
+            (list(event_types), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
         )
         dirty_rows = self._connection.fetch_all(
             """

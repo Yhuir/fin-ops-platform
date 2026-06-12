@@ -329,11 +329,16 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         repository.dashboard_read_model_metrics()
 
         normalized_sql = " ".join(connection.duration_sql.lower().split())
-        self.assertIn("row_number() over", normalized_sql)
-        self.assertIn("runtime_metric_rank", normalized_sql)
-        self.assertIn("runtime_metric_rank <= %s", normalized_sql)
-        self.assertNotIn("'-infinity'::timestamptz", normalized_sql)
-        self.assertGreaterEqual(len(connection.duration_params), 2)
+        self.assertIn("cross join lateral", normalized_sql)
+        self.assertIn("event_type_filter(event_type)", normalized_sql)
+        self.assertIn("event_type like '%%.read_model.refresh'", normalized_sql)
+        self.assertIn("order by updated_at desc", normalized_sql)
+        self.assertIn("limit %s", normalized_sql)
+        self.assertIn("'-infinity'::timestamptz", normalized_sql)
+        self.assertNotIn("row_number() over", normalized_sql)
+        self.assertNotIn("runtime_metric_rank", normalized_sql)
+        self.assertEqual(len(connection.duration_params), 2)
+        self.assertEqual(connection.duration_params[1], 512)
 
 
 if __name__ == "__main__":

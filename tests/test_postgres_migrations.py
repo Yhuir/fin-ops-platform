@@ -80,6 +80,7 @@ EXPECTED_MIGRATIONS = [
     "0065_invoice_canonical_identity_fingerprint_invariant.sql",
     "0066_oa_applicant_credentials.sql",
     "0067_app_status_current_effective_outbox_index.sql",
+    "0068_outbox_read_model_refresh_metric_samples.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -189,7 +190,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 68)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 69)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -214,6 +215,12 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("where status = 'done'", sql)
         self.assertIn("event_type like '%.read_model.refresh'", sql)
         self.assertIn("raw_payload->'runtime_result' ? 'duration_ms'", sql)
+        self.assertIn("outbox_events_read_model_refresh_metric_samples_idx", sql)
+        self.assertIn(
+            "(coalesce(aggregate_id, raw_payload->>'scope_key', raw_payload->'runtime_result'->>'scope_key', ''))",
+            sql,
+        )
+        self.assertIn("(((raw_payload->'runtime_result'->>'duration_ms')::numeric))", sql)
         self.assertIn("workbench_rows_oa_attachment_inventory_idx", sql)
         self.assertIn("on read_model.workbench_rows (row_id, generated_at desc)", sql)
         self.assertIn("where source_kind = 'oa_attachment_invoice'", sql)
