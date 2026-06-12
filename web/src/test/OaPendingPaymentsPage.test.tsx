@@ -314,6 +314,63 @@ const rowsPayload = {
         detailMode: "none",
       },
     },
+    {
+      id: "oa-payment-row-candidate",
+      oa: {
+        id: "oa-candidate",
+        applicantName: "候选付款人",
+        applicationType: "支付申请",
+        projectName: "候选流水展示项目",
+        applicationTime: "2026-05-24",
+        amount: "977.00",
+        detailAvailable: true,
+      },
+      paymentStatus: {
+        code: "unpaid",
+        label: "未支付",
+        reason: "候选流水不计入已支付金额",
+      },
+      bankTransaction: {
+        primaryBankTransactionId: "bank-candidate-004",
+        accountDetailNo: "candidate-bank-004",
+        enterpriseSerialNo: "",
+        voucherKind: "",
+        voucherNo: "",
+        bankName: "建设银行",
+        accountNo: "",
+        accountLast4: "8106",
+        bankAccount: "建设银行 8106",
+        directionLabel: "支出",
+        accountName: "",
+        tradeTime: "2026-05-24 12:00:00",
+        debitAmount: "977.00",
+        creditAmount: "0.00",
+        balance: "",
+        currency: "",
+        counterpartyName: "候选供应商",
+        counterpartyAccountNo: "",
+        counterpartyBankName: "",
+        bookedDate: "",
+        summary: "候选支付流水",
+        remark: "",
+        amount: "977.00",
+        paidTotal: "0.00",
+        relationStatus: "candidate",
+        relationCount: 1,
+        hasMultiple: false,
+        detailMode: "single",
+      },
+      invoice: {
+        primaryInvoiceId: null,
+        digitalInvoiceNo: "",
+        sellerName: "",
+        invoiceDate: "",
+        totalWithTax: "",
+        relationCount: 0,
+        hasMultiple: false,
+        detailMode: "none",
+      },
+    },
   ],
   pagination: { page: 1, pageSize: 20, total: 51 },
   summary: { rowCount: 51 },
@@ -755,6 +812,9 @@ describe("OA pending payments page", () => {
     expect(within(noInvoiceRow).queryByText("进")).not.toBeInTheDocument();
     expect(within(noInvoiceRow).queryByText("开票日期为空")).not.toBeInTheDocument();
     expect(within(noInvoiceRow).queryByRole("button", { name: /查看发票/ })).not.toBeInTheDocument();
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    expect(within(candidateRow).getByText("候选")).toBeInTheDocument();
+    expect(within(candidateRow).getByText("未支付")).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");

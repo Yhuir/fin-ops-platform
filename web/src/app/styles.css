@@ -2103,6 +2103,12 @@ textarea {
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
 
+.oa-pending-payments-table-tag--candidate {
+  border-color: color-mix(in srgb, var(--fp-warning) 32%, var(--fp-border));
+  background: var(--fp-warning-soft);
+  color: var(--fp-warning);
+}
+
 .oa-pending-payments-invoice-type-chip {
   display: inline-flex;
   flex: 0 0 auto;
@@ -3233,6 +3239,12 @@ textarea {
   border-color: color-mix(in srgb, var(--fp-success) 32%, var(--fp-border));
   background: var(--fp-success-soft);
   color: var(--fp-success);
+}
+
+.output-invoice-collections-table-tag--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 32%, var(--fp-border));
+  background: var(--fp-warning-soft);
+  color: var(--fp-warning);
 }
 
 .output-invoice-collections-table-action {
@@ -7400,6 +7412,12 @@ textarea {
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pending-invoices-tag--candidate {
+  border-color: color-mix(in srgb, var(--fp-warning) 46%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-warning) 12%, var(--fp-surface));
+  color: var(--fp-warning);
 }
 
 .pending-invoices-amount-cell {
@@ -20705,6 +20723,11 @@ body.column-layout-dragging {
 .bank-details-page .bank-relation-tag-has {
   background: #eef7f1;
   color: #245c32;
+}
+
+.bank-details-page .bank-relation-tag-candidate {
+  background: #fff4dc;
+  color: #7a4b00;
 }
 
 .bank-details-page .bank-relation-tag-none {

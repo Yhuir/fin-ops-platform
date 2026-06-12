@@ -421,13 +421,24 @@ class BankDetailsService:
                 for row_type in list(relation.get("row_types") or [])
                 if str(row_type).strip()
             }
+        relation_status = (
+            str(relation.get("relation_status") or relation.get("relationStatus") or "").strip()
+            if isinstance(relation, dict)
+            else ""
+        )
+        relation_status = relation_status or "linked"
         oa_relation_tag = "有oa" if "oa" in row_types else "无oa"
         invoice_relation_tag = "有发票" if "invoice" in row_types else "无发票"
+        if relation_status == "candidate":
+            oa_relation_tag = "候选oa" if "oa" in row_types else "无oa"
+            invoice_relation_tag = "候选发票" if "invoice" in row_types else "无发票"
         payload: dict[str, Any] = {
             "oa_relation_tag": oa_relation_tag,
             "invoice_relation_tag": invoice_relation_tag,
             "relation_tags": [oa_relation_tag, invoice_relation_tag],
         }
+        if relation_status != "linked":
+            payload["relation_status"] = relation_status
         if isinstance(relation, dict) and str(relation.get("case_id") or "").strip():
             payload["relation_case_id"] = str(relation.get("case_id") or "").strip()
         return payload

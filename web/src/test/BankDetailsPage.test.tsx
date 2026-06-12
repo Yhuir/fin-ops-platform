@@ -220,9 +220,9 @@ describe("Bank details page", () => {
     expect(within(table).queryByText("2026-05-01 10:30:00+08:00")).not.toBeInTheDocument();
     expect(tradeTimeText?.closest(".bank-counterparty-meta-row")).not.toBeNull();
     expect(tradeTimeText?.closest(".bank-relation-chip-row")).toBeNull();
-    expect(within(table).getByText("有oa").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-has");
-    expect(within(table).getByText("无发票").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-none");
-    expect(within(table).getByText("有oa").closest(".bank-counterparty-meta-row")?.querySelector(".bank-trade-time-text")).not.toBeNull();
+    expect(within(table).getByText("候选oa").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-candidate");
+    expect(within(table).getByText("候选发票").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-candidate");
+    expect(within(table).getByText("候选oa").closest(".bank-counterparty-meta-row")?.querySelector(".bank-trade-time-text")).not.toBeNull();
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-direction-tag-centered");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-chip-auto-size");
     expect(within(table).getByText("工商银行 6386").closest(".bank-source-chip")).toHaveClass("bank-chip-auto-size");

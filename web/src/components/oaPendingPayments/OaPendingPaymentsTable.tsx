@@ -184,6 +184,7 @@ export default function OaPendingPaymentsTable({
                     </span>
                     <span className="oa-pending-payments-tag-row">
                       <TableTag>{row.oa.applicationType || "类型为空"}</TableTag>
+                      {hasCandidateOaRelation(row) ? <RelationStatusTag status="candidate" /> : null}
                     </span>
                   </td>
                   <td className="oa-pending-payments-table-cell" data-column-role="description">
@@ -218,6 +219,7 @@ export default function OaPendingPaymentsTable({
                         {row.bankTransaction.tradeTime ? (
                           <span className="oa-pending-payments-tag-row">
                             <TableTag>{row.bankTransaction.tradeTime}</TableTag>
+                            {hasCandidateBankRelation(row) ? <RelationStatusTag status="candidate" /> : null}
                           </span>
                         ) : null}
                       </>
@@ -278,6 +280,7 @@ export default function OaPendingPaymentsTable({
                         {row.invoice.invoiceDate ? (
                           <span className="oa-pending-payments-tag-row">
                             <TableTag>{row.invoice.invoiceDate}</TableTag>
+                            {hasCandidateInvoiceRelation(row) ? <RelationStatusTag status="candidate" /> : null}
                           </span>
                         ) : null}
                       </>
@@ -551,6 +554,13 @@ function TableTag({ children }: { children: ReactNode }) {
   return <span className="oa-pending-payments-table-tag">{children}</span>;
 }
 
+function RelationStatusTag({ status }: { status: string }) {
+  if (status !== "candidate") {
+    return null;
+  }
+  return <span className="oa-pending-payments-table-tag oa-pending-payments-table-tag--candidate">候选</span>;
+}
+
 function RelationAmountCell({
   amount,
   extraCount,
@@ -796,6 +806,25 @@ function bankDetailLabel(row: OaPendingPaymentRow): string {
     return `查看${applicant}关联流水 ${row.bankTransaction.relationCount} 条`;
   }
   return `查看流水 ${applicant} 详情`;
+}
+
+function isCandidateStatus(value: unknown): boolean {
+  return typeof value === "string" && value.trim() === "candidate";
+}
+
+function hasCandidateOaRelation(row: OaPendingPaymentRow): boolean {
+  return isCandidateStatus(row.oa.relationStatus)
+    || Boolean(row.oa.summaries?.some((summary) => isCandidateStatus(summary.relationStatus)));
+}
+
+function hasCandidateBankRelation(row: OaPendingPaymentRow): boolean {
+  return isCandidateStatus(row.bankTransaction.relationStatus)
+    || Boolean(row.bankTransaction.summaries?.some((summary) => isCandidateStatus(summary.relationStatus)));
+}
+
+function hasCandidateInvoiceRelation(row: OaPendingPaymentRow): boolean {
+  return isCandidateStatus(row.invoice.relationStatus)
+    || Boolean(row.invoice.summaries?.some((summary) => isCandidateStatus(summary.relationStatus)));
 }
 
 function bankRelationButtonText(row: OaPendingPaymentRow): string | undefined {

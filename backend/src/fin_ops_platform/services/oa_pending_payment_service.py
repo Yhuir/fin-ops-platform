@@ -14,7 +14,11 @@ from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
-from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
+from fin_ops_platform.services.invoice_relation_query_context import (
+    DistributedInvoiceRelationContext,
+    relation_status,
+    summary_is_linked,
+)
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
@@ -525,13 +529,19 @@ class OaPendingPaymentQueryService:
         }
         if relation is not None:
             summary["relationCaseId"] = relation.get("case_id", "")
+            summary["relationStatus"] = relation_status(relation)
+            summary["relationSource"] = str(relation.get("relation_source") or "")
         return summary
 
     def _payment_status_for_amount(self, oa_amount_value: Any, bank_payload: dict[str, Any]) -> dict[str, str]:
         oa_amount = _parse_decimal(oa_amount_value)
         if oa_amount is None:
             return self._lifecycle_policy.evaluate_oa_payment(oa_amount=None, paid_total=ZERO, has_bank=False)
-        bank_ids = [str(summary.get("bankTransactionId") or "") for summary in list(bank_payload.get("summaries") or [])]
+        bank_ids = [
+            str(summary.get("bankTransactionId") or "")
+            for summary in list(bank_payload.get("summaries") or [])
+            if isinstance(summary, dict) and summary_is_linked(summary)
+        ]
         bank_ids = [bank_id for bank_id in bank_ids if bank_id]
         if not bank_ids:
             return self._lifecycle_policy.evaluate_oa_payment(
@@ -624,7 +634,8 @@ class OaPendingPaymentQueryService:
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
-        paid_total = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
+        linked_summaries = [summary for summary in public_summaries if summary_is_linked(summary)]
+        paid_total = sum((_decimal(summary.get("amount")) for summary in linked_summaries), start=ZERO)
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
             "accountDetailNo": primary.get("accountDetailNo", ""),
@@ -655,6 +666,7 @@ class OaPendingPaymentQueryService:
             "hasMultiple": len(public_summaries) > 1,
             "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
             "summaries": public_summaries,
+            "linkedRelationCount": len(linked_summaries),
             "missingBankRelationCount": missing_bank_relation_count,
             "nonOutflowBankRelationCount": non_outflow_relation_count,
         }
@@ -690,6 +702,8 @@ class OaPendingPaymentQueryService:
             "direction": _bank_direction(bank),
             "directionLabel": _bank_direction_label(bank),
             "relationCaseId": relation.get("case_id", ""),
+            "relationStatus": relation_status(relation),
+            "relationSource": str(relation.get("relation_source") or ""),
             "_sort": (diff, -timestamp, bank.id),
         }
 
@@ -739,6 +753,8 @@ class OaPendingPaymentQueryService:
             "invoiceDate": invoice.invoice_date or "",
             "totalWithTax": _money(total),
             "relationCaseId": relation.get("case_id", ""),
+            "relationStatus": relation_status(relation),
+            "relationSource": str(relation.get("relation_source") or ""),
             "_sort": (abs(total - oa_amount), invoice.invoice_date or "", invoice.id),
         }
 

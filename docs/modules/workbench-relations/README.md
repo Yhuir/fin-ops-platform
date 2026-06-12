@@ -50,7 +50,9 @@
 
 `app.workbench_pair_relations` 是 OA、银行流水、正式发票和 OA 附件发票跨页面已确认配对关系的 canonical write model。`app.workbench_pair_relation_history` 保存 confirm、cancel、withdraw、repair 等操作历史。当前 PostgreSQL migration 已经提供 `case_id`、`relation_mode`、`status`、`version`、`month_scope`、`row_ids`、`row_types`、`amount_check`、`special_metadata`、`source_versions` 和 raw payload。
 
-`workbench_relation` 是跨页面 relation distribution read model。它从 `app.workbench_pair_relations` 读取 active 手工关系，同时从 `read_model.workbench_reconciliation_decisions` 补充分发已 paired 的自动决策。自动决策只作为候选或展示上下文，不是已确认写事实，不能被页面当作 active relation 写模型。
+`workbench_relation` 是跨页面 relation distribution read model。它从 `app.workbench_pair_relations` 读取 active 手工关系，同时从 `read_model.workbench_reconciliation_decisions` 补充分发已 paired 的自动决策和未配对区 open/proposed 候选。自动决策只作为候选或展示上下文，不是已确认写事实，不能被页面当作 active relation 写模型。
+
+distribution payload 必须保留关系展示语义：`relation_status='linked'` 表示已确认或已 paired 的关系上下文；`relation_status='candidate'` 表示关联台未配对候选，只能用于页面展示候选证据，不得作为 confirmed fact、支付完成判断或 row 占用事实。下游 mapper 不得把 candidate 硬编码成 `status='active'`。
 
 `WorkbenchRelationReadFacade` 是下游页面读取关系上下文的唯一后端边界。待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细关系标签、成本、税金、搜索和批量账务的读路径必须通过它或它封装的 request-scoped context 读取 `workbench_relation` distribution。
 
@@ -109,6 +111,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 - `require_fresh=True` 时，missing/stale/source mismatch 返回非 fresh 状态并入队刷新。
 - 读结果必须包含 `status`、`read_model_scope_keys`、`stale_reasons`、`refresh_enqueued`、`source_versions`。
 - 业务写 API 不能把 facade 返回的空 rows 当成真实无关系。
+- 读结果必须保留 `linked` / `candidate` / `unlinked` 语义。进项发票使用、OA 待付款、待找发票等下游页面可以展示 candidate 作为关联台候选证据，但只有 linked 能参与已支付、已关联、已占用等业务判断。
 
 ### `WorkbenchPairRelationService`
 
@@ -175,6 +178,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 读入口必须保持通过 read facade/read model：
 
 - workbench relation distribution。
+- workbench open/proposed unmatched candidates distribution。候选必须通过 `WorkbenchRelationReadFacade` 发给各页面，不能让页面直接读取关联台本地候选或自动匹配表。
 - bank detail relation tags。
 - pending invoice rows/detail/OA detail。
 - input invoice usage。

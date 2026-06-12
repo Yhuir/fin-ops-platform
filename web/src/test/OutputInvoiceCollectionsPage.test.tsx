@@ -159,10 +159,37 @@ const rowsPayload = {
         pendingAmount: "-12345.67",
       },
       bankTransactions: {
-        relationCount: 0,
+        primaryBankTransactionId: "bank-output-candidate-001",
+        counterpartyName: "候选回款客户",
+        tradeTime: "2026-05-05 11:20:00",
+        amount: "12345.67",
+        direction: "inflow",
+        directionLabel: "收入",
+        bankName: "建设银行",
+        accountLast4: "8106",
+        summary: "候选回款流水",
+        remark: "",
+        relationCount: 1,
+        relationStatus: "candidate",
+        relationCaseId: "candidate:output-bank-001",
         hasMultiple: false,
-        detailMode: "none",
-        summaries: [],
+        detailMode: "single",
+        summaries: [
+          {
+            bankTransactionId: "bank-output-candidate-001",
+            counterpartyName: "候选回款客户",
+            tradeTime: "2026-05-05 11:20:00",
+            amount: "12345.67",
+            direction: "inflow",
+            directionLabel: "收入",
+            bankName: "建设银行",
+            accountLast4: "8106",
+            summary: "候选回款流水",
+            remark: "",
+            relationStatus: "candidate",
+            relationCaseId: "candidate:output-bank-001",
+          },
+        ],
       },
       redInvoiceRelation: {
         relationCount: 0,
@@ -620,11 +647,16 @@ describe("Output invoice collections page", () => {
     expect(amountCell).not.toBeNull();
     const amountTags = within(amountCell as HTMLElement).getAllByText(/收入|建设银行 8106/).map((element) => element.textContent);
     expect(amountTags).toEqual(["收入", "建设银行 8106"]);
-    expect(within(page).queryByText("建设银行 8106")).toBeInTheDocument();
+    expect(within(page).getAllByText("建设银行 8106").length).toBeGreaterThan(0);
     expect(
       within(page).getAllByText("待收款，已收部分款")
         .some((element) => element.closest(".output-invoice-collection-status-cell")),
     ).toBe(true);
+    const candidateCollectionRow = bodyRows.find((row) => within(row).queryByText("XSFP-2026-RED"));
+    expect(candidateCollectionRow).toBeDefined();
+    expect(within(candidateCollectionRow as HTMLElement).getByText("候选回款客户")).toBeInTheDocument();
+    expect(within(candidateCollectionRow as HTMLElement).getByText("候选")).toBeInTheDocument();
+    expect(within(candidateCollectionRow as HTMLElement).getByText("待收款")).toBeInTheDocument();
     expect(within(page).queryByText("存在收入流水，但收入流水合计小于发票价税合计。")).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "查看发票 XSFP-2026-0001 详情" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "查看流水 云南客户科技有限公司 详情" })).toBeInTheDocument();

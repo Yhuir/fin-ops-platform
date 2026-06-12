@@ -170,6 +170,7 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     InputInvoiceUsageQueryService,
 )
+from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import InputInvoiceUsageReadModelDetailService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
@@ -8669,6 +8670,10 @@ class Application:
 
     def _handle_api_input_invoice_usage_relation_details(self, row_id: str, query: dict[str, list[str]]) -> Response:
         try:
+            sql_payload = self._get_input_invoice_usage_relation_details_from_sql_read_model(row_id, query)
+            if sql_payload is not None:
+                status_code = HTTPStatus.ACCEPTED if sql_payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+                return self._json_response(status_code, sql_payload)
             payload = self._input_invoice_usage_service().row_relation_details(
                 row_id,
                 kind=query.get("kind", [""])[0],
@@ -8679,6 +8684,24 @@ class Application:
 
     def _handle_api_input_invoice_usage_payment_status_rules(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._input_invoice_usage_service().payment_status_rules())
+
+    def _get_input_invoice_usage_relation_details_from_sql_read_model(
+        self,
+        row_id: str,
+        query: dict[str, list[str]],
+    ) -> dict[str, object] | None:
+        repository = getattr(self, "_input_invoice_usage_sql_read_repository", None)
+        if not callable(getattr(repository, "get_input_invoice_usage_row_by_row_id", None)):
+            return None
+        service = InputInvoiceUsageReadModelDetailService(
+            repository=repository,
+            enqueue_refresh=lambda scope_key, reason: self._enqueue_input_invoice_usage_read_model_refresh(
+                scope_key,
+                reason=reason,
+            ),
+            source_versions_provider=self._input_invoice_usage_expected_source_versions,
+        )
+        return service.relation_details(row_id, kind=query.get("kind", [""])[0])
 
     def _handle_api_input_invoice_usage_payment_status_rules_update(
         self,

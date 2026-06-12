@@ -179,6 +179,9 @@ export type PendingInvoiceSummary = {
   sellerTaxNo: string;
   buyerName: string;
   invoiceType: "input" | "output" | (string & {});
+  relationCaseId: string;
+  relationStatus: string;
+  relationSource: string;
 };
 
 export type PendingInvoicePaymentSummary = {
@@ -191,6 +194,7 @@ export type PendingInvoicePaymentSummary = {
 export type PendingInvoiceInvoiceZone = {
   primary: PendingInvoiceSummary | null;
   relationCount: number;
+  linkedRelationCount: number;
   hasMultiple: boolean;
   summaries: PendingInvoiceSummary[];
   paymentSummary: PendingInvoicePaymentSummary | null;
@@ -205,6 +209,8 @@ export type PendingInvoiceOaSummary = {
   formNo: string;
   detailAvailable: boolean;
   relationCaseId: string;
+  relationStatus: string;
+  relationSource: string;
 };
 
 export type PendingInvoiceOaZone = {
@@ -302,6 +308,8 @@ export type PendingInvoiceRelationDetail = {
     counterpartyName: string;
     debitAmount: string;
     relationCaseId: string;
+    relationStatus: string;
+    relationSource: string;
   }>;
   paidTotal: string;
   invoiceTotal: string;

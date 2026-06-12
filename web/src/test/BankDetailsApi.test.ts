@@ -36,10 +36,11 @@ describe("bank details API", () => {
             note_text: "客户附言",
             bank_name: "工商银行",
             account_last4: "6386",
-            oa_relation_tag: "有oa",
-            invoice_relation_tag: "有发票",
-            relation_tags: ["有oa", "有发票"],
+            oa_relation_tag: "候选oa",
+            invoice_relation_tag: "候选发票",
+            relation_tags: ["候选oa", "候选发票"],
             relation_case_id: "CASE-202605-001",
+            relation_status: "candidate",
           },
           {
             id: "bank-detail-unlinked",
@@ -61,10 +62,11 @@ describe("bank details API", () => {
     const payload = await fetchBankDetailTransactions({});
 
     expect(payload.rows[0]).toMatchObject({
-      oaRelationTag: "有oa",
-      invoiceRelationTag: "有发票",
-      relationTags: ["有oa", "有发票"],
+      oaRelationTag: "候选oa",
+      invoiceRelationTag: "候选发票",
+      relationTags: ["候选oa", "候选发票"],
       relationCaseId: "CASE-202605-001",
+      relationStatus: "candidate",
       tradeTime: "2026-05-01 10:30:00",
       purposeText: "交易用途",
       summaryText: "项目回款摘要",
@@ -75,6 +77,7 @@ describe("bank details API", () => {
       invoiceRelationTag: "无发票",
       relationTags: ["无oa", "无发票"],
       relationCaseId: null,
+      relationStatus: "",
     });
   });
 

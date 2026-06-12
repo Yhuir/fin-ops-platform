@@ -8,6 +8,7 @@ from typing import Any, Callable
 from openpyxl import Workbook
 
 from fin_ops_platform.domain.enums import TransactionDirection
+from fin_ops_platform.services.cost_statistics_relation_rules import is_cost_eligible_open_group
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.project_detail_export_service import ProjectDetailExportService
@@ -21,8 +22,6 @@ CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PROJECT_SCOPE_ACTIVE = "active"
 PROJECT_SCOPE_ALL = "all"
-COST_LINKED_RELATION_CODES = {"fully_linked", "automatic_match"}
-OPEN_COST_GROUP_REASONS = {"attached_unique_candidate"}
 
 
 class CostStatisticsService:
@@ -706,7 +705,7 @@ class CostStatisticsService:
                 *[
                     group
                     for group in list(((payload.get("open") or {}).get("groups") or []))
-                    if self._is_cost_eligible_open_group(group)
+                    if is_cost_eligible_open_group(group)
                 ],
             ]
             for group in groups:
@@ -811,30 +810,6 @@ class CostStatisticsService:
                 if applicant:
                     return applicant
         return ""
-
-    @staticmethod
-    def _is_linked_cost_open_group(group: dict[str, Any]) -> bool:
-        for row in list(group.get("oa_rows") or []):
-            relation = row.get("oa_bank_relation")
-            if isinstance(relation, dict) and str(relation.get("code", "")).strip() in COST_LINKED_RELATION_CODES:
-                return True
-        return False
-
-    @classmethod
-    def _is_cost_eligible_open_group(cls, group: dict[str, Any]) -> bool:
-        if cls._is_linked_cost_open_group(group):
-            return True
-        if str(group.get("reason") or "").strip() in OPEN_COST_GROUP_REASONS:
-            return True
-        for row in list(group.get("bank_rows") or []):
-            actions = {
-                str(action).strip()
-                for action in list(row.get("available_actions") or [])
-                if str(action).strip()
-            }
-            if "cancel_link" in actions:
-                return True
-        return False
 
     def _build_filtered_entries(
         self,

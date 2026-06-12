@@ -42,9 +42,11 @@ export type BankTransactionCategoryCode = string;
 
 export type BankTransactionCategoryCounts = Record<string, number> & { uncategorized: number };
 
-export type OaRelationTag = "有oa" | "无oa";
+export type OaRelationTag = "有oa" | "候选oa" | "无oa";
 
-export type InvoiceRelationTag = "有发票" | "无发票";
+export type InvoiceRelationTag = "有发票" | "候选发票" | "无发票";
+
+export type BankDetailRelationStatus = "linked" | "candidate" | "";
 
 export type BankInternalTransferCounterpart = {
   transactionId: string;
@@ -130,6 +132,7 @@ export type BankDetailTransaction = {
   invoiceRelationTag: InvoiceRelationTag;
   relationTags: string[];
   relationCaseId: string | null;
+  relationStatus: BankDetailRelationStatus;
 };
 
 export type BankDetailTransactionsResponse = {

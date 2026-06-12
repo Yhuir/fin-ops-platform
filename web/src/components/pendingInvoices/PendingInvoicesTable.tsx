@@ -92,6 +92,13 @@ function tagPathLabel(row: PendingInvoiceRow["bankTransaction"]) {
     .join(" / ") || row.effectiveTagLabel || row.effectiveTagCode || "未标注";
 }
 
+function RelationStatusChip({ status }: { status?: string }) {
+  if (status !== "candidate") {
+    return null;
+  }
+  return <span className="pending-invoices-tag pending-invoices-tag--candidate">候选</span>;
+}
+
 function severityTone(severity: PendingInvoiceStatusSeverity): FinanceTone {
   switch (severity) {
     case "success":
@@ -693,6 +700,7 @@ function PendingInvoiceTableRow({
             secondary={(
               <span className="pending-invoices-inline-row">
                 <span>{primaryInvoice.issueDate || "-"}</span>
+                <RelationStatusChip status={primaryInvoice.relationStatus} />
                 <DetailButton
                   label={`发票详情 ${invoiceNumberLabel}`}
                   onClick={() => onOpenObjectDetail({ kind: "invoice", id: primaryInvoice.id, rowId: row.id })}
@@ -739,7 +747,12 @@ function PendingInvoiceTableRow({
         {primaryOa ? (
           <TextCell
             primary={primaryOa.applicant || <EmptyValue />}
-            secondary={primaryOa.applicationType || <EmptyValue />}
+            secondary={(
+              <span className="pending-invoices-inline-row">
+                <span>{primaryOa.applicationType || <EmptyValue />}</span>
+                <RelationStatusChip status={primaryOa.relationStatus} />
+              </span>
+            )}
             title={primaryOa.applicant}
           />
         ) : <EmptyValue />}

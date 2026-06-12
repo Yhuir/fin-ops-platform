@@ -5714,10 +5714,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         effective_category_third_label: null,
         effective_category_label_path: ["费用", "工资"],
         effective_category_source: "auto",
-        oa_relation_tag: "有oa",
-        invoice_relation_tag: "无发票",
-        relation_tags: ["有oa", "无发票"],
-        relation_case_id: "CASE-202605-001",
+        oa_relation_tag: "候选oa",
+        invoice_relation_tag: "候选发票",
+        relation_tags: ["候选oa", "候选发票"],
+        relation_case_id: "candidate:CASE-202605-001",
+        relation_status: "candidate",
       };
       const hiddenTargetRow = {
         ...visibleRow,
@@ -5776,6 +5777,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         effective_category_sub_label: null,
         effective_category_third_label: null,
         effective_category_label_path: ["内部往来款"],
+        oa_relation_tag: "候选oa",
+        invoice_relation_tag: "候选发票",
+        relation_tags: ["候选oa", "候选发票"],
+        relation_case_id: "candidate:bank-detail-internal-transfer",
+        relation_status: "candidate",
         internal_transfer_counterpart: {
           transaction_id: "bank-detail-internal-transfer-counterpart",
           trade_time: "2026-04-03 12:00:00",

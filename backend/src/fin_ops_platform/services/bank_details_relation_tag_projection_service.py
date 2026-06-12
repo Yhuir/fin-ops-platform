@@ -59,6 +59,15 @@ class BankDetailsRelationTagProjectionService:
             if list(row.get("linked_input_invoices") or []) or list(row.get("linked_output_invoices") or []):
                 row_types.add("invoice")
             case_id = next((str(group_id).strip() for group_id in list(row.get("group_ids") or []) if str(group_id).strip()), "")
+            relation_status = _relation_status_from_distribution_row(row)
             if case_id or len(row_types) > 1:
-                result[row_id] = {"case_id": case_id, "row_types": sorted(row_types)}
+                payload = {"case_id": case_id, "row_types": sorted(row_types)}
+                if relation_status != "linked":
+                    payload["relation_status"] = relation_status
+                result[row_id] = payload
         return result
+
+
+def _relation_status_from_distribution_row(row: dict[str, Any]) -> str:
+    status = str(row.get("relation_status") or row.get("relationStatus") or "").strip()
+    return status or "linked"

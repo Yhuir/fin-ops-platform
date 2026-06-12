@@ -397,6 +397,31 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["relation_tags"], ["有oa", "有发票"])
         self.assertEqual(row["relation_case_id"], "CASE-LINKED")
 
+    def test_transactions_display_candidate_relation_tags_explicitly(self) -> None:
+        service = BankDetailsService(
+            _ImportServiceStub(
+                [
+                    self._transaction(
+                        transaction_id="txn-candidate",
+                        trade_time="2026-04-01 09:00:00",
+                    )
+                ]
+            ),
+            relation_tag_provider=lambda transaction_id: {
+                "case_id": "CASE-CANDIDATE",
+                "row_types": ["bank", "oa", "invoice"],
+                "relation_status": "candidate",
+            } if transaction_id == "txn-candidate" else None,
+        )
+
+        row = service.list_transactions(account_key="工商银行:6386")["rows"][0]
+
+        self.assertEqual(row["oa_relation_tag"], "候选oa")
+        self.assertEqual(row["invoice_relation_tag"], "候选发票")
+        self.assertEqual(row["relation_tags"], ["候选oa", "候选发票"])
+        self.assertEqual(row["relation_case_id"], "CASE-CANDIDATE")
+        self.assertEqual(row["relation_status"], "candidate")
+
     def test_transactions_use_relation_provider_for_invoice_only_boundary(self) -> None:
         service = BankDetailsService(
             _ImportServiceStub(
@@ -463,6 +488,27 @@ class BankDetailsServiceTests(unittest.TestCase):
             {"case_id": "CASE-DISTRIBUTED", "row_types": ["bank", "invoice", "oa"]},
         )
         self.assertEqual(facade.calls, [["txn-shared"]])
+
+    def test_relation_tag_projection_preserves_candidate_status(self) -> None:
+        facade = _RelationDistributionFacade(
+            [
+                {
+                    "row_id": "txn-candidate",
+                    "row_type": "bank_transaction",
+                    "relation_status": "candidate",
+                    "group_ids": ["CASE-CANDIDATE"],
+                    "linked_oa": [{"id": "oa-candidate"}],
+                    "linked_input_invoices": [{"id": "inv-candidate"}],
+                    "linked_output_invoices": [],
+                }
+            ]
+        )
+        service = BankDetailsRelationTagProjectionService(relation_facade=facade)
+
+        self.assertEqual(
+            service.relation_tag_for_transaction("txn-candidate"),
+            {"case_id": "CASE-CANDIDATE", "row_types": ["bank", "invoice", "oa"], "relation_status": "candidate"},
+        )
 
     def test_relation_tag_projection_returns_none_for_unlinked_distribution_row(self) -> None:
         service = BankDetailsRelationTagProjectionService(

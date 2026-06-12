@@ -81,7 +81,8 @@ class CostStatisticsWriteConnection:
 
 
 class CostStatisticsProjectionConnection:
-    def __init__(self) -> None:
+    def __init__(self, *, include_open_candidate: bool = False) -> None:
+        self.include_open_candidate = include_open_candidate
         self.fetch_all_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
 
@@ -89,11 +90,14 @@ class CostStatisticsProjectionConnection:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
         if "from read_model.workbench_groups" in normalized:
-            return [
+            rows = [
                 {
                     "group_id": "group-1",
+                    "zone": "paired",
                     "payload": {
                         "group_id": "group-1",
+                        "group_type": "manual_confirmed",
+                        "relation_status": "linked",
                         "oa_rows": [
                             {
                                 "project_name": "项目A",
@@ -118,6 +122,42 @@ class CostStatisticsProjectionConnection:
                     "raw_payload": {},
                 }
             ]
+            if self.include_open_candidate:
+                rows.append(
+                    {
+                        "group_id": "group-candidate",
+                        "zone": "open",
+                        "payload": {
+                            "group_id": "group-candidate",
+                            "group_type": "candidate",
+                            "relation_status": "candidate",
+                            "reason": "attached_unique_candidate",
+                            "oa_rows": [
+                                {
+                                    "project_name": "项目A",
+                                    "project_id": "P-A",
+                                    "expense_type": "材料",
+                                    "expense_content": "候选材料",
+                                    "applicant": "李四",
+                                }
+                            ],
+                            "bank_rows": [
+                                {
+                                    "id": "bank-candidate",
+                                    "trade_time": "2026-05-03 10:00:00",
+                                    "counterparty_name": "候选供应商",
+                                    "payment_account_label": "建行",
+                                    "direction": "支出",
+                                    "remark": "候选采购",
+                                    "amount": "999.00",
+                                    "available_actions": ["detail", "view_relation", "cancel_link"],
+                                }
+                            ],
+                        },
+                        "raw_payload": {},
+                    }
+                )
+            return rows
         return []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
@@ -571,6 +611,24 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(builder.rebuilt, ["active:2026-05"])
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:2026-05")])
         self.assertEqual(result["entry_count"], 1)
+
+    def test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts(self) -> None:
+        repository = CostStatisticsSaveRecorder()
+        connection = CostStatisticsProjectionConnection(include_open_candidate=True)
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_cost_statistics_read_model_scope("active:2026-05")
+
+        self.assertEqual(result["entry_count"], 1)
+        snapshot, changed_scope_keys = repository.saved[0]
+        self.assertEqual(changed_scope_keys, {"active:2026-05"})
+        payload = snapshot["read_models"]["active:2026-05"]["payload"]
+        self.assertEqual(payload["summary"]["transaction_count"], 1)
+        self.assertEqual(payload["summary"]["total_amount"], "10.00")
+        self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
 
     def test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows(self) -> None:
         repository = CostStatisticsSaveRecorder()

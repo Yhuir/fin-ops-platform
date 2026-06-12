@@ -10,6 +10,10 @@ from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
 )
+from fin_ops_platform.services.cost_statistics_relation_rules import (
+    is_candidate_workbench_group,
+    is_cost_eligible_open_group,
+)
 from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
@@ -240,7 +244,7 @@ class CostStatisticsSqlProjectionBuilder:
     def _cost_entries_from_workbench(self, month: str, *, project_scope: str) -> list[dict[str, Any]]:
         group_rows = self._connection.fetch_all(
             """
-            select group_id, payload, raw_payload
+            select group_id, zone, payload, raw_payload
             from read_model.workbench_groups
             where scope_key = %s
               and zone in ('paired', 'open')
@@ -253,6 +257,11 @@ class CostStatisticsSqlProjectionBuilder:
         for row in group_rows:
             group_payload = row_payload(row, "payload", "raw_payload")
             if isinstance(group_payload, dict):
+                if is_candidate_workbench_group(group_payload):
+                    continue
+                zone = str(row.get("zone") or group_payload.get("zone") or "paired").strip().lower()
+                if zone == "open" and not is_cost_eligible_open_group(group_payload):
+                    continue
                 groups.append(group_payload)
         active_projects = self._active_project_names() if project_scope == "active" else None
         entries: list[dict[str, Any]] = []

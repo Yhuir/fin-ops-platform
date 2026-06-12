@@ -313,6 +313,62 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransactions"]["primaryBankTransactionId"], "bank-exact")
         self.assertEqual([summary["bankTransactionId"] for summary in relation_detail["summaries"]], ["bank-exact", "bank-old"])
 
+    def test_candidate_relations_are_displayed_without_marking_invoice_paid(self) -> None:
+        vendor = self._counterparty("vendor", "供应商")
+        invoice = self._invoice("inv-candidate", "9202", vendor, total_with_tax="100.00")
+        bank = self._bank_transaction("bank-candidate", "100.00")
+        oa_projection = StaticOAProjection([self._oa("oa-candidate", "李四", "100.00")])
+        relation_facade = FakeWorkbenchRelationFacade(
+            [
+                {
+                    "row_id": invoice.id,
+                    "row_type": "input_invoice",
+                    "relation_status": "candidate",
+                    "group_ids": ["decision-open-candidate"],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                }
+            ],
+            groups=[
+                {
+                    "group_id": "decision-open-candidate",
+                    "scope_month": "2026-05",
+                    "relation_source": "automatic_decision",
+                    "relation_status": "candidate",
+                    "oa_row_ids": ["oa-candidate"],
+                    "bank_transaction_ids": [bank.id],
+                    "input_invoice_ids": [invoice.id],
+                    "output_invoice_ids": [],
+                    "payload": {
+                        "group_id": "decision-open-candidate",
+                        "row_ids": ["oa-candidate", bank.id, invoice.id],
+                        "row_types": ["oa", "bank", "invoice"],
+                        "relation_mode": "automatic_decision",
+                        "relation_status": "candidate",
+                        "amount_check": {"matched": True},
+                    },
+                }
+            ],
+        )
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(
+                existing_invoices=[invoice],
+                existing_transactions=[bank],
+            ),
+            relation_facade=relation_facade,
+            oa_projection=oa_projection,
+        )
+
+        row = service.list_rows()["rows"][0]
+
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
+        self.assertEqual(row["oa"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["paymentStatus"]["code"], "pending")
+
     def test_details_and_filter_options_have_complete_contract_shape(self) -> None:
         vendor = self._counterparty("vendor", "云南中招招标有限公司")
         invoice = self._invoice("inv-detail", "9301", vendor, buyer_name="云南溯源科技有限公司", remark="发票备注")

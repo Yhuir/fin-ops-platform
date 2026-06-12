@@ -1,5 +1,42 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-12 Phase 7O Downstream candidate closure
+
+目标：把 `WorkbenchRelationReadFacade` 分发的 `relation_status='candidate'` 显式传递到各下游页面，同时保持所有业务金额、状态、占用和冲突判断只使用 `linked`。
+
+结论：
+
+- OA 待付款、待找发票、销项发票收款、银行明细、进项发票使用情况均保留 candidate relation status 并在前端显示“候选”或“候选oa/候选发票”。
+- `InvoiceRelationQueryContext`、pending invoice live service 和 pending invoice SQL projection 统一保留 `relationStatus/relation_status`；candidate 不再被映射成默认 active/linked。
+- OA 待付款的 `paidTotal` / 支付状态、销项发票收款的 `receivedTotal` / 收款状态、待找发票的 `can_create_invoice` / paid pending 状态均只按 linked 关系计算。
+- 银行明细 relation tag 由 distribution 生成，candidate 显示为 `候选oa` / `候选发票`，同时保留机器字段 `relation_status='candidate'`。
+- 成本、税金、搜索等不一定展示候选 chip 的下游不能把 candidate 当 confirmed relation 参与金额或状态计算；搜索 pending invoice projection 已保留 candidate relation status 且 linked-only 计算付款汇总，成本统计 live service 和 SQL projection 均显式排除 Workbench open/proposed candidate 成本行。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py tests/test_input_invoice_usage_service.py tests/test_input_invoice_usage_api.py tests/test_invoice_usage_collection_sql_runtime.py tests/test_oa_pending_payment_api.py tests/test_output_invoice_collection_service.py tests/test_bank_details_service.py tests/test_pending_invoice_service.py tests/test_search_pending_sql_runtime.py tests/test_cost_statistics_service.py tests/test_cost_statistics_sql_runtime.py -q`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_downstream_relation_read_models_use_workbench_relation_distribution tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_details_relation_tags_only_read_relation_distribution_facade -q`
+- `cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx src/test/OaPendingPaymentsPage.test.tsx src/test/OutputInvoiceCollectionsPage.test.tsx src/test/PendingInvoicesApi.test.ts`
+- `cd web && npm test -- --run src/test/PendingInvoicesPage.test.tsx`
+- `cd web && npm run build`
+
+## 2026-06-12 Phase 7N Workbench relation candidate distribution
+
+目标：把关联台未配对区 open/proposed 自动候选也纳入 `WorkbenchRelationReadFacade` 的统一只读分发，避免进项发票使用情况等下游页面直接读取旧候选链路或看不到候选关系。
+
+结论：
+
+- `workbench_relation` SQL projection 同时分发 active/paired linked 关系和 open/proposed candidate 关系。
+- distribution group/row payload 保留 `relation_status`，下游 mapper 不再把所有 group 硬编码为 `status=active`。
+- `relation_status=candidate` 只表示关联台候选展示上下文，不写入 `app.workbench_pair_relations`，不作为 confirmed fact、支付完成判断或 row 占用事实。
+- 进项发票使用情况继续通过 `WorkbenchRelationReadFacade` 消费关系上下文，展示 candidate 证据，但支付状态只按 linked 关系计算。
+
+验证：
+
+- `tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_distributes_open_reconciliation_decision_as_candidate_relation`
+- `tests/test_workbench_relation_read_facade.py::WorkbenchRelationReadFacadeTests::test_distribution_mapper_preserves_candidate_relation_status`
+- `tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_candidate_relations_are_displayed_without_marking_invoice_paid`
+
 ## 2026-06-12 Phase 7M Workbench withdraw command 边界与 candidate split
 
 目标：把关联台 `withdraw-link` preview/submit 从 `WorkbenchWriteFacade -> WorkbenchPairRelationService` direct path 迁到 `WorkbenchRelationCommandService`，同时支持未配对区纯自动候选 group 的统一按钮 split/suppress。

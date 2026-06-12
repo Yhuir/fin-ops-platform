@@ -188,6 +188,34 @@ class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProj
         return super().fetch_all(sql, params)
 
 
+class CandidateDecisionRelationProjectionConnection(WorkbenchRelationProjectionConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_reconciliation_decisions" in normalized:
+            self.sql_statements.append(sql)
+            if "display_state = 'open'" not in normalized and "decision_status in" not in normalized:
+                return []
+            return [
+                {
+                    "decision_key": "decision-open-candidate",
+                    "scope_month": "2026-01-01",
+                    "row_ids": ["oa-tian-196", "txn-tian-196", "oa-att-inv-70"],
+                    "row_types": [],
+                    "oa_row_ids": ["oa-tian-196"],
+                    "bank_row_ids": ["txn-tian-196"],
+                    "invoice_row_ids": ["oa-att-inv-70"],
+                    "amount": "196.00",
+                    "payment_amount_closed": False,
+                    "invoice_amount_closed": False,
+                    "source_versions": {"decision": "v1"},
+                    "raw_payload": {"decision_status": "open", "display_state": "open"},
+                }
+            ]
+        if "from app.workbench_pair_relations" in normalized:
+            return []
+        return super().fetch_all(sql, params)
+
+
 class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
     def test_rebuild_writes_linked_and_unlinked_relation_rows(self) -> None:
         repository = CaptureWorkbenchRelationRepository()
@@ -245,6 +273,29 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
             linked["linked_input_invoices"][0]["object_identity_key"],
             "265320000000992",
         )
+
+    def test_rebuild_distributes_open_reconciliation_decision_as_candidate_relation(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = CandidateDecisionRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_workbench_relation_read_model_scope("2026-01")
+
+        self.assertEqual(result["group_count"], 1)
+        saved = repository.saved[0]
+        group = saved["groups"][0]
+        self.assertEqual(group["group_id"], "decision-open-candidate")
+        self.assertEqual(group["relation_source"], "automatic_decision")
+        self.assertEqual(group["relation_status"], "candidate")
+        self.assertEqual(group["payload"]["relation_status"], "candidate")
+        rows_by_id = {row["row_id"]: row for row in saved["rows"]}
+        self.assertEqual(rows_by_id["txn-tian-196"]["relation_status"], "candidate")
+        self.assertEqual(rows_by_id["txn-tian-196"]["group_ids"], ["decision-open-candidate"])
+        self.assertEqual(rows_by_id["txn-tian-196"]["linked_oa"][0]["relation_status"], "candidate")
+        self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
 
 
 if __name__ == "__main__":

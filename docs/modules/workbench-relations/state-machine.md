@@ -2,14 +2,16 @@
 
 ## Relation 事实与展示上下文
 
-`app.workbench_pair_relations` 只保存 confirmed relation fact。`workbench_relation` read model 可以同时分发 active confirmed relation、paired automatic decision 和 unlinked rows，但 automatic decision 不是 confirmed write fact。
+`app.workbench_pair_relations` 只保存 confirmed relation fact。`workbench_relation` read model 可以同时分发 active confirmed relation、paired automatic decision、open/proposed unmatched candidate 和 unlinked rows，但 automatic decision 不是 confirmed write fact。
 
 页面和 downstream read model 不能把以下内容当作 confirmed relation：
 
 - 前端 `workbenchRelationUpdated` event。
-- `read_model.workbench_reconciliation_decisions` 中未确认或仅用于候选展示的匹配。
+- `read_model.workbench_reconciliation_decisions` 中 `relation_status='candidate'`、未确认或仅用于候选展示的匹配。
 - 页面本地 table rows、drawer state、session state。
 - 非 fresh `workbench_relation` 返回的空 rows。
+
+`relation_status='linked'` 是下游只读页面判断已关联/已支付的唯一关系状态；`relation_status='candidate'` 只表示关联台未配对候选，应展示为候选证据，但不能驱动支付状态、row 独占或撤回/取消业务。
 
 ## Relation mode
 

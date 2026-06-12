@@ -17,6 +17,7 @@ import type {
   BankAutoTagSystemRule,
   BankInternalTransferCounterpart,
   SaveBankAutoTagRulesRequest,
+  BankDetailRelationStatus,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
   InvoiceRelationTag,
@@ -108,6 +109,8 @@ type ApiBankDetailTransaction = {
   invoice_relation_tag?: string | null;
   relation_tags?: string[];
   relation_case_id?: string | null;
+  relation_status?: string | null;
+  relationStatus?: string | null;
 };
 
 type ApiBankDetailAutoCandidateCategory = {
@@ -367,11 +370,28 @@ function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {
 }
 
 function normalizeOaRelationTag(value: unknown): OaRelationTag {
-  return value === "有oa" ? "有oa" : "无oa";
+  if (value === "有oa" || value === "候选oa") {
+    return value;
+  }
+  return "无oa";
 }
 
 function normalizeInvoiceRelationTag(value: unknown): InvoiceRelationTag {
-  return value === "有发票" ? "有发票" : "无发票";
+  if (value === "有发票" || value === "候选发票") {
+    return value;
+  }
+  return "无发票";
+}
+
+function normalizeRelationStatus(value: unknown): BankDetailRelationStatus {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.trim();
+  if (normalized === "candidate" || normalized === "linked") {
+    return normalized;
+  }
+  return "";
 }
 
 function formatBankDetailTradeTime(value: string) {
@@ -510,6 +530,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     relationCaseId: typeof row.relation_case_id === "string" && row.relation_case_id.trim()
       ? row.relation_case_id.trim()
       : null,
+    relationStatus: normalizeRelationStatus(row.relation_status ?? row.relationStatus),
   };
 }
 

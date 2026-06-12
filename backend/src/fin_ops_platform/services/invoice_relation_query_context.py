@@ -70,6 +70,9 @@ class DistributedInvoiceRelationContext:
                 "rowIds": list(relation.get("row_ids") or []),
                 "rowTypes": list(relation.get("row_types") or []),
                 "amountCheck": deepcopy(relation.get("amount_check") or {}),
+                "relationStatus": relation_status(relation),
+                "relation_status": relation_status(relation),
+                "relationSource": str(relation.get("relation_source") or ""),
             }
             for relation in self.distributed_relations_for_row_ids([row_id])
         ]
@@ -201,6 +204,32 @@ class DistributedInvoiceRelationContext:
         return typed
 
 
+def relation_status(relation: dict[str, Any] | None) -> str:
+    if not relation:
+        return ""
+    resolved = str(relation.get("relation_status") or relation.get("relationStatus") or "").strip()
+    if resolved:
+        return resolved
+    if str(relation.get("status") or "").strip() == "active":
+        return "linked"
+    return ""
+
+
+def relation_is_linked(relation: dict[str, Any] | None) -> bool:
+    return relation_status(relation) == "linked"
+
+
+def summary_relation_status(summary: dict[str, Any] | None) -> str:
+    if not summary:
+        return ""
+    resolved = str(summary.get("relationStatus") or summary.get("relation_status") or "").strip()
+    return resolved or "linked"
+
+
+def summary_is_linked(summary: dict[str, Any] | None) -> bool:
+    return summary_relation_status(summary) == "linked"
+
+
 def _infer_row_type(row_id: str) -> str:
     if row_id.startswith("bank"):
         return "bank"
@@ -225,6 +254,7 @@ def _relation_from_distribution_group(group: dict[str, Any]) -> dict[str, Any]:
     return {
         "case_id": str(group.get("group_id") or payload.get("group_id") or ""),
         "relation_mode": str(payload.get("relation_mode") or group.get("relation_source") or ""),
+        "relation_status": str(payload.get("relation_status") or group.get("relation_status") or "").strip() or "linked",
         "row_ids": row_ids,
         "row_types": row_types,
         "amount_check": deepcopy(payload.get("amount_check") if isinstance(payload.get("amount_check"), dict) else {}),

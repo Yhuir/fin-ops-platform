@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import unittest
 
+from fin_ops_platform.services.workbench_relation_distribution_mapper import (
+    relation_dicts_by_row_id_from_distribution_payload,
+)
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
@@ -141,6 +144,40 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(repository.month_calls[0]["relation_status"], "unlinked")
         self.assertEqual(repository.month_calls[0]["row_types"], ["bank_transaction"])
+
+    def test_distribution_mapper_preserves_candidate_relation_status(self) -> None:
+        relations_by_row_id = relation_dicts_by_row_id_from_distribution_payload(
+            {
+                "rows": [
+                    {
+                        "row_id": "txn-candidate",
+                        "row_type": "bank_transaction",
+                        "relation_status": "candidate",
+                        "group_ids": ["decision-open-candidate"],
+                    }
+                ],
+                "groups": [
+                    {
+                        "group_id": "decision-open-candidate",
+                        "scope_month": "2026-01",
+                        "relation_source": "automatic_decision",
+                        "relation_status": "candidate",
+                        "payload": {
+                            "row_ids": ["oa-candidate", "txn-candidate"],
+                            "row_types": ["oa", "bank"],
+                            "relation_mode": "automatic_decision",
+                            "relation_status": "candidate",
+                        },
+                    }
+                ],
+            }
+        )
+
+        relation = relations_by_row_id["txn-candidate"][0]
+        self.assertEqual(relation["status"], "candidate")
+        self.assertEqual(relation["relation_status"], "candidate")
+        self.assertEqual(relation["relationStatus"], "candidate")
+        self.assertEqual(relation["relation_source"], "automatic_decision")
 
 
 if __name__ == "__main__":

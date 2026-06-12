@@ -437,6 +437,9 @@ function formatMoney(value: string | null) {
 }
 
 function relationTagTone(tag: string) {
+  if (tag.startsWith("候选")) {
+    return "candidate";
+  }
   return tag.startsWith("有") ? "has" : "none";
 }
 

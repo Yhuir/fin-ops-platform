@@ -14,7 +14,12 @@ from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
-from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
+from fin_ops_platform.services.invoice_relation_query_context import (
+    DistributedInvoiceRelationContext,
+    relation_is_linked,
+    relation_status,
+    summary_is_linked,
+)
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.output_invoice_collection_models import (
     OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
@@ -313,7 +318,7 @@ class OutputInvoiceReceiptPreviewService:
         candidates = [
             summary
             for summary in list(row.get("bankTransactions", {}).get("summaries") or [])
-            if str(summary.get("direction") or "") == "inflow"
+            if str(summary.get("direction") or "") == "inflow" and summary_is_linked(summary)
         ]
         return sorted(candidates, key=lambda item: (_sortable_time(item.get("tradeTime")), item.get("bankTransactionId", "")), reverse=True)
 
@@ -769,7 +774,7 @@ class OutputInvoiceCollectionQueryService:
             for related_group in all_groups
             if related_group["primary"].id in {summary["relatedInvoiceId"] for summary in red_payload["summaries"]}
         ]
-        own_inflow_total = self._bank_total(bank_payload["summaries"], direction="inflow")
+        own_inflow_total = self._bank_total(bank_payload["summaries"], direction="inflow", linked_only=True)
         related_bank_summaries = []
         for related_group in related_groups:
             related_ids = [line.id for line in related_group["line_items"]]
@@ -782,8 +787,16 @@ class OutputInvoiceCollectionQueryService:
                     context=context,
                 )["summaries"]
             )
-        related_inflow_total = self._bank_total(related_bank_summaries + bank_payload["summaries"], direction="inflow")
-        related_outflow_total = self._bank_total(related_bank_summaries + bank_payload["summaries"], direction="outflow")
+        related_inflow_total = self._bank_total(
+            related_bank_summaries + bank_payload["summaries"],
+            direction="inflow",
+            linked_only=True,
+        )
+        related_outflow_total = self._bank_total(
+            related_bank_summaries + bank_payload["summaries"],
+            direction="outflow",
+            linked_only=True,
+        )
         collection_status = self._lifecycle_policy.evaluate_output_invoice_collection(
             invoice_total=sum((_invoice_total(line) for line in line_items), start=ZERO),
             own_inflow_total=own_inflow_total,
@@ -856,7 +869,7 @@ class OutputInvoiceCollectionQueryService:
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
-        received_total = self._bank_total(public_summaries, direction="inflow")
+        received_total = self._bank_total(public_summaries, direction="inflow", linked_only=True)
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
             "counterpartyName": primary.get("counterpartyName", ""),
@@ -900,6 +913,8 @@ class OutputInvoiceCollectionQueryService:
             "summary": bank.summary or "",
             "remark": bank.remark or "",
             "relationCaseId": relation.get("case_id", ""),
+            "relationStatus": relation_status(relation),
+            "relationSource": str(relation.get("relation_source") or ""),
             "_sort": (direction_rank, completeness, diff, -timestamp, bank.id),
         }
 
@@ -1015,8 +1030,8 @@ class OutputInvoiceCollectionQueryService:
         positive_total = abs(sum((_invoice_total(line) for line in positive_group["line_items"]), start=ZERO))
         positive_banks = self._group_bank_summaries(positive_group, context=context)
         negative_banks = self._group_bank_summaries(negative_group, context=context)
-        positive_inflow = self._bank_total(positive_banks, direction="inflow")
-        negative_outflow = self._bank_total(negative_banks, direction="outflow")
+        positive_inflow = self._bank_total(positive_banks, direction="inflow", linked_only=True)
+        negative_outflow = self._bank_total(negative_banks, direction="outflow", linked_only=True)
         positive_full_inflow = _within_cent(positive_inflow, positive_total)
         if positive_full_inflow and negative_outflow > ZERO:
             priority = 0
@@ -1051,7 +1066,11 @@ class OutputInvoiceCollectionQueryService:
                 "hasMultiple": False,
                 "detailMode": "none",
             }
-        inflow_count = sum(1 for summary in bank_payload.get("summaries", []) if summary.get("direction") == "inflow")
+        inflow_count = sum(
+            1
+            for summary in bank_payload.get("summaries", [])
+            if summary.get("direction") == "inflow" and summary_is_linked(summary)
+        )
         if inflow_count <= 0:
             return {
                 "status": "not_available",
@@ -1200,6 +1219,8 @@ class OutputInvoiceCollectionQueryService:
         bank_map = context.bank_transactions_by_id()
         invoice_ids = {line.id for line in line_items}
         for relation in relations:
+            if not relation_is_linked(relation):
+                continue
             if not self._relation_amount_check_is_matched(relation):
                 continue
             typed_rows = self._typed_relation_rows(relation)
@@ -1373,9 +1394,14 @@ class OutputInvoiceCollectionQueryService:
         return {transaction.id: transaction for transaction in self._import_service.list_transactions(month="all")}
 
     @staticmethod
-    def _bank_total(summaries: list[dict[str, Any]], *, direction: str) -> Decimal:
+    def _bank_total(summaries: list[dict[str, Any]], *, direction: str, linked_only: bool = False) -> Decimal:
         return sum(
-            (_decimal(summary.get("amount")) for summary in summaries if str(summary.get("direction") or "") == direction),
+            (
+                _decimal(summary.get("amount"))
+                for summary in summaries
+                if str(summary.get("direction") or "") == direction
+                and (not linked_only or summary_is_linked(summary))
+            ),
             start=ZERO,
         )
 

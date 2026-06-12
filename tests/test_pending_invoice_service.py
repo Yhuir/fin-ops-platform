@@ -664,6 +664,122 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual([invoice["id"] for invoice in payload["rows"][0]["invoices"]], ["inv_output"])
         self.assertEqual(payload["rows"][0]["oa_applicant"], "—")
 
+    def test_candidate_distribution_is_visible_without_closing_pending_invoice(self) -> None:
+        vendor = self._counterparty("cp_vendor", "Vendor Candidate")
+        txn = self._bank_transaction("txn_candidate", TransactionDirection.OUTFLOW, "Vendor Candidate", "118.00")
+        invoice = self._invoice(
+            "inv_candidate",
+            InvoiceType.INPUT,
+            "IN-CANDIDATE",
+            vendor,
+            seller_name="Vendor Candidate",
+            total_with_tax="118.00",
+        )
+        oa_projection = FakeOAProjection([
+            OAApplicationRecord(
+                id="oa-candidate",
+                month="2026-05",
+                section="已完成",
+                case_id="OA-CANDIDATE",
+                applicant="候选申请人",
+                project_name="候选项目",
+                apply_type="支付申请",
+                amount="118.00",
+                counterparty_name="Vendor Candidate",
+                reason="候选关系",
+                relation_code="pending_match",
+                relation_label="待确认",
+                relation_tone="warn",
+            )
+        ])
+        rows = [
+            {
+                "row_id": row_id,
+                "row_type": row_type,
+                "relation_status": "candidate",
+                "group_ids": ["candidate-pending-invoice"],
+                "linked_oa": [
+                    {
+                        "id": "oa-candidate",
+                        "applicant": "候选申请人",
+                        "application_type": "支付申请",
+                        "project_name": "候选项目",
+                        "status": "已完成",
+                        "form_no": "OA-CANDIDATE",
+                        "detail_available": True,
+                        "relation_case_id": "candidate-pending-invoice",
+                        "relation_status": "candidate",
+                    }
+                ],
+                "linked_bank_transactions": [
+                    {
+                        "id": txn.id,
+                        "amount": "118.00",
+                        "trade_time": txn.trade_time,
+                        "counterparty_name": txn.counterparty_name_raw,
+                        "relation_case_id": "candidate-pending-invoice",
+                        "relation_status": "candidate",
+                    }
+                ],
+                "linked_input_invoices": [
+                    {
+                        "id": invoice.id,
+                        "invoice_no": invoice.invoice_no,
+                        "issue_date": invoice.invoice_date,
+                        "seller_name": invoice.seller_name,
+                        "total_with_tax": "118.00",
+                        "relation_case_id": "candidate-pending-invoice",
+                        "relation_status": "candidate",
+                    }
+                ],
+                "linked_output_invoices": [],
+            }
+            for row_id, row_type in ((txn.id, "bank_transaction"), (invoice.id, "invoice"), ("oa-candidate", "oa"))
+        ]
+        relation_facade = FakeWorkbenchRelationFacade(
+            rows,
+            groups=[
+                {
+                    "group_id": "candidate-pending-invoice",
+                    "relation_status": "candidate",
+                    "payload": {
+                        "group_id": "candidate-pending-invoice",
+                        "row_ids": ["oa-candidate", txn.id, invoice.id],
+                        "row_types": ["oa", "bank", "invoice"],
+                        "relation_status": "candidate",
+                        "relation_mode": "automatic_decision",
+                        "amount_check": {"matched": True},
+                    },
+                    "oa_row_ids": ["oa-candidate"],
+                    "bank_transaction_ids": [txn.id],
+                    "input_invoice_ids": [invoice.id],
+                    "output_invoice_ids": [],
+                }
+            ],
+        )
+        service = self._query_service(
+            transactions=[txn],
+            invoices=[invoice],
+            oa_projection=oa_projection,
+            relation_facade=relation_facade,
+        )
+
+        row = service.list_rows(direction="expense", filter="all")["rows"][0]
+        detail = service.relation_detail(transaction_id=txn.id, direction="expense")
+        candidates = service.invoice_candidates(transaction_id=txn.id)
+
+        self.assertEqual(row["input_invoices"]["relation_count"], 1)
+        self.assertEqual(row["input_invoices"]["summaries"][0]["relation_status"], "candidate")
+        self.assertEqual(row["oa"]["summaries"][0]["relation_status"], "candidate")
+        self.assertEqual(row["input_invoices"]["payment_summary"]["paid_total"], "0.00")
+        self.assertEqual(row["invoice_acquisition_status"]["code"], "paid_pending_invoice")
+        self.assertTrue(row["can_create_invoice"])
+        self.assertEqual(detail["payment_rows"][0]["relation_status"], "candidate")
+        self.assertEqual(detail["paid_total"], "0.00")
+        self.assertEqual(detail["related_invoices"][0]["relation_status"], "candidate")
+        self.assertEqual(candidates["rows"][0]["candidate_status"], "available")
+        self.assertEqual(candidates["rows"][0]["paid_total"], "0.00")
+
     def test_filter_rules_and_can_create_invoice_follow_pending_invoice_tag_groups(self) -> None:
         requires_txn = self._bank_transaction("txn_requires", TransactionDirection.OUTFLOW, "Vendor R", "10.00")
         statement_txn = self._bank_transaction("txn_statement", TransactionDirection.OUTFLOW, "Vendor S", "20.00")

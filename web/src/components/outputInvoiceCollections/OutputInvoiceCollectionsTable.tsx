@@ -300,6 +300,7 @@ function OutputInvoiceCollectionDataRow({
             />
             <span className="output-invoice-collections-tag-row">
               <FinanceTag>{bank.tradeTime || "收款日期为空"}</FinanceTag>
+              {bank.relationStatus === "candidate" ? <FinanceTag tone="warning">候选</FinanceTag> : null}
               {bank.detailAvailable ? (
                 <ActionButton
                   ariaLabel={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
@@ -423,7 +424,7 @@ function EmptyValue() {
   return <span className="output-invoice-collections-empty-value">—</span>;
 }
 
-function FinanceTag({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "info" | "success" }) {
+function FinanceTag({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "info" | "success" | "warning" }) {
   return <span className={`output-invoice-collections-table-tag output-invoice-collections-table-tag--${tone}`}>{children}</span>;
 }
 

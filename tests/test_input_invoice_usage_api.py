@@ -16,6 +16,7 @@ from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoic
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import InputInvoiceUsageOaReverseStatus
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
+from fin_ops_platform.services.invoice_usage_collection_source_versions import input_invoice_usage_source_versions
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.target_oa_applicant_token_provider import TargetOaApplicantTokenProvider
@@ -93,6 +94,29 @@ class FailingRelationCommandService:
                 "refresh_enqueued": True,
             },
         )
+
+
+class StaticInputInvoiceUsageReadRepository:
+    def __init__(self, row: dict[str, object], *, refresh_status: str = "fresh") -> None:
+        self.row = dict(row)
+        self.refresh_status = refresh_status
+        self.row_id_calls: list[str] = []
+
+    def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
+        self.row_id_calls.append(str(row_id))
+        if str(self.row.get("id")) != str(row_id):
+            return None
+        return {
+            "row": dict(self.row),
+            "refresh_status": self.refresh_status,
+            "source_versions": input_invoice_usage_source_versions(),
+            "read_model_scope_key": "2026-05",
+        }
+
+
+class FailingInputInvoiceUsageQueryService(InputInvoiceUsageQueryService):
+    def row_relation_details(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        raise AssertionError("relation detail must be served from input_invoice_usage read model")
 
 
 class InputInvoiceUsageApiTests(unittest.TestCase):
@@ -229,6 +253,43 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(len(json.loads(oa_detail_response.body)["summaries"]), 2)
         self.assertEqual(len(json.loads(bank_detail_response.body)["summaries"]), 2)
         self.assertEqual(len(json.loads(invoice_detail_response.body)["summaries"]), 2)
+
+    def test_relation_details_use_input_invoice_usage_read_model_row_without_live_rebuild(self) -> None:
+        row = {
+            "id": "usage-row-read-model",
+            "invoiceId": "inv-read-model",
+            "oa": {
+                "relationCount": 2,
+                "hasMultiple": True,
+                "detailMode": "list",
+                "summaries": [
+                    {"oaId": "oa-a", "applicantName": "刘际涛", "amount": "40.00", "relationStatus": "linked"},
+                    {"oaId": "oa-b", "applicantName": "张三", "amount": "60.00", "relationStatus": "linked"},
+                ],
+            },
+            "bankTransactions": {"relationCount": 0, "summaries": []},
+            "invoiceRelations": {"relationCount": 1, "summaries": [{"invoiceId": "inv-read-model"}]},
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            repository = StaticInputInvoiceUsageReadRepository(row)
+            app._input_invoice_usage_sql_read_repository = repository
+            app._input_invoice_usage_query_service = FailingInputInvoiceUsageQueryService(
+                import_service=ImportNormalizationService()
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/input-invoice-usage/rows/usage-row-read-model/relation-details?kind=oa",
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(repository.row_id_calls, ["usage-row-read-model"])
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["rowId"], "usage-row-read-model")
+        self.assertEqual(payload["relationCount"], 2)
+        self.assertEqual([summary["oaId"] for summary in payload["summaries"]], ["oa-a", "oa-b"])
 
     def test_bank_filter_options_and_invoice_date_sort_are_http_contract_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

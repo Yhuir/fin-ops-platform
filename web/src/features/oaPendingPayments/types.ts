@@ -33,6 +33,8 @@ export type OaPendingPaymentOaSummary = {
   amount: string;
   detailAvailable: boolean;
   relationCount?: number;
+  relationStatus?: string;
+  relationSource?: string;
   hasMultiple?: boolean;
   detailMode?: "none" | "single" | "list";
   summaries?: OaPendingPaymentOaRelationSummary[];
@@ -50,6 +52,8 @@ export type OaPendingPaymentOaRelationSummary = {
   reason?: string;
   counterpartyName?: string;
   relationCaseId?: string;
+  relationStatus?: string;
+  relationSource?: string;
 };
 
 export type OaPendingPaymentStatus = {
@@ -85,6 +89,8 @@ export type OaPendingPaymentBankTransaction = {
   remark: string;
   amount?: string;
   paidTotal?: string;
+  relationStatus?: string;
+  relationSource?: string;
   relationCount: number;
   hasMultiple: boolean;
   detailMode?: "none" | "single" | "list";
@@ -105,6 +111,19 @@ export type OaPendingPaymentBankTransactionSummary = {
   summary?: string;
   remark?: string;
   relationCaseId?: string;
+  relationStatus?: string;
+  relationSource?: string;
+};
+
+export type OaPendingPaymentInvoiceSummary = {
+  invoiceId?: string | null;
+  digitalInvoiceNo?: string;
+  sellerName?: string;
+  invoiceDate?: string;
+  totalWithTax?: string;
+  relationCaseId?: string;
+  relationStatus?: string;
+  relationSource?: string;
 };
 
 export type OaPendingPaymentInvoice = {
@@ -113,10 +132,12 @@ export type OaPendingPaymentInvoice = {
   sellerName: string;
   invoiceDate: string;
   totalWithTax: string;
+  relationStatus?: string;
+  relationSource?: string;
   relationCount: number;
   hasMultiple: boolean;
   detailMode?: "none" | "single" | "list";
-  summaries?: Array<Record<string, unknown>>;
+  summaries?: OaPendingPaymentInvoiceSummary[];
 };
 
 export type OaPendingPaymentRow = {

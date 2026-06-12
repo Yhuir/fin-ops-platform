@@ -13,6 +13,8 @@
 | 发票生命周期 | `InvoiceLifecyclePolicy`、`invoice_lifecycle` read model | `paymentStatus` 保持兼容；生命周期变化必须先刷新 invoice lifecycle，再刷新进项使用等下游。 |
 | 筛选/排序/导出 | 后端 filter config 和 export service | 前端不能从当前页 rows 推导全局筛选项；导出必须沿用当前筛选和 sort。 |
 | OA 反提预览 | `InputInvoiceUsageOaReverseService.preview` | 候选发票必须排除已有 active OA 关系；preview hash 过期不能创建草稿。 |
+| relation candidate 展示 | `WorkbenchRelationReadFacade`、`workbench_relation` distribution、`InputInvoiceUsageQueryService` | 关联台未配对候选必须展示在进项使用页面；candidate 不得参与支付状态和 confirmed relation 判断。 |
+| `+N` 详情展开 | `read_model.input_invoice_usage_rows`、`InputInvoiceUsageReadModelDetailService` | 多 OA/流水/发票详情必须从单行 read model payload 展开，不能触发全量 live rebuild 后长期 loading。 |
 | OA 反提草稿 | `InputInvoiceUsageOaReverseService`、内部 batch repository | 一键创建内部 batch 和 OA draft；不能暴露 `创建本地批次` 用户概念。 |
 | 目标申请人凭据 | `OaApplicantCredentialService`、PG repository、settings UI | admin-only；密码只写不读；API、日志、前端状态和测试快照不得泄漏密码/密文/token。 |
 | 目标申请人 OA 登录 | `TargetOaApplicantTokenProvider`、`OaLoginClient` | 必须使用目标申请人凭据/token，不使用当前操作人 request token。 |
@@ -25,6 +27,8 @@
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
 | rows/filter/detail/relation API contract | P0 | `tests/test_input_invoice_usage_api.py` | covered | 覆盖筛选、排序、分页、filter-options、invoice/bank/OA/detail/relation routes；同一 active relation 多 OA/流水/发票必须聚合合计并返回 relation summaries。 |
+| relation candidate display without payment proof | P0 | `tests/test_input_invoice_usage_service.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_relation_read_facade.py` | covered | open/proposed unmatched candidate 通过统一 facade 分发并在进项使用行展示；mapper 保留 `relationStatus=candidate`，支付状态只用 linked 关系计算。 |
+| relation details single-row read model lookup | P0 | `tests/test_input_invoice_usage_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | covered | `/rows/{row_id}/relation-details` 优先读取 SQL read model 单行 payload；stale/missing 返回 refreshing，不执行全量 live rebuild。 |
 | all scope source_versions 聚合 | P0 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_read_model_freshness.py` | covered | 月份 relation 嵌套版本不同仍可返回 fresh all scope；缺失基础版本仍 refreshing。 |
 | read model miss/stale enqueue | P0 | `tests/test_invoice_usage_collection_sql_runtime.py` | covered | API miss/source version stale 入队刷新，不 live scan 伪 fresh。 |
 | export preview/download | P1 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` | covered | 当前筛选导出、read model refreshing、文件下载。 |
@@ -44,9 +48,9 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_read_model_freshness.py` | OA 反提状态、preview hash、已提交/未提交流转、relation writer mode/idempotency/fail-fast、freshness 判断属于业务核心。 |
-| 2. Service-layer tests | 适用 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_oa_applicant_credentials_service.py`、`tests/test_target_oa_applicant_token_provider.py`、`tests/test_postgres_input_invoice_usage_oa_reverse_repository.py` | 覆盖服务编排、repository、凭据、token provider、外部 OA client 边界、本地 batch 状态和 relation command service 写入边界。 |
-| 3. API contract tests | 适用 | `tests/test_input_invoice_usage_api.py`、`tests/test_oa_applicant_credentials_api.py` | 覆盖 rows/filter/detail/export/OA reverse/credential API、权限、错误码、响应 shape、relation command 409/no half-write 和敏感信息不泄漏。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_read_model_freshness.py` | 覆盖 input/output/OA usage collection repository、all scope、source versions、worker all-scope fan-out、RabbitMQ event types。 |
+| 2. Service-layer tests | 适用 | `tests/test_input_invoice_usage_service.py`、`tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_oa_applicant_credentials_service.py`、`tests/test_target_oa_applicant_token_provider.py`、`tests/test_postgres_input_invoice_usage_oa_reverse_repository.py` | 覆盖服务编排、repository、凭据、token provider、外部 OA client 边界、本地 batch 状态、relation command service 写入边界，以及 candidate relation 不参与支付状态。 |
+| 3. API contract tests | 适用 | `tests/test_input_invoice_usage_api.py`、`tests/test_oa_applicant_credentials_api.py` | 覆盖 rows/filter/detail/export/OA reverse/credential API、权限、错误码、响应 shape、relation command 409/no half-write、敏感信息不泄漏，以及 relation detail 单行 read model contract。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_read_model_freshness.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_relation_read_facade.py` | 覆盖 input/output/OA usage collection repository、all scope、source versions、worker all-scope fan-out、RabbitMQ event types，以及 workbench_relation linked/candidate distribution。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/src/test/SettingsPage.test.tsx` | 覆盖页面、表格、drawer、tabs、确认弹窗、设置页凭据管理、权限隐藏和 mapper。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | 覆盖管理员保存凭据 -> full-access 用户创建 OA 草稿 -> 用户确认已提交 -> 已提交历史；真实 OA 外部联调仍为 documented-risk。 |
 | 7. Existing feature regression tests | 适用 | 上述全部 input invoice usage tests，加 `tests/test_pending_invoice_*`、`tests/test_oa_pending_payment_*`、`tests/test_tax_offset_*`、`tests/test_cost_statistics_*` 的按改动选择扩展集 | 进项使用受发票生命周期、关系确认、规则、税金和成本影响；任何共享规则或 read model 变更都要评估旧页面。 |
@@ -62,6 +66,8 @@
 | 2026-06-10 | 已提交历史展示内部 batch/draft/preview/status 字段。 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |
 | 2026-06-12 | OA reverse evidence detected 直接写 pair service，导致 relation 事实源绕过 command service/read model freshness。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered |
 | 2026-06-12 | 同一 active relation 下多条 OA、流水或发票在进项发票使用情况列表中只显示 primary，未展示合计和 `+N` 详情入口。 | `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_rows_and_relation_details_return_multi_relation_totals_for_oa_bank_and_invoice`、`web/src/test/InputInvoiceUsagePage.test.tsx::shows relation totals with +N entry points for multi OA, bank, and invoice relations` | covered |
+| 2026-06-12 | 进项发票使用情况没有展示关联台未配对候选，或把 candidate 当成 active relation 导致支付状态错误。 | `tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_distributes_open_reconciliation_decision_as_candidate_relation`、`tests/test_workbench_relation_read_facade.py::WorkbenchRelationReadFacadeTests::test_distribution_mapper_preserves_candidate_relation_status`、`tests/test_input_invoice_usage_service.py::InputInvoiceUsageQueryServiceTests::test_candidate_relations_are_displayed_without_marking_invoice_paid` | covered |
+| 2026-06-12 | 点击 `+N` 详情后长期停在“正在加载完整详情”，因为详情接口触发全量 live rebuild 而不是读取当前 read model 行。 | `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_relation_details_use_input_invoice_usage_read_model_row_without_live_rebuild`、`tests/test_invoice_usage_collection_sql_runtime.py::InvoiceUsageCollectionSqlRuntimeTests::test_input_repository_detail_lookup_uses_row_id_native_column` | covered |
 | 长期 | read model stale/missing 时页面显示假空态。 | `tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` | covered |
 
 ## 关键 smoke flows

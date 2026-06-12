@@ -294,9 +294,10 @@ class SearchPendingSqlProjectionBuilder:
             invoices = _relation_invoice_summaries(relation_context, target_invoice_type=target_invoice_type)
             if not invoices:
                 invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
+            linked_invoices = [invoice for invoice in invoices if _distribution_item_is_linked(invoice)]
             paid_total = _relation_paid_total(relation_context) if relation_context else row.get("paid_total")
-            payment_summary = _payment_summary_from_invoices(invoices, paid_total=paid_total)
-            can_create_invoice = direction == "expense" and not invoices and filter_group != "no_invoice_required"
+            payment_summary = _payment_summary_from_invoices(linked_invoices, paid_total=paid_total)
+            can_create_invoice = direction == "expense" and not linked_invoices and filter_group != "no_invoice_required"
             relation_case_ids = _relation_case_ids(relation_context) or list(row.get("relation_case_ids") or [])
             relation_oa_summaries = _relation_oa_summaries(relation_context)
             oa_applicant = str(
@@ -324,7 +325,7 @@ class SearchPendingSqlProjectionBuilder:
             status_payload = pending_invoice_status_payload(
                 direction=direction,
                 group=filter_group if filter_group != "all" else None,
-                has_invoices=bool(invoices),
+                has_invoices=bool(linked_invoices),
                 payment_summary=payment_summary,
                 matched_rule=_matched_rule_payload(
                     group=filter_group if filter_group != "all" else None,
@@ -373,6 +374,7 @@ class SearchPendingSqlProjectionBuilder:
             input_invoices = {
                 "primary": invoices[0] if invoices else None,
                 "relation_count": len(invoices),
+                "linked_relation_count": len(linked_invoices),
                 "has_multiple": len(invoices) > 1,
                 "summaries": invoices,
                 "payment_summary": payment_summary,
@@ -533,6 +535,9 @@ def _relation_invoice_summaries(relation_context: dict[str, object], *, target_i
                 "invoice_type": text(invoice.get("invoice_type")) or target_invoice_type,
                 "source_kind": text(invoice.get("source_kind")),
                 "counterparty_display_name": seller_name if target_invoice_type == "input" else buyer_name,
+                "relation_case_id": text(invoice.get("relation_case_id")),
+                "relation_status": _distribution_item_relation_status(invoice),
+                "relation_source": text(invoice.get("relation_source") or invoice.get("relationSource")),
             }
         )
     return summaries
@@ -558,6 +563,8 @@ def _relation_oa_summaries(relation_context: dict[str, object]) -> list[dict[str
                 "form_no": text(oa.get("form_no") or oa.get("form_id")),
                 "detail_available": bool(oa.get("detail_available", True)),
                 "relation_case_id": text(oa.get("relation_case_id")),
+                "relation_status": _distribution_item_relation_status(oa),
+                "relation_source": text(oa.get("relation_source") or oa.get("relationSource")),
             }
         )
     return summaries
@@ -580,11 +587,22 @@ def _relation_paid_total(relation_context: dict[str, object]) -> str:
         (
             _decimal_from_text(bank.get("amount"))
             for bank in list(relation_context.get("linked_bank_transactions") or [])
-            if isinstance(bank, dict)
+            if isinstance(bank, dict) and _distribution_item_is_linked(bank)
         ),
         start=Decimal("0.00"),
     )
     return _decimal_to_str(total)
+
+
+def _distribution_item_relation_status(item: dict[str, object] | None) -> str:
+    if not isinstance(item, dict):
+        return "linked"
+    status = text(item.get("relation_status") or item.get("relationStatus"))
+    return status or "linked"
+
+
+def _distribution_item_is_linked(item: dict[str, object] | None) -> bool:
+    return _distribution_item_relation_status(item) == "linked"
 
 
 def _dedupe_preserve_order(values: object) -> list[str]:

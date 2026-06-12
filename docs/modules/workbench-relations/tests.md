@@ -5,8 +5,8 @@
 - `tests/test_workbench_pair_relation_service.py`：领域规则、row 去重、row type 对齐、active overlap、cancel、ETC 删除不恢复旧二栏 relation。
 - `tests/test_workbench_relation_command_service.py`：command service confirm/cancel/withdraw 基座、withdraw preview lock、row-id batch cancel、metadata update、freshness precondition、idempotency、mode registry 和 active row conflict。
 - `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service，以及纯候选 `split_candidate` suppress 边界。
-- `tests/test_workbench_relation_sql_projection.py`：`workbench_relation` distribution、linked/unlinked rows、正式发票和 OA 附件发票 identity 去重。
-- `tests/test_workbench_relation_read_facade.py`：freshness-gated facade、missing 入队刷新、unlinked 过滤。
+- `tests/test_workbench_relation_sql_projection.py`：`workbench_relation` distribution、linked/candidate/unlinked rows、正式发票和 OA 附件发票 identity 去重。
+- `tests/test_workbench_relation_read_facade.py`：freshness-gated facade、missing 入队刷新、unlinked 过滤、candidate relation status 映射不被硬编码为 active。
 - `tests/test_platform_runtime_boundary_guards.py`：下游读模型不得直接 join `app.workbench_pair_relations`，银行明细关系标签必须走 facade，ETC summary 删除、server OA offset auto pair、OA 附件上下文 repair、batch accounting legacy repair 和 no-OA legacy repair/consolidation 不得退回 direct pair relation mutation。
 - `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`：批量账务 relation freshness、submit/withdraw command service 委托、submit 缺 command fail-fast 和前端阻断。
 - `tests/test_no_oa_bank_batch_*`：no-OA submit/withdraw、internal transfer confirm-link、command service 写入委托、relation read model stale fail-fast、Workbench paired/open 收敛。
@@ -64,6 +64,8 @@
 - relation 写入后 `workbench_relation` dirty/outbox 入队；ETC summary delete command result 必须返回 changed case ids 和 affected months 并驱动 Workbench relation invalidation。
 - downstream `bank_detail`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`no_oa_bank_batch`、`turnover_ledger`、`search`、`cost_statistics`、`tax_offset` scope 覆盖。
 - worker rebuild 后 relation distribution fresh。
+- open/proposed unmatched candidate decision 必须分发为 `relation_status='candidate'`，并由 `WorkbenchRelationReadFacade` 统一提供给下游页面；paired/active 关系才是 `linked`。
+- OA 待付款、待找发票、进项发票使用情况、销项发票收款、银行明细必须覆盖至少一个 candidate relation status 不丢失的 regression；其中支付/收款/待补票状态和金额汇总必须证明 candidate 不参与 linked-only 业务计算。成本统计等非 relation chip 页面必须覆盖 candidate 不进入业务金额/状态计算。
 - read facade missing/stale/source mismatch 返回非 fresh，不伪装空关系。
 - App Status registry 仍能观测 `workbench_relation`。
 - PostgreSQL history replay 必须报告 readiness missing/not fresh，不能把 read model 状态缺失当成 pass。
@@ -74,6 +76,7 @@
 
 - 关联台、待找发票、no-OA、turnover、batch accounting mutation success 后 refetch/invalidate。
 - bank detail、cost statistics 等监听 `workbenchRelationUpdated` 只作为刷新提示。
+- bank detail 必须显示 `候选oa` / `候选发票`，OA 待付款、待找发票、销项发票收款必须显示候选 chip；这些 chip 只能由后端 `relationStatus` / `relation_status` 驱动，不能由金额或页面本地状态推断。
 - relation read model non-fresh 时按钮禁用并展示后端 message/reasons/scopes。
 - API 失败时不更新本地事实，不把 event 当成功。
 
@@ -92,6 +95,7 @@
 适用。必须保护：
 
 - 旧 API response shape 不丢字段。
+- 新增 `relationStatus` / `relation_status` 字段不能破坏旧页面筛选、排序、分页、导出；旧 linked/no-relation 样式和详情按钮位置必须保持。
 - 旧页面筛选、排序、分页、导出不因 relation module 抽离变空。
 - 旧 Mongo snapshot/shadow read/repair tools 迁移观察期可读。
 - App Health/readiness 仍能展示 workbench relation worker。

@@ -98,6 +98,9 @@ export type OutputInvoiceCollectionBankSummary = {
   accountLast4: string;
   summary: string;
   remark: string;
+  relationCaseId?: string;
+  relationStatus?: string;
+  relationSource?: string;
   detailAvailable: boolean;
 };
 

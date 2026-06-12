@@ -191,6 +191,13 @@ class InvoiceReadModelConnection:
         if "from read_model.oa_pending_payment_scopes" in normalized:
             return {"scope_key": params[0] if params else "2026-05", "source_versions": oa_pending_payment_source_versions()} if self.scope_exists else None
         if "from read_model.input_invoice_usage_rows" in normalized:
+            if "select scope_key, source_versions, payload, raw_payload" in normalized:
+                if not self.input_rows:
+                    return None
+                row = dict(self.input_rows[0])
+                row.setdefault("scope_key", "2026-05")
+                row.setdefault("source_versions", input_invoice_usage_source_versions())
+                return row
             return {
                 "count": len(self.input_rows),
                 "total_with_tax": "118.00",
@@ -651,6 +658,34 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("oa_id = %s", executed_sql)
         self.assertIn("bank_transaction_id = %s", executed_sql)
         self.assertIn("invoice_id = %s", executed_sql)
+        self.assertIn("row_id = %s", executed_sql)
+
+    def test_input_repository_detail_lookup_uses_row_id_native_column(self) -> None:
+        connection = InvoiceReadModelConnection(
+            input_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "source_versions": input_invoice_usage_source_versions(),
+                    "payload": {
+                        "id": "input_invoice_usage_row_1",
+                        "invoiceId": "input-invoice-1",
+                        "oa": {"relationCount": 2},
+                        "bankTransactions": {"relationCount": 1},
+                        "invoiceRelations": {"relationCount": 1},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        row_payload = repository.get_input_invoice_usage_row_by_row_id("input_invoice_usage_row_1")
+
+        self.assertEqual(row_payload["row"]["id"], "input_invoice_usage_row_1")
+        self.assertEqual(row_payload["refresh_status"], "fresh")
+        self.assertEqual(row_payload["source_versions"], input_invoice_usage_source_versions())
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_one_calls)
+        self.assertIn("from read_model.input_invoice_usage_rows", executed_sql)
         self.assertIn("row_id = %s", executed_sql)
 
     def test_input_api_miss_enqueues_refresh_without_live_scan(self) -> None:

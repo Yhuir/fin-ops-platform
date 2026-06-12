@@ -6,9 +6,10 @@
 ## 业务状态
 
 - 当前状态：页面本身是只读查询页，业务状态主要来自行 payload 中的 `paymentStatus`、OA 关联、银行流水关联和发票生命周期判断。
-- 状态事实源：`read_model.input_invoice_usage_rows.payload` 是页面读取事实；发票、OA、银行流水和 workbench 关系由 read model worker 构建时投影进入 payload。
+- 状态事实源：`read_model.input_invoice_usage_rows.payload` 是页面读取事实；发票、OA、银行流水和 workbench 关系由 read model worker 构建时投影进入 payload。关系证据来自 `WorkbenchRelationReadFacade`，包括 linked 关系和关联台未配对区 candidate 候选。
 - 允许流转：支付状态规则、OA 反提、workbench 关系确认或撤销会通过 read model refresh 影响页面展示。
 - 禁止流转：页面列表查询不直接修改发票、OA 或银行流水事实；缺失或过期 read model 不能回退为 live scan 伪装 fresh。
+- 支付状态规则：`relationStatus='candidate'` 的 OA/银行/发票只作为候选展示，不参与已支付、完全关联或已确认关系判断；只有 `relationStatus='linked'` 的关系可参与支付状态计算。
 
 ## 以发票反提 OA 本地状态机
 
@@ -73,8 +74,9 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 ## Read Model / Worker 状态
 
 - fresh：SQL read model payload 的 `refresh_status=fresh`，且 `source_versions` 覆盖服务端期望版本时，API 返回 rows 并设置 `read_model_status=fresh`。
+- relation details fresh：`/rows/{row_id}/relation-details` 可直接从 `read_model.input_invoice_usage_rows` 按 `row_id` 读取单行 payload 时，展开该行已有 summaries 和 `invoiceRelations`，不触发全量 live rebuild。
 - missing：repository 没有可用 payload 时，API 返回 `202` 和 `read_model_status=refreshing`，并以 `api_miss` 入队。
-- refreshing：dirty scope 处于 `pending`/`processing`，或 API 判定 schema/source version stale 后，会返回空 rows 的 refreshing payload。
+- refreshing：dirty scope 处于 `pending`/`processing`，或 API 判定 schema/source version stale 后，会返回空 rows 或详情不可用的 refreshing payload。
 - stale/failed/unavailable：dirty scope 失败或依赖不可用时不得把旧 rows 伪装为 fresh；调用方应触发 refresh 或展示可恢复状态。
 - all scope：默认不传 `month` 的页面查询使用 `scope_key=all`。当没有单独 `all` scope 行时，repository 会从各月份 scope 聚合共同一致的顶层 `source_versions`；月份间 `workbench_relation_source_versions` 等嵌套版本可不同，不应导致基础版本被清空。若任一月份 cache status 非 fresh，all scope 仍判定不可 fresh。
 - refresh 触发来源：API miss、schema stale、source version stale、业务写入后的 read model invalidation、worker all scope 展开月 shard。
@@ -92,3 +94,4 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 | 2026-06-10 | 落地反提 OA 前端 `待处理 | 已提交` 状态 | 前端只暴露 `创建 OA 草稿`，草稿创建后弹窗确认 `已提交 OA` 或 `未提交 OA`；已提交 tab 只展示业务历史字段 | `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`cd web && npm run build` |
 | 2026-06-11 | 补齐测试闭环状态机引用 | 将 all scope、OA 反提、目标申请人凭据、submitted history、UI/read model 状态纳入本轮闭环验证 | `tests.test_invoice_usage_collection_sql_runtime`、`tests.test_input_invoice_usage_api`、`tests.test_input_invoice_usage_oa_reverse_service`、`web/src/test/InputInvoiceUsagePage.test.tsx` 等本轮最小闭环 |
 | 2026-06-12 | 收口 OA reverse relation 写入口 | OA reverse batch 不作为 relation 事实源；evidence detected 后通过 `WorkbenchRelationCommandService` 写 `input_invoice_oa_reverse`，non-fresh 时 fail fast 且不保存 detected batch | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` |
+| 2026-06-12 | 接入 unified relation candidate 和单行详情 | 关联台未配对 candidate 通过 `WorkbenchRelationReadFacade` 进入页面展示；candidate 不参与支付状态；`+N` 详情优先读取 SQL read model 单行 payload，避免全量 live rebuild 卡在加载态 | `tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_relation_read_facade.py`、`tests/test_input_invoice_usage_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` |

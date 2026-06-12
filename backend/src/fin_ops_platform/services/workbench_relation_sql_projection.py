@@ -191,12 +191,15 @@ class WorkbenchRelationSqlProjectionBuilder:
         rows = self._connection.fetch_all(
             """
             select decision_key, scope_month, row_ids, row_types, oa_row_ids, bank_row_ids, invoice_row_ids,
-                   amount, payment_amount_closed, invoice_amount_closed, source_versions, raw_payload
+                   amount, payment_amount_closed, invoice_amount_closed, decision_status, display_state,
+                   source_versions, raw_payload
             from read_model.workbench_reconciliation_decisions d
             where d.tenant_id = %s
               and d.scope_month = %s::date
-              and d.decision_status = 'paired'
-              and d.display_state = 'paired'
+              and (
+                  (d.decision_status = 'paired' and d.display_state = 'paired')
+                  or (d.decision_status in ('proposed', 'open') and d.display_state = 'open')
+              )
               and d.row_ids && %s::text[]
               and not exists (
                   select 1
@@ -214,10 +217,16 @@ class WorkbenchRelationSqlProjectionBuilder:
             row_types_payload = text_list(row.get("row_types"))
             if not row_types_payload:
                 row_types_payload = _decision_row_types(row)
+            relation_status = (
+                "linked"
+                if text(row.get("decision_status")) == "paired" and text(row.get("display_state")) == "paired"
+                else "candidate"
+            )
             result.append(
                 {
                     "case_id": text(row.get("decision_key")),
                     "relation_mode": "automatic_decision",
+                    "relation_status": relation_status,
                     "month_scope": month_start(month),
                     "row_ids": row_ids_payload,
                     "row_types": row_types_payload,
@@ -226,7 +235,10 @@ class WorkbenchRelationSqlProjectionBuilder:
                         "status": "matched" if bool(row.get("payment_amount_closed")) or bool(row.get("invoice_amount_closed")) else "",
                         "amount": _decimal_text(row.get("amount")),
                     },
-                    "special_metadata": {},
+                    "special_metadata": {
+                        "decision_status": text(row.get("decision_status")),
+                        "display_state": text(row.get("display_state")),
+                    },
                     "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
                     "raw_payload": row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {},
                 }
@@ -397,6 +409,7 @@ def _relation_group_payload(relation: dict[str, Any], *, objects: dict[str, dict
     group_id = text(relation.get("case_id")) or ""
     typed_ids = _relation_typed_row_ids(relation, objects=objects)
     relation_kind = _relation_kind(typed_ids)
+    relation_status = text(relation.get("relation_status")) or "linked"
     summaries_by_id = {
         row_id: dict(summary)
         for row_id, object_payload in objects.items()
@@ -408,7 +421,7 @@ def _relation_group_payload(relation: dict[str, Any], *, objects: dict[str, dict
         "scope_month": month,
         "relation_source": _relation_source(relation),
         "relation_kind": relation_kind,
-        "relation_status": "linked",
+        "relation_status": relation_status,
         "oa_row_ids": typed_ids["oa"],
         "bank_transaction_ids": typed_ids["bank_transaction"],
         "input_invoice_ids": typed_ids["input_invoice"],
@@ -418,6 +431,7 @@ def _relation_group_payload(relation: dict[str, Any], *, objects: dict[str, dict
             "group_id": group_id,
             "relation_mode": text(relation.get("relation_mode")),
             "relation_kind": relation_kind,
+            "relation_status": relation_status,
             "row_ids": text_list(relation.get("row_ids")),
             "row_types": text_list(relation.get("row_types")),
             "amount_check": relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else {},
@@ -446,12 +460,13 @@ def _relation_row_payload(*, object_payload: dict[str, Any], groups: list[dict[s
         groups,
         "output_invoice_ids",
     )
+    relation_status = _row_relation_status(groups)
     return {
         "row_id": row_id,
         "row_type": row_type,
         "scope_key": month,
         "scope_month": month,
-        "relation_status": "linked" if group_ids else "unlinked",
+        "relation_status": relation_status,
         "group_ids": group_ids,
         "linked_oa": linked_oa,
         "linked_bank_transactions": linked_bank,
@@ -477,9 +492,21 @@ def _linked_summaries(
                 continue
             item = dict(summary)
             item["relation_case_id"] = text(group.get("group_id"))
+            item["relation_status"] = text(group.get("relation_status")) or "linked"
+            item["relation_source"] = text(group.get("relation_source")) or "manual"
             summaries.append(item)
             seen.add(row_id)
     return summaries
+
+
+def _row_relation_status(groups: list[dict[str, Any]]) -> str:
+    statuses = {text(group.get("relation_status")) or "linked" for group in groups}
+    if "linked" in statuses:
+        return "linked"
+    if "candidate" in statuses:
+        return "candidate"
+    return "unlinked"
+
 
 def _relation_typed_row_ids(relation: dict[str, Any], *, objects: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
     result = {"oa": [], "bank_transaction": [], "input_invoice": [], "output_invoice": []}

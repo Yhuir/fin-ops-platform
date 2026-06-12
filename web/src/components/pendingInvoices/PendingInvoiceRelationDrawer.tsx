@@ -16,6 +16,13 @@ function formatMoney(value: string) {
   return Number.isFinite(parsed) ? parsed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value || "-";
 }
 
+function RelationStatusChip({ status }: { status?: string }) {
+  if (status !== "candidate") {
+    return null;
+  }
+  return <span className="pending-invoices-tag pending-invoices-tag--candidate">候选</span>;
+}
+
 export default function PendingInvoiceRelationDrawer({
   open,
   transactionId,
@@ -91,17 +98,19 @@ export default function PendingInvoiceRelationDrawer({
                   <th scope="col">对方</th>
                   <th scope="col">开票日期</th>
                   <th className="pending-invoice-simple-table__amount" scope="col">价税合计</th>
+                  <th scope="col">状态</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.relatedInvoices.length === 0 ? (
-                  <tr><td colSpan={4}>暂无关联发票。</td></tr>
+                  <tr><td colSpan={5}>暂无关联发票。</td></tr>
                 ) : detail.relatedInvoices.map((invoice) => (
                   <tr key={invoice.id || invoice.digitalInvoiceNo || invoice.invoiceNo}>
                     <td>{invoice.digitalInvoiceNo || invoice.invoiceNo || "-"}</td>
                     <td>{invoice.sellerName || invoice.buyerName || "-"}</td>
                     <td>{invoice.issueDate || "-"}</td>
                     <td className="pending-invoice-simple-table__amount">{formatMoney(invoice.totalWithTax)}</td>
+                    <td><RelationStatusChip status={invoice.relationStatus} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -116,17 +125,19 @@ export default function PendingInvoiceRelationDrawer({
                   <th scope="col">类型</th>
                   <th scope="col">项目</th>
                   <th scope="col">关系</th>
+                  <th scope="col">状态</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.relatedOa.length === 0 ? (
-                  <tr><td colSpan={4}>暂无关联 OA。</td></tr>
+                  <tr><td colSpan={5}>暂无关联 OA。</td></tr>
                 ) : detail.relatedOa.map((oa) => (
                   <tr key={oa.id || oa.relationCaseId || `${oa.applicant}-${oa.projectName}`}>
                     <td>{oa.applicant || "-"}</td>
                     <td>{oa.applicationType || "-"}</td>
                     <td>{oa.projectName || "-"}</td>
                     <td>{oa.relationCaseId || "-"}</td>
+                    <td><RelationStatusChip status={oa.relationStatus} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -140,12 +151,13 @@ export default function PendingInvoiceRelationDrawer({
                   <th scope="col">对方</th>
                   <th className="pending-invoice-simple-table__amount" scope="col">金额</th>
                   <th scope="col">关系</th>
+                  <th scope="col">状态</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.paymentRows.length === 0 ? (
                   <tr>
-                    <td colSpan={4}>暂无历史支付。</td>
+                    <td colSpan={5}>暂无历史支付。</td>
                   </tr>
                 ) : detail.paymentRows.map((row) => (
                   <tr key={row.id || row.relationCaseId}>
@@ -153,6 +165,7 @@ export default function PendingInvoiceRelationDrawer({
                     <td>{row.counterpartyName || "-"}</td>
                     <td className="pending-invoice-simple-table__amount">{formatMoney(row.debitAmount)}</td>
                     <td>{row.relationCaseId || "-"}</td>
+                    <td><RelationStatusChip status={row.relationStatus} /></td>
                   </tr>
                 ))}
               </tbody>

@@ -9,8 +9,9 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 class FakeCostRelationFacade:
     last_source_versions = {"schema_version": 52}
 
-    def __init__(self) -> None:
+    def __init__(self, *, relation_status: str = "linked") -> None:
         self.calls: list[list[str]] = []
+        self.relation_status = relation_status
 
     def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
         normalized = [str(row_id) for row_id in row_ids]
@@ -21,7 +22,7 @@ class FakeCostRelationFacade:
                 {
                     "row_id": "txn-cost-001",
                     "row_type": "bank_transaction",
-                    "relation_status": "linked",
+                    "relation_status": self.relation_status,
                     "group_ids": ["group-cost-001"],
                     "linked_oa": [
                         {
@@ -346,6 +347,24 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(explorer["summary"]["total_amount"], "1,250.00")
         self.assertEqual(relation_facade.calls[0], ["txn-cost-001"])
 
+    def test_transaction_detail_preserves_candidate_relation_status_without_changing_cost_total(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
+
+        relation_facade = FakeCostRelationFacade(relation_status="candidate")
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: self.grouped_payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+            relation_facade=relation_facade,
+        )
+
+        payload = service.get_transaction_detail("txn-cost-001")
+        explorer = service.get_explorer("2026-03")
+
+        self.assertEqual(payload["transaction"]["relation_status"], "candidate")
+        self.assertEqual(payload["relation_context"]["relation_status"], "candidate")
+        self.assertEqual(explorer["summary"]["total_amount"], "1,250.00")
+
     def test_group_cost_context_treats_dash_placeholders_as_empty_and_falls_back_to_detail_fields(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
@@ -629,7 +648,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(all_payload["summary"]["total_amount"], "600.00")
         self.assertEqual(preview_payload["summary"]["transaction_count"], 2)
 
-    def test_open_attached_unique_candidate_groups_are_included_in_cost_statistics(self) -> None:
+    def test_open_candidate_groups_are_excluded_from_cost_statistics(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
         payloads = {
@@ -686,10 +705,9 @@ class CostStatisticsServiceTests(unittest.TestCase):
 
         payload = service.get_explorer("2026-03", project_scope="all")
 
-        self.assertEqual(payload["summary"]["transaction_count"], 1)
-        self.assertEqual(payload["summary"]["total_amount"], "1,000.00")
-        self.assertEqual(payload["time_rows"][0]["project_name"], "云南溯源科技")
-        self.assertEqual(payload["time_rows"][0]["expense_type"], "交通费")
+        self.assertEqual(payload["summary"]["transaction_count"], 0)
+        self.assertEqual(payload["summary"]["total_amount"], "0.00")
+        self.assertEqual(payload["time_rows"], [])
 
     def test_invalid_project_scope_is_rejected(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService

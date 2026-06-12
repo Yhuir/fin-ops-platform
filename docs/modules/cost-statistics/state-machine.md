@@ -16,6 +16,7 @@
 关键规则：
 
 - 成本统计页面不重新定义项目归因、发票生命周期、银行标签或 relation identity。
+- 只有 confirmed/linked 成本关系可以进入金额统计；Workbench open/proposed candidate 只作为候选关系展示事实，不能被 live service 或 SQL projection 计入成本行。
 - 合法 read model scope 只允许 `active:YYYY-MM`、`all:YYYY-MM`、`active:all`、`all:all`。
 - 裸月份或裸 `all` 只能通过 `ReadModelRefreshGateway` 归一化后入队；未知 project scope 必须拒绝。
 - 月份 shard 成功发布后必须重新入队同 project scope 的父 scope，推动全期间视图收敛。
@@ -87,5 +88,6 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-12 | Workbench candidate 关系不再计入成本统计 | live 成本查询、cost-tax SQL projection、月份 shard rows | `tests.test_cost_statistics_service`、`tests.test_cost_statistics_sql_runtime` |
 | 2026-06-11 | 补齐测试闭环状态机 | 业务归因、UI、父 scope、月份 shard、App Status 和 worker 状态边界 | `tests.test_cost_statistics_service`、`tests.test_project_costing_service`、`tests.test_project_costing_api`、`tests.test_cost_statistics_api`、`tests.test_cost_statistics_read_model_service`、`tests.test_cost_statistics_runtime_service`、`tests.test_cost_statistics_sql_runtime`、`tests.test_read_model_refresh_gateway`、`tests.test_runtime_worker_read_model_refresh_scopes`、`tests.test_read_model_scope_contract`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx` |
 | 2026-06-10 | 成本统计 scope contract 修复 | 裸月份/裸 `all` 只能经 gateway 归一化，非法 scope 拒绝 | `tests.test_read_model_refresh_gateway`、`tests.test_runtime_worker_read_model_refresh_scopes`、`tests.test_read_model_scope_contract` |

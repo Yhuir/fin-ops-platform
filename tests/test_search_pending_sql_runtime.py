@@ -1447,6 +1447,71 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["relation_case_ids"], ["case-tian-196"])
         self.assertEqual(relation_facade.calls[0]["reason"], "pending_invoice_sql_projection")
 
+    def test_pending_invoice_sql_projection_preserves_candidate_without_closing_status(self) -> None:
+        relation_facade = FakeWorkbenchRelationReadFacade(
+            {
+                "status": "fresh",
+                "rows": [
+                    {
+                        "row_id": "txn-1",
+                        "row_type": "bank_transaction",
+                        "relation_status": "candidate",
+                        "group_ids": ["candidate-sql-pending"],
+                        "linked_oa": [
+                            {
+                                "id": "oa-candidate",
+                                "applicant": "候选申请人",
+                                "application_type": "支付申请",
+                                "project_name": "候选项目",
+                                "detail_available": True,
+                                "relation_case_id": "candidate-sql-pending",
+                                "relation_status": "candidate",
+                            }
+                        ],
+                        "linked_bank_transactions": [
+                            {
+                                "id": "txn-1",
+                                "amount": "118.00",
+                                "relation_case_id": "candidate-sql-pending",
+                                "relation_status": "candidate",
+                            }
+                        ],
+                        "linked_input_invoices": [
+                            {
+                                "id": "inv-candidate",
+                                "invoice_no": "IN-CANDIDATE",
+                                "issue_date": "2026-05-20",
+                                "seller_name": "云南供应商",
+                                "total_with_tax": "118.00",
+                                "invoice_type": "input",
+                                "relation_case_id": "candidate-sql-pending",
+                                "relation_status": "candidate",
+                            }
+                        ],
+                        "linked_output_invoices": [],
+                    }
+                ],
+                "groups": [{"group_id": "candidate-sql-pending", "relation_status": "candidate"}],
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "read_model_scope_keys": ["2026-05"],
+            }
+        )
+        builder = SearchPendingSqlProjectionBuilder(
+            connection=PendingProjectionConnection(),
+            workbench_relation_read_facade=relation_facade,
+        )
+
+        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+
+        payload = rows[0]["payload"]
+        self.assertEqual(payload["input_invoices"]["relation_count"], 1)
+        self.assertEqual(payload["input_invoices"]["linked_relation_count"], 0)
+        self.assertEqual(payload["input_invoices"]["summaries"][0]["relation_status"], "candidate")
+        self.assertEqual(payload["oa"]["summaries"][0]["relation_status"], "candidate")
+        self.assertEqual(payload["input_invoices"]["payment_summary"]["paid_total"], "0.00")
+        self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_pending_invoice")
+        self.assertTrue(payload["can_create_invoice"])
+
     def test_pending_invoice_sql_projection_uses_fresh_bank_tag_facade_category(self) -> None:
         facade = FakeBankTransactionTagFacade(
             {

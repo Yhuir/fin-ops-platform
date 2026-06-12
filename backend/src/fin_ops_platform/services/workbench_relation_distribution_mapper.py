@@ -35,10 +35,14 @@ def relation_dict_from_distribution_group(group: dict[str, Any]) -> dict[str, An
         row_types = [row_type for _row_id, row_type in typed_rows]
     if len(row_types) < len(row_ids):
         row_types = [*row_types, *["" for _ in range(len(row_ids) - len(row_types))]]
+    relation_status = _text(payload.get("relation_status") or group.get("relation_status")) or "linked"
     return {
         "case_id": group_id,
         "relation_mode": _text(payload.get("relation_mode")),
-        "status": "active",
+        "status": "active" if relation_status == "linked" else relation_status,
+        "relation_status": relation_status,
+        "relationStatus": relation_status,
+        "relation_source": _text(group.get("relation_source") or payload.get("relation_source")),
         "month_scope": _text(group.get("scope_month") or group.get("scope_key")),
         "row_ids": row_ids,
         "row_types": row_types,

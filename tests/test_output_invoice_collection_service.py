@@ -194,6 +194,63 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["out-red"]["collectionStatus"]["code"], "collected_red_refunded")
         self.assertEqual(rows["out-paid"]["redInvoiceRelation"]["relationCount"], 1)
 
+    def test_candidate_bank_relation_is_visible_without_marking_invoice_collected(self) -> None:
+        buyer = self._counterparty("buyer", "候选客户")
+        invoice = self._invoice("out-candidate", "9005", buyer, total_with_tax="100.00")
+        bank = self._bank("bank-candidate", "100.00", TransactionDirection.INFLOW)
+        relation_facade = FakeWorkbenchRelationFacade(
+            [
+                {
+                    "row_id": invoice.id,
+                    "row_type": "invoice",
+                    "relation_status": "candidate",
+                    "group_ids": ["candidate-output-bank"],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [
+                        {
+                            "id": bank.id,
+                            "amount": "100.00",
+                            "direction": "inflow",
+                            "relation_case_id": "candidate-output-bank",
+                            "relation_status": "candidate",
+                        }
+                    ],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [{"id": invoice.id, "relation_case_id": "candidate-output-bank", "relation_status": "candidate"}],
+                }
+            ],
+            groups=[
+                {
+                    "group_id": "candidate-output-bank",
+                    "relation_status": "candidate",
+                    "payload": {
+                        "group_id": "candidate-output-bank",
+                        "row_ids": [invoice.id, bank.id],
+                        "row_types": ["invoice", "bank"],
+                        "relation_status": "candidate",
+                        "relation_mode": "automatic_decision",
+                        "amount_check": {"matched": True},
+                    },
+                    "oa_row_ids": [],
+                    "bank_transaction_ids": [bank.id],
+                    "input_invoice_ids": [],
+                    "output_invoice_ids": [invoice.id],
+                }
+            ],
+        )
+        service = OutputInvoiceCollectionQueryService(
+            import_service=ImportNormalizationService(existing_invoices=[invoice], existing_transactions=[bank]),
+            relation_facade=relation_facade,
+        )
+
+        row = service.list_rows(page_size=20)["rows"][0]
+
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
+        self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["bankTransactions"]["receivedTotal"], "0.00")
+        self.assertEqual(row["collectionStatus"]["code"], "pending_collection")
+        self.assertEqual(row["receipt"]["status"], "not_available")
+
     def test_pagination_filter_sort_and_filter_options_are_server_side_contracts(self) -> None:
         buyer_a = self._counterparty("buyer-a", "甲客户")
         buyer_b = self._counterparty("buyer-b", "乙客户")

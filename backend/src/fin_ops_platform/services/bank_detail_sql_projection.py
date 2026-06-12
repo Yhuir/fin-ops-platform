@@ -286,6 +286,7 @@ class BankDetailSqlProjectionBuilder:
                 has_oa=has_oa,
                 has_invoice=has_invoice,
                 case_id=next((group_id for group_id in text_list(row.get("group_ids")) if group_id), None),
+                relation_status=text(row.get("relation_status")) or "linked",
             )
         return result
 
@@ -323,18 +324,27 @@ class BankDetailSqlProjectionBuilder:
         has_oa: bool,
         has_invoice: bool,
         case_id: str | None,
+        relation_status: str,
     ) -> None:
         for transaction_id in bank_ids:
             if not transaction_id:
                 continue
             current = result.setdefault(
                 transaction_id,
-                {"oa_relation_tag": "无oa", "invoice_relation_tag": "无发票", "relation_case_id": None},
+                {
+                    "oa_relation_tag": "无oa",
+                    "invoice_relation_tag": "无发票",
+                    "relation_case_id": None,
+                    "relation_status": "",
+                },
             )
+            normalized_status = str(relation_status or "").strip() or "linked"
+            if current.get("relation_status") != "linked":
+                current["relation_status"] = normalized_status
             if has_oa:
-                current["oa_relation_tag"] = "有oa"
+                current["oa_relation_tag"] = "候选oa" if normalized_status == "candidate" else "有oa"
             if has_invoice:
-                current["invoice_relation_tag"] = "有发票"
+                current["invoice_relation_tag"] = "候选发票" if normalized_status == "candidate" else "有发票"
             current["relation_case_id"] = current.get("relation_case_id") or case_id
 
     def _normalize_transaction_row(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -422,7 +432,12 @@ class BankDetailSqlProjectionBuilder:
             if manual_confirmed_code or effective_source in {"manual", "manual_confirmation"}
             else (auto_status or "unmatched")
         )
-        relation_payload = relation or {"oa_relation_tag": "无oa", "invoice_relation_tag": "无发票", "relation_case_id": None}
+        relation_payload = relation or {
+            "oa_relation_tag": "无oa",
+            "invoice_relation_tag": "无发票",
+            "relation_case_id": None,
+            "relation_status": "",
+        }
         relation_tags = [
             str(relation_payload.get("oa_relation_tag") or "无oa"),
             str(relation_payload.get("invoice_relation_tag") or "无发票"),
@@ -507,6 +522,7 @@ class BankDetailSqlProjectionBuilder:
             "invoice_relation_tag": relation_tags[1],
             "relation_tags": relation_tags,
             "relation_case_id": relation_payload.get("relation_case_id"),
+            "relation_status": relation_payload.get("relation_status") or "",
         }
         return {
             **row,

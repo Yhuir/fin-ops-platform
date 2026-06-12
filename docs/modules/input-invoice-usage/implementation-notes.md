@@ -13,6 +13,8 @@
 - `已提交 OA` 由用户手动确认后进入本地 `submitted_confirmed` 历史；`未提交 OA` 只清理 FinOps 本地草稿字段并回到可重新创建状态，不调用 OA 删除暂存草稿。
 - 目标 OA 申请人登录需要 `FIN_OPS_OA_BASE_URL`、`FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY`、可选 `FIN_OPS_OA_LOGIN_PATH` 和 OpenSSL runtime；密码登录前必须用 OA 公钥 RSA 加密。
 - OA reverse evidence detected 后的 OA/发票 relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`，relation mode 为 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
+- 关联台未配对区 open/proposed 候选必须通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面展示；页面不能直接读取关联台候选表。candidate 只展示关系证据，不参与支付状态或 confirmed relation 判断。
+- `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
 
 ## 记录模板
@@ -31,6 +33,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-12 - 统一 relation candidate 展示与 `+N` 详情闭环
+
+- 目标：让进项发票使用情况页面和关联台使用同一 relation 读事实源，展示 linked 与未配对 candidate 关系，并修复点击 `+N` 详情后长期 loading。
+- 影响范围：`workbench_relation` SQL projection、distribution mapper、`InputInvoiceUsageQueryService`、input usage relation detail API、SQL read model repository、模块/API/架构文档。
+- 关键决策：open/proposed unmatched decision 通过 `WorkbenchRelationReadFacade` 分发为 `relationStatus=candidate`；candidate 不写入 confirmed relation，不参与支付状态；`relationStatus=linked` 才能证明已支付/已确认。详情接口新增 read-model detail service，优先按 row id 读取单行 payload。
+- 文档影响：更新本实施记录、`README.md`、`state-machine.md`、`tests.md`、`docs/dev/api-contracts.md` 和 `docs/architecture/persistence-and-read-models.md`。
+- 测试覆盖：新增/更新 projection、facade mapper、input usage service、API 和 repository runtime tests；前端沿用 `InputInvoiceUsagePage` 的多关系 `+N` 覆盖。
+- 验证命令：本轮最终说明列出实际执行命令。
+- 未测风险：真实生产数据量下的 worker drain 与浏览器手工 smoke 仍需 staging/发布前验证。
 
 ## 2026-06-12 - OA reverse relation command boundary Phase 7C
 

@@ -69,6 +69,12 @@ type ApiInvoiceSummary = Partial<{
   seller_tax_no: string | null;
   buyer_name: string | null;
   invoice_type: string | null;
+  relation_case_id: string | null;
+  relationCaseId: string | null;
+  relation_status: string | null;
+  relationStatus: string | null;
+  relation_source: string | null;
+  relationSource: string | null;
 }>;
 
 type ApiOaSummary = Partial<{
@@ -80,6 +86,11 @@ type ApiOaSummary = Partial<{
   form_no: string | null;
   detail_available: boolean | null;
   relation_case_id: string | null;
+  relationCaseId: string | null;
+  relation_status: string | null;
+  relationStatus: string | null;
+  relation_source: string | null;
+  relationSource: string | null;
 }>;
 
 type ApiPendingInvoiceRow = {
@@ -129,10 +140,11 @@ type ApiPendingInvoiceRow = {
       tag_label_path: unknown[] | null;
     }> | null;
   }> | null;
-  input_invoices?: Partial<{
-    primary: ApiInvoiceSummary | null;
-    relation_count: number | null;
-    has_multiple: boolean | null;
+	  input_invoices?: Partial<{
+	    primary: ApiInvoiceSummary | null;
+	    relation_count: number | null;
+	    linked_relation_count: number | null;
+	    has_multiple: boolean | null;
     summaries: ApiInvoiceSummary[] | null;
     payment_summary: Partial<{
       paid_total: string | null;
@@ -220,6 +232,11 @@ type ApiRelationDetail = {
     debit_amount: string | null;
     amount: string | null;
     relation_case_id: string | null;
+    relationCaseId: string | null;
+    relation_status: string | null;
+    relationStatus: string | null;
+    relation_source: string | null;
+    relationSource: string | null;
   }>> | null;
   paid_total?: string | null;
   invoice_total?: string | null;
@@ -468,6 +485,9 @@ function mapInvoice(value: ApiInvoiceSummary | null | undefined): PendingInvoice
     sellerTaxNo: stringValue(value?.seller_tax_no),
     buyerName: stringValue(value?.buyer_name),
     invoiceType: stringValue(value?.invoice_type, "input") as PendingInvoiceSummary["invoiceType"],
+    relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
+    relationStatus: stringValue(value?.relation_status, stringValue(value?.relationStatus, "linked")),
+    relationSource: stringValue(value?.relation_source, stringValue(value?.relationSource)),
   };
 }
 
@@ -484,7 +504,9 @@ function mapOa(value: ApiOaSummary | null | undefined): PendingInvoiceOaSummary 
     status: stringValue(value?.status),
     formNo: stringValue(value?.form_no),
     detailAvailable: value?.detail_available !== false,
-    relationCaseId: stringValue(value?.relation_case_id),
+    relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
+    relationStatus: stringValue(value?.relation_status, stringValue(value?.relationStatus, "linked")),
+    relationSource: stringValue(value?.relation_source, stringValue(value?.relationSource)),
   };
 }
 
@@ -522,7 +544,7 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
   }
   const matchedRule = row.invoice_acquisition_status?.matched_rule;
   const oaPrimary = row.oa?.primary ? mapOa(row.oa.primary) : (
-    row.oa_applicant ? { id: "", applicant: row.oa_applicant, applicationType: "", projectName: "", status: "", formNo: "", detailAvailable: false, relationCaseId: "" } : null
+    row.oa_applicant ? { id: "", applicant: row.oa_applicant, applicationType: "", projectName: "", status: "", formNo: "", detailAvailable: false, relationCaseId: "", relationStatus: "", relationSource: "" } : null
   );
   const oaSummaries = (row.oa?.summaries ?? []).map(mapOa).filter((item) => item.id || item.applicant);
   const oaDetailAvailable = row.oa?.detail_available !== false && Boolean(oaPrimary?.detailAvailable) && isRealOaDetailId(oaPrimary?.id ?? "");
@@ -548,6 +570,7 @@ export function mapPendingInvoiceRow(row: ApiPendingInvoiceRow): PendingInvoiceR
     inputInvoices: {
       primary: hasInvoiceIdentity(primaryInvoice) ? primaryInvoice : null,
       relationCount: numberValue(row.input_invoices?.relation_count, invoices.length),
+      linkedRelationCount: numberValue(row.input_invoices?.linked_relation_count, invoices.length),
       hasMultiple: row.input_invoices?.has_multiple === true || invoices.length > 1,
       summaries: invoices,
       paymentSummary: row.input_invoices?.payment_summary ? {
@@ -800,7 +823,9 @@ function mapRelationDetail(payload: ApiRelationDetail): PendingInvoiceRelationDe
       tradeTime: displayDateTime(row.trade_time),
       counterpartyName: stringValue(row.counterparty_name),
       debitAmount: stringValue(row.debit_amount, stringValue(row.amount)),
-      relationCaseId: stringValue(row.relation_case_id),
+      relationCaseId: stringValue(row.relation_case_id, stringValue(row.relationCaseId)),
+      relationStatus: stringValue(row.relation_status, stringValue(row.relationStatus, "linked")),
+      relationSource: stringValue(row.relation_source, stringValue(row.relationSource)),
     })),
     paidTotal: stringValue(payload.paid_total),
     invoiceTotal: stringValue(payload.invoice_total),

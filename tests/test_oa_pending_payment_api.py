@@ -56,12 +56,13 @@ class FakeRelationFacade:
         for group in groups:
             group_id = str(group["group_id"])
             payload = group["payload"]
+            relation_status = str(group.get("relation_status") or payload.get("relation_status") or "linked")
             for row_id, row_type in zip(payload["row_ids"], payload["row_types"]):
                 key = (str(row_id), group_id)
                 if key in seen:
                     continue
                 seen.add(key)
-                rows.append({"row_id": row_id, "row_type": row_type, "relation_status": "linked", "group_ids": [group_id]})
+                rows.append({"row_id": row_id, "row_type": row_type, "relation_status": relation_status, "group_ids": [group_id]})
         return {"status": "fresh", "rows": rows, "groups": groups, "source_versions": {}, "read_model_scope_keys": []}
 
     @staticmethod
@@ -69,9 +70,11 @@ class FakeRelationFacade:
         case_id = str(relation.get("case_id") or "")
         row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
         row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+        relation_status = str(relation.get("relation_status") or relation.get("relationStatus") or "linked")
         return {
             "group_id": case_id,
             "scope_month": relation.get("month_scope") or "2026-05",
+            "relation_status": relation_status,
             "oa_row_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "oa"],
             "bank_transaction_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "bank"],
             "input_invoice_ids": [row_id for row_id, row_type in zip(row_ids, row_types) if row_type == "invoice"],
@@ -80,6 +83,7 @@ class FakeRelationFacade:
                 "case_id": case_id,
                 "row_ids": row_ids,
                 "row_types": row_types,
+                "relation_status": relation_status,
                 "relation_mode": relation.get("relation_mode") or "",
                 "amount_check": dict(relation.get("amount_check") or {}),
                 "special_metadata": dict(relation.get("special_metadata") or {}),
@@ -147,6 +151,41 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-api")
         self.assertEqual(json.loads(relation_response.body)["kind"], "bank")
         self.assertEqual(json.loads(oa_relation_response.body)["kind"], "oa")
+
+    def test_candidate_bank_relation_is_visible_without_marking_oa_paid(self) -> None:
+        bank = BankTransaction(
+            id="bank-candidate",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="候选供应商",
+            amount=Decimal("100.00"),
+            signed_amount=Decimal("-100.00"),
+            txn_date="2026-05-21",
+            trade_time="2026-05-21 10:00:00",
+        )
+        service = OaPendingPaymentQueryService(
+            import_service=ImportNormalizationService(existing_transactions=[bank]),
+            relation_facade=FakeRelationFacade([
+                {
+                    "case_id": "candidate-oa-bank",
+                    "row_ids": ["oa-candidate", "bank-candidate"],
+                    "row_types": ["oa", "bank"],
+                    "relation_mode": "automatic_decision",
+                    "relation_status": "candidate",
+                    "amount_check": {"matched": True},
+                }
+            ]),
+            oa_projection=StaticOAProjection([
+                self._oa("oa-candidate", "候选申请人", "100.00", detail_fields={"申请日期": "2026-05-20"}),
+            ]),
+        )
+
+        row = service.list_rows(page_size=20)["rows"][0]
+
+        self.assertEqual(row["bankTransaction"]["relationCount"], 1)
+        self.assertEqual(row["bankTransaction"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["bankTransaction"]["paidTotal"], "0.00")
+        self.assertNotEqual(row["paymentStatus"]["code"], "paid")
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

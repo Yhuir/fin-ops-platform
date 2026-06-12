@@ -150,6 +150,9 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
     accountLast4: stringValue(camelOrSnake(raw, "accountLast4", "account_last4")),
     summary: stringValue(raw.summary),
     remark: stringValue(raw.remark),
+    relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
+    relationStatus: stringValue(camelOrSnake(raw, "relationStatus", "relation_status")),
+    relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
     detailAvailable: id !== "",
   };
 }
