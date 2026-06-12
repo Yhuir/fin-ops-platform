@@ -1082,6 +1082,10 @@ Stage 20 结论：
 
 ## Stage 21：补齐登录态 HTTP SLO 采样入口
 
+Stage 21 Release：`main-d206d545-stage21-202606130231`
+
+Stage 21 Commit：`d206d545`
+
 Stage 20 之后的主要证据缺口不是 App Status，而是用户真实页面体验：页面 shell 首包、关键 read model API 首包、
 以及这些 API 返回时的 `read_model_status` / `cache_status`。只看 `/health` 或数据库 baseline 不能证明用户页面
 已在几秒内拿到 fresh snapshot。
@@ -1117,12 +1121,38 @@ pending invoices、input invoice usage、OA pending payments、output invoice co
 - `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_http_slo_probe -v`
 - `bash scripts/verify.sh backend`：2838 tests pass，25 skipped
 
+生产部署：
+
+- 使用干净 worktree `/private/tmp/finops-stage21-deploy`。
+- 复用已验证 `web/dist`，执行
+  `./scripts/deploy-oa.sh --skip-build --release-name main-d206d545-stage21-202606130231`。
+- migration `0068` skipped，没有新增数据库变更。
+- deploy script 在 release activation 后返回 SSH `255`，但线上已切到
+  `main-d206d545-stage21-202606130231`。随后手动补跑后半段验证：`/health/ready`、deploy-control status、
+  runtime worker ensure、frontend hash、public session route 和 cleanup releases 均通过。
+
+生产 post-deploy summary：
+
+| 指标 | 值 |
+|---|---:|
+| release | `main-d206d545-stage21-202606130231` |
+| schema_version | 68 |
+| runtime_release.consistent | true |
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| RabbitMQ queue depth | 0 |
+| RabbitMQ DLQ | 0 |
+| missing required workers | 0 |
+| stale required workers | 0 |
+
 生产 smoke：
 
 - public page shell only：
   `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe --base-url https://www.yn-sourcing.com --page-path /fin-ops/ --replace-default-probes --iterations 5 --warmup 1 --allow-unauthenticated`
-- 结果文件：`/tmp/finops-http-slo-stage21-public-shell-20260613023043.json`
-- 5 个 measured samples，status `200`，p95 `108.325ms`。
+- pre-deploy 工具链路结果：`/tmp/finops-http-slo-stage21-public-shell-20260613023043.json`，
+  5 个 measured samples，status `200`，p95 `108.325ms`。
+- post-deploy release 结果：`/tmp/finops-http-slo-stage21-release-public-shell-20260613023350.json`，
+  5 个 measured samples，status `200`，p95 `107.950ms`。
 - 不带 token 采集登录态 API 时返回 exit code `2` / `auth_missing`，符合“缺真实登录态不生成生产 SLO 证据”的保护。
 
 Stage 21 结论：
