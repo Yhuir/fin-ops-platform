@@ -2,13 +2,13 @@
 
 ## 范围
 
-- 目标：发布包含 current-effective App Status、repair manifest 和 production dry-run SQL 修复的 release，执行受控 `cost_statistics` legacy scope repair，并验证 replacement scope 真实收敛。
-- Release：`main-b9c31cf4-stage4-202606122310`
-- Commit：`b9c31cf43f3b37c09a8dec47e08524f82407be09`
+- 目标：记录 2026-06-12 生产同步闭环执行过程，从 legacy scope repair 到 RabbitMQ real consumers 切换。
+- Stage 4 Release：`main-b9c31cf4-stage4-202606122310`
+- Stage 4 Commit：`b9c31cf43f3b37c09a8dec47e08524f82407be09`
 - 生产脚本：`scripts/check-read-model-scope-contracts.py`
 - 原始运行产物保存在生产机 `/tmp/finops-stage4-20260612T225927+0800-*`。该路径只作审计定位，不作为长期事实源。
 
-本次没有启用 RabbitMQ real consumers、Redis fresh-cache、PgBouncer、Prometheus/Grafana、分区或新增索引；这些仍属于后续性能阶段。
+Stage 4 没有启用 RabbitMQ real consumers、Redis fresh-cache、PgBouncer、Prometheus/Grafana、分区或新增索引；Stage 7-9 已完成 required RabbitMQ real consumer 切换。Redis fresh-cache、PgBouncer、Prometheus/Grafana、分区和新增索引仍属于后续性能阶段。
 
 ## 执行前 Gate
 
@@ -134,9 +134,9 @@ worker 收敛后只读数据库验证：
 
 这不是“几秒内全部同步”性能闭环的完成态。剩余 10 条 dead-letter 是已被 later done/fresh readiness 覆盖的历史 outbox failure，当前不应阻断页面显示已同步，但仍会让 `/health/ready.runtime_infrastructure.failed_jobs=10`。如果目标是运维面板也完全没有失败计数，下一阶段应使用独立的受控 dead-letter resolve/归档流程处理，不能在本阶段顺手删除。
 
-## 后续阶段
+## Stage 4 后续判断
 
-1. RabbitMQ real consumers：当前 RabbitMQ 仍只是 publish/wakeup 边界，management metric 返回 404；需要启用真实 consumer 和监控，降低 wakeup 延迟。
+1. RabbitMQ real consumers：Stage 4 时 RabbitMQ 仍只是 publish/wakeup 边界，management metric 返回 404；已在 Stage 7-9 启用真实 consumer 和监控。
 2. Redis fresh-cache：只缓存 fresh gate 之后 payload，优先覆盖页面首包慢且重复读取的 read model。
 3. PostgreSQL 索引/分区：基于基线 EXPLAIN 和生产 pg_stat/表大小做，不做盲目分区。
 4. Prometheus/Grafana 或 OpenTelemetry：把 enqueue-to-fresh latency、pending age、failure rate、readiness non-fresh 和 API p95 做成持续 SLO。
@@ -274,8 +274,184 @@ Commit：`3933b00ffc6868df382ad8f2cb54caeb61b23463`
 | `read_model_refresh_failure_rate` | 0.0 |
 | `read_model_refresh_duration_ms.p95` | 17769.2015 |
 
-剩余风险：
+Stage 6 剩余风险快照：
 
 - `read_model_refresh_duration_ms.p95` 仍约 17.77s，来自滚动窗口内的重型 workbench refresh；Stage 6 只消除发布/重启导致的分钟级 lease 等待，不代表“几秒内全部同步”性能 SLO 已完成。
-- RabbitMQ management metric 仍返回 `HTTP Error 404: Not Found`，真实 consumer 与持续观测阶段仍未闭环。
+- RabbitMQ management metric 当时仍返回 `HTTP Error 404: Not Found`，真实 consumer 与持续观测阶段尚未闭环；该项已在 Stage 7-9 处理。
 - workbench 全量/月份 rebuild 的真实性能仍需要基于 EXPLAIN、索引/分区、增量化和 fresh-cache 后续阶段继续优化。
+
+## Stage 7：RabbitMQ required-only preflight 与 topology 补齐
+
+Release：`main-c5454601-stage7-202606122340`
+
+Commit：`c5454601a043b4b504fd0c7e5582f77f68603f9e`
+
+本阶段修复 RabbitMQ 灰度前置检查的范围：
+
+- `run_rabbitmq_staging_preflight` 默认只检查 registry 中 `required=true` 且 `rabbitmq_eligible=true` 的 worker。
+- `file-migration`、`bank-account-balance` 等 optional worker 只有显式传 `--include-optional-workers` 才参与检查，避免未启用依赖阻塞 required 队列灰度。
+- 文档明确 optional worker 需要先补齐 GridFS、对象存储或专用 dependency 后再启用。
+
+本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_staging_preflight tests.test_rabbitmq_runtime -v`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight --help`
+- `bash scripts/verify.sh docs`
+
+生产发布后 non-destructive preflight：
+
+| 指标 | 值 |
+|---|---:|
+| status | `pass` |
+| `include_optional_workers` | `false` |
+| `check_count` | 14 |
+| failed | `[]` |
+
+preflight 通过后继续检查 RabbitMQ Management API，发现 `rabbitmq_metric_error=HTTP Error 404: Not Found` 不是权限或 API 不可用，而是部分 event queue / DLQ 尚未由 topology bootstrap 创建。使用 `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 执行 topology apply 后验证：
+
+| 指标 | 值 |
+|---|---:|
+| missing required queue / DLQ | 0 |
+| `rabbitmq_metric_error` | `null` |
+| preflight status | `pass` |
+| `rabbitmq_queue_depth` | 5280 |
+| `rabbitmq_consumer_count` | 0 |
+
+`rabbitmq_queue_depth=5280` 且 `consumer_count=0` 说明 dispatcher shadow publish 已堆积 broker 消息，但 worker 仍未切到 real consumers；这不是失败闭环，只是 Stage 8/9 切换前的预期中间态。
+
+回滚口径：
+
+- Stage 7 代码回滚走 release rollback。
+- topology apply 创建 exchange/queue/binding/DLQ，不删除 PostgreSQL durable queue 状态；如需停用 RabbitMQ，可把 worker 保持 `FIN_OPS_QUEUE_BACKEND=postgres`，dispatcher 改回 shadow/off，不需要删除 RabbitMQ 队列。
+
+## Stage 8：共享 RabbitMQ worker 凭据
+
+Release：`main-f4c6208b-stage8-202606122353`
+
+Commit：`f4c6208b1d5fc3066b9b1cfa1ba2d2b1da466bf30`
+
+本阶段把 worker consumer 连接凭据从 per-worker env 中拆出来：
+
+- `fin-ops-worker@.service.example` 在 common/secrets 和 per-worker env 之间加载 `/etc/fin-ops/fin-ops.rabbitmq-worker.env`。
+- `/etc/fin-ops/fin-ops.rabbitmq-worker.env` 只保存共享 `RABBITMQ_URL`，不得设置 `FIN_OPS_QUEUE_BACKEND`。
+- `/etc/fin-ops/fin-ops.worker.<instance>.env` 仍是单个 worker 是否切到 RabbitMQ 的控制点，只有灰度实例才设置 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。
+- 仓库模板不再在每个 worker env example 中放占位 `RABBITMQ_URL`，避免同一 secret 在多处漂移。
+
+本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script tests.test_rabbitmq_staging_preflight tests.test_rabbitmq_runtime -v`
+- `bash scripts/verify.sh docs`
+
+生产操作：
+
+- 创建 `/etc/fin-ops/fin-ops.rabbitmq-worker.env`，权限 `0600 root root`。
+- 轮换 worker 专用 RabbitMQ 凭据，并只把连接串写入上述 root-only 文件。
+- 短时启动 `turnover-ledger` consumer smoke，验证 worker 可以读取共享 env 并连接 broker。
+
+Stage 8 smoke 暴露出 `timeout` 触发 `SIGINT` 时 consumer 会打印 `KeyboardInterrupt` traceback；该行为不影响数据一致性，但会污染 systemd/运维日志，因此进入 Stage 9 修复。
+
+回滚口径：
+
+- 删除或清空 `/etc/fin-ops/fin-ops.rabbitmq-worker.env` 后，所有仍使用 `FIN_OPS_QUEUE_BACKEND=postgres` 的 worker 不受影响。
+- 已切到 RabbitMQ 的 worker 回滚时先把 per-worker env 改回 `FIN_OPS_QUEUE_BACKEND=postgres`，再重启对应 unit。
+
+## Stage 9：RabbitMQ consumer clean interrupt 与 required worker cutover
+
+Release：`main-99a98feb-stage9-202606130000`
+
+Commit：`99a98feb3895141db5e5f1347d29cf38f4c313f5`
+
+本阶段完成 RabbitMQ real consumers 的 required worker 切换：
+
+- `RabbitMqConsumer.consume_forever()` 捕获 `KeyboardInterrupt`，记录 `stopped` 后干净返回，避免受控 smoke 或 systemd stop 打印 traceback。
+- 发布后重跑 `turnover-ledger` 短时 smoke：`timeout` 返回 `124` 属于受控超时退出；没有 traceback、没有残留进程，目标队列保持 `messages=0 / consumers=0 / unacked=0`。
+- 将 required RabbitMQ eligible worker 的 `/etc/fin-ops/fin-ops.worker.<instance>.env` 切换为 `FIN_OPS_QUEUE_BACKEND=rabbitmq` 并重启：
+  - `oa-sync`
+  - `workbench`
+  - `workbench-relation`
+  - `bank-detail`
+  - `turnover-ledger`
+  - `search-pending`
+  - `invoice-lifecycle`
+  - `invoice-usage-collection`
+  - `cost-tax`
+  - `import`
+  - `no-oa-bank-batch`
+- `workbench-matching` 继续使用 PostgreSQL queue；它不是 RabbitMQ eligible refresh worker。
+- optional `bank-account-balance`、`file-migration` 未启用。
+
+生产 env 备份：
+
+| 备份 | 路径 |
+|---|---|
+| required cutover 前 per-worker env | `/etc/fin-ops/rabbitmq-required-cutover-backup-20260613000902` |
+| 单独 turnover-ledger smoke 前备份 | `/etc/fin-ops/rabbitmq-worker-cutover-backup-20260613000651` |
+
+切换后 RabbitMQ broker 检查：
+
+| 指标 | 值 |
+|---|---:|
+| required event queue depth | 0 |
+| required event queue consumers | 每个 required queue 1 |
+| total RabbitMQ depth | 0 |
+| RabbitMQ DLQ | 0 |
+| `/health/ready.rabbitmq_consumer_count` | 15 |
+| `/health/ready.rabbitmq_queue_depth` | 0 |
+| `/health/ready.rabbitmq_dlq_count` | 0 |
+| `/health/ready.rabbitmq_metric_error` | `null` |
+
+切换过程中发现 `finops.cost_statistics.read_model.refresh.dlq` 有 2 条 RabbitMQ orphan envelope，但 PostgreSQL `job.outbox_events` 中没有对应 `event_id`。由于 PostgreSQL durable queue 才是事实源，这 2 条 broker-only DLQ 不代表真实 read model blocker。已先导出审计摘要到生产 `/tmp/finops-rabbitmq-cost-statistics-dlq-purge-20260613T001207+0800.json`，再清空该 DLQ。
+
+最终 `/health/ready` 摘要：
+
+| 指标 | 值 |
+|---|---:|
+| status | `ready` |
+| `queue_backlog.done` | 35952 |
+| `dirty_scopes.done` | 30684 |
+| `failed_jobs` | 0 |
+| `rabbitmq_consumer_count` | 15 |
+| `rabbitmq_queue_depth` | 0 |
+| `rabbitmq_dlq_count` | 0 |
+| `rabbitmq_metric_error` | `null` |
+| `read_model_refresh_duration_ms.p50` | 377.38ms |
+| `read_model_refresh_duration_ms.p95` | 17765.13ms |
+| `read_model_refresh_duration_ms.p99` | 38188.05ms |
+
+结论：
+
+- required worker 已从 PostgreSQL polling/wakeup 切到 RabbitMQ real consumer。
+- RabbitMQ Management API、queue depth、DLQ 和 consumer count 已纳入 `/health/ready` 可观测闭环。
+- PostgreSQL durable queue、dirty scope 和 readiness 全部保持真实收敛；没有通过手工写 fresh 或删除 current blocker 达成绿色状态。
+
+回滚口径：
+
+- 按备份目录恢复 `/etc/fin-ops/fin-ops.worker.<instance>.env`，或逐个把 `FIN_OPS_QUEUE_BACKEND` 改回 `postgres`。
+- 重启对应 `fin-ops-worker@<instance>.service`。
+- 确认 `/health/ready.runtime_infrastructure` 的 required worker missing/stale/mismatch 为 0，PostgreSQL `job.outbox_events` 与 `job.read_model_dirty_scopes` 没有 active backlog。
+- 不需要清空 PostgreSQL durable queue；RabbitMQ 中残留消息只作为 transport envelope 处理，不能作为 read model 状态事实源。
+
+## 当前闭环状态
+
+已闭环：
+
+- current-effective App Status blocker 只看当前有效 dirty/outbox/readiness，不再被历史 legacy scope 污染。
+- legacy `cost_statistics` scope 已受控 repair，并由 replacement scope 真实重建完成。
+- covered historical dead-letter 已通过 repository 工具归档，`failed_jobs=0`。
+- worker shutdown 不再依赖 300 秒 lock timeout 回收 `processing` lease。
+- RabbitMQ topology、Management metrics、required worker real consumers 和 DLQ 清理已完成。
+
+尚未完成“几秒内全部同步”性能 SLO：
+
+- `read_model_refresh_duration_ms.p95` 仍约 17.77s，主要来自滚动窗口里的重型 read model。
+- 生产基线中 `/api/input-invoice-usage/rows/.../relation-details` p95 曾达到 42.8s，且单请求约 1129 次 DB query，仍需专门优化。
+- Workbench/cost statistics/pending invoice 等重型链路仍需要 EXPLAIN 驱动的索引、分区或增量化评估。
+- Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
+
+下一阶段优先级：
+
+1. 针对 relation-details、workbench groups、cost_statistics、pending_invoice 采集最新 EXPLAIN 和 `pg_stat_statements`/API rolling window，先修最慢读路径和 N+1。
+2. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
+3. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
+4. 接入 Prometheus/Grafana 或 OpenTelemetry，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
+5. 只有当 worker 并发提高后出现连接等待或连接数接近阈值，再启用 PgBouncer；当前 2-3 人使用场景下它不是性能第一瓶颈。

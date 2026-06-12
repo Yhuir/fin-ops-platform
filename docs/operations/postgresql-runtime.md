@@ -142,6 +142,10 @@ python3 -m fin_ops_platform.tools.run_runtime_convergence_closure \
 RabbitMQ staging preflight 如启用 RabbitMQ：
 
 ```bash
+set -a
+source /etc/fin-ops/fin-ops.api.env
+source /etc/fin-ops/fin-ops.rabbitmq-monitoring.env
+set +a
 PYTHONPATH=backend/src \
 python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight \
   --json \
@@ -151,5 +155,18 @@ python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight \
 默认只检查 registry 中 `required=true` 且 `rabbitmq_eligible=true` 的 worker，避免未启用的 optional
 worker 例如 `file-migration` 因缺少 legacy GridFS 或对象存储配置阻塞灰度。如果本次发布明确要启用
 optional worker，再加 `--include-optional-workers`，并先补齐对应 dependency 和 env。
+
+生产 RabbitMQ worker env 拆分：
+
+- `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 只给 topology bootstrap 使用。
+- `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env` 只给 API/运维读取 Management metrics 使用。
+- `/etc/fin-ops/fin-ops.rabbitmq-worker.env` 只保存 worker consumer 共享 `RABBITMQ_URL`，权限 `0600 root root`，不得设置 `FIN_OPS_QUEUE_BACKEND`。
+- `/etc/fin-ops/fin-ops.worker.<instance>.env` 控制单个 worker 是否从 `postgres` 切到 `rabbitmq`。
+
+2026-06-13 生产 Stage 9 已把 required RabbitMQ eligible worker 切到 real consumers。验收时
+`/health/ready` 中 `rabbitmq_consumer_count=15`、`rabbitmq_queue_depth=0`、`rabbitmq_dlq_count=0`、
+`rabbitmq_metric_error=null`，PostgreSQL dirty/outbox/readiness 同时保持收敛。回滚时只需要恢复
+per-worker env 到 `FIN_OPS_QUEUE_BACKEND=postgres` 并重启 worker；不要把 RabbitMQ 队列作为
+read model 状态事实源。
 
 一次性报告不要写入长期文档树。需要长期保留的结论应提炼到本文或对应运维文档。

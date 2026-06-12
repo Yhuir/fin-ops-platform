@@ -260,6 +260,77 @@ Worker 在收到 `SIGTERM` 或 `SIGINT` 时必须释放当前持有的 PostgreSQ
 `read_model.app_status_readiness` 非 `fresh` 均收敛为 0。该验证只证明发布/重启不再依赖 300 秒
 lock timeout；单个重型 read model rebuild 的执行时间仍需通过 worker 增量化、索引/分区和缓存阶段优化。
 
+## RabbitMQ Real Consumer 运维
+
+RabbitMQ 是 read model refresh 的 transport/wakeup，不是状态事实源。切换前后都必须以
+PostgreSQL durable queue 和 readiness 为准：
+
+- `job.outbox_events`
+- `job.read_model_dirty_scopes`
+- `read_model.app_status_readiness`
+
+生产启用 required RabbitMQ real consumers 的顺序：
+
+1. 发布包含 RabbitMQ preflight、systemd env hook 和 consumer clean interrupt 的 release。
+2. 确认 RabbitMQ topology env 只加载给 bootstrap，不加载给 API 或 worker。
+3. 执行 required-only preflight：
+
+   ```bash
+   cd /opt/fin-ops/current
+   set -a
+   source /etc/fin-ops/fin-ops.api.env
+   source /etc/fin-ops/fin-ops.rabbitmq-monitoring.env
+   set +a
+   PYTHONPATH=/opt/fin-ops/current/backend/src \
+     /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.run_rabbitmq_staging_preflight \
+       --json \
+       --output /tmp/finops-rabbitmq-staging-preflight.json
+   ```
+
+   默认只检查 registry 中 `required=true` 且 `rabbitmq_eligible=true` 的 worker。只有本次明确启用
+   optional worker 时才加 `--include-optional-workers`。
+
+4. 如果 `/health/ready.runtime_infrastructure.rabbitmq_metric_error` 是 queue/DLQ missing，先使用
+   `/etc/fin-ops/fin-ops.rabbitmq-topology.env` 执行 topology apply，再重新检查 Management metrics。
+5. 创建或更新 root-only `/etc/fin-ops/fin-ops.rabbitmq-worker.env`，只写共享 `RABBITMQ_URL`。该文件
+   权限必须是 `0600 root root`，且不得设置 `FIN_OPS_QUEUE_BACKEND`。
+6. 备份准备切换的 `/etc/fin-ops/fin-ops.worker.<instance>.env` 到带时间戳的目录。
+7. 逐个或按小批量把 required eligible worker 的 per-instance env 改为 `FIN_OPS_QUEUE_BACKEND=rabbitmq`，
+   重启对应 `fin-ops-worker@<instance>.service`。
+8. 每批切换后检查：
+
+   ```bash
+   curl -fsS http://127.0.0.1:18001/health/ready
+   rabbitmqctl -p /finops list_queues name messages consumers messages_unacknowledged
+   ```
+
+验收条件：
+
+- required event queue 均有 consumer，且 `messages`、`messages_unacknowledged` 不持续增长。
+- RabbitMQ DLQ 为 0；若有 DLQ，必须先确认 PostgreSQL `job.outbox_events` 是否存在对应 `event_id`。
+- `/health/ready.runtime_infrastructure.rabbitmq_metric_error=null`。
+- `/health/ready.runtime_infrastructure.rabbitmq_queue_depth=0` 或短时间内下降。
+- `/health/ready.runtime_infrastructure.rabbitmq_consumer_count` 覆盖已切换 required queues。
+- PostgreSQL `job.outbox_events` 没有 active failed/dead-lettered current blocker。
+- `job.read_model_dirty_scopes` 非 `done` 与 `read_model.app_status_readiness` 非 `fresh` 不持续增长。
+
+如果 RabbitMQ DLQ 中 envelope 没有 PostgreSQL outbox 对应行，它是 transport orphan，不是 read model
+事实 blocker。处理顺序是先导出审计摘要，再 purge 该 DLQ；禁止反向根据 broker-only envelope 写入
+PostgreSQL done/fresh。
+
+生产 Stage 9 已验证 required worker cutover：`main-99a98feb-stage9-202606130000` 切换后
+`rabbitmq_consumer_count=15`、`rabbitmq_queue_depth=0`、`rabbitmq_dlq_count=0`、
+`rabbitmq_metric_error=null`，同时 PostgreSQL queue/dirty/readiness 全部保持收敛。
+
+回滚步骤：
+
+1. 从切换前备份目录恢复 `/etc/fin-ops/fin-ops.worker.<instance>.env`，或把目标实例改回
+   `FIN_OPS_QUEUE_BACKEND=postgres`。
+2. 重启对应 worker unit。
+3. 检查 `/health/ready.runtime_infrastructure` 的 required worker missing/stale/mismatch 为 0。
+4. 检查 PostgreSQL durable queue 和 readiness 是否收敛。
+5. RabbitMQ 残留消息只按 transport envelope 处理；不要把清空 RabbitMQ 当成 read model 修复。
+
 ## App Status Readiness Convergence
 
 `read_model.app_status_readiness` 是全局状态 icon 允许变绿的 read model 证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 read model 表、active generation、schema/source version 和 row count 做 convergence。

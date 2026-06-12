@@ -7,6 +7,7 @@
 
 - read model refresh 入队前由统一 scope policy/gateway 负责 normalize、validate 和 dedupe；`RuntimeQueueRepository` 继续只负责 PostgreSQL durable queue 持久化。
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
+- RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
 
 ## 记录模板
 
@@ -24,6 +25,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-13 - Required RabbitMQ real consumers 生产切换
+
+- 目标：把 required RabbitMQ eligible read model worker 从 PostgreSQL polling/wakeup 切到 RabbitMQ real consumer，降低 queue wakeup latency，并让 RabbitMQ Management metrics、queue depth、DLQ 和 consumer count 进入 `/health/ready` 观测闭环。
+- 影响范围：`run_rabbitmq_staging_preflight` required/optional 检查边界、worker systemd 共享 RabbitMQ env、`RabbitMqConsumer.consume_forever()` interrupt 行为、生产 required worker env 和 RabbitMQ topology。
+- 关键决策：preflight 默认只检查 required eligible worker；optional worker 需显式 `--include-optional-workers`。`/etc/fin-ops/fin-ops.rabbitmq-worker.env` 只存共享 `RABBITMQ_URL`，单 worker 是否切换仍由 `/etc/fin-ops/fin-ops.worker.<instance>.env` 的 `FIN_OPS_QUEUE_BACKEND` 决定。RabbitMQ DLQ 中没有 PostgreSQL outbox 对应行的 envelope 视为 transport orphan，先导出审计摘要再清理。
+- 文档影响：更新 `docs/operations/runtime-sync-repair-2026-06-12.md`、`docs/operations/runtime-worker-governance.md` 和 `docs/operations/postgresql-runtime.md`。
+- 测试覆盖：`tests/test_rabbitmq_staging_preflight.py` 覆盖 optional worker flag；`tests/test_deploy_oa_script.py` 覆盖共享 worker env 加载顺序；`tests/test_rabbitmq_runtime.py` 覆盖 consumer 收到 interrupt 后干净返回。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_staging_preflight tests.test_rabbitmq_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script tests.test_rabbitmq_staging_preflight tests.test_rabbitmq_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_runtime tests.test_runtime_worker tests.test_deploy_oa_script -v`；`PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --help`；`bash scripts/verify.sh docs`；生产 preflight、topology apply、required worker cutover 和 `/health/ready` 检查。
+- 未测风险：Prometheus/Grafana 或 OpenTelemetry 尚未接入；`read_model_refresh_duration_ms.p95` 仍约 17.77s，RabbitMQ 只解决 wakeup/transport，不解决重型 projection 执行耗时或慢 API N+1。
+- 后续事项：进入 EXPLAIN/pg_stat 驱动的 relation-details、workbench groups、cost_statistics、pending_invoice 查询优化；再按 fresh gate 引入 Redis fresh-cache，并把 SLO 指标接入持续监控。
 
 ## 2026-06-12 - Worker shutdown release processing lease
 
