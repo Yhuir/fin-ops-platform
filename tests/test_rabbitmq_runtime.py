@@ -103,9 +103,16 @@ class FakeConnection:
         self.channel_obj = channel
         self.closed = False
         self.is_open = True
+        self.process_data_events_calls = 0
+        self.raise_on_process_data_events: BaseException | None = None
 
     def channel(self) -> FakeChannel:
         return self.channel_obj
+
+    def process_data_events(self, *, time_limit):
+        self.process_data_events_calls += 1
+        if self.raise_on_process_data_events is not None:
+            raise self.raise_on_process_data_events
 
     def close(self) -> None:
         self.closed = True
@@ -382,6 +389,32 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(worker.heartbeats[0][0], "idle")
         self.assertEqual(worker.heartbeats[0][1]["transport"], "rabbitmq")
         self.assertEqual(worker.heartbeats[0][1]["event_types"], ["workbench.read_model.refresh"])
+
+    def test_consumer_exits_cleanly_on_keyboard_interrupt(self) -> None:
+        worker = FakeWorker()
+        channel = FakeChannel()
+        connection = FakeConnection(channel)
+        connection.raise_on_process_data_events = KeyboardInterrupt()
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+        consumer = RabbitMqConsumer(
+            settings=settings,
+            queue_repository=FakeQueue(),
+            worker=worker,
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            lock_timeout_seconds=300,
+        )
+
+        with patch(
+            "fin_ops_platform.services.rabbitmq_runtime._open_blocking_connection",
+            return_value=connection,
+        ):
+            consumer.consume_forever()
+
+        self.assertEqual(connection.process_data_events_calls, 1)
+        self.assertTrue(connection.closed)
+        self.assertEqual(worker.heartbeats[-1][0], "stopped")
+        self.assertEqual(worker.heartbeats[-1][1]["transport"], "rabbitmq")
 
     def test_consumer_rejects_message_without_postgres_fact(self) -> None:
         queue = FakeQueue()

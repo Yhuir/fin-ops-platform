@@ -364,17 +364,21 @@ class RabbitMqConsumer:
             heartbeat_interval_seconds = min(30.0, max(5.0, float(self._settings.rabbitmq_heartbeat_seconds) / 2.0))
             next_heartbeat_at = 0.0
             while True:
-                connection.process_data_events(time_limit=1.0)
-                now = monotonic()
-                if now >= next_heartbeat_at:
-                    drain_result = self.drain_postgres_queue_once()
-                    heartbeat_status = (
-                        "postgres_queue_processed"
-                        if drain_result == RuntimeWorkerResult.PROCESSED
-                        else "idle"
-                    )
-                    self._record_consumer_heartbeat(heartbeat_status)
-                    next_heartbeat_at = now + heartbeat_interval_seconds
+                try:
+                    connection.process_data_events(time_limit=1.0)
+                    now = monotonic()
+                    if now >= next_heartbeat_at:
+                        drain_result = self.drain_postgres_queue_once()
+                        heartbeat_status = (
+                            "postgres_queue_processed"
+                            if drain_result == RuntimeWorkerResult.PROCESSED
+                            else "idle"
+                        )
+                        self._record_consumer_heartbeat(heartbeat_status)
+                        next_heartbeat_at = now + heartbeat_interval_seconds
+                except KeyboardInterrupt:
+                    self._record_consumer_heartbeat("stopped")
+                    return
 
     def drain_postgres_queue_once(self) -> RuntimeWorkerResult | str:
         try:
