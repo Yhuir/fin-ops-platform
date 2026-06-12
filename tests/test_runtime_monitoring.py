@@ -54,6 +54,7 @@ class FakeConnection:
         if "recent_refresh_events" in normalized:
             return [
                 {
+                    "window_name": "all_time",
                     "event_type": "__all__",
                     "p50_ms": 120.0,
                     "p95_ms": 300.0,
@@ -68,6 +69,7 @@ class FakeConnection:
                     "last_fresh_at": "2026-06-13 03:00:01+08",
                 },
                 {
+                    "window_name": "all_time",
                     "event_type": "workbench.read_model.refresh",
                     "p50_ms": 200.0,
                     "p95_ms": 500.0,
@@ -82,6 +84,7 @@ class FakeConnection:
                     "last_fresh_at": "2026-06-13 03:00:01+08",
                 },
                 {
+                    "window_name": "all_time",
                     "event_type": "tax_offset.read_model.refresh",
                     "p50_ms": 50.0,
                     "p95_ms": 80.0,
@@ -94,6 +97,36 @@ class FakeConnection:
                     "read_model_refresh_total": 5,
                     "last_completed_at": "2026-06-13 03:01:00+08",
                     "last_fresh_at": "2026-06-13 03:01:01+08",
+                },
+                {
+                    "window_name": "recent_15m",
+                    "event_type": "__all__",
+                    "p50_ms": 90.0,
+                    "p95_ms": 140.0,
+                    "p99_ms": 180.0,
+                    "enqueue_p50_ms": 100.0,
+                    "enqueue_p95_ms": 160.0,
+                    "enqueue_p99_ms": 200.0,
+                    "completed_sample_count": 3,
+                    "failed_count": 0,
+                    "read_model_refresh_total": 3,
+                    "last_completed_at": "2026-06-13 03:08:00+08",
+                    "last_fresh_at": "2026-06-13 03:08:01+08",
+                },
+                {
+                    "window_name": "recent_15m",
+                    "event_type": "workbench.read_model.refresh",
+                    "p50_ms": 95.0,
+                    "p95_ms": 150.0,
+                    "p99_ms": 190.0,
+                    "enqueue_p50_ms": 105.0,
+                    "enqueue_p95_ms": 170.0,
+                    "enqueue_p99_ms": 210.0,
+                    "completed_sample_count": 2,
+                    "failed_count": 0,
+                    "read_model_refresh_total": 2,
+                    "last_completed_at": "2026-06-13 03:08:00+08",
+                    "last_fresh_at": "2026-06-13 03:08:01+08",
                 },
             ]
         if "pending_outbox_by_scope" in normalized:
@@ -302,6 +335,18 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "2026-03")
         self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 35150.0)
         self.assertFalse(summary["read_model_refresh_slow_events"][0]["skipped"])
+        self.assertEqual(summary["read_model_refresh_current_windows"]["recent_15m"]["sample_count"], 3)
+        self.assertEqual(
+            summary["read_model_refresh_current_windows"]["recent_15m"]["enqueue_to_fresh_ms"]["p95"],
+            160.0,
+        )
+        self.assertEqual(summary["read_model_refresh_current_windows"]["recent_1h"]["sample_count"], 0)
+        self.assertEqual(summary["read_model_refresh_by_key_current_windows"][0]["window"], "recent_15m")
+        self.assertEqual(summary["read_model_refresh_by_key_current_windows"][0]["key"], "workbench")
+        self.assertEqual(
+            summary["read_model_refresh_by_key_current_windows"][0]["enqueue_to_fresh_ms"]["p95"],
+            170.0,
+        )
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
         self.assertEqual(summary["rabbitmq_unpublished_backlog"], 4)
         self.assertEqual(summary["rabbitmq_publish_failed_backlog"], 2)
@@ -371,6 +416,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("order by updated_at desc", refresh_metric_sql)
         self.assertIn("limit %s", refresh_metric_sql)
         self.assertIn("processed_at - refresh_event.created_at", refresh_metric_sql)
+        self.assertIn("metric_windows(window_name, started_at)", refresh_metric_sql)
+        self.assertIn("recent_15m", refresh_metric_sql)
         self.assertNotIn("from job.outbox_events where event_type like", refresh_metric_sql)
         slow_event_sql = next(sql for sql in normalized_calls if "slow_refresh_event_samples" in sql)
         self.assertIn("cross join lateral", slow_event_sql)

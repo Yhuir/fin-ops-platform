@@ -21,6 +21,7 @@ READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = read_model_event_types()
 EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
 READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT = 512
 READ_MODEL_REFRESH_SLOW_EVENT_LIMIT = 20
+READ_MODEL_REFRESH_CURRENT_WINDOWS = ("recent_15m", "recent_1h", "recent_6h")
 RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT = 512
 
 
@@ -484,11 +485,19 @@ class RuntimeMonitoringRepository:
                 order by updated_at desc
                 limit %s
               ) refresh_event
+            ),
+            metric_windows(window_name, started_at) as (
+              values
+                ('all_time', '-infinity'::timestamptz),
+                ('recent_15m', now() - interval '15 minutes'),
+                ('recent_1h', now() - interval '1 hour'),
+                ('recent_6h', now() - interval '6 hours')
             )
             select
+              metric_windows.window_name,
               case
-                when grouping(event_type) = 1 then '__all__'
-                else event_type
+                when grouping(recent_refresh_events.event_type) = 1 then '__all__'
+                else recent_refresh_events.event_type
               end as event_type,
               (percentile_cont(0.5) within group (
                 order by duration_ms
@@ -514,7 +523,9 @@ class RuntimeMonitoringRepository:
               (max(updated_at) filter (where duration_ms is not null))::text as last_completed_at,
               (max(processed_at) filter (where enqueue_to_fresh_ms is not null))::text as last_fresh_at
             from recent_refresh_events
-            group by grouping sets ((event_type), ())
+            join metric_windows
+              on recent_refresh_events.created_at >= metric_windows.started_at
+            group by grouping sets ((metric_windows.window_name, recent_refresh_events.event_type), (metric_windows.window_name))
             """,
             (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
         )
@@ -607,8 +618,34 @@ class RuntimeMonitoringRepository:
         refresh_duration_row: dict[str, Any] = {}
         refresh_failure_row: dict[str, Any] = {}
         read_model_refresh_by_key: list[dict[str, Any]] = []
+        read_model_refresh_current_windows: dict[str, dict[str, Any]] = {
+            window: _empty_refresh_metric_summary(window=window)
+            for window in READ_MODEL_REFRESH_CURRENT_WINDOWS
+        }
+        read_model_refresh_by_key_current_windows: list[dict[str, Any]] = []
         for row in refresh_metric_rows:
+            window_name = str(row.get("window_name") or "all_time")
             event_type = str(row.get("event_type") or "")
+            if window_name != "all_time":
+                if event_type == "__all__":
+                    read_model_refresh_current_windows[window_name] = _refresh_metric_summary(row, window=window_name)
+                    continue
+                event_metadata = READ_MODEL_EVENT_TYPES.get(event_type)
+                if event_metadata is None:
+                    read_model_key = event_type
+                    scope_type = event_type
+                else:
+                    read_model_key, scope_type = event_metadata
+                read_model_refresh_by_key_current_windows.append(
+                    {
+                        "window": window_name,
+                        "key": read_model_key,
+                        "event_type": event_type,
+                        "scope_type": scope_type,
+                        **_refresh_metric_summary(row),
+                    }
+                )
+                continue
             if event_type == "__all__":
                 refresh_duration_row = dict(row)
                 refresh_failure_row = dict(row)
@@ -648,6 +685,14 @@ class RuntimeMonitoringRepository:
             key=lambda item: (
                 item["duration_ms"]["p95"] is None,
                 -float(item["duration_ms"]["p95"] or 0),
+                str(item["key"]),
+            )
+        )
+        read_model_refresh_by_key_current_windows.sort(
+            key=lambda item: (
+                str(item["window"]),
+                item["enqueue_to_fresh_ms"]["p95"] is None,
+                -float(item["enqueue_to_fresh_ms"]["p95"] or 0),
                 str(item["key"]),
             )
         )
@@ -788,6 +833,8 @@ class RuntimeMonitoringRepository:
                 round(failed_refresh_count / total_refresh_count, 6) if total_refresh_count else 0.0
             ),
             "read_model_refresh_by_key": read_model_refresh_by_key,
+            "read_model_refresh_current_windows": read_model_refresh_current_windows,
+            "read_model_refresh_by_key_current_windows": read_model_refresh_by_key_current_windows,
             "read_model_refresh_slow_events": read_model_refresh_slow_events,
             "rabbitmq_publish_status": publish_status,
             "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
@@ -1273,6 +1320,46 @@ def _optional_float(value: object) -> float | None:
         return round(float(value), 3)
     except (TypeError, ValueError):
         return None
+
+
+def _refresh_metric_summary(row: dict[str, Any], *, window: str | None = None) -> dict[str, Any]:
+    sample_count = _optional_int(row.get("read_model_refresh_total")) or 0
+    failed_count = _optional_int(row.get("failed_count")) or 0
+    payload: dict[str, Any] = {
+        "duration_ms": {
+            "p50": _optional_float(row.get("p50_ms")),
+            "p95": _optional_float(row.get("p95_ms")),
+            "p99": _optional_float(row.get("p99_ms")),
+        },
+        "enqueue_to_fresh_ms": {
+            "p50": _optional_float(row.get("enqueue_p50_ms")),
+            "p95": _optional_float(row.get("enqueue_p95_ms")),
+            "p99": _optional_float(row.get("enqueue_p99_ms")),
+        },
+        "sample_count": sample_count,
+        "completed_sample_count": _optional_int(row.get("completed_sample_count")) or 0,
+        "failed_count": failed_count,
+        "failure_rate": round(failed_count / sample_count, 6) if sample_count else 0.0,
+        "last_completed_at": row.get("last_completed_at"),
+        "last_fresh_at": row.get("last_fresh_at"),
+    }
+    if window is not None:
+        payload["window"] = window
+    return payload
+
+
+def _empty_refresh_metric_summary(*, window: str) -> dict[str, Any]:
+    return {
+        "window": window,
+        "duration_ms": dict(EMPTY_PERCENTILES),
+        "enqueue_to_fresh_ms": dict(EMPTY_PERCENTILES),
+        "sample_count": 0,
+        "completed_sample_count": 0,
+        "failed_count": 0,
+        "failure_rate": 0.0,
+        "last_completed_at": None,
+        "last_fresh_at": None,
+    }
 
 
 def _app_status_dirty_scope_status(value: object) -> str:

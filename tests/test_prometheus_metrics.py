@@ -49,6 +49,30 @@ class PrometheusMetricsTests(unittest.TestCase):
                         "failure_rate": 0.1,
                     }
                 ],
+                "read_model_refresh_current_windows": {
+                    "recent_15m": {
+                        "duration_ms": {"p50": 90.0, "p95": 140.0, "p99": 180.0},
+                        "enqueue_to_fresh_ms": {"p50": 100.0, "p95": 160.0, "p99": 200.0},
+                        "sample_count": 3,
+                        "completed_sample_count": 3,
+                        "failed_count": 0,
+                        "failure_rate": 0.0,
+                    }
+                },
+                "read_model_refresh_by_key_current_windows": [
+                    {
+                        "window": "recent_15m",
+                        "key": "workbench",
+                        "event_type": "workbench.read_model.refresh",
+                        "scope_type": "workbench",
+                        "duration_ms": {"p50": 95.0, "p95": 150.0, "p99": 190.0},
+                        "enqueue_to_fresh_ms": {"p50": 105.0, "p95": 170.0, "p99": 210.0},
+                        "sample_count": 2,
+                        "completed_sample_count": 2,
+                        "failed_count": 0,
+                        "failure_rate": 0.0,
+                    }
+                ],
                 "rabbitmq_publish_status": {"unpublished": 1},
                 "rabbitmq_queue_depth": 5,
                 "rabbitmq_unacked_messages": 1,
@@ -107,6 +131,22 @@ class PrometheusMetricsTests(unittest.TestCase):
         )
         self.assertIn(
             'finops_read_model_refresh_by_key_enqueue_to_fresh_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench"} 560',
+            rendered,
+        )
+        self.assertIn(
+            'finops_read_model_refresh_current_window_enqueue_to_fresh_ms{quantile="0.95",window="recent_15m"} 160',
+            rendered,
+        )
+        self.assertIn(
+            'finops_read_model_refresh_current_window_sample_count{window="recent_15m"} 3',
+            rendered,
+        )
+        self.assertIn(
+            'finops_read_model_refresh_by_key_current_window_enqueue_to_fresh_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench",window="recent_15m"} 170',
+            rendered,
+        )
+        self.assertIn(
+            'finops_read_model_refresh_by_key_current_window_sample_count{event_type="workbench.read_model.refresh",read_model_key="workbench",scope_type="workbench",window="recent_15m"} 2',
             rendered,
         )
         self.assertIn(
