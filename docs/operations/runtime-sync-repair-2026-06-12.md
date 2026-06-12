@@ -799,6 +799,95 @@ Stage 16 结论：
 - 页面首包/API p95 仍是 `not_collected`，必须用登录态 HTTP/browser 采样补齐；不能用 worker freshness 代替页面体验证据。
 - 最大表和最大索引集中在 workbench generation 表，下一阶段索引、retention、分区或 payload-cache 决策必须围绕这些事实做 impact analysis。
 
+## Stage 17：启用 pg_stat_statements preload
+
+Stage 17 只做生产运维配置变更，无代码提交。目标是补齐数据库 top SQL 证据链，避免在没有
+`pg_stat_statements` 的情况下盲做索引或分区。
+
+变更前只读 preflight：
+
+| 项目 | 结果 |
+|---|---|
+| PostgreSQL service | `postgresql.service` |
+| PostgreSQL version | 16.12 |
+| config file | `/var/lib/pgsql/data/postgresql.conf` |
+| auto config file | `/var/lib/pgsql/data/postgresql.auto.conf` |
+| `shared_preload_libraries` | empty |
+| app/workers active connections | idle only；无 active transaction |
+| `job.outbox_events` active statuses | 0 |
+| `job.read_model_dirty_scopes` active statuses | 0 |
+| `read_model.app_status_readiness` | 124 fresh |
+
+执行记录：
+
+1. 备份 `/var/lib/pgsql/data/postgresql.auto.conf` 到
+   `/var/lib/pgsql/data/postgresql.auto.conf.stage17-20260613013828.bak`。
+2. 停止 `fin-ops-rabbitmq-dispatcher.service`、12 个 `fin-ops-worker@*.service` 和 `fin-ops.service`。
+3. 执行 `ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';`。
+4. 重启 `postgresql.service`；验证 `shared_preload_libraries` 为 `pg_stat_statements`。
+5. 用 `/usr/local/sbin/finops-deploy-control restart` 恢复 API；由于该 helper 只重启调用时
+   active 的 worker，而 worker 在第 2 步已经全部停止，所以随后显式执行
+   `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/main-688ce928-stage16-202606130133/src`
+   恢复 required workers，并启动 dispatcher。
+
+恢复验证：
+
+| 指标 | 值 |
+|---|---:|
+| `/health/ready.status` | `ready` |
+| release | `main-688ce928-stage16-202606130133` |
+| runtime release consistent | true |
+| active required workers | 12 |
+| dispatcher | active |
+| app DB `pg_stat_statements` extension | installed |
+| app DB `pg_stat_statements` rows | 77 |
+
+Stage 17 baseline JSON：
+`/tmp/finops-sync-slo-baseline-stage17-20260613014328.json`。
+
+Stage 17 同步基线：
+
+| 指标 | 值 |
+|---|---:|
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| `max_pending_age_seconds` | null |
+| `queue_backlog.done` | 36021 |
+| `dirty_scopes.done` | 30745 |
+| runtime read model attention | 0 |
+| runtime outbox attention | 0 |
+| `pg_stat_statements.status` | available |
+| metric version | `pg_stat_statements_total_exec_time` |
+| `read_model_refresh_duration_ms.p95` | 17759.437ms |
+
+Stage 17 top SQL 样本：
+
+| rank | total_exec_time | calls | mean_exec_time | query 摘要 |
+|---:|---:|---:|---:|---|
+| 1 | 2864.602ms | 1 | 2864.602ms | `read_model.workbench_generation_consistency` inconsistent count |
+| 2 | 400.821ms | 29 | 13.821ms | `job.outbox_events` status count by event type |
+| 3 | 367.547ms | 399 | 0.921ms | `app.app_settings` settings payload lookup |
+| 4 | 334.678ms | 29 | 11.541ms | workbench generation consistency aggregate over rows/groups/group_rows/summary |
+| 5 | 179.012ms | 1 | 179.012ms | `read_model.workbench_candidate_matches` full candidate load |
+
+Rollback：
+
+1. `ALTER SYSTEM RESET shared_preload_libraries;`
+2. `systemctl restart postgresql.service`
+3. `/usr/local/sbin/finops-deploy-control restart`
+4. 若 worker 曾被停止，执行
+   `/usr/local/sbin/finops-ensure-runtime-workers /opt/fin-ops/releases/main-688ce928-stage16-202606130133/src`
+   并启动 `fin-ops-rabbitmq-dispatcher.service`。
+5. 重新跑 `/health/ready` 和 `sync_slo_baseline`，确认 current-effective blocker 仍为 0。
+
+Stage 17 结论：
+
+- 数据库 top SQL 证据链已补齐；下一阶段可以对 top SQL 做 EXPLAIN ANALYZE 和索引/retention impact analysis。
+- 这仍不是“几秒内全部同步”验收通过：当前缺少真实用户登录态页面/API p95 采样，且 global historical
+  read model p95 仍保留 17.76s 历史样本。
+- 运维 caveat：`finops-deploy-control restart` 不适合在 worker 已全部停止后单独恢复 worker；维护脚本或手册应补
+  `finops-ensure-runtime-workers` 步骤。
+
 ## 当前闭环状态
 
 已闭环：
@@ -812,20 +901,20 @@ Stage 16 结论：
 - 发票使用详情在 fresh gate 后走 SQL read model 单行 payload，避免详情抽屉请求热路径 N+1/live assembly。
 - 应用启动默认不再执行 startup stale scan；显式启用时也只会重算缺少 completed scope run proof 的 matching 月份。
 - 生产 SLO baseline collector 已部署，可重复采集 runtime、worker、PostgreSQL catalog、固定 EXPLAIN 和缺口状态。
+- `pg_stat_statements` 已在生产 PostgreSQL preload 并可在 app DB 读取 top SQL。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
 - `read_model_refresh_duration_ms.p95` 仍约 17.76s；Stage 16 近 1 小时样本中 `workbench`、`invoice_lifecycle`、
   `input_invoice_usage` p95 仍约 8-9s。
 - 页面首包/API p95 仍未采集；Stage 11 已完成 relation-details SQL read model 单行读取优化，但仍需登录态 HTTP 样本验证端到端 p95。
-- Workbench 大表/大索引是当前最明确的数据库优化对象；仍需要 `pg_stat_statements`、EXPLAIN ANALYZE、索引/retention/分区 impact analysis。
-- `pg_stat_statements` extension 已存在但未通过 `shared_preload_libraries` 加载，生产 top SQL 证据链仍缺口。
+- Workbench 大表/大索引是当前最明确的数据库优化对象；仍需要对 Stage 17 top SQL 做 EXPLAIN ANALYZE、索引/retention/分区 impact analysis。
 - Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
 
 下一阶段优先级：
 
-1. 启用 `pg_stat_statements` preload 并重启 PostgreSQL，带 rollback；随后采集 top SQL 和 EXPLAIN ANALYZE。
-2. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
+1. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
+2. 对 Stage 17 top SQL 跑 EXPLAIN ANALYZE，先修 workbench consistency aggregate、candidate match full load、outbox status count 等可见瓶颈。
 3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
 4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
 5. 接入 Prometheus/Grafana 或 OpenTelemetry，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
