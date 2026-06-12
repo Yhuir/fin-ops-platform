@@ -65,6 +65,7 @@ class WorkbenchSqlProjectionBuilder:
                 oa_adapter=PostgresOAProjectionAdapter(oa_repository),
                 seed_demo_rows=False,
             )
+        self._structured_attachment_rows_by_parent_oa_id: dict[str, list[dict[str, Any]]] | None = None
 
     def list_workbench_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope = str(scope_key or "").strip()
@@ -130,48 +131,53 @@ class WorkbenchSqlProjectionBuilder:
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench SQL projection scope_key must be a month shard YYYY-MM.")
         self._bank_account_mapping_cache = None
-        resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
-        rows_by_id = self._workbench_rows_for_month(normalized_scope)
-        relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
-        decisions = self._active_reconciliation_decisions_for_month(normalized_scope)
-        self._supplement_missing_relation_rows(rows_by_id, relations)
-        self._supplement_missing_decision_rows(rows_by_id, decisions)
-        payload = self._group_payload(
-            normalized_scope,
-            rows_by_id,
-            relations,
-            decisions=decisions,
-        )
-        snapshot = {
-            "read_models": {
-                normalized_scope: {
-                    "scope_key": normalized_scope,
-                    "scope_month": normalized_scope,
-                    "generated_at": datetime.now().isoformat(),
-                    "cache_status": "fresh",
-                    "payload": payload,
-                    "source_versions": {
-                        "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-                        "source_version": resolved_source_version,
-                        "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
-                        "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
-                        "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
+        previous_structured_attachment_cache = self._structured_attachment_rows_by_parent_oa_id
+        self._structured_attachment_rows_by_parent_oa_id = {}
+        try:
+            resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
+            rows_by_id = self._workbench_rows_for_month(normalized_scope)
+            relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
+            decisions = self._active_reconciliation_decisions_for_month(normalized_scope)
+            self._supplement_missing_relation_rows(rows_by_id, relations)
+            self._supplement_missing_decision_rows(rows_by_id, decisions)
+            payload = self._group_payload(
+                normalized_scope,
+                rows_by_id,
+                relations,
+                decisions=decisions,
+            )
+            snapshot = {
+                "read_models": {
+                    normalized_scope: {
+                        "scope_key": normalized_scope,
+                        "scope_month": normalized_scope,
+                        "generated_at": datetime.now().isoformat(),
+                        "cache_status": "fresh",
+                        "payload": payload,
+                        "source_versions": {
+                            "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+                            "source_version": resolved_source_version,
+                            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+                            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+                            "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
+                        },
                     },
                 }
             }
-        }
-        self._read_model_repository.save_workbench_read_models(
-            snapshot,
-            changed_scope_keys={normalized_scope},
-            refresh_all_scope_from_month_shards=False,
-        )
-        row_count = sum(len(group.get(f"{kind}_rows") or []) for group in payload["paired"]["groups"] + payload["open"]["groups"] for kind in ("oa", "bank", "invoice"))
-        return {
-            "scope_key": normalized_scope,
-            "base_scope_key": normalized_scope,
-            "row_count": row_count,
-            "ignored_row_count": 0,
-        }
+            self._read_model_repository.save_workbench_read_models(
+                snapshot,
+                changed_scope_keys={normalized_scope},
+                refresh_all_scope_from_month_shards=False,
+            )
+            row_count = sum(len(group.get(f"{kind}_rows") or []) for group in payload["paired"]["groups"] + payload["open"]["groups"] for kind in ("oa", "bank", "invoice"))
+            return {
+                "scope_key": normalized_scope,
+                "base_scope_key": normalized_scope,
+                "row_count": row_count,
+                "ignored_row_count": 0,
+            }
+        finally:
+            self._structured_attachment_rows_by_parent_oa_id = previous_structured_attachment_cache
 
     def _current_bank_auto_tag_rules_version(self) -> int:
         row = self._connection.fetch_one(
@@ -352,6 +358,32 @@ class WorkbenchSqlProjectionBuilder:
         month: str,
         oa_rows_by_id: dict[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        cache = self._structured_attachment_rows_by_parent_oa_id
+        requested_oa_ids = [row_id for row_id in sorted(oa_rows_by_id) if str(row_id).strip()]
+        cached_result: list[dict[str, Any]] = []
+        if cache is not None:
+            missing_oa_ids: list[str] = []
+            for oa_row_id in requested_oa_ids:
+                cached_rows = cache.get(oa_row_id)
+                if cached_rows is None:
+                    missing_oa_ids.append(oa_row_id)
+                    continue
+                cached_result.extend(deepcopy(cached_rows))
+            if not missing_oa_ids:
+                return cached_result
+            oa_rows_to_fetch = {
+                oa_row_id: oa_rows_by_id[oa_row_id]
+                for oa_row_id in missing_oa_ids
+                if oa_row_id in oa_rows_by_id
+            }
+        else:
+            oa_rows_to_fetch = {
+                oa_row_id: oa_rows_by_id[oa_row_id]
+                for oa_row_id in requested_oa_ids
+                if oa_row_id in oa_rows_by_id
+            }
+        if not oa_rows_to_fetch:
+            return cached_result
         rows = self._connection.fetch_all(
             """
             select
@@ -462,13 +494,13 @@ class WorkbenchSqlProjectionBuilder:
               and (%s = 'all' or oa.scope_month = %s::date)
             order by oa.row_id, item.row_id, attachment.source_attachment_key
             """,
-            (sorted(oa_rows_by_id), month, month_start(month) if month != "all" else None),
+            (sorted(oa_rows_to_fetch), month, month_start(month) if month != "all" else None),
         )
         evidence_by_oa_id: dict[str, list[dict[str, Any]]] = {}
         scope_month_by_oa_id: dict[str, str] = {}
         for row in rows:
             oa_row_id = str(row.get("oa_row_id") or "").strip()
-            if not oa_row_id or oa_row_id not in oa_rows_by_id:
+            if not oa_row_id or oa_row_id not in oa_rows_to_fetch:
                 continue
             scope_month_by_oa_id[oa_row_id] = str(row.get("scope_month") or "")[:7]
             item_payload = row.get("item_payload") if isinstance(row.get("item_payload"), dict) else {}
@@ -521,9 +553,10 @@ class WorkbenchSqlProjectionBuilder:
                 normalized.setdefault("source_attachment_name", source_attachment_name)
                 evidence_by_oa_id.setdefault(oa_row_id, []).append(normalized)
         result: list[dict[str, Any]] = []
+        result_by_oa_id: dict[str, list[dict[str, Any]]] = {oa_row_id: [] for oa_row_id in oa_rows_to_fetch}
         seen: set[str] = set()
         for oa_row_id, attachment_evidences in evidence_by_oa_id.items():
-            oa_row = oa_rows_by_id.get(oa_row_id)
+            oa_row = oa_rows_to_fetch.get(oa_row_id)
             if not isinstance(oa_row, dict) or not attachment_evidences:
                 continue
             attachment_evidences = self._dedupe_attachment_evidences_by_source_identity(attachment_evidences)
@@ -543,7 +576,22 @@ class WorkbenchSqlProjectionBuilder:
                 serialized["status"] = "open"
                 serialized.setdefault("source_kind", serialized.get("source_kind") or "oa_attachment_invoice")
                 result.append(serialized)
-        return result
+                result_by_oa_id.setdefault(oa_row_id, []).append(serialized)
+        if cache is not None:
+            for oa_row_id, attachment_rows in result_by_oa_id.items():
+                cache[oa_row_id] = deepcopy(attachment_rows)
+        if not cached_result:
+            return result
+        combined_result: list[dict[str, Any]] = []
+        combined_seen: set[str] = set()
+        for row in [*cached_result, *result]:
+            row_id = str(row.get("id") or "").strip()
+            if row_id and row_id in combined_seen:
+                continue
+            if row_id:
+                combined_seen.add(row_id)
+            combined_result.append(row)
+        return combined_result
 
     @classmethod
     def _select_structured_attachment_evidences(

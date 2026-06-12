@@ -5018,6 +5018,148 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(rows[0]["invoice_no"], "INV-STRUCT-001")
         self.assertIn("INV-STRUCT-001", rows[0]["detail_fields"]["发票号码"])
 
+    def test_sql_projection_reuses_structured_attachment_rows_during_rebuild(self) -> None:
+        class StructuredOAConnection(WorkbenchProjectionSettingsConnection):
+            def __init__(self) -> None:
+                super().__init__()
+                self.structured_query_count = 0
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.oa_application_items" in normalized:
+                    self.structured_query_count += 1
+                    return [
+                        {
+                            "oa_row_id": "oa-exp-1",
+                            "scope_month": "2026-05-01",
+                            "item_payload": {
+                                "expense_item_id": "oa-exp-1:item:1",
+                                "row_index": "0",
+                            },
+                            "attachment_payload": {
+                                "source_attachment_key": "oa-exp-1:invoice:1",
+                                "filename": "发票.pdf",
+                            },
+                            "cache_invoices": [
+                                {
+                                    "invoice_no": "INV-STRUCT-001",
+                                    "seller_name": "杭州供应商",
+                                    "total_with_tax": "199.00",
+                                }
+                            ],
+                            "cache_evidences": [],
+                            "cache_artifacts": [],
+                        }
+                    ]
+                if "from app.oa_applications" in normalized:
+                    return []
+                return super().fetch_all(sql, params)
+
+        class FakeOAQueryService:
+            def __init__(self) -> None:
+                self.parent_row = {
+                    "id": "oa-exp-1",
+                    "type": "oa",
+                    "source_kind": "oa",
+                    "status": "open",
+                    "amount": "199.00",
+                    "counterparty_name": "杭州供应商",
+                    "_month": "2026-05",
+                    "_section": "open",
+                    "_detail_fields": {"申请日期": "2026-05-02"},
+                }
+
+            def get_workbench(self, month: str) -> dict[str, object]:
+                return {"month": month}
+
+            def sync_oa_row_ids(self, row_ids: list[str]) -> None:
+                return None
+
+            def list_record_snapshots(self) -> list[dict[str, object]]:
+                return [dict(self.parent_row)]
+
+            def serialize_row(self, row: dict[str, object]) -> dict[str, object]:
+                payload = {key: value for key, value in row.items() if not key.startswith("_")}
+                detail_fields = row.get("_detail_fields")
+                if isinstance(detail_fields, dict):
+                    payload["detail_fields"] = dict(detail_fields)
+                return payload
+
+            def _build_attachment_invoice_rows(self, record: object, *, oa_row: dict[str, object]) -> list[dict[str, object]]:
+                rows: list[dict[str, object]] = []
+                for evidence in list(getattr(record, "attachment_evidences", []) or []):
+                    if not isinstance(evidence, dict):
+                        continue
+                    invoice_no = str(evidence.get("invoice_no") or "").strip()
+                    rows.append(
+                        {
+                            "id": f"oa-att-inv-{oa_row.get('id')}-{invoice_no.lower()}",
+                            "type": "invoice",
+                            "source_kind": "oa_attachment_invoice",
+                            "status": "open",
+                            "derived_from_oa_id": oa_row.get("id"),
+                            "source_expense_item_id": evidence.get("source_expense_item_id"),
+                            "source_attachment_key": evidence.get("source_attachment_key"),
+                            "invoice_no": invoice_no,
+                            "amount": evidence.get("total_with_tax"),
+                            "_month": oa_row.get("_month"),
+                            "_section": "open",
+                            "_detail_fields": {"发票号码": invoice_no},
+                        }
+                    )
+                return rows
+
+        class SaveRecorder:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def save_workbench_read_models(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_scope_keys: set[str] | None = None,
+                refresh_all_scope_from_month_shards: bool = True,
+            ) -> None:
+                self.calls.append(
+                    {
+                        "snapshot": snapshot,
+                        "changed_scope_keys": changed_scope_keys,
+                        "refresh_all_scope_from_month_shards": refresh_all_scope_from_month_shards,
+                    }
+                )
+
+            def list_workbench_reconciliation_decisions(self, **_kwargs: object) -> list[dict[str, object]]:
+                return []
+
+        connection = StructuredOAConnection()
+        query_service = FakeOAQueryService()
+        recorder = SaveRecorder()
+        builder = WorkbenchSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=recorder,
+            oa_query_service=query_service,
+        )
+
+        def supplement_from_same_parent(rows_by_id: dict[str, dict[str, object]], _relations: list[dict[str, object]]) -> None:
+            parent_row = query_service.serialize_row(query_service.parent_row)
+            for row in builder._attachment_invoice_rows_from_expense_items("all", {"oa-exp-1": parent_row}):
+                row_id = str(row.get("id") or "").strip()
+                if row_id:
+                    rows_by_id[row_id] = row
+
+        builder._supplement_missing_relation_rows = supplement_from_same_parent
+        builder._group_payload = lambda *_args, **_kwargs: {
+            "paired": {"groups": []},
+            "open": {"groups": [{"invoice_rows": [{"id": "oa-att-inv-oa-exp-1-inv-struct-001"}]}]},
+        }
+
+        builder.rebuild_workbench_read_model_scope("2026-05")
+
+        self.assertEqual(connection.structured_query_count, 1)
+        self.assertIsNone(builder._structured_attachment_rows_by_parent_oa_id)
+        self.assertEqual(len(recorder.calls), 1)
+        self.assertEqual(recorder.calls[0]["changed_scope_keys"], {"2026-05"})
+
     def test_sql_projection_structured_cache_excludes_payment_receipt_evidence_rows(self) -> None:
         selected = WorkbenchSqlProjectionBuilder._select_structured_attachment_evidences(
             invoices=[],
