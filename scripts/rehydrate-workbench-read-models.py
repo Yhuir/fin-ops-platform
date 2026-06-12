@@ -230,12 +230,13 @@ def _structured_attachment_query_diagnostic(connection: PostgresConnection, scop
             oa.scope_month,
             item.normalized_payload as item_payload,
             attachment.normalized_payload as attachment_payload,
-            cache.cache_source_attachment_key,
-            coalesce(cache.invoices, '[]'::jsonb) as cache_invoices,
-            coalesce(cache.evidences, '[]'::jsonb) as cache_evidences,
+            coalesce(direct_cache.cache_source_attachment_key, fallback_cache.cache_source_attachment_key) as cache_source_attachment_key,
+            coalesce(direct_cache.invoices, fallback_cache.invoices, '[]'::jsonb) as cache_invoices,
+            coalesce(direct_cache.evidences, fallback_cache.evidences, '[]'::jsonb) as cache_evidences,
             coalesce(
                 case
-                    when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
+                    when jsonb_typeof(coalesce(direct_cache.artifacts, fallback_cache.artifacts)) = 'array'
+                        then coalesce(direct_cache.artifacts, fallback_cache.artifacts)
                     else '[]'::jsonb
                 end,
                 '[]'::jsonb
@@ -249,86 +250,75 @@ def _structured_attachment_query_diagnostic(connection: PostgresConnection, scop
                 or attachment.normalized_payload->>'source_expense_item_id' = item.row_id
              )
         left join lateral (
-            select matched.cache_source_attachment_key, matched.invoices, matched.evidences, matched.artifacts
-            from (
-                select
-                    0 as match_rank,
-                    source.cache_source_attachment_key,
-                    cache.parsed_at,
-                    cache.invoices,
-                    cache.evidences,
-                    cache.artifacts
-                from app.oa_attachment_invoice_cache_sources source
-                join app.oa_attachment_invoice_cache cache
-                  on cache.source_attachment_key = source.cache_source_attachment_key
-                where source.source_attachment_key = attachment.source_attachment_key
-                union all
-                select
-                    1 as match_rank,
-                    cache.source_attachment_key as cache_source_attachment_key,
-                    cache.parsed_at,
-                    cache.invoices,
-                    cache.evidences,
-                    cache.artifacts
-                from app.oa_attachment_invoice_cache cache
-                where nullif(
-                        coalesce(
-                            item.normalized_payload->>'expense_item_id',
-                            item.normalized_payload->>'row_id'
-                        ),
-                        ''
-                      ) is not null
-                  and nullif(
-                        coalesce(
-                            attachment.normalized_payload->>'source_attachment_name',
-                            attachment.normalized_payload->>'attachment_name',
-                            attachment.normalized_payload->>'fileName',
-                            attachment.normalized_payload->>'filename'
-                        ),
-                        ''
-                      ) is not null
-                  and exists (
-                        select 1
-                        from jsonb_array_elements(
-                            coalesce(cache.invoices, '[]'::jsonb)
-                            || coalesce(cache.evidences, '[]'::jsonb)
-                            || coalesce(
-                                case
-                                    when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
-                                    else '[]'::jsonb
-                                end,
-                                '[]'::jsonb
-                            )
-                        ) as evidence(value)
-                        where nullif(evidence.value->>'source_expense_item_id', '') = nullif(
-                                coalesce(
-                                    item.normalized_payload->>'expense_item_id',
-                                    item.normalized_payload->>'row_id'
-                                ),
-                                ''
-                              )
-                          and nullif(
-                                coalesce(
-                                    evidence.value->>'source_attachment_name',
-                                    evidence.value->>'attachment_name',
-                                    evidence.value->>'fileName',
-                                    evidence.value->>'filename'
-                                ),
-                                ''
-                              ) = nullif(
-                                coalesce(
-                                    attachment.normalized_payload->>'source_attachment_name',
-                                    attachment.normalized_payload->>'attachment_name',
-                                    attachment.normalized_payload->>'fileName',
-                                    attachment.normalized_payload->>'filename'
-                                ),
-                                ''
-                              )
-                    )
-            ) matched
-            order by matched.match_rank, matched.parsed_at desc nulls last, matched.cache_source_attachment_key
+            select source.cache_source_attachment_key, cache.parsed_at, cache.invoices, cache.evidences, cache.artifacts
+            from app.oa_attachment_invoice_cache_sources source
+            join app.oa_attachment_invoice_cache cache
+              on cache.source_attachment_key = source.cache_source_attachment_key
+            where source.source_attachment_key = attachment.source_attachment_key
+            order by cache.parsed_at desc nulls last, source.cache_source_attachment_key
             limit 1
-        ) cache on true
+        ) direct_cache on true
+        left join lateral (
+            select cache.source_attachment_key as cache_source_attachment_key, cache.parsed_at, cache.invoices, cache.evidences, cache.artifacts
+            from app.oa_attachment_invoice_cache cache
+            where direct_cache.cache_source_attachment_key is null
+              and nullif(
+                    coalesce(
+                        item.normalized_payload->>'expense_item_id',
+                        item.normalized_payload->>'row_id'
+                    ),
+                    ''
+                  ) is not null
+              and nullif(
+                    coalesce(
+                        attachment.normalized_payload->>'source_attachment_name',
+                        attachment.normalized_payload->>'attachment_name',
+                        attachment.normalized_payload->>'fileName',
+                        attachment.normalized_payload->>'filename'
+                    ),
+                    ''
+                  ) is not null
+              and exists (
+                    select 1
+                    from jsonb_array_elements(
+                        coalesce(cache.invoices, '[]'::jsonb)
+                        || coalesce(cache.evidences, '[]'::jsonb)
+                        || coalesce(
+                            case
+                                when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
+                                else '[]'::jsonb
+                            end,
+                            '[]'::jsonb
+                        )
+                    ) as evidence(value)
+                    where nullif(evidence.value->>'source_expense_item_id', '') = nullif(
+                            coalesce(
+                                item.normalized_payload->>'expense_item_id',
+                                item.normalized_payload->>'row_id'
+                            ),
+                            ''
+                          )
+                      and nullif(
+                            coalesce(
+                                evidence.value->>'source_attachment_name',
+                                evidence.value->>'attachment_name',
+                                evidence.value->>'fileName',
+                                evidence.value->>'filename'
+                            ),
+                            ''
+                          ) = nullif(
+                            coalesce(
+                                attachment.normalized_payload->>'source_attachment_name',
+                                attachment.normalized_payload->>'attachment_name',
+                                attachment.normalized_payload->>'fileName',
+                                attachment.normalized_payload->>'filename'
+                            ),
+                            ''
+                          )
+                )
+            order by cache.parsed_at desc nulls last, cache.source_attachment_key
+            limit 1
+        ) fallback_cache on true
         where oa.row_id = any(%s)
           and (%s = 'all' or oa.scope_month = %s::date)
         order by oa.row_id, item.row_id, attachment.source_attachment_key
