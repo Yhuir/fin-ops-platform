@@ -276,6 +276,7 @@ class DeployOAScriptTest(unittest.TestCase):
         template = (Path(__file__).resolve().parents[1] / "deploy/oa/systemd/fin-ops-worker@.service.example").read_text()
 
         self.assertIn("Environment=FIN_OPS_WORKER_INSTANCE=%i", template)
+        self.assertIn("EnvironmentFile=-/etc/fin-ops/fin-ops.rabbitmq-worker.env", template)
         self.assertIn("--registration ${FIN_OPS_WORKER_INSTANCE}", template)
         self.assertIn("--worker-instance ${FIN_OPS_WORKER_INSTANCE}", template)
 

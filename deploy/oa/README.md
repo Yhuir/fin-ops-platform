@@ -201,7 +201,15 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.postgres apply
 ```
 
-RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。完整步骤见 `docs/operations/runtime-read-model-hardening.md`。
+RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_BACKEND=postgres`，完成 topology apply 和 dispatcher shadow publish 观察，再按 worker 族灰度到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。完整 topology 已覆盖 workbench、search/pending、发票使用/收款、cost/tax、oa-sync 和 file migration；生产发布范围由 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制。运行前置检查见 `docs/operations/postgresql-runtime.md`，worker/read model 运维口径见 `docs/operations/runtime-worker-governance.md`。
+
+RabbitMQ 生产 env 拆分：
+
+- `/etc/fin-ops/fin-ops.rabbitmq-topology.env`：bootstrap-only，用于 `rabbitmq_topology --apply`，不加载到 API 或 worker。
+- `/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env`：dispatcher shadow publish/real publish 配置。
+- `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`：API 只读 management metrics 配置。
+- `/etc/fin-ops/fin-ops.rabbitmq-worker.env`：worker consumer 共享 `RABBITMQ_URL` 凭据；该文件不得设置 `FIN_OPS_QUEUE_BACKEND`。
+- `/etc/fin-ops/fin-ops.worker.<instance>.env`：单 worker 实例配置。只有灰度到 RabbitMQ 的实例才把本文件切为 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。
 
 最小生产正确性不依赖 RabbitMQ。标准 release 发布会通过服务器 root-owned helper
 `/usr/local/sbin/finops-ensure-runtime-workers`，安装/更新 worker systemd 模板，补齐缺失的
