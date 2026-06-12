@@ -5560,41 +5560,12 @@ class PostgresReadModelRepository:
             scope_key="all",
             summary_payload=summary_payload,
         )
+        workbench_row_params: list[tuple[Any, ...]] = []
         for row in workbench_rows:
             row_id = text(row.get("id") or row.get("row_id"))
             if row_id is None:
                 continue
-            connection.execute(
-                """
-                insert into read_model.workbench_rows(
-                    generation_id, row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
-                    counterparty_name, amount, object_identity_key, object_identity_kind,
-                    object_identity_source, object_identity_confidence,
-                    source_versions, generated_at, cache_status, payload, raw_payload
-                )
-                values (
-                    %s, %s, %s::date, 'all', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
-                )
-                on conflict (generation_id, scope_key, row_id) do update set
-                    scope_month = excluded.scope_month,
-                    source_kind = excluded.source_kind,
-                    status = excluded.status,
-                    project_id = excluded.project_id,
-                    project_name = excluded.project_name,
-                    counterparty_name = excluded.counterparty_name,
-                    amount = excluded.amount,
-                    object_identity_key = excluded.object_identity_key,
-                    object_identity_kind = excluded.object_identity_kind,
-                    object_identity_source = excluded.object_identity_source,
-                    object_identity_confidence = excluded.object_identity_confidence,
-                    source_versions = excluded.source_versions,
-                    generated_at = excluded.generated_at,
-                    cache_status = excluded.cache_status,
-                    payload = excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
+            workbench_row_params.append(
                 (
                     generation_id,
                     row_id,
@@ -5615,43 +5586,48 @@ class PostgresReadModelRepository:
                     jsonb({"normalized_payload": row}),
                 ),
             )
+        _execute_many(
+            connection,
+            """
+            insert into read_model.workbench_rows(
+                generation_id, row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
+                counterparty_name, amount, object_identity_key, object_identity_kind,
+                object_identity_source, object_identity_confidence,
+                source_versions, generated_at, cache_status, payload, raw_payload
+            )
+            values (
+                %s, %s, %s::date, 'all', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
+            )
+            on conflict (generation_id, scope_key, row_id) do update set
+                scope_month = excluded.scope_month,
+                source_kind = excluded.source_kind,
+                status = excluded.status,
+                project_id = excluded.project_id,
+                project_name = excluded.project_name,
+                counterparty_name = excluded.counterparty_name,
+                amount = excluded.amount,
+                object_identity_key = excluded.object_identity_key,
+                object_identity_kind = excluded.object_identity_kind,
+                object_identity_source = excluded.object_identity_source,
+                object_identity_confidence = excluded.object_identity_confidence,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            workbench_row_params,
+        )
+        workbench_group_params: list[tuple[Any, ...]] = []
+        workbench_group_row_params: list[tuple[Any, ...]] = []
         for group in workbench_groups:
             group_id = text(group.get("group_id"))
             if group_id is None:
                 continue
             sort_keys = _workbench_group_sort_keys(group)
-            connection.execute(
-                """
-                insert into read_model.workbench_groups(
-                    generation_id, group_id, scope_key, scope_month, zone, status, group_type, source_kinds,
-                    row_count, searchable_text, oa_sort_min, oa_sort_max, bank_sort_min, bank_sort_max,
-                    invoice_sort_min, invoice_sort_max, source_versions, generated_at, cache_status,
-                    payload, raw_payload
-                )
-                values (
-                    %s, %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
-                )
-                on conflict (generation_id, scope_key, zone, group_id) do update set
-                    scope_month = excluded.scope_month,
-                    status = excluded.status,
-                    group_type = excluded.group_type,
-                    source_kinds = excluded.source_kinds,
-                    row_count = excluded.row_count,
-                    searchable_text = excluded.searchable_text,
-                    oa_sort_min = excluded.oa_sort_min,
-                    oa_sort_max = excluded.oa_sort_max,
-                    bank_sort_min = excluded.bank_sort_min,
-                    bank_sort_max = excluded.bank_sort_max,
-                    invoice_sort_min = excluded.invoice_sort_min,
-                    invoice_sort_max = excluded.invoice_sort_max,
-                    source_versions = excluded.source_versions,
-                    generated_at = excluded.generated_at,
-                    cache_status = excluded.cache_status,
-                    payload = excluded.payload,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
+            workbench_group_params.append(
                 (
                     generation_id,
                     group_id,
@@ -5674,38 +5650,7 @@ class PostgresReadModelRepository:
                 ),
             )
             for group_row in _workbench_group_row_records(_workbench_group_payload_for_rows(group)):
-                connection.execute(
-                    """
-                    insert into read_model.workbench_group_rows(
-                        generation_id, scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
-                        source_kind, status, time_value, time_date, column_values, searchable_text,
-                        object_identity_key, object_identity_kind, object_identity_source, object_identity_confidence,
-                        source_versions, generated_at, cache_status, payload, raw_payload
-                    )
-                    values (
-                        %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
-                        %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
-                    )
-                    on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id) do update set
-                        scope_month = excluded.scope_month,
-                        row_index = excluded.row_index,
-                        source_kind = excluded.source_kind,
-                        status = excluded.status,
-                        time_value = excluded.time_value,
-                        time_date = excluded.time_date,
-                        column_values = excluded.column_values,
-                        searchable_text = excluded.searchable_text,
-                        object_identity_key = excluded.object_identity_key,
-                        object_identity_kind = excluded.object_identity_kind,
-                        object_identity_source = excluded.object_identity_source,
-                        object_identity_confidence = excluded.object_identity_confidence,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
+                workbench_group_row_params.append(
                     (
                         generation_id,
                         text(group_row.get("zone")) or text(group.get("zone")) or "open",
@@ -5730,6 +5675,76 @@ class PostgresReadModelRepository:
                         jsonb({"normalized_payload": group_row}),
                     ),
                 )
+        _execute_many(
+            connection,
+            """
+            insert into read_model.workbench_groups(
+                generation_id, group_id, scope_key, scope_month, zone, status, group_type, source_kinds,
+                row_count, searchable_text, oa_sort_min, oa_sort_max, bank_sort_min, bank_sort_max,
+                invoice_sort_min, invoice_sort_max, source_versions, generated_at, cache_status,
+                payload, raw_payload
+            )
+            values (
+                %s, %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
+            )
+            on conflict (generation_id, scope_key, zone, group_id) do update set
+                scope_month = excluded.scope_month,
+                status = excluded.status,
+                group_type = excluded.group_type,
+                source_kinds = excluded.source_kinds,
+                row_count = excluded.row_count,
+                searchable_text = excluded.searchable_text,
+                oa_sort_min = excluded.oa_sort_min,
+                oa_sort_max = excluded.oa_sort_max,
+                bank_sort_min = excluded.bank_sort_min,
+                bank_sort_max = excluded.bank_sort_max,
+                invoice_sort_min = excluded.invoice_sort_min,
+                invoice_sort_max = excluded.invoice_sort_max,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            workbench_group_params,
+        )
+        _execute_many(
+            connection,
+            """
+            insert into read_model.workbench_group_rows(
+                generation_id, scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
+                source_kind, status, time_value, time_date, column_values, searchable_text,
+                object_identity_key, object_identity_kind, object_identity_source, object_identity_confidence,
+                source_versions, generated_at, cache_status, payload, raw_payload
+            )
+            values (
+                %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
+                %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
+            )
+            on conflict (generation_id, scope_key, zone, group_id, pane, row_role, row_id) do update set
+                scope_month = excluded.scope_month,
+                row_index = excluded.row_index,
+                source_kind = excluded.source_kind,
+                status = excluded.status,
+                time_value = excluded.time_value,
+                time_date = excluded.time_date,
+                column_values = excluded.column_values,
+                searchable_text = excluded.searchable_text,
+                object_identity_key = excluded.object_identity_key,
+                object_identity_kind = excluded.object_identity_kind,
+                object_identity_source = excluded.object_identity_source,
+                object_identity_confidence = excluded.object_identity_confidence,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            workbench_group_row_params,
+        )
         final_summary_payload = self._workbench_summary_from_payload(
             scope_key="all",
             grouped_payload=aggregate_payload,

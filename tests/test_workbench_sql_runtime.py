@@ -2648,6 +2648,67 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(aggregate_source_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
 
+    def test_repository_batches_all_scope_generation_rows_when_supported(self) -> None:
+        class BulkAggregateAllWorkbenchConnection(BulkWorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                return [
+                    {
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "zone": "paired",
+                        "group_id": "case:BULK-ALL",
+                        "generated_at": "2026-05-24T00:02:00+00:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "case:BULK-ALL",
+                            "zone": "paired",
+                            "oa_rows": [{"id": "oa-1", "type": "oa", "source_kind": "oa"}],
+                            "bank_rows": [{"id": "bank-1", "type": "bank", "source_kind": "bank"}],
+                            "invoice_rows": [{"id": "inv-1", "type": "invoice", "source_kind": "invoice"}],
+                        },
+                    }
+                ]
+
+        connection = BulkAggregateAllWorkbenchConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models(
+            {
+                "read_models": {
+                    "2026-01": {
+                        "scope_key": "2026-01",
+                        "payload": {"paired": {"groups": []}, "open": {"groups": []}},
+                        "source_versions": {"source_version": 3},
+                    }
+                }
+            },
+            changed_scope_keys={"2026-01"},
+        )
+
+        all_row_batches = [
+            params for statement, params in connection.execute_many_calls
+            if "insert into read_model.workbench_rows" in statement
+            and "values ( %s, %s, %s::date, 'all'" in statement
+        ]
+        all_group_batches = [
+            params for statement, params in connection.execute_many_calls
+            if "insert into read_model.workbench_groups" in statement
+            and "values ( %s, %s, 'all'" in statement
+        ]
+        all_group_row_batches = [
+            params for statement, params in connection.execute_many_calls
+            if "insert into read_model.workbench_group_rows" in statement
+            and "values ( %s, 'all', null" in statement
+        ]
+
+        self.assertEqual([3], [len(batch) for batch in all_row_batches])
+        self.assertEqual([1], [len(batch) for batch in all_group_batches])
+        self.assertEqual([3], [len(batch) for batch in all_group_row_batches])
+
     def test_repository_all_scope_suppresses_open_rows_claimed_by_paired_shards(self) -> None:
         class AggregateAllCrossZoneDuplicateConnection(WorkbenchWriteConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
