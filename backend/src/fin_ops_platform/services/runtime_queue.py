@@ -1004,6 +1004,34 @@ class RuntimeQueueRepository:
             )
         return row is not None
 
+    def release_event(self, event_id: str, worker_id: str, *, reason: str = "worker_shutdown") -> bool:
+        normalized_reason = str(reason or "").strip() or "worker_shutdown"
+        with self._connection.transaction() as transaction:
+            row = transaction.fetch_one(
+                """
+                update job.outbox_events
+                set
+                    status = 'pending',
+                    available_at = now(),
+                    locked_by = null,
+                    locked_at = null,
+                    attempts = greatest(coalesce(attempts, 0) - 1, 0),
+                    updated_at = now(),
+                    raw_payload = jsonb_set(
+                        coalesce(raw_payload, '{}'::jsonb),
+                        '{runtime_shutdown_release}',
+                        jsonb_build_object('reason', %s::text, 'released_at', now()),
+                        true
+                    )
+                where id = %s
+                  and status = 'processing'
+                  and locked_by = %s
+                returning id
+                """,
+                (normalized_reason, event_id, worker_id),
+            )
+        return row is not None
+
     def resolve_dead_letter_event(self, event_id: str, *, reason: str = "operator_resolved") -> bool:
         normalized_reason = str(reason or "").strip() or "operator_resolved"
         with self._connection.transaction() as transaction:

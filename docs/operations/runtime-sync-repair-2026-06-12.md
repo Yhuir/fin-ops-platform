@@ -140,7 +140,7 @@ worker 收敛后只读数据库验证：
 2. Redis fresh-cache：只缓存 fresh gate 之后 payload，优先覆盖页面首包慢且重复读取的 read model。
 3. PostgreSQL 索引/分区：基于基线 EXPLAIN 和生产 pg_stat/表大小做，不做盲目分区。
 4. Prometheus/Grafana 或 OpenTelemetry：把 enqueue-to-fresh latency、pending age、failure rate、readiness non-fresh 和 API p95 做成持续 SLO。
-5. Worker shutdown/reclaim：本次发布后观察到 worker 在处理事件时被 systemd 重启，outbox 进入 `processing` 并依赖 300s lock timeout 回收；这是“打开 app 后同步几分钟”的直接风险，需要优先修复。
+5. Worker shutdown/reclaim：本次发布后观察到 worker 在处理事件时被 systemd 重启，outbox 进入 `processing` 并依赖 300s lock timeout 回收；这是“打开 app 后同步几分钟”的直接风险。后续 Stage 6 已将 shutdown lease release 纳入 worker/repository 边界。
 
 ## Stage 5：covered historical dead-letter 归档
 
@@ -211,3 +211,13 @@ Commit：`d38edfa93c7211654c9df71f02974c6b7cbd011a`
 - `cost_statistics:active:2026-04`
 
 这些事件没有失败，最终也真实完成；但它们暴露出当前 worker shutdown/reclaim 设计会制造分钟级尾延迟。下一阶段必须优先修复 worker graceful shutdown、processing lease 释放或 deploy worker restart 顺序，再谈 RabbitMQ/Redis/索引性能优化。
+
+## Stage 6：worker shutdown lease release
+
+本阶段修复 Stage 5 发现的 300s lock-timeout 尾延迟风险：
+
+- `RuntimeQueueRepository.release_event()`：只释放当前 `worker_id` 持有的 `processing` outbox event，恢复为 `pending`、`available_at=now()`、清理 lock、回退本次 claim 增加的 `attempts`，并写入 `raw_payload.runtime_shutdown_release`。
+- `RuntimeWorker`：在 `run_forever()` 期间安装 `SIGTERM/SIGINT` handler；handler 中断当前处理，worker 释放已 claim 的事件，记录 `stopping/stopped` heartbeat 后退出。
+- 如果 queue 实现没有 `release_event()`，worker 仍会走原有 retry failure fallback，避免事件无限卡住。
+
+这项修复针对发布、systemd stop 或滚动重启造成的 `processing` lease 残留。它不能缩短单个真实重型 rebuild 的执行时间；后者仍需要 RabbitMQ real consumers、索引/分区、增量 worker 和 Redis fresh-cache 阶段继续优化。

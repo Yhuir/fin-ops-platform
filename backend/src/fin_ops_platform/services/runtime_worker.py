@@ -23,6 +23,13 @@ class RuntimeWorkerResult(str, Enum):
     FAILED_PERMANENT = "failed_permanent"
 
 
+class RuntimeWorkerShutdownRequested(BaseException):
+    def __init__(self, signum: int | None = None) -> None:
+        self.signum = signum
+        reason = f"shutdown_signal_{signum}" if signum is not None else "shutdown_requested"
+        super().__init__(reason)
+
+
 @dataclass(frozen=True)
 class RuntimeWorkerConfig:
     worker_id: str = field(default_factory=lambda: f"runtime-worker-{os.getpid()}")
@@ -113,6 +120,12 @@ class RuntimeWorker:
             started_at = monotonic()
             with self._task_timeout(self._config.task_timeout_seconds):
                 result_payload = handler(event)
+        except RuntimeWorkerShutdownRequested as exc:
+            reason = str(exc) or "shutdown_requested"
+            self._release_event(event, reason)
+            self._record_heartbeat("stopping", {"event_id": event.event_id, "reason": reason})
+            self._log("runtime_worker.event_released", event=event, retry=True, error=reason)
+            raise
         except Exception as exc:
             error = str(exc) or exc.__class__.__name__
             self._fail_event(event, error)
@@ -131,15 +144,19 @@ class RuntimeWorker:
 
     def run_forever(self) -> None:
         iterations = 0
-        while self._config.max_iterations is None or iterations < self._config.max_iterations:
-            result = RuntimeWorkerResult.IDLE
-            for _ in range(self._config.max_events_per_iteration):
-                result = self.run_once()
-                if result is RuntimeWorkerResult.IDLE:
-                    break
-            iterations += 1
-            if result is RuntimeWorkerResult.IDLE:
-                sleep(self._config.poll_interval_seconds)
+        with self._shutdown_signal_handlers():
+            try:
+                while self._config.max_iterations is None or iterations < self._config.max_iterations:
+                    result = RuntimeWorkerResult.IDLE
+                    for _ in range(self._config.max_events_per_iteration):
+                        result = self.run_once()
+                        if result is RuntimeWorkerResult.IDLE:
+                            break
+                    iterations += 1
+                    if result is RuntimeWorkerResult.IDLE:
+                        sleep(self._config.poll_interval_seconds)
+            except RuntimeWorkerShutdownRequested as exc:
+                self._record_heartbeat("stopped", {"reason": str(exc) or "shutdown_requested"})
 
     def _claim_event_types(self) -> list[str]:
         configured = [event_type for event_type in self._config.event_types if str(event_type).strip()]
@@ -197,9 +214,35 @@ class RuntimeWorker:
         ):
             raise RuntimeError(f"PostgreSQL retry update did not match event {event.event_id}.")
 
+    def _release_event(self, event: RuntimeQueueEvent, reason: str) -> None:
+        release_event = getattr(self._queue, "release_event", None)
+        if callable(release_event):
+            if not release_event(event.event_id, self._config.worker_id, reason=reason):
+                raise RuntimeError(f"PostgreSQL release update did not match event {event.event_id}.")
+            return
+        self._fail_event(event, reason)
+
     def _retry_delay_for_attempt(self, attempts: int) -> int:
         exponent = max(0, int(attempts or 1) - 1)
         return int(self._config.retry_delay_seconds * (2**exponent))
+
+    @contextmanager
+    def _shutdown_signal_handlers(self) -> Iterator[None]:
+        signal_names = [name for name in ("SIGTERM", "SIGINT") if hasattr(signal, name)]
+        previous_handlers: dict[int, Any] = {}
+
+        def shutdown_handler(signum: int, _frame: Any) -> None:
+            raise RuntimeWorkerShutdownRequested(signum)
+
+        try:
+            for name in signal_names:
+                signum = int(getattr(signal, name))
+                previous_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, shutdown_handler)
+            yield
+        finally:
+            for signum, previous_handler in previous_handlers.items():
+                signal.signal(signum, previous_handler)
 
     @contextmanager
     def _task_timeout(self, seconds: int | None) -> Iterator[None]:

@@ -4,7 +4,12 @@ import unittest
 from time import sleep
 
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-from fin_ops_platform.services.runtime_worker import RuntimeWorker, RuntimeWorkerConfig, RuntimeWorkerResult
+from fin_ops_platform.services.runtime_worker import (
+    RuntimeWorker,
+    RuntimeWorkerConfig,
+    RuntimeWorkerResult,
+    RuntimeWorkerShutdownRequested,
+)
 
 
 def event(event_type: str = "runtime.test") -> RuntimeQueueEvent:
@@ -31,6 +36,7 @@ class FakeQueue:
         self.acked: list[tuple[str, str, dict[str, object] | None]] = []
         self.failed: list[tuple[str, str, str, bool, int]] = []
         self.failed_events: list[tuple[str, str, str, bool, int, int]] = []
+        self.released_events: list[tuple[str, str, str]] = []
         self.heartbeats: list[tuple[str, str, str, object]] = []
         self.statement_timeouts: list[int | None] = []
 
@@ -61,6 +67,10 @@ class FakeQueue:
         max_attempts: int = 5,
     ) -> bool:
         self.failed_events.append((event_id, worker_id, error, retryable, retry_delay_seconds, max_attempts))
+        return True
+
+    def release_event(self, event_id: str, worker_id: str, *, reason: str = "worker_shutdown") -> bool:
+        self.released_events.append((event_id, worker_id, reason))
         return True
 
     def record_worker_heartbeat(self, worker_id: str, worker_kind: str, status: str, payload=None) -> None:
@@ -245,6 +255,27 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual([event_id for event_id, _worker_id, _payload in queue.acked], ["event-1", "event-2", "event-3"])
         self.assertEqual(len(queue.claim_calls), 3)
         self.assertEqual([claimed.event_id for claimed in queue.claimed_events], ["event-4"])
+
+    def test_run_forever_releases_claimed_event_on_shutdown_request(self) -> None:
+        queue = FakeQueue(event())
+
+        def stop(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeWorkerShutdownRequested(15)
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["runtime.test"]),
+            handlers={"runtime.test": stop},
+        )
+
+        worker.run_forever()
+
+        self.assertEqual(queue.released_events, [("event-1", "worker-1", "shutdown_signal_15")])
+        self.assertEqual(queue.acked, [])
+        self.assertEqual(queue.failed_events, [])
+        statuses = [status for _worker_id, _kind, status, _payload in queue.heartbeats]
+        self.assertIn("stopping", statuses)
+        self.assertIn("stopped", statuses)
 
 
 if __name__ == "__main__":

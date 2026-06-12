@@ -248,6 +248,12 @@ worker readiness 不是 systemd active。发布脚本会等待：
 默认等待 90 秒，可用 `FINOPS_WORKER_READY_TIMEOUT_SECONDS` 调整。超时应视为发布失败，不能继续把
 “进程已启动”当成“worker 已就绪”。
 
+Worker 在收到 `SIGTERM` 或 `SIGINT` 时必须释放当前持有的 PostgreSQL outbox lease：如果事件仍由当前
+`worker_id` 以 `processing` 状态持有，worker 将其恢复为 `pending`、清理 lock、回退本次 claim 增加的
+`attempts`，并写入 `raw_payload.runtime_shutdown_release`。这样发布重启或 systemd stop 不应再让页面等待
+`FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS` 默认 300 秒后才重新 claim。该 release 只适用于同一 worker lock，
+不能释放其他 worker 持有的事件。
+
 ## App Status Readiness Convergence
 
 `read_model.app_status_readiness` 是全局状态 icon 允许变绿的 read model 证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 read model 表、active generation、schema/source version 和 row count 做 convergence。
