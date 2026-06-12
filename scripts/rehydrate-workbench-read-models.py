@@ -468,7 +468,7 @@ def _rollback_attachment_identity_bridge(connection: Any, *, apply_changes: bool
     rows = connection.fetch_all(
         """
         delete from app.oa_attachment_invoice_cache_sources
-        where source_kind like 'attachment_identity_%'
+        where source_kind like 'attachment_identity_%%'
         returning source_kind
         """
     )
@@ -482,7 +482,7 @@ def _attachment_identity_bridge_counts(connection: Any) -> dict[str, Any]:
         """
         select source_kind, count(*)::bigint as count
         from app.oa_attachment_invoice_cache_sources
-        where source_kind like 'attachment_identity_%'
+        where source_kind like 'attachment_identity_%%'
         group by source_kind
         order by source_kind
         """
