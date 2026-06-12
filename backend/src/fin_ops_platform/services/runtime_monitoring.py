@@ -20,6 +20,7 @@ READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = read_model_event_types()
 
 EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
 READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT = 512
+READ_MODEL_REFRESH_SLOW_EVENT_LIMIT = 20
 RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT = 512
 
 
@@ -446,18 +447,28 @@ class RuntimeMonitoringRepository:
               select
                 refresh_event.event_type,
                 refresh_event.status,
+                refresh_event.created_at,
+                refresh_event.processed_at,
                 refresh_event.updated_at,
                 case
                   when refresh_event.status = 'done'
                    and refresh_event.raw_payload->'runtime_result' ? 'duration_ms'
                     then ((refresh_event.raw_payload->'runtime_result'->>'duration_ms')::numeric)
                   else null
-                end as duration_ms
+                end as duration_ms,
+                case
+                  when refresh_event.status = 'done'
+                   and refresh_event.processed_at is not null
+                    then greatest(extract(epoch from (refresh_event.processed_at - refresh_event.created_at)) * 1000, 0)
+                  else null
+                end as enqueue_to_fresh_ms
               from event_type_filter
               cross join lateral (
                 select
                   event_type,
                   status,
+                  created_at,
+                  processed_at,
                   updated_at,
                   raw_payload
                 from job.outbox_events
@@ -488,14 +499,110 @@ class RuntimeMonitoringRepository:
               (percentile_cont(0.99) within group (
                 order by duration_ms
               ) filter (where duration_ms is not null))::float as p99_ms,
+              (percentile_cont(0.5) within group (
+                order by enqueue_to_fresh_ms
+              ) filter (where enqueue_to_fresh_ms is not null))::float as enqueue_p50_ms,
+              (percentile_cont(0.95) within group (
+                order by enqueue_to_fresh_ms
+              ) filter (where enqueue_to_fresh_ms is not null))::float as enqueue_p95_ms,
+              (percentile_cont(0.99) within group (
+                order by enqueue_to_fresh_ms
+              ) filter (where enqueue_to_fresh_ms is not null))::float as enqueue_p99_ms,
               count(*) filter (where duration_ms is not null)::bigint as completed_sample_count,
               count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
               count(*)::bigint as read_model_refresh_total,
-              (max(updated_at) filter (where duration_ms is not null))::text as last_completed_at
+              (max(updated_at) filter (where duration_ms is not null))::text as last_completed_at,
+              (max(processed_at) filter (where enqueue_to_fresh_ms is not null))::text as last_fresh_at
             from recent_refresh_events
             group by grouping sets ((event_type), ())
             """,
             (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
+        )
+        slow_event_rows = self._connection.fetch_all(
+            """
+            with event_type_filter(event_type) as (
+              select unnest(%s::text[])
+            ),
+            slow_refresh_event_samples as (
+              select
+                refresh_event.id::text as event_id,
+                refresh_event.event_type,
+                coalesce(
+                  refresh_event.scope_type,
+                  refresh_event.payload->>'scope_type',
+                  refresh_event.aggregate_type,
+                  ''
+                ) as scope_type,
+                coalesce(
+                  refresh_event.scope_key,
+                  refresh_event.payload->>'scope_key',
+                  refresh_event.aggregate_id,
+                  ''
+                ) as scope_key,
+                refresh_event.status,
+                refresh_event.source_version,
+                refresh_event.priority,
+                refresh_event.created_at::text as created_at,
+                refresh_event.processed_at::text as processed_at,
+                refresh_event.updated_at::text as updated_at,
+                case
+                  when refresh_event.status = 'done'
+                   and refresh_event.raw_payload->'runtime_result' ? 'duration_ms'
+                    then ((refresh_event.raw_payload->'runtime_result'->>'duration_ms')::numeric)
+                  else null
+                end as duration_ms,
+                case
+                  when refresh_event.status = 'done'
+                   and refresh_event.processed_at is not null
+                    then greatest(extract(epoch from (refresh_event.processed_at - refresh_event.created_at)) * 1000, 0)
+                  else null
+                end as enqueue_to_fresh_ms,
+                coalesce((refresh_event.raw_payload->'runtime_result'->>'skipped')::boolean, false) as skipped,
+                refresh_event.raw_payload->'runtime_result'->>'skip_reason' as skip_reason
+              from event_type_filter
+              cross join lateral (
+                select
+                  id,
+                  event_type,
+                  aggregate_type,
+                  aggregate_id,
+                  scope_type,
+                  scope_key,
+                  payload,
+                  raw_payload,
+                  status,
+                  source_version,
+                  priority,
+                  created_at,
+                  processed_at,
+                  updated_at
+                from job.outbox_events
+                where event_type = event_type_filter.event_type
+                  and event_type like '%%.read_model.refresh'
+                  and (
+                    status in ('failed', 'dead_lettered')
+                    or (
+                      status = 'done'
+                      and raw_payload->'runtime_result' ? 'duration_ms'
+                    )
+                  )
+                order by updated_at desc
+                limit %s
+              ) refresh_event
+            )
+            select *
+            from slow_refresh_event_samples
+            order by
+              greatest(coalesce(enqueue_to_fresh_ms, 0), coalesce(duration_ms, 0)) desc,
+              updated_at desc,
+              event_id
+            limit %s
+            """,
+            (
+                list(READ_MODEL_EVENT_TYPES.keys()),
+                READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT,
+                READ_MODEL_REFRESH_SLOW_EVENT_LIMIT,
+            ),
         )
         refresh_duration_row: dict[str, Any] = {}
         refresh_failure_row: dict[str, Any] = {}
@@ -524,11 +631,17 @@ class RuntimeMonitoringRepository:
                         "p95": _optional_float(row.get("p95_ms")),
                         "p99": _optional_float(row.get("p99_ms")),
                     },
+                    "enqueue_to_fresh_ms": {
+                        "p50": _optional_float(row.get("enqueue_p50_ms")),
+                        "p95": _optional_float(row.get("enqueue_p95_ms")),
+                        "p99": _optional_float(row.get("enqueue_p99_ms")),
+                    },
                     "sample_count": sample_count,
                     "completed_sample_count": _optional_int(row.get("completed_sample_count")) or 0,
                     "failed_count": failed_count,
                     "failure_rate": round(failed_count / sample_count, 6) if sample_count else 0.0,
                     "last_completed_at": row.get("last_completed_at"),
+                    "last_fresh_at": row.get("last_fresh_at"),
                 }
             )
         read_model_refresh_by_key.sort(
@@ -538,6 +651,33 @@ class RuntimeMonitoringRepository:
                 str(item["key"]),
             )
         )
+        read_model_refresh_slow_events = []
+        for row in slow_event_rows:
+            event_type = str(row.get("event_type") or "")
+            event_metadata = READ_MODEL_EVENT_TYPES.get(event_type)
+            if event_metadata is None:
+                read_model_key = event_type
+            else:
+                read_model_key, _scope_type = event_metadata
+            read_model_refresh_slow_events.append(
+                {
+                    "event_id": str(row.get("event_id") or ""),
+                    "key": read_model_key,
+                    "event_type": event_type,
+                    "scope_type": str(row.get("scope_type") or ""),
+                    "scope_key": str(row.get("scope_key") or ""),
+                    "status": str(row.get("status") or ""),
+                    "source_version": _optional_int(row.get("source_version")),
+                    "priority": str(row.get("priority") or ""),
+                    "duration_ms": _optional_float(row.get("duration_ms")),
+                    "enqueue_to_fresh_ms": _optional_float(row.get("enqueue_to_fresh_ms")),
+                    "created_at": row.get("created_at"),
+                    "processed_at": row.get("processed_at"),
+                    "updated_at": row.get("updated_at"),
+                    "skipped": bool(row.get("skipped")),
+                    "skip_reason": str(row.get("skip_reason") or ""),
+                }
+            )
         publish_rows = self._connection.fetch_all(
             """
             select publish_status, count(*)::bigint as count
@@ -638,11 +778,17 @@ class RuntimeMonitoringRepository:
                 "p95": (refresh_duration_row or {}).get("p95_ms"),
                 "p99": (refresh_duration_row or {}).get("p99_ms"),
             },
+            "read_model_refresh_enqueue_to_fresh_ms": {
+                "p50": (refresh_duration_row or {}).get("enqueue_p50_ms"),
+                "p95": (refresh_duration_row or {}).get("enqueue_p95_ms"),
+                "p99": (refresh_duration_row or {}).get("enqueue_p99_ms"),
+            },
             "read_model_refresh_sample_count": total_refresh_count,
             "read_model_refresh_failure_rate": (
                 round(failed_refresh_count / total_refresh_count, 6) if total_refresh_count else 0.0
             ),
             "read_model_refresh_by_key": read_model_refresh_by_key,
+            "read_model_refresh_slow_events": read_model_refresh_slow_events,
             "rabbitmq_publish_status": publish_status,
             "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
             "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),

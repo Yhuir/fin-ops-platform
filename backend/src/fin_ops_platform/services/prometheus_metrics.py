@@ -107,6 +107,13 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
             value,
             {"quantile": quantile},
         )
+    for quantile, value in _percentiles(runtime.get("read_model_refresh_enqueue_to_fresh_ms")).items():
+        writer.gauge(
+            "finops_read_model_refresh_enqueue_to_fresh_ms",
+            "Read model enqueue-to-fresh latency percentiles in milliseconds.",
+            value,
+            {"quantile": quantile},
+        )
     for row in _list_of_mappings(runtime.get("read_model_refresh_by_key")):
         labels = {
             "read_model_key": str(row.get("key") or ""),
@@ -117,6 +124,13 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
             writer.gauge(
                 "finops_read_model_refresh_by_key_duration_ms",
                 "Read model refresh duration percentiles by read model key in milliseconds.",
+                value,
+                {**labels, "quantile": quantile},
+            )
+        for quantile, value in _percentiles(row.get("enqueue_to_fresh_ms")).items():
+            writer.gauge(
+                "finops_read_model_refresh_by_key_enqueue_to_fresh_ms",
+                "Read model enqueue-to-fresh latency percentiles by read model key in milliseconds.",
                 value,
                 {**labels, "quantile": quantile},
             )

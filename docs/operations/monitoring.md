@@ -27,6 +27,7 @@
 - `worker_heartbeat_lag_seconds` 持续超过 worker poll interval 与任务超时阈值。
 - `missing_required_worker_count > 0` 或 `stale_required_worker_count > 0`。required worker 清单来自 `runtime_worker_registry`；例如 `search-pending-read-model` 缺失会导致搜索/待找发票 read model 长时间 refreshing。
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
+- `read_model_refresh_enqueue_to_fresh_ms.p95/p99` 持续升高。该指标从 durable outbox `created_at -> processed_at` 计算，表示真实 enqueue-to-fresh latency，不等同于单次 worker handler duration。
 - `/api/workbench/summary` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
 - `/api/workbench/refresh-status` 长时间返回 `refreshing`、`stale`、`failed` 或 `unavailable`。
 - `/api/workbench/refresh-status.consistency_status=failed`，或 `read_model.workbench_generation_consistency` 中存在 active inconsistent generation。该状态表示 read model 发布契约被阻断，不能靠浏览器刷新恢复。
@@ -62,9 +63,11 @@
 - `worker_metrics`：按中心 registry 展示 required worker 的 heartbeat。没有 heartbeat 的 required worker 显示 `status=missing` / `warning_code=required_worker_missing`；超过该 worker SLO 的显示 `status=stale` / `warning_code=worker_heartbeat_stale`。
 - `missing_required_worker_count` / `stale_required_worker_count`：required worker 缺失或 stale 的数量。
 - `read_model_refresh_duration_ms`：每类 read model refresh 最近 bounded 样本的 p50/p95/p99，不做全历史排序。
+- `read_model_refresh_enqueue_to_fresh_ms`：每类 read model refresh 最近 bounded 样本的 enqueue-to-fresh p50/p95/p99，用于验证“写入后几秒内 fresh”的真实 SLO。
 - `read_model_refresh_sample_count`：本次 read model refresh duration/failure rate 使用的 bounded 样本数。
 - `read_model_refresh_failure_rate`：同一 bounded 样本内 failed/dead-lettered 比例。
-- `read_model_refresh_by_key`：按 read model key / event type 拆分的 bounded refresh p50/p95/p99、样本数、失败数和失败率，用于定位拖慢总体 p95 的具体 projection。
+- `read_model_refresh_by_key`：按 read model key / event type 拆分的 bounded refresh duration、enqueue-to-fresh p50/p95/p99、样本数、失败数和失败率，用于定位拖慢总体 p95 的具体 projection。
+- `read_model_refresh_slow_events`：最近 bounded 样本中最慢的有限条 outbox event 摘要，包含 event/scope/status/source_version/duration/enqueue-to-fresh/skipped 信息；该字段只用于 `/health/ready` drilldown，不把 `event_id` 或 `scope_key` 作为 Prometheus label。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。
 - `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups 和对象身份跨区一致性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。
 - `redis_hit_count` / `redis_miss_count`：进程内 Redis helper 计数。
@@ -107,7 +110,9 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
 - `finops_ready`、`finops_runtime_release_consistent`、`finops_production_runtime_guard_consistent`。
 - `finops_outbox_events{status=...}`、`finops_read_model_dirty_scopes{status=...}`、`finops_failed_jobs`、`finops_stale_dirty_scope_count`。
 - `finops_read_model_refresh_duration_ms{quantile=...}`、`finops_read_model_refresh_sample_count`、`finops_read_model_refresh_failure_rate`。
+- `finops_read_model_refresh_enqueue_to_fresh_ms{quantile=...}`。
 - `finops_read_model_refresh_by_key_duration_ms{read_model_key=...,event_type=...,scope_type=...,quantile=...}`、
+  `finops_read_model_refresh_by_key_enqueue_to_fresh_ms{read_model_key=...,event_type=...,scope_type=...,quantile=...}`、
   `finops_read_model_refresh_by_key_sample_count{...}`、
   `finops_read_model_refresh_by_key_failure_rate{...}`。
 - `finops_rabbitmq_queue_depth`、`finops_rabbitmq_dlq_count`、`finops_rabbitmq_consumer_count`、`finops_rabbitmq_publish_confirm_latency_ms{quantile=...}`。
@@ -149,7 +154,8 @@ Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS
 - API p95 升高但 DB 指标不高，优先看 Python 对象构造、JSON 序列化、前端请求量和网络。
 - OA 附件发票 inventory 优先读取 `app.oa_attachment_invoice_cache`；`read_model.workbench_rows` 仅作为 fallback，并依赖 `workbench_rows_oa_attachment_inventory_idx` 覆盖索引。
 - Read model refresh 的“历史”指标是 bounded history：最近 7 天或每个 event type 最近 512 条完成事件，不是全库永久历史扫描。
-- `/health/ready` 和 `/metrics` 的 read model refresh / RabbitMQ publish confirm percentile 使用每个 event type 最近 512 条样本，不扫全历史 `done` outbox。
+- `/health/ready` 和 `/metrics` 的 read model refresh / enqueue-to-fresh / RabbitMQ publish confirm percentile 使用每个 event type 最近 512 条样本，不扫全历史 `done` outbox。
+- `/health/ready.runtime_infrastructure.read_model_refresh_slow_events` 用于定位慢 scope；Prometheus 只导出聚合分位数，避免 event/scope 高基数 label。
 - outbox pending 和 RabbitMQ queue 同时增长，优先看 worker/consumer。
 - RabbitMQ queue 增长但 outbox 不增长，优先看 broker consumer、prefetch、DLQ 和 ack/nack。
 

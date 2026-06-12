@@ -16,6 +16,41 @@ class FakeConnection:
         normalized = " ".join(sql.lower().split())
         if "like '%." in normalized:
             raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "slow_refresh_event_samples" in normalized:
+            return [
+                {
+                    "event_id": "event-search-1",
+                    "event_type": "search.read_model.refresh",
+                    "scope_type": "search",
+                    "scope_key": "2026-03",
+                    "status": "done",
+                    "source_version": 42,
+                    "priority": "normal",
+                    "duration_ms": 35000.0,
+                    "enqueue_to_fresh_ms": 35150.0,
+                    "created_at": "2026-06-13 03:00:00+08",
+                    "processed_at": "2026-06-13 03:00:35+08",
+                    "updated_at": "2026-06-13 03:00:35+08",
+                    "skipped": False,
+                    "skip_reason": "",
+                },
+                {
+                    "event_id": "event-workbench-1",
+                    "event_type": "workbench.read_model.refresh",
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "status": "done",
+                    "source_version": 40,
+                    "priority": "normal",
+                    "duration_ms": 28000.0,
+                    "enqueue_to_fresh_ms": 29000.0,
+                    "created_at": "2026-06-13 02:59:00+08",
+                    "processed_at": "2026-06-13 02:59:29+08",
+                    "updated_at": "2026-06-13 02:59:29+08",
+                    "skipped": False,
+                    "skip_reason": "",
+                },
+            ]
         if "recent_refresh_events" in normalized:
             return [
                 {
@@ -23,30 +58,42 @@ class FakeConnection:
                     "p50_ms": 120.0,
                     "p95_ms": 300.0,
                     "p99_ms": 450.0,
+                    "enqueue_p50_ms": 180.0,
+                    "enqueue_p95_ms": 350.0,
+                    "enqueue_p99_ms": 500.0,
                     "completed_sample_count": 9,
                     "failed_count": 1,
                     "read_model_refresh_total": 10,
                     "last_completed_at": "2026-06-13 03:00:00+08",
+                    "last_fresh_at": "2026-06-13 03:00:01+08",
                 },
                 {
                     "event_type": "workbench.read_model.refresh",
                     "p50_ms": 200.0,
                     "p95_ms": 500.0,
                     "p99_ms": 650.0,
+                    "enqueue_p50_ms": 220.0,
+                    "enqueue_p95_ms": 550.0,
+                    "enqueue_p99_ms": 700.0,
                     "completed_sample_count": 4,
                     "failed_count": 1,
                     "read_model_refresh_total": 5,
                     "last_completed_at": "2026-06-13 03:00:00+08",
+                    "last_fresh_at": "2026-06-13 03:00:01+08",
                 },
                 {
                     "event_type": "tax_offset.read_model.refresh",
                     "p50_ms": 50.0,
                     "p95_ms": 80.0,
                     "p99_ms": 90.0,
+                    "enqueue_p50_ms": 70.0,
+                    "enqueue_p95_ms": 100.0,
+                    "enqueue_p99_ms": 110.0,
                     "completed_sample_count": 5,
                     "failed_count": 0,
                     "read_model_refresh_total": 5,
                     "last_completed_at": "2026-06-13 03:01:00+08",
+                    "last_fresh_at": "2026-06-13 03:01:01+08",
                 },
             ]
         if "pending_outbox_by_scope" in normalized:
@@ -239,14 +286,22 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["mismatched_required_worker_count"], 0)
         self.assertEqual(summary["worker_metrics"][0]["status"], "missing")
         self.assertEqual(summary["read_model_refresh_duration_ms"], {"p50": 120.0, "p95": 300.0, "p99": 450.0})
+        self.assertEqual(summary["read_model_refresh_enqueue_to_fresh_ms"], {"p50": 180.0, "p95": 350.0, "p99": 500.0})
         self.assertEqual(summary["read_model_refresh_sample_count"], 10)
         self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["key"], "workbench")
         self.assertEqual(summary["read_model_refresh_by_key"][0]["event_type"], "workbench.read_model.refresh")
         self.assertEqual(summary["read_model_refresh_by_key"][0]["duration_ms"]["p95"], 500.0)
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["enqueue_to_fresh_ms"]["p95"], 550.0)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["sample_count"], 5)
         self.assertEqual(summary["read_model_refresh_by_key"][0]["failure_rate"], 0.2)
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["last_fresh_at"], "2026-06-13 03:00:01+08")
         self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "tax_offset")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["event_id"], "event-search-1")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["key"], "search")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["scope_key"], "2026-03")
+        self.assertEqual(summary["read_model_refresh_slow_events"][0]["enqueue_to_fresh_ms"], 35150.0)
+        self.assertFalse(summary["read_model_refresh_slow_events"][0]["skipped"])
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
         self.assertEqual(summary["rabbitmq_unpublished_backlog"], 4)
         self.assertEqual(summary["rabbitmq_publish_failed_backlog"], 2)
@@ -315,7 +370,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("cross join lateral", refresh_metric_sql)
         self.assertIn("order by updated_at desc", refresh_metric_sql)
         self.assertIn("limit %s", refresh_metric_sql)
+        self.assertIn("processed_at - refresh_event.created_at", refresh_metric_sql)
         self.assertNotIn("from job.outbox_events where event_type like", refresh_metric_sql)
+        slow_event_sql = next(sql for sql in normalized_calls if "slow_refresh_event_samples" in sql)
+        self.assertIn("cross join lateral", slow_event_sql)
+        self.assertIn("limit %s", slow_event_sql)
+        self.assertIn("order by greatest(coalesce(enqueue_to_fresh_ms, 0)", slow_event_sql)
         publish_confirm_sql = next(sql for sql in normalized_calls if "recent_publish_confirms" in sql)
         self.assertIn("cross join lateral", publish_confirm_sql)
         self.assertIn("limit %s", publish_confirm_sql)

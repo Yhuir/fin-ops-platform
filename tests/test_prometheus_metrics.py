@@ -33,6 +33,7 @@ class PrometheusMetricsTests(unittest.TestCase):
                 "stale_required_worker_count": 0,
                 "mismatched_required_worker_count": 0,
                 "read_model_refresh_duration_ms": {"p50": 100.0, "p95": 300.0, "p99": 450.0},
+                "read_model_refresh_enqueue_to_fresh_ms": {"p50": 120.0, "p95": 360.0, "p99": 500.0},
                 "read_model_refresh_sample_count": 128,
                 "read_model_refresh_failure_rate": 0.01,
                 "read_model_refresh_by_key": [
@@ -41,6 +42,7 @@ class PrometheusMetricsTests(unittest.TestCase):
                         "event_type": "workbench.read_model.refresh",
                         "scope_type": "workbench",
                         "duration_ms": {"p50": 200.0, "p95": 500.0, "p99": 700.0},
+                        "enqueue_to_fresh_ms": {"p50": 220.0, "p95": 560.0, "p99": 760.0},
                         "sample_count": 10,
                         "completed_sample_count": 9,
                         "failed_count": 1,
@@ -97,9 +99,14 @@ class PrometheusMetricsTests(unittest.TestCase):
         self.assertIn('finops_outbox_events{status="pending"} 4', rendered)
         self.assertIn('finops_read_model_dirty_scopes{status="pending"} 2', rendered)
         self.assertIn('finops_read_model_refresh_duration_ms{quantile="0.95"} 300', rendered)
+        self.assertIn('finops_read_model_refresh_enqueue_to_fresh_ms{quantile="0.95"} 360', rendered)
         self.assertIn("finops_read_model_refresh_sample_count 128", rendered)
         self.assertIn(
             'finops_read_model_refresh_by_key_duration_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench"} 500',
+            rendered,
+        )
+        self.assertIn(
+            'finops_read_model_refresh_by_key_enqueue_to_fresh_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench"} 560',
             rendered,
         )
         self.assertIn(
