@@ -1278,6 +1278,25 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
   `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe --base-url https://www.yn-sourcing.com --page-path /fin-ops/ --replace-default-probes --iterations 5 --warmup 1 --allow-unauthenticated`
   通过，`/fin-ops/` p95 `116.127ms`。
 
+## Stage 24：health / metrics outbox percentile 热路径收敛
+
+Stage 24 收敛 `/health/ready`、`/health`、Prometheus `/metrics` 和 App Health dashboard 复用的 runtime
+monitoring 热路径：
+
+- `queue_backlog` 只统计 current backlog / attention status，不再把历史 `done` outbox 放进健康检查热路径。
+- `read_model_refresh_duration_ms` 和 `read_model_refresh_failure_rate` 改为按 read model event type 最近
+  `512` 条样本聚合，仍来自 PostgreSQL `job.outbox_events` 事实源，但不做全历史 percentile sort。
+- `rabbitmq_publish_confirm_latency_ms` 改为按 RabbitMQ dispatch event type 最近 `512` 条样本聚合，不做全历史
+  published outbox percentile sort。
+- `dashboard_outbox_metric()` 增加 current-attention `WHERE`，只扫描 pending / failed / dead-lettered / publish failed
+  相关 outbox。
+- Prometheus 增加 `finops_read_model_refresh_sample_count` 和
+  `finops_rabbitmq_publish_confirm_sample_limit`，避免把低样本 percentile 误读成稳定 SLO。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_monitoring tests.test_operations_dashboard_service tests.test_prometheus_metrics tests.test_app_postgres_mode -v`
+
 ## 当前闭环状态
 
 已闭环：
@@ -1296,6 +1315,7 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
 - 状态页 read model health 热路径不再 live recompute `workbench_generation_consistency` 全量视图。
 - 状态页 read model duration metric 热路径不再全局排序 `job.outbox_events` 历史样本，clean mean 约 `49ms`，
   `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
+- health / Prometheus runtime percentile 热路径不再全历史排序 outbox，而是按 event type 使用 bounded recent samples。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 - 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
 - Prometheus `/metrics` 应用侧已具备，可输出 runtime/read-model/RabbitMQ/worker/API p95 指标；生产 token 未配置时保持 `404` 安全关闭。
@@ -1306,15 +1326,16 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
   `input_invoice_usage` p95 仍约 8-9s。
 - 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
-  outbox percentile 和 outbox summary，已经不再出现历史全局 window sort。
+  outbox percentile 和 outbox summary；Stage 24 已收敛 health/metrics percentile 与 outbox summary，仍需生产
+  pg_stat / EXPLAIN 复测确认是否进入 SLO。
 - Redis fresh-cache 尚未覆盖全部页面。
 - 生产 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`、Grafana dashboard、alert rules 和 scrape 配置尚未落地；`/metrics` 是应用侧指标出口，不等同于完整 Grafana 告警闭环。
 
 下一阶段优先级：
 
 1. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
-2. 对 Stage 20 clean top SQL 剩余 `job.outbox_events` percentile/summary 查询做 EXPLAIN ANALYZE，
-   决定是否需要轻量 rollup table 或 metrics retention。
+2. 对 Stage 24 后的 `job.outbox_events` bounded percentile/summary 查询做 pg_stat / EXPLAIN 复测，
+   决定是否仍需要轻量 rollup table 或 metrics retention。
 3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
 4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
 5. 在 root-only `/etc/fin-ops/fin-ops.secrets.env` 配置 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`，重启 API 后配置 Prometheus scrape、Grafana dashboard 和 alert rules，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。

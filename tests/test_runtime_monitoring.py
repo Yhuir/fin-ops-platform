@@ -82,8 +82,14 @@ class FakeConnection:
             return {"max_worker_heartbeat_lag_seconds": 8.0}
         if "rabbitmq_publish" in normalized:
             return {"p50_ms": 10.0, "p95_ms": 20.0, "p99_ms": 30.0}
-        if "percentile_cont" in normalized:
-            return {"p50_ms": 120.0, "p95_ms": 300.0, "p99_ms": 450.0}
+        if "recent_refresh_events" in normalized:
+            return {
+                "p50_ms": 120.0,
+                "p95_ms": 300.0,
+                "p99_ms": 450.0,
+                "failed_count": 1,
+                "read_model_refresh_total": 10,
+            }
         if "read_model_refresh_total" in normalized:
             return {"failed_count": 1, "read_model_refresh_total": 10}
         if "publish_status in" in normalized:
@@ -208,6 +214,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["mismatched_required_worker_count"], 0)
         self.assertEqual(summary["worker_metrics"][0]["status"], "missing")
         self.assertEqual(summary["read_model_refresh_duration_ms"], {"p50": 120.0, "p95": 300.0, "p99": 450.0})
+        self.assertEqual(summary["read_model_refresh_sample_count"], 10)
         self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
         self.assertEqual(summary["rabbitmq_unpublished_backlog"], 4)
@@ -215,6 +222,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["rabbitmq_dispatcher_lag_seconds"], 11.0)
         self.assertEqual(summary["rabbitmq_dispatch_event_types"], list(DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES))
         self.assertEqual(summary["rabbitmq_publish_confirm_latency_ms"], {"p50": 10.0, "p95": 20.0, "p99": 30.0})
+        self.assertEqual(summary["rabbitmq_publish_confirm_sample_limit"], 512)
         self.assertEqual(summary["rabbitmq_queue_depth"], 5)
         self.assertEqual(summary["rabbitmq_unacked_messages"], 1)
         self.assertEqual(summary["rabbitmq_consumer_count"], 2)
@@ -271,6 +279,46 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 },
             },
         )
+        normalized_calls = [" ".join(sql.lower().split()) for sql, _ in connection.calls]
+        refresh_metric_sql = next(sql for sql in normalized_calls if "recent_refresh_events" in sql)
+        self.assertIn("cross join lateral", refresh_metric_sql)
+        self.assertIn("order by updated_at desc", refresh_metric_sql)
+        self.assertIn("limit %s", refresh_metric_sql)
+        self.assertNotIn("from job.outbox_events where event_type like", refresh_metric_sql)
+        publish_confirm_sql = next(sql for sql in normalized_calls if "recent_publish_confirms" in sql)
+        self.assertIn("cross join lateral", publish_confirm_sql)
+        self.assertIn("limit %s", publish_confirm_sql)
+        queue_status_sql = next(
+            sql
+            for sql in normalized_calls
+            if "select status, count(*)::bigint as count from job.outbox_events" in sql
+        )
+        self.assertIn("where status <> 'done'", queue_status_sql)
+
+    def test_dashboard_outbox_metric_only_scans_current_attention_statuses(self) -> None:
+        class OutboxMetricConnection:
+            def __init__(self) -> None:
+                self.sql = ""
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
+                self.sql = " ".join(sql.lower().split())
+                return {
+                    "pending_count": 1,
+                    "publishing_count": 0,
+                    "failed_count": 0,
+                    "publish_failed_count": 0,
+                    "oldest_pending_age_seconds": 2.0,
+                }
+
+        connection = OutboxMetricConnection()
+        repository = RuntimeMonitoringRepository(connection)
+
+        metric = repository.dashboard_outbox_metric()
+
+        self.assertEqual(metric["pending_count"], 1)
+        self.assertIn("where status in ('pending', 'failed', 'dead_lettered')", connection.sql)
+        self.assertIn("or publish_status in ('publishing', 'failed')", connection.sql)
+
     def test_dashboard_worker_metrics_are_registry_instance_aware(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
 

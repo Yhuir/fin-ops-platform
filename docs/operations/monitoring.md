@@ -55,14 +55,15 @@
 
 `/health` 的 `runtime_infrastructure` 至少包含：
 
-- `queue_backlog`：outbox 按 status 聚合。
+- `queue_backlog`：outbox 当前 backlog/attention status 聚合，不包含历史 `done`。
 - `dirty_scopes`：dirty scope 按 status 聚合。
 - `oldest_pending_event_age_seconds`：最老 pending event age。
 - `worker_heartbeat_lag_seconds`：runtime worker heartbeat lag。
 - `worker_metrics`：按中心 registry 展示 required worker 的 heartbeat。没有 heartbeat 的 required worker 显示 `status=missing` / `warning_code=required_worker_missing`；超过该 worker SLO 的显示 `status=stale` / `warning_code=worker_heartbeat_stale`。
 - `missing_required_worker_count` / `stale_required_worker_count`：required worker 缺失或 stale 的数量。
-- `read_model_refresh_duration_ms`：read model refresh p50/p95/p99。
-- `read_model_refresh_failure_rate`：read model refresh failed/dead-lettered 比例。
+- `read_model_refresh_duration_ms`：每类 read model refresh 最近 bounded 样本的 p50/p95/p99，不做全历史排序。
+- `read_model_refresh_sample_count`：本次 read model refresh duration/failure rate 使用的 bounded 样本数。
+- `read_model_refresh_failure_rate`：同一 bounded 样本内 failed/dead-lettered 比例。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。
 - `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups 和对象身份跨区一致性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。
 - `redis_hit_count` / `redis_miss_count`：进程内 Redis helper 计数。
@@ -73,7 +74,7 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 - `rabbitmq_unpublished_backlog`：等待 dispatcher 投递的 pending outbox 数量。
 - `rabbitmq_publish_failed_backlog`：RabbitMQ 发布失败、等待重试的 pending outbox 数量。
 - `rabbitmq_dispatcher_lag_seconds`：最老未发布 pending outbox age。
-- `rabbitmq_publish_confirm_latency_ms`：publisher confirm p50/p95/p99。
+- `rabbitmq_publish_confirm_latency_ms`：每类 RabbitMQ dispatch event 最近 bounded 样本的 publisher confirm p50/p95/p99。
 - `rabbitmq_queue_depth`：RabbitMQ workbench queue messages。
 - `rabbitmq_unacked_messages`：RabbitMQ unacked delivery 数量。
 - `rabbitmq_consumer_count`：RabbitMQ consumer 数量。
@@ -104,7 +105,7 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
 
 - `finops_ready`、`finops_runtime_release_consistent`、`finops_production_runtime_guard_consistent`。
 - `finops_outbox_events{status=...}`、`finops_read_model_dirty_scopes{status=...}`、`finops_failed_jobs`、`finops_stale_dirty_scope_count`。
-- `finops_read_model_refresh_duration_ms{quantile=...}`、`finops_read_model_refresh_failure_rate`。
+- `finops_read_model_refresh_duration_ms{quantile=...}`、`finops_read_model_refresh_sample_count`、`finops_read_model_refresh_failure_rate`。
 - `finops_rabbitmq_queue_depth`、`finops_rabbitmq_dlq_count`、`finops_rabbitmq_consumer_count`、`finops_rabbitmq_publish_confirm_latency_ms{quantile=...}`。
 - `finops_worker_heartbeat_lag_seconds{worker_instance=...,worker_kind=...,status=...}`、`finops_worker_required`、`finops_worker_current_effective`。
 - `finops_api_duration_ms{endpoint=...,quantile=...}`、`finops_api_connection_acquire_ms{endpoint=...,quantile=...}`、`finops_api_sql_execute_fetch_ms{endpoint=...,quantile=...}`。
@@ -144,6 +145,7 @@ Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS
 - API p95 升高但 DB 指标不高，优先看 Python 对象构造、JSON 序列化、前端请求量和网络。
 - OA 附件发票 inventory 优先读取 `app.oa_attachment_invoice_cache`；`read_model.workbench_rows` 仅作为 fallback，并依赖 `workbench_rows_oa_attachment_inventory_idx` 覆盖索引。
 - Read model refresh 的“历史”指标是 bounded history：最近 7 天或每个 event type 最近 512 条完成事件，不是全库永久历史扫描。
+- `/health/ready` 和 `/metrics` 的 read model refresh / RabbitMQ publish confirm percentile 使用每个 event type 最近 512 条样本，不扫全历史 `done` outbox。
 - outbox pending 和 RabbitMQ queue 同时增长，优先看 worker/consumer。
 - RabbitMQ queue 增长但 outbox 不增长，优先看 broker consumer、prefetch、DLQ 和 ack/nack。
 

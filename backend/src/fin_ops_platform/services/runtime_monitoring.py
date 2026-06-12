@@ -20,6 +20,7 @@ READ_MODEL_EVENT_TYPES: dict[str, tuple[str, str]] = read_model_event_types()
 
 EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
 READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT = 512
+RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT = 512
 
 
 class RuntimeMonitoringRepository:
@@ -384,6 +385,7 @@ class RuntimeMonitoringRepository:
             """
             select status, count(*)::bigint as count
             from job.outbox_events
+            where status <> 'done'
             group by status
             order by status
             """
@@ -435,33 +437,61 @@ class RuntimeMonitoringRepository:
             where worker_kind <> 'runtime'
             """
         )
-        refresh_duration_row = self._connection.fetch_one(
+        refresh_metric_row = self._connection.fetch_one(
             """
+            with event_type_filter(event_type) as (
+              select unnest(%s::text[])
+            ),
+            recent_refresh_events as (
+              select
+                refresh_event.event_type,
+                refresh_event.status,
+                refresh_event.updated_at,
+                case
+                  when refresh_event.status = 'done'
+                   and refresh_event.raw_payload->'runtime_result' ? 'duration_ms'
+                    then ((refresh_event.raw_payload->'runtime_result'->>'duration_ms')::numeric)
+                  else null
+                end as duration_ms
+              from event_type_filter
+              cross join lateral (
+                select
+                  event_type,
+                  status,
+                  updated_at,
+                  raw_payload
+                from job.outbox_events
+                where event_type = event_type_filter.event_type
+                  and event_type like '%%.read_model.refresh'
+                  and (
+                    status in ('failed', 'dead_lettered')
+                    or (
+                      status = 'done'
+                      and raw_payload->'runtime_result' ? 'duration_ms'
+                    )
+                  )
+                order by updated_at desc
+                limit %s
+              ) refresh_event
+            )
             select
-              percentile_cont(0.5) within group (
-                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
-              )::float as p50_ms,
-              percentile_cont(0.95) within group (
-                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
-              )::float as p95_ms,
-              percentile_cont(0.99) within group (
-                order by ((raw_payload->'runtime_result'->>'duration_ms')::numeric)
-              )::float as p99_ms
-            from job.outbox_events
-            where event_type like '%%.read_model.refresh'
-              and status = 'done'
-              and raw_payload->'runtime_result' ? 'duration_ms'
-            """
-        )
-        refresh_failure_row = self._connection.fetch_one(
-            """
-            select
+              (percentile_cont(0.5) within group (
+                order by duration_ms
+              ) filter (where duration_ms is not null))::float as p50_ms,
+              (percentile_cont(0.95) within group (
+                order by duration_ms
+              ) filter (where duration_ms is not null))::float as p95_ms,
+              (percentile_cont(0.99) within group (
+                order by duration_ms
+              ) filter (where duration_ms is not null))::float as p99_ms,
               count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
               count(*)::bigint as read_model_refresh_total
-            from job.outbox_events
-            where event_type like '%%.read_model.refresh'
-            """
+            from recent_refresh_events
+            """,
+            (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
         )
+        refresh_duration_row = refresh_metric_row or {}
+        refresh_failure_row = refresh_metric_row or {}
         publish_rows = self._connection.fetch_all(
             """
             select publish_status, count(*)::bigint as count
@@ -485,20 +515,36 @@ class RuntimeMonitoringRepository:
         )
         publish_confirm_latency_row = self._connection.fetch_one(
             """
+            with event_type_filter(event_type) as (
+              select unnest(%s::text[])
+            ),
+            recent_publish_confirms as (
+              select
+                ((published_event.raw_payload->'rabbitmq_publish'->>'confirm_latency_ms')::numeric) as confirm_latency_ms
+              from event_type_filter
+              cross join lateral (
+                select raw_payload, updated_at
+                from job.outbox_events
+                where event_type = event_type_filter.event_type
+                  and publish_status = 'published'
+                  and raw_payload->'rabbitmq_publish' ? 'confirm_latency_ms'
+                order by updated_at desc
+                limit %s
+              ) published_event
+            )
             select
               percentile_cont(0.5) within group (
-                order by ((raw_payload->'rabbitmq_publish'->>'confirm_latency_ms')::numeric)
+                order by confirm_latency_ms
               )::float as p50_ms,
               percentile_cont(0.95) within group (
-                order by ((raw_payload->'rabbitmq_publish'->>'confirm_latency_ms')::numeric)
+                order by confirm_latency_ms
               )::float as p95_ms,
               percentile_cont(0.99) within group (
-                order by ((raw_payload->'rabbitmq_publish'->>'confirm_latency_ms')::numeric)
+                order by confirm_latency_ms
               )::float as p99_ms
-            from job.outbox_events
-            where publish_status = 'published'
-              and raw_payload->'rabbitmq_publish' ? 'confirm_latency_ms'
-            """
+            from recent_publish_confirms
+            """,
+            (list(_rabbitmq_dispatch_event_types()), RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT),
         )
         pending_outbox_by_scope = self._pending_outbox_events_by_scope()
         dirty_scopes_by_scope = self._dirty_scopes_by_scope()
@@ -546,6 +592,7 @@ class RuntimeMonitoringRepository:
                 "p95": (refresh_duration_row or {}).get("p95_ms"),
                 "p99": (refresh_duration_row or {}).get("p99_ms"),
             },
+            "read_model_refresh_sample_count": total_refresh_count,
             "read_model_refresh_failure_rate": (
                 round(failed_refresh_count / total_refresh_count, 6) if total_refresh_count else 0.0
             ),
@@ -558,6 +605,7 @@ class RuntimeMonitoringRepository:
                 "p95": (publish_confirm_latency_row or {}).get("p95_ms"),
                 "p99": (publish_confirm_latency_row or {}).get("p99_ms"),
             },
+            "rabbitmq_publish_confirm_sample_limit": RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT,
             "rabbitmq_dispatch_event_types": list(_rabbitmq_dispatch_event_types()),
             **rabbitmq_metrics,
             "stale_dirty_scope_count": len(stale_dirty_scopes),
@@ -730,6 +778,8 @@ class RuntimeMonitoringRepository:
               count(*) filter (where publish_status = 'failed')::bigint as publish_failed_count,
               extract(epoch from max(now() - created_at) filter (where status = 'pending'))::float as oldest_pending_age_seconds
             from job.outbox_events
+            where status in ('pending', 'failed', 'dead_lettered')
+               or publish_status in ('publishing', 'failed')
             """
         ) or {}
         return {

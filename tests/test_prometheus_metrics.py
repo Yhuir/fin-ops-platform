@@ -33,6 +33,7 @@ class PrometheusMetricsTests(unittest.TestCase):
                 "stale_required_worker_count": 0,
                 "mismatched_required_worker_count": 0,
                 "read_model_refresh_duration_ms": {"p50": 100.0, "p95": 300.0, "p99": 450.0},
+                "read_model_refresh_sample_count": 128,
                 "read_model_refresh_failure_rate": 0.01,
                 "rabbitmq_publish_status": {"unpublished": 1},
                 "rabbitmq_queue_depth": 5,
@@ -40,6 +41,7 @@ class PrometheusMetricsTests(unittest.TestCase):
                 "rabbitmq_consumer_count": 15,
                 "rabbitmq_dlq_count": 0,
                 "rabbitmq_publish_confirm_latency_ms": {"p50": 2.0, "p95": 9.0, "p99": 15.0},
+                "rabbitmq_publish_confirm_sample_limit": 512,
                 "stale_dirty_scope_count": 0,
                 "worker_metrics": [
                     {
@@ -83,7 +85,9 @@ class PrometheusMetricsTests(unittest.TestCase):
         self.assertIn('finops_outbox_events{status="pending"} 4', rendered)
         self.assertIn('finops_read_model_dirty_scopes{status="pending"} 2', rendered)
         self.assertIn('finops_read_model_refresh_duration_ms{quantile="0.95"} 300', rendered)
+        self.assertIn("finops_read_model_refresh_sample_count 128", rendered)
         self.assertIn('finops_rabbitmq_publish_confirm_latency_ms{quantile="0.95"} 9', rendered)
+        self.assertIn("finops_rabbitmq_publish_confirm_sample_limit 512", rendered)
         self.assertIn(
             'finops_worker_heartbeat_lag_seconds{status="available",worker_instance="workbench",worker_kind="workbench-read-model"} 2.5',
             rendered,

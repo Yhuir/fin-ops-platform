@@ -81,6 +81,7 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
         "missing_required_worker_count",
         "stale_required_worker_count",
         "mismatched_required_worker_count",
+        "read_model_refresh_sample_count",
         "read_model_refresh_failure_rate",
         "rabbitmq_unpublished_backlog",
         "rabbitmq_publish_failed_backlog",
@@ -90,6 +91,7 @@ def _runtime_metrics(writer: "_PrometheusWriter", runtime: Mapping[str, Any]) ->
         "rabbitmq_consumer_count",
         "rabbitmq_dlq_count",
         "rabbitmq_oldest_message_age_seconds",
+        "rabbitmq_publish_confirm_sample_limit",
         "stale_dirty_scope_count",
     ):
         writer.gauge(
