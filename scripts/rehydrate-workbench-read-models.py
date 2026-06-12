@@ -14,7 +14,9 @@ BACKEND_SRC = REPO_ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
+from fin_ops_platform.services import postgres_connection as postgres_connection_module  # noqa: E402
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings  # noqa: E402
+from fin_ops_platform.services.postgres_repositories import read_models as read_models_module  # noqa: E402
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository  # noqa: E402
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # noqa: E402
 from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder  # noqa: E402
@@ -637,11 +639,17 @@ def _install_internal_profiling(builder: Any, repository: Any, timings: list[dic
         "_refresh_workbench_all_scope_from_month_shards",
         "_workbench_generation_consistency_failures",
         "_start_workbench_generation",
+        "_iter_workbench_rows",
+        "_iter_workbench_groups",
+        "_workbench_summary_from_payload",
+        "_workbench_invoice_inventory",
         "_upsert_workbench_generation_stats",
         "_activate_workbench_generation",
         "get_workbench_refresh_status",
     ):
         _wrap_timed_method(repository, attr, f"repository.{attr}", timings)
+    _wrap_timed_execute_many(timings)
+    _wrap_timed_transaction_sql(timings)
 
 
 def _wrap_timed_method(obj: Any, attr: str, label: str, timings: list[dict[str, Any]]) -> None:
@@ -663,6 +671,82 @@ def _wrap_timed_method(obj: Any, attr: str, label: str, timings: list[dict[str, 
             timings.append(item)
 
     setattr(obj, attr, timed)
+
+
+def _wrap_timed_execute_many(timings: list[dict[str, Any]]) -> None:
+    original = getattr(read_models_module, "_execute_many", None)
+    if not callable(original):
+        return
+
+    def timed(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) -> Any:
+        started_at = perf_counter()
+        try:
+            return original(connection, sql, params_seq)
+        finally:
+            timings.append(
+                {
+                    "step": "read_models._execute_many",
+                    "duration_ms": _duration_ms(started_at),
+                    "target": _sql_target(sql),
+                    "row_count": len(params_seq or []),
+                }
+            )
+
+    setattr(read_models_module, "_execute_many", timed)
+
+
+def _wrap_timed_transaction_sql(timings: list[dict[str, Any]]) -> None:
+    transaction_cls = getattr(postgres_connection_module, "PostgresTransaction", None)
+    if transaction_cls is None:
+        return
+    for attr in ("fetch_one", "fetch_all", "execute"):
+        original = getattr(transaction_cls, attr, None)
+        if not callable(original):
+            continue
+
+        def timed(self: Any, sql: str, params: tuple[Any, ...] = (), *, _original: Any = original, _attr: str = attr) -> Any:
+            started_at = perf_counter()
+            try:
+                return _original(self, sql, params)
+            finally:
+                timings.append(
+                    {
+                        "step": f"postgres_transaction.{_attr}",
+                        "duration_ms": _duration_ms(started_at),
+                        "target": _sql_target(sql),
+                    }
+                )
+
+        setattr(transaction_cls, attr, timed)
+
+
+def _sql_target(sql: str) -> str:
+    normalized = " ".join(str(sql or "").lower().split())
+    for target in (
+        "read_model.workbench_group_rows",
+        "read_model.workbench_groups",
+        "read_model.workbench_rows",
+        "read_model.workbench_summary",
+        "read_model.workbench_snapshots",
+        "read_model.workbench_generations",
+        "job.read_model_dirty_scopes",
+        "job.outbox_events",
+        "app.invoices",
+        "app.oa_attachment_invoice_cache_sources",
+        "app.oa_attachment_invoice_cache",
+        "app.oa_attachments",
+    ):
+        if target in normalized:
+            return target
+    if normalized.startswith("select"):
+        return "select"
+    if normalized.startswith("insert"):
+        return "insert"
+    if normalized.startswith("update"):
+        return "update"
+    if normalized.startswith("delete"):
+        return "delete"
+    return "sql"
 
 
 if __name__ == "__main__":
