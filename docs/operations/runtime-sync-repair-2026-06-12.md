@@ -1470,6 +1470,55 @@ Stage 27 结论：
 - 当前 `enqueue-to-fresh` p95 远高于几秒 SLO，且最近 bounded 样本被历史滞留/repair event 污染；这不能用作当前窗口页面体验的唯一 SLO 判定。
 - 下一阶段必须新增 current-window SLO 口径，例如按 `created_at >= now() - interval '15 minutes'` 或 release marker 之后的 enqueue-to-fresh p95，同时保留 all bounded history 作为历史修复/积压证据。
 
+## Stage 28：separate current-window SLO from historical backlog samples
+
+Stage 28 在 Stage 27 的同一个 bounded read-model refresh CTE 中补固定 current-window 聚合，不新增写链路：
+
+- `read_model_refresh_current_windows`：`recent_15m` / `recent_1h` / `recent_6h` 的 duration、enqueue-to-fresh、sample/failure rate。
+- `read_model_refresh_by_key_current_windows`：按 read model key / event type / current window 拆分当前窗口慢 projection。
+- Prometheus 对应导出 `finops_read_model_refresh_current_window_*` 和
+  `finops_read_model_refresh_by_key_current_window_*`，`window` 是固定低基数 label。
+- all-time bounded 指标和 slow events 保留，用于发现历史滞留/repair；current windows 用于判断当前用户体验。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_monitoring tests.test_prometheus_metrics tests.test_app_postgres_mode -v`
+- `python3 -m py_compile backend/src/fin_ops_platform/services/runtime_monitoring.py backend/src/fin_ops_platform/services/prometheus_metrics.py`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`
+
+生产发布：
+
+- commit：`0e21c5d0 Report current-window read model freshness metrics`
+- release：`main-0e21c5d0-stage28-202606130347`
+- `/health/ready`：`status=ready`，`runtime_release.consistent=true`，schema `68`。
+- runtime health：`failed_jobs=0`，`stale_dirty_scope_count=0`，`rabbitmq_queue_depth=0`，
+  `rabbitmq_dlq_count=0`，`missing_required_worker_count=0`，`stale_required_worker_count=0`。
+- all-time bounded 仍为：duration p95 `8301.8155ms`，enqueue-to-fresh p95 `133764.9166ms`。
+- current windows：
+  - `recent_15m`：sample `0`，无 p95。
+  - `recent_1h`：sample `0`，无 p95。
+  - `recent_6h`：sample `470`，duration p95 `16254.495ms`，enqueue-to-fresh p95 `99397.573ms`，failure `0.0`。
+- `recent_6h` by-key 前 8 项：
+  - `workbench.read_model.refresh`：sample `84`，duration p95 `28283.18ms`，enqueue p95 `143644.6ms`。
+  - `invoice_lifecycle.read_model.refresh`：sample `42`，duration p95 `12553.532ms`，enqueue p95 `95294.231ms`。
+  - `oa_pending_payment.read_model.refresh`：sample `42`，duration p95 `1110.827ms`，enqueue p95 `86383.492ms`。
+  - `input_invoice_usage.read_model.refresh`：sample `42`，duration p95 `12120.567ms`，enqueue p95 `85734.132ms`。
+  - `output_invoice_collection.read_model.refresh`：sample `42`，duration p95 `444.912ms`，enqueue p95 `77018.456ms`。
+  - `tax_offset.read_model.refresh`：sample `42`，duration p95 `615.477ms`，enqueue p95 `37185.447ms`。
+  - `cost_statistics.read_model.refresh`：sample `110`，duration p95 `4481.847ms`，enqueue p95 `35219.095ms`。
+  - `workbench_relation.read_model.refresh`：sample `66`，duration p95 `3143.842ms`，enqueue p95 `13546.838ms`。
+- 本机 `/health/ready` 连续 5 次 curl `time_total`：`0.429848s`、`0.452638s`、`0.455037s`、
+  `0.417906s`、`0.419137s`。
+- 公网 `/fin-ops/` 未登录页面 shell smoke 通过，p95 `111.2944ms`。
+- 公网 `/fin-ops-api/metrics` 未带 token 返回 `404 application/json`，符合未配置 token 时安全关闭预期。
+
+Stage 28 结论：
+
+- current-window SLO 口径已经具备。当前 15m/1h 没有新业务写入样本，不能证明或否定“当前写入几秒内 fresh”。
+- 6h 窗口仍显示 `workbench`、`invoice_lifecycle`、`input_invoice_usage` handler duration 长尾，下一步应补 current slow-event drilldown 或触发受控样本，定位具体 scope。
+- health 热路径仍低于 1s，但 Stage 28 增加了窗口聚合后本机 `/health/ready` 约 `0.42-0.46s`，仍在页面首包 SLO 外围可接受范围内。
+
 ## 当前闭环状态
 
 已闭环：
@@ -1494,6 +1543,7 @@ Stage 27 结论：
   发布；workbench/search/pending_invoice refresh handler 会跳过 stale source_version 事件。
 - health / Prometheus 已具备真实 enqueue-to-fresh p95 以及只读 slow event drilldown；能区分 handler duration 慢和 outbox
   等待时间长。
+- health / Prometheus 已具备 current-window read model refresh 指标，可以把历史滞留样本和当前用户体验 SLO 分开。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 - 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
 - Prometheus `/metrics` 应用侧已具备，可输出 runtime/read-model/RabbitMQ/worker/API p95 指标；生产 token 未配置时保持 `404` 安全关闭。
@@ -1505,6 +1555,8 @@ Stage 27 结论：
   `28180.444ms`，以及 `cost_statistics`、`invoice_lifecycle`、`input_invoice_usage` 的 5-7s 级 p95。
 - `read_model_refresh_enqueue_to_fresh_ms.p95` 在 Stage 27 bounded sample 口径下为 `133764.9166ms`；当前样本包含
   历史滞留后完成的 event，必须补 current-window/release-window SLO 口径，不能把历史 repair 样本当作当前页面体验结论。
+- Stage 28 current-window 口径下 `recent_15m` / `recent_1h` 暂无样本；`recent_6h` 仍显示 `workbench` duration p95
+  `28283.18ms`、`invoice_lifecycle` p95 `12553.532ms`、`input_invoice_usage` p95 `12120.567ms`。
 - 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
   outbox percentile 和 outbox summary；Stage 24 已收敛 health/metrics percentile 与 outbox summary，Stage 25
@@ -1514,10 +1566,10 @@ Stage 27 结论：
 
 下一阶段优先级：
 
-1. 补 current-window/release-window enqueue-to-fresh 指标，分离历史滞留事件和当前写入后的真实几秒收敛 SLO。
-2. 对 `search` 与 `workbench` refresh 做 scope/event drilldown、worker trace、pg_stat 和 EXPLAIN，判断是否存在
+1. 补 current slow-event drilldown 或触发受控 read-model refresh 样本，让 `recent_15m` / `recent_1h` 有可判定数据。
+2. 对 `workbench`、`invoice_lifecycle`、`input_invoice_usage` refresh 做 scope/event drilldown、worker trace、pg_stat 和 EXPLAIN，判断是否存在
    过宽 scope、重复 rebuild、缺索引、低效 join 或可增量化路径。
-3. 对 `cost_statistics`、`invoice_lifecycle`、`input_invoice_usage` 做同样分析，把 5-7s p95 收敛到轻量 read model
+3. 对 `cost_statistics`、`workbench_relation` 做同样分析，把 3-5s p95 收敛到轻量 read model
    `< 3s` 或把明确重型路径纳入局部收敛 `< 10-15s` 的 SLO 分类。
 4. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
 5. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
