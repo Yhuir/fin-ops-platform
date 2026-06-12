@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-12 - 关联台 group 级统一撤回/拆分闭环
+
+- 目标：已配对区和未配对区点击任意 row 都带入完整 group；统一撤回按钮先打开三栏 preview，再由后端判定 `withdraw_relation` 或 `split_candidate`。
+- 影响范围：`WorkbenchRelationCommandService` withdraw preview/submit、`WorkbenchWriteFacade.withdraw-link` preview/submit、`WorkbenchCandidateMatchService` suppress 边界、前端 selection model/API mapper/关联预览提交。
+- 关键决策：relation 撤回只通过 `WorkbenchRelationCommandService`，submit 使用 `operation_type`、`preview_id`、`submit_expected_versions` 锁定 preview。active relation 有 history 时恢复上一状态；无 history 时撤到无关联。纯自动候选不写 relation history，而是 suppress candidate 为 `manual_override`。
+- 文档影响：更新本模块 `README.md`、`tests.md`，并同步 `workbench-relations` 模块文档。
+- 测试覆盖：新增 `WorkbenchSelectionModel.test.ts`；更新 `WorkbenchSelection.test.tsx` group context/submit payload；新增 command service withdraw preview lock 和 facade withdraw/split tests；更新 API 无 history 撤回口径和 rollback characterization。
+- 验证命令：`python -m pytest tests/test_workbench_relation_command_service.py tests/test_workbench_auth_context_idempotency.py -q`；`python -m pytest tests/test_workbench_v2_api.py -k "withdraw_link" tests/test_workbench_write_characterization.py -k "withdraw_link" tests/test_workbench_candidate_match_service.py -q`；`npm --prefix web test -- WorkbenchSelection.test.tsx WorkbenchSelectionModel.test.ts --run`；`npm --prefix web run build`。
+- 未测风险：未做真实浏览器/staging smoke；多 group 禁止目前依赖后端 preview/前端单 group button 规则，后续如开放批量选择需要补更专门的交互测试。
+
 ## 2026-06-12 - server active relation repair command 写入口收敛
 
 - 目标：删除 `server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 对 `WorkbenchPairRelationService` 的直接写入，避免 Workbench payload build/repair 路径成为第二个 relation 写事实源。

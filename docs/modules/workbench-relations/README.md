@@ -73,6 +73,7 @@
 统一承接所有 relation 写入：
 
 - workbench confirm/cancel。
+- workbench withdraw preview/submit。preview 必须返回 `operation_type`、`preview_id`、`submit_expected_versions`；submit 必须使用这些字段校验当前 relation identity，状态变化时返回 conflict，不得重新猜测当前可撤回对象。
 - pending invoice attach existing/create manual invoice relation。
 - no-OA submit/withdraw、internal transfer confirm-link、legacy migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 收敛。常规入口已在 Phase 5 迁入 command service；legacy/repair/consolidation 已在 Phase 7L 迁入 command service，且 read model worker 继续禁止隐式 repair。
 - turnover manual closure confirm/withdraw。
@@ -116,6 +117,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 - row id 去重并保持 row type 对齐。
 - active case reuse 和 active row overlap 校验。
 - relation replace/cancel/withdraw/history 生成。
+- withdraw 的上一状态计算和无 history 时撤到无关联的领域转换。
 - mode/state registry 的领域规则校验可以委托给它或独立 policy。
 
 禁止它承担以下职责：
@@ -159,7 +161,9 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 
 写入口必须迁移到 command service：
 
-- `POST /api/workbench/actions/confirm-link` 和 `cancel-link` 已迁入 command service；缺 command service 时 fail fast，不再回退到 direct pair snapshot 写入。个人暂借款还清 `confirm_personal_advance_repayment` 已迁入 command service。Workbench exception closed apply 已通过 command service 写入 `normal_match` / `oa_exempt`，并在创建本地 exception case 前执行 relation write precondition。`server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 已通过 command service 写入；其他 server 读/展示/persist helper 仍待后续抽离。
+- `POST /api/workbench/actions/confirm-link`、`cancel-link` 和 `withdraw-link` 已迁入 command service；缺 command service 时 fail fast，不再回退到 direct pair snapshot 写入。`withdraw-link` preview/submit 由 command service 锁定 relation identity；无 history 时撤到无关联，不再由 facade 合成恢复关系。个人暂借款还清 `confirm_personal_advance_repayment` 已迁入 command service。Workbench exception closed apply 已通过 command service 写入 `normal_match` / `oa_exempt`，并在创建本地 exception case 前执行 relation write precondition。`server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 已通过 command service 写入；其他 server 读/展示/persist helper 仍待后续抽离。
+
+`split_candidate` 不属于 relation lifecycle，不写入 `app.workbench_pair_relations` 或 relation history。关联台未配对区统一按钮在没有 active relation 但命中自动候选时，由 `WorkbenchWriteFacade` 复用 `WorkbenchCandidateMatchService.mark_candidates_suppressed(..., suppressed_reason="manual_override")` suppress 候选，并触发 Workbench read model refresh。
 - pending invoice manual invoice confirm、attach existing 单条和批量已迁入 command service；写前 active relation 读取走 `WorkbenchRelationReadFacade` distribution，stale/fresh 由 command service precondition 负责。
 - no-OA `submit-selection`、`submit-batch`、`withdraw` 已迁入 command service；`no_oa_bank_batch.read_model.refresh` 不再执行 relation repair；legacy relation migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 已通过 command service 写入或取消 relation。已有 submitted batch 与 legacy active relation 命中同一 row set 时，迁移复用 existing submitted batch 的 relation case，避免创建第二条 active relation。
 - turnover manual zero-difference closure、withdraw 已迁入 command service；legacy fallback 缺少 command service 时的 direct pair write fallback 已删除，缺 command 会 fail fast。

@@ -1259,17 +1259,21 @@ export default function ReconciliationWorkbenchPage() {
 
   const canConfirmOpenSelection = openSelectionSummary.bank > 0 && openSelectionSummary.oa + openSelectionSummary.invoice > 0;
   const canHandleOpenSelectionException = openSelectionSummary.total > 0;
+  const selectedOpenGroupsForUnifiedAction = useMemo(() => {
+    const selectedRowIdSet = new Set(openSelectionContext.includedRowIds);
+    return openSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
+  }, [openSelectionContext.includedRowIds, openSelectionSourceGroups]);
+  const selectedPairedGroupsForUnifiedAction = useMemo(() => {
+    const selectedRowIdSet = new Set(pairedSelectionContext.includedRowIds);
+    return pairedSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
+  }, [pairedSelectionContext.includedRowIds, pairedSelectionSourceGroups]);
   const canWithdrawOpenSelection = useMemo(() => {
-    if (selectedOpenRowIds.length === 0) {
+    if (openSelectionSummary.total === 0) {
       return false;
     }
-    const selectedRowIdSet = new Set(selectedOpenRowIds);
-    return (workbenchData?.open.groups ?? []).some((group) =>
-      group.canWithdraw
-      && [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((row) => selectedRowIdSet.has(row.id)),
-    );
-  }, [selectedOpenRowIds, workbenchData?.open.groups]);
-  const isOpenConfirmSelectionDisabled = explicitOpenRows.length < 2;
+    return selectedOpenGroupsForUnifiedAction.length === 1;
+  }, [openSelectionSummary.total, selectedOpenGroupsForUnifiedAction.length]);
+  const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection;
   const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
 
@@ -1676,14 +1680,22 @@ export default function ReconciliationWorkbenchPage() {
           month: WORKBENCH_VIEW_MONTH,
           rowIds,
           note,
+          operationType: preview.operationType === "split_candidate" ? "split_candidate" : "withdraw_relation",
+          previewId: preview.previewId,
+          expectedVersions: preview.submitExpectedVersions,
         });
         clearPairedSelection();
         clearOpenSelection();
-        applyLocalWithdrawLink(rowIds, preview.after.groups);
+        if (preview.operation === "withdraw_link") {
+          applyLocalWithdrawLink(rowIds, preview.after.groups);
+        }
         emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
           affectedMonths: actionAffectedMonths(result),
-          source: "workbench_withdraw_link",
+          source: preview.operation === "split_candidate" ? "workbench_split_candidate" : "workbench_withdraw_link",
         });
+        if (preview.operation === "split_candidate") {
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+        }
         return result.message;
       },
     });
@@ -1713,18 +1725,15 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     if (!canWithdrawOpenSelection) {
-      openActionResultDialog("当前选择没有可撤回的关联历史。");
+      openActionResultDialog(
+        selectedOpenGroupsForUnifiedAction.length > 1
+          ? "一次只能处理一个关联组。"
+          : "请先选择一个待处理关联组。",
+      );
       return;
     }
-    const selectedRowIdSet = new Set(selectedOpenRowIds);
-    const selectedGroups = (workbenchData?.open.groups ?? []).filter((group) =>
-      group.canWithdraw
-      && [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice].some((row) => selectedRowIdSet.has(row.id)),
-    );
     try {
-      await openWithdrawPreview(
-        selectedGroups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]),
-      );
+      await openWithdrawPreview(flattenGroups(selectedOpenGroupsForUnifiedAction));
     } catch (error) {
       openRelationPreviewErrorDialog(error);
     }
@@ -1770,6 +1779,10 @@ export default function ReconciliationWorkbenchPage() {
 
     if (selectedPairedRows.length === 0) {
       openActionResultDialog("请先选择已配对记录。");
+      return;
+    }
+    if (selectedPairedGroupsForUnifiedAction.length > 1) {
+      openActionResultDialog("一次只能处理一个关联组。");
       return;
     }
     const selectedNoOaSummaryRows = uniqueNoOaBatchRows(selectedPairedRows.filter(isNoOaSummaryRow));
@@ -1967,7 +1980,7 @@ export default function ReconciliationWorkbenchPage() {
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
       onTertiarySelectionAction={handleWithdrawOpenSelection}
-      tertiarySelectionActionDisabled={!canWithdrawOpenSelection || !canWriteWorkbench}
+      tertiarySelectionActionDisabled={openSelectionSummary.total < 1 || !canWriteWorkbench}
       onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
@@ -2199,8 +2212,9 @@ function RelationPreviewDialog({
 }) {
   const [note, setNote] = useState("");
   const isWithdraw = preview.operation === "withdraw_link";
-  const submitLabel = isWithdraw ? "确认撤回" : "确认关联";
-  const title = isWithdraw ? "撤回关联预览" : "确认关联预览";
+  const isSplitCandidate = preview.operation === "split_candidate";
+  const submitLabel = isSplitCandidate ? "确认拆分" : isWithdraw ? "确认撤回" : "确认关联";
+  const title = isSplitCandidate ? "拆分候选预览" : isWithdraw ? "撤回关联预览" : "确认关联预览";
   const noteRequired = preview.requiresNote;
   const canSubmit = preview.canSubmit && (!noteRequired || note.trim().length > 0);
 

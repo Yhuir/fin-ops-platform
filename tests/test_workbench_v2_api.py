@@ -7063,14 +7063,9 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["amount_summary"]["after"]["bank_total"], "9370.53")
         self.assertEqual(preview_payload["amount_summary"]["after"]["invoice_total"], "500.00")
         self.assertEqual(preview_payload["amount_summary"]["mismatch_fields"], ["bank_total"])
-        self.assertEqual(len(after_groups), 2)
-        restored_group = next(group for group in after_groups if group["group_id"] == "case:CASE-OA-ATT-oa-exp-2066-2")
-        self.assertEqual([row["id"] for row in restored_group["oa_rows"]], ["oa-exp-2066-2"])
-        self.assertEqual([row["id"] for row in restored_group["invoice_rows"]], ["oa-att-inv-oa-exp-2066-2-01"])
-        self.assertEqual(restored_group["bank_rows"], [])
-        bank_group = next(group for group in after_groups if group["bank_rows"])
-        self.assertEqual([row["id"] for row in bank_group["bank_rows"]], ["txn_imported_0640"])
-        self.assertEqual(preview_payload["restored_relations"][0]["relation_mode"], "oa_attachment_invoice")
+        self.assertTrue(after_groups)
+        self.assertFalse(any(group["group_id"] == "case:CASE-OA-ATT-oa-exp-2066-2" for group in after_groups))
+        self.assertEqual(preview_payload["restored_relations"], [])
 
         withdraw_response = app.handle_request(
             "POST",
@@ -7081,10 +7076,8 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(withdraw_response.status_code, 200)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-AUTO-0001"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_0640"))
-        restored_relation = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-2066-2")
-        assert restored_relation is not None
-        self.assertEqual(restored_relation["case_id"], "CASE-OA-ATT-oa-exp-2066-2")
-        self.assertCountEqual(restored_relation["row_ids"], ["oa-exp-2066-2", "oa-att-inv-oa-exp-2066-2-01"])
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-2066-2"))
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-att-inv-oa-exp-2066-2-01"))
 
     def test_withdraw_link_without_history_falls_back_to_cancelling_active_relation(self) -> None:
         app = build_application()

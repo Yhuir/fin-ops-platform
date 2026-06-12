@@ -9,7 +9,7 @@
 | 影响面 | 当前事实源 | 需要关注的旧功能 |
 | --- | --- | --- |
 | 自动候选规则 | `WorkbenchMatchingRules`、`WorkbenchFreeMatchingEngine`、special pair rule service | 单笔 OA-bank、OA-bank 多流水合计、OA-发票、OA-bank-invoice、附件发票、免 OA、内部转账、工资等 legacy/special rules |
-| 人工确认/撤回 | `/api/workbench/actions/confirm-link`、`cancel-link`、idempotency、UoW | active pair relation、审计、版本冲突、重复提交、in-progress replay、撤回恢复旧 group |
+| 人工确认/撤回/候选拆分 | `/api/workbench/actions/confirm-link`、`cancel-link`、`withdraw-link`、idempotency、UoW | active pair relation、审计、preview lock、版本冲突、重复提交、in-progress replay、撤回恢复上一状态、无 history 撤到无关联、纯候选 split/suppress |
 | 异常处理 | exception classifier/application/projection | open/closed exception、ignore/unignore、金额差异 note、OA 免单、异常取消 |
 | Active generation read model | `read_model.workbench_generations`、`workbench_rows/groups/summary/stats` | 原子发布、active pinning、failed generation 不可提升、retention 不删 active |
 | Query facade / Redis cache | `WorkbenchQueryFacade`、groups page cache warmer | 只缓存 fresh payload；refreshing/stale/unavailable 不写 Redis；query timeout 有明确 refreshing/unavailable |
@@ -25,7 +25,8 @@
 | OA-bank 单笔精确候选 | P0 | `tests/test_workbench_matching_rules.py`、`tests/test_workbench_free_matching_engine.py` | covered | 基础候选规则，避免误配。 |
 | `oa_bank_exact_sum` 多银行流水合计候选 | P0 | `tests/test_workbench_matching_rules.py`、`tests/test_workbench_free_matching_engine.py`、`tests/test_workbench_matching_orchestrator.py`、`tests/test_workbench_v2_api.py` | covered | 覆盖唯一性、证据要求、单笔优先、API grouping。 |
 | 三方闭环与 open/paired 分区 | P0 | `tests/test_workbench_candidate_grouping.py`、`tests/test_workbench_reconciliation_engine.py`、`tests/test_workbench_v2_api.py` | covered | active relation 优先于自动候选。 |
-| 确认/撤回 idempotency、版本冲突和 command 写边界 | P0 | `tests/test_workbench_auth_context_idempotency.py`、`tests/test_workbench_idempotency_contract.py`、`tests/test_workbench_stale_write_contract.py`、`tests/test_workbench_v2_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | 防止重复提交、旧版本写入、不稳定 replay，以及缺 command 时回退到 pair snapshot 直接写。 |
+| 确认/撤回 idempotency、preview lock、版本冲突和 command 写边界 | P0 | `tests/test_workbench_auth_context_idempotency.py`、`tests/test_workbench_relation_command_service.py`、`tests/test_workbench_idempotency_contract.py`、`tests/test_workbench_stale_write_contract.py`、`tests/test_workbench_v2_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | 防止重复提交、旧版本写入、不稳定 replay，以及缺 command 时回退到 pair snapshot 直接写。withdraw preview/submit 锁定 `operation_type`、`preview_id`、`submit_expected_versions`。 |
+| 纯自动候选 group 统一按钮拆分 | P0 | `tests/test_workbench_auth_context_idempotency.py`、`tests/test_workbench_candidate_match_service.py`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchSelectionModel.test.ts` | covered | 未配对区点击任一 row 带入完整 group；无 active relation 时后端 preview 判定 `split_candidate`，submit suppress candidate 为 `manual_override`。 |
 | 个人暂借款还清 special relation | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | 创建 settled exception case 与 `personal_advance_repayment_settlement` relation；缺 command 时不得先写 exception case 或 direct pair fallback。 |
 | 异常 preview/apply/cancel/ignore | P0 | `tests/test_workbench_exception_*`、`tests/test_workbench_v2_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | 覆盖 exception projection、分类、API 行为，以及 closed apply relation command 写边界。 |
 | Workbench active generation pinning | P0 | `tests/test_workbench_sql_runtime.py` | covered | groups/summary/detail 必须读取同一个 active generation。 |
@@ -63,6 +64,8 @@
 | 2026-06-11 | paired 详情出现两个一模一样 OA：active relation payload 中重复 row id 被 UI/query 原样展开。 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py::WorkbenchApiTests::test_relation_groups_dedupes_duplicate_relation_row_ids` | covered |
 | 2026-06-11 | 外部往来 bank-only 手动闭环被 exactly 2 bank rows 例外错误放入 paired。 | `tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_bank_only_turnover_manual_closure_rows_remain_open_even_when_linked`、`tests/test_turnover_workbench_integration.py::TurnoverWorkbenchIntegrationTests::test_manual_zero_difference_closure_creates_open_bank_only_workbench_relation` | covered |
 | 2026-06-12 | `confirm-link` / `cancel-link` 缺 relation command service 时回退到 pair snapshot 直接写，形成第二写入口。 | `tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_confirm_and_cancel_link_fail_fast_without_relation_command_service`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_confirm_and_cancel_link_have_no_direct_pair_write_fallback` | covered |
+| 2026-06-12 | 关联台 withdraw 预览/提交绕过 command service，且无 history 时沿用合成 OA 附件恢复，容易形成与“恢复上一状态/撤到无关联”冲突的状态。 | `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_preview_withdraw_relation_returns_locked_previous_state`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_withdraw_relation_rejects_stale_preview_identity`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_preview_and_submit_delegate_to_relation_command_service`、`tests/test_workbench_v2_api.py -k withdraw_link` | covered |
+| 2026-06-12 | 未配对区只有部分 relation snapshot group 会带入整组，普通自动候选需要手动点多栏，无法用统一按钮拆分候选。 | `web/src/test/WorkbenchSelectionModel.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_splits_pure_candidate_group_without_relation_history` | covered |
 | 2026-06-12 | 个人暂借款还清先写 exception case 再 direct pair relation，绕过 relation command freshness/审计边界。 | `tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_personal_advance_repayment_delegates_relation_write_to_command_service`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_personal_advance_repayment_fails_fast_without_relation_command_service`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_personal_advance_repayment_uses_relation_command_boundary` | covered |
 | 2026-06-12 | Workbench exception closed apply 直接调用 pair service 创建 `normal_match` / `oa_exempt` relation，绕过统一 freshness/审计边界。 | `tests/test_workbench_exception_application_service.py::WorkbenchExceptionApplicationServiceTests::test_apply_closed_exception_delegates_pair_relation_to_command_service`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_exception_application_uses_relation_command_boundary` | covered |
 | 2026-06-12 | `server.py` 在 payload build/repair 中直接创建或取消 OA offset / OA 附件上下文 relation，绕过 command service 审计边界。 | `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_confirm_relation_allows_oa_invoice_offset_auto_match_mode`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_replace_existing_confirm_uses_requested_history_operation_type`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_server_active_relation_repairs_use_relation_command_boundary` | covered |
@@ -72,10 +75,11 @@
 ## 关键 smoke flows
 
 1. `导入/OA/ETC/关系变更 -> workbench dirty scope -> worker refresh -> active generation publish -> /api/workbench fresh -> 页面三栏展示`
-2. `open candidate -> confirm preview -> confirm submit -> active pair relation -> domain event -> downstream relation read models refresh`
-3. `paired relation -> cancel/withdraw -> previous group restored -> dirty scopes/readiness/App Health 收敛`
-4. `ETC business batch submitted -> etc_invoice_summary open row -> OA/bank/invoice 三项确认 -> paired 区展开明细`
-5. `Workbench query refreshing/stale -> 页面展示刷新/陈旧状态 -> Redis 不缓存 stale payload -> 后续 fresh 后更新`
+2. `open candidate -> group selection -> confirm preview -> confirm submit -> active pair relation -> domain event -> downstream relation read models refresh`
+3. `paired relation -> withdraw preview locked by preview_id/expected_versions -> previous state restored or no-history unlinked -> dirty scopes/readiness/App Health 收敛`
+4. `open automatic candidate -> group selection -> split_candidate preview -> submit suppresses candidate -> workbench refresh no longer groups the same candidate`
+5. `ETC business batch submitted -> etc_invoice_summary open row -> OA/bank/invoice 三项确认 -> paired 区展开明细`
+6. `Workbench query refreshing/stale -> 页面展示刷新/陈旧状态 -> Redis 不缓存 stale payload -> 后续 fresh 后更新`
 
 ## 本模块验证命令
 

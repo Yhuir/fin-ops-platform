@@ -7,6 +7,7 @@ import {
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   previewWorkbenchException,
+  previewWorkbenchWithdrawLink,
 } from "../features/workbench/api";
 import {
   buildWorkbenchServerPageQuery,
@@ -73,6 +74,43 @@ function createContextSearchGroups(activePaneId: WorkbenchRecordType) {
 describe("workbench api bank amount mapping", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  test("maps split candidate withdraw preview lock fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          operation: "split_candidate",
+          operation_type: "split_candidate",
+          preview_id: "split_candidate:abc123",
+          submit_expected_versions: { "candidate:candidate-1": "needs_review" },
+          candidate_keys: ["candidate-1"],
+          can_submit: true,
+          requires_note: false,
+          message: "将拆分该自动候选组合",
+          before: { groups: [] },
+          after: { groups: [] },
+          amount_summary: {
+            before: { oa_total: "100.00", bank_total: "100.00", invoice_total: "100.00" },
+            after: { oa_total: "100.00", bank_total: "100.00", invoice_total: "100.00" },
+            status: "matched",
+            direction: "payment",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const preview = await previewWorkbenchWithdrawLink({
+      month: "all",
+      rowIds: ["bank-candidate"],
+    });
+
+    expect(preview.operation).toBe("split_candidate");
+    expect(preview.operationType).toBe("split_candidate");
+    expect(preview.previewId).toBe("split_candidate:abc123");
+    expect(preview.submitExpectedVersions).toEqual({ "candidate:candidate-1": "needs_review" });
+    expect(preview.candidateKeys).toEqual(["candidate-1"]);
   });
 
   test("does not mark ordinary open candidates withdrawable from row cancel actions", async () => {

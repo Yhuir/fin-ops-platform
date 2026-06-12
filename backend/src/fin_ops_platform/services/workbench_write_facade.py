@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from hashlib import sha256
 from http import HTTPStatus
+import json
 from time import monotonic
 from typing import Any, Callable
 
@@ -624,6 +626,8 @@ class WorkbenchWriteFacade:
         conflict_errors = {
             "workbench_relation_active_row_conflict",
             "workbench_relation_idempotency_conflict",
+            "workbench_relation_multiple_groups_selected",
+            "workbench_relation_preview_conflict",
             "workbench_relation_read_model_not_fresh",
         }
         unavailable_errors = {
@@ -1010,100 +1014,43 @@ class WorkbenchWriteFacade:
             return exc
         return None
 
-    def _withdraw_link_stale_conflict(
-        self,
-        payload: dict[str, object],
-        active_relation: dict[str, object],
-    ) -> WorkbenchWriteConflict | None:
-        expected_versions = payload.get("expected_versions")
-        if not isinstance(expected_versions, dict) or not expected_versions:
-            return None
-        try:
-            assert_workbench_stale_preconditions(
-                _WorkbenchWritePreconditionCommand(
-                    action_name="withdraw_link",
-                    expected_versions=dict(expected_versions),
-                    payload={
-                        "current_relation_case_id": str(active_relation.get("case_id") or ""),
-                        "current_relation_version": active_relation.get("version"),
-                    },
-                )
-            )
-        except WorkbenchWriteConflict as exc:
-            return exc
-        return None
-
     def preview_withdraw_link(self, payload: dict[str, object]) -> WorkbenchWriteResult:
         try:
             month = str(payload["month"])
             row_ids = self._withdraw_row_ids(payload)
-            preview = self._pair_relation_service.preview_withdraw_for_row_ids(row_ids)
-            active_relation = preview["active_relation"]
-            rows, after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
-                active_relation=active_relation,
-                after_relations=list(preview.get("after_relations") or []),
-                month=month,
-            )
-            before_groups = self._relation_groups([active_relation], selected_rows=rows)
-            after_groups = self._relation_groups(
-                after_relations,
-                selected_rows=rows,
-                ungrouped_selected_rows="separate",
-            )
-            amount_check = self._amount_check_for_withdraw_preview(
-                active_relation=active_relation,
-                rows=rows,
-            )
-            active_relation_identity = self._withdraw_preview_active_relation_identity(active_relation)
-        except KeyError as exc:
+        except (KeyError, TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
-                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
+                {"error": "invalid_withdraw_link_preview_request", "message": str(exc)},
             )
+
+        relation_command = self._relation_command_service_for()
+        if relation_command is None:
+            return self._relation_command_unavailable_result()
+        try:
+            preview_relation = self._preview_withdraw_relation_via_command_service(
+                relation_command,
+                row_ids=row_ids,
+                month=month,
+            )
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code != "workbench_relation_not_found":
+                return self._relation_command_error_result(exc)
+            candidate_preview = self._preview_split_candidate(
+                month=month,
+                row_ids=row_ids,
+            )
+            if candidate_preview is not None:
+                return WorkbenchWriteResult(HTTPStatus.OK, candidate_preview)
+            return self._relation_command_error_result(exc)
+        except _WorkbenchWritePersistenceError as exc:
+            return self._persistence_unavailable_result(str(exc))
         except (TypeError, ValueError) as exc:
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_withdraw_link_preview_request", "message": str(exc)},
             )
-        return WorkbenchWriteResult(
-            HTTPStatus.OK,
-            {
-                "operation": "withdraw_link",
-                "can_submit": True,
-                "requires_note": False,
-                "message": "",
-                "before": {"groups": before_groups},
-                "after": {"groups": after_groups},
-                "amount_summary": {
-                    "before": amount_check,
-                    "after": amount_check,
-                    **amount_check,
-                },
-                "restored_relations": after_relations,
-                "active_relation": active_relation_identity,
-                "submit_expected_versions": {
-                    f"relation:{active_relation_identity['case_id']}": active_relation_identity["version"],
-                },
-            },
-        )
-
-    @staticmethod
-    def _withdraw_preview_active_relation_identity(active_relation: dict[str, object]) -> dict[str, object]:
-        case_id = str(active_relation.get("case_id") or "").strip()
-        if not case_id:
-            raise ValueError("active relation case_id is required for withdraw preview.")
-        version = active_relation.get("version")
-        if type(version) is int:
-            resolved_version = version
-        elif isinstance(version, str) and version.strip().isdigit():
-            resolved_version = int(version.strip())
-        else:
-            # Compatibility bridge: current in-memory relation facts do not yet
-            # expose a durable facts-level version. This preview-only token gives
-            # the frontend a stable submit contract; real stale rejection remains
-            # a later UoW/facts precondition slice.
-            resolved_version = 1
-        return {"case_id": case_id, "version": resolved_version}
+        return WorkbenchWriteResult(HTTPStatus.OK, self._withdraw_relation_preview_payload(preview_relation, month=month))
 
     def withdraw_link(self, payload: dict[str, object], *, request_id: str | None = None) -> WorkbenchWriteResult:
         action_name = "withdraw_link"
@@ -1117,54 +1064,76 @@ class WorkbenchWriteFacade:
                 {"error": "invalid_withdraw_link_request", "message": str(exc)},
             )
 
-        try:
-            preview = self._pair_relation_service.preview_withdraw_for_row_ids(row_ids)
-        except KeyError as exc:
+        operation_type = str(payload.get("operation_type") or "withdraw_relation").strip()
+        if operation_type == "split_candidate":
+            return self._split_candidate_from_withdraw_link(
+                payload=payload,
+                month=month,
+                row_ids=row_ids,
+                request_id=request_id,
+            )
+        if operation_type != "withdraw_relation":
             return WorkbenchWriteResult(
                 HTTPStatus.BAD_REQUEST,
-                {"error": str(exc).strip("'") or "workbench_pair_relation_no_withdraw_history", "message": str(exc)},
+                {
+                    "error": "invalid_withdraw_link_request",
+                    "message": f"Unsupported withdraw operation_type: {operation_type or '<empty>'}.",
+                },
             )
 
-        active_relation = preview["active_relation"]
-        conflict = self._withdraw_link_stale_conflict(payload, active_relation)
-        if conflict is not None:
-            conflict_payload = conflict.to_response_payload()
-            return WorkbenchWriteResult(HTTPStatus(conflict.status_code), dict(conflict_payload["payload"]))
-        _rows, after_relations, affected_row_ids = self._withdraw_rows_and_after_relations(
-            active_relation=active_relation,
-            after_relations=list(preview.get("after_relations") or []),
-            month=month,
-        )
-        restored_relations, _history = self._pair_relation_service.withdraw_latest_for_row_ids(
-            row_ids,
-            created_by="system",
-            note=note,
-            fallback_after_relations=after_relations,
-        )
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
+        relation_command = self._relation_command_service_for()
+        if relation_command is None:
+            return self._relation_command_unavailable_result()
+        try:
+            preview = self._preview_withdraw_relation_via_command_service(
+                relation_command,
+                row_ids=row_ids,
                 month=month,
-                row_ids=affected_row_ids,
-                month_scope=str(active_relation.get("month_scope") or ""),
             )
-        )
-        changed_case_ids = [
-            str(active_relation.get("case_id") or ""),
-            *[str(relation.get("case_id") or "") for relation in restored_relations],
-        ]
+            active_relation = dict(preview.get("active_relation") or {})
+            case_id = str(active_relation.get("case_id") or "").strip()
+            if not case_id:
+                raise ValueError("active relation case_id is required.")
+            previous_pair_snapshot = self._pair_relation_service.snapshot()
+            result = self._withdraw_relation_via_command_service(
+                relation_command,
+                payload=payload,
+                case_id=case_id,
+                actor_id=None,
+                reason=note,
+            )
+        except WorkbenchRelationCommandError as exc:
+            return self._relation_command_error_result(exc)
+        except _WorkbenchWritePersistenceError as exc:
+            return self._persistence_unavailable_result(str(exc))
+        except (TypeError, ValueError) as exc:
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_withdraw_link_request", "message": str(exc)},
+            )
+        changed_case_ids = list(result.get("changed_case_ids") or [case_id])
+        affected_row_ids = list(result.get("affected_row_ids") or row_ids)
+        changed_scope_keys = list(result.get("affected_months") or result.get("read_model_scope_keys") or [])
         schedule_started_at = monotonic()
-        self._schedule_pair_relation_persist(
-            changed_case_ids=changed_case_ids,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        self._invalidate_and_schedule_read_model(
-            action_name=action_name,
-            changed_scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(active_relation.get("case_id") or "")},
-            request_id=request_id,
-            schedule_started_at=schedule_started_at,
-        )
+        try:
+            self._schedule_pair_relation_persist(
+                changed_case_ids=changed_case_ids,
+                request_id=request_id,
+                action_name=action_name,
+            )
+            self._invalidate_and_schedule_read_model(
+                action_name=action_name,
+                changed_scope_keys=changed_scope_keys,
+                metadata={"source": action_name, "case_id": case_id},
+                request_id=request_id,
+                schedule_started_at=schedule_started_at,
+            )
+        except Exception:
+            self._restore_pair_relation_snapshot(
+                previous_pair_snapshot,
+                changed_case_ids=changed_case_ids,
+            )
+            return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             {
@@ -1175,9 +1144,319 @@ class WorkbenchWriteFacade:
                 "changed_scopes": changed_scope_keys,
                 "affected_months": changed_scope_keys,
                 "affected_row_ids": affected_row_ids,
-                "restored_relations": restored_relations,
+                "restored_relations": list(result.get("restored_relations") or []),
+                "message": "已撤回 1 组关联。",
             },
         )
+
+    def _preview_withdraw_relation_via_command_service(
+        self,
+        relation_command: Any,
+        *,
+        row_ids: list[str],
+        month: str,
+    ) -> dict[str, object]:
+        preview_withdraw_relation = getattr(relation_command, "preview_withdraw_relation", None)
+        if not callable(preview_withdraw_relation):
+            raise _WorkbenchWritePersistenceError("relation command service must expose preview_withdraw_relation.")
+        return dict(
+            preview_withdraw_relation(
+                row_ids=list(row_ids),
+                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            )
+            or {}
+        )
+
+    def _withdraw_relation_via_command_service(
+        self,
+        relation_command: Any,
+        *,
+        payload: dict[str, object],
+        case_id: str,
+        actor_id: str | None,
+        reason: str | None,
+    ) -> dict[str, object]:
+        withdraw_relation = getattr(relation_command, "withdraw_relation", None)
+        if not callable(withdraw_relation):
+            raise _WorkbenchWritePersistenceError("relation command service must expose withdraw_relation.")
+        return dict(
+            withdraw_relation(
+                case_id=case_id,
+                actor_id=_normalize_actor_id(actor_id),
+                reason=reason,
+                idempotency_key=self._idempotency_key_from_payload(payload),
+                history_operation_type="withdraw_link",
+                preview_id=str(payload.get("preview_id") or "").strip() or None,
+                operation_type=str(payload.get("operation_type") or "withdraw_relation").strip(),
+                expected_versions=dict(payload.get("expected_versions") or {})
+                if isinstance(payload.get("expected_versions"), dict)
+                else None,
+            )
+            or {}
+        )
+
+    def _withdraw_relation_preview_payload(self, preview: dict[str, object], *, month: str) -> dict[str, object]:
+        before_relations = [
+            dict(relation)
+            for relation in list(preview.get("before_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        if not before_relations:
+            active_identity = dict(preview.get("active_relation") or {})
+            before_relations = [active_identity] if active_identity else []
+        active_relation = before_relations[0] if before_relations else {}
+        after_relations = [
+            dict(relation)
+            for relation in list(preview.get("after_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
+            active_relation=active_relation,
+            after_relations=after_relations,
+            month=month,
+        )
+        before_groups = self._relation_groups(before_relations, selected_rows=rows)
+        after_groups = self._relation_groups(
+            after_relations,
+            selected_rows=rows,
+            ungrouped_selected_rows="separate",
+        )
+        amount_check = self._amount_check_for_withdraw_preview(
+            active_relation=active_relation,
+            rows=rows,
+        )
+        return {
+            "operation": "withdraw_link",
+            "operation_type": "withdraw_relation",
+            "preview_id": str(preview.get("preview_id") or ""),
+            "can_submit": bool(preview.get("can_submit", True)),
+            "requires_note": bool(preview.get("requires_note")),
+            "message": str(preview.get("message") or ""),
+            "before": {"groups": before_groups},
+            "after": {"groups": after_groups},
+            "amount_summary": {
+                "before": amount_check,
+                "after": amount_check,
+                **amount_check,
+            },
+            "restored_relations": after_relations,
+            "active_relation": dict(preview.get("active_relation") or {}),
+            "submit_expected_versions": dict(preview.get("submit_expected_versions") or {}),
+        }
+
+    def _preview_split_candidate(self, *, month: str, row_ids: list[str]) -> dict[str, object] | None:
+        candidates = self._active_candidate_matches_for_row_ids(month=month, row_ids=row_ids)
+        if not candidates:
+            return None
+        if len(candidates) > 1:
+            raise ValueError("一次只能处理一个关联组。")
+        candidate = candidates[0]
+        candidate_key = str(candidate.get("candidate_key") or "").strip()
+        if not candidate_key:
+            return None
+        candidate_row_ids = [
+            str(row_id)
+            for row_id in list(candidate.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        rows = self._resolve_live_rows_direct(candidate_row_ids, month_hint=month) if candidate_row_ids else []
+        amount_check = self._amount_check_for_rows_by_type(self._rows_by_type(rows))
+        expected_versions = {f"candidate:{candidate_key}": str(candidate.get("status") or "")}
+        preview_id = self._split_candidate_preview_id(
+            candidate_keys=[candidate_key],
+            expected_versions=expected_versions,
+        )
+        return {
+            "operation": "split_candidate",
+            "operation_type": "split_candidate",
+            "preview_id": preview_id,
+            "candidate_keys": [candidate_key],
+            "can_submit": True,
+            "requires_note": False,
+            "message": "将拆分该自动候选组合，保留各记录为未配对状态。",
+            "before": {
+                "groups": self._relation_groups(
+                    [],
+                    selected_rows=rows,
+                    ungrouped_selected_rows="single",
+                )
+            },
+            "after": {"groups": []},
+            "amount_summary": {
+                "before": amount_check,
+                "after": amount_check,
+                **amount_check,
+            },
+            "submit_expected_versions": expected_versions,
+        }
+
+    def _split_candidate_from_withdraw_link(
+        self,
+        *,
+        payload: dict[str, object],
+        month: str,
+        row_ids: list[str],
+        request_id: str | None,
+    ) -> WorkbenchWriteResult:
+        try:
+            preview = self._preview_split_candidate(month=month, row_ids=row_ids)
+        except ValueError as exc:
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_split_candidate_request", "message": str(exc)},
+            )
+        if preview is None:
+            return WorkbenchWriteResult(
+                HTTPStatus.NOT_FOUND,
+                {
+                    "error": "workbench_candidate_not_found",
+                    "message": "Selected rows do not belong to an active automatic candidate group.",
+                },
+            )
+        conflict = self._split_candidate_preview_conflict(payload=payload, preview=preview)
+        if conflict is not None:
+            return conflict
+        marker = getattr(self._candidate_match_service, "mark_candidates_suppressed", None)
+        if not callable(marker):
+            return WorkbenchWriteResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "workbench_candidate_match_service_unavailable",
+                    "message": "Workbench candidate match service is not configured.",
+                },
+            )
+        candidate_keys = [
+            str(candidate_key)
+            for candidate_key in list(preview.get("candidate_keys") or [])
+            if str(candidate_key).strip()
+        ]
+        previous_candidate_snapshot = self._candidate_match_service.snapshot()
+        try:
+            updated_candidates = marker(
+                candidate_keys=candidate_keys,
+                suppressed_reason="manual_override",
+            )
+            self._persist_candidate_matches_best_effort(operation="split_candidate")
+            changed_scope_keys = list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids, month_scope=month))
+            schedule_started_at = monotonic()
+            self._execute_derived_data_lifecycle_event(
+                "candidate_match_changed",
+                scope_keys=changed_scope_keys,
+                metadata={"source": "split_candidate", "candidate_keys": candidate_keys},
+            )
+            self._schedule_read_model_persist(
+                changed_scope_keys=changed_scope_keys,
+                request_id=request_id,
+                action_name="split_candidate",
+            )
+            self._emit_timing_if_requested(
+                request_id=request_id,
+                action_name="split_candidate",
+                phase="schedule_background_persist",
+                started_at=schedule_started_at,
+            )
+        except Exception:
+            loader = getattr(type(self._candidate_match_service), "from_snapshot", None)
+            if callable(loader):
+                restored_service = loader(previous_candidate_snapshot)
+                self._candidate_match_service.__dict__.update(restored_service.__dict__)
+            return self._persistence_unavailable_result("工作台候选关系暂时无法保存，请稍后重试。")
+        affected_row_ids = [
+            str(row_id)
+            for candidate in list(updated_candidates or [])
+            for row_id in list(candidate.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        return WorkbenchWriteResult(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "operation": "split_candidate",
+                "action": "split_candidate",
+                "month": month,
+                "changed_scopes": list(self._scope_keys_for_row_ids(month=month, row_ids=affected_row_ids or row_ids, month_scope=month)),
+                "affected_months": list(self._scope_keys_for_row_ids(month=month, row_ids=affected_row_ids or row_ids, month_scope=month)),
+                "affected_row_ids": affected_row_ids or row_ids,
+                "candidate_keys": candidate_keys,
+                "message": "已拆分 1 个候选组合。",
+            },
+        )
+
+    def _active_candidate_matches_for_row_ids(self, *, month: str, row_ids: list[str]) -> list[dict[str, object]]:
+        requested_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
+        if not requested_row_ids:
+            return []
+        month_scope = str(month or "").strip()
+        lister = getattr(self._candidate_match_service, "list_candidates_by_month", None)
+        if callable(lister) and month_scope != "all":
+            candidates = lister(month)
+        else:
+            snapshotter = getattr(self._candidate_match_service, "snapshot", None)
+            snapshot = snapshotter() if callable(snapshotter) else {}
+            candidates_payload = (snapshot.get("candidates") if isinstance(snapshot, dict) else {}) or {}
+            candidates = list(candidates_payload.values()) if isinstance(candidates_payload, dict) else []
+        matched: list[dict[str, object]] = []
+        for candidate in list(candidates or []):
+            if not isinstance(candidate, dict):
+                continue
+            status = str(candidate.get("status") or "").strip()
+            if status in {"consumed", "suppressed"}:
+                continue
+            candidate_row_ids = {
+                str(row_id).strip()
+                for row_id in list(candidate.get("row_ids") or [])
+                if str(row_id).strip()
+            }
+            if requested_row_ids.intersection(candidate_row_ids):
+                matched.append(dict(candidate))
+        return matched
+
+    @staticmethod
+    def _split_candidate_preview_id(
+        *,
+        candidate_keys: list[str],
+        expected_versions: dict[str, object],
+    ) -> str:
+        payload = {
+            "operation_type": "split_candidate",
+            "candidate_keys": list(candidate_keys),
+            "expected_versions": dict(expected_versions),
+        }
+        digest = sha256(
+            json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"split_candidate:{digest}"
+
+    @staticmethod
+    def _split_candidate_preview_conflict(
+        *,
+        payload: dict[str, object],
+        preview: dict[str, object],
+    ) -> WorkbenchWriteResult | None:
+        preview_id = str(payload.get("preview_id") or "").strip()
+        if preview_id and preview_id != str(preview.get("preview_id") or "").strip():
+            return WorkbenchWriteResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "workbench_candidate_preview_conflict",
+                    "message": "Candidate split preview is stale.",
+                    "reason": "stale_preview_id",
+                },
+            )
+        expected_versions = payload.get("expected_versions")
+        if isinstance(expected_versions, dict) and expected_versions:
+            current_expected = dict(preview.get("submit_expected_versions") or {})
+            if dict(expected_versions) != current_expected:
+                return WorkbenchWriteResult(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "workbench_candidate_preview_conflict",
+                        "message": "Candidate split expected_versions do not match current candidate state.",
+                        "reason": "stale_candidate_identity",
+                        "current_expected_versions": current_expected,
+                    },
+                )
+        return None
 
     def confirm_cash_pass_through(
         self,

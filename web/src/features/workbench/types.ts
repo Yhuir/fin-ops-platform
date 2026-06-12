@@ -254,10 +254,14 @@ export type WorkbenchAmountSummary = {
   mismatchFields: string[];
 };
 
-export type WorkbenchRelationPreviewOperation = "confirm_link" | "withdraw_link";
+export type WorkbenchRelationPreviewOperation = "confirm_link" | "withdraw_link" | "split_candidate";
 
 export type WorkbenchRelationPreview = {
   operation: WorkbenchRelationPreviewOperation;
+  operationType: "confirm_link" | "withdraw_relation" | "split_candidate";
+  previewId: string;
+  submitExpectedVersions: Record<string, unknown>;
+  candidateKeys: string[];
   canSubmit: boolean;
   requiresNote: boolean;
   message: string;

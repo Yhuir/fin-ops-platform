@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import json
 from typing import Any
 
@@ -463,6 +464,79 @@ class WorkbenchRelationCommandService:
             month_scope=month_scope,
         )
 
+    def preview_withdraw_relation(
+        self,
+        *,
+        row_ids: list[str],
+        month_scope: str = "all",
+    ) -> dict[str, Any]:
+        pair_service = self._pair_service()
+        active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
+        if not active_relations:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_not_found",
+                "Workbench relation is not active or does not exist.",
+                payload={"row_ids": [str(row_id) for row_id in list(row_ids or [])]},
+            )
+        if len(active_relations) > 1:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_multiple_groups_selected",
+                "Only one workbench relation group can be withdrawn at a time.",
+                payload={
+                    "case_ids": [
+                        str(relation.get("case_id") or "")
+                        for relation in active_relations
+                        if str(relation.get("case_id") or "").strip()
+                    ],
+                },
+            )
+        active_relation = active_relations[0]
+        active_row_ids = [
+            str(row_id)
+            for row_id in list(active_relation.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        freshness = self._assert_relation_read_model_fresh(
+            row_ids=active_row_ids,
+            month_scope=str(active_relation.get("month_scope") or month_scope or "all"),
+        )
+        try:
+            preview = pair_service.preview_withdraw_for_row_ids(active_row_ids)
+        except KeyError as exc:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_not_found",
+                "Workbench relation is not active or does not exist.",
+                payload={"row_ids": active_row_ids},
+            ) from exc
+        active_relation = deepcopy(preview["active_relation"])
+        after_relations = [
+            deepcopy(relation)
+            for relation in list(preview.get("after_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        expected_versions = self._withdraw_expected_versions(active_relation)
+        preview_id = self._withdraw_preview_id(
+            operation_type="withdraw_relation",
+            active_relation=active_relation,
+            after_relations=after_relations,
+        )
+        return {
+            "operation": "withdraw_link",
+            "operation_type": "withdraw_relation",
+            "preview_id": preview_id,
+            "can_submit": True,
+            "requires_note": False,
+            "message": "",
+            "active_relation": self._relation_identity(active_relation),
+            "before_relations": [deepcopy(active_relation)],
+            "after_relations": after_relations,
+            "submit_expected_versions": expected_versions,
+            "read_model_status": str(freshness.get("status") or freshness.get("read_model_status") or FRESH_WORKBENCH_RELATION_STATUS),
+            "read_model_scope_keys": list(freshness.get("read_model_scope_keys") or self._affected_months(str(active_relation.get("month_scope") or month_scope or "all"))),
+            "read_model_stale_reasons": list(freshness.get("stale_reasons") or freshness.get("read_model_stale_reasons") or []),
+            "refresh_enqueued": bool(freshness.get("refresh_enqueued")),
+        }
+
     def withdraw_relation(
         self,
         *,
@@ -472,8 +546,18 @@ class WorkbenchRelationCommandService:
         occurred_at: str | None = None,
         idempotency_key: str | None = None,
         history_operation_type: str = "withdraw_link",
+        preview_id: str | None = None,
+        operation_type: str | None = None,
+        expected_versions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resolved_case_id = str(case_id or "").strip()
+        resolved_operation_type = str(operation_type or "withdraw_relation").strip()
+        if resolved_operation_type != "withdraw_relation":
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_preview_conflict",
+                "Withdraw relation submit operation_type does not match the preview.",
+                payload={"operation_type": resolved_operation_type},
+            )
         fingerprint = self._request_fingerprint(
             "withdraw_relation",
             {
@@ -481,6 +565,9 @@ class WorkbenchRelationCommandService:
                 "actor_id": actor_id,
                 "reason": reason,
                 "history_operation_type": history_operation_type,
+                "preview_id": preview_id,
+                "operation_type": resolved_operation_type,
+                "expected_versions": expected_versions,
             },
         )
         replay = self._idempotency_replay(idempotency_key, fingerprint)
@@ -495,6 +582,15 @@ class WorkbenchRelationCommandService:
                 "Workbench relation is not active or does not exist.",
                 payload={"case_id": resolved_case_id},
             )
+        current_preview = self.preview_withdraw_relation(
+            row_ids=list(before_relation.get("row_ids") or []),
+            month_scope=str(before_relation.get("month_scope") or "all"),
+        )
+        self._assert_withdraw_preview_lock(
+            preview=current_preview,
+            preview_id=preview_id,
+            expected_versions=expected_versions,
+        )
         freshness = self._assert_relation_read_model_fresh(
             row_ids=list(before_relation.get("row_ids") or []),
             month_scope=str(before_relation.get("month_scope") or "all"),
@@ -548,6 +644,84 @@ class WorkbenchRelationCommandService:
         }
         self._save_idempotency_result(idempotency_key, fingerprint, result)
         return result
+
+    @classmethod
+    def _relation_identity(cls, relation: dict[str, Any]) -> dict[str, Any]:
+        case_id = str(relation.get("case_id") or "").strip()
+        if not case_id:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_invalid_identity",
+                "Workbench relation case_id is required.",
+            )
+        return {"case_id": case_id, "version": cls._relation_version(relation)}
+
+    @classmethod
+    def _withdraw_expected_versions(cls, active_relation: dict[str, Any]) -> dict[str, Any]:
+        identity = cls._relation_identity(active_relation)
+        return {f"relation:{identity['case_id']}": identity["version"]}
+
+    @classmethod
+    def _withdraw_preview_id(
+        cls,
+        *,
+        operation_type: str,
+        active_relation: dict[str, Any],
+        after_relations: list[dict[str, Any]],
+    ) -> str:
+        payload = {
+            "operation_type": operation_type,
+            "active_relation": cls._relation_identity(active_relation),
+            "active_row_ids": [
+                str(row_id)
+                for row_id in list(active_relation.get("row_ids") or [])
+                if str(row_id).strip()
+            ],
+            "after_relations": [
+                cls._relation_identity(relation)
+                for relation in list(after_relations or [])
+                if isinstance(relation, dict)
+            ],
+        }
+        digest = sha256(
+            json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"{operation_type}:{digest}"
+
+    @staticmethod
+    def _relation_version(relation: dict[str, Any]) -> int:
+        version = relation.get("version")
+        if type(version) is int:
+            return version
+        if isinstance(version, str) and version.strip().isdigit():
+            return int(version.strip())
+        return 1
+
+    @staticmethod
+    def _assert_withdraw_preview_lock(
+        *,
+        preview: dict[str, Any],
+        preview_id: str | None,
+        expected_versions: dict[str, Any] | None,
+    ) -> None:
+        resolved_preview_id = str(preview_id or "").strip()
+        current_preview_id = str(preview.get("preview_id") or "").strip()
+        if resolved_preview_id and resolved_preview_id != current_preview_id:
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_preview_conflict",
+                "Withdraw relation preview is stale.",
+                payload={"reason": "stale_preview_id", "current_preview_id": current_preview_id},
+            )
+        if isinstance(expected_versions, dict) and expected_versions:
+            current_expected = dict(preview.get("submit_expected_versions") or {})
+            if dict(expected_versions) != current_expected:
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_preview_conflict",
+                    "Withdraw relation expected_versions do not match the current relation state.",
+                    payload={
+                        "reason": "stale_relation_identity",
+                        "current_expected_versions": current_expected,
+                    },
+                )
 
     def _pair_service(self) -> WorkbenchPairRelationService:
         loader = getattr(self._relation_repository, "load_workbench_pair_relations", None)

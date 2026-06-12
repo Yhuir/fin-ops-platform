@@ -37,48 +37,13 @@ export function buildWorkbenchSelectionContext({
     includedRowsById.set(row.id, sourceRowsById.get(row.id) ?? row);
   });
 
-  const selectedOaIds = new Set(
-    explicitRows
-      .map((row) => sourceRowsById.get(row.id) ?? row)
-      .filter((row) => row.recordType === "oa")
-      .map((row) => row.id),
-  );
-  const selectedSourceOaIds = new Set(
-    explicitRows
-      .map((row) => sourceRowsById.get(row.id) ?? row)
-      .map(readOaSourceId)
-      .filter((sourceOaId): sourceOaId is string => Boolean(sourceOaId)),
-  );
   sourceGroups.forEach((group) => {
     const groupRows = flattenWorkbenchGroup(group);
     if (!groupRows.some((row) => explicitRowIdSet.has(row.id))) {
       return;
     }
 
-    if (zoneId === "paired" || groupPreservesExistingContext(group)) {
-      groupRows.forEach((row) => includedRowsById.set(row.id, row));
-      return;
-    }
-
-    const explicitGroupRecordTypes = new Set(
-      groupRows
-        .filter((row) => explicitRowIdSet.has(row.id))
-        .map((row) => row.recordType),
-    );
-    if (explicitGroupRecordTypes.size >= 2) {
-      groupRows.forEach((row) => includedRowsById.set(row.id, row));
-      return;
-    }
-
-    groupRows.forEach((row) => {
-      const sourceOaId = readOaSourceId(row);
-      if (sourceOaId && selectedOaIds.has(sourceOaId)) {
-        includedRowsById.set(row.id, row);
-      }
-      if (row.recordType === "oa" && selectedSourceOaIds.has(row.id)) {
-        includedRowsById.set(row.id, row);
-      }
-    });
+    groupRows.forEach((row) => includedRowsById.set(row.id, row));
   });
 
   const includedRows = Array.from(includedRowsById.values());
@@ -157,26 +122,4 @@ function flattenWorkbenchGroups(groups: WorkbenchCandidateGroup[]) {
 
 function flattenWorkbenchGroup(group: WorkbenchCandidateGroup) {
   return paneIds.flatMap((paneId) => group.rows[paneId]);
-}
-
-function readOaSourceId(row: WorkbenchRecord) {
-  if (
-    row.sourceKind !== "oa_attachment_invoice"
-    && row.sourceKind !== "oa_attachment_payment_receipt"
-    && row.sourceKind !== "oa_attachment_unknown"
-  ) {
-    return null;
-  }
-
-  const sourceField = row.detailFields.find((field) =>
-    field.label === "来源OA单号" || field.label === "derived_from_oa_id" || field.label === "source_oa_id",
-  );
-  const sourceId = sourceField?.value.trim();
-  return sourceId && sourceId !== "--" && sourceId !== "—" ? sourceId : null;
-}
-
-function groupPreservesExistingContext(group: WorkbenchCandidateGroup) {
-  return group.canWithdraw
-    || group.reason === "relation_snapshot"
-    || group.reason === "oa_attachment_source_relation";
 }

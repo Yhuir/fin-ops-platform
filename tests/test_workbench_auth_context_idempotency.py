@@ -7,7 +7,9 @@ from unittest.mock import patch
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_idempotency import WorkbenchIdempotencyInProgress
+from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
 
 
@@ -93,6 +95,8 @@ class _RecordingRelationCommandService:
     def __init__(self) -> None:
         self.confirm_calls: list[dict[str, object]] = []
         self.cancel_calls: list[dict[str, object]] = []
+        self.preview_withdraw_calls: list[dict[str, object]] = []
+        self.withdraw_calls: list[dict[str, object]] = []
 
     def confirm_relation(self, **kwargs: object) -> dict[str, object]:
         self.confirm_calls.append(dict(kwargs))
@@ -139,6 +143,58 @@ class _RecordingRelationCommandService:
             "idempotent_replay": False,
         }
 
+    def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        self.preview_withdraw_calls.append(dict(kwargs))
+        active_relation = {
+            "case_id": "CASE-1",
+            "row_ids": list(kwargs["row_ids"]),
+            "row_types": ["oa", "bank"],
+            "status": "active",
+            "month_scope": "2026-05",
+            "version": 3,
+        }
+        return {
+            "operation": "withdraw_link",
+            "operation_type": "withdraw_relation",
+            "preview_id": "withdraw_relation:CASE-1:3",
+            "active_relation": {"case_id": "CASE-1", "version": 3},
+            "before_relations": [active_relation],
+            "after_relations": [],
+            "submit_expected_versions": {"relation:CASE-1": 3},
+        }
+
+    def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        self.withdraw_calls.append(dict(kwargs))
+        return {
+            "status": "withdrawn",
+            "relation": {
+                "case_id": "CASE-1",
+                "row_ids": ["oa-1", "bank-1"],
+                "status": "cancelled",
+                "version": 4,
+            },
+            "history": {"operation_type": "withdraw_link"},
+            "changed_case_ids": ["CASE-1"],
+            "affected_months": ["2026-05"],
+            "affected_row_ids": ["oa-1", "bank-1"],
+            "restored_relations": [],
+            "version": 4,
+            "read_model_status": "fresh",
+            "read_model_stale_reasons": [],
+            "read_model_scope_keys": ["2026-05"],
+            "refresh_enqueued": False,
+            "idempotent_replay": False,
+        }
+
+
+class _NoActiveRelationCommandService:
+    def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        raise WorkbenchRelationCommandError(
+            "workbench_relation_not_found",
+            "Workbench relation is not active or does not exist.",
+            payload={"row_ids": list(kwargs.get("row_ids") or [])},
+        )
+
 
 class _RecordingExceptionCaseService:
     def __init__(self) -> None:
@@ -167,6 +223,8 @@ def _new_facade(
     cancel_uow: object | None = None,
     relation_command_service: object | None = None,
     exception_case_service: object | None = None,
+    candidate_match_service: object | None = None,
+    candidate_persist_calls: list[dict[str, object]] | None = None,
     live_rows: list[dict[str, object]] | None = None,
 ) -> WorkbenchWriteFacade:
     pair_relation_service = _PairRelationService()
@@ -175,7 +233,7 @@ def _new_facade(
         exception_service=object(),
         exception_case_service=exception_case_service or object(),
         override_service=object(),
-        candidate_match_service=object(),
+        candidate_match_service=candidate_match_service or object(),
         next_case_id=lambda: "CASE-NEW",
         normalize_row_ids=lambda values: [str(value) for value in values],
         resolved_row_types_for_row_ids=lambda row_ids, **_: ["oa" if str(row_id).startswith("oa") else "bank" for row_id in row_ids],
@@ -199,7 +257,11 @@ def _new_facade(
         save_exception_cases_snapshot=lambda: None,
         persist_pair_relations=lambda **_: None,
         save_overrides_snapshot=lambda **_: None,
-        persist_candidate_matches_best_effort=lambda **_: None,
+        persist_candidate_matches_best_effort=(
+            lambda **kwargs: candidate_persist_calls.append(dict(kwargs))
+            if candidate_persist_calls is not None
+            else None
+        ),
         restore_exception_write_snapshots=lambda **_: None,
         restore_exception_override_snapshots=lambda **_: None,
         restore_exception_pair_snapshots=lambda **_: None,
@@ -344,6 +406,102 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(relation_command.cancel_calls[0]["case_id"], "CASE-1")
         self.assertEqual(relation_command.cancel_calls[0]["actor_id"], "oa-user-1")
         self.assertEqual(relation_command.cancel_calls[0]["reason"], "误关联")
+
+    def test_withdraw_link_preview_and_submit_delegate_to_relation_command_service(self) -> None:
+        relation_command = _RecordingRelationCommandService()
+        facade = _new_facade(relation_command_service=relation_command)
+
+        preview = facade.preview_withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+            }
+        )
+        submit = facade.withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "operation_type": "withdraw_relation",
+                "preview_id": preview.payload["preview_id"],
+                "expected_versions": preview.payload["submit_expected_versions"],
+                "idempotency_key": "withdraw:1",
+            },
+            request_id="req-withdraw-1",
+        )
+
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
+        self.assertEqual(submit.status_code, HTTPStatus.OK)
+        self.assertEqual(len(relation_command.preview_withdraw_calls), 2)
+        self.assertEqual(relation_command.preview_withdraw_calls[0]["row_ids"], ["oa-1", "bank-1"])
+        self.assertEqual(relation_command.preview_withdraw_calls[0]["month_scope"], "2026-05")
+        self.assertEqual(relation_command.preview_withdraw_calls[1]["row_ids"], ["oa-1", "bank-1"])
+        self.assertEqual(relation_command.preview_withdraw_calls[1]["month_scope"], "2026-05")
+        self.assertEqual(len(relation_command.withdraw_calls), 1)
+        self.assertEqual(relation_command.withdraw_calls[0]["case_id"], "CASE-1")
+        self.assertEqual(relation_command.withdraw_calls[0]["preview_id"], "withdraw_relation:CASE-1:3")
+        self.assertEqual(relation_command.withdraw_calls[0]["operation_type"], "withdraw_relation")
+        self.assertEqual(relation_command.withdraw_calls[0]["expected_versions"], {"relation:CASE-1": 3})
+        self.assertEqual(relation_command.withdraw_calls[0]["idempotency_key"], "withdraw:1")
+
+    def test_withdraw_link_splits_pure_candidate_group_without_relation_history(self) -> None:
+        candidate_service = WorkbenchCandidateMatchService()
+        candidate = candidate_service.upsert_candidate(
+            {
+                "scope_month": "2026-05",
+                "candidate_type": "oa_bank_invoice",
+                "status": "needs_review",
+                "confidence": "medium",
+                "rule_code": "same_counterparty_amount",
+                "row_ids": ["oa-candidate", "bank-candidate", "invoice-candidate"],
+                "oa_row_ids": ["oa-candidate"],
+                "bank_row_ids": ["bank-candidate"],
+                "invoice_row_ids": ["invoice-candidate"],
+                "amount": "100.00",
+                "amount_delta": "0.00",
+                "explanation": "自动候选",
+                "conflict_candidate_keys": [],
+                "generated_at": "2026-05-06T10:00:00+00:00",
+                "source_versions": {},
+            }
+        )
+        persist_calls: list[dict[str, object]] = []
+        facade = _new_facade(
+            relation_command_service=_NoActiveRelationCommandService(),
+            candidate_match_service=candidate_service,
+            candidate_persist_calls=persist_calls,
+            live_rows=[
+                {"id": "oa-candidate", "type": "oa", "amount": "100.00"},
+                {"id": "bank-candidate", "type": "bank", "amount": "100.00"},
+                {"id": "invoice-candidate", "type": "invoice", "amount": "100.00"},
+            ],
+        )
+
+        preview = facade.preview_withdraw_link(
+            {
+                "month": "all",
+                "row_ids": ["bank-candidate"],
+            }
+        )
+        submit = facade.withdraw_link(
+            {
+                "month": "all",
+                "row_ids": ["bank-candidate"],
+                "operation_type": "split_candidate",
+                "preview_id": preview.payload["preview_id"],
+                "expected_versions": preview.payload["submit_expected_versions"],
+                "idempotency_key": "split-candidate:1",
+            },
+            request_id="req-split-candidate",
+        )
+
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
+        self.assertEqual(preview.payload["operation_type"], "split_candidate")
+        self.assertEqual(preview.payload["candidate_keys"], [candidate["candidate_key"]])
+        self.assertEqual(submit.status_code, HTTPStatus.OK)
+        stored = candidate_service.list_candidates_by_month("2026-05")[0]
+        self.assertEqual(stored["status"], "suppressed")
+        self.assertEqual(stored["suppressed_reason"], "manual_override")
+        self.assertEqual(persist_calls, [{"operation": "split_candidate"}])
 
     def test_confirm_and_cancel_link_fail_fast_without_relation_command_service(self) -> None:
         facade = _new_facade()

@@ -389,28 +389,29 @@ describe("Workbench row selection and detail modal", () => {
     );
   });
 
-  test("open zone header confirm link explains invalid selection when selected context has no bank row", async () => {
+  test("open zone header confirm link uses the whole selected group from one clicked row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
     const openOaRow = await screen.findByRole("row", {
-      name: /孙敏.*华东补录项目/,
-    });
-    const openInvoiceRow = await screen.findByRole("row", {
-      name: /昆玉高速公路收费站/,
+      name: /陈涛.*智能工厂设备商/,
     });
 
     await user.click(openOaRow);
-    await user.click(openInvoiceRow);
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    expect(
-      await screen.findByText("确认关联至少需要选择 1 条银行流水，并同时选择 OA 或发票。"),
-    ).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/workbench/actions/confirm-link",
-      expect.anything(),
+    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/confirm-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+          case_id: "CASE-202603-101",
+        }),
+      }),
     );
   });
 
@@ -830,7 +831,7 @@ describe("Workbench row selection and detail modal", () => {
     window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
 
-  test("open zone enables withdraw link only for groups with history", async () => {
+  test("open zone withdraw opens a preview for one selected group", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
@@ -852,6 +853,27 @@ describe("Workbench row selection and detail modal", () => {
     expectRelationPreviewSummary(after);
     expectRelationPreviewTriPane(before);
     expectRelationPreviewTriPane(after);
+  });
+
+  test("open zone withdraw blocks multi-group selection with a prompt", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    const openZone = await screen.findByTestId("zone-open");
+    const withdrawButton = within(openZone).getByRole("button", { name: "撤回关联" });
+
+    await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(openZone).getByRole("row", { name: /林晨.*尾差设备商/ }));
+
+    expect(withdrawButton).toBeEnabled();
+    fetchMock.mockClear();
+    await user.click(withdrawButton);
+
+    expect(await screen.findByText("一次只能处理一个关联组。")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/workbench/actions/withdraw-link/preview")),
+    ).toBe(false);
   });
 
   test("pane search filters only the active pane while keeping aligned rows visible", async () => {
@@ -890,7 +912,7 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(openInvoicePane).getByRole("button", { name: "清空搜索 进销项发票" })).toBeInTheDocument();
   });
 
-  test("open zone header actions stay disabled until enough rows are selected", async () => {
+  test("open zone header actions use the selected group context", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
@@ -913,8 +935,9 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(openOaRow);
 
-    expect(confirmButton).toBeDisabled();
+    expect(confirmButton).toBeEnabled();
     expect(exceptionButton).toBeEnabled();
+    expect(withdrawButton).toBeEnabled();
 
     const openBankRow = within(openZone).getByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
@@ -924,7 +947,7 @@ describe("Workbench row selection and detail modal", () => {
 
     expect(confirmButton).toBeEnabled();
     expect(exceptionButton).toBeEnabled();
-    expect(withdrawButton).toBeDisabled();
+    expect(withdrawButton).toBeEnabled();
   });
 
   test("workbench settings can manage allowed app accounts", async () => {
@@ -1745,6 +1768,7 @@ describe("Workbench row selection and detail modal", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
+          operation_type: "withdraw_relation",
         }),
       }),
     );

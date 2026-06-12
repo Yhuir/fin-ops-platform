@@ -1064,7 +1064,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(pair_relation_persist.call_count, 2)
         self.assertEqual(read_model_persist.call_count, 2)
 
-    def test_withdraw_link_read_model_scheduling_failure_propagates_after_relation_is_withdrawn(self) -> None:
+    def test_withdraw_link_read_model_scheduling_failure_rolls_back_relation_withdraw(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
@@ -1080,11 +1080,12 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             patch.object(app, "_schedule_workbench_pair_relation_persist"),
             patch.object(app, "_schedule_workbench_read_model_persist", side_effect=RuntimeError("mock withdraw read model failure")),
         ):
-            with self.assertRaisesRegex(RuntimeError, "mock withdraw read model failure"):
-                self._post(app, "/api/workbench/actions/withdraw-link", {"month": "2026-03", "row_ids": row_ids})
+            response = self._post(app, "/api/workbench/actions/withdraw-link", {"month": "2026-03", "row_ids": row_ids})
 
-        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-SCHEDULE-FAIL"))
-        self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["operation_type"], "withdraw_link")
+        self.assertEqual(response.status_code, 503, response.body)
+        self.assertEqual(_json_response(response)["error"], "workbench_state_persistence_unavailable")
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-SCHEDULE-FAIL"))
+        self.assertNotEqual(app._workbench_pair_relation_service.list_history()[-1]["operation_type"], "withdraw_link")
 
     def test_duplicate_cash_special_updates_and_clears_are_replayed_current_behavior(self) -> None:
         app = self._build_app()

@@ -1,5 +1,27 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-12 Phase 7M Workbench withdraw command 边界与 candidate split
+
+目标：把关联台 `withdraw-link` preview/submit 从 `WorkbenchWriteFacade -> WorkbenchPairRelationService` direct path 迁到 `WorkbenchRelationCommandService`，同时支持未配对区纯自动候选 group 的统一按钮 split/suppress。
+
+结论：
+
+- `WorkbenchRelationCommandService.preview_withdraw_relation` 返回 locked preview：`operation_type=withdraw_relation`、`preview_id`、`submit_expected_versions`、before/after relations。
+- `WorkbenchRelationCommandService.withdraw_relation` 校验 preview id 和 expected versions；不匹配时返回 `workbench_relation_preview_conflict`，避免 stale submit 撤回当前新关系。
+- `WorkbenchWriteFacade.preview_withdraw_link` 只负责 HTTP payload 组装和三栏 preview groups；relation 判断委托 command service。
+- active relation 无 history 时撤到无关联，不再由 facade 合成 OA 附件恢复关系。
+- `split_candidate` 不进入 relation command service，不写 relation history；它复用 `WorkbenchCandidateMatchService.mark_candidates_suppressed(..., suppressed_reason="manual_override")`，并触发 workbench refresh。
+
+验证：
+
+- `tests/test_workbench_relation_command_service.py`
+- `tests/test_workbench_auth_context_idempotency.py`
+- `tests/test_workbench_v2_api.py -k withdraw_link`
+- `tests/test_workbench_write_characterization.py -k withdraw_link`
+- `web/src/test/WorkbenchSelection.test.tsx`
+- `web/src/test/WorkbenchSelectionModel.test.ts`
+- `npm --prefix web run build`
+
 ## 2026-06-11 Phase 0 架构盘点
 
 目标：设计 `workbench_relations` 后端模块，把 OA、银行流水、正式发票、OA 附件发票之间的配对/解除配对/撤回/关闭/挂接关系收敛到同一事实源，避免页面、service 和 read model 各自维护独立事实。
