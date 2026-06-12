@@ -178,7 +178,7 @@ refresh 触发来源：
 - bank transaction category changed。
 - Workbench confirm-link internal transfer path。
 - runtime repair。
-- `startup_stale_scan` 只标记 workbench matching dirty scopes，不直接刷新免 OA read model。
+- `startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes，不直接刷新免 OA read model。
 
 worker 流程：
 

@@ -37,7 +37,7 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | `etc_business_batch_changed` | ETC/tax/cost/search 相关派生域 | ETC、税金、成本 | all-event safe plan guard；ETC 模块继续补 |
 | `settings_reset_completed` / `manual_derived_cache_cleanup` | 多数 read model/cache/job 域 | 所有列表页、App Health、成本/搜索 | manual cleanup tests；settings/cost 模块继续补 |
 | `project_scope_changed` | 成本统计、搜索 | 成本/搜索 | `tests/test_derived_data_lifecycle_service.py` |
-| `startup_stale_scan` | `workbench_matching_dirty_scopes` only | 关联台 matching 补扫；不得刷新用户可见 read model | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_marks_available_months_dirty_when_db_queue_exists` |
+| `startup_stale_scan` | opt-in `workbench_matching_dirty_scopes` only | 关联台 matching 补扫；默认启动不执行，启用时只标记 stale scope，不得刷新用户可见 read model | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_is_disabled_during_application_startup_by_default`、`test_startup_stale_scan_can_be_enabled_during_application_startup`、`test_startup_stale_scan_skips_fresh_matching_months` |
 
 ## 前端 domain event 影响图
 
@@ -69,7 +69,7 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | --- | --- | --- | --- |
 | 2026-06-11 | 新增 derived lifecycle event 可能只加入枚举，未证明能生成安全 plan。 | `test_every_declared_event_builds_safe_json_serializable_plan` | covered |
 | 2026-06-11 | 前端 finance domain event 改名或漏同步，导致页面监听旧事件失效。 | `web/src/test/domainEvents.test.ts::declares the finance domain event contract` | covered |
-| 2026-06-13 | 应用/worker 重启触发 `startup_stale_scan` 时误刷新 workbench、relation、invoice lifecycle、cost、tax 等页面 read model，造成分钟级同步窗口。 | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_marks_available_months_dirty_when_db_queue_exists` | covered |
+| 2026-06-13 | 应用/worker 重启触发 `startup_stale_scan` 时误刷新 workbench、relation、invoice lifecycle、cost、tax 等页面 read model，或无条件重扫 matching dirty scopes，造成分钟级同步窗口。 | `test_startup_stale_scan_marks_workbench_matching_dirty_scopes_for_rule_backfill`、`test_startup_stale_scan_is_disabled_during_application_startup_by_default`、`test_startup_stale_scan_can_be_enabled_during_application_startup`、`test_startup_stale_scan_skips_fresh_matching_months` | covered |
 | 长期 | 前端 domain event 被误当成事实源，inactive 页面 replay 旧事件误刷新。 | `web/src/test/useActiveFinanceDomainEvent.test.tsx` | covered |
 
 ## 关键 smoke flows

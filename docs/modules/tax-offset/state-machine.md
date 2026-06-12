@@ -75,7 +75,7 @@ Refresh 触发来源：
 - 待找发票规则变化、invoice lifecycle refresh。
 - OA rebuild 或 OA 附件发票 cache 更新。
 - readiness backfill、App Health 运维任务。
-- `startup_stale_scan` 不直接刷新税金 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
+- `startup_stale_scan` 默认关闭，且不直接刷新税金 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
 
 `all` refresh 流程：
 

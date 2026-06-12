@@ -86,7 +86,7 @@ Refresh 触发来源：
 - 收入状态 override。
 - 银行标签保存、重命名、归档或自动分类版本变化。
 - invoice lifecycle refresh、OA rebuild、App Health/backfill 运维任务。
-- `startup_stale_scan` 不直接刷新待找发票 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
+- `startup_stale_scan` 默认关闭，且不直接刷新待找发票 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
 
 父 scope / filter scope fan-out：
 

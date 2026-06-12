@@ -70,7 +70,7 @@ Refresh 触发来源：
 - 候选确认、撤销、人工补分类、清除：刷新 `bank_detail`、turnover/cost 等相关派生数据。
 - 关联台、批量账务、免 OA、往来款关系变更：刷新 relation distribution，银行明细页面通过事件或下次读取获得 relation tag。
 - App Health/backfill CLI 和 worker retry 可触发缺失或陈旧 scope 重建。
-- `startup_stale_scan` 不直接刷新银行明细 read model；它只标记 workbench matching dirty scopes。
+- `startup_stale_scan` 默认关闭，且不直接刷新银行明细 read model；它只标记 workbench matching dirty scopes。
 
 失败恢复：
 

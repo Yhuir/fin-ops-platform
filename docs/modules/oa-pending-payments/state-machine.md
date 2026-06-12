@@ -83,7 +83,7 @@ Refresh 触发来源：
 - Workbench 关系确认/撤回、batch accounting relation change、turnover relation change。
 - 待找发票规则保存和人工发票相关事件。
 - invoice lifecycle refresh、App Health/readiness backfill。
-- `startup_stale_scan` 不直接刷新 OA 待付款 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
+- `startup_stale_scan` 默认关闭，且不直接刷新 OA 待付款 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才间接影响。
 
 Worker 流程：
 

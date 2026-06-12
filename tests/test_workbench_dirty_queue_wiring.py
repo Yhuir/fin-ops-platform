@@ -480,13 +480,25 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             [(["2026-05"], "oa_invoice_offset_settings_changed")],
         )
 
-    def test_startup_stale_scan_is_called_during_application_startup(self) -> None:
+    def test_startup_stale_scan_is_disabled_during_application_startup_by_default(self) -> None:
         with patch.object(
             server_module.Application,
             "_schedule_startup_workbench_matching_stale_scan",
             autospec=True,
         ) as scan:
-            build_application()
+            with patch.dict(os.environ, {"FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED": "0"}):
+                build_application()
+
+        scan.assert_not_called()
+
+    def test_startup_stale_scan_can_be_enabled_during_application_startup(self) -> None:
+        with patch.object(
+            server_module.Application,
+            "_schedule_startup_workbench_matching_stale_scan",
+            autospec=True,
+        ) as scan:
+            with patch.dict(os.environ, {"FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED": "1"}):
+                build_application()
 
         scan.assert_called_once()
 
@@ -508,6 +520,27 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         )
         self.assertEqual(summary["enqueued_jobs"], [])
         self.assertEqual(summary["deleted_counts"], {"workbench_matching_dirty_scopes": 0})
+
+    def test_startup_stale_scan_skips_fresh_matching_months(self) -> None:
+        app = build_application()
+        queue = RecordingDirtyQueue()
+        app._workbench_reconciliation_dirty_queue = queue
+        app._workbench_candidate_match_service.mark_scope_processed(
+            "2026-05",
+            source_versions=app._workbench_matching_source_versions(),
+            candidate_count=0,
+            request_id="test-fresh-scope",
+            reason="test",
+        )
+
+        with patch.object(app._workbench_query_service, "list_available_months", return_value=["2026-05", "2026-06"]):
+            summary = app._schedule_startup_workbench_matching_stale_scan()
+
+        self.assertEqual(
+            [(call["months"], call["reason"]) for call in queue.mark_calls],
+            [(["2026-06"], "startup_stale_scan")],
+        )
+        self.assertIn("2026-06", summary["invalidated_scopes"])
 
     def test_worker_cli_exposes_workbench_matching_dirty_queue_options(self) -> None:
         args = build_parser().parse_args(

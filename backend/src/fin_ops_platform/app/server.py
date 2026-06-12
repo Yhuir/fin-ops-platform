@@ -439,6 +439,10 @@ SYSTEM_AUTO_PAIR_RELATION_MODES = {
 }
 
 
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(slots=True)
 class Response:
     status_code: int
@@ -551,7 +555,8 @@ class Application:
             return
         self._initialize_runtime_services(self._runtime_bootstrap_state())
         self._recover_interrupted_cost_statistics_cache_warmup_jobs()
-        self._schedule_startup_workbench_matching_stale_scan()
+        if _truthy_env("FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED"):
+            self._schedule_startup_workbench_matching_stale_scan()
         if (
             os.getenv("FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR", "").strip() not in {"1", "true", "yes"}
             and self._historical_etc_repair_needs_startup_reconcile()
@@ -8009,9 +8014,15 @@ class Application:
         scope_months = sorted(dict.fromkeys(scope_months))
         if not scope_months:
             return None
+        stale_months = self._workbench_candidate_match_service.stale_scope_months(
+            scope_months,
+            source_versions=self._workbench_matching_source_versions(),
+        )
+        if not stale_months:
+            return None
         return self._execute_derived_data_lifecycle_event(
             "startup_stale_scan",
-            months=scope_months,
+            months=stale_months,
             include_all=False,
             metadata={"source": "application_startup", "reason": "startup_stale_scan"},
             schedule_cost_warmup=False,

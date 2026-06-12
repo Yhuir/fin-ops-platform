@@ -59,7 +59,7 @@
 | OA 导入过滤/留存设置变化 | state store，后续 OA reset/rebuild 或 sync 使用 | OA 待付款、进项/销项、税金、成本、关联台 |
 | OA 申请人凭据维护 | 独立 credential repository；不进入普通 settings payload | 进项发票使用 OA 反提草稿、真实 OA 登录/token provider |
 | 数据重置 | `settings_reset_completed`、read model/dirty scope/cache cleanup | 所有列表页、导入、关联台、App Status/App Health |
-| 启动补扫 | `startup_stale_scan` 只标记 workbench matching dirty scopes | 关联台 matching 候选补扫；不直接刷新用户可见 read model |
+| 启动补扫 | `startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes | 关联台 matching 候选补扫；不直接刷新用户可见 read model |
 
 ## 维护触发器
 

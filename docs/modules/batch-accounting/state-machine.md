@@ -65,7 +65,7 @@ Refresh 触发来源：
 - 关联台关系确认/撤回：`pair_relation_changed`。
 - 银行流水或发票导入、OA rebuild、标签规则等影响 Workbench relation 的生命周期事件。
 - backfill / runtime worker retry。
-- `startup_stale_scan` 不直接刷新 `workbench_relation` read model；它只标记 workbench matching dirty scopes。
+- `startup_stale_scan` 默认关闭，且不直接刷新 `workbench_relation` read model；它只标记 workbench matching dirty scopes。
 
 失败恢复：
 

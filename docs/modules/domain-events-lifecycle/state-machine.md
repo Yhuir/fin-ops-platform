@@ -60,7 +60,7 @@ Refresh 触发来源：
 - runtime worker handler 调用 `_RuntimeWorkerDerivedLifecycle.execute_event(...)`。
 - 页面动作 emit 前端 `FINANCE_DOMAIN_EVENTS.*` 只提示当前浏览器刷新。
 - 运维/backfill/startup stale scan 通过受控 lifecycle event 规划影响域。
-- `startup_stale_scan` 只允许标记 `workbench_matching_dirty_scopes`，用于启动后 matching rule 补扫；不得直接 invalidating 或 enqueue 用户可见 read model，避免服务重启把页面拖入长时间 refreshing/failed。
+- `startup_stale_scan` 是 opt-in 启动补扫，只有 `FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED=1` 时才在 API 启动时执行；执行时只允许标记不 fresh 的 `workbench_matching_dirty_scopes`，不得直接 invalidating 或 enqueue 用户可见 read model，避免服务重启把页面拖入长时间 refreshing/failed。
 
 失败恢复：
 
@@ -74,4 +74,4 @@ Refresh 触发来源：
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐 domain events / derived lifecycle 状态机 | 明确后端 lifecycle plan、executor summary、前端刷新事件和 read model/worker 状态边界 | 待本轮 domain-events-lifecycle 验证 |
-| 2026-06-13 | 收窄 startup stale scan 影响域 | 启动补扫只标记 workbench matching dirty scopes，不再刷新 workbench、relation、invoice lifecycle、cost、tax 等页面 read model | `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_workbench_dirty_queue_wiring -v` |
+| 2026-06-13 | 收窄 startup stale scan 影响域并改为 opt-in | 默认启动不再执行补扫；启用时只标记 stale workbench matching dirty scopes，不再刷新 workbench、relation、invoice lifecycle、cost、tax 等页面 read model | `PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_workbench_dirty_queue_wiring -v` |
