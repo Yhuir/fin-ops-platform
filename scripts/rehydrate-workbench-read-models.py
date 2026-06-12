@@ -30,6 +30,11 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print JSON report.")
     parser.add_argument("--profile-internal", action="store_true", help="Include fine-grained builder and repository step timings.")
     parser.add_argument(
+        "--explain-structured-attachments",
+        action="store_true",
+        help="Run read-only EXPLAIN ANALYZE diagnostics for the Workbench structured OA attachment query.",
+    )
+    parser.add_argument(
         "--statement-timeout-seconds",
         type=int,
         default=300,
@@ -38,6 +43,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.statement_timeout_seconds <= 0:
         raise ValueError("--statement-timeout-seconds must be positive.")
+    if args.explain_structured_attachments and not args.scope:
+        raise ValueError("--explain-structured-attachments requires at least one --scope to avoid accidental full-table diagnostics.")
 
     connection = PostgresConnection(PostgresSettings.from_env())
     connection.set_statement_timeout_ms(args.statement_timeout_seconds * 1000)
@@ -52,6 +59,7 @@ def main() -> int:
         "action": "rehydrate_workbench_read_models",
         "dry_run": bool(args.dry_run),
         "profile_internal": bool(args.profile_internal),
+        "explain_structured_attachments": bool(args.explain_structured_attachments),
         "scope_keys": scopes,
         "rebuilt": [],
         "completed_dirty_scopes": [],
@@ -60,6 +68,16 @@ def main() -> int:
         "timings": [],
         "internal_timings": internal_timings,
     }
+    if args.explain_structured_attachments:
+        diagnostic_started_at = perf_counter()
+        report["structured_attachment_diagnostics"] = [
+            _structured_attachment_query_diagnostic(connection, scope_key) for scope_key in scopes
+        ]
+        report["timings"].append(
+            {"step": "explain_structured_attachments", "duration_ms": _duration_ms(diagnostic_started_at)}
+        )
+        report["duration_ms"] = _duration_ms(script_started_at)
+        return _print_report(report, json_output=args.json)
     if args.dry_run:
         status_started_at = perf_counter()
         report["status"] = repository.get_workbench_refresh_status(scope_key="all")
@@ -146,6 +164,185 @@ def _print_report(report: dict[str, Any], *, json_output: bool) -> int:
 
 def _duration_ms(started_at: float) -> float:
     return round((perf_counter() - started_at) * 1000, 3)
+
+
+def _structured_attachment_query_diagnostic(connection: PostgresConnection, scope_key: str) -> dict[str, Any]:
+    normalized_scope = str(scope_key or "").strip()
+    if not normalized_scope:
+        raise ValueError("scope_key is required for structured attachment diagnostics.")
+    if normalized_scope == "all":
+        oa_row = connection.fetch_one(
+            """
+            select array_agg(row_id order by row_id) as row_ids, count(*)::int as count
+            from app.oa_applications
+            """
+        )
+        scope_month_param = None
+    else:
+        oa_row = connection.fetch_one(
+            """
+            select array_agg(row_id order by row_id) as row_ids, count(*)::int as count
+            from app.oa_applications
+            where scope_month = %s::date
+            """,
+            (f"{normalized_scope}-01",),
+        )
+        scope_month_param = f"{normalized_scope}-01"
+    oa_row_ids = list((oa_row or {}).get("row_ids") or [])
+    table_stats = connection.fetch_all(
+        """
+        select
+            relname,
+            n_live_tup::bigint as live_rows,
+            pg_total_relation_size(relid)::bigint as total_bytes
+        from pg_stat_user_tables
+        where schemaname = 'app'
+          and relname in (
+              'oa_applications',
+              'oa_application_items',
+              'oa_attachments',
+              'oa_attachment_invoice_cache',
+              'oa_attachment_invoice_cache_sources'
+          )
+        order by relname
+        """
+    )
+    indexes = connection.fetch_all(
+        """
+        select tablename, indexname, indexdef
+        from pg_indexes
+        where schemaname = 'app'
+          and tablename in (
+              'oa_applications',
+              'oa_application_items',
+              'oa_attachments',
+              'oa_attachment_invoice_cache',
+              'oa_attachment_invoice_cache_sources'
+          )
+        order by tablename, indexname
+        """
+    )
+    explain_rows = connection.fetch_all(
+        """
+        explain (analyze, buffers, verbose, format text)
+        select
+            oa.row_id as oa_row_id,
+            oa.scope_month,
+            item.normalized_payload as item_payload,
+            attachment.normalized_payload as attachment_payload,
+            cache.cache_source_attachment_key,
+            coalesce(cache.invoices, '[]'::jsonb) as cache_invoices,
+            coalesce(cache.evidences, '[]'::jsonb) as cache_evidences,
+            coalesce(
+                case
+                    when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
+                    else '[]'::jsonb
+                end,
+                '[]'::jsonb
+            ) as cache_artifacts
+        from app.oa_application_items item
+        join app.oa_applications oa on oa.id = item.oa_application_id
+        left join app.oa_attachments attachment
+          on attachment.oa_application_id = oa.id
+         and (
+                attachment.row_id = item.row_id
+                or attachment.normalized_payload->>'source_expense_item_id' = item.row_id
+             )
+        left join lateral (
+            select matched.cache_source_attachment_key, matched.invoices, matched.evidences, matched.artifacts
+            from (
+                select
+                    0 as match_rank,
+                    source.cache_source_attachment_key,
+                    cache.parsed_at,
+                    cache.invoices,
+                    cache.evidences,
+                    cache.artifacts
+                from app.oa_attachment_invoice_cache_sources source
+                join app.oa_attachment_invoice_cache cache
+                  on cache.source_attachment_key = source.cache_source_attachment_key
+                where source.source_attachment_key = attachment.source_attachment_key
+                union all
+                select
+                    1 as match_rank,
+                    cache.source_attachment_key as cache_source_attachment_key,
+                    cache.parsed_at,
+                    cache.invoices,
+                    cache.evidences,
+                    cache.artifacts
+                from app.oa_attachment_invoice_cache cache
+                where nullif(
+                        coalesce(
+                            item.normalized_payload->>'expense_item_id',
+                            item.normalized_payload->>'row_id'
+                        ),
+                        ''
+                      ) is not null
+                  and nullif(
+                        coalesce(
+                            attachment.normalized_payload->>'source_attachment_name',
+                            attachment.normalized_payload->>'attachment_name',
+                            attachment.normalized_payload->>'fileName',
+                            attachment.normalized_payload->>'filename'
+                        ),
+                        ''
+                      ) is not null
+                  and exists (
+                        select 1
+                        from jsonb_array_elements(
+                            coalesce(cache.invoices, '[]'::jsonb)
+                            || coalesce(cache.evidences, '[]'::jsonb)
+                            || coalesce(
+                                case
+                                    when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
+                                    else '[]'::jsonb
+                                end,
+                                '[]'::jsonb
+                            )
+                        ) as evidence(value)
+                        where nullif(evidence.value->>'source_expense_item_id', '') = nullif(
+                                coalesce(
+                                    item.normalized_payload->>'expense_item_id',
+                                    item.normalized_payload->>'row_id'
+                                ),
+                                ''
+                              )
+                          and nullif(
+                                coalesce(
+                                    evidence.value->>'source_attachment_name',
+                                    evidence.value->>'attachment_name',
+                                    evidence.value->>'fileName',
+                                    evidence.value->>'filename'
+                                ),
+                                ''
+                              ) = nullif(
+                                coalesce(
+                                    attachment.normalized_payload->>'source_attachment_name',
+                                    attachment.normalized_payload->>'attachment_name',
+                                    attachment.normalized_payload->>'fileName',
+                                    attachment.normalized_payload->>'filename'
+                                ),
+                                ''
+                              )
+                    )
+            ) matched
+            order by matched.match_rank, matched.parsed_at desc nulls last, matched.cache_source_attachment_key
+            limit 1
+        ) cache on true
+        where oa.row_id = any(%s)
+          and (%s = 'all' or oa.scope_month = %s::date)
+        order by oa.row_id, item.row_id, attachment.source_attachment_key
+        """,
+        (oa_row_ids, normalized_scope, scope_month_param),
+    )
+    return {
+        "scope_key": normalized_scope,
+        "oa_row_count": int((oa_row or {}).get("count") or 0),
+        "sample_oa_row_ids": oa_row_ids[:10],
+        "table_stats": table_stats,
+        "indexes": indexes,
+        "plan": [str(row.get("QUERY PLAN") or "") for row in explain_rows],
+    }
 
 
 def _install_internal_profiling(builder: Any, repository: Any, timings: list[dict[str, Any]]) -> None:
