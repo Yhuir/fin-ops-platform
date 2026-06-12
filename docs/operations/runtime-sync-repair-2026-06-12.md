@@ -678,6 +678,127 @@ Stage 14 修复 PostgreSQL formal read path：`load_workbench_candidate_matches(
 | restored candidate scope runs | 5 |
 | restored months | `2025-10`、`2026-04`、`2026-05`、`2026-06`、`2026-07` |
 
+## Stage 15-16：同步 SLO 基线采集器与生产基线
+
+Stage 15 Release：`main-53b148b3-stage15-202606130124`
+
+Stage 15 Commit：`53b148b32ab546ed90d2a7f914991d89acdf377a`
+
+Stage 15 新增 `fin_ops_platform.tools.sync_slo_baseline`，用于从现有
+`RuntimeMonitoringRepository`、dashboard metric、PostgreSQL catalog、固定 EXPLAIN probe
+采集只读同步 SLO 基线。该工具不写业务数据，不绕过 fresh gate，也不把 API p95 伪装为已采集；
+登录态页面/API p95 仍必须单独通过 HTTP/browser 采样补齐。
+
+Stage 15 本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_sync_slo_baseline tests.test_runtime_monitoring tests.test_operations_dashboard_service -v`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sync_slo_baseline --help`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`：2832 tests pass，25 skipped
+- deploy worktree 前端 build 通过；仍有既有 CSS minify warning。
+
+Stage 15 生产部署后采集到 baseline JSON：
+`/tmp/finops-sync-slo-baseline-stage15-20260613012648.json`。该轮确认队列和 dirty scope
+已收敛，但发现 collector 对 `pg_stat_statements` 的 fallback 会吞掉真实错误，并误报 legacy
+`total_time` 列不存在。
+
+Stage 16 Release：`main-688ce928-stage16-202606130133`
+
+Stage 16 Commit：`688ce928bb782d6ba9c692009799a0d48689eceb`
+
+Stage 16 将 `pg_stat_statements` 检测改为先读取 `information_schema.columns` 再选择
+`total_exec_time` 或 legacy `total_time`，并在 extension 未通过
+`shared_preload_libraries` 加载时保留真实错误。第一次发布尝试在本地临时 worktree 构建阶段失败，
+原因是该 worktree 没有 `web/node_modules`，没有触达生产；随后复用已验证的 `web/dist` 并通过
+`--skip-build` 发布成功。
+
+Stage 16 本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_sync_slo_baseline -v`
+- `bash scripts/verify.sh backend`：2833 tests pass，25 skipped
+
+Stage 16 生产 baseline JSON：
+`/tmp/finops-sync-slo-baseline-stage16-20260613013413.json`。
+
+生产同步基线：
+
+| 指标 | 值 |
+|---|---:|
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| `max_pending_age_seconds` | null |
+| `queue_backlog.done` | 36021 |
+| `dirty_scopes.done` | 30745 |
+| runtime read model attention | 0 |
+| runtime outbox attention | 0 |
+| required worker missing/stale/mismatch | 0 / 0 / 0 |
+| `read_model_refresh_duration_ms.p50` | 377.895ms |
+| `read_model_refresh_duration_ms.p95` | 17759.437ms |
+| `read_model_refresh_duration_ms.p99` | 38198.219ms |
+
+关键 read model 窗口样本：
+
+| read model | 15m samples | 15m p95 | 1h samples | 1h p95 | historical p95 | stale | unavailable |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `workbench` | 0 | null | 6 | 8478.061ms | 7608.166ms | 0 | 0 |
+| `workbench_relation` | 0 | null | 4 | 1000.943ms | 2772.275ms | 0 | 0 |
+| `invoice_lifecycle` | 0 | null | 6 | 9094.040ms | 5918.287ms | 0 | 0 |
+| `input_invoice_usage` | 0 | null | 5 | 8516.291ms | 989.881ms | 0 | 0 |
+| `output_invoice_collection` | 0 | null | 3 | 223.817ms | 265.033ms | 0 | 0 |
+| `oa_pending_payment` | 0 | null | 5 | 1331.061ms | 944.822ms | 0 | 0 |
+| `cost_statistics` | 0 | null | 2 | 2193.815ms | 11038.899ms | 0 | 0 |
+| `tax_offset` | 0 | null | 0 | null | 528.776ms | 0 | 0 |
+| `bank_detail` | 0 | null | 0 | null | 1866.591ms | 0 | 0 |
+
+PostgreSQL 基线：
+
+| 指标 | 值 |
+|---|---:|
+| connections total / active / max | 35 / 1 / 100 |
+| wait_event non-null connections | 29 |
+| `pg_stat_statements` | unavailable |
+| `pg_stat_statements` error | `pg_stat_statements must be loaded via shared_preload_libraries` |
+
+最大 read model/job 表：
+
+| table | total size | estimated rows | seq_scan | idx_scan |
+|---|---:|---:|---:|---:|
+| `read_model.workbench_group_rows` | 3.69GB | 415423 | 78 | 3307110 |
+| `read_model.workbench_groups` | 3.50GB | 210220 | 64 | 1692504 |
+| `read_model.workbench_rows` | 2.57GB | 358335 | 298 | 2775063 |
+| `read_model.workbench_snapshots` | 1.48GB | 481 | 122 | 4789 |
+| `read_model.search_index_rows` | 125MB | 1678 | 0 | 319538 |
+| `job.outbox_events` | 71MB | 36022 | 116606 | 6145828 |
+
+最大且疑似低效索引样本：
+
+| index | size | idx_scan |
+|---|---:|---:|
+| `workbench_groups_searchable_text_trgm` | 708MB | 0 |
+| `workbench_rows_payload_gin` | 337MB | 0 |
+| `workbench_group_rows_searchable_text_trgm` | 310MB | 413 |
+| `workbench_group_rows_generation_scope_identity_zone_idx` | 95MB | 0 |
+
+固定 EXPLAIN probe 当前为 plain EXPLAIN，未执行 ANALYZE：
+
+| probe | total cost | plan rows |
+|---|---:|---:|
+| `active_read_model_dirty_scopes` | 47.03 | 1 |
+| `active_read_model_outbox` | 23.87 | 1 |
+| `non_fresh_app_status_readiness` | 31.91 | 1 |
+| `workbench_groups_all_scope_count` | 8396.72 | 1 |
+| `workbench_group_rows_all_scope_count` | 12903.76 | 1 |
+
+Stage 16 结论：
+
+- 当前“失败/同步几分钟”的主要 current-effective blocker 已被清零；生产 runtime 不再显示 read model/outbox attention。
+- 这不是“几秒内全部同步”闭环证明：全局历史 p95 仍约 17.76s，`workbench`、`invoice_lifecycle`、`input_invoice_usage`
+  近 1 小时 p95 仍在 8-9s，且 15 分钟窗口无新样本，不能证明写入后 p95 已稳定达标。
+- `pg_stat_statements` 必须在 PostgreSQL 参数中启用 `shared_preload_libraries` 并重启数据库，才有 top SQL 生产证据；
+  这一步需要独立 rollback 计划。
+- 页面首包/API p95 仍是 `not_collected`，必须用登录态 HTTP/browser 采样补齐；不能用 worker freshness 代替页面体验证据。
+- 最大表和最大索引集中在 workbench generation 表，下一阶段索引、retention、分区或 payload-cache 决策必须围绕这些事实做 impact analysis。
+
 ## 当前闭环状态
 
 已闭环：
@@ -690,18 +811,22 @@ Stage 14 修复 PostgreSQL formal read path：`load_workbench_candidate_matches(
 - candidate relation 已通过 workbench relation read model 传播到下游页面，页面不再把候选关系误计为 confirmed/paid/closed。
 - 发票使用详情在 fresh gate 后走 SQL read model 单行 payload，避免详情抽屉请求热路径 N+1/live assembly。
 - 应用启动默认不再执行 startup stale scan；显式启用时也只会重算缺少 completed scope run proof 的 matching 月份。
+- 生产 SLO baseline collector 已部署，可重复采集 runtime、worker、PostgreSQL catalog、固定 EXPLAIN 和缺口状态。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
-- `read_model_refresh_duration_ms.p95` 仍约 17.76s，post-deploy enqueue-to-fresh 样本仍出现 30-300 秒级耗时。
-- 生产基线中 `/api/input-invoice-usage/rows/.../relation-details` p95 曾达到 42.8s，且单请求约 1129 次 DB query；Stage 11 已完成 SQL read model 单行读取优化，但仍需登录态 HTTP 样本验证端到端 p95。
-- Workbench/cost statistics/pending invoice 等重型链路仍需要 EXPLAIN 驱动的索引、分区或增量化评估。
+- `read_model_refresh_duration_ms.p95` 仍约 17.76s；Stage 16 近 1 小时样本中 `workbench`、`invoice_lifecycle`、
+  `input_invoice_usage` p95 仍约 8-9s。
+- 页面首包/API p95 仍未采集；Stage 11 已完成 relation-details SQL read model 单行读取优化，但仍需登录态 HTTP 样本验证端到端 p95。
+- Workbench 大表/大索引是当前最明确的数据库优化对象；仍需要 `pg_stat_statements`、EXPLAIN ANALYZE、索引/retention/分区 impact analysis。
+- `pg_stat_statements` extension 已存在但未通过 `shared_preload_libraries` 加载，生产 top SQL 证据链仍缺口。
 - Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
 
 下一阶段优先级：
 
-1. 针对 relation-details、workbench groups、cost_statistics、pending_invoice 采集最新 EXPLAIN 和 `pg_stat_statements`/API rolling window，先修最慢读路径和 N+1。
-2. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
-3. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
-4. 接入 Prometheus/Grafana 或 OpenTelemetry，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
-5. 只有当 worker 并发提高后出现连接等待或连接数接近阈值，再启用 PgBouncer；当前 2-3 人使用场景下它不是性能第一瓶颈。
+1. 启用 `pg_stat_statements` preload 并重启 PostgreSQL，带 rollback；随后采集 top SQL 和 EXPLAIN ANALYZE。
+2. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
+3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
+4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
+5. 接入 Prometheus/Grafana 或 OpenTelemetry，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
+6. 只有当 worker 并发提高后出现连接等待或连接数接近阈值，再启用 PgBouncer；当前 baseline 为 35/100 connections，PgBouncer 不是当前第一瓶颈。
