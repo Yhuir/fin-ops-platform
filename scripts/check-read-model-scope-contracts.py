@@ -24,15 +24,22 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository  # no
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Check and repair read model refresh scope contract violations in PostgreSQL runtime state."
+        description=(
+            "Check read model refresh scope contract violations and classify current-effective outbox failures "
+            "in PostgreSQL runtime state."
+        )
     )
-    parser.add_argument("--apply", action="store_true", help="Delete non-canonical cost statistics runtime state rows.")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Delete non-canonical cost statistics runtime state rows; current uncovered failures are retained.",
+    )
     parser.add_argument(
         "--no-enqueue-replacements",
         action="store_true",
         help="With --apply, delete old rows without enqueueing normalized replacement cost statistics refreshes.",
     )
-    parser.add_argument("--reason", default="read_model_scope_contract_repair", help="Reason for replacement refresh events.")
+    parser.add_argument("--reason", default="read_model_scope_contract_repair", help="Reason for audit and replacement refresh events.")
     parser.add_argument("--json", action="store_true", help="Print JSON. This is currently the only output format.")
     args = parser.parse_args(argv)
 

@@ -52,7 +52,8 @@
 
 - API miss/stale 可以重新 enqueue refresh。
 - Worker failed/unavailable 由 App Health 暴露具体 scope、last error 和 worker 状态。
-- 旧生产 scope contract 由 `scripts/check-read-model-scope-contracts.py` dry-run 检查；`--apply` 只能受控清理非规范旧状态并补投可归一化 replacement scope。
+- 旧生产 scope contract 由 `scripts/check-read-model-scope-contracts.py` dry-run 检查；dry-run 必须输出 repair manifest，列出 legacy/invalid cost statistics 行、已被 later done/fresh readiness 覆盖的历史 outbox failure，以及 current-effective 未覆盖 failure。
+- `--apply` 只能受控清理非规范旧状态并补投可归一化 replacement scope；apply 必须记录 audit event，并带可回滚 manifest。current-effective 未覆盖 failure 不自动删除、不伪造 fresh，只能调查原因后 requeue、修复 worker 或修复投影。
 - 生产真实库修复前必须保留 dry-run 报告，不能直接热改 runtime 表。
 
 ## 非法状态
@@ -62,10 +63,12 @@
 - API 返回空 rows 且不带 refreshing/stale/missing 语义，却实际没有 fresh projection。
 - Redis cache 命中绕过 fresh gate。
 - RabbitMQ transport 成为状态事实源。
+- 未覆盖的 failed/dead_lettered/publish_failed outbox event 被删除或忽略，但没有 later done/fresh readiness 证明。
 - 新增 read model/worker 后未同步 registry、manifest/systemd env、tests、docs。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-12 | 补齐 repair manifest 与 current-effective failure 保留规则 | dry-run/apply 可审计区分历史已覆盖失败和当前未覆盖 blocker；禁止假同步 | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_scope_contract tests.test_platform_runtime_boundary_guards tests.test_runtime_queue_ops -v` |
 | 2026-06-11 | 补齐共享 read model 状态机 | 明确 fresh/missing/refreshing/stale/failed/unavailable、非法状态和恢复路径 | `bash scripts/verify.sh docs` |

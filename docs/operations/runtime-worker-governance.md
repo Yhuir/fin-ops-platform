@@ -105,10 +105,17 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 ```
 
 脚本会检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness`
-中不符合当前 registry 的 `cost_statistics` scope。发现 violation 时默认返回非 0，JSON 中会区分：
+中不符合当前 registry 的 `cost_statistics` scope，同时扫描 failed/dead_lettered/publish_failed
+read model outbox event 是否已有 later done 或 fresh readiness 覆盖。发现 violation、历史已覆盖 failure
+或 current uncovered failure 时默认返回非 0，JSON 的 `repair_manifest` 会区分：
 
 - `legacy`：如 `2026-03`、裸 `all`，可归一化为规范 `active/all` scope。
 - `invalid`：如未知 project scope，当前 registry 无法解释，不猜测 replacement。
+- `covered_historical_outbox_failures`：同一 tenant/event/scope 后续已有 `done` 或 `fresh` readiness，可进入人工 resolve/归档候选。
+- `current_uncovered_outbox_failures`：没有后续成功或 fresh 证明，仍然是当前真实 blocker，必须调查 worker、query、数据或重投原因。
+
+dry-run JSON 必须随发布/修复记录归档，至少保留 `repair_manifest.items[]` 的 `scope_type`、`scope_key`、
+`event_type`、`status`、`last_error`、`updated_at`、`covered_by`、`proposed_action` 和 `rollback_hint`。
 
 确认报告后执行受控修复：
 
@@ -121,8 +128,17 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 ```
 
 `--apply` 只删除非规范的 `cost_statistics` runtime 状态，并通过 `ReadModelRefreshGateway` 补投
-可归一化的 replacement scope；不会手工把 readiness 改成 `fresh`。如果只需要删除旧状态而不补投
-replacement scope，可加 `--no-enqueue-replacements`。
+可归一化的 replacement scope；不会手工把 readiness 改成 `fresh`，也不会删除 current uncovered
+outbox failure。apply 报告必须包含：
+
+- `cleanup.deleted`：本次实际删除的 dirty/outbox/readiness 行数。
+- `replacement_enqueue`：补投的规范 replacement scope。
+- `repair_audit`：写入 `audit.events` 的修复审计 id。
+- `rollback`：基于 `repair_manifest.items[].row` 恢复被删 runtime 行的策略。
+
+如果只需要删除旧状态而不补投 replacement scope，可加 `--no-enqueue-replacements`。如果 dry-run
+存在 `current_uncovered_outbox_failures`，先按 App Health/worker log/EXPLAIN 定位并 requeue 或修复
+worker/query；不能通过删除 failed event 或批量写 fresh readiness 达成“已同步”。
 
 ### Workbench generation retention
 
