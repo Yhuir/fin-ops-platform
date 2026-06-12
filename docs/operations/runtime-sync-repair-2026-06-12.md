@@ -612,6 +612,72 @@ post-deploy 真实 refresh 样本仍未达成“几秒内全部同步”：
 - 但 post-deploy enqueue-to-fresh 仍有 30-300 秒级样本，主要来自 `workbench` all/month shard、`cost_statistics` 及其下游依赖 fan-out；“几秒内全部同步”SLO 还没有达成。
 - 下一阶段必须针对 workbench generation、all scope aggregation、下游 fan-out gating、Redis fresh-cache、EXPLAIN/索引/分区和持续指标系统继续优化。
 
+## Stage 12-14：启动补扫收敛与 scope run 证明
+
+Stage 12 Release：`main-5256ed9f-stage12-202606130053`
+
+Stage 12 Commit：`5256ed9f2210f2e2f39584caa72dbd74fac2a67a`
+
+Stage 12 将 `startup_stale_scan` 从用户可见 read model fan-out 收窄为只标记
+`workbench_matching_dirty_scopes`。生产验证显示，发布后没有再由
+`startup_stale_scan` 创建 read model outbox 或 read model dirty scope；但该阶段仍会在 API
+启动时无条件标记 matching dirty scope，导致历史大月份 matching 重试并触发 statement timeout。
+
+Stage 13 Release：`main-02dc9317-stage13-202606130103`
+
+Stage 13 Commit：`02dc9317f1d2b171ee92f0690fd5eef09421973a`
+
+Stage 13 将启动 matching stale scan 改为默认关闭，只有
+`FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED=1` 时才执行；即使启用，也会先通过
+`WorkbenchCandidateMatchService.stale_scope_months(...)` 过滤，只标记缺少 fresh proof 的月份。
+
+生产验证：
+
+| 指标 | 值 |
+|---|---:|
+| `/health.status` | `ready` |
+| `job.outbox_events` 非 `done` | 0 |
+| `job.read_model_dirty_scopes` 非 `done` | 0 |
+| `read_model.app_status_readiness` 非 `fresh` | 0 |
+| Stage 13 后 `startup_stale_scan` outbox | 0 |
+| Stage 13 后 `startup_stale_scan` read model dirty scope | 0 |
+| Stage 13 后 `startup_stale_scan` matching dirty scope | 0 |
+
+Stage 13 之后不再因为每次应用启动或打开页面自动制造新的同步窗口。历史
+`startup_stale_scan` matching rows 仍保留：其中 completed 行代表真实完成，failed 行代表大月份
+matching 曾经真实超时，不能手工伪造成 fresh。
+
+Stage 14 Release：`main-3d103ceb-stage14-202606130115`
+
+Stage 14 Commit：`3d103ceb193312ee36ee2bb7c35a446f94888372`
+
+Stage 14 修复 PostgreSQL formal read path：`load_workbench_candidate_matches()` 现在从
+`job.workbench_matching_dirty_scopes.status='completed'` 恢复 `scope_runs`，使
+`WorkbenchCandidateMatchService.is_scope_fresh(...)` 在生产重启后仍能看到 completed scope run proof。
+这避免未来显式启用 startup stale scan 时，因为 scope run 只存在于 durable queue 而未载入 service，
+误把已完成月份重新标记为 stale。
+
+本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_state_store tests.test_workbench_dirty_queue_wiring -v`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`
+
+生产验证：
+
+| 指标 | 值 |
+|---|---:|
+| `/health.status` | `ready` |
+| release commit | `3d103ceb193312ee36ee2bb7c35a446f94888372` |
+| `queue_backlog.done` | 36021 |
+| `dirty_scopes.done` | 30745 |
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| runtime readiness attention | 0 |
+| runtime outbox attention | 0 |
+| restored candidate scope runs | 5 |
+| restored months | `2025-10`、`2026-04`、`2026-05`、`2026-06`、`2026-07` |
+
 ## 当前闭环状态
 
 已闭环：
@@ -623,6 +689,7 @@ post-deploy 真实 refresh 样本仍未达成“几秒内全部同步”：
 - RabbitMQ topology、Management metrics、required worker real consumers 和 DLQ 清理已完成。
 - candidate relation 已通过 workbench relation read model 传播到下游页面，页面不再把候选关系误计为 confirmed/paid/closed。
 - 发票使用详情在 fresh gate 后走 SQL read model 单行 payload，避免详情抽屉请求热路径 N+1/live assembly。
+- 应用启动默认不再执行 startup stale scan；显式启用时也只会重算缺少 completed scope run proof 的 matching 月份。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
