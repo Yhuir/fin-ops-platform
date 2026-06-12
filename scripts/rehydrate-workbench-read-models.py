@@ -28,6 +28,7 @@ def main() -> int:
     parser.add_argument("--scope", action="append", default=[], help="Month scope YYYY-MM. Repeatable. Defaults to all fact-backed months.")
     parser.add_argument("--dry-run", action="store_true", help="List scopes and current status without rebuilding.")
     parser.add_argument("--json", action="store_true", help="Print JSON report.")
+    parser.add_argument("--profile-internal", action="store_true", help="Include fine-grained builder and repository step timings.")
     parser.add_argument(
         "--statement-timeout-seconds",
         type=int,
@@ -43,16 +44,21 @@ def main() -> int:
     repository = PostgresReadModelRepository(connection)
     queue_repository = RuntimeQueueRepository(connection)
     builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+    internal_timings: list[dict[str, Any]] = []
+    if args.profile_internal:
+        _install_internal_profiling(builder, repository, internal_timings)
     scopes = _scope_keys(builder, args.scope)
     report: dict[str, Any] = {
         "action": "rehydrate_workbench_read_models",
         "dry_run": bool(args.dry_run),
+        "profile_internal": bool(args.profile_internal),
         "scope_keys": scopes,
         "rebuilt": [],
         "completed_dirty_scopes": [],
         "all": None,
         "status": None,
         "timings": [],
+        "internal_timings": internal_timings,
     }
     if args.dry_run:
         status_started_at = perf_counter()
@@ -140,6 +146,57 @@ def _print_report(report: dict[str, Any], *, json_output: bool) -> int:
 
 def _duration_ms(started_at: float) -> float:
     return round((perf_counter() - started_at) * 1000, 3)
+
+
+def _install_internal_profiling(builder: Any, repository: Any, timings: list[dict[str, Any]]) -> None:
+    for attr in (
+        "_current_dirty_scope_source_version",
+        "_workbench_rows_for_month",
+        "_oa_projection_rows",
+        "_attachment_invoice_rows_from_structured_oa_tables",
+        "_bank_rows",
+        "_invoice_rows",
+        "_open_etc_invoice_summary_rows",
+        "_active_pair_relations_for_month",
+        "_active_reconciliation_decisions_for_month",
+        "_supplement_missing_relation_rows",
+        "_supplement_missing_decision_rows",
+        "_group_payload",
+        "_current_bank_auto_tag_rules_version",
+        "refresh_workbench_all_scope_from_active_shards",
+    ):
+        _wrap_timed_method(builder, attr, f"builder.{attr}", timings)
+    for attr in (
+        "save_workbench_read_models",
+        "_refresh_workbench_all_scope_from_month_shards",
+        "_workbench_generation_consistency_failures",
+        "_start_workbench_generation",
+        "_upsert_workbench_generation_stats",
+        "_activate_workbench_generation",
+        "get_workbench_refresh_status",
+    ):
+        _wrap_timed_method(repository, attr, f"repository.{attr}", timings)
+
+
+def _wrap_timed_method(obj: Any, attr: str, label: str, timings: list[dict[str, Any]]) -> None:
+    original = getattr(obj, attr, None)
+    if not callable(original):
+        return
+
+    def timed(*args: Any, **kwargs: Any) -> Any:
+        started_at = perf_counter()
+        try:
+            return original(*args, **kwargs)
+        finally:
+            item: dict[str, Any] = {"step": label, "duration_ms": _duration_ms(started_at)}
+            changed_scope_keys = kwargs.get("changed_scope_keys")
+            if changed_scope_keys is not None:
+                item["changed_scope_keys"] = sorted(str(scope_key) for scope_key in changed_scope_keys)
+            if args and attr in {"_workbench_rows_for_month", "_oa_projection_rows", "_bank_rows", "_invoice_rows"}:
+                item["scope_key"] = str(args[0])
+            timings.append(item)
+
+    setattr(obj, attr, timed)
 
 
 if __name__ == "__main__":
