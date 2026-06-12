@@ -1260,6 +1260,23 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
 本地验证：
 
 - `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_prometheus_metrics tests.test_app tests.test_app_postgres_mode tests.test_runtime_monitoring -v`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`
+
+生产发布：
+
+- commit：`d648c9b3 Expose protected Prometheus runtime metrics`
+- release：`main-d648c9b3-stage23-202606130256`
+- `/health/ready`：`status=ready`，`runtime_release.consistent=true`，schema `68`。
+- runtime health：`failed_jobs=0`，`stale_dirty_scope_count=0`，`rabbitmq_queue_depth=0`，`rabbitmq_dlq_count=0`，
+  `missing_required_worker_count=0`，`stale_required_worker_count=0`。
+- `/metrics` 未带 token 本机访问返回 `404 application/json`；公网 `/fin-ops-api/metrics` 同样返回 `404 application/json`。
+- 公网 `/metrics` 返回外层站点 `200 text/html`，不是 fin-ops API。
+- 未通过无交互 root 权限配置 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`，因此生产 Prometheus scrape token 仍待人工写入
+  `/etc/fin-ops/fin-ops.secrets.env` 并重启 `fin-ops.service` 后启用。
+- 未登录页面 shell smoke：
+  `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe --base-url https://www.yn-sourcing.com --page-path /fin-ops/ --replace-default-probes --iterations 5 --warmup 1 --allow-unauthenticated`
+  通过，`/fin-ops/` p95 `116.127ms`。
 
 ## 当前闭环状态
 
@@ -1281,7 +1298,7 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
   `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 - 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
-- Prometheus `/metrics` 已具备，可抓取 runtime/read-model/RabbitMQ/worker/API p95 指标。
+- Prometheus `/metrics` 应用侧已具备，可输出 runtime/read-model/RabbitMQ/worker/API p95 指标；生产 token 未配置时保持 `404` 安全关闭。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
@@ -1291,7 +1308,7 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
   outbox percentile 和 outbox summary，已经不再出现历史全局 window sort。
 - Redis fresh-cache 尚未覆盖全部页面。
-- Grafana dashboard、alert rules 和 scrape 配置尚未落地；`/metrics` 是应用侧指标出口，不等同于完整 Grafana 告警闭环。
+- 生产 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`、Grafana dashboard、alert rules 和 scrape 配置尚未落地；`/metrics` 是应用侧指标出口，不等同于完整 Grafana 告警闭环。
 
 下一阶段优先级：
 
@@ -1300,5 +1317,5 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
    决定是否需要轻量 rollup table 或 metrics retention。
 3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
 4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
-5. 配置 Prometheus scrape、Grafana dashboard 和 alert rules，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
+5. 在 root-only `/etc/fin-ops/fin-ops.secrets.env` 配置 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`，重启 API 后配置 Prometheus scrape、Grafana dashboard 和 alert rules，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
 6. 只有当 worker 并发提高后出现连接等待或连接数接近阈值，再启用 PgBouncer；当前 baseline 为 35/100 connections，PgBouncer 不是当前第一瓶颈。
