@@ -59,7 +59,7 @@ def _execute_many(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) 
     if not params_seq:
         return 0
     execute_many_values = getattr(connection, "execute_many_values", None)
-    if callable(execute_many_values):
+    if callable(execute_many_values) and _should_execute_many_values(sql):
         return int(execute_many_values(sql, params_seq) or 0)
     execute_many = getattr(connection, "execute_many", None)
     if callable(execute_many):
@@ -68,6 +68,11 @@ def _execute_many(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) 
     for params in params_seq:
         affected += int(connection.execute(sql, params) or 0)
     return affected
+
+
+def _should_execute_many_values(sql: str) -> bool:
+    normalized = " ".join(str(sql or "").lower().split())
+    return "insert into read_model.workbench_group_rows" in normalized
 
 
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {

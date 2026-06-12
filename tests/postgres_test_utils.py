@@ -81,6 +81,7 @@ EXPECTED_MIGRATION_FILES = [
     "0067_app_status_current_effective_outbox_index.sql",
     "0068_outbox_read_model_refresh_metric_samples.sql",
     "0069_oa_attachment_identity_bridge_repair.sql",
+    "0070_workbench_unused_write_indexes.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

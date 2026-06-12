@@ -40,6 +40,22 @@
 - API 返回 `read_model_unavailable`，表示 production PostgreSQL runtime 缺少对应 SQL read repository 或 repository 初始化失败；这不是允许回落旧 snapshot 的场景，应该检查 PostgreSQL 连接、migration 版本和 worker 配置。
 - `state:full_state` 在 PostgreSQL `app.app_settings` 中持续更新。生产 API/worker 不应设置 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT=1`；若出现该 key 写入，应排查是否误用了 migration/shadow/test 配置。
 
+## Workbench 索引卫生
+
+Workbench read model 写入会同时维护多张投影表和索引。生产基线中以下索引体积大、`idx_scan=0`，且现有查询不依赖它们的索引类型；`0070_workbench_unused_write_indexes.sql` 会删除它们以降低 active generation 发布写放大：
+
+- `read_model.workbench_rows_payload_gin`
+- `read_model.workbench_groups_searchable_text_trgm`
+- `read_model.workbench_group_rows_column_values_gin`
+
+保留 `workbench_group_rows_searchable_text_trgm`，因为 pane search 仍有扫描记录。若生产搜索/筛选出现可复现退化，先用 `/health.api_performance`、`EXPLAIN (ANALYZE, BUFFERS)` 和 `pg_stat_user_indexes` 证明相关查询需要恢复索引，再执行回滚 SQL：
+
+```sql
+create index if not exists workbench_rows_payload_gin on read_model.workbench_rows using gin (payload);
+create index if not exists workbench_groups_searchable_text_trgm on read_model.workbench_groups using gin (searchable_text gin_trgm_ops);
+create index if not exists workbench_group_rows_column_values_gin on read_model.workbench_group_rows using gin (column_values);
+```
+
 ## 日志要求
 
 - 日志应包含请求路径、用户、动作、耗时和错误摘要。

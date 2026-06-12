@@ -82,6 +82,7 @@ EXPECTED_MIGRATIONS = [
     "0067_app_status_current_effective_outbox_index.sql",
     "0068_outbox_read_model_refresh_metric_samples.sql",
     "0069_oa_attachment_identity_bridge_repair.sql",
+    "0070_workbench_unused_write_indexes.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -191,7 +192,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 70)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 71)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -207,6 +208,13 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
 
         self.assertIn("workbench_relation_rows_scope_status_type_idx", sql)
         self.assertIn("workbench_relation_groups_tenant_group_idx", sql)
+
+    def test_workbench_unused_write_indexes_are_dropped(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+
+        self.assertIn("drop index if exists read_model.workbench_rows_payload_gin", sql)
+        self.assertIn("drop index if exists read_model.workbench_groups_searchable_text_trgm", sql)
+        self.assertIn("drop index if exists read_model.workbench_group_rows_column_values_gin", sql)
 
     def test_app_health_dashboard_metrics_indexes_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
