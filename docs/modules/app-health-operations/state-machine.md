@@ -53,6 +53,8 @@
 - `stale`：source/schema/version 不匹配或 dirty 未完成；busy/yellow。
 - `failed`：refresh 失败或 readiness failed；critical domain blocked/red。
 - `unavailable`：runtime repository/readiness reader 不可用；blocked/red，不能空 green。
+- current-effective blocker：`scopes[]`、dirty scope 和 outbox failed/dead-letter 只有在仍代表当前 scope 未收敛时才参与 overall/domain 判定。成本统计 legacy scope `all` / 裸 `YYYY-MM`、以及已被后续同 scope `done` 或 fresh readiness 覆盖的 outbox 失败，只能进入历史诊断或 repair 队列，不能把 canonical fresh 页面拖成 busy/blocked。
+- historical diagnostics：`historical_read_model_scopes[]` 暴露历史失败、废弃 scope contract 和可审计修复对象；该字段不作为 fresh 证明，也不参与 `details`、`level` 或 `blocks_mutations` 推导。
 - refresh 触发来源：各业务模块 lifecycle event、settings reset、startup stale scan、read model miss/stale API enqueue、worker/backfill。
 - 失败恢复：通过对应 runbook、runtime queue ops、readiness backfill、worker restart/drain；App Health 只展示和定位，不直接执行 repair。
 
@@ -62,3 +64,4 @@
 | --- | --- | --- | --- |
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-11 | 补齐 App Health / App Status 测试闭环状态机 | 将 overall/domain/job/runtime/dashboard/readiness 状态纳入统一维护边界 | `tests.test_app_health_api`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` |
+| 2026-06-12 | 引入 current-effective blocker 语义 | legacy 成本 scope 与已被后续成功覆盖的 outbox 失败不再污染当前 App Status；历史 scope 通过 `historical_read_model_scopes[]` 暴露 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service tests.test_runtime_monitoring -v` |

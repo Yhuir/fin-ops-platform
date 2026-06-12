@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-12 - App Status current-effective blocker
+
+- 目标：修复历史 cost statistics legacy scope、历史 dead-letter/outbox failure 把当前页面同步状态长期拖成 busy/failed 的问题。
+- 影响范围：`RuntimeMonitoringRepository.app_status_runtime_snapshot()`、`AppStatusOverviewService`、`/api/app-health.app_status.domains[]` 的诊断字段、App Health / App Status 文档、outbox App Status 热路径索引。
+- 关键决策：`read_model_statuses[*].scopes[]` 只保留 current-effective scope；成本统计 legacy scope `all` 和裸 `YYYY-MM` 进入 `historical_scopes[]`。outbox `failed/dead_lettered/publish_failed` 只有在没有后续同 scope `done` 事件、且没有后续同 scope fresh readiness 时才参与当前状态。新增 `domains[*].historical_read_model_scopes[]` 只做历史诊断，不作为 fresh 证明。新增 `0067_app_status_current_effective_outbox_index.sql`，保护 App Status current-effective outbox 查询不退化为全表扫描。
+- 文档影响：更新 `docs/dev/api-contracts.md`、`docs/app-architecture/runtime-and-ownership.md`、本模块 `state-machine.md` 和 `tests.md`。
+- 测试覆盖：新增 legacy cost scope、historical read model scope diagnostics、covered outbox failure 回归测试；保留旧 missing/failed/worker/runtime unavailable/API contract 测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service tests.test_runtime_monitoring -v`。
+- 未测风险：本地 fake connection 已覆盖语义；真实生产数据仍需要部署后 smoke `/api/app-health`，确认 historical failures 不再影响 current App Status，同时 repair 脚本仍需在后续阶段处理历史 dirty/dead-letter 记录。
+- 后续事项：生产 repair 阶段应 dry-run 旧 cost statistics scope、covered dead-letter 和 readiness 记录，写审计/回滚记录后再清理；不要把语义过滤当作数据修复完成。
+
 ## 2026-06-11 - app-health-operations 测试闭环首轮
 
 - 目标：补齐 App Health / App Status 的影响面、七类测试矩阵、状态机、验证命令和真实环境风险。

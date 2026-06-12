@@ -408,6 +408,70 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertIn("active:all: parent projection failed", cost_domain["details"])
         self.assertEqual(payload["overall"]["level"], "blocked")
 
+    def test_historical_read_model_scopes_are_diagnostics_not_current_blockers(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[],
+            attention_jobs=[],
+            read_model_statuses={
+                "cost_statistics": {
+                    "status": "fresh",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "scopes": [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "fresh",
+                            "updated_at": "2026-06-04T10:07:00+00:00",
+                        },
+                    ],
+                    "historical_scopes": [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "last_error": "legacy scope failed",
+                            "updated_at": "2026-06-04T09:00:00+00:00",
+                            "current_effective": False,
+                            "history_reason": "legacy_scope_contract",
+                        },
+                    ],
+                },
+            },
+            worker_statuses={"cost-tax": {"status": "ready"}},
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:07:00+00:00",
+                "status": "ok",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        cost_domain = next(domain for domain in payload["domains"] if domain["key"] == "cost_statistics")
+        self.assertEqual(cost_domain["level"], "ok")
+        self.assertEqual(cost_domain["status"], "ready")
+        self.assertNotIn("all: legacy scope failed", cost_domain["details"])
+        self.assertEqual(
+            cost_domain["historical_read_model_scopes"],
+            [
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "all",
+                    "status": "failed",
+                    "last_error": "legacy scope failed",
+                    "updated_at": "2026-06-04T09:00:00+00:00",
+                    "current_effective": "false",
+                    "history_reason": "legacy_scope_contract",
+                },
+            ],
+        )
+
     def test_missing_critical_dependency_key_is_blocked_not_available(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
         dependencies = healthy_dependencies()
@@ -433,6 +497,15 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
 class FakeRuntimeConnection:
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
         normalized = " ".join(sql.lower().split())
+        if "from job.outbox_events" in normalized:
+            return [
+                {
+                    "event_type": "bank_detail.read_model.refresh",
+                    "status": "pending",
+                    "count": 1,
+                    "updated_at": "2026-06-04T10:00:00+00:00",
+                }
+            ]
         if "from read_model.app_status_readiness" in normalized:
             return [
                 {
@@ -455,15 +528,6 @@ class FakeRuntimeConnection:
                     "status": "processing",
                     "count": 2,
                     "last_error": None,
-                    "updated_at": "2026-06-04T10:00:00+00:00",
-                }
-            ]
-        if "from job.outbox_events" in normalized:
-            return [
-                {
-                    "event_type": "bank_detail.read_model.refresh",
-                    "status": "pending",
-                    "count": 1,
                     "updated_at": "2026-06-04T10:00:00+00:00",
                 }
             ]
@@ -496,11 +560,11 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         class NoReadinessConnection(FakeRuntimeConnection):
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    return []
                 if "from read_model.app_status_readiness" in normalized:
                     return []
                 if "from job.read_model_dirty_scopes" in normalized:
-                    return []
-                if "from job.outbox_events" in normalized:
                     return []
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
                     return []
@@ -515,6 +579,8 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         class CostScopeConnection(FakeRuntimeConnection):
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    return []
                 if "from read_model.app_status_readiness" in normalized:
                     return [
                         {
@@ -553,8 +619,6 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                             "updated_at": "2026-06-04T10:06:00+00:00",
                         },
                     ]
-                if "from job.outbox_events" in normalized:
-                    return []
                 if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
                     return [
                         {
@@ -607,6 +671,141 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
                 },
             ],
         )
+
+    def test_runtime_repository_treats_legacy_cost_statistics_scopes_as_historical(self) -> None:
+        class LegacyCostScopeConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    return []
+                if "from read_model.app_status_readiness" in normalized:
+                    return [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "fresh",
+                            "schema_version": "cost-v1",
+                            "source_versions": {"workbench": 10},
+                            "row_count": 42,
+                            "generated_at": "2026-06-04T10:07:00+00:00",
+                            "updated_at": "2026-06-04T10:07:00+00:00",
+                            "last_error": None,
+                        },
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "schema_version": "cost-v0",
+                            "source_versions": {},
+                            "row_count": None,
+                            "generated_at": None,
+                            "updated_at": "2026-06-04T09:00:00+00:00",
+                            "last_error": "legacy parent scope failed",
+                        },
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "2026-03",
+                            "status": "failed",
+                            "schema_version": "cost-v0",
+                            "source_versions": {},
+                            "row_count": None,
+                            "generated_at": None,
+                            "updated_at": "2026-06-04T09:01:00+00:00",
+                            "last_error": "legacy month scope failed",
+                        },
+                    ]
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "count": 1,
+                            "last_error": "legacy dirty scope failed",
+                            "updated_at": "2026-06-04T09:02:00+00:00",
+                        },
+                    ]
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return [
+                        {
+                            "worker_id": "cost-tax-1",
+                            "worker_instance": "cost-tax",
+                            "worker_kind": "cost-tax-read-model",
+                            "status": "running",
+                            "heartbeat_lag_seconds": 8,
+                            "payload": {
+                                "worker_instance": "cost-tax",
+                                "configured_event_types": [
+                                    "cost_statistics.read_model.refresh",
+                                    "tax_offset.read_model.refresh",
+                                ],
+                            },
+                        },
+                    ]
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(LegacyCostScopeConnection()).app_status_runtime_snapshot()
+        cost_status = snapshot["read_model_statuses"]["cost_statistics"]
+
+        self.assertEqual(cost_status["status"], "fresh")
+        self.assertEqual([scope["scope_key"] for scope in cost_status["scopes"]], ["active:all"])
+        self.assertEqual(
+            [scope["scope_key"] for scope in cost_status["historical_scopes"]],
+            ["all", "2026-03", "all"],
+        )
+        self.assertTrue(all(scope["current_effective"] is False for scope in cost_status["historical_scopes"]))
+
+    def test_runtime_repository_ignores_outbox_failures_covered_by_later_success(self) -> None:
+        class CoveredOutboxConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    return [
+                        {
+                            "event_type": "output_invoice_collection.read_model.refresh",
+                            "scope_type": "output_invoice_collection",
+                            "scope_key": "2026-05",
+                            "status": "dead_lettered",
+                            "count": 1,
+                            "updated_at": "2026-06-04T09:00:00+00:00",
+                            "covered_by_later_done": False,
+                            "covered_by_later_readiness": True,
+                        },
+                        {
+                            "event_type": "bank_detail.read_model.refresh",
+                            "scope_type": "bank_detail",
+                            "scope_key": "all",
+                            "status": "failed",
+                            "count": 1,
+                            "updated_at": "2026-06-04T10:00:00+00:00",
+                            "covered_by_later_done": False,
+                        },
+                        {
+                            "event_type": "pending_invoice.read_model.refresh",
+                            "scope_type": "pending_invoice",
+                            "scope_key": "all",
+                            "status": "pending",
+                            "count": 1,
+                            "updated_at": "2026-06-04T10:01:00+00:00",
+                            "covered_by_later_done": True,
+                        },
+                    ]
+                if "from read_model.app_status_readiness" in normalized:
+                    return []
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return []
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return []
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(CoveredOutboxConnection()).app_status_runtime_snapshot()
+
+        self.assertNotIn("output_invoice_collection.read_model.refresh", snapshot["outbox_statuses"])
+        self.assertEqual(snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["status"], "failed")
+        self.assertEqual(snapshot["outbox_statuses"]["pending_invoice.read_model.refresh"]["status"], "pending")
 
     def test_runtime_repository_records_read_model_readiness_through_repository_boundary(self) -> None:
         class RecordingConnection(FakeRuntimeConnection):

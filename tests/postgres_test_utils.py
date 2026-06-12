@@ -78,6 +78,7 @@ EXPECTED_MIGRATION_FILES = [
     "0064_etc_scrub_oa_detection_metadata.sql",
     "0065_invoice_canonical_identity_fingerprint_invariant.sql",
     "0066_oa_applicant_credentials.sql",
+    "0067_app_status_current_effective_outbox_index.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

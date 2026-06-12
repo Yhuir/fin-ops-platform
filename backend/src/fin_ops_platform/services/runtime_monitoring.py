@@ -152,17 +152,42 @@ class RuntimeMonitoringRepository:
             if not scope_type:
                 continue
             read_model_key = definitions_by_scope.get(scope_type).key if scope_type in definitions_by_scope else scope_type
+            last_error = str(row.get("last_error") or "").strip()
+            updated_at = str(row.get("updated_at") or "").strip()
+            scope_status = _app_status_dirty_scope_status(row.get("status"))
+            if _is_legacy_cost_statistics_scope(scope_type, row.get("scope_key")):
+                current = grouped.setdefault(
+                    read_model_key,
+                    {
+                        "status": "missing",
+                        "reason": "readiness record missing",
+                        "count": 0,
+                        "details": [],
+                        "scopes": [],
+                    },
+                )
+                historical_scopes = current.setdefault("historical_scopes", [])
+                if isinstance(historical_scopes, list):
+                    historical_scopes.append(
+                        _app_status_historical_read_model_scope_payload(
+                            read_model_key=read_model_key,
+                            scope_type=scope_type,
+                            scope_key=row.get("scope_key"),
+                            status=scope_status,
+                            last_error=last_error,
+                            updated_at=updated_at,
+                            history_reason="legacy_scope_contract",
+                        )
+                    )
+                continue
             current = grouped.setdefault(read_model_key, {"status": "missing", "count": 0, "details": [], "scopes": []})
             current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
-            scope_status = _app_status_dirty_scope_status(row.get("status"))
             current["status"] = _max_app_status(
                 str(current.get("status") or "missing"),
                 scope_status,
             )
-            last_error = str(row.get("last_error") or "").strip()
             if last_error:
                 current["last_error"] = last_error
-            updated_at = str(row.get("updated_at") or "").strip()
             if updated_at:
                 current["updated_at"] = updated_at
             scopes = current.setdefault("scopes", [])
@@ -209,11 +234,25 @@ class RuntimeMonitoringRepository:
             """
         )
         grouped: dict[str, dict[str, Any]] = {}
+        historical_scopes_by_key: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             key = str(row.get("read_model_key") or "").strip()
             if not key:
                 continue
             status = str(row.get("status") or "missing").strip().lower() or "missing"
+            if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
+                historical_scopes_by_key.setdefault(key, []).append(
+                    _app_status_historical_read_model_scope_payload(
+                        read_model_key=key,
+                        scope_type=row.get("scope_type"),
+                        scope_key=row.get("scope_key"),
+                        status=status,
+                        last_error=row.get("last_error"),
+                        updated_at=row.get("updated_at"),
+                        history_reason="legacy_scope_contract",
+                    )
+                )
+                continue
             current = grouped.setdefault(
                 key,
                 {
@@ -250,25 +289,65 @@ class RuntimeMonitoringRepository:
                 current["updated_at"] = row.get("updated_at")
             if row.get("generated_at"):
                 current["generated_at"] = row.get("generated_at")
+        for key, historical_scopes in historical_scopes_by_key.items():
+            current = grouped.setdefault(
+                key,
+                {
+                    "status": "missing",
+                    "reason": "readiness record missing",
+                    "count": 0,
+                    "scopes": [],
+                },
+            )
+            target_scopes = current.setdefault("historical_scopes", [])
+            if isinstance(target_scopes, list):
+                target_scopes.extend(historical_scopes)
         return grouped
 
     def _app_status_outbox_statuses(self) -> dict[str, dict[str, Any]]:
         rows = self._connection.fetch_all(
             """
             select
-                event_type,
-                status,
+                e.event_type,
+                e.scope_type,
+                e.scope_key,
+                e.status,
                 count(*)::bigint as count,
-                max(updated_at)::text as updated_at
-            from job.outbox_events
-            where status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
-            group by event_type, status
+                max(e.updated_at)::text as updated_at,
+                bool_or(
+                    exists (
+                        select 1
+                        from job.outbox_events done
+                        where done.tenant_id = e.tenant_id
+                          and done.event_type = e.event_type
+                          and coalesce(done.scope_type, '') = coalesce(e.scope_type, '')
+                          and coalesce(done.scope_key, '') = coalesce(e.scope_key, '')
+                          and done.status = 'done'
+                          and done.updated_at > e.updated_at
+                    )
+                ) as covered_by_later_done,
+                bool_or(
+                    exists (
+                        select 1
+                        from read_model.app_status_readiness readiness
+                        where readiness.tenant_id = e.tenant_id
+                          and coalesce(readiness.scope_type, '') = coalesce(e.scope_type, '')
+                          and coalesce(readiness.scope_key, '') = coalesce(e.scope_key, '')
+                          and readiness.status = 'fresh'
+                          and readiness.updated_at > e.updated_at
+                    )
+                ) as covered_by_later_readiness
+            from job.outbox_events e
+            where e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
+            group by e.event_type, e.scope_type, e.scope_key, e.status
             """
         )
         grouped: dict[str, dict[str, Any]] = {}
         for row in rows:
             event_type = str(row.get("event_type") or "").strip()
             if not event_type:
+                continue
+            if _is_historical_outbox_status(row):
                 continue
             current = grouped.setdefault(event_type, {"status": "ready", "count": 0})
             current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
@@ -972,6 +1051,54 @@ def _app_status_read_model_scope_payload(
         "last_error": str(last_error or "").strip(),
         "updated_at": str(updated_at or "").strip(),
     }
+
+
+def _app_status_historical_read_model_scope_payload(
+    *,
+    read_model_key: object,
+    scope_type: object,
+    scope_key: object,
+    status: object,
+    last_error: object,
+    updated_at: object,
+    history_reason: str,
+) -> dict[str, Any]:
+    payload = _app_status_read_model_scope_payload(
+        read_model_key=read_model_key,
+        scope_type=scope_type,
+        scope_key=scope_key,
+        status=status,
+        last_error=last_error,
+        updated_at=updated_at,
+    )
+    payload["current_effective"] = False
+    payload["history_reason"] = history_reason
+    return payload
+
+
+def _is_legacy_cost_statistics_scope(scope_type: object, scope_key: object) -> bool:
+    if str(scope_type or "").strip() != "cost_statistics":
+        return False
+    key = str(scope_key or "").strip()
+    if key == "all":
+        return True
+    parts = key.split("-")
+    return len(parts) == 2 and len(parts[0]) == 4 and len(parts[1]) == 2 and all(part.isdigit() for part in parts)
+
+
+def _is_historical_outbox_status(row: dict[str, Any]) -> bool:
+    status = str(row.get("status") or "").strip()
+    if status not in {"publish_failed", "failed", "dead_lettered"}:
+        return False
+    if _is_legacy_cost_statistics_scope(row.get("scope_type"), row.get("scope_key")):
+        return True
+    return _truthy(row.get("covered_by_later_done")) or _truthy(row.get("covered_by_later_readiness"))
+
+
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "t", "true", "yes", "y"}
 
 
 def _max_app_status(left: str, right: str) -> str:

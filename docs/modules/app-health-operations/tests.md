@@ -21,8 +21,8 @@
 | 场景 | 保护测试 | 说明 |
 | --- | --- | --- |
 | idle / busy / blocked health API | `tests/test_app_health_api.py`、`tests/test_app_health_service.py` | 覆盖 dirty OA scopes、workbench consistency failure、dependency error、background jobs、SSE |
-| App Status overview | `tests/test_app_status_overview_service.py` | 覆盖 registry 一致性、background task、read model missing/failed、worker missing、runtime unavailable、API contract |
-| Runtime monitoring metrics | `tests/test_runtime_monitoring.py` | 覆盖 backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics、worker mismatch |
+| App Status overview | `tests/test_app_status_overview_service.py` | 覆盖 registry 一致性、background task、read model missing/failed、worker missing、runtime unavailable、current-effective blocker、历史 scope 诊断、API contract |
+| Runtime monitoring metrics | `tests/test_runtime_monitoring.py` | 覆盖 backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics、worker mismatch；App Status runtime repository 在 `tests/test_app_status_overview_service.py` 额外覆盖 legacy scope 与 covered outbox failure |
 | Readiness backfill | `tests/test_app_status_readiness_backfill.py` | 覆盖 dry-run/apply、missing projection 不伪造 fresh |
 | Worker/queue ops | `tests/test_runtime_worker_registry.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_queue_ops.py`、`tests/test_deploy_runtime_examples.py` | 覆盖 registry-derived worker、outbox/dirty queue、dead letter resolve、deployment examples |
 | Frontend dashboard | `web/src/test/AppHealthOperationsPage.test.tsx` | 覆盖只读 dashboard、admin gate、unknown metrics、refresh failure stale payload |
@@ -48,6 +48,7 @@
 
 - dirty scope/outbox pending -> `/api/app-health` busy/yellow -> App Status popover 显示受影响 domain。
 - critical read model failed/unavailable -> App Status blocked/red -> 页面不能把旧数据当 fresh。
+- legacy cost statistics scope 或已被后续真实完成事实覆盖的 outbox failure -> App Status 保持当前 canonical 状态，同时通过历史诊断暴露 repair/audit 信息。
 - required worker missing/stale/mismatch -> runtime infrastructure warning -> App Health dashboard 和 App Status domain 可定位。
 - import/data reset/background job running -> active background task -> App Status 显示任务进度和 affected domains。
 - dashboard refresh 成功后展示数据/请求/后台三块；下一次刷新失败时保留旧 dashboard 并显示 warning。

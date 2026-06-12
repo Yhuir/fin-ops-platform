@@ -124,6 +124,10 @@ class AppStatusOverviewService:
             read_model_statuses=read_model_statuses,
             domain=domain,
         )
+        historical_read_model_scopes = self._historical_read_model_scope_payloads(
+            read_model_statuses=read_model_statuses,
+            domain=domain,
+        )
         worker_values = [
             self._normalize_status(worker_statuses.get(key))
             for key in domain.worker_instances
@@ -219,6 +223,7 @@ class AppStatusOverviewService:
             "details": self._unique(details),
             "read_models": list(domain.read_model_keys),
             "read_model_scopes": read_model_scopes,
+            "historical_read_model_scopes": historical_read_model_scopes,
             "workers": list(domain.worker_instances),
             "job_ids": [job_id for job_id in domain_task_ids if job_id],
             "updated_at": generated_at,
@@ -249,6 +254,37 @@ class AppStatusOverviewService:
                         "status": self._normalize_status(raw_scope),
                         "last_error": str(raw_scope.get("last_error") or "").strip(),
                         "updated_at": str(raw_scope.get("updated_at") or "").strip(),
+                    }
+                )
+        return payloads
+
+    def _historical_read_model_scope_payloads(
+        self,
+        *,
+        read_model_statuses: dict[str, dict[str, Any]],
+        domain: AppStatusDomainDefinition,
+    ) -> list[dict[str, str]]:
+        payloads: list[dict[str, str]] = []
+        for key in domain.read_model_keys:
+            status_payload = read_model_statuses.get(key) or {}
+            if not isinstance(status_payload, dict):
+                continue
+            raw_scopes = status_payload.get("historical_scopes")
+            if not isinstance(raw_scopes, list):
+                continue
+            for raw_scope in raw_scopes:
+                if not isinstance(raw_scope, dict):
+                    continue
+                payloads.append(
+                    {
+                        "read_model_key": str(raw_scope.get("read_model_key") or key).strip(),
+                        "scope_type": str(raw_scope.get("scope_type") or status_payload.get("scope_type") or "").strip(),
+                        "scope_key": str(raw_scope.get("scope_key") or "").strip(),
+                        "status": self._normalize_status(raw_scope),
+                        "last_error": str(raw_scope.get("last_error") or "").strip(),
+                        "updated_at": str(raw_scope.get("updated_at") or "").strip(),
+                        "current_effective": str(raw_scope.get("current_effective") is not False).lower(),
+                        "history_reason": str(raw_scope.get("history_reason") or "").strip(),
                     }
                 )
         return payloads

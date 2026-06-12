@@ -79,6 +79,7 @@ EXPECTED_MIGRATIONS = [
     "0064_etc_scrub_oa_detection_metadata.sql",
     "0065_invoice_canonical_identity_fingerprint_invariant.sql",
     "0066_oa_applicant_credentials.sql",
+    "0067_app_status_current_effective_outbox_index.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -188,7 +189,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 67)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 68)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -216,6 +217,18 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("workbench_rows_oa_attachment_inventory_idx", sql)
         self.assertIn("on read_model.workbench_rows (row_id, generated_at desc)", sql)
         self.assertIn("where source_kind = 'oa_attachment_invoice'", sql)
+
+    def test_app_status_current_effective_outbox_index_is_declared(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("outbox_events_app_status_current_effective_idx", sql)
+        self.assertIn(
+            "on job.outbox_events ( status, tenant_id, event_type, scope_type, scope_key, updated_at desc )",
+            normalized_sql,
+        )
+        self.assertIn("'dead_lettered'", sql)
+        self.assertIn("'done'", sql)
 
     def test_discovery_rejects_invalid_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
