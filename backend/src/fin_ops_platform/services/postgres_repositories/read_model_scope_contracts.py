@@ -82,7 +82,7 @@ class PostgresReadModelScopeContractRepository:
                       and readiness.updated_at > e.updated_at
                 ) as covered_by_later_readiness
             from job.outbox_events e
-            where e.event_type like '%.read_model.refresh'
+            where e.event_type like '%%.read_model.refresh'
               and e.status in ('failed', 'dead_lettered', 'publish_failed')
             order by e.updated_at desc, e.id
             """

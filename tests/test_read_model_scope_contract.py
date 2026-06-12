@@ -2,7 +2,19 @@ from __future__ import annotations
 
 import unittest
 
+from fin_ops_platform.services.postgres_repositories.read_model_scope_contracts import (
+    PostgresReadModelScopeContractRepository,
+)
 from fin_ops_platform.services.read_model_scope_contract import ReadModelScopeContractService
+
+
+class CapturingConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, object]] = []
+
+    def fetch_all(self, sql: str, params: object = ()) -> list[dict[str, object]]:
+        self.fetch_all_calls.append((sql, params))
+        return []
 
 
 class FakeScopeContractRepository:
@@ -86,6 +98,17 @@ class FakeRefreshGateway:
 
 
 class ReadModelScopeContractServiceTests(unittest.TestCase):
+    def test_postgres_repository_outbox_failure_query_escapes_psycopg_percent_pattern(self) -> None:
+        connection = CapturingConnection()
+
+        rows = PostgresReadModelScopeContractRepository(connection).list_read_model_outbox_failures()
+
+        self.assertEqual(rows, [])
+        sql, params = connection.fetch_all_calls[-1]
+        self.assertEqual(params, ())
+        self.assertIn("like '%%.read_model.refresh'", sql)
+        self.assertNotIn("like '%.read_model.refresh'", sql)
+
     def test_check_reports_non_canonical_cost_statistics_scope_rows_without_writes(self) -> None:
         repository = FakeScopeContractRepository()
         repository.dirty_scopes = [
