@@ -1163,6 +1163,10 @@ Stage 21 结论：
 
 ## Stage 22：Redis fresh-cache 增加 fresh-gate envelope
 
+Stage 22 Release：`main-0c9a3c68-stage22-202606130242`
+
+Stage 22 Commit：`0c9a3c68`
+
 Stage 22 修复 fresh-cache 的基础契约：不能只因为 Redis key 命中就把 payload 标记成 fresh。通用
 `ReadModelQueryGateway` 现在要求 Redis payload 通过 fresh-gate 校验：
 
@@ -1185,6 +1189,37 @@ Stage 22 修复 fresh-cache 的基础契约：不能只因为 Redis key 命中�
 
 - `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_read_model_query_gateway tests.test_cost_statistics_sql_runtime tests.test_tax_offset_sql_runtime -v`
 - `bash scripts/verify.sh backend`：2839 tests pass，25 skipped
+
+生产部署：
+
+- 使用干净 worktree `/private/tmp/finops-stage22-deploy`。
+- 复用已验证 `web/dist`，执行
+  `./scripts/deploy-oa.sh --skip-build --release-name main-0c9a3c68-stage22-202606130242`。
+- migration `0068` skipped，没有新增数据库变更。
+- deploy script 完整通过：backend readiness、deploy-control status、runtime worker ensure、frontend hash、public session route
+  和 cleanup releases 均通过；旧 release `main-8f123cb4-stage18-202606130151` 被清理。
+
+生产 post-deploy summary：
+
+| 指标 | 值 |
+|---|---:|
+| release | `main-0c9a3c68-stage22-202606130242` |
+| schema_version | 68 |
+| runtime_release.consistent | true |
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| RabbitMQ queue depth | 0 |
+| RabbitMQ DLQ | 0 |
+| missing required workers | 0 |
+| stale required workers | 0 |
+
+生产 smoke：
+
+- public page shell only：
+  `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe --base-url https://www.yn-sourcing.com --page-path /fin-ops/ --replace-default-probes --iterations 5 --warmup 1 --allow-unauthenticated`
+- 结果文件：`/tmp/finops-http-slo-stage22-public-shell-20260613024403.json`
+- 5 个 measured samples，status `200`，p95 `112.874ms`。
+- `/fin-ops-api/api/session/me` 和 `/fin-ops/api/session/me` 仍返回 JSON `401`，代理路由正常。
 
 Stage 22 结论：
 
