@@ -136,8 +136,78 @@ worker 收敛后只读数据库验证：
 
 ## 后续阶段
 
-1. 受控归档 covered historical dead-letter：逐条验证 later done/fresh readiness 证明，记录 audit 和 rollback，把 `/health/ready.failed_jobs` 降到 0。
-2. RabbitMQ real consumers：当前 RabbitMQ 仍只是 publish/wakeup 边界，management metric 返回 404；需要启用真实 consumer 和监控，降低 wakeup 延迟。
-3. Redis fresh-cache：只缓存 fresh gate 之后 payload，优先覆盖页面首包慢且重复读取的 read model。
-4. PostgreSQL 索引/分区：基于基线 EXPLAIN 和生产 pg_stat/表大小做，不做盲目分区。
-5. Prometheus/Grafana 或 OpenTelemetry：把 enqueue-to-fresh latency、pending age、failure rate、readiness non-fresh 和 API p95 做成持续 SLO。
+1. RabbitMQ real consumers：当前 RabbitMQ 仍只是 publish/wakeup 边界，management metric 返回 404；需要启用真实 consumer 和监控，降低 wakeup 延迟。
+2. Redis fresh-cache：只缓存 fresh gate 之后 payload，优先覆盖页面首包慢且重复读取的 read model。
+3. PostgreSQL 索引/分区：基于基线 EXPLAIN 和生产 pg_stat/表大小做，不做盲目分区。
+4. Prometheus/Grafana 或 OpenTelemetry：把 enqueue-to-fresh latency、pending age、failure rate、readiness non-fresh 和 API p95 做成持续 SLO。
+5. Worker shutdown/reclaim：本次发布后观察到 worker 在处理事件时被 systemd 重启，outbox 进入 `processing` 并依赖 300s lock timeout 回收；这是“打开 app 后同步几分钟”的直接风险，需要优先修复。
+
+## Stage 5：covered historical dead-letter 归档
+
+Release：`main-d38edfa9-stage5-202606122335`
+
+Commit：`d38edfa93c7211654c9df71f02974c6b7cbd011a`
+
+本阶段新增并发布 `runtime_queue_ops resolve-covered-dead-letters`：
+
+- dry-run/execute 双模式。
+- 每条 dead-letter 必须有同一 `tenant_id + read_model_key + scope_type + scope_key` 的 `fresh_readiness`，或同一 outbox scope 在该 dead-letter 之后已有 `done` 事件。
+- 同一 `tenant_id + scope_type + scope_key` 不能存在 `pending`、`processing` 或 `failed` dirty scope。
+- execute 复用 `RuntimeQueueRepository.resolve_dead_letter_event()`，把事件标为 `done`，并写 `raw_payload.operator_resolution`，不直接 SQL 改状态。
+
+本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue_ops tests.test_runtime_queue -v`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_queue_ops resolve-covered-dead-letters --help`
+- `bash scripts/verify.sh docs`
+
+生产 dry-run：
+
+| 指标 | 值 |
+|---|---:|
+| candidate_count | 10 |
+| eligible_count | 10 |
+| resolved_count | 0 |
+
+10 条候选全部有 `fresh_readiness` 与 `later_done` proof，且 `active_dirty_count=0`。范围为：
+
+- `workbench.read_model.refresh`：`all` 1 条。
+- `output_invoice_collection.read_model.refresh`：`2026-01`、`2026-02`、`2026-03` 共 9 条历史重复 dead-letter。
+
+生产 execute：
+
+| 指标 | 值 |
+|---|---:|
+| candidate_count | 10 |
+| eligible_count | 10 |
+| resolved_count | 10 |
+| reason | `readiness_converged_obsolete_dead_letter` |
+
+执行后 post dry-run：
+
+| 指标 | 值 |
+|---|---:|
+| candidate_count | 0 |
+| eligible_count | 0 |
+| resolved_count | 0 |
+
+最终生产快照：
+
+| 指标 | 值 |
+|---|---:|
+| read model outbox 非 `done` | 0 |
+| dirty scope 非 `done` | 0 |
+| readiness 非 `fresh` | 0 |
+| `operator_resolution` 记录数 | 10 |
+| `/health/ready.failed_jobs` | 0 |
+| `/health/ready.stale_dirty_scope_count` | 0 |
+| required worker missing/stale/mismatch | 0 |
+| `read_model_refresh_failure_rate` | 0.0 |
+
+本阶段把 runtime failure count 清到了 0，但仍未达到“几秒内全部同步”的性能闭环。发布期间观察到 3 个正常 refresh scope 在 worker 重启后留在 `processing`，直到 lock timeout/reclaim 后才收敛：
+
+- `workbench:2026-01`
+- `input_invoice_usage:2026-03`
+- `cost_statistics:active:2026-04`
+
+这些事件没有失败，最终也真实完成；但它们暴露出当前 worker shutdown/reclaim 设计会制造分钟级尾延迟。下一阶段必须优先修复 worker graceful shutdown、processing lease 释放或 deploy worker restart 顺序，再谈 RabbitMQ/Redis/索引性能优化。
