@@ -5477,12 +5477,6 @@ class PostgresReadModelRepository:
         generated_at = max_generated_at or None
         workbench_rows = list(self._iter_workbench_rows(aggregate_payload))
         workbench_groups = list(self._iter_workbench_groups(aggregate_payload))
-        summary_payload = self._workbench_summary_from_payload(
-            scope_key="all",
-            grouped_payload=aggregate_payload,
-            source_versions=aggregate_source_versions,
-            generated_at=generated_at,
-        )
         generation_id = self._new_workbench_generation_id("all")
         self._start_workbench_generation(
             connection,
@@ -5526,39 +5520,6 @@ class PostgresReadModelRepository:
                 ),
                 jsonb({"normalized_payload": aggregate_payload}),
             ),
-        )
-        connection.execute(
-            """
-            insert into read_model.workbench_summary(
-                generation_id, scope_key, scope_month, source_versions, generated_at, cache_status,
-                summary, invoice_inventory, payload, raw_payload
-            )
-            values (%s, 'all', null, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s, %s, %s)
-            on conflict (generation_id, scope_key) do update set
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                summary = excluded.summary,
-                invoice_inventory = excluded.invoice_inventory,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            (
-                generation_id,
-                jsonb(aggregate_source_versions),
-                generated_at,
-                jsonb(summary_payload.get("summary") if isinstance(summary_payload.get("summary"), dict) else {}),
-                jsonb(summary_payload.get("invoice_inventory") if isinstance(summary_payload.get("invoice_inventory"), dict) else {}),
-                jsonb(summary_payload),
-                jsonb({"normalized_payload": summary_payload}),
-            ),
-        )
-        self._upsert_workbench_generation_stats(
-            connection,
-            generation_id=generation_id,
-            scope_key="all",
-            summary_payload=summary_payload,
         )
         workbench_row_params: list[tuple[Any, ...]] = []
         for row in workbench_rows:
@@ -5751,7 +5712,10 @@ class PostgresReadModelRepository:
             source_versions=aggregate_source_versions,
             generated_at=generated_at,
         )
-        final_summary_payload["invoice_inventory"] = self._workbench_invoice_inventory(scope_key="all")
+        final_summary_payload["invoice_inventory"] = self._workbench_invoice_inventory(
+            scope_key="all",
+            generation_id=generation_id,
+        )
         connection.execute(
             """
             insert into read_model.workbench_summary(
