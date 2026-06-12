@@ -148,4 +148,8 @@ python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight \
   --output /tmp/finops-rabbitmq-staging-preflight.json
 ```
 
+默认只检查 registry 中 `required=true` 且 `rabbitmq_eligible=true` 的 worker，避免未启用的 optional
+worker 例如 `file-migration` 因缺少 legacy GridFS 或对象存储配置阻塞灰度。如果本次发布明确要启用
+optional worker，再加 `--include-optional-workers`，并先补齐对应 dependency 和 env。
+
 一次性报告不要写入长期文档树。需要长期保留的结论应提炼到本文或对应运维文档。

@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip real PostgreSQL/RabbitMQ pytest integration tests. Intended only for CLI smoke in local development.",
     )
+    parser.add_argument(
+        "--include-optional-workers",
+        action="store_true",
+        help="Also run RabbitMQ --check for optional workers. Defaults to required workers only.",
+    )
     return parser
 
 
@@ -94,6 +99,7 @@ def main(
         runner=runner or CommandRunner(),
         apply_topology=args.apply_topology,
         skip_real_tests=args.skip_real_tests,
+        include_optional_workers=args.include_optional_workers,
     )
     status = PASS if all(check.status == PASS for check in checks) else FAIL
     report = {
@@ -101,6 +107,7 @@ def main(
         "status": status,
         "apply_topology": bool(args.apply_topology),
         "skip_real_tests": bool(args.skip_real_tests),
+        "include_optional_workers": bool(args.include_optional_workers),
         "checks": [check.to_dict() for check in checks],
     }
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
@@ -117,6 +124,7 @@ def run_checks(
     runner: CommandRunner,
     apply_topology: bool,
     skip_real_tests: bool,
+    include_optional_workers: bool,
 ) -> list[CheckResult]:
     checks: list[CheckResult] = [_check_required_env(env)]
     if checks[-1].status != PASS:
@@ -195,7 +203,10 @@ def run_checks(
         f"rabbitmq.consumer_worker_check.{registration.instance_name.replace('-', '_')}": list(
             worker_check_command_args(registration, transport="rabbitmq")
         )
-        for registration in worker_registrations(rabbitmq_eligible_only=True)
+        for registration in worker_registrations(
+            required_only=not include_optional_workers,
+            rabbitmq_eligible_only=True,
+        )
     }
     for name, worker_args in worker_checks.items():
         checks.append(

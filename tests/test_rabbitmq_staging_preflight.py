@@ -61,10 +61,9 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
             "rabbitmq.consumer_worker_check.cost_tax",
             "rabbitmq.consumer_worker_check.import",
             "rabbitmq.consumer_worker_check.no_oa_bank_batch",
-            "rabbitmq.consumer_worker_check.bank_account_balance",
-            "rabbitmq.consumer_worker_check.file_migration",
         ])
-        self.assertEqual(len(runner.calls), 17)
+        self.assertEqual(report["include_optional_workers"], False)
+        self.assertEqual(len(runner.calls), 15)
         dispatcher_env = runner.calls[3][1]
         self.assertEqual(dispatcher_env["FIN_OPS_QUEUE_BACKEND"], "postgres")
         self.assertEqual(dispatcher_env["RABBITMQ_SHADOW_PUBLISH"], "true")
@@ -91,6 +90,28 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         encoded = stdout.getvalue()
         self.assertNotIn("pw@", encoded)
         self.assertNotIn("secret@", encoded)
+
+    def test_include_optional_workers_runs_optional_rabbitmq_checks(self) -> None:
+        runner = FakeRunner()
+        env = {
+            "FIN_OPS_TEST_DATABASE_URL": "postgresql://user:pw@postgres.internal:5432/fin_ops_test",
+            "RABBITMQ_TEST_URL": "amqp://worker:secret@rabbitmq.internal/%2Ffinops",
+        }
+        stdout = StringIO()
+
+        exit_code = preflight.main(
+            ["--json", "--skip-real-tests", "--include-optional-workers"],
+            stdout=stdout,
+            runner=runner,
+            environ=env,
+        )
+
+        self.assertEqual(exit_code, 0)
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(report["include_optional_workers"], True)
+        check_names = [check["name"] for check in report["checks"]]
+        self.assertIn("rabbitmq.consumer_worker_check.bank_account_balance", check_names)
+        self.assertIn("rabbitmq.consumer_worker_check.file_migration", check_names)
 
     def test_apply_topology_adds_explicit_apply_command(self) -> None:
         runner = FakeRunner()
