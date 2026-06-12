@@ -6,6 +6,7 @@ from typing import Any, Callable
 from fin_ops_platform.services.read_model_freshness import (
     normalize_source_versions,
     resolve_read_model_freshness,
+    source_version_mismatch_reasons,
 )
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
@@ -48,7 +49,12 @@ class ReadModelQueryGateway:
         source_mismatch_reason: str = "api_source_versions_stale",
     ) -> ReadModelQueryResult:
         expected_versions = normalize_source_versions(expected_source_versions)
-        cached_payload = self._get_cached_payload(cache_key)
+        cached_payload = self._get_cached_payload(
+            cache_key,
+            scope_key=scope_key,
+            expected_source_versions=expected_versions,
+            expected_schema_version=expected_schema_version,
+        )
         if cached_payload is not None:
             payload = dict(cached_payload)
             self._attach_payload_metadata(
@@ -120,7 +126,14 @@ class ReadModelQueryGateway:
             payload["refresh_reason"] = "source_version_mismatch" if refresh_reason == source_mismatch_reason else refresh_reason
         elif cache_key and cache_ttl_seconds:
             payload["refresh_enqueued"] = False
-            self._set_cached_payload(cache_key, payload, ttl_seconds=cache_ttl_seconds)
+            self._set_cached_payload(
+                cache_key,
+                payload,
+                ttl_seconds=cache_ttl_seconds,
+                scope_key=scope_key,
+                source_versions=actual_source_versions,
+                schema_version=expected_schema_version or view.get("schema_version"),
+            )
         else:
             payload["refresh_enqueued"] = False
         return ReadModelQueryResult(
@@ -136,7 +149,14 @@ class ReadModelQueryGateway:
             return False
         return bool(self._refresh_gateway.enqueue_many(scope_type, [scope_key], reason=reason))
 
-    def _get_cached_payload(self, cache_key: str | None) -> dict[str, Any] | None:
+    def _get_cached_payload(
+        self,
+        cache_key: str | None,
+        *,
+        scope_key: str,
+        expected_source_versions: dict[str, Any],
+        expected_schema_version: Any | None,
+    ) -> dict[str, Any] | None:
         if not cache_key:
             return None
         get_json = getattr(self._redis_helper, "get_json", None)
@@ -149,14 +169,42 @@ class ReadModelQueryGateway:
         if not isinstance(cached, dict):
             return None
         payload = cached.get("payload") if isinstance(cached.get("payload"), dict) else cached
-        return dict(payload) if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        if not _cached_payload_passes_fresh_gate(
+            cached,
+            payload,
+            scope_key=scope_key,
+            expected_source_versions=expected_source_versions,
+            expected_schema_version=expected_schema_version,
+        ):
+            return None
+        return dict(payload)
 
-    def _set_cached_payload(self, cache_key: str, payload: dict[str, Any], *, ttl_seconds: int) -> None:
+    def _set_cached_payload(
+        self,
+        cache_key: str,
+        payload: dict[str, Any],
+        *,
+        ttl_seconds: int,
+        scope_key: str,
+        source_versions: dict[str, Any] | None,
+        schema_version: Any | None,
+    ) -> None:
         set_json = getattr(self._redis_helper, "set_json", None)
         if not callable(set_json):
             return
         try:
-            set_json(cache_key, {"payload": payload}, ttl_seconds=ttl_seconds)
+            set_json(
+                cache_key,
+                build_fresh_cache_envelope(
+                    payload,
+                    scope_key=scope_key,
+                    source_versions=source_versions,
+                    schema_version=schema_version,
+                ),
+                ttl_seconds=ttl_seconds,
+            )
         except Exception:
             return
 
@@ -185,6 +233,61 @@ class ReadModelQueryGateway:
 def _default_payload_from_view(view: dict[str, Any]) -> dict[str, Any]:
     payload = view.get("payload")
     return dict(payload) if isinstance(payload, dict) else {}
+
+
+def build_fresh_cache_envelope(
+    payload: dict[str, Any],
+    *,
+    scope_key: str,
+    source_versions: dict[str, Any] | None,
+    schema_version: Any | None = None,
+) -> dict[str, Any]:
+    return {
+        "payload": payload,
+        "fresh_gate": {
+            "scope_key": scope_key,
+            "read_model_status": "fresh",
+            "schema_version": str(schema_version) if schema_version not in (None, "") else "",
+            "source_versions": normalize_source_versions(source_versions),
+        },
+    }
+
+
+def _cached_payload_passes_fresh_gate(
+    cached: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    scope_key: str,
+    expected_source_versions: dict[str, Any],
+    expected_schema_version: Any | None,
+) -> bool:
+    gate = cached.get("fresh_gate") if isinstance(cached.get("fresh_gate"), dict) else {}
+    status = str(gate.get("read_model_status") or payload.get("read_model_status") or "fresh").strip().lower()
+    if status != "fresh":
+        return False
+
+    cached_scope_key = str(
+        gate.get("scope_key") or payload.get("read_model_scope_key") or payload.get("scope_key") or ""
+    ).strip()
+    if cached_scope_key and cached_scope_key != str(scope_key):
+        return False
+
+    actual_source_versions = (
+        gate.get("source_versions") if isinstance(gate.get("source_versions"), dict) else payload.get("source_versions")
+    )
+    if source_version_mismatch_reasons(
+        expected=expected_source_versions,
+        actual=actual_source_versions if isinstance(actual_source_versions, dict) else {},
+    ):
+        return False
+
+    expected_schema = str(expected_schema_version or "").strip()
+    if not expected_schema:
+        return True
+    actual_schema = str(
+        gate.get("schema_version") or payload.get("read_model_schema_version") or payload.get("schema_version") or ""
+    ).strip()
+    return not actual_schema or actual_schema == expected_schema
 
 
 class ReadModelRefreshQueueAdapter:

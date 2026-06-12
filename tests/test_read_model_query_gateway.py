@@ -31,7 +31,20 @@ class RedisRecorder:
 class ReadModelQueryGatewayTests(unittest.TestCase):
     def test_fresh_cache_hit_does_not_call_sql_or_enqueue_refresh(self) -> None:
         queue = QueueRecorder()
-        redis = RedisRecorder({"payload": {"rows": [{"id": "cached"}]}})
+        redis = RedisRecorder(
+            {
+                "payload": {
+                    "rows": [{"id": "cached"}],
+                    "read_model_status": "fresh",
+                    "source_versions": {"source_version": "3"},
+                },
+                "fresh_gate": {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "source_versions": {"source_version": "3"},
+                },
+            }
+        )
         gateway = ReadModelQueryGateway(queue_repository=queue, redis_helper=redis)
 
         result = gateway.load(
@@ -52,6 +65,30 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         self.assertFalse(result.refresh_enqueued)
         self.assertEqual(queue.refreshes, [])
         self.assertEqual(redis.gets, ["example:all:v3"])
+
+    def test_legacy_cache_without_fresh_gate_or_source_versions_misses_and_repopulates(self) -> None:
+        queue = QueueRecorder()
+        redis = RedisRecorder({"payload": {"rows": [{"id": "legacy"}], "read_model_status": "fresh"}})
+        gateway = ReadModelQueryGateway(queue_repository=queue, redis_helper=redis)
+
+        result = gateway.load(
+            scope_type="example",
+            scope_key="all",
+            expected_source_versions={"source_version": 3},
+            load_view=lambda: {
+                "payload": {"rows": [{"id": "sql"}]},
+                "refresh_status": "fresh",
+                "source_versions": {"source_version": 3},
+            },
+            empty_payload_factory=lambda: {"rows": []},
+            cache_key="example:all:v3",
+            cache_ttl_seconds=60,
+        )
+
+        self.assertEqual(result.payload["rows"], [{"id": "sql"}])
+        self.assertFalse(result.cache_hit)
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(len(redis.sets), 1)
 
     def test_stale_sql_view_enqueues_refresh_without_populating_cache(self) -> None:
         queue = QueueRecorder()
@@ -157,6 +194,8 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         self.assertFalse(result.payload["refresh_enqueued"])
         self.assertEqual(queue.refreshes, [])
         self.assertEqual(len(redis.sets), 1)
+        self.assertEqual(redis.sets[0][1]["fresh_gate"]["scope_key"], "all")
+        self.assertEqual(redis.sets[0][1]["fresh_gate"]["source_versions"], {"source_version": "3"})
 
 
 if __name__ == "__main__":

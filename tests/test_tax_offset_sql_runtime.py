@@ -7,6 +7,7 @@ import unittest
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
+from fin_ops_platform.services.tax_offset_read_model_service import TAX_OFFSET_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 
 
@@ -30,6 +31,28 @@ def tax_payload(month: str = "2026-05") -> dict[str, object]:
         "locked_certified_input_ids": [],
         "default_selected_output_ids": [],
         "default_selected_input_ids": [],
+    }
+
+
+def redis_fresh_payload(
+    payload: dict[str, object],
+    *,
+    scope_key: str,
+    source_versions: dict[str, object],
+) -> dict[str, object]:
+    cached_payload = dict(payload)
+    cached_payload["read_model_status"] = "fresh"
+    cached_payload["read_model_scope_key"] = scope_key
+    cached_payload["read_model_schema_version"] = TAX_OFFSET_READ_MODEL_SCHEMA_VERSION
+    cached_payload["source_versions"] = dict(source_versions)
+    return {
+        "payload": cached_payload,
+        "fresh_gate": {
+            "scope_key": scope_key,
+            "read_model_status": "fresh",
+            "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            "source_versions": dict(source_versions),
+        },
     }
 
 
@@ -154,10 +177,20 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
     def test_tax_offset_api_reads_redis_hot_cache_without_sql_or_sync_build(self) -> None:
         app = object.__new__(Application)
+        source_versions = app._tax_offset_source_versions()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
-            {"queue_repository": QueueRecorder(), "redis_helper": RedisRecorder({"payload": tax_payload("2026-05")})},
+            {
+                "queue_repository": QueueRecorder(),
+                "redis_helper": RedisRecorder(
+                    redis_fresh_payload(
+                        tax_payload("2026-05"),
+                        scope_key="2026-05",
+                        source_versions=source_versions,
+                    )
+                ),
+            },
         )()
         app._tax_offset_sql_read_repository = type(
             "SqlTaxOffset",
@@ -373,10 +406,20 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             "item_counts": {"output_items": 8},
         }
         app = object.__new__(Application)
+        source_versions = app._tax_offset_source_versions()
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
-            {"queue_repository": QueueRecorder(), "redis_helper": RedisRecorder({"payload": cached_summary})},
+            {
+                "queue_repository": QueueRecorder(),
+                "redis_helper": RedisRecorder(
+                    redis_fresh_payload(
+                        cached_summary,
+                        scope_key="2026-05",
+                        source_versions=source_versions,
+                    )
+                ),
+            },
         )()
         app._tax_offset_sql_read_repository = type(
             "SqlTaxOffset",

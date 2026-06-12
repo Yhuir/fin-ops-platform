@@ -6,6 +6,7 @@ import unittest
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
+from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.cost_tax_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
@@ -41,6 +42,28 @@ class RedisRecorder:
     def delete(self, key: str) -> bool:
         self.deletes.append(key)
         return True
+
+
+def redis_fresh_payload(
+    payload: dict[str, object],
+    *,
+    scope_key: str,
+    source_versions: dict[str, object],
+) -> dict[str, object]:
+    cached_payload = dict(payload)
+    cached_payload["read_model_status"] = "fresh"
+    cached_payload["read_model_scope_key"] = scope_key
+    cached_payload["read_model_schema_version"] = COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
+    cached_payload["source_versions"] = dict(source_versions)
+    return {
+        "payload": cached_payload,
+        "fresh_gate": {
+            "scope_key": scope_key,
+            "read_model_status": "fresh",
+            "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "source_versions": dict(source_versions),
+        },
+    }
 
 
 class CostStatisticsReadConnection:
@@ -381,10 +404,20 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
     def test_cost_statistics_api_reads_redis_hot_cache_without_sql_or_sync_build(self) -> None:
         app = object.__new__(Application)
+        source_versions = app._cost_statistics_expected_source_versions("active:2026-05")
         app._runtime_repositories = type(
             "RuntimeRepos",
             (),
-            {"queue_repository": QueueRecorder(), "redis_helper": RedisRecorder({"payload": {"month": "2026-05", "time_rows": []}})},
+            {
+                "queue_repository": QueueRecorder(),
+                "redis_helper": RedisRecorder(
+                    redis_fresh_payload(
+                        {"month": "2026-05", "time_rows": []},
+                        scope_key="active:2026-05",
+                        source_versions=source_versions,
+                    )
+                ),
+            },
         )()
         app._cost_statistics_sql_read_repository = type(
             "SqlCostStats",

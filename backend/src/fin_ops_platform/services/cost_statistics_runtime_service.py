@@ -11,6 +11,7 @@ from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions
+from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -722,7 +723,12 @@ class CostStatisticsRuntimeService:
         cached_payload["source_versions"] = source_versions
         set_cached(
             self.redis_cache_key(scope_key, source_versions=source_versions),
-            {"payload": cached_payload},
+            build_fresh_cache_envelope(
+                cached_payload,
+                scope_key=scope_key,
+                source_versions=source_versions,
+                schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            ),
             ttl_seconds=self.redis_ttl_seconds(),
         )
 

@@ -19,6 +19,7 @@ from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.tax_offset_read_model_service import (
     TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
     TaxOffsetReadModelService,
@@ -154,14 +155,17 @@ class CostStatisticsSqlProjectionBuilder:
         )
         self._set_redis_json(
             f"cost_statistics:explorer:{warmed_scope_key}",
-            {
-                "payload": {
+            build_fresh_cache_envelope(
+                {
                     **payload,
                     "read_model_status": "fresh",
                     "read_model_scope_key": warmed_scope_key,
                     "source_versions": source_versions,
-                }
-            },
+                },
+                scope_key=warmed_scope_key,
+                source_versions=source_versions,
+                schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            ),
         )
         return {
             "scope_key": warmed_scope_key,
@@ -425,14 +429,17 @@ class TaxOffsetSqlProjectionBuilder:
         )
         self._set_redis_json(
             f"tax_offset:month:{warmed_scope_key}",
-            {
-                "payload": {
+            build_fresh_cache_envelope(
+                {
                     **payload,
                     "read_model_status": "fresh",
                     "read_model_scope_key": warmed_scope_key,
                     "source_versions": source_versions,
-                }
-            },
+                },
+                scope_key=warmed_scope_key,
+                source_versions=source_versions,
+                schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+            ),
         )
         return {
             "scope_key": warmed_scope_key,

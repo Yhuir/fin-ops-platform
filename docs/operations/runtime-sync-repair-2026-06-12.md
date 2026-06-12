@@ -1161,6 +1161,37 @@ Stage 21 结论：
 - 尚未形成最终生产 SLO 证据：仍需要在真实管理员登录态下采集 20+ 次样本，并把结果与 runtime freshness
   baseline 放在同一阶段报告中。
 
+## Stage 22：Redis fresh-cache 增加 fresh-gate envelope
+
+Stage 22 修复 fresh-cache 的基础契约：不能只因为 Redis key 命中就把 payload 标记成 fresh。通用
+`ReadModelQueryGateway` 现在要求 Redis payload 通过 fresh-gate 校验：
+
+- `fresh_gate.scope_key` 与当前 scope 一致。
+- `fresh_gate.read_model_status=fresh`。
+- `fresh_gate.source_versions` 与当前 expected source versions 一致。
+- `fresh_gate.schema_version` 存在时必须与当前 expected schema version 一致。
+
+命中失败时不返回旧 payload，不 enqueue 伪刷新，而是 fail closed 回 SQL read model 路径；只有 SQL view
+再次通过 freshness/source-version gate 后，才会写入新的 fresh-gate envelope。
+
+同步更新的写入路径：
+
+- `ReadModelQueryGateway` fresh SQL view cache write。
+- 成本统计 runtime cache warmup。
+- 成本/税金 SQL projection legacy Redis writes。
+- 税金抵扣 worker refresh 后的 month/summary Redis warmup。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_read_model_query_gateway tests.test_cost_statistics_sql_runtime tests.test_tax_offset_sql_runtime -v`
+- `bash scripts/verify.sh backend`：2839 tests pass，25 skipped
+
+Stage 22 结论：
+
+- 通过 gateway 的 Redis fresh-cache 不再接受无 source-version gate 的旧 payload 作为 fresh。
+- 这仍不是全部页面 fresh-cache 完成：workbench groups 使用 generation/version key 的专用 cache；bank detail、pending invoice、
+  invoice lifecycle、input/output invoice usage、OA pending payment 等页面仍需要逐页按相同契约迁移或确认已有等价 fresh gate。
+
 ## 当前闭环状态
 
 已闭环：
@@ -1180,6 +1211,7 @@ Stage 21 结论：
 - 状态页 read model duration metric 热路径不再全局排序 `job.outbox_events` 历史样本，clean mean 约 `49ms`，
   `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
+- 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
@@ -1188,7 +1220,7 @@ Stage 21 结论：
 - 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
   outbox percentile 和 outbox summary，已经不再出现历史全局 window sort。
-- Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
+- Redis fresh-cache 尚未覆盖全部页面；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
 
 下一阶段优先级：
 

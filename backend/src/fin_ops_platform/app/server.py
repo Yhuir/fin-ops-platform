@@ -102,6 +102,7 @@ from fin_ops_platform.services.cost_statistics_query_service import CostStatisti
 from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
+from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.etc_service import (
     ETC_BUSINESS_BATCH_SUBMITTED_STATUSES,
@@ -16428,12 +16429,22 @@ class Application:
             cached_payload["source_versions"] = source_versions
             self._runtime_redis_set_json_best_effort(
                 self._tax_offset_redis_cache_key(warmed_scope_key, source_versions=source_versions),
-                {"payload": cached_payload},
+                build_fresh_cache_envelope(
+                    cached_payload,
+                    scope_key=warmed_scope_key,
+                    source_versions=source_versions,
+                    schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+                ),
                 ttl_seconds=self._tax_offset_redis_ttl_seconds(),
             )
             self._runtime_redis_set_json_best_effort(
                 self._tax_offset_summary_redis_cache_key(warmed_scope_key, source_versions=source_versions),
-                {"payload": self._tax_offset_summary_payload(cached_payload, scope_key=warmed_scope_key)},
+                build_fresh_cache_envelope(
+                    self._tax_offset_summary_payload(cached_payload, scope_key=warmed_scope_key),
+                    scope_key=warmed_scope_key,
+                    source_versions=source_versions,
+                    schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+                ),
                 ttl_seconds=self._tax_offset_redis_ttl_seconds(),
             )
         return {
