@@ -380,7 +380,7 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
 
 如果 dead-letter 来自历史 invalid-scope cost statistics 事件，优先使用 `scripts/check-read-model-scope-contracts.py`
 检查和清理同类 legacy/invalid scope，避免逐个重放必然再次失败的旧事件。对于其他 read model，且当前版本
-已经通过真实 readiness convergence 证明对应 read model fresh，可以使用受控 resolve：
+已经通过真实 readiness convergence 证明同一 scope 已被覆盖，可以使用受控 resolve：
 
 ```bash
 PYTHONPATH=/opt/fin-ops/current/backend/src \
@@ -389,11 +389,32 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
     --reason readiness_converged_obsolete_invalid_scope
 ```
 
-`resolve-dead-letter` 只适用于注册的 read model refresh event。命令会先检查：
+批量归档前必须先 dry-run：
+
+```bash
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-covered-dead-letters \
+    --dry-run \
+    --limit 100 \
+    --reason readiness_converged_obsolete_dead_letter
+```
+
+dry-run 中 `eligible_count` 必须等于准备归档的候选数，且每条 event 的 `proof.covered_by` 至少包含
+`fresh_readiness` 或 `later_done`。确认后才能执行：
+
+```bash
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-covered-dead-letters \
+    --execute \
+    --limit 100 \
+    --reason readiness_converged_obsolete_dead_letter
+```
+
+`resolve-dead-letter` 和 `resolve-covered-dead-letters` 只适用于注册的 read model refresh event。命令会先检查：
 
 - 事件当前必须仍是 `dead_lettered`。
-- 对应 `read_model_key` 在 `read_model.app_status_readiness` 中已经有 `fresh` 证明。
-- 同一 `scope_type` 没有 `pending`、`processing` 或 `failed` dirty scope。
+- 同一 `tenant_id + read_model_key + scope_type + scope_key` 在 `read_model.app_status_readiness` 中已经有 `fresh` 证明，或同一 outbox scope 在该 dead-letter 后已有 `done` 事件。
+- 同一 `tenant_id + scope_type + scope_key` 没有 `pending`、`processing` 或 `failed` dirty scope。
 
 不满足这些条件时命令必须拒绝处理。禁止直接 SQL 把 `dead_lettered` 改成 `done`；需要保留
 `raw_payload.operator_resolution` 审计记录。

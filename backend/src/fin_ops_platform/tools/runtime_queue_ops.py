@@ -29,6 +29,16 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("--event-id", required=True)
     resolve.add_argument("--reason", default="operator_resolved")
 
+    resolve_covered = subparsers.add_parser(
+        "resolve-covered-dead-letters",
+        help="Dry-run or resolve read-model dead-letters that have exact-scope fresh/done proof.",
+    )
+    resolve_covered.add_argument("--limit", type=int, default=100)
+    resolve_covered.add_argument("--reason", default="readiness_converged_obsolete_dead_letter")
+    resolve_covered_mode = resolve_covered.add_mutually_exclusive_group(required=True)
+    resolve_covered_mode.add_argument("--dry-run", action="store_true")
+    resolve_covered_mode.add_argument("--execute", action="store_true")
+
     republish = subparsers.add_parser("republish", help="Mark a pending event as unpublished for RabbitMQ redispatch.")
     republish.add_argument("--event-id", required=True)
     republish.add_argument("--reason", default="operator_republish")
@@ -68,6 +78,16 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None, std
         result = _resolve_dead_letter(connection, repository, event_id=args.event_id, reason=args.reason)
         print(json.dumps(result, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
         return 0 if result.get("resolved") else 1
+    if args.command == "resolve-covered-dead-letters":
+        result = _resolve_covered_dead_letters(
+            connection,
+            repository,
+            limit=args.limit,
+            reason=args.reason,
+            execute=args.execute,
+        )
+        print(json.dumps(result, default=str, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+        return 0
     if args.command == "replay-unpublished":
         result = _replay_unpublished(connection, limit=args.limit, execute=args.execute)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
@@ -142,43 +162,9 @@ def _resolve_dead_letter(
     definition = read_model_by_refresh_event_type().get(str(event.get("event_type") or ""))
     if definition is None:
         return {"event_id": event_id, "resolved": False, "reason": "event_type_not_read_model", "event_type": event.get("event_type")}
-    readiness = connection.fetch_one(
-        """
-        select count(*)::integer as fresh_count
-        from read_model.app_status_readiness
-        where tenant_id = %s
-          and read_model_key = %s
-          and status = 'fresh'
-        """,
-        (str(event.get("tenant_id") or "default"), definition.key),
-    )
-    fresh_count = _int_value((readiness or {}).get("fresh_count"))
-    if fresh_count <= 0:
-        return {
-            "event_id": event_id,
-            "resolved": False,
-            "reason": "readiness_not_fresh",
-            "read_model_key": definition.key,
-        }
-    dirty = connection.fetch_one(
-        """
-        select count(*)::integer as active_count
-        from job.read_model_dirty_scopes
-        where tenant_id = %s
-          and scope_type = %s
-          and status in ('pending', 'processing', 'failed')
-        """,
-        (str(event.get("tenant_id") or "default"), definition.scope_type),
-    )
-    active_dirty_count = _int_value((dirty or {}).get("active_count"))
-    if active_dirty_count > 0:
-        return {
-            "event_id": event_id,
-            "resolved": False,
-            "reason": "active_dirty_scope_exists",
-            "read_model_key": definition.key,
-            "active_dirty_count": active_dirty_count,
-        }
+    eligibility = _dead_letter_resolution_eligibility(connection, event)
+    if not eligibility.get("eligible"):
+        return {"event_id": event_id, "resolved": False, **eligibility}
     resolved = repository.resolve_dead_letter_event(event_id, reason=reason)
     return {
         "event_id": event_id,
@@ -186,7 +172,163 @@ def _resolve_dead_letter(
         "reason": reason if resolved else "update_did_not_match",
         "event_type": event.get("event_type"),
         "read_model_key": definition.key,
+        "scope_type": eligibility.get("scope_type"),
+        "scope_key": eligibility.get("scope_key"),
+        "covered_by": eligibility.get("covered_by"),
     }
+
+
+def _resolve_covered_dead_letters(
+    connection: PostgresConnection,
+    repository: RuntimeQueueRepository,
+    *,
+    limit: int,
+    reason: str,
+    execute: bool,
+) -> dict[str, Any]:
+    rows = _dead_letter_read_model_events(connection, limit=limit)
+    events: list[dict[str, Any]] = []
+    eligible_count = 0
+    resolved_count = 0
+    for row in rows:
+        eligibility = _dead_letter_resolution_eligibility(connection, row)
+        eligible = bool(eligibility.get("eligible"))
+        if eligible:
+            eligible_count += 1
+        resolved = False
+        if execute and eligible:
+            resolved = repository.resolve_dead_letter_event(str(row.get("event_id") or ""), reason=reason)
+            if resolved:
+                resolved_count += 1
+        events.append(
+            {
+                "event_id": row.get("event_id"),
+                "event_type": row.get("event_type"),
+                "scope_type": row.get("scope_type"),
+                "scope_key": row.get("scope_key"),
+                "updated_at": row.get("updated_at"),
+                "eligible": eligible,
+                "resolved": resolved,
+                "reason": reason if resolved else eligibility.get("reason"),
+                "proof": eligibility,
+            }
+        )
+    return {
+        "mode": "execute" if execute else "dry-run",
+        "candidate_count": len(rows),
+        "eligible_count": eligible_count,
+        "resolved_count": resolved_count,
+        "reason": reason,
+        "events": events,
+    }
+
+
+def _dead_letter_read_model_events(connection: PostgresConnection, *, limit: int) -> list[dict[str, Any]]:
+    return list(
+        connection.fetch_all(
+            """
+            select
+              id::text as event_id,
+              tenant_id,
+              event_type,
+              scope_type,
+              scope_key,
+              source_version,
+              status,
+              attempts,
+              last_error,
+              created_at,
+              updated_at,
+              processed_at,
+              dead_lettered_at
+            from job.outbox_events
+            where status = 'dead_lettered'
+              and event_type like '%%.read_model.refresh'
+            order by updated_at, created_at, id
+            limit %s
+            """,
+            (max(1, int(limit)),),
+        )
+    )
+
+
+def _dead_letter_resolution_eligibility(connection: PostgresConnection, event: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(event.get("event_type") or "")
+    definition = read_model_by_refresh_event_type().get(event_type)
+    if definition is None:
+        return {"eligible": False, "reason": "event_type_not_read_model", "event_type": event_type}
+    tenant_id = str(event.get("tenant_id") or "default")
+    scope_type = str(event.get("scope_type") or definition.scope_type or "").strip()
+    scope_key = str(event.get("scope_key") or event.get("aggregate_id") or "").strip()
+    if not scope_type or not scope_key:
+        return {
+            "eligible": False,
+            "reason": "scope_missing",
+            "read_model_key": definition.key,
+            "scope_type": scope_type,
+            "scope_key": scope_key,
+        }
+    readiness = connection.fetch_one(
+        """
+        select count(*)::integer as fresh_count, max(updated_at) as latest_fresh_at
+        from read_model.app_status_readiness
+        where tenant_id = %s
+          and read_model_key = %s
+          and scope_type = %s
+          and scope_key = %s
+          and status = 'fresh'
+        """,
+        (tenant_id, definition.key, scope_type, scope_key),
+    )
+    later_done = connection.fetch_one(
+        """
+        select count(*)::integer as done_count, max(updated_at) as latest_done_at
+        from job.outbox_events
+        where tenant_id = %s
+          and event_type = %s
+          and scope_type = %s
+          and scope_key = %s
+          and status = 'done'
+          and id <> %s::uuid
+          and updated_at > coalesce(%s::timestamptz, '-infinity'::timestamptz)
+        """,
+        (tenant_id, event_type, scope_type, scope_key, event.get("event_id"), event.get("updated_at")),
+    )
+    dirty = connection.fetch_one(
+        """
+        select count(*)::integer as active_count
+        from job.read_model_dirty_scopes
+        where tenant_id = %s
+          and scope_type = %s
+          and scope_key = %s
+          and status in ('pending', 'processing', 'failed')
+        """,
+        (tenant_id, scope_type, scope_key),
+    )
+    fresh_count = _int_value((readiness or {}).get("fresh_count"))
+    later_done_count = _int_value((later_done or {}).get("done_count"))
+    active_dirty_count = _int_value((dirty or {}).get("active_count"))
+    covered_by = []
+    if fresh_count > 0:
+        covered_by.append("fresh_readiness")
+    if later_done_count > 0:
+        covered_by.append("later_done")
+    result = {
+        "eligible": active_dirty_count <= 0 and bool(covered_by),
+        "reason": "eligible" if active_dirty_count <= 0 and covered_by else "coverage_not_proven",
+        "read_model_key": definition.key,
+        "scope_type": scope_type,
+        "scope_key": scope_key,
+        "fresh_count": fresh_count,
+        "latest_fresh_at": (readiness or {}).get("latest_fresh_at"),
+        "later_done_count": later_done_count,
+        "latest_done_at": (later_done or {}).get("latest_done_at"),
+        "active_dirty_count": active_dirty_count,
+        "covered_by": covered_by,
+    }
+    if active_dirty_count > 0:
+        result["reason"] = "active_dirty_scope_exists"
+    return result
 
 
 def _replay_unpublished(connection: PostgresConnection, *, limit: int, execute: bool) -> dict[str, Any]:

@@ -9,8 +9,13 @@ from fin_ops_platform.tools import runtime_queue_ops
 
 
 class FakeConnection:
-    def __init__(self, fetch_one_rows: list[dict[str, object] | None] | None = None) -> None:
+    def __init__(
+        self,
+        fetch_one_rows: list[dict[str, object] | None] | None = None,
+        fetch_all_rows: list[dict[str, object]] | None = None,
+    ) -> None:
         self.fetch_one_rows = list(fetch_one_rows or [])
+        self.fetch_all_rows = fetch_all_rows
         self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
         self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
         self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
@@ -21,6 +26,8 @@ class FakeConnection:
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
         self.fetch_all_calls.append((sql, params))
+        if self.fetch_all_rows is not None:
+            return list(self.fetch_all_rows)
         return [
             {
                 "event_id": "00000000-0000-0000-0000-000000000001",
@@ -124,7 +131,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                     "scope_key": "all",
                     "status": "dead_lettered",
                 },
-                {"fresh_count": 1},
+                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
+                {"done_count": 0, "latest_done_at": None},
                 {"active_count": 0},
             ]
         )
@@ -144,11 +152,18 @@ class RuntimeQueueOpsTests(unittest.TestCase):
             [("00000000-0000-0000-0000-000000000001", "readiness_converged_obsolete_invalid_scope")],
         )
         readiness_sql, readiness_params = connection.fetch_one_calls[1]
-        dirty_sql, dirty_params = connection.fetch_one_calls[2]
+        later_done_sql, later_done_params = connection.fetch_one_calls[2]
+        dirty_sql, dirty_params = connection.fetch_one_calls[3]
         self.assertIn("read_model.app_status_readiness", " ".join(readiness_sql.lower().split()))
-        self.assertEqual(readiness_params, ("default", "pending_invoice"))
+        self.assertIn("scope_key = %s", " ".join(readiness_sql.lower().split()))
+        self.assertEqual(readiness_params, ("default", "pending_invoice", "pending_invoice", "all"))
+        self.assertIn("status = 'done'", " ".join(later_done_sql.lower().split()))
+        self.assertEqual(
+            later_done_params,
+            ("default", "pending_invoice.read_model.refresh", "pending_invoice", "all", "00000000-0000-0000-0000-000000000001", None),
+        )
         self.assertIn("job.read_model_dirty_scopes", " ".join(dirty_sql.lower().split()))
-        self.assertEqual(dirty_params, ("default", "pending_invoice"))
+        self.assertEqual(dirty_params, ("default", "pending_invoice", "all"))
 
     def test_resolve_dead_letter_refuses_when_dirty_scope_is_active(self) -> None:
         connection = FakeConnection(
@@ -161,7 +176,8 @@ class RuntimeQueueOpsTests(unittest.TestCase):
                     "scope_key": "all",
                     "status": "dead_lettered",
                 },
-                {"fresh_count": 1},
+                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
+                {"done_count": 0, "latest_done_at": None},
                 {"active_count": 2},
             ]
         )
@@ -178,6 +194,128 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertEqual(result["reason"], "active_dirty_scope_exists")
         self.assertEqual(result["active_dirty_count"], 2)
         self.assertEqual(repository.resolve_calls, [])
+
+    def test_resolve_dead_letter_refuses_when_exact_scope_is_not_covered(self) -> None:
+        connection = FakeConnection(
+            fetch_one_rows=[
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000001",
+                    "tenant_id": "default",
+                    "event_type": "output_invoice_collection.read_model.refresh",
+                    "scope_type": "output_invoice_collection",
+                    "scope_key": "2026-03",
+                    "status": "dead_lettered",
+                },
+                {"fresh_count": 0, "latest_fresh_at": None},
+                {"done_count": 0, "latest_done_at": None},
+                {"active_count": 0},
+            ]
+        )
+        repository = FakeRuntimeQueueRepository()
+
+        result = runtime_queue_ops._resolve_dead_letter(
+            connection,
+            repository,  # type: ignore[arg-type]
+            event_id="00000000-0000-0000-0000-000000000001",
+            reason="readiness_converged_obsolete_invalid_scope",
+        )
+
+        self.assertFalse(result["resolved"])
+        self.assertEqual(result["reason"], "coverage_not_proven")
+        self.assertEqual(result["scope_key"], "2026-03")
+        self.assertEqual(repository.resolve_calls, [])
+
+    def test_resolve_covered_dead_letters_dry_run_lists_exact_scope_proof_without_update(self) -> None:
+        connection = FakeConnection(
+            fetch_all_rows=[
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000001",
+                    "tenant_id": "default",
+                    "event_type": "output_invoice_collection.read_model.refresh",
+                    "scope_type": "output_invoice_collection",
+                    "scope_key": "2026-03",
+                    "status": "dead_lettered",
+                    "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+                }
+            ],
+            fetch_one_rows=[
+                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
+                {"done_count": 0, "latest_done_at": None},
+                {"active_count": 0},
+            ],
+        )
+        repository = FakeRuntimeQueueRepository()
+
+        result = runtime_queue_ops._resolve_covered_dead_letters(
+            connection,
+            repository,  # type: ignore[arg-type]
+            limit=25,
+            reason="readiness_converged_obsolete_dead_letter",
+            execute=False,
+        )
+
+        self.assertEqual(result["mode"], "dry-run")
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["eligible_count"], 1)
+        self.assertEqual(result["resolved_count"], 0)
+        self.assertEqual(result["events"][0]["proof"]["covered_by"], ["fresh_readiness"])
+        self.assertEqual(repository.resolve_calls, [])
+        sql, params = connection.fetch_all_calls[0]
+        self.assertIn("status = 'dead_lettered'", " ".join(sql.lower().split()))
+        self.assertEqual(params, (25,))
+
+    def test_resolve_covered_dead_letters_execute_resolves_only_eligible_events(self) -> None:
+        connection = FakeConnection(
+            fetch_all_rows=[
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000001",
+                    "tenant_id": "default",
+                    "event_type": "output_invoice_collection.read_model.refresh",
+                    "scope_type": "output_invoice_collection",
+                    "scope_key": "2026-03",
+                    "status": "dead_lettered",
+                    "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+                },
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000002",
+                    "tenant_id": "default",
+                    "event_type": "workbench.read_model.refresh",
+                    "scope_type": "workbench",
+                    "scope_key": "all",
+                    "status": "dead_lettered",
+                    "updated_at": datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+                },
+            ],
+            fetch_one_rows=[
+                {"fresh_count": 1, "latest_fresh_at": datetime(2026, 6, 4, 12, 10, tzinfo=timezone.utc)},
+                {"done_count": 0, "latest_done_at": None},
+                {"active_count": 0},
+                {"fresh_count": 0, "latest_fresh_at": None},
+                {"done_count": 0, "latest_done_at": None},
+                {"active_count": 0},
+            ],
+        )
+        repository = FakeRuntimeQueueRepository()
+
+        result = runtime_queue_ops._resolve_covered_dead_letters(
+            connection,
+            repository,  # type: ignore[arg-type]
+            limit=100,
+            reason="readiness_converged_obsolete_dead_letter",
+            execute=True,
+        )
+
+        self.assertEqual(result["mode"], "execute")
+        self.assertEqual(result["candidate_count"], 2)
+        self.assertEqual(result["eligible_count"], 1)
+        self.assertEqual(result["resolved_count"], 1)
+        self.assertEqual(
+            repository.resolve_calls,
+            [("00000000-0000-0000-0000-000000000001", "readiness_converged_obsolete_dead_letter")],
+        )
+        self.assertTrue(result["events"][0]["resolved"])
+        self.assertFalse(result["events"][1]["resolved"])
+        self.assertEqual(result["events"][1]["reason"], "coverage_not_proven")
 
 
 if __name__ == "__main__":
