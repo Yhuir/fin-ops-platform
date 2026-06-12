@@ -897,7 +897,9 @@ class FakeWorkbenchReadModelService:
 
 class WorkbenchSqlRuntimeTests(unittest.TestCase):
     def test_transactional_cost_statistics_enqueue_expands_workbench_month_scope(self) -> None:
-        from fin_ops_platform.services.postgres_repositories.workbench import _enqueue_read_model_refresh_in_transaction
+        from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+            _enqueue_read_model_refresh_in_transaction,
+        )
 
         connection = ReadModelRefreshTransactionConnection()
 
