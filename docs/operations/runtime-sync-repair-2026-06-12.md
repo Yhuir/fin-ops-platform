@@ -1326,6 +1326,24 @@ Stage 24 结论：
 - 下一步仍必须定位 `workbench`、`invoice_lifecycle`、`input_invoice_usage` 等重型 refresh 的真实执行耗时，
   不能把观测口径优化误当作业务同步 SLO 达标。
 
+## Stage 25：read model refresh by-key breakdown
+
+Stage 25 在 Stage 24 的 bounded recent sample 基础上，给 `/health/ready` / `/health` runtime payload 增加
+`read_model_refresh_by_key`：
+
+- 每个 read model event type 一行，包含 `key`、`event_type`、`scope_type`。
+- 每行包含最近 bounded sample 的 `duration_ms.p50/p95/p99`、`sample_count`、`completed_sample_count`、
+  `failed_count`、`failure_rate` 和 `last_completed_at`。
+- 仍复用同一个 `job.outbox_events` bounded lateral sample CTE，通过 `grouping sets` 同时产生 overall 与 by-key
+  聚合，不新增事实源，不扫描全历史。
+- Prometheus 增加 `finops_read_model_refresh_by_key_duration_ms{read_model_key=...,event_type=...,scope_type=...,quantile=...}`、
+  `finops_read_model_refresh_by_key_sample_count{...}` 和
+  `finops_read_model_refresh_by_key_failure_rate{...}`。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_monitoring tests.test_prometheus_metrics tests.test_app_postgres_mode -v`
+
 ## 当前闭环状态
 
 已闭环：
@@ -1345,6 +1363,7 @@ Stage 24 结论：
 - 状态页 read model duration metric 热路径不再全局排序 `job.outbox_events` 历史样本，clean mean 约 `49ms`，
   `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
 - health / Prometheus runtime percentile 热路径不再全历史排序 outbox，而是按 event type 使用 bounded recent samples。
+- health / Prometheus 已具备按 read model key 拆分的 refresh p95/failure/sample breakdown，可定位下一阶段优化目标。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 - 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
 - Prometheus `/metrics` 应用侧已具备，可输出 runtime/read-model/RabbitMQ/worker/API p95 指标；生产 token 未配置时保持 `404` 安全关闭。
@@ -1356,7 +1375,7 @@ Stage 24 结论：
 - 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
   outbox percentile 和 outbox summary；Stage 24 已收敛 health/metrics percentile 与 outbox summary，仍需生产
-  pg_stat / EXPLAIN 复测确认是否进入 SLO。
+  pg_stat / EXPLAIN 复测确认是否进入 SLO；Stage 25 将提供 by-key breakdown，用于确认具体慢 projection。
 - Redis fresh-cache 尚未覆盖全部页面。
 - 生产 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`、Grafana dashboard、alert rules 和 scrape 配置尚未落地；`/metrics` 是应用侧指标出口，不等同于完整 Grafana 告警闭环。
 

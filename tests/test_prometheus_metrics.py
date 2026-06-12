@@ -35,6 +35,18 @@ class PrometheusMetricsTests(unittest.TestCase):
                 "read_model_refresh_duration_ms": {"p50": 100.0, "p95": 300.0, "p99": 450.0},
                 "read_model_refresh_sample_count": 128,
                 "read_model_refresh_failure_rate": 0.01,
+                "read_model_refresh_by_key": [
+                    {
+                        "key": "workbench",
+                        "event_type": "workbench.read_model.refresh",
+                        "scope_type": "workbench",
+                        "duration_ms": {"p50": 200.0, "p95": 500.0, "p99": 700.0},
+                        "sample_count": 10,
+                        "completed_sample_count": 9,
+                        "failed_count": 1,
+                        "failure_rate": 0.1,
+                    }
+                ],
                 "rabbitmq_publish_status": {"unpublished": 1},
                 "rabbitmq_queue_depth": 5,
                 "rabbitmq_unacked_messages": 1,
@@ -86,6 +98,14 @@ class PrometheusMetricsTests(unittest.TestCase):
         self.assertIn('finops_read_model_dirty_scopes{status="pending"} 2', rendered)
         self.assertIn('finops_read_model_refresh_duration_ms{quantile="0.95"} 300', rendered)
         self.assertIn("finops_read_model_refresh_sample_count 128", rendered)
+        self.assertIn(
+            'finops_read_model_refresh_by_key_duration_ms{event_type="workbench.read_model.refresh",quantile="0.95",read_model_key="workbench",scope_type="workbench"} 500',
+            rendered,
+        )
+        self.assertIn(
+            'finops_read_model_refresh_by_key_failure_rate{event_type="workbench.read_model.refresh",read_model_key="workbench",scope_type="workbench"} 0.1',
+            rendered,
+        )
         self.assertIn('finops_rabbitmq_publish_confirm_latency_ms{quantile="0.95"} 9', rendered)
         self.assertIn("finops_rabbitmq_publish_confirm_sample_limit 512", rendered)
         self.assertIn(

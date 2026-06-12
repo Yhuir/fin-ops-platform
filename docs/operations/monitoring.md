@@ -64,6 +64,7 @@
 - `read_model_refresh_duration_ms`：每类 read model refresh 最近 bounded 样本的 p50/p95/p99，不做全历史排序。
 - `read_model_refresh_sample_count`：本次 read model refresh duration/failure rate 使用的 bounded 样本数。
 - `read_model_refresh_failure_rate`：同一 bounded 样本内 failed/dead-lettered 比例。
+- `read_model_refresh_by_key`：按 read model key / event type 拆分的 bounded refresh p50/p95/p99、样本数、失败数和失败率，用于定位拖慢总体 p95 的具体 projection。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。
 - `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups 和对象身份跨区一致性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。
 - `redis_hit_count` / `redis_miss_count`：进程内 Redis helper 计数。
@@ -106,6 +107,9 @@ Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
 - `finops_ready`、`finops_runtime_release_consistent`、`finops_production_runtime_guard_consistent`。
 - `finops_outbox_events{status=...}`、`finops_read_model_dirty_scopes{status=...}`、`finops_failed_jobs`、`finops_stale_dirty_scope_count`。
 - `finops_read_model_refresh_duration_ms{quantile=...}`、`finops_read_model_refresh_sample_count`、`finops_read_model_refresh_failure_rate`。
+- `finops_read_model_refresh_by_key_duration_ms{read_model_key=...,event_type=...,scope_type=...,quantile=...}`、
+  `finops_read_model_refresh_by_key_sample_count{...}`、
+  `finops_read_model_refresh_by_key_failure_rate{...}`。
 - `finops_rabbitmq_queue_depth`、`finops_rabbitmq_dlq_count`、`finops_rabbitmq_consumer_count`、`finops_rabbitmq_publish_confirm_latency_ms{quantile=...}`。
 - `finops_worker_heartbeat_lag_seconds{worker_instance=...,worker_kind=...,status=...}`、`finops_worker_required`、`finops_worker_current_effective`。
 - `finops_api_duration_ms{endpoint=...,quantile=...}`、`finops_api_connection_acquire_ms{endpoint=...,quantile=...}`、`finops_api_sql_execute_fetch_ms{endpoint=...,quantile=...}`。

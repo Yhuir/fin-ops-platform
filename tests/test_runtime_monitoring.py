@@ -16,6 +16,39 @@ class FakeConnection:
         normalized = " ".join(sql.lower().split())
         if "like '%." in normalized:
             raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "recent_refresh_events" in normalized:
+            return [
+                {
+                    "event_type": "__all__",
+                    "p50_ms": 120.0,
+                    "p95_ms": 300.0,
+                    "p99_ms": 450.0,
+                    "completed_sample_count": 9,
+                    "failed_count": 1,
+                    "read_model_refresh_total": 10,
+                    "last_completed_at": "2026-06-13 03:00:00+08",
+                },
+                {
+                    "event_type": "workbench.read_model.refresh",
+                    "p50_ms": 200.0,
+                    "p95_ms": 500.0,
+                    "p99_ms": 650.0,
+                    "completed_sample_count": 4,
+                    "failed_count": 1,
+                    "read_model_refresh_total": 5,
+                    "last_completed_at": "2026-06-13 03:00:00+08",
+                },
+                {
+                    "event_type": "tax_offset.read_model.refresh",
+                    "p50_ms": 50.0,
+                    "p95_ms": 80.0,
+                    "p99_ms": 90.0,
+                    "completed_sample_count": 5,
+                    "failed_count": 0,
+                    "read_model_refresh_total": 5,
+                    "last_completed_at": "2026-06-13 03:01:00+08",
+                },
+            ]
         if "pending_outbox_by_scope" in normalized:
             return [
                 {
@@ -82,14 +115,6 @@ class FakeConnection:
             return {"max_worker_heartbeat_lag_seconds": 8.0}
         if "rabbitmq_publish" in normalized:
             return {"p50_ms": 10.0, "p95_ms": 20.0, "p99_ms": 30.0}
-        if "recent_refresh_events" in normalized:
-            return {
-                "p50_ms": 120.0,
-                "p95_ms": 300.0,
-                "p99_ms": 450.0,
-                "failed_count": 1,
-                "read_model_refresh_total": 10,
-            }
         if "read_model_refresh_total" in normalized:
             return {"failed_count": 1, "read_model_refresh_total": 10}
         if "publish_status in" in normalized:
@@ -216,6 +241,12 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(summary["read_model_refresh_duration_ms"], {"p50": 120.0, "p95": 300.0, "p99": 450.0})
         self.assertEqual(summary["read_model_refresh_sample_count"], 10)
         self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["key"], "workbench")
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["event_type"], "workbench.read_model.refresh")
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["duration_ms"]["p95"], 500.0)
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["sample_count"], 5)
+        self.assertEqual(summary["read_model_refresh_by_key"][0]["failure_rate"], 0.2)
+        self.assertEqual(summary["read_model_refresh_by_key"][1]["key"], "tax_offset")
         self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
         self.assertEqual(summary["rabbitmq_unpublished_backlog"], 4)
         self.assertEqual(summary["rabbitmq_publish_failed_backlog"], 2)

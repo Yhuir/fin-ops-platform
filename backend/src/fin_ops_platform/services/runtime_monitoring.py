@@ -437,7 +437,7 @@ class RuntimeMonitoringRepository:
             where worker_kind <> 'runtime'
             """
         )
-        refresh_metric_row = self._connection.fetch_one(
+        refresh_metric_rows = self._connection.fetch_all(
             """
             with event_type_filter(event_type) as (
               select unnest(%s::text[])
@@ -475,6 +475,10 @@ class RuntimeMonitoringRepository:
               ) refresh_event
             )
             select
+              case
+                when grouping(event_type) = 1 then '__all__'
+                else event_type
+              end as event_type,
               (percentile_cont(0.5) within group (
                 order by duration_ms
               ) filter (where duration_ms is not null))::float as p50_ms,
@@ -484,14 +488,56 @@ class RuntimeMonitoringRepository:
               (percentile_cont(0.99) within group (
                 order by duration_ms
               ) filter (where duration_ms is not null))::float as p99_ms,
+              count(*) filter (where duration_ms is not null)::bigint as completed_sample_count,
               count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
-              count(*)::bigint as read_model_refresh_total
+              count(*)::bigint as read_model_refresh_total,
+              (max(updated_at) filter (where duration_ms is not null))::text as last_completed_at
             from recent_refresh_events
+            group by grouping sets ((event_type), ())
             """,
             (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
         )
-        refresh_duration_row = refresh_metric_row or {}
-        refresh_failure_row = refresh_metric_row or {}
+        refresh_duration_row: dict[str, Any] = {}
+        refresh_failure_row: dict[str, Any] = {}
+        read_model_refresh_by_key: list[dict[str, Any]] = []
+        for row in refresh_metric_rows:
+            event_type = str(row.get("event_type") or "")
+            if event_type == "__all__":
+                refresh_duration_row = dict(row)
+                refresh_failure_row = dict(row)
+                continue
+            event_metadata = READ_MODEL_EVENT_TYPES.get(event_type)
+            if event_metadata is None:
+                read_model_key = event_type
+                scope_type = event_type
+            else:
+                read_model_key, scope_type = event_metadata
+            sample_count = _optional_int(row.get("read_model_refresh_total")) or 0
+            failed_count = _optional_int(row.get("failed_count")) or 0
+            read_model_refresh_by_key.append(
+                {
+                    "key": read_model_key,
+                    "event_type": event_type,
+                    "scope_type": scope_type,
+                    "duration_ms": {
+                        "p50": _optional_float(row.get("p50_ms")),
+                        "p95": _optional_float(row.get("p95_ms")),
+                        "p99": _optional_float(row.get("p99_ms")),
+                    },
+                    "sample_count": sample_count,
+                    "completed_sample_count": _optional_int(row.get("completed_sample_count")) or 0,
+                    "failed_count": failed_count,
+                    "failure_rate": round(failed_count / sample_count, 6) if sample_count else 0.0,
+                    "last_completed_at": row.get("last_completed_at"),
+                }
+            )
+        read_model_refresh_by_key.sort(
+            key=lambda item: (
+                item["duration_ms"]["p95"] is None,
+                -float(item["duration_ms"]["p95"] or 0),
+                str(item["key"]),
+            )
+        )
         publish_rows = self._connection.fetch_all(
             """
             select publish_status, count(*)::bigint as count
@@ -596,6 +642,7 @@ class RuntimeMonitoringRepository:
             "read_model_refresh_failure_rate": (
                 round(failed_refresh_count / total_refresh_count, 6) if total_refresh_count else 0.0
             ),
+            "read_model_refresh_by_key": read_model_refresh_by_key,
             "rabbitmq_publish_status": publish_status,
             "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
             "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),
