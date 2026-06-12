@@ -964,11 +964,128 @@ Stage 18 结论：
   `workbench` 单 scope consistency aggregate 是否需要更便宜的缓存或按需采样。
 - 页面/API p95 仍未采集，因此“几秒内全部同步”仍未验收。
 
+## Stage 19：优化状态页 read model duration metric 查询
+
+Stage 19 Release：`main-20148900-stage19-202606130212`
+
+Stage 19 Commit：`20148900`
+
+Stage 18 clean top SQL 证明 `dashboard_read_model_metrics()` 的 duration window 查询会在
+`job.outbox_events` 上做 `row_number() over (partition by event_type order by updated_at desc)`。
+生产 EXPLAIN 显示约 `145.680ms`，`temp_read=2635`、`temp_written=2641`，并对约 3.5 万条历史
+refresh event 做外部排序。该查询只服务 App Health/运行状态面板，不参与真实 read model refresh。
+
+Stage 19 做两个最小改动：
+
+- 新增 migration `0068_outbox_read_model_refresh_metric_samples.sql`，创建
+  `outbox_events_read_model_refresh_metric_samples_idx`，索引键包含 `event_type`、`updated_at desc`、
+  JSONB 派生的 metric scope marker 和 `duration_ms`。
+- 将 duration SQL 改为 `event_type_filter -> cross join lateral -> order by updated_at desc limit 512`，
+  每个 read model event type 只取有界最近样本，再按 `recent_15m`、`recent_1h`、`all_time`
+  聚合 percentiles。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_operations_dashboard_service tests.test_runtime_monitoring tests.test_postgres_migrations tests.test_postgres_test_utils -v`
+- `bash scripts/verify.sh backend`：2833 tests pass，25 skipped
+
+生产部署：
+
+- 使用干净 worktree `/private/tmp/finops-stage19-deploy`。
+- 复用已验证 `web/dist`，执行
+  `./scripts/deploy-oa.sh --skip-build --release-name main-20148900-stage19-202606130212`。
+- 首次 SSH 未建立 ControlMaster 导致认证失败，远端未进入部署步骤；建立脚本使用的 SSH ControlMaster 后重跑。
+- migration `0068` applied，用时 `85ms`；backend readiness、worker ensure、frontend hash、
+  public session route checks 均通过；旧 release `main-3d103ceb-stage14-202606130115` 被清理。
+
+生产验证：
+
+| 指标 | Stage 18 clean | Stage 19 |
+|---|---:|---:|
+| duration metric SQL mean | 136.078ms | 49.806ms |
+| duration metric SQL temp I/O | `2635/2641` blocks | `0/0` blocks |
+| duration metric SQL index | old partial index / bitmap + sort | `outbox_events_read_model_refresh_metric_samples_idx` |
+| `dashboard_read_model_metrics()` cold run | 161.423ms | 168.786ms |
+| `dashboard_read_model_metrics()` warm run | 未单独采样 | 63-71ms |
+| failed jobs | 0 | 0 |
+| stale dirty scopes | 0 | 0 |
+| RabbitMQ queue / DLQ | 0 / 0 | 0 / 0 |
+
+Stage 19 baseline JSON：
+
+- 累计 baseline：`/tmp/finops-sync-slo-baseline-stage19-202606130216.json`
+- clean baseline：`/tmp/finops-sync-slo-baseline-stage19-clean-202606130218.json`
+
+Stage 19 clean baseline 仍发现一个历史 optional worker heartbeat
+`operator-cost-statistics-drain-after-deploy-20260606`，实例名 `cost-tax-read-model`，它不是当前 required
+`cost-tax` worker，但会进入 `worker_attention`。这不是刷新链路失败，但会污染“当前有效 blocker”视图。
+
+Rollback：
+
+1. 回滚到 `main-8f123cb4-stage18-202606130151` release。
+2. 如需移除索引，可在维护窗口执行：
+   `drop index if exists job.outbox_events_read_model_refresh_metric_samples_idx;`
+3. 重新跑 `/health/ready`、`dashboard_read_model_metrics()` direct probe 和 `sync_slo_baseline`。
+
+## Stage 20：App Status worker snapshot 只看 current-effective worker
+
+Stage 20 Release：`main-9498e9e0-stage20-202606130220`
+
+Stage 20 Commit：`9498e9e0`
+
+Stage 20 不删除历史 heartbeat 事实，只在 worker metric row 上新增 `current_effective` 标记：
+required worker 总是 current-effective；optional worker 如果超过对应 registration 的
+`heartbeat_stale_after_seconds`，在 App Status worker snapshot 中跳过。Operations dashboard 明细仍可看到
+历史 optional worker，用于审计。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_monitoring tests.test_operations_dashboard_service -v`
+- `bash scripts/verify.sh backend`：2834 tests pass，25 skipped
+
+生产部署：
+
+- 使用干净 worktree `/private/tmp/finops-stage20-deploy`。
+- 复用已验证 `web/dist`，执行
+  `./scripts/deploy-oa.sh --skip-build --release-name main-9498e9e0-stage20-202606130220`。
+- migration `0068` skipped；backend readiness、worker ensure、frontend hash、public session route checks 均通过；
+  旧 release `main-53b148b3-stage15-202606130124` 被清理。
+
+Stage 20 clean baseline JSON：
+`/tmp/finops-sync-slo-baseline-stage20-clean-202606130222.json`。
+
+Stage 20 clean baseline：
+
+| 指标 | 值 |
+|---|---:|
+| release | `main-9498e9e0-stage20-202606130220` |
+| schema_version | 68 |
+| runtime_release.consistent | true |
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| RabbitMQ queue depth | 0 |
+| RabbitMQ DLQ | 0 |
+| read model attention | 0 |
+| outbox attention | 0 |
+| worker attention | 0 |
+| queue unknown count | 0 |
+| `dashboard_read_model_metrics()` cold run | 166.028ms |
+| `dashboard_read_model_metrics()` warm run | 62.758-68.631ms |
+| duration metric SQL mean | 49.089ms |
+
+Stage 20 结论：
+
+- 状态页 read model/outbox/worker current-effective blocker 全部清零。
+- 状态页 duration metric 查询不再对 outbox 历史做全局窗口排序，不再产生 temp I/O。
+- 这仍不是“几秒内全部同步”最终验收：read model 历史 refresh p95 仍含重型构建样本，页面首包/API p95
+  仍需登录态 HTTP 采样。
+
 ## 当前闭环状态
 
 已闭环：
 
 - current-effective App Status blocker 只看当前有效 dirty/outbox/readiness，不再被历史 legacy scope 污染。
+- current-effective worker attention 不再被历史 optional worker heartbeat 污染。
 - legacy `cost_statistics` scope 已受控 repair，并由 replacement scope 真实重建完成。
 - covered historical dead-letter 已通过 repository 工具归档，`failed_jobs=0`。
 - worker shutdown 不再依赖 300 秒 lock timeout 回收 `processing` lease。
@@ -979,20 +1096,23 @@ Stage 18 结论：
 - 生产 SLO baseline collector 已部署，可重复采集 runtime、worker、PostgreSQL catalog、固定 EXPLAIN 和缺口状态。
 - `pg_stat_statements` 已在生产 PostgreSQL preload 并可在 app DB 读取 top SQL。
 - 状态页 read model health 热路径不再 live recompute `workbench_generation_consistency` 全量视图。
+- 状态页 read model duration metric 热路径不再全局排序 `job.outbox_events` 历史样本，clean mean 约 `49ms`，
+  `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
 - `read_model_refresh_duration_ms.p95` 仍约 17.76s；Stage 16 近 1 小时样本中 `workbench`、`invoice_lifecycle`、
   `input_invoice_usage` p95 仍约 8-9s。
 - 页面首包/API p95 仍未采集；Stage 11 已完成 relation-details SQL read model 单行读取优化，但仍需登录态 HTTP 样本验证端到端 p95。
-- Stage 18 clean top SQL 显示 runtime metric window/percentile 查询和部分 workbench scoped consistency aggregate
-  仍是当前监控热路径瓶颈。
+- Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
+  outbox percentile 和 outbox summary，已经不再出现历史全局 window sort。
 - Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
 
 下一阶段优先级：
 
 1. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
-2. 对 Stage 18 clean top SQL 跑 EXPLAIN ANALYZE，优先处理 `job.outbox_events` runtime metric window/percentile 查询。
+2. 对 Stage 20 clean top SQL 剩余 `job.outbox_events` percentile/summary 查询做 EXPLAIN ANALYZE，
+   决定是否需要轻量 rollup table 或 metrics retention。
 3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
 4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
 5. 接入 Prometheus/Grafana 或 OpenTelemetry，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
