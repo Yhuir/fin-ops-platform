@@ -170,7 +170,8 @@ class FakeWorkerMetricsConnection:
 
 class RuntimeMonitoringRepositoryTests(unittest.TestCase):
     def test_health_summary_reports_backlog_failed_jobs_and_stale_dirty_scopes(self) -> None:
-        repository = RuntimeMonitoringRepository(FakeConnection(), rabbitmq_metrics_provider=FakeRabbitMqMetrics())
+        connection = FakeConnection()
+        repository = RuntimeMonitoringRepository(connection, rabbitmq_metrics_provider=FakeRabbitMqMetrics())
 
         summary = repository.health_summary(stale_after_seconds=300)
 
@@ -248,7 +249,6 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                 },
             },
         )
-
     def test_dashboard_worker_metrics_are_registry_instance_aware(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
 

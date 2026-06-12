@@ -854,8 +854,9 @@ class RuntimeMonitoringRepository:
             consistency_row = self._connection.fetch_one(
                 """
                 select count(*)::bigint as inconsistent_count
-                from read_model.workbench_generation_consistency
-                where status = 'active'
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and status = 'active'
                   and consistency_status = 'inconsistent'
                 """
             )

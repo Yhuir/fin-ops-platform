@@ -244,9 +244,13 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
     def test_runtime_repository_uses_recent_window_for_read_model_health_duration(self) -> None:
         class WindowedConnection:
+            def __init__(self) -> None:
+                self.fetch_one_sql: list[str] = []
+
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
-                if "workbench_generation_consistency" in normalized:
+                self.fetch_one_sql.append(normalized)
+                if "from read_model.workbench_generations" in normalized and "consistency_status" in normalized:
                     return {"inconsistent_count": 0}
                 raise AssertionError(sql)
 
@@ -279,7 +283,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                     return []
                 raise AssertionError(sql)
 
-        repository = RuntimeMonitoringRepository(WindowedConnection())
+        connection = WindowedConnection()
+        repository = RuntimeMonitoringRepository(connection)
 
         rows = repository.dashboard_read_model_metrics()
 
@@ -288,6 +293,13 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(workbench["historical_refresh_duration_ms"]["p95"], 24000.0)
         self.assertEqual(workbench["refresh_duration_windows"]["recent_15m"]["sample_count"], 2)
         self.assertIn("full", workbench["refresh_duration_by_kind"])
+        self.assertTrue(
+            any(
+                "from read_model.workbench_generations" in sql and "consistency_status = 'inconsistent'" in sql
+                for sql in connection.fetch_one_sql
+            )
+        )
+        self.assertFalse(any("workbench_generation_consistency" in sql for sql in connection.fetch_one_sql))
 
     def test_runtime_repository_bounds_read_model_duration_history_query(self) -> None:
         class CapturingConnection:
@@ -297,7 +309,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
 
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
-                if "workbench_generation_consistency" in normalized:
+                if "from read_model.workbench_generations" in normalized and "consistency_status" in normalized:
                     return {"inconsistent_count": 0}
                 raise AssertionError(sql)
 
