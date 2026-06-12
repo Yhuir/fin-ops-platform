@@ -155,6 +155,24 @@ limit 20;
 
 `0018_api_performance_read_model.sql` 会执行 `create extension if not exists pg_stat_statements`。如果目标环境的 migrator 没有创建 extension 权限，应由 DBA 预先启用 extension，再执行应用 migration。
 
+## 同步 SLO 基线采集
+
+生产同步优化阶段使用只读 baseline collector 固化当前证据，避免依赖一次性手工 SQL：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sync_slo_baseline --json
+```
+
+默认采集内容：
+
+- `/health` 同源 PostgreSQL runtime summary、App Status runtime attention、outbox/readiness/worker/RabbitMQ dashboard metrics。
+- PostgreSQL 连接数、`max_connections`、连接 state/application 分布。
+- `read_model`、`job`、`app` 主要表体积、估算行数和大索引使用情况。
+- `pg_stat_statements` top SQL；如果 extension、权限或 `shared_preload_libraries` 不满足，结果会标记 unavailable。
+- 关键同步查询的 `EXPLAIN (BUFFERS, FORMAT JSON)`；默认不执行 `ANALYZE`。需要真实执行计划时显式加 `--analyze-explain`，并保存生产变更窗口和回滚说明。
+
+该工具不采集登录态页面 API p95，因为当前 API 性能 recorder 是进程内窗口且 dashboard 接口需要认证。页面首包 p95 必须用登录态 HTTP/browser 采样另行证明，不能用只读 DB baseline 代替。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：
