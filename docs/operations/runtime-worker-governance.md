@@ -254,6 +254,12 @@ Worker 在收到 `SIGTERM` 或 `SIGINT` 时必须释放当前持有的 PostgreSQ
 `FIN_OPS_WORKER_LOCK_TIMEOUT_SECONDS` 默认 300 秒后才重新 claim。该 release 只适用于同一 worker lock，
 不能释放其他 worker 持有的事件。
 
+2026-06-12 Stage 6 生产发布 `main-3933b00f-stage6-202606122329` 已验证该路径：发布期间
+`fin-ops-worker@workbench.service` 两次 stop 均记录 `runtime_worker.event_released`，
+后续 `job.outbox_events` read model 非 `done`、`job.read_model_dirty_scopes` 非 `done` 和
+`read_model.app_status_readiness` 非 `fresh` 均收敛为 0。该验证只证明发布/重启不再依赖 300 秒
+lock timeout；单个重型 read model rebuild 的执行时间仍需通过 worker 增量化、索引/分区和缓存阶段优化。
+
 ## App Status Readiness Convergence
 
 `read_model.app_status_readiness` 是全局状态 icon 允许变绿的 read model 证明层。上线该表或新增 read model 后，不能用批量 `insert fresh` 伪造状态；必须先用真实 read model 表、active generation、schema/source version 和 row count 做 convergence。

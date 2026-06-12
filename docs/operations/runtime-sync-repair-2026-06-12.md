@@ -214,6 +214,10 @@ Commit：`d38edfa93c7211654c9df71f02974c6b7cbd011a`
 
 ## Stage 6：worker shutdown lease release
 
+Release：`main-3933b00f-stage6-202606122329`
+
+Commit：`3933b00ffc6868df382ad8f2cb54caeb61b23463`
+
 本阶段修复 Stage 5 发现的 300s lock-timeout 尾延迟风险：
 
 - `RuntimeQueueRepository.release_event()`：只释放当前 `worker_id` 持有的 `processing` outbox event，恢复为 `pending`、`available_at=now()`、清理 lock、回退本次 claim 增加的 `attempts`，并写入 `raw_payload.runtime_shutdown_release`。
@@ -221,3 +225,57 @@ Commit：`d38edfa93c7211654c9df71f02974c6b7cbd011a`
 - 如果 queue 实现没有 `release_event()`，worker 仍会走原有 retry failure fallback，避免事件无限卡住。
 
 这项修复针对发布、systemd stop 或滚动重启造成的 `processing` lease 残留。它不能缩短单个真实重型 rebuild 的执行时间；后者仍需要 RabbitMQ real consumers、索引/分区、增量 worker 和 Redis fresh-cache 阶段继续优化。
+
+本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue tests.test_runtime_queue_ops tests.test_rabbitmq_runtime -v`
+- `PYTHONPATH=backend/src python3 -m fin_ops_platform.app.worker --help`
+- `bash scripts/verify.sh docs`
+- 干净部署 worktree `/tmp/finops-stage6-deploy` 重跑上述 worker/queue/runtime 测试与 docs verify。
+
+生产发布：
+
+- `./scripts/deploy-oa.sh --release-name main-3933b00f-stage6-202606122329` 成功。
+- 本阶段没有新增 migration；发布输出中 `0001` 到 `0067` 均为 skipped。
+- `/health/ready.runtime_release.consistent=true`，运行目录为 `/opt/fin-ops/releases/main-3933b00f-stage6-202606122329/src`。
+
+发布期间真实验证到 shutdown release path：
+
+- `fin-ops-worker@workbench.service` 在 `23:30:02` 收到 stop，已 claim 的 `workbench.read_model.refresh` 事件 `bcc5d43e-1dfc-4e16-9b36-5fffdf5b6a0d` 记录 `runtime_worker.event_released`，`error=shutdown_signal_15`。
+- 同一服务在 `23:30:25` 再次 stop，事件 `57824909-e07b-4054-a6d9-ceb0f7af2162` 同样 release。
+- 生产库中带 `raw_payload.runtime_shutdown_release` 的 outbox 记录数为 4。
+
+发布后中间态曾出现后台 workbench refresh 仍在追赶：
+
+| 指标 | 值 |
+|---|---:|
+| read model outbox 非 `done` | 6 |
+| dirty scope 非 `done` | 1 |
+| readiness 非 `fresh` | 0 |
+| `failed_jobs` | 0 |
+| `queue_backlog.pending` | 5 |
+| `queue_backlog.processing` | 1 |
+
+这时页面 readiness 已经是 fresh，后台 workbench 重建仍在进行；关键差异是 shutdown 后事件立即回到可 claim 状态，而不是依赖 300s lock timeout。
+
+收敛后最终生产快照：
+
+| 指标 | 值 |
+|---|---:|
+| `/health/ready.status` | `ready` |
+| runtime release | `main-3933b00f-stage6-202606122329` |
+| release commit | `3933b00ffc6868df382ad8f2cb54caeb61b23463` |
+| `job.outbox_events` read model 非 `done` | 0 |
+| `job.read_model_dirty_scopes` 非 `done` | 0 |
+| `read_model.app_status_readiness` 非 `fresh` | 0 |
+| `/health/ready.failed_jobs` | 0 |
+| `/health/ready.stale_dirty_scope_count` | 0 |
+| required worker missing/stale/mismatch | 0 / 0 / 0 |
+| `read_model_refresh_failure_rate` | 0.0 |
+| `read_model_refresh_duration_ms.p95` | 17769.2015 |
+
+剩余风险：
+
+- `read_model_refresh_duration_ms.p95` 仍约 17.77s，来自滚动窗口内的重型 workbench refresh；Stage 6 只消除发布/重启导致的分钟级 lease 等待，不代表“几秒内全部同步”性能 SLO 已完成。
+- RabbitMQ management metric 仍返回 `HTTP Error 404: Not Found`，真实 consumer 与持续观测阶段仍未闭环。
+- workbench 全量/月份 rebuild 的真实性能仍需要基于 EXPLAIN、索引/分区、增量化和 fresh-cache 后续阶段继续优化。
