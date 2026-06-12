@@ -47,8 +47,14 @@ class FakeRuntimeMonitoringRepository:
 
 
 class FakeConnection:
-    def __init__(self, *, fail_pg_stat_statements: bool = False) -> None:
-        self.fail_pg_stat_statements = fail_pg_stat_statements
+    def __init__(
+        self,
+        *,
+        pg_stat_metric_version: str = "total_exec_time",
+        pg_stat_query_error: Exception | None = None,
+    ) -> None:
+        self.pg_stat_metric_version = pg_stat_metric_version
+        self.pg_stat_query_error = pg_stat_query_error
         self.fetch_one_calls: list[str] = []
         self.fetch_all_calls: list[str] = []
 
@@ -109,13 +115,19 @@ class FakeConnection:
                     "idx_scan": 0,
                 }
             ]
+        if "from information_schema.columns" in normalized and "pg_stat_statements" in normalized:
+            if self.pg_stat_metric_version == "total_time":
+                return [{"column_name": "query"}, {"column_name": "total_time"}, {"column_name": "mean_time"}]
+            if self.pg_stat_metric_version == "unsupported":
+                return [{"column_name": "query"}, {"column_name": "calls"}]
+            return [{"column_name": "query"}, {"column_name": "total_exec_time"}, {"column_name": "mean_exec_time"}]
         if (
             "from pg_stat_statements" in normalized
             and "total_exec_time" in normalized
             and "total_time as total_exec_time" not in normalized
         ):
-            if self.fail_pg_stat_statements:
-                raise RuntimeError("pg_stat_statements permission denied")
+            if self.pg_stat_query_error is not None:
+                raise self.pg_stat_query_error
             return [
                 {
                     "query": "select * from read_model.workbench_groups where scope_key = $1",
@@ -125,7 +137,9 @@ class FakeConnection:
                     "rows": 9,
                 }
             ]
-        if "from pg_stat_statements" in normalized and "total_time" in normalized:
+        if "from pg_stat_statements" in normalized and "total_time as total_exec_time" in normalized:
+            if self.pg_stat_query_error is not None:
+                raise self.pg_stat_query_error
             return [
                 {
                     "query": "select count(*) from job.outbox_events",
@@ -155,12 +169,25 @@ class SyncSloBaselineTests(unittest.TestCase):
 
     def test_pg_stat_statements_falls_back_to_legacy_time_columns(self) -> None:
         result = sync_slo_baseline._pg_stat_statements(
-            FakeConnection(fail_pg_stat_statements=True),
+            FakeConnection(pg_stat_metric_version="total_time"),
             limit=5,
         )
 
         self.assertEqual(result["metric_version"], "pg_stat_statements_total_time")
         self.assertEqual(result["rows"][0]["query"], "select count(*) from job.outbox_events")
+
+    def test_pg_stat_statements_reports_real_unloaded_extension_error(self) -> None:
+        result = sync_slo_baseline._safe_section(
+            lambda: sync_slo_baseline._pg_stat_statements(
+                FakeConnection(
+                    pg_stat_query_error=RuntimeError("pg_stat_statements must be loaded via shared_preload_libraries")
+                ),
+                limit=5,
+            )
+        )
+
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("shared_preload_libraries", result["error"])
 
 
 if __name__ == "__main__":

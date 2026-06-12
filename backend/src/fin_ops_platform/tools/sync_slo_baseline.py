@@ -258,43 +258,44 @@ def _pg_stat_statements(connection: Any, *, limit: int) -> dict[str, Any]:
     ) or {}
     if not bool(extension.get("installed")):
         return {"installed": False, "rows": []}
-    try:
-        rows = connection.fetch_all(
-            """
-            select
-              query,
-              calls,
-              total_exec_time,
-              mean_exec_time,
-              rows
-            from pg_stat_statements
-            order by total_exec_time desc
-            limit %s
-            """,
-            (limit,),
-        )
-        metric_version = "pg_stat_statements_total_exec_time"
-    except Exception:
-        rows = connection.fetch_all(
-            """
-            select
-              query,
-              calls,
-              total_time as total_exec_time,
-              mean_time as mean_exec_time,
-              rows
-            from pg_stat_statements
-            order by total_time desc
-            limit %s
-            """,
-            (limit,),
-        )
-        metric_version = "pg_stat_statements_total_time"
+    total_column, mean_column, metric_version = _pg_stat_statement_time_columns(connection)
+    rows = connection.fetch_all(
+        f"""
+        select
+          query,
+          calls,
+          {total_column} as total_exec_time,
+          {mean_column} as mean_exec_time,
+          rows
+        from pg_stat_statements
+        order by {total_column} desc
+        limit %s
+        """,
+        (limit,),
+    )
     return {
         "installed": True,
         "metric_version": metric_version,
         "rows": [_pg_stat_statement_row(row) for row in rows],
     }
+
+
+def _pg_stat_statement_time_columns(connection: Any) -> tuple[str, str, str]:
+    rows = connection.fetch_all(
+        """
+        select column_name
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'pg_stat_statements'
+        """
+    )
+    columns = {str(row.get("column_name") or "") for row in rows}
+    if {"total_exec_time", "mean_exec_time"}.issubset(columns):
+        return "total_exec_time", "mean_exec_time", "pg_stat_statements_total_exec_time"
+    if {"total_time", "mean_time"}.issubset(columns):
+        return "total_time", "mean_time", "pg_stat_statements_total_time"
+    available = ", ".join(sorted(column for column in columns if column))
+    raise RuntimeError(f"pg_stat_statements does not expose supported time columns: {available or 'none'}")
 
 
 def _pg_stat_statement_row(row: dict[str, Any]) -> dict[str, Any]:
