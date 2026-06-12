@@ -411,12 +411,31 @@ class WorkbenchSqlProjectionBuilder:
                     or attachment.normalized_payload->>'source_expense_item_id' = item.row_id
                  )
             left join lateral (
-                select source.cache_source_attachment_key, cache.parsed_at, cache.invoices, cache.evidences, cache.artifacts
-                from app.oa_attachment_invoice_cache_sources source
-                join app.oa_attachment_invoice_cache cache
-                  on cache.source_attachment_key = source.cache_source_attachment_key
-                where source.source_attachment_key = attachment.source_attachment_key
-                order by cache.parsed_at desc nulls last, source.cache_source_attachment_key
+                select matched.cache_source_attachment_key, matched.parsed_at, matched.invoices, matched.evidences, matched.artifacts
+                from (
+                    select
+                        0 as match_rank,
+                        source.cache_source_attachment_key,
+                        cache.parsed_at,
+                        cache.invoices,
+                        cache.evidences,
+                        cache.artifacts
+                    from app.oa_attachment_invoice_cache_sources source
+                    join app.oa_attachment_invoice_cache cache
+                      on cache.source_attachment_key = source.cache_source_attachment_key
+                    where source.source_attachment_key = attachment.source_attachment_key
+                    union all
+                    select
+                        1 as match_rank,
+                        cache.source_attachment_key as cache_source_attachment_key,
+                        cache.parsed_at,
+                        cache.invoices,
+                        cache.evidences,
+                        cache.artifacts
+                    from app.oa_attachment_invoice_cache cache
+                    where cache.source_attachment_key = attachment.source_attachment_key
+                ) matched
+                order by matched.match_rank, matched.parsed_at desc nulls last, matched.cache_source_attachment_key
                 limit 1
             ) direct_cache on true
             left join lateral (
