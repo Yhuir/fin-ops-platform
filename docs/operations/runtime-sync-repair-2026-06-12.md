@@ -888,6 +888,82 @@ Stage 17 结论：
 - 运维 caveat：`finops-deploy-control restart` 不适合在 worker 已全部停止后单独恢复 worker；维护脚本或手册应补
   `finops-ensure-runtime-workers` 步骤。
 
+## Stage 18：移除状态页热路径重型 consistency 视图
+
+Stage 18 Release：`main-8f123cb4-stage18-202606130151`
+
+Stage 18 Commit：`8f123cb4`
+
+Stage 17 top SQL 证明 `RuntimeMonitoringRepository.dashboard_read_model_metrics()` 每次统计 workbench
+一致性时会查询 `read_model.workbench_generation_consistency` 视图。该视图会 live recompute
+`workbench_group_rows`、`workbench_groups`、`workbench_rows`、`workbench_summary` 和 duplicate identity
+聚合；生产 EXPLAIN ANALYZE 显示单次 count 约 `2484.731ms`，且会读 `142880` 个 shared blocks，
+还有外部排序 temp I/O。
+
+Stage 18 将监控热路径改为读取持久字段：
+
+```sql
+select count(*)::bigint as inconsistent_count
+from read_model.workbench_generations
+where tenant_id = 'default'
+  and status = 'active'
+  and consistency_status = 'inconsistent';
+```
+
+这个字段由 workbench generation 发布/失败边界写入：building 时为 `validating`，activate 时为
+`consistent`，fail 时为 `inconsistent`。重型 `_workbench_generation_consistency_failures(...)`
+仍保留在 generation 构建、发布和 all-scope 聚合边界，不从状态页热路径删除真实校验。
+
+本地验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_monitoring tests.test_operations_dashboard_service -v`
+- `bash scripts/verify.sh backend`：2833 tests pass，25 skipped
+
+生产部署：
+
+- 使用干净 worktree `/tmp/finops-stage18-deploy`。
+- 复用已验证 `web/dist`，执行
+  `./scripts/deploy-oa.sh --skip-build --release-name main-8f123cb4-stage18-202606130151`。
+- migrations `0001`-`0067` 均为 skipped/accepted drift；backend readiness、worker ensure、frontend hash、
+  public session route checks 均通过；旧 release `main-02dc9317-stage13-202606130103` 被清理。
+
+生产验证：
+
+| 指标 | Stage 17 旧视图 | Stage 18 持久字段 |
+|---|---:|---:|
+| consistency count EXPLAIN execution | 2484.731ms | 0.796ms |
+| root node | Aggregate | Aggregate |
+| shared read blocks | 142880 | 2 |
+| `dashboard_read_model_metrics()` elapsed | 未单独计时 | 161.423ms |
+| workbench stale/unavailable | 0 / 0 | 0 / 0 |
+
+Stage 18 baseline JSON：
+`/tmp/finops-sync-slo-baseline-stage18-20260613015259.json`。
+
+该 baseline 仍包含 Stage 17 的累计 pg_stat 旧慢 SQL，因此采集后执行
+`pg_stat_statements_reset()`，再跑 5 次 runtime monitoring 采样，生成 clean baseline：
+`/tmp/finops-sync-slo-baseline-stage18-clean-20260613015555.json`。
+
+clean pg_stat top SQL：
+
+| rank | total_exec_time | calls | mean_exec_time | query 摘要 |
+|---:|---:|---:|---:|---|
+| 1 | 816.466ms | 6 | 136.078ms | `dashboard_read_model_metrics` duration window over `job.outbox_events` |
+| 2 | 245.948ms | 330 | 0.745ms | `app.app_settings` lookup |
+| 3 | 227.786ms | 6 | 37.964ms | read model refresh percentile over `job.outbox_events` |
+| 4 | 212.163ms | 27 | 7.858ms | `workbench.read_model.refresh` outbox status count |
+| 5 | 207.472ms | 27 | 7.684ms | scoped workbench generation consistency aggregate |
+
+Stage 18 结论：
+
+- 状态页 current-effective blocker 仍为 0：`failed_jobs=0`、`stale_dirty_scope_count=0`、
+  outbox/read model attention 为空。
+- Stage 17 的 2.5s 状态页慢 SQL 已从热路径移除，clean top SQL 不再出现
+  `read_model.workbench_generation_consistency` 全量视图。
+- 下一阶段数据库优化重点应转向 `job.outbox_events` 的 runtime metric window/percentile 查询，以及
+  `workbench` 单 scope consistency aggregate 是否需要更便宜的缓存或按需采样。
+- 页面/API p95 仍未采集，因此“几秒内全部同步”仍未验收。
+
 ## 当前闭环状态
 
 已闭环：
@@ -902,19 +978,21 @@ Stage 17 结论：
 - 应用启动默认不再执行 startup stale scan；显式启用时也只会重算缺少 completed scope run proof 的 matching 月份。
 - 生产 SLO baseline collector 已部署，可重复采集 runtime、worker、PostgreSQL catalog、固定 EXPLAIN 和缺口状态。
 - `pg_stat_statements` 已在生产 PostgreSQL preload 并可在 app DB 读取 top SQL。
+- 状态页 read model health 热路径不再 live recompute `workbench_generation_consistency` 全量视图。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
 - `read_model_refresh_duration_ms.p95` 仍约 17.76s；Stage 16 近 1 小时样本中 `workbench`、`invoice_lifecycle`、
   `input_invoice_usage` p95 仍约 8-9s。
 - 页面首包/API p95 仍未采集；Stage 11 已完成 relation-details SQL read model 单行读取优化，但仍需登录态 HTTP 样本验证端到端 p95。
-- Workbench 大表/大索引是当前最明确的数据库优化对象；仍需要对 Stage 17 top SQL 做 EXPLAIN ANALYZE、索引/retention/分区 impact analysis。
+- Stage 18 clean top SQL 显示 runtime metric window/percentile 查询和部分 workbench scoped consistency aggregate
+  仍是当前监控热路径瓶颈。
 - Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
 
 下一阶段优先级：
 
 1. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
-2. 对 Stage 17 top SQL 跑 EXPLAIN ANALYZE，先修 workbench consistency aggregate、candidate match full load、outbox status count 等可见瓶颈。
+2. 对 Stage 18 clean top SQL 跑 EXPLAIN ANALYZE，优先处理 `job.outbox_events` runtime metric window/percentile 查询。
 3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
 4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
 5. 接入 Prometheus/Grafana 或 OpenTelemetry，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
