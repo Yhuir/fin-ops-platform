@@ -39,6 +39,8 @@ Workbench exception closed apply 会创建 exception case，并通过 `Workbench
 
 OA 附件发票冲抵自动闭环和 OA 附件上下文 repair 也必须通过 `WorkbenchRelationCommandService` 写 relation/history；Workbench payload build/repair 过程不得直接 mutate `WorkbenchPairRelationService`。
 
+OA 附件发票解析缓存必须通过 `app.oa_attachment_invoice_cache_sources` 的 indexed source bridge 连接当前 `app.oa_attachments`。`attachment_identity_*` bridge 行用于把历史 parser cache 的 `source_expense_item_id + source_attachment_name` 映射到当前附件 key；Workbench read model 热路径不得回退到全量扫描 `app.oa_attachment_invoice_cache` 才声明 fresh。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

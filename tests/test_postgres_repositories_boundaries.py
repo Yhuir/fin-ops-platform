@@ -311,6 +311,7 @@ def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
                 {
                     "source_attachment_key": "actual-attachment-key",
                     "source_expense_item_id": "item-1",
+                    "source_attachment_name": "invoice.pdf",
                     "invoice_no": "INV-001",
                 }
             ],
@@ -329,6 +330,13 @@ def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
         params[1] == "actual-attachment-key"
         for sql, params in connection.executed
         if "insert into app.oa_attachment_invoice_cache_sources" in sql
+    )
+    assert "attachment_identity_invoice" in executed_sql
+    assert "from app.oa_attachments attachment" in executed_sql
+    assert any(
+        params == ("cache-key-1",)
+        for sql, params in connection.executed
+        if "attachment_identity_invoice" in sql
     )
 
 

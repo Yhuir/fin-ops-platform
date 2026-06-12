@@ -30,6 +30,21 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print JSON report.")
     parser.add_argument("--profile-internal", action="store_true", help="Include fine-grained builder and repository step timings.")
     parser.add_argument(
+        "--repair-attachment-identity-bridge",
+        action="store_true",
+        help="Repair indexed OA attachment cache identity bridge rows. Requires --dry-run or --apply-repair.",
+    )
+    parser.add_argument(
+        "--rollback-attachment-identity-bridge",
+        action="store_true",
+        help="Delete repairable attachment_identity_* bridge rows. Requires --dry-run or --apply-repair.",
+    )
+    parser.add_argument(
+        "--apply-repair",
+        action="store_true",
+        help="Apply an explicit repair or rollback action instead of previewing it.",
+    )
+    parser.add_argument(
         "--explain-structured-attachments",
         action="store_true",
         help="Run read-only EXPLAIN ANALYZE diagnostics for the Workbench structured OA attachment query.",
@@ -43,11 +58,48 @@ def main() -> int:
     args = parser.parse_args()
     if args.statement_timeout_seconds <= 0:
         raise ValueError("--statement-timeout-seconds must be positive.")
+    if args.dry_run and args.apply_repair:
+        raise ValueError("--dry-run and --apply-repair are mutually exclusive.")
+    repair_mode = bool(args.repair_attachment_identity_bridge or args.rollback_attachment_identity_bridge)
+    if args.repair_attachment_identity_bridge and args.rollback_attachment_identity_bridge:
+        raise ValueError("Choose only one attachment identity bridge repair action.")
+    if args.apply_repair and not repair_mode:
+        raise ValueError("--apply-repair is only valid with an attachment identity bridge repair action.")
+    if repair_mode and args.explain_structured_attachments:
+        raise ValueError("Attachment identity bridge repair cannot be combined with --explain-structured-attachments.")
+    if repair_mode and not (args.dry_run or args.apply_repair):
+        raise ValueError("Attachment identity bridge repair requires --dry-run or --apply-repair.")
     if args.explain_structured_attachments and not args.scope:
         raise ValueError("--explain-structured-attachments requires at least one --scope to avoid accidental full-table diagnostics.")
 
     connection = PostgresConnection(PostgresSettings.from_env())
     connection.set_statement_timeout_ms(args.statement_timeout_seconds * 1000)
+    if repair_mode:
+        repair_started_at = perf_counter()
+        report: dict[str, Any] = {
+            "action": (
+                "rollback_attachment_identity_bridge"
+                if args.rollback_attachment_identity_bridge
+                else "repair_attachment_identity_bridge"
+            ),
+            "dry_run": bool(args.dry_run),
+            "apply_repair": bool(args.apply_repair),
+            "timings": [],
+        }
+        if args.rollback_attachment_identity_bridge:
+            report["attachment_identity_bridge"] = _rollback_attachment_identity_bridge(
+                connection,
+                apply_changes=bool(args.apply_repair),
+            )
+        else:
+            report["attachment_identity_bridge"] = _repair_attachment_identity_bridge(
+                connection,
+                apply_changes=bool(args.apply_repair),
+            )
+        report["timings"].append({"step": "attachment_identity_bridge", "duration_ms": _duration_ms(repair_started_at)})
+        report["duration_ms"] = _duration_ms(script_started_at)
+        return _print_report(report, json_output=args.json)
+
     repository = PostgresReadModelRepository(connection)
     queue_repository = RuntimeQueueRepository(connection)
     builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=repository)
@@ -352,6 +404,214 @@ def _structured_attachment_query_diagnostic(connection: PostgresConnection, scop
         "indexes": indexes,
         "plan": [str(row.get("QUERY PLAN") or "") for row in explain_rows],
     }
+
+
+def _repair_attachment_identity_bridge(connection: Any, *, apply_changes: bool) -> dict[str, Any]:
+    before = _attachment_identity_bridge_counts(connection)
+    candidates = _attachment_identity_bridge_candidate_counts(connection)
+    result: dict[str, Any] = {
+        "mode": "apply" if apply_changes else "dry_run",
+        "before": before,
+        "candidates": candidates,
+    }
+    if not apply_changes:
+        result["applied"] = {"total": 0, "by_source_kind": {}}
+        result["after"] = before
+        return result
+
+    rows = connection.fetch_all(
+        f"""
+        {_attachment_identity_bridge_matches_cte()}
+        insert into app.oa_attachment_invoice_cache_sources (
+            cache_source_attachment_key,
+            source_attachment_key,
+            source_kind,
+            source_expense_item_id,
+            source_expense_row_index,
+            source_attachment_name,
+            updated_at
+        )
+        select
+            cache_source_attachment_key,
+            source_attachment_key,
+            source_kind,
+            source_expense_item_id,
+            source_expense_row_index,
+            source_attachment_name,
+            now()
+        from identity_matches
+        on conflict (cache_source_attachment_key, source_attachment_key, source_kind) do update set
+            source_expense_item_id = excluded.source_expense_item_id,
+            source_expense_row_index = excluded.source_expense_row_index,
+            source_attachment_name = excluded.source_attachment_name,
+            updated_at = now()
+        returning source_kind
+        """
+    )
+    result["applied"] = {"total": len(rows), "by_source_kind": _count_rows_by_key(rows, "source_kind")}
+    result["after"] = _attachment_identity_bridge_counts(connection)
+    return result
+
+
+def _rollback_attachment_identity_bridge(connection: Any, *, apply_changes: bool) -> dict[str, Any]:
+    before = _attachment_identity_bridge_counts(connection)
+    result: dict[str, Any] = {
+        "mode": "apply" if apply_changes else "dry_run",
+        "before": before,
+        "candidates": before,
+    }
+    if not apply_changes:
+        result["deleted"] = {"total": 0, "by_source_kind": {}}
+        result["after"] = before
+        return result
+
+    rows = connection.fetch_all(
+        """
+        delete from app.oa_attachment_invoice_cache_sources
+        where source_kind like 'attachment_identity_%'
+        returning source_kind
+        """
+    )
+    result["deleted"] = {"total": len(rows), "by_source_kind": _count_rows_by_key(rows, "source_kind")}
+    result["after"] = _attachment_identity_bridge_counts(connection)
+    return result
+
+
+def _attachment_identity_bridge_counts(connection: Any) -> dict[str, Any]:
+    rows = connection.fetch_all(
+        """
+        select source_kind, count(*)::bigint as count
+        from app.oa_attachment_invoice_cache_sources
+        where source_kind like 'attachment_identity_%'
+        group by source_kind
+        order by source_kind
+        """
+    )
+    by_kind = {str(row.get("source_kind") or ""): int(row.get("count") or 0) for row in rows}
+    return {"total": sum(by_kind.values()), "by_source_kind": by_kind}
+
+
+def _attachment_identity_bridge_candidate_counts(connection: Any) -> dict[str, Any]:
+    rows = connection.fetch_all(
+        f"""
+        {_attachment_identity_bridge_matches_cte()}
+        select source_kind, count(*)::bigint as count
+        from identity_matches
+        group by source_kind
+        order by source_kind
+        """
+    )
+    by_kind = {str(row.get("source_kind") or ""): int(row.get("count") or 0) for row in rows}
+    return {"total": sum(by_kind.values()), "by_source_kind": by_kind}
+
+
+def _count_rows_by_key(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for row in rows:
+        value = str(row.get(key) or "").strip() or "unknown"
+        result[value] = result.get(value, 0) + 1
+    return dict(sorted(result.items()))
+
+
+def _attachment_identity_bridge_matches_cte() -> str:
+    return """
+        with attachment_sources as (
+            select distinct
+                attachment.source_attachment_key,
+                nullif(attachment.normalized_payload->>'source_expense_item_id', '') as source_expense_item_id,
+                nullif(attachment.normalized_payload->>'source_expense_row_index', '') as source_expense_row_index,
+                nullif(
+                    coalesce(
+                        attachment.normalized_payload->>'source_attachment_name',
+                        attachment.normalized_payload->>'attachment_name',
+                        attachment.normalized_payload->>'fileName',
+                        attachment.normalized_payload->>'filename'
+                    ),
+                    ''
+                ) as source_attachment_name
+            from app.oa_attachments attachment
+            where nullif(attachment.source_attachment_key, '') is not null
+              and nullif(attachment.normalized_payload->>'source_expense_item_id', '') is not null
+              and nullif(
+                    coalesce(
+                        attachment.normalized_payload->>'source_attachment_name',
+                        attachment.normalized_payload->>'attachment_name',
+                        attachment.normalized_payload->>'fileName',
+                        attachment.normalized_payload->>'filename'
+                    ),
+                    ''
+                  ) is not null
+        ),
+        cache_evidence_sources as (
+            select
+                cache.source_attachment_key as cache_source_attachment_key,
+                nullif(evidence.value->>'source_attachment_key', '') as parsed_source_attachment_key,
+                nullif(evidence.value->>'source_expense_item_id', '') as source_expense_item_id,
+                nullif(evidence.value->>'source_expense_row_index', '') as source_expense_row_index,
+                nullif(
+                    coalesce(
+                        evidence.value->>'source_attachment_name',
+                        evidence.value->>'attachment_name',
+                        evidence.value->>'fileName',
+                        evidence.value->>'filename'
+                    ),
+                    ''
+                ) as source_attachment_name,
+                cache.parsed_at,
+                evidence.source_kind
+            from app.oa_attachment_invoice_cache cache
+            cross join lateral (
+                select invoice.value, 'attachment_identity_invoice'::text as source_kind
+                from jsonb_array_elements(coalesce(cache.invoices, '[]'::jsonb)) as invoice(value)
+                union all
+                select evidence.value, 'attachment_identity_evidence'::text as source_kind
+                from jsonb_array_elements(coalesce(cache.evidences, '[]'::jsonb)) as evidence(value)
+                union all
+                select artifact.value, 'attachment_identity_artifact'::text as source_kind
+                from jsonb_array_elements(
+                    coalesce(
+                        case
+                            when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
+                            when jsonb_typeof(cache.artifacts) = 'object' then jsonb_build_array(cache.artifacts)
+                            else '[]'::jsonb
+                        end,
+                        '[]'::jsonb
+                    )
+                ) as artifact(value)
+            ) evidence
+            where nullif(evidence.value->>'source_expense_item_id', '') is not null
+              and nullif(
+                    coalesce(
+                        evidence.value->>'source_attachment_name',
+                        evidence.value->>'attachment_name',
+                        evidence.value->>'fileName',
+                        evidence.value->>'filename'
+                    ),
+                    ''
+                  ) is not null
+        ),
+        identity_matches as (
+            select distinct on (cache.cache_source_attachment_key, attachment.source_attachment_key, cache.source_kind)
+                cache.cache_source_attachment_key,
+                attachment.source_attachment_key,
+                cache.source_kind,
+                attachment.source_expense_item_id,
+                coalesce(attachment.source_expense_row_index, cache.source_expense_row_index) as source_expense_row_index,
+                attachment.source_attachment_name,
+                cache.parsed_at
+            from attachment_sources attachment
+            join cache_evidence_sources cache
+              on cache.source_expense_item_id = attachment.source_expense_item_id
+             and cache.source_attachment_name = attachment.source_attachment_name
+            where cache.cache_source_attachment_key is not null
+              and attachment.source_attachment_key <> coalesce(cache.parsed_source_attachment_key, '')
+            order by
+                cache.cache_source_attachment_key,
+                attachment.source_attachment_key,
+                cache.source_kind,
+                cache.parsed_at desc nulls last
+        )
+        """
 
 
 def _install_internal_profiling(builder: Any, repository: Any, timings: list[dict[str, Any]]) -> None:
