@@ -1343,6 +1343,38 @@ Stage 25 在 Stage 24 的 bounded recent sample 基础上，给 `/health/ready` 
 本地验证：
 
 - `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_monitoring tests.test_prometheus_metrics tests.test_app_postgres_mode -v`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`
+
+生产发布：
+
+- commit：`a227d0ff Report read model refresh metrics by key`
+- release：`main-a227d0ff-stage25-202606130315`
+- `/health/ready`：`status=ready`，`runtime_release.consistent=true`，schema `68`。
+- bounded runtime metric：`read_model_refresh_duration_ms.p95=8301.8155ms`，`read_model_refresh_sample_count=5940`，
+  `read_model_refresh_failure_rate=0.0`。
+- runtime health：`queue_backlog={}`，`failed_jobs=0`，`stale_dirty_scope_count=0`，`rabbitmq_queue_depth=0`，
+  `rabbitmq_dlq_count=0`，`missing_required_worker_count=0`，`stale_required_worker_count=0`。
+- `read_model_refresh_by_key` 生产样本共 `14` 个 event type，按 p95 降序前 8 项：
+  - `search.read_model.refresh`：p95 `35107.029ms`，sample `174`，failure `0.0`。
+  - `workbench.read_model.refresh`：p95 `28180.444ms`，sample `512`，failure `0.0`。
+  - `cost_statistics.read_model.refresh`：p95 `6639.672ms`，sample `512`，failure `0.0`。
+  - `invoice_lifecycle.read_model.refresh`：p95 `6318.668ms`，sample `512`，failure `0.0`。
+  - `input_invoice_usage.read_model.refresh`：p95 `5780.509ms`，sample `512`，failure `0.0`。
+  - `turnover_ledger.read_model.refresh`：p95 `4482.926ms`，sample `133`，failure `0.0`。
+  - `workbench_relation.read_model.refresh`：p95 `1896.104ms`，sample `512`，failure `0.0`。
+  - `bank_detail.read_model.refresh`：p95 `1757.164ms`，sample `512`，failure `0.0`。
+- 本机 `/health/ready` 连续 5 次 curl `time_total`：`0.339808s`、`0.338427s`、`0.325668s`、
+  `0.330065s`、`0.344222s`。
+- 公网 `/fin-ops/` 未登录页面 shell smoke 通过，p95 `114.807ms`。
+- 公网 `/fin-ops-api/metrics` 未带 token 返回 `404 application/json`，符合未配置 token 时安全关闭预期。
+
+Stage 25 结论：
+
+- by-key breakdown 已证实 SQL 在生产 PostgreSQL 上可执行，且不会明显拖慢 `/health/ready`。
+- 当前总 p95 `8.3s` 不是单纯观测查询慢，而是被真实 refresh event 的长尾拖住。
+- 下一阶段应优先检查 `search` 与 `workbench` 的 refresh 触发范围、coalescing、worker 执行计划和索引命中；随后处理
+  `cost_statistics`、`invoice_lifecycle`、`input_invoice_usage` 这三个 5-7s 级 event type。
 
 ## 当前闭环状态
 
@@ -1370,21 +1402,24 @@ Stage 25 在 Stage 24 的 bounded recent sample 基础上，给 `/health/ready` 
 
 尚未完成“几秒内全部同步”性能 SLO：
 
-- `read_model_refresh_duration_ms.p95` 仍约 17.76s；Stage 16 近 1 小时样本中 `workbench`、`invoice_lifecycle`、
-  `input_invoice_usage` p95 仍约 8-9s。
+- `read_model_refresh_duration_ms.p95` 在 Stage 25 bounded recent sample 口径下仍为 `8301.8155ms`，未达到轻量
+  read model enqueue-to-fresh p95 `< 3s`；当前长尾主要来自 `search` p95 `35107.029ms`、`workbench` p95
+  `28180.444ms`，以及 `cost_statistics`、`invoice_lifecycle`、`input_invoice_usage` 的 5-7s 级 p95。
 - 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
-  outbox percentile 和 outbox summary；Stage 24 已收敛 health/metrics percentile 与 outbox summary，仍需生产
-  pg_stat / EXPLAIN 复测确认是否进入 SLO；Stage 25 将提供 by-key breakdown，用于确认具体慢 projection。
+  outbox percentile 和 outbox summary；Stage 24 已收敛 health/metrics percentile 与 outbox summary，Stage 25
+  已确认具体慢 projection，仍需生产 pg_stat / EXPLAIN 复测具体 refresh worker 热查询。
 - Redis fresh-cache 尚未覆盖全部页面。
 - 生产 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`、Grafana dashboard、alert rules 和 scrape 配置尚未落地；`/metrics` 是应用侧指标出口，不等同于完整 Grafana 告警闭环。
 
 下一阶段优先级：
 
-1. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
-2. 对 Stage 24 后的 `job.outbox_events` bounded percentile/summary 查询做 pg_stat / EXPLAIN 复测，
-   决定是否仍需要轻量 rollup table 或 metrics retention。
-3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
+1. 对 `search` 与 `workbench` refresh 做 scope/event drilldown、worker trace、pg_stat 和 EXPLAIN，判断是否存在
+   过宽 scope、重复 rebuild、缺索引、低效 join 或可增量化路径。
+2. 对 `cost_statistics`、`invoice_lifecycle`、`input_invoice_usage` 做同样分析，把 5-7s p95 收敛到轻量 read model
+   `< 3s` 或把明确重型路径纳入局部收敛 `< 10-15s` 的 SLO 分类。
+3. 用登录态 HTTP/browser 采样补齐页面首包 p95、关键页面 rows/detail API p95，并与 runtime freshness 关联。
 4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
 5. 在 root-only `/etc/fin-ops/fin-ops.secrets.env` 配置 `FIN_OPS_PROMETHEUS_BEARER_TOKEN`，重启 API 后配置 Prometheus scrape、Grafana dashboard 和 alert rules，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
-6. 只有当 worker 并发提高后出现连接等待或连接数接近阈值，再启用 PgBouncer；当前 baseline 为 35/100 connections，PgBouncer 不是当前第一瓶颈。
+6. 对 workbench/search 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
+7. 只有当 worker 并发提高后出现连接等待或连接数接近阈值，再启用 PgBouncer；当前 baseline 为 35/100 connections，PgBouncer 不是当前第一瓶颈。
