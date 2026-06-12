@@ -1394,13 +1394,31 @@ Stage 26 针对 Stage 25 暴露的 `workbench.read_model.refresh` 长尾先做�
 - `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_workbench_sql_runtime tests.test_search_pending_sql_runtime -v`
 - `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_queue tests.test_runtime_worker tests.test_rabbitmq_runtime tests.test_app_postgres_mode tests.test_platform_runtime_boundary_guards -v`
 - `python3 -m py_compile backend/src/fin_ops_platform/services/workbench_read_model_refresh.py backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py backend/src/fin_ops_platform/services/workbench_sql_projection.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`
 
-Stage 26 待发布验证：
+生产发布：
 
-- 发布后 `/health/ready` 必须保持 `ready`、`failed_jobs=0`、DLQ `0`、required workers healthy。
-- `read_model_refresh_by_key` 中 `workbench.read_model.refresh` p95 应随新样本逐步下降；旧样本仍在 bounded window
-  内时不能把瞬时 p95 未变误判为失败。
-- 需要等待或触发真实 workbench refresh 才能证明月 shard 不再承担 all 聚合耗时。
+- commit：`fd8cc3c7 Defer workbench all aggregation from shard refresh`
+- release：`main-fd8cc3c7-stage26-202606130329`
+- `/health/ready`：`status=ready`，`runtime_release.consistent=true`，schema `68`。
+- runtime health：`queue_backlog={}`，`failed_jobs=0`，`stale_dirty_scope_count=0`，`rabbitmq_queue_depth=0`，
+  `rabbitmq_dlq_count=0`，`missing_required_worker_count=0`，`stale_required_worker_count=0`。
+- bounded runtime metric 暂未变化：`read_model_refresh_duration_ms.p95=8301.8155ms`，`read_model_refresh_sample_count=5940`，
+  `read_model_refresh_failure_rate=0.0`。
+- `read_model_refresh_by_key` 暂未变化：`search` p95 `35107.029ms`，`workbench` p95 `28180.444ms`，
+  `cost_statistics` p95 `6639.672ms`，`invoice_lifecycle` p95 `6318.668ms`，
+  `input_invoice_usage` p95 `5780.509ms`。
+- 本机 `/health/ready` 连续 5 次 curl `time_total`：`0.330925s`、`0.333933s`、`0.343484s`、
+  `0.325625s`、`0.341890s`。
+- 公网 `/fin-ops/` 未登录页面 shell smoke 通过，p95 `104.213ms`。
+- 公网 `/fin-ops-api/metrics` 未带 token 返回 `404 application/json`，符合未配置 token 时安全关闭预期。
+
+Stage 26 结论：
+
+- 发布后 runtime health 正常，未引入 failed jobs / DLQ / worker missing。
+- by-key p95 仍是部署前历史 bounded sample；Stage 26 代码路径已消除月 shard 内联 all 聚合，但生产 p95 降幅需要
+  新 workbench refresh 样本才能证明。
 - deploy 用户没有 root-only PostgreSQL DSN，不能直接运行 production scope/event_id drilldown；如需 scope 级证据，
   应新增受保护的只读诊断入口或由 root 环境执行只读 collector，不打印 secrets。
 
