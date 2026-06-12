@@ -1296,6 +1296,35 @@ monitoring 热路径：
 本地验证：
 
 - `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_monitoring tests.test_operations_dashboard_service tests.test_prometheus_metrics tests.test_app_postgres_mode -v`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`
+
+生产发布：
+
+- commit：`2535765a Bound runtime outbox metric scans`
+- release：`main-2535765a-stage24-202606130306`
+- `/health/ready`：`status=ready`，`runtime_release.consistent=true`，schema `68`。
+- runtime health：`queue_backlog_keys=[]`，`failed_jobs=0`，`stale_dirty_scope_count=0`，`rabbitmq_queue_depth=0`，
+  `rabbitmq_dlq_count=0`，`missing_required_worker_count=0`，`stale_required_worker_count=0`。
+- bounded runtime metric：`read_model_refresh_duration_ms.p95=8301.8155ms`，`read_model_refresh_sample_count=5940`，
+  `read_model_refresh_failure_rate=0.0`。
+- RabbitMQ confirm metric：`rabbitmq_publish_confirm_latency_ms.p95=10.467ms`，
+  `rabbitmq_publish_confirm_sample_limit=512`。
+- 本机 `/health/ready` 连续 5 次 curl `time_total`：`0.420397s`、`0.339751s`、`0.333093s`、
+  `0.333778s`、`0.332786s`。
+- `/metrics` 未带 token 本机访问返回 `404 application/json`；公网 `/fin-ops-api/metrics` 返回
+  `404 application/json`；公网 `/metrics` 返回外层站点 `200 text/html`，不是 fin-ops API。
+- 未登录页面 shell smoke：
+  `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe --base-url https://www.yn-sourcing.com --page-path /fin-ops/ --replace-default-probes --iterations 5 --warmup 1 --allow-unauthenticated`
+  通过，`/fin-ops/` p95 `121.826ms`。
+
+Stage 24 结论：
+
+- health / Prometheus runtime 指标热路径已避免全历史 outbox percentile / done count 扫描。
+- `read_model_refresh_duration_ms.p95` 在 bounded recent sample 口径下约 `8.3s`，比旧全历史约 `17.76s`
+  更接近当前有效状态，但仍未达到轻量 read model enqueue-to-fresh p95 `< 3s` 的目标。
+- 下一步仍必须定位 `workbench`、`invoice_lifecycle`、`input_invoice_usage` 等重型 refresh 的真实执行耗时，
+  不能把观测口径优化误当作业务同步 SLO 达标。
 
 ## 当前闭环状态
 
