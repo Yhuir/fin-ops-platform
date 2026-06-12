@@ -3,6 +3,7 @@
 ## 当前可观察对象
 
 - `/health` 和 app health API。
+- `GET /metrics` Prometheus text exposition。
 - `GET /api/operations/app-health-dashboard` 管理员只读 Dashboard。
 - OA 同步状态。
 - 工作台 dirty scopes。
@@ -87,6 +88,35 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 - `rabbitmq_unacked_messages` 长时间不下降。
 - `rabbitmq_dlq_count > 0`。
 - PostgreSQL `failed/dead_lettered` 增长优先级高于 RabbitMQ DLQ，因为 PostgreSQL 才是失败事实。
+
+## Prometheus / Grafana
+
+应用暴露 Prometheus text exposition：
+
+```text
+GET /metrics
+Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
+```
+
+该接口复用 `/health/ready` 的只读 runtime facts，不执行 workbench deep self-test，不新增写入或修复动作。`FIN_OPS_PROMETHEUS_BEARER_TOKEN` 未配置时返回 `404`；配置后必须带同值 bearer token。生产应只允许 Prometheus 从内网或本机端口抓取，不应通过公网代理暴露；即使经过 `/fin-ops-api/` 公网代理，也必须由 token 和代理 ACL 双重保护。
+
+核心指标包括：
+
+- `finops_ready`、`finops_runtime_release_consistent`、`finops_production_runtime_guard_consistent`。
+- `finops_outbox_events{status=...}`、`finops_read_model_dirty_scopes{status=...}`、`finops_failed_jobs`、`finops_stale_dirty_scope_count`。
+- `finops_read_model_refresh_duration_ms{quantile=...}`、`finops_read_model_refresh_failure_rate`。
+- `finops_rabbitmq_queue_depth`、`finops_rabbitmq_dlq_count`、`finops_rabbitmq_consumer_count`、`finops_rabbitmq_publish_confirm_latency_ms{quantile=...}`。
+- `finops_worker_heartbeat_lag_seconds{worker_instance=...,worker_kind=...,status=...}`、`finops_worker_required`、`finops_worker_current_effective`。
+- `finops_api_duration_ms{endpoint=...,quantile=...}`、`finops_api_connection_acquire_ms{endpoint=...,quantile=...}`、`finops_api_sql_execute_fetch_ms{endpoint=...,quantile=...}`。
+- `finops_workbench_read_model_active_scope_count`、`finops_workbench_read_model_active_row_count`、`finops_workbench_read_model_failed_scope_count`。
+
+建议 Grafana 面板至少覆盖：
+
+- read model enqueue-to-fresh / refresh duration p95、failure rate、stale dirty scope count。
+- RabbitMQ queue depth、DLQ、consumer count、publisher confirm p95。
+- API endpoint p95、DB p95、connection acquire p95。
+- worker heartbeat lag、missing/stale/mismatch worker count。
+- Redis hit/miss 计数和 PostgreSQL schema/release consistency。
 
 ## AppHealth 运维状态 Dashboard
 

@@ -136,6 +136,7 @@ FIN_OPS_ALLOWED_USERNAMES=YNSYLP005
 FIN_OPS_READONLY_EXPORT_USERNAMES=
 FIN_OPS_ADMIN_USERNAMES=YNSYLP005
 FIN_OPS_ALLOWED_ROLES=
+FIN_OPS_PROMETHEUS_BEARER_TOKEN=<root-only long random metrics token>
 VITE_APP_BASE_PATH=/fin-ops/
 ```
 
@@ -152,6 +153,8 @@ VITE_APP_BASE_PATH=/fin-ops/
 - 服务器 runtime 必须能执行 `openssl`，用于目标申请人登录密码 RSA 加密；缺失时 `创建 OA 草稿` 会返回目标 OA 登录不可用
 - `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES / FIN_OPS_ADMIN_USERNAMES`
   是启动期兜底配置，真实长期口径仍以 app 设置持久化为准
+- `FIN_OPS_PROMETHEUS_BEARER_TOKEN` 用于 `/metrics` Prometheus scrape；未配置时 `/metrics`
+  返回 `404`，配置后必须带 `Authorization: Bearer <token>`
 - 如果希望“访问账户管理”保存后自动同步 OA 菜单角色，还需要配置：
   - `FIN_OPS_OA_ROLE_SYNC_ENABLED=1`
   - `FIN_OPS_OA_ROLE_SYNC_HOST / PORT / DATABASE / USERNAME / PASSWORD`

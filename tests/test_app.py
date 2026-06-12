@@ -21,6 +21,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("reminder_scheduler", payload["capabilities"])
         self.assertIn("advanced_exceptions", payload["capabilities"])
         self.assertIn("oa_integration_foundation", payload["capabilities"])
+        self.assertIn("/metrics", payload["entrypoints"])
         self.assertIn("/workbench", payload["entrypoints"])
         self.assertIn("/ledgers", payload["entrypoints"])
         self.assertIn("/workbench/actions/difference", payload["entrypoints"])
@@ -102,6 +103,51 @@ class AppTests(unittest.TestCase):
         self.assertIn("storage", payload)
         self.assertIn("production_runtime_guard", payload)
         self.assertNotIn("workbench_api_self_test", payload)
+
+    @patch.dict("os.environ", {"FIN_OPS_PROMETHEUS_BEARER_TOKEN": ""})
+    def test_metrics_endpoint_is_hidden_when_token_is_not_configured(self) -> None:
+        app = build_application()
+
+        response = app.handle_request("GET", "/metrics")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(payload["error"], "not_found")
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
+    @patch.dict("os.environ", {"FIN_OPS_PROMETHEUS_BEARER_TOKEN": "metric-token"})
+    def test_metrics_endpoint_rejects_missing_or_wrong_token(self) -> None:
+        app = build_application()
+
+        missing_response = app.handle_request("GET", "/metrics")
+        wrong_response = app.handle_request("GET", "/metrics", headers={"Authorization": "Bearer wrong-token"})
+
+        self.assertEqual(missing_response.status_code, 403)
+        self.assertEqual(wrong_response.status_code, 403)
+        self.assertNotIn("Access-Control-Allow-Origin", missing_response.headers)
+        self.assertNotIn("Access-Control-Allow-Origin", wrong_response.headers)
+
+    @patch.dict("os.environ", {"FIN_OPS_PROMETHEUS_BEARER_TOKEN": "metric-token"})
+    def test_metrics_endpoint_exports_prometheus_text_without_workbench_api_self_test(self) -> None:
+        app = build_application()
+
+        class FailingWorkbenchRepository:
+            def get_workbench_summary(self, *, scope_key: str):
+                raise AssertionError("/metrics must not run deep workbench self-test")
+
+            def get_workbench_groups_page(self, **kwargs):
+                raise AssertionError("/metrics must not run deep workbench self-test")
+
+        app._workbench_sql_read_repository = FailingWorkbenchRepository()
+
+        response = app.handle_request("GET", "/metrics", headers={"Authorization": "Bearer metric-token"})
+        body = response.body.decode("utf-8") if isinstance(response.body, bytes) else str(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "text/plain; version=0.0.4; charset=utf-8")
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+        self.assertIn("# TYPE finops_ready gauge", body)
+        self.assertIn("finops_ready", body)
 
     def test_health_endpoint_marks_release_import_path_mismatch_not_ready(self) -> None:
         app = build_application()

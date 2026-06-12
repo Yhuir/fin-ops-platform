@@ -1227,6 +1227,40 @@ Stage 22 结论：
 - 这仍不是全部页面 fresh-cache 完成：workbench groups 使用 generation/version key 的专用 cache；bank detail、pending invoice、
   invoice lifecycle、input/output invoice usage、OA pending payment 等页面仍需要逐页按相同契约迁移或确认已有等价 fresh gate。
 
+## Stage 23：Prometheus 指标出口
+
+Stage 23 将已有 `/health/ready` runtime facts 转换为 Prometheus text exposition：
+
+```text
+GET /metrics
+Authorization: Bearer <FIN_OPS_PROMETHEUS_BEARER_TOKEN>
+```
+
+该接口复用现有 readiness/runtime monitoring payload，不执行 workbench deep self-test，不写数据，不执行 retry/repair。
+`FIN_OPS_PROMETHEUS_BEARER_TOKEN` 未配置时返回 `404`；配置后必须带同值 bearer token。
+生产 scrape 应限制在内网或本机端口；公网代理是否暴露由部署层控制，即使公网路径可达也必须由 token 和代理 ACL 双重保护。
+
+新增指标覆盖：
+
+- release / production guard：`finops_ready`、`finops_runtime_release_consistent`、`finops_production_runtime_guard_consistent`。
+- PostgreSQL durable queue：`finops_outbox_events{status=...}`、`finops_read_model_dirty_scopes{status=...}`、
+  `finops_failed_jobs`、`finops_stale_dirty_scope_count`。
+- read model performance：`finops_read_model_refresh_duration_ms{quantile=...}`、
+  `finops_read_model_refresh_failure_rate`。
+- RabbitMQ：`finops_rabbitmq_queue_depth`、`finops_rabbitmq_dlq_count`、`finops_rabbitmq_consumer_count`、
+  `finops_rabbitmq_publish_confirm_latency_ms{quantile=...}`。
+- worker：`finops_worker_heartbeat_lag_seconds{worker_instance=...,worker_kind=...,status=...}`、
+  `finops_worker_required`、`finops_worker_current_effective`、`finops_worker_warning`。
+- API p95：`finops_api_duration_ms{endpoint=...,quantile=...}`、
+  `finops_api_connection_acquire_ms{endpoint=...,quantile=...}`、
+  `finops_api_sql_execute_fetch_ms{endpoint=...,quantile=...}`。
+- workbench generation：`finops_workbench_read_model_active_scope_count`、
+  `finops_workbench_read_model_active_row_count`、`finops_workbench_read_model_failed_scope_count`。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_prometheus_metrics tests.test_app tests.test_app_postgres_mode tests.test_runtime_monitoring -v`
+
 ## 当前闭环状态
 
 已闭环：
@@ -1247,6 +1281,7 @@ Stage 22 结论：
   `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 - 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
+- Prometheus `/metrics` 已具备，可抓取 runtime/read-model/RabbitMQ/worker/API p95 指标。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
@@ -1255,7 +1290,8 @@ Stage 22 结论：
 - 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
   outbox percentile 和 outbox summary，已经不再出现历史全局 window sort。
-- Redis fresh-cache 尚未覆盖全部页面；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
+- Redis fresh-cache 尚未覆盖全部页面。
+- Grafana dashboard、alert rules 和 scrape 配置尚未落地；`/metrics` 是应用侧指标出口，不等同于完整 Grafana 告警闭环。
 
 下一阶段优先级：
 
@@ -1264,5 +1300,5 @@ Stage 22 结论：
    决定是否需要轻量 rollup table 或 metrics retention。
 3. 对 workbench 大表和大索引做 impact analysis，先优化查询/索引/retention，再决定是否分区；不做盲目全库分区。
 4. 为 fresh gate 后 payload 引入 Redis fresh-cache，确保页面秒开读取的是已通过 readiness/source version 的 snapshot。
-5. 接入 Prometheus/Grafana 或 OpenTelemetry，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
+5. 配置 Prometheus scrape、Grafana dashboard 和 alert rules，把 enqueue-to-fresh latency、pending age、failure rate、RabbitMQ DLQ、consumer count、API p95 和 DB p95 变成持续告警。
 6. 只有当 worker 并发提高后出现连接等待或连接数接近阈值，再启用 PgBouncer；当前 baseline 为 35/100 connections，PgBouncer 不是当前第一瓶颈。

@@ -7,6 +7,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
+from hmac import compare_digest
 import hashlib
 import json
 import os
@@ -29,12 +30,14 @@ from pymongo.errors import PyMongoError
 import fin_ops_platform
 from fin_ops_platform import __version__
 from fin_ops_platform.app.auth import (
+    BEARER_PREFIX,
     ForbiddenOAAccessError,
     OAAuthError,
     OARequestSession,
     UnauthorizedOASessionError,
     actor_id_for_session,
     extract_oa_token,
+    get_header,
     resolve_oa_request_session,
     tenant_id_for_session,
 )
@@ -102,6 +105,7 @@ from fin_ops_platform.services.cost_statistics_query_service import CostStatisti
 from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
+from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.etc_service import (
@@ -427,6 +431,7 @@ PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
 WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-06-11-turnover-bank-only-open"
 PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
+PROMETHEUS_BEARER_TOKEN_ENV = "FIN_OPS_PROMETHEUS_BEARER_TOKEN"
 APP_HEALTH_DASHBOARD_STALE_WARNING_CODES = {
     "bank_inventory_unknown",
     "invoice_inventory_unknown",
@@ -1482,6 +1487,8 @@ class Application:
                 HTTPStatus.OK,
                 self._readiness_health_payload(include_workbench_api_self_test=True),
             )
+        if method == "GET" and route_path == "/metrics":
+            return self._handle_prometheus_metrics(headers)
         if method == "OPTIONS":
             return Response(status_code=int(HTTPStatus.NO_CONTENT), body="")
         if method == "GET" and route_path == "/foundation/seed":
@@ -2246,6 +2253,7 @@ class Application:
             },
             "entrypoints": [
                 "/health",
+                "/metrics",
                 "/foundation/seed",
                 "/imports/preview",
                 "/imports/confirm",
@@ -2560,6 +2568,43 @@ class Application:
         if include_workbench_api_self_test:
             payload["workbench_api_self_test"] = self._workbench_api_self_test()
         return payload
+
+    def _handle_prometheus_metrics(self, headers: dict[str, str] | None) -> Response:
+        auth_error = self._authorize_prometheus_metrics(headers)
+        if auth_error is not None:
+            return auth_error
+        payload = self._readiness_health_payload(include_workbench_api_self_test=False)
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=render_prometheus_metrics(payload),
+            headers={
+                "Content-Type": PROMETHEUS_CONTENT_TYPE,
+            },
+        )
+
+    def _authorize_prometheus_metrics(self, headers: dict[str, str] | None) -> Response | None:
+        expected_token = os.getenv(PROMETHEUS_BEARER_TOKEN_ENV, "").strip()
+        if not expected_token:
+            return self._plain_json_response(
+                HTTPStatus.NOT_FOUND,
+                {
+                    "error": "not_found",
+                    "message": "Resource not found.",
+                },
+            )
+        authorization = (get_header(headers, "authorization") or "").strip()
+        provided_token = ""
+        if authorization.lower().startswith(BEARER_PREFIX):
+            provided_token = authorization[len(BEARER_PREFIX) :].strip()
+        if not provided_token or not compare_digest(provided_token, expected_token):
+            return self._plain_json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "forbidden",
+                    "message": "Prometheus metrics token is required.",
+                },
+            )
+        return None
 
     def _attach_health_metadata(self, payload: dict[str, object]) -> None:
         payload["seed_counts"] = {
@@ -20714,6 +20759,15 @@ class Application:
     def _json_response(status: HTTPStatus, payload: dict[str, object]) -> Response:
         normalized_payload = Application._serialize_value(payload)
         return Response(status_code=int(status), body=json.dumps(normalized_payload, ensure_ascii=False))
+
+    @staticmethod
+    def _plain_json_response(status: HTTPStatus, payload: dict[str, object]) -> Response:
+        normalized_payload = Application._serialize_value(payload)
+        return Response(
+            status_code=int(status),
+            body=json.dumps(normalized_payload, ensure_ascii=False),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
 
     def _etc_reconciliation_task_payload(self, task: object) -> dict[str, object]:
         imported_summary = self._etc_reconciliation_imported_invoice_summary(task)
