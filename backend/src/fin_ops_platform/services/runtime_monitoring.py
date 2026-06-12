@@ -364,6 +364,8 @@ class RuntimeMonitoringRepository:
     def _app_status_worker_statuses(self) -> dict[str, dict[str, Any]]:
         statuses: dict[str, dict[str, Any]] = {}
         for row in self.dashboard_worker_metrics():
+            if row.get("required") is False and row.get("current_effective") is False:
+                continue
             instance = str(row.get("worker_instance") or "").strip()
             if not instance:
                 continue
@@ -1163,6 +1165,11 @@ def _worker_metric_row(
         and stale_after_seconds is not None
         and heartbeat_lag_seconds > stale_after_seconds
     )
+    current_effective = required or not (
+        heartbeat_lag_seconds is not None
+        and stale_after_seconds is not None
+        and heartbeat_lag_seconds > stale_after_seconds
+    )
     warning_code = None
     if registration is not None and worker_kind != registration.worker_kind:
         warning_code = "worker_kind_mismatch"
@@ -1181,6 +1188,8 @@ def _worker_metric_row(
         "expected_worker_kind": registration.worker_kind if registration is not None else worker_kind,
         "worker_status": str(row.get("status") or ""),
         "heartbeat_lag_seconds": heartbeat_lag_seconds,
+        "heartbeat_stale_after_seconds": stale_after_seconds,
+        "current_effective": current_effective,
         "required": required,
         "expected_event_types": expected_event_types,
         "configured_event_types": configured_event_types,

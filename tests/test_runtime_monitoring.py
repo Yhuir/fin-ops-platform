@@ -162,6 +162,28 @@ class FakeWorkerMetricsConnection:
                     "configured_event_types": ["import.process.requested", "import.fact.changed"],
                 },
             },
+            {
+                "worker_id": "host-cost-tax",
+                "worker_instance": "cost-tax",
+                "worker_kind": "cost-tax-read-model",
+                "status": "idle",
+                "heartbeat_lag_seconds": 4.0,
+                "payload": {
+                    "worker_instance": "cost-tax",
+                    "configured_event_types": ["cost_statistics.read_model.refresh", "tax_offset.read_model.refresh"],
+                },
+            },
+            {
+                "worker_id": "operator-cost-statistics-drain-after-deploy-20260606",
+                "worker_instance": "cost-tax-read-model",
+                "worker_kind": "cost-tax-read-model",
+                "status": "processing",
+                "heartbeat_lag_seconds": 999999.0,
+                "payload": {
+                    "worker_instance": "cost-tax-read-model",
+                    "configured_event_types": ["cost_statistics.read_model.refresh"],
+                },
+            },
         ]
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
@@ -262,8 +284,19 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(by_instance["bank-detail"]["status"], "stale")
         self.assertFalse(by_instance["bank-account-balance"]["required"])
         self.assertEqual(by_instance["bank-account-balance"]["status"], "available")
+        self.assertFalse(by_instance["cost-tax-read-model"]["required"])
+        self.assertFalse(by_instance["cost-tax-read-model"]["current_effective"])
+        self.assertEqual(by_instance["cost-tax-read-model"]["warning_code"], "worker_event_type_mismatch")
         self.assertNotIn("warning_code", by_instance["import"])
         self.assertEqual(by_instance["oa-sync"]["warning_code"], "required_worker_missing")
+
+    def test_app_status_worker_snapshot_ignores_historical_optional_worker_heartbeats(self) -> None:
+        repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
+
+        snapshot = repository.app_status_runtime_snapshot()
+
+        self.assertIn("cost-tax", snapshot["worker_statuses"])
+        self.assertNotIn("cost-tax-read-model", snapshot["worker_statuses"])
 
     def test_health_summary_counts_worker_mismatches(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
