@@ -1519,6 +1519,56 @@ Stage 28 结论：
 - 6h 窗口仍显示 `workbench`、`invoice_lifecycle`、`input_invoice_usage` handler duration 长尾，下一步应补 current slow-event drilldown 或触发受控样本，定位具体 scope。
 - health 热路径仍低于 1s，但 Stage 28 增加了窗口聚合后本机 `/health/ready` 约 `0.42-0.46s`，仍在页面首包 SLO 外围可接受范围内。
 
+## Stage 29：current-window slow event drilldown
+
+Stage 29 补 `/health/ready.runtime_infrastructure.read_model_refresh_current_slow_events`：
+
+- 固定过滤 `created_at >= now() - interval '6 hours'`，仍按每个 read model event type bounded 512 样本读取。
+- 输出有限条 event/scope/status/source_version/duration/enqueue-to-fresh/skipped 摘要。
+- 只用于 health drilldown，不导出 Prometheus per-event/per-scope label。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_runtime_monitoring tests.test_prometheus_metrics tests.test_app_postgres_mode -v`
+- `python3 -m py_compile backend/src/fin_ops_platform/services/runtime_monitoring.py backend/src/fin_ops_platform/services/prometheus_metrics.py`
+- `bash scripts/verify.sh docs`
+- `bash scripts/verify.sh backend`
+
+生产发布：
+
+- commit：`77e5c720 Expose current-window slow refresh events`
+- release：`main-77e5c720-stage29-202606130352`
+- `/health/ready`：`status=ready`，`runtime_release.consistent=true`。
+- runtime health：`failed_jobs=0`，`stale_dirty_scope_count=0`，`rabbitmq_queue_depth=0`，
+  `rabbitmq_dlq_count=0`，`missing_required_worker_count=0`，`stale_required_worker_count=0`。
+- current windows 仍为：`recent_15m` sample `0`、`recent_1h` sample `0`、`recent_6h` sample `470`，
+  duration p95 `16254.495ms`，enqueue p95 `99397.573ms`。
+- `read_model_refresh_current_slow_events` 前 15 条定位：
+  - `workbench` `2026-01`：duration `28200.008ms`，enqueue `353156.13ms`，source `1060`。
+  - `cost_statistics` `active:2026-04`：duration `2287.711ms`，enqueue `336418.59ms`，source `723`。
+  - `cost_statistics` `all:2026-04`：duration `2022.695ms`，enqueue `326410.667ms`，source `653`。
+  - `invoice_lifecycle` `2026-03`：duration `5073.341ms`，enqueue `323113.52ms`，source `122`。
+  - `workbench` `2025-12`：duration `11485.995ms`，enqueue `321015.475ms`，source `1048`。
+  - `input_invoice_usage` `2026-03`：duration `5765.02ms`，enqueue `317263.715ms`，source `1101`。
+  - `workbench` `2025-12`：duration `12450.238ms`，enqueue `316294.107ms`，source `1042`。
+  - `workbench` `2026-05`：duration `10238.351ms`，enqueue `149926.477ms`，source `1039`。
+  - `workbench` `2026-01`：duration `28297.857ms`，enqueue `143679.644ms`，source `1061`。
+  - `workbench` `2026-05`：duration `9708.887ms`，enqueue `143446.015ms`，source `1033`。
+  - `workbench` `2026-01`：duration `28121.228ms`，enqueue `139944.284ms`，source `1064`。
+  - `workbench` `2026-04`：duration `17524.122ms`，enqueue `139689.673ms`，source `1073`。
+  - `workbench` `2026-04`：duration `16772.428ms`，enqueue `133745.911ms`，source `1067`。
+  - `workbench` `2026-01`：duration `33693.584ms`，enqueue `133255.21ms`，source `1062`。
+- 本机 `/health/ready` 连续 5 次 curl `time_total`：`0.448809s`、`0.451925s`、`0.443224s`、
+  `0.450579s`、`0.456225s`。
+- 公网 `/fin-ops/` 未登录页面 shell smoke 通过，p95 `119.5248ms`。
+- 公网 `/fin-ops-api/metrics` 未带 token 返回 `404 application/json`，符合未配置 token 时安全关闭预期。
+
+Stage 29 结论：
+
+- 当前窗口慢 handler 已定位到具体 scope：`workbench` 月份 scope 是首要目标，尤其 `2026-01`、`2026-04`、`2026-05`、`2025-12`。
+- `cost_statistics`、`invoice_lifecycle`、`input_invoice_usage` 同时存在 queue wait 长尾，但 handler duration 低于或接近 5-6s，优先级排在 workbench 月份 projection 后。
+- 下一阶段应直接分析 `WorkbenchSqlProjectionBuilder.rebuild_workbench_read_model_scope(month)` 的 SQL/保存路径和相关索引，而不是继续做泛化队列改造。
+
 ## 当前闭环状态
 
 已闭环：
@@ -1544,6 +1594,7 @@ Stage 28 结论：
 - health / Prometheus 已具备真实 enqueue-to-fresh p95 以及只读 slow event drilldown；能区分 handler duration 慢和 outbox
   等待时间长。
 - health / Prometheus 已具备 current-window read model refresh 指标，可以把历史滞留样本和当前用户体验 SLO 分开。
+- health 已具备 current-window slow event drilldown，可以把慢 projection 定位到具体 read model scope。
 - 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 - 通用 Redis fresh-cache 已具备 fresh-gate envelope，旧格式或 source-version 不匹配的缓存不会被当作 fresh 返回。
 - Prometheus `/metrics` 应用侧已具备，可输出 runtime/read-model/RabbitMQ/worker/API p95 指标；生产 token 未配置时保持 `404` 安全关闭。
@@ -1557,6 +1608,7 @@ Stage 28 结论：
   历史滞留后完成的 event，必须补 current-window/release-window SLO 口径，不能把历史 repair 样本当作当前页面体验结论。
 - Stage 28 current-window 口径下 `recent_15m` / `recent_1h` 暂无样本；`recent_6h` 仍显示 `workbench` duration p95
   `28283.18ms`、`invoice_lifecycle` p95 `12553.532ms`、`input_invoice_usage` p95 `12120.567ms`。
+- Stage 29 current slow events 显示慢 handler 主要集中在 `workbench` 月份 scope，最慢 `2026-01` 达 `33.7s`。
 - 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
   outbox percentile 和 outbox summary；Stage 24 已收敛 health/metrics percentile 与 outbox summary，Stage 25
@@ -1566,8 +1618,8 @@ Stage 28 结论：
 
 下一阶段优先级：
 
-1. 补 current slow-event drilldown 或触发受控 read-model refresh 样本，让 `recent_15m` / `recent_1h` 有可判定数据。
-2. 对 `workbench`、`invoice_lifecycle`、`input_invoice_usage` refresh 做 scope/event drilldown、worker trace、pg_stat 和 EXPLAIN，判断是否存在
+1. 对 `workbench` 月份 projection 做代码级和 SQL/EXPLAIN 分析，优先处理 `2026-01`、`2026-04`、`2026-05`、`2025-12` 这类慢 scope。
+2. 对 `invoice_lifecycle`、`input_invoice_usage` refresh 做 scope/event drilldown、worker trace、pg_stat 和 EXPLAIN，判断是否存在
    过宽 scope、重复 rebuild、缺索引、低效 join 或可增量化路径。
 3. 对 `cost_statistics`、`workbench_relation` 做同样分析，把 3-5s p95 收敛到轻量 read model
    `< 3s` 或把明确重型路径纳入局部收敛 `< 10-15s` 的 SLO 分类。
