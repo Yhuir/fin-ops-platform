@@ -523,6 +523,95 @@ PYTHONPATH=backend/src python3 -m unittest \
 
 这些 WIP 需要先完成 ownership/impact review、全量相关测试和文档收口后才能提交或部署；不能在未确认范围时直接把整批脏文件带入生产发布。
 
+## Stage 11：candidate relation 与发票使用详情 SQL read model 发布
+
+发布时间：2026-06-13 00:31-00:40 CST
+
+发布版本：
+
+- release：`main-a2a53ada-stage11-202606130031`
+- commit：`a2a53adaf460f99bc1b6ae55bcd6c63355d455fa`
+
+本阶段收口 Stage 10 记录的未提交 WIP，目标是把关联候选状态从 `workbench_relation`
+read model 规范传播到下游页面，并把 `/api/input-invoice-usage/rows/{row_id}/relation-details`
+从请求热路径 live 组装改为 fresh gate 后的单行 SQL read model payload 读取。
+
+已实现的闭环：
+
+- `relationStatus=candidate` 通过 workbench relation distribution 进入银行明细、待找发票、OA 待付款、销项收款、进项发票使用页面。
+- candidate relation 可见但不计入确认、已付款、已核销或成本统计 closed totals。
+- 发票使用详情在 read model fresh 时读取 `read_model.input_invoice_usage_rows` 单行 payload；missing/stale/source mismatch 时返回 `refreshing` 并入队，不在 API 请求里重建关系链。
+- 权限、审计和撤回/配对写操作没有改成前端本地判定；页面秒开只影响读路径，写路径仍走既有后端 service、权限和 audit 链路。
+
+发布前验证：
+
+- `git diff --check`
+- `bash scripts/verify.sh docs`
+- 相关后端单测：227 tests pass
+- 相关前端单测：102 tests pass
+- `npm run build`
+- `bash scripts/verify.sh backend`：2827 tests pass，25 skipped
+- `npm test -- --run`：全量并发运行出现一次 `TaxOffsetPage.test.tsx` 选择表格用例失败；随后单文件和单用例重跑均通过，按现有前端并发 flaky 风险记录。
+
+部署方式：
+
+- 在干净部署工作树 `/tmp/finops-stage11-deploy` 构建前端。
+- 执行 `./scripts/deploy-oa.sh --skip-build --release-name main-a2a53ada-stage11-202606130031`。
+- migration `0001`-`0067` 均为已应用状态；backend readiness、frontend hash、public session route 检查通过。
+
+生产验证过程：
+
+部署刚完成时出现 7 条下游 read model 暂时非 fresh：
+
+- `invoice_lifecycle`：`2026-03`、`2026-04`、`2026-05`
+- `oa_pending_payment`：`2026-03`、`2026-04`、`2026-05`
+- `input_invoice_usage`：`2026-04`
+
+这些 failure 的错误原因均为依赖 `workbench_relation` 尚在 refreshing；没有手工改写 readiness。
+约 45 秒后 `read_model.app_status_readiness` 非 fresh 收敛为 0，最终 PostgreSQL durable truth
+与 RabbitMQ 均收敛：
+
+| 指标 | 值 |
+|---|---:|
+| `/health/ready.status` | `ready` |
+| `job.outbox_events` read model 非 `done` | 0 |
+| `job.read_model_dirty_scopes` 非 `done` | 0 |
+| `read_model.app_status_readiness` 非 `fresh` | 0 |
+| `queue_backlog.done` | 36019 |
+| `dirty_scopes.done` | 30743 |
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| required worker missing/stale/mismatch | 0 / 0 / 0 |
+| RabbitMQ queue depth | 0 |
+| RabbitMQ unacked | 0 |
+| RabbitMQ DLQ | 0 |
+| RabbitMQ consumer count | 15 |
+| `read_model_refresh_failure_rate` | 0.0 |
+| `read_model_refresh_duration_ms.p95` | 17760.733ms |
+
+发票使用详情生产只读 SQL 抽样显示：在 fresh scope 下单行 payload lookup 约 `0.55-0.70ms`，
+payload 中包含 OA、银行流水和发票关系结构。未认证访问 `/api/app-health` 返回 401，符合认证边界。
+
+post-deploy 真实 refresh 样本仍未达成“几秒内全部同步”：
+
+| event type | count | p50 | p95 | max |
+|---|---:|---:|---:|---:|
+| `workbench.read_model.refresh` | 12 | 83.116s | 226.917s | 321.015s |
+| `cost_statistics.read_model.refresh` | 15 | 20.101s | 122.919s | 336.419s |
+| `invoice_lifecycle.read_model.refresh` | 6 | 81.961s | 95.902s | 96.005s |
+| `oa_pending_payment.read_model.refresh` | 6 | 80.629s | 95.885s | 95.984s |
+| `input_invoice_usage.read_model.refresh` | 6 | 75.659s | 92.497s | 94.807s |
+| `output_invoice_collection.read_model.refresh` | 6 | 40.819s | 83.636s | 85.798s |
+| `tax_offset.read_model.refresh` | 6 | 33.173s | 33.536s | 33.558s |
+| `workbench_relation.read_model.refresh` | 10 | 8.971s | 15.029s | 15.231s |
+
+结论：
+
+- Stage 11 让 relation-details 详情读路径摆脱 N+1/live assembly，并把 candidate relation 语义纳入 read model 页面闭环。
+- 全局 App Status 最终仍是真实 fresh，不是手工假同步。
+- 但 post-deploy enqueue-to-fresh 仍有 30-300 秒级样本，主要来自 `workbench` all/month shard、`cost_statistics` 及其下游依赖 fan-out；“几秒内全部同步”SLO 还没有达成。
+- 下一阶段必须针对 workbench generation、all scope aggregation、下游 fan-out gating、Redis fresh-cache、EXPLAIN/索引/分区和持续指标系统继续优化。
+
 ## 当前闭环状态
 
 已闭环：
@@ -532,11 +621,13 @@ PYTHONPATH=backend/src python3 -m unittest \
 - covered historical dead-letter 已通过 repository 工具归档，`failed_jobs=0`。
 - worker shutdown 不再依赖 300 秒 lock timeout 回收 `processing` lease。
 - RabbitMQ topology、Management metrics、required worker real consumers 和 DLQ 清理已完成。
+- candidate relation 已通过 workbench relation read model 传播到下游页面，页面不再把候选关系误计为 confirmed/paid/closed。
+- 发票使用详情在 fresh gate 后走 SQL read model 单行 payload，避免详情抽屉请求热路径 N+1/live assembly。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
-- `read_model_refresh_duration_ms.p95` 仍约 17.77s，主要来自滚动窗口里的重型 read model。
-- 生产基线中 `/api/input-invoice-usage/rows/.../relation-details` p95 曾达到 42.8s，且单请求约 1129 次 DB query，仍需专门优化。
+- `read_model_refresh_duration_ms.p95` 仍约 17.76s，post-deploy enqueue-to-fresh 样本仍出现 30-300 秒级耗时。
+- 生产基线中 `/api/input-invoice-usage/rows/.../relation-details` p95 曾达到 42.8s，且单请求约 1129 次 DB query；Stage 11 已完成 SQL read model 单行读取优化，但仍需登录态 HTTP 样本验证端到端 p95。
 - Workbench/cost statistics/pending invoice 等重型链路仍需要 EXPLAIN 驱动的索引、分区或增量化评估。
 - Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
 
