@@ -431,6 +431,98 @@ Commit：`99a98feb3895141db5e5f1347d29cf38f4c313f5`
 - 确认 `/health/ready.runtime_infrastructure` 的 required worker missing/stale/mismatch 为 0，PostgreSQL `job.outbox_events` 与 `job.read_model_dirty_scopes` 没有 active backlog。
 - 不需要清空 PostgreSQL durable queue；RabbitMQ 中残留消息只作为 transport envelope 处理，不能作为 read model 状态事实源。
 
+## Stage 10：post-cutover 只读基线
+
+采集时间：2026-06-13 00:20-00:22 CST
+
+采集方式：
+
+- `/health`
+- `/health/ready`
+- `rabbitmqctl -p /finops list_queues name messages consumers messages_unacknowledged --formatter=json`
+- PostgreSQL 只读聚合查询
+
+采集未执行 migration、env 修改、service restart、enqueue、repair 或表写入。
+
+当前稳定性：
+
+| 指标 | 值 |
+|---|---:|
+| `/health.status` | `ready` |
+| `/health/ready.status` | `ready` |
+| `job.outbox_events` read model 非 `done` | 0 |
+| `job.read_model_dirty_scopes` 非 `done` | 0 |
+| `read_model.app_status_readiness` 非 `fresh` | 0 |
+| `failed_jobs` | 0 |
+| `stale_dirty_scope_count` | 0 |
+| required worker missing/stale/mismatch | 0 / 0 / 0 |
+| RabbitMQ total depth | 0 |
+| RabbitMQ unacked | 0 |
+| RabbitMQ DLQ | 0 |
+| `/health/ready.rabbitmq_consumer_count` | 15 |
+| PostgreSQL active/idle connections | 1 / 17 |
+
+RabbitMQ cutover 后从 `2026-06-13 00:09:00+08` 起还没有新的 `*.read_model.refresh` outbox event，因此不能用该窗口证明 enqueue-to-fresh p95 已达标。当前 24h refresh p95 仍包含 Stage 9 前历史积压和 workbench `all` 重建样本：
+
+| event type | 24h count | p50 | p95 | max |
+|---|---:|---:|---:|---:|
+| `workbench.read_model.refresh` | 316 | 93.457s | 380.888s | 483.112s |
+| `no_oa_bank_batch.read_model.refresh` | 7 | 184.159s | 188.182s | 188.616s |
+| `invoice_lifecycle.read_model.refresh` | 61 | 40.165s | 89.613s | 323.114s |
+| `oa_pending_payment.read_model.refresh` | 61 | 36.866s | 86.390s | 96.607s |
+| `input_invoice_usage.read_model.refresh` | 62 | 41.107s | 85.375s | 317.264s |
+| `bank_detail.read_model.refresh` | 20 | 5.881s | 75.784s | 76.253s |
+| `output_invoice_collection.read_model.refresh` | 63 | 17.351s | 75.032s | 87.123s |
+| `pending_invoice.read_model.refresh` | 291 | 1.385s | 67.341s | 71.212s |
+| `tax_offset.read_model.refresh` | 63 | 28.104s | 36.793s | 37.641s |
+| `cost_statistics.read_model.refresh` | 157 | 9.498s | 33.080s | 326.411s |
+| `search.read_model.refresh` | 15 | 9.269s | 19.131s | 19.437s |
+| `workbench_relation.read_model.refresh` | 112 | 2.269s | 5.593s | 7.253s |
+
+表体积仍集中在 workbench projection：
+
+| relation | total size | live rows | idx scans |
+|---|---:|---:|---:|
+| `read_model.workbench_group_rows` | 3.65GB | 415k | 3.286M |
+| `read_model.workbench_groups` | 3.45GB | 208k | 1.681M |
+| `read_model.workbench_rows` | 2.54GB | 356k | 2.755M |
+| `read_model.workbench_snapshots` | 1.44GB | 462 | 4.761k |
+
+仍存在大而低/零扫描索引，例如：
+
+- `workbench_groups_searchable_text_trgm` 708MB，`idx_scan=0`。
+- `workbench_rows_payload_gin` 337MB，`idx_scan=0`。
+- `workbench_group_rows_generation_scope_identity_zone_idx` 95MB，`idx_scan=0`。
+- `workbench_rows_generation_scope_identity_idx` 93MB，`idx_scan=0`。
+- `workbench_group_rows_column_values_gin` 66MB，`idx_scan=0`。
+
+API rolling window 当前最慢 endpoint：
+
+| endpoint | samples | p95 | DB p95 | SQL p95 | DB query p95 |
+|---|---:|---:|---:|---:|---:|
+| `GET /api/workbench/groups` | 18 | 570.598ms | 256.747ms | 256.483ms | 17 |
+| `GET /health/ready` | 11 | 320.297ms | 251.646ms | 251.324ms | 17 |
+| `GET /api/app-health` | 512 | 154.363ms | 73.193ms | 72.877ms | 31 |
+| `GET /api/workbench/summary` | 9 | 113.021ms | 9.310ms | 9.142ms | 10 |
+| `GET /api/workbench/groups/detail` | 16 | 110.957ms | 80.459ms | 42.389ms | 4 |
+
+持续观测缺口：
+
+- `/health.api_performance.endpoints` 以 endpoint 字典 key 暴露标签；采集脚本必须保留 key，不能只取 values。
+- `pg_stat_statements` 仍未通过 `shared_preload_libraries` 启用，生产 SQL top list 不可用。
+- RabbitMQ 后没有新 refresh 样本，不能只靠“当前无 backlog”宣称 enqueue-to-fresh SLO 已达成。
+
+本地工作树已存在一组未提交 WIP，方向包括 `input_invoice_usage` relation-details 走 SQL read model row、candidate relation 不再标记已付款、多个页面 relation status 展示。相关后端测试已通过：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest \
+  tests.test_input_invoice_usage_api \
+  tests.test_input_invoice_usage_service \
+  tests.test_invoice_usage_collection_sql_runtime -v
+```
+
+这些 WIP 需要先完成 ownership/impact review、全量相关测试和文档收口后才能提交或部署；不能在未确认范围时直接把整批脏文件带入生产发布。
+
 ## 当前闭环状态
 
 已闭环：
