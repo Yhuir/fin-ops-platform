@@ -44,7 +44,7 @@
 - schema version mismatch
 - source version missing/mismatch
 - 业务写入后的 `DerivedDataLifecycleService` dirty cascade
-- startup stale scan
+- `startup_stale_scan` 之后的 workbench matching dirty worker 间接更新；startup scan 本身不得直接刷新用户可见 read model
 - worker shard fan-out / parent scope convergence
 - 手工 runtime scope contract 清理后的 replacement scope
 

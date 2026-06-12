@@ -65,7 +65,7 @@
 - `manual_invoice_confirmed`
 - `tax_certified_import_confirmed`
 - `pair_relation_changed` / `workbenchRelationUpdated` 相关下游链路
-- `startup_stale_scan`
+- `startup_stale_scan` 不直接刷新发票相关 read model；它只标记 workbench matching dirty scopes。
 
 失败恢复：
 

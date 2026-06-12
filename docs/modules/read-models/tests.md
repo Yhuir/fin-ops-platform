@@ -23,7 +23,7 @@
 - 缓存：Redis 只能缓存 fresh gate 后 payload；`ReadModelQueryGateway` 负责 cache hit/miss 语义。
 - 外部依赖：PostgreSQL durable queue 是事实源；Redis/RabbitMQ 不是事实源。
 - 可能影响的旧页面：所有依赖 read model 的页面，尤其关联台、银行明细、待找发票、进项/销项/OA 待付款、税金抵扣、成本统计、免 OA、批量账务、往来款和 App Health。
-- 可能被哪些上游写入影响：导入确认、关系确认/撤回、规则保存、no-OA 批处理、税金认证导入、设置重置、project scope 变化、startup stale scan。
+- 可能被哪些上游写入影响：导入确认、关系确认/撤回、规则保存、no-OA 批处理、税金认证导入、设置重置、project scope 变化、read model miss/stale。`startup_stale_scan` 只标记 workbench matching dirty scopes，不是用户可见 read model 的直接 refresh 来源。
 - 依赖地图引用：`../../dev/testing-closure-dependency-map.md` 的 Read Model / Worker 依赖图、API Contract 风险图和共享风险热点。
 
 ## 场景覆盖清单

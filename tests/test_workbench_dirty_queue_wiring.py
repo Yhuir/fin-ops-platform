@@ -504,8 +504,10 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         )
         self.assertEqual(
             summary["invalidated_scopes"],
-            ["2026-05", "2026-03", "2026-04", "2026-06", "2026-07"],
+            ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"],
         )
+        self.assertEqual(summary["enqueued_jobs"], [])
+        self.assertEqual(summary["deleted_counts"], {"workbench_matching_dirty_scopes": 0})
 
     def test_worker_cli_exposes_workbench_matching_dirty_queue_options(self) -> None:
         args = build_parser().parse_args(

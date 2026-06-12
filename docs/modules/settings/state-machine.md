@@ -78,7 +78,8 @@
   - `pending_invoice_rules_changed`：待找发票、发票 lifecycle、关联台、进项/销项/OA 待付款、税金、成本、搜索。
   - `bank_auto_tag_rules_changed` / bank tag settings：银行明细、免 OA、关联台候选、往来款、成本、搜索。
   - `project_scope_changed`：成本统计、搜索。
-  - `settings_reset_completed` / `startup_stale_scan`：多数 read model、cache、dirty scope、App Status readiness。
+  - `settings_reset_completed`：多数 read model、cache、dirty scope、App Status readiness。
+  - `startup_stale_scan`：只标记 workbench matching dirty scopes，用于启动补扫；不应直接刷新用户可见 read model。
 - worker 状态：settings save 通常不直接阻塞等待 worker；必须通过 dirty scope、queue、App Status 展示 refreshing/stale/failed。
 - 失败恢复：
   - settings 保存失败不得产生半写入 audit 或半更新规则。

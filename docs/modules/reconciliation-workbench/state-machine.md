@@ -62,10 +62,11 @@
 
 Refresh 触发来源：
 
-- 导入确认、OA 同步、发票/银行/ETC 变化、设置变化和 startup stale scan。
+- 导入确认、OA 同步、发票/银行/ETC 变化和设置变化。
 - 关联台确认/撤回、exception apply/cancel、ignore/unignore。
 - 下游模块如 no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
 - worker `workbench.read_model.refresh` 发布 active generation；matching dirty worker 重建候选。
+- `startup_stale_scan` 只标记 matching dirty scopes；它不直接 invalidating workbench read model。
 
 失败恢复：
 

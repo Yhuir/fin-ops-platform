@@ -55,7 +55,7 @@
 - `unavailable`：runtime repository/readiness reader 不可用；blocked/red，不能空 green。
 - current-effective blocker：`scopes[]`、dirty scope 和 outbox failed/dead-letter 只有在仍代表当前 scope 未收敛时才参与 overall/domain 判定。成本统计 legacy scope `all` / 裸 `YYYY-MM`、以及已被后续同 scope `done` 或 fresh readiness 覆盖的 outbox 失败，只能进入历史诊断或 repair 队列，不能把 canonical fresh 页面拖成 busy/blocked。
 - historical diagnostics：`historical_read_model_scopes[]` 暴露历史失败、废弃 scope contract 和可审计修复对象；该字段不作为 fresh 证明，也不参与 `details`、`level` 或 `blocks_mutations` 推导。
-- refresh 触发来源：各业务模块 lifecycle event、settings reset、startup stale scan、read model miss/stale API enqueue、worker/backfill。
+- refresh 触发来源：各业务模块 lifecycle event、settings reset、read model miss/stale API enqueue、worker/backfill。`startup_stale_scan` 只标记 workbench matching dirty scopes，不应直接刷新用户可见 read model。
 - 失败恢复：通过对应 runbook、runtime queue ops、readiness backfill、worker restart/drain；App Health 只展示和定位，不直接执行 repair。
 
 ## 变更记录

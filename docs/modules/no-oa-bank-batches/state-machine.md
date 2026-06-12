@@ -177,7 +177,8 @@ refresh 触发来源：
 - bank auto tag rules changed。
 - bank transaction category changed。
 - Workbench confirm-link internal transfer path。
-- startup stale scan / runtime repair。
+- runtime repair。
+- `startup_stale_scan` 只标记 workbench matching dirty scopes，不直接刷新免 OA read model。
 
 worker 流程：
 

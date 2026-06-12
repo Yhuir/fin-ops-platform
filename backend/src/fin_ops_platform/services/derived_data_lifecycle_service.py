@@ -319,17 +319,7 @@ class DerivedDataLifecycleService:
         ),
         "manual_derived_cache_cleanup": DERIVED_DATA_DOMAINS,
         "startup_stale_scan": (
-            "workbench_read_model",
-            "workbench_relation_read_model",
-            "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",
-            "invoice_lifecycle_read_model",
-            "cost_statistics_read_model",
-            "tax_offset_read_model",
-            "file_import_sessions",
-            "tax_certified_import_sessions",
-            "background_jobs",
-            "historical_etc_repair_state",
         ),
     }
 

@@ -65,7 +65,8 @@ Refresh 触发来源：
 - Workbench relation 确认/撤回、批量账务、往来款手动闭环。
 - 待找发票规则、银行标签、税金认证、发票生命周期变化。
 - 项目范围或项目状态设置变化。
-- startup stale scan、scope contract repair、App Health/backfill 运维任务。
+- scope contract repair、App Health/backfill 运维任务。
+- `startup_stale_scan` 不直接刷新成本统计 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才影响成本。
 
 父 scope 流程：
 

@@ -62,7 +62,8 @@
 - `settings_reset_completed` lifecycle event，`include_all=True`。
 - `reset_oa_and_rebuild` 后的 Workbench matching dirty scope reset/rebuild。
 - 发票或 OA reset 后的 historical ETC repair。
-- 后续 startup stale scan、read model query miss/stale enqueue。
+- 后续 read model query miss/stale enqueue。
+- `startup_stale_scan` 只标记 workbench matching dirty scopes；reset 主链路仍由 `settings_reset_completed` 和 reset job 显式清理/重建 read model。
 
 ## 失败恢复
 

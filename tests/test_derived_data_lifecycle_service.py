@@ -162,8 +162,8 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
 
         plan = service.plan_event("startup_stale_scan", months=["2026-05"], include_all=False)
 
-        self.assertIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in plan["domains"]])
-        self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
+        self.assertEqual([domain["domain"] for domain in plan["domains"]], ["workbench_matching_dirty_scopes"])
+        self.assertEqual(plan["will_enqueue_jobs"], ["workbench_matching"])
 
     def test_manual_invoice_confirmed_maps_invoice_workbench_tax_cost_pending_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()

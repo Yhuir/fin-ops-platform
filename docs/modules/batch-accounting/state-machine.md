@@ -64,7 +64,8 @@ Refresh 触发来源：
 - 批量账务提交/撤回：`batch_accounting_relation_changed` -> `workbench_relation_read_model` invalidate/refresh。
 - 关联台关系确认/撤回：`pair_relation_changed`。
 - 银行流水或发票导入、OA rebuild、标签规则等影响 Workbench relation 的生命周期事件。
-- App startup stale scan / backfill / runtime worker retry。
+- backfill / runtime worker retry。
+- `startup_stale_scan` 不直接刷新 `workbench_relation` read model；它只标记 workbench matching dirty scopes。
 
 失败恢复：
 
