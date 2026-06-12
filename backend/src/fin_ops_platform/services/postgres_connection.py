@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import os
+import re
 from threading import Lock
 from time import monotonic
 from typing import Any, Iterator
@@ -297,3 +298,77 @@ class PostgresTransaction:
             finally:
                 record_database_query((monotonic() - started_at) * 1000)
             return int(cursor.rowcount or 0)
+
+    def execute_many_values(self, sql: str, params_seq: list[tuple[Any, ...]], *, chunk_size: int = 200) -> int:
+        rows = list(params_seq or [])
+        if not rows:
+            return 0
+        parsed = _split_insert_values_sql(sql)
+        if parsed is None:
+            return self.execute_many(sql, rows)
+        params_per_row = len(rows[0])
+        if params_per_row <= 0 or any(len(row) != params_per_row for row in rows):
+            return self.execute_many(sql, rows)
+        prefix, row_sql, suffix = parsed
+        max_rows_by_params = max(1, 60_000 // params_per_row)
+        effective_chunk_size = max(1, min(chunk_size, max_rows_by_params))
+        affected = 0
+        with self._connection.cursor() as cursor:
+            for start in range(0, len(rows), effective_chunk_size):
+                chunk = rows[start : start + effective_chunk_size]
+                chunk_sql = f"{prefix}{', '.join([row_sql] * len(chunk))}{suffix}"
+                chunk_params = tuple(value for row in chunk for value in row)
+                started_at = monotonic()
+                try:
+                    cursor.execute(chunk_sql, chunk_params)
+                finally:
+                    record_database_query((monotonic() - started_at) * 1000)
+                affected += int(cursor.rowcount or 0)
+        return affected
+
+
+def _split_insert_values_sql(sql: str) -> tuple[str, str, str] | None:
+    raw_sql = str(sql or "")
+    match = re.search(r"\bvalues\b", raw_sql, flags=re.IGNORECASE)
+    if match is None:
+        return None
+    open_index = match.end()
+    while open_index < len(raw_sql) and raw_sql[open_index].isspace():
+        open_index += 1
+    if open_index >= len(raw_sql) or raw_sql[open_index] != "(":
+        return None
+    close_index = _matching_parenthesis_index(raw_sql, open_index)
+    if close_index is None:
+        return None
+    prefix = raw_sql[:open_index]
+    row_sql = raw_sql[open_index : close_index + 1]
+    suffix = raw_sql[close_index + 1 :]
+    return prefix, row_sql, suffix
+
+
+def _matching_parenthesis_index(sql: str, open_index: int) -> int | None:
+    depth = 0
+    quote: str | None = None
+    index = open_index
+    while index < len(sql):
+        char = sql[index]
+        if quote is not None:
+            if char == quote:
+                if quote == "'" and index + 1 < len(sql) and sql[index + 1] == "'":
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            index += 1
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None

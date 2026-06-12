@@ -58,6 +58,9 @@ def _parse_postgres_timestamp(value: str | None) -> datetime | None:
 def _execute_many(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) -> int:
     if not params_seq:
         return 0
+    execute_many_values = getattr(connection, "execute_many_values", None)
+    if callable(execute_many_values):
+        return int(execute_many_values(sql, params_seq) or 0)
     execute_many = getattr(connection, "execute_many", None)
     if callable(execute_many):
         return int(execute_many(sql, params_seq) or 0)
