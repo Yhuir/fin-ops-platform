@@ -25,6 +25,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
     without_keys,
 )
+from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 8
@@ -5919,7 +5920,40 @@ class PostgresReadModelRepository:
             for row in rows
             if (payload := _read_model_payload(row, drop_rebuildable_rows=True)) is not None
         }
-        return {"candidates": values} if values else {}
+        scope_rows = self._connection.fetch_all(
+            """
+            select
+                to_char(scope_month, 'YYYY-MM') as scope_month,
+                source_versions,
+                completed_at::text as generated_at,
+                request_id,
+                reason
+            from job.workbench_matching_dirty_scopes
+            where tenant_id = 'default'
+              and status = 'completed'
+            order by scope_month
+            """
+        )
+        scope_runs: dict[str, dict[str, Any]] = {}
+        for row in scope_rows:
+            scope_month = str(row.get("scope_month") or "").strip()
+            if not MONTH_SCOPE_RE.match(scope_month):
+                continue
+            scope_runs[scope_month] = {
+                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+                "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+                "candidate_count": 0,
+                "generated_at": str(row.get("generated_at") or ""),
+                "request_id": str(row.get("request_id") or ""),
+                "reason": str(row.get("reason") or ""),
+            }
+        result: dict[str, Any] = {}
+        if values:
+            result["candidates"] = values
+        if scope_runs:
+            result["schema_version"] = CANDIDATE_MATCH_SCHEMA_VERSION
+            result["scope_runs"] = scope_runs
+        return result
 
     def upsert_workbench_reconciliation_decisions(
         self,

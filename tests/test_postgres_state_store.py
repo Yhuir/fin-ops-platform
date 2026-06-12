@@ -13,6 +13,7 @@ from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_diff import diff_state_snapshots
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.etc_service import EtcBatch
+from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 
 
 def unwrap_jsonb(value):
@@ -129,6 +130,21 @@ class CandidateFormalAndFallbackConnection(FakePostgresConnection):
                 }
             ]
         return []
+
+
+class CandidateFormalWithCompletedScopeRunsConnection(CandidateFormalAndFallbackConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        if "from job.workbench_matching_dirty_scopes" in sql:
+            return [
+                {
+                    "scope_month": "2026-05",
+                    "source_versions": {"source_version": 7},
+                    "generated_at": "2026-06-13 01:20:00+08",
+                    "request_id": "worker:2026-05",
+                    "reason": "write_event",
+                }
+            ]
+        return super().fetch_all(sql, params)
 
 
 class WorkbenchReadModelFormalAndFallbackConnection(FakePostgresConnection):
@@ -276,6 +292,29 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertNotIn("schema_version", snapshot)
         self.assertNotIn("scope_runs", snapshot)
         self.assertEqual(list(snapshot["candidates"]), ["candidate-stale"])
+
+    def test_postgres_candidate_matches_restore_completed_scope_runs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = PostgresStateStore(
+                data_dir=Path(temp_dir),
+                connection=CandidateFormalWithCompletedScopeRunsConnection(),
+            )
+
+            snapshot = store.load_workbench_candidate_matches()
+
+        self.assertEqual(snapshot["schema_version"], CANDIDATE_MATCH_SCHEMA_VERSION)
+        self.assertEqual(list(snapshot["candidates"]), ["candidate-stale"])
+        self.assertEqual(
+            snapshot["scope_runs"]["2026-05"],
+            {
+                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
+                "source_versions": {"source_version": 7},
+                "candidate_count": 0,
+                "generated_at": "2026-06-13 01:20:00+08",
+                "request_id": "worker:2026-05",
+                "reason": "write_event",
+            },
+        )
 
     def test_postgres_workbench_read_models_ignore_runtime_snapshot_fallback(self) -> None:
         with TemporaryDirectory() as temp_dir:

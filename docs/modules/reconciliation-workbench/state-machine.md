@@ -67,6 +67,7 @@ Refresh 触发来源：
 - 下游模块如 no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
 - worker `workbench.read_model.refresh` 发布 active generation；matching dirty worker 重建候选。
 - `startup_stale_scan` 默认关闭；启用时只标记 stale matching dirty scopes；它不直接 invalidating workbench read model。
+- PostgreSQL formal read path 必须恢复 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run，供 `WorkbenchCandidateMatchService.is_scope_fresh(...)` 判断 freshness；否则 opt-in 启动补扫会因为缺少 scope run 证明而把已完成月份重新标 dirty。
 
 失败恢复：
 
