@@ -317,12 +317,8 @@ export default function ReconciliationWorkbenchPage() {
   const canMutateWithHealth = useCanMutateWithHealth();
   const { canMutateData } = useSessionPermissions();
   const { active } = useOptionalPageActivation("reconciliation-workbench");
-  const isWorkbenchFreshnessBlocked =
-    healthStatus.sources.oaSync === "dirty"
-    || healthStatus.sources.oaSync === "refreshing"
-    || healthStatus.sources.workbench === "stale"
-    || healthStatus.sources.workbench === "loading";
-  const canWriteWorkbench = canMutateData && canMutateWithHealth && !isWorkbenchFreshnessBlocked;
+  const isOaSyncWriteBlocked = healthStatus.sources.oaSync === "dirty" || healthStatus.sources.oaSync === "refreshing";
+  const canWriteWorkbench = canMutateData && canMutateWithHealth && !isOaSyncWriteBlocked;
   const {
     detailRow,
     getRowState,
@@ -373,6 +369,7 @@ export default function ReconciliationWorkbenchPage() {
   const [workbenchExceptionDialog, setWorkbenchExceptionDialog] = useState<WorkbenchExceptionDialogState | null>(null);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [cancelProcessedExceptionDialog, setCancelProcessedExceptionDialog] = useState<CancelProcessedExceptionDialogState | null>(null);
+  const [pendingWorkbenchRowIds, setPendingWorkbenchRowIds] = useState<Set<string>>(() => new Set());
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "pairedDisplayState",
@@ -640,9 +637,43 @@ export default function ReconciliationWorkbenchPage() {
     });
   }, []);
 
-  const refreshWorkbenchDataInBackground = useCallback((month: string) => {
-    void loadWorkbenchData(month, undefined, { background: true, includeAuxiliary: false });
+  const markWorkbenchRowsPending = useCallback((rowIds: string[]) => {
+    const normalizedIds = rowIds.map((rowId) => rowId.trim()).filter(Boolean);
+    if (normalizedIds.length === 0) {
+      return;
+    }
+    setPendingWorkbenchRowIds((current) => {
+      const next = new Set(current);
+      normalizedIds.forEach((rowId) => next.add(rowId));
+      return next.size === current.size ? current : next;
+    });
   }, []);
+
+  const releasePendingWorkbenchRows = useCallback((rowIds: string[]) => {
+    const normalizedIds = rowIds.map((rowId) => rowId.trim()).filter(Boolean);
+    if (normalizedIds.length === 0) {
+      return;
+    }
+    setPendingWorkbenchRowIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+      normalizedIds.forEach((rowId) => {
+        if (next.delete(rowId)) {
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, []);
+
+  const refreshWorkbenchDataInBackground = useCallback((month: string, options: { unlockRowIds?: string[] } = {}) => {
+    void loadWorkbenchData(month, undefined, { background: true, includeAuxiliary: false })
+      .finally(() => {
+        if (options.unlockRowIds && options.unlockRowIds.length > 0) {
+          releasePendingWorkbenchRows(options.unlockRowIds);
+        }
+      });
+  }, [releasePendingWorkbenchRows]);
 
   const scheduleOaSyncWorkbenchRefresh = useCallback(() => {
     if (oaSyncRefreshTimeoutRef.current !== null) {
@@ -1248,6 +1279,8 @@ export default function ReconciliationWorkbenchPage() {
   const pairedSelectionSummary = pairedSelectionContext.summary;
   const contextualOpenRowIds = openSelectionContext.relatedRowIdSet;
   const contextualPairedRowIds = pairedSelectionContext.relatedRowIdSet;
+  const selectedOpenHasPendingRows = openSelectionContext.includedRowIds.some((rowId) => pendingWorkbenchRowIds.has(rowId));
+  const selectedPairedHasPendingRows = pairedSelectionContext.includedRowIds.some((rowId) => pendingWorkbenchRowIds.has(rowId));
 
   const getWorkbenchRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open") => {
     const explicitState = getRowState(row, zoneId);
@@ -1273,9 +1306,10 @@ export default function ReconciliationWorkbenchPage() {
     }
     return selectedOpenGroupsForUnifiedAction.length === 1;
   }, [openSelectionSummary.total, selectedOpenGroupsForUnifiedAction.length]);
-  const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection;
-  const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
-  const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
+  const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection || selectedOpenHasPendingRows;
+  const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1 || selectedOpenHasPendingRows;
+  const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1 || selectedPairedHasPendingRows;
+  const isOpenWithdrawSelectionDisabled = openSelectionSummary.total < 1 || selectedOpenHasPendingRows;
 
   const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
     const containingGroup = sourceAllGroups.find((group) =>
@@ -1298,7 +1332,7 @@ export default function ReconciliationWorkbenchPage() {
     setIsDetailLoading(true);
     openDetail(row);
     try {
-      const detailedRow = await fetchWorkbenchRowDetail(row.id);
+      const detailedRow = await fetchWorkbenchRowDetail(row.id, { month: WORKBENCH_VIEW_MONTH });
       replaceDetailRow(detailedRow);
     } catch {
       setDetailError("详情加载失败，请稍后重试。");
@@ -1350,12 +1384,12 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("登录已失效或系统不可用，请返回 OA 系统重新进入。");
       return false;
     }
-    if (isWorkbenchFreshnessBlocked) {
-      openActionResultDialog("关联台正在同步，请刷新完成后再操作。");
+    if (isOaSyncWriteBlocked) {
+      openActionResultDialog("OA 正在同步，请刷新完成后再操作。");
       return false;
     }
     return true;
-  }, [canMutateData, healthStatus.blocksMutations, isWorkbenchFreshnessBlocked, openActionResultDialog]);
+  }, [canMutateData, healthStatus.blocksMutations, isOaSyncWriteBlocked, openActionResultDialog]);
 
   const openCancelProcessedExceptionDialog = useCallback((row: WorkbenchRecord) => {
     const group = processedExceptionGroups.find((candidateGroup) =>
@@ -1660,13 +1694,15 @@ export default function ReconciliationWorkbenchPage() {
             note,
           });
           const affectedRowIds = actionAffectedRowIds(result);
+          const pendingRowIds = affectedRowIds.length > 0 ? affectedRowIds : rowIds;
           clearOpenSelection();
-          applyLocalConfirmLink(affectedRowIds.length > 0 ? affectedRowIds : rowIds, result.case_id || caseId);
+          applyLocalConfirmLink(pendingRowIds, result.case_id || caseId);
+          markWorkbenchRowsPending(pendingRowIds);
           emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
             affectedMonths: actionAffectedMonths(result),
             source: "workbench_confirm_link",
           });
-          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH, { unlockRowIds: pendingRowIds });
           return result.message;
         },
       });
@@ -1684,18 +1720,19 @@ export default function ReconciliationWorkbenchPage() {
           previewId: preview.previewId,
           expectedVersions: preview.submitExpectedVersions,
         });
+        const affectedRowIds = actionAffectedRowIds(result);
+        const pendingRowIds = affectedRowIds.length > 0 ? affectedRowIds : rowIds;
         clearPairedSelection();
         clearOpenSelection();
         if (preview.operation === "withdraw_link") {
-          applyLocalWithdrawLink(rowIds, preview.after.groups);
+          applyLocalWithdrawLink(pendingRowIds, preview.after.groups);
         }
+        markWorkbenchRowsPending(pendingRowIds);
         emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
           affectedMonths: actionAffectedMonths(result),
           source: preview.operation === "split_candidate" ? "workbench_split_candidate" : "workbench_withdraw_link",
         });
-        if (preview.operation === "split_candidate") {
-          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-        }
+        refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH, { unlockRowIds: pendingRowIds });
         return result.message;
       },
     });
@@ -1980,7 +2017,7 @@ export default function ReconciliationWorkbenchPage() {
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
       onTertiarySelectionAction={handleWithdrawOpenSelection}
-      tertiarySelectionActionDisabled={openSelectionSummary.total < 1 || !canWriteWorkbench}
+      tertiarySelectionActionDisabled={isOpenWithdrawSelectionDisabled || !canWriteWorkbench}
       onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}

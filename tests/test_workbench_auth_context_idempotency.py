@@ -196,6 +196,29 @@ class _NoActiveRelationCommandService:
         )
 
 
+class _BankInvoiceWithdrawRelationCommandService(_RecordingRelationCommandService):
+    def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        self.preview_withdraw_calls.append(dict(kwargs))
+        active_relation = {
+            "case_id": "CASE-BANK-INVOICE",
+            "row_ids": ["bank-withdraw", "invoice-withdraw-a", "invoice-withdraw-b"],
+            "row_types": ["bank", "invoice", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 7,
+        }
+        return {
+            "operation": "withdraw_link",
+            "operation_type": "withdraw_relation",
+            "preview_id": "withdraw_relation:CASE-BANK-INVOICE:7",
+            "active_relation": {"case_id": "CASE-BANK-INVOICE", "version": 7},
+            "before_relations": [active_relation],
+            "after_relations": [],
+            "submit_expected_versions": {"relation:CASE-BANK-INVOICE": 7},
+        }
+
+
 class _RecordingExceptionCaseService:
     def __init__(self) -> None:
         self.created_cases: list[dict[str, object]] = []
@@ -226,6 +249,8 @@ def _new_facade(
     candidate_match_service: object | None = None,
     candidate_persist_calls: list[dict[str, object]] | None = None,
     live_rows: list[dict[str, object]] | None = None,
+    relation_groups: object | None = None,
+    withdraw_rows_and_after_relations: object | None = None,
 ) -> WorkbenchWriteFacade:
     pair_relation_service = _PairRelationService()
     return WorkbenchWriteFacade(
@@ -248,8 +273,8 @@ def _new_facade(
         scope_keys_for_rows=lambda rows, **_: ["2026-05"],
         resolve_live_rows_direct=lambda *_, **__: list(live_rows or []),
         resolve_live_row=lambda row_id, **_: {"id": row_id},
-        relation_groups=lambda *_, **__: [],
-        withdraw_rows_and_after_relations=lambda *_, **__: ([], [], []),
+        relation_groups=relation_groups or (lambda *_, **__: []),
+        withdraw_rows_and_after_relations=withdraw_rows_and_after_relations or (lambda *_, **__: ([], [], [])),
         amount_check_for_rows_by_type=lambda _: {},
         transaction_amount_for_row_id=lambda _: 0,
         build_workbench_payload=lambda *_, **__: {},
@@ -442,6 +467,68 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(relation_command.withdraw_calls[0]["operation_type"], "withdraw_relation")
         self.assertEqual(relation_command.withdraw_calls[0]["expected_versions"], {"relation:CASE-1": 3})
         self.assertEqual(relation_command.withdraw_calls[0]["idempotency_key"], "withdraw:1")
+
+    def test_withdraw_preview_after_groups_unrestored_bank_invoice_rows_individually(self) -> None:
+        relation_command = _BankInvoiceWithdrawRelationCommandService()
+        relation_group_app = object.__new__(Application)
+        rows = [
+            {
+                "id": "bank-withdraw",
+                "type": "bank",
+                "case_id": "CASE-BANK-INVOICE",
+                "amount": "10000.00",
+                "counterparty": "中招国际招标有限公司云南分公司",
+            },
+            {
+                "id": "invoice-withdraw-a",
+                "type": "invoice",
+                "case_id": "CASE-BANK-INVOICE",
+                "amount": "9000.00",
+                "buyer_name": "云南溯源科技有限公司",
+            },
+            {
+                "id": "invoice-withdraw-b",
+                "type": "invoice",
+                "case_id": "CASE-BANK-INVOICE",
+                "amount": "6716.32",
+                "buyer_name": "云南溯源科技有限公司",
+            },
+        ]
+        facade = _new_facade(
+            relation_command_service=relation_command,
+            relation_groups=relation_group_app._relation_groups,
+            withdraw_rows_and_after_relations=lambda **_: (rows, [], [str(row["id"]) for row in rows]),
+        )
+
+        preview = facade.preview_withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["bank-withdraw", "invoice-withdraw-a", "invoice-withdraw-b"],
+            }
+        )
+
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
+        after_groups = preview.payload["after"]["groups"]
+        self.assertEqual(len(after_groups), 3)
+        self.assertEqual(
+            [
+                (
+                    len(group["bank_rows"]),
+                    len(group["invoice_rows"]),
+                    str(group["group_id"]),
+                    str(group["reason"]),
+                )
+                for group in after_groups
+            ],
+            [
+                (1, 0, "selected:bank-withdraw", "selected_row"),
+                (0, 1, "selected:invoice-withdraw-a", "selected_row"),
+                (0, 1, "selected:invoice-withdraw-b", "selected_row"),
+            ],
+        )
+        for group in after_groups:
+            self.assertEqual(group["oa_rows"], [])
+            self.assertFalse(group["bank_rows"] and group["invoice_rows"])
 
     def test_withdraw_link_splits_pure_candidate_group_without_relation_history(self) -> None:
         candidate_service = WorkbenchCandidateMatchService()

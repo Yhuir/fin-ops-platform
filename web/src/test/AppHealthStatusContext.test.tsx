@@ -277,6 +277,8 @@ describe("AppHealthStatusProvider", () => {
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
       expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "关联台待刷新");
     });
+    expect(screen.getByLabelText("health")).toHaveTextContent("\"oaSync\":\"idle\"");
+    expect(screen.getByLabelText("health")).toHaveTextContent("\"workbench\":\"stale\"");
   });
 
   it("updates from an app_health SSE snapshot before polling", async () => {

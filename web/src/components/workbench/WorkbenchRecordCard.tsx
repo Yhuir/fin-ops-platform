@@ -1,3 +1,4 @@
+import { Info } from "lucide-react";
 import { memo, useState, type FocusEvent, type MouseEvent, type TouchEvent } from "react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
@@ -288,24 +289,26 @@ function renderOaApplicantValue(
 
   return (
     <span className="compound-cell-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{value}</span>
-      {hasApplicationTime ? (
-        <span className="compound-cell-secondary">
-          {renderInlineDateTimeTag(applicationTime)}
-        </span>
-      ) : null}
-      {showInlineDetail ? (
-        <span className="inline-cell-action-row">
+      <span className="compound-cell-primary workbench-oa-applicant-line">
+        <span className="cell-text-value cell-text-value-full">{value}</span>
+        {showInlineDetail ? (
           <button
-            className="row-action-btn row-action-btn-inline"
+            aria-label={`查看OA ${value} 详情`}
+            className="row-action-btn row-action-btn-inline row-action-btn-icon"
+            title="查看OA详情"
             type="button"
             onClick={(event) => {
               event.stopPropagation();
               onOpenDetail();
             }}
           >
-            详情
+            <Info aria-hidden="true" size={12} strokeWidth={2.2} />
           </button>
+        ) : null}
+      </span>
+      {hasApplicationTime ? (
+        <span className="compound-cell-secondary">
+          {renderInlineDateTimeTag(applicationTime)}
         </span>
       ) : null}
     </span>

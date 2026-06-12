@@ -63,6 +63,42 @@ def scope_key_for_month(month: str | None) -> str:
 
 
 class WorkbenchQueryFacadeTests(unittest.TestCase):
+    def test_row_detail_reads_sql_row_without_application_live_sync(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def get_workbench_row_detail(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                return {
+                    "row": {
+                        "id": "oa-pay-1976",
+                        "type": "oa",
+                        "applicant": "刘际涛",
+                        "detail_fields": {"OA单号": "oa-pay-1976"},
+                    },
+                    "source_versions": {"builder": "v1"},
+                    "read_model_status": "fresh",
+                }
+
+        repository = Repository()
+        facade = WorkbenchQueryFacade(
+            repository=repository,
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.row_detail(None, row_id="oa-pay-1976")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["row"]["id"], "oa-pay-1976")
+        self.assertEqual(result.payload["read_model_status"], "fresh")
+        self.assertEqual(repository.calls, [{"scope_key": "all", "row_id": "oa-pay-1976"}])
+
     def test_summary_missing_payload_enqueues_refresh_without_application_dependency(self) -> None:
         class Repository:
             def get_workbench_summary(self, **_kwargs: object) -> None:

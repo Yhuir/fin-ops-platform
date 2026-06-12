@@ -1247,7 +1247,7 @@ class WorkbenchWriteFacade:
         after_groups = self._relation_groups(
             after_relations,
             selected_rows=rows,
-            ungrouped_selected_rows="separate",
+            ungrouped_selected_rows="individual",
         )
         amount_check = self._amount_check_for_withdraw_preview(
             active_relation=active_relation,

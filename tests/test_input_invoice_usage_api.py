@@ -167,6 +167,69 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertTrue(json.loads(oa_response.body)["detailAvailable"])
         self.assertEqual(json.loads(relation_response.body)["kind"], "oa")
 
+    def test_rows_and_relation_details_return_multi_relation_totals_for_oa_bank_and_invoice(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            invoice_a = self._invoice("inv-multi-a", "2201", "多关系供应商A", total_with_tax="40.00")
+            invoice_b = self._invoice("inv-multi-b", "2202", "多关系供应商B", total_with_tax="60.00")
+            bank_a = self._bank("bank-multi-a", "40.00")
+            bank_b = self._bank("bank-multi-b", "60.00")
+            pair_service = WorkbenchPairRelationService()
+            pair_service.create_active_relation(
+                case_id="case-multi-relation",
+                row_ids=[invoice_a.id, invoice_b.id, "oa-multi-a", "oa-multi-b", bank_a.id, bank_b.id],
+                row_types=["invoice", "invoice", "oa", "oa", "bank", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+            self._install_service(
+                app,
+                invoices=[invoice_a, invoice_b],
+                transactions=[bank_a, bank_b],
+                pair_service=pair_service,
+                oa_projection=StaticOAProjection(
+                    [
+                        self._oa("oa-multi-a", "刘际涛", "40.00", apply_type="支付申请"),
+                        self._oa("oa-multi-b", "张三", "60.00", apply_type="支付申请"),
+                    ]
+                ),
+            )
+
+            rows_response = app.handle_request("GET", "/api/input-invoice-usage/rows?sort_field=invoice_no&sort_direction=asc")
+            rows_payload = json.loads(rows_response.body)
+            row = next(item for item in rows_payload["rows"] if item["invoiceId"] == invoice_a.id)
+            row_id = row["id"]
+            oa_detail_response = app.handle_request(
+                "GET",
+                f"/api/input-invoice-usage/rows/{row_id}/relation-details?kind=oa",
+            )
+            bank_detail_response = app.handle_request(
+                "GET",
+                f"/api/input-invoice-usage/rows/{row_id}/relation-details?kind=bank",
+            )
+            invoice_detail_response = app.handle_request(
+                "GET",
+                f"/api/input-invoice-usage/rows/{row_id}/relation-details?kind=invoice",
+            )
+
+        self.assertEqual(rows_response.status_code, 200)
+        self.assertEqual(row["oa"]["relationCount"], 2)
+        self.assertEqual(row["oa"]["amount"], "100.00")
+        self.assertEqual(row["oa"]["hasMultiple"], True)
+        self.assertEqual(row["bankTransactions"]["relationCount"], 2)
+        self.assertEqual(row["bankTransactions"]["amount"], "100.00")
+        self.assertEqual(row["bankTransactions"]["hasMultiple"], True)
+        self.assertEqual(row["invoiceRelations"]["relationCount"], 2)
+        self.assertEqual(row["invoiceRelations"]["totalWithTax"], "100.00")
+        self.assertEqual(row["invoiceRelations"]["hasMultiple"], True)
+        self.assertEqual(oa_detail_response.status_code, 200)
+        self.assertEqual(bank_detail_response.status_code, 200)
+        self.assertEqual(invoice_detail_response.status_code, 200)
+        self.assertEqual(len(json.loads(oa_detail_response.body)["summaries"]), 2)
+        self.assertEqual(len(json.loads(bank_detail_response.body)["summaries"]), 2)
+        self.assertEqual(len(json.loads(invoice_detail_response.body)["summaries"]), 2)
+
     def test_bank_filter_options_and_invoice_date_sort_are_http_contract_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

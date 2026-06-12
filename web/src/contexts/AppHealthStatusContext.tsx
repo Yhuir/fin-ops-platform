@@ -143,15 +143,6 @@ function workbenchSourceFromShell(level: "ok" | "pending" | "error" | undefined)
   return "unknown";
 }
 
-function dirtyScopeCount(payload: ApiAppHealthPayload | null) {
-  const scopes = [
-    ...(payload?.workbench_read_model?.dirty_scopes ?? []),
-    ...(payload?.workbench_read_model?.stale_scopes ?? []),
-    ...(payload?.workbench_read_model?.rebuilding_scopes ?? []),
-  ];
-  return scopes.length;
-}
-
 function cleanStringArray(values: unknown): string[] {
   return Array.isArray(values)
     ? values.map((value) => String(value ?? "").trim()).filter(Boolean)
@@ -226,9 +217,6 @@ function oaSyncSourceFromPayload(
   apiPayload: ApiAppHealthPayload | null,
   fallbackOaSync: ApiOaSyncStatus | null,
 ): AppHealthOaSyncSource {
-  if (dirtyScopeCount(apiPayload) > 0) {
-    return "dirty";
-  }
   const apiSource = mapOaSyncSource(apiPayload?.oa_sync);
   if (apiSource !== "unknown") {
     return apiSource;

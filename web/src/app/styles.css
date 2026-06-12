@@ -635,6 +635,14 @@ textarea {
   flex-wrap: wrap;
 }
 
+.input-invoice-usage-bank-amount-line {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-1);
+}
+
 .input-invoice-usage-bank-tag {
   font-family: var(--fp-font-data);
   font-variant-numeric: tabular-nums;
@@ -663,6 +671,14 @@ textarea {
   width: 22px;
   min-width: 22px;
   padding: 0;
+}
+
+.input-invoice-usage-relation-count-button {
+  border-color: color-mix(in srgb, var(--fp-primary) 36%, var(--fp-border));
+  background: var(--fp-primary-soft);
+  color: var(--fp-primary);
+  font-family: var(--fp-font-data);
+  font-variant-numeric: tabular-nums;
 }
 
 .input-invoice-usage-table-action:hover,
@@ -12450,6 +12466,14 @@ body.column-layout-dragging {
   flex-wrap: nowrap;
 }
 
+.workbench-oa-applicant-line {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
 .inline-cell-action-row {
   display: flex;
   align-items: center;
@@ -13186,6 +13210,12 @@ body.column-layout-dragging {
   padding: 0 6px;
   border-radius: 7px;
   font-size: 10px;
+}
+
+.row-action-btn-icon {
+  width: 20px;
+  min-width: 20px;
+  padding: 0;
 }
 
 .row-action-btn.primary {

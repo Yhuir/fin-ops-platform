@@ -306,6 +306,46 @@ function DetailButton({
   );
 }
 
+function RelationCountButton({
+  label,
+  extraCount,
+  onClick,
+}: {
+  label: string;
+  extraCount: number;
+  onClick: () => void;
+}) {
+  if (extraCount <= 0) {
+    return null;
+  }
+  return (
+    <button
+      aria-label={label}
+      className="input-invoice-usage-table-action input-invoice-usage-relation-count-button"
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      {`+${extraCount}`}
+    </button>
+  );
+}
+
+function extraRelationCount(relationCount: number | undefined): number {
+  return Math.max(0, Number(relationCount ?? 0) - 1);
+}
+
+function relationListTarget(
+  row: InputInvoiceUsageRow,
+  relationKind: NonNullable<InputInvoiceUsageDetailTarget["relationKind"]>,
+): InputInvoiceUsageDetailTarget | null {
+  const relation = relationKind === "oa" ? row.oa : relationKind === "bank" ? row.bank : row.invoiceRelations;
+  if (relation.detailMode === "list" && Number(relation.relationCount ?? 0) > 1) {
+    return { kind: "relationList", id: row.id, rowId: row.id, relationKind };
+  }
+  return null;
+}
+
 function displayedRange(page: number, pageSize: number, total: number) {
   if (total <= 0) {
     return "0-0 / 0";
@@ -469,6 +509,12 @@ export default function InputInvoiceUsageTable({
               const bankRemarkCellExpanded = expandedCells.has(`${row.id}:bank-remark`);
               const oa = row.oa.primary;
               const bank = row.bank.primary;
+              const oaRelationTarget = relationListTarget(row, "oa");
+              const bankRelationTarget = relationListTarget(row, "bank");
+              const invoiceRelationTarget = relationListTarget(row, "invoice");
+              const oaExtraCount = extraRelationCount(row.oa.relationCount);
+              const bankExtraCount = extraRelationCount(row.bank.relationCount);
+              const invoiceExtraCount = extraRelationCount(row.invoiceRelations.relationCount);
 
               return (
                 <tr className="input-invoice-usage-table-row" key={row.id}>
@@ -480,6 +526,13 @@ export default function InputInvoiceUsageTable({
                         label={`查看发票 ${invoiceNo} 详情`}
                         onClick={() => onOpenDetail({ kind: "invoice", id: row.invoice.id, rowId: row.id })}
                       />
+                      {invoiceRelationTarget ? (
+                        <RelationCountButton
+                          extraCount={invoiceExtraCount}
+                          label={`查看发票 ${invoiceNo} 关联发票 ${row.invoiceRelations.relationCount} 张`}
+                          onClick={() => onOpenDetail(invoiceRelationTarget)}
+                        />
+                      ) : null}
                     </div>
                     <div className="input-invoice-usage-tag-row">
                       <Tag>{dateOnly(row.invoice.issueDate)}</Tag>
@@ -510,16 +563,26 @@ export default function InputInvoiceUsageTable({
                       <>
                         <div className="input-invoice-usage-inline-row">
                           <span className="input-invoice-usage-cell-primary">{oa.applicant || "-"}</span>
-                          {oa.detailAvailable ? (
+                          {oa.detailAvailable && !oaRelationTarget ? (
                             <DetailButton
                               iconOnly
                               label={`查看OA ${oa.applicant || oa.id} 详情`}
                               onClick={() => onOpenDetail({ kind: "oa", id: oa.id, rowId: row.id })}
                             />
                           ) : null}
+                          {oaRelationTarget ? (
+                            <RelationCountButton
+                              extraCount={oaExtraCount}
+                              label={`查看${oa.applicant || "该发票"}关联OA ${row.oa.relationCount} 条`}
+                              onClick={() => onOpenDetail(oaRelationTarget)}
+                            />
+                          ) : null}
                         </div>
                         <div className="input-invoice-usage-tag-row">
                           <Tag>{oa.applicationType || "类型为空"}</Tag>
+                          {row.oa.hasMultiple && oa.amount ? (
+                            <Tag tone="info">{`合计 ${formatMoney(oa.amount)}`}</Tag>
+                          ) : null}
                         </div>
                       </>
                     ) : <EmptyCell />}
@@ -543,7 +606,7 @@ export default function InputInvoiceUsageTable({
                         />
                         <div className="input-invoice-usage-tag-row">
                           <Tag>{bank.tradeTime || "交易日期为空"}</Tag>
-                          {bank.detailAvailable ? (
+                          {bank.detailAvailable && !bankRelationTarget ? (
                             <DetailButton
                               label={`查看流水 ${bank.counterpartyName || bank.id} 详情`}
                               onClick={() => onOpenDetail({ kind: "bank", id: bank.id, rowId: row.id })}
@@ -558,7 +621,16 @@ export default function InputInvoiceUsageTable({
                   <td className="input-invoice-usage-table-cell input-invoice-usage-table-cell--amount input-invoice-usage-table-cell--separator">
                     {bank ? (
                       <>
-                        <div className="input-invoice-usage-money-primary">{formatMoney(bank.amount)}</div>
+                        <div className="input-invoice-usage-bank-amount-line">
+                          <span className="input-invoice-usage-money-primary">{formatMoney(bank.amount)}</span>
+                          {bankRelationTarget ? (
+                            <RelationCountButton
+                              extraCount={bankExtraCount}
+                              label={`查看${bank.counterpartyName || "该发票"}关联流水 ${row.bank.relationCount} 条`}
+                              onClick={() => onOpenDetail(bankRelationTarget)}
+                            />
+                          ) : null}
+                        </div>
                         <div className="input-invoice-usage-bank-tag-row">
                           <Tag tone="info">{directionLabel(bank.directionLabel || bank.direction)}</Tag>
                           <Tag className="input-invoice-usage-bank-tag">

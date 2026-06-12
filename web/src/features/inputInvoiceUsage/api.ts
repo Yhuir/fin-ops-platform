@@ -162,7 +162,8 @@ function mapOa(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]
   const applicant = stringValue(raw.applicant ?? camelOrSnake(raw, "applicantName", "applicant_name"));
   const applicationType = stringValue(camelOrSnake(raw, "applicationType", "application_type"));
   const projectName = stringValue(camelOrSnake(raw, "projectName", "project_name"));
-  if (!id && !applicant && !applicationType && !projectName) {
+  const amount = stringValue(raw.amount);
+  if (!id && !applicant && !applicationType && !projectName && !amount) {
     return null;
   }
   return {
@@ -170,6 +171,7 @@ function mapOa(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]
     applicant,
     applicationType,
     projectName,
+    amount,
     detailAvailable: booleanValue(camelOrSnake(raw, "detailAvailable", "detail_available")),
   };
 }
@@ -199,6 +201,33 @@ function mapBank(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][numbe
   };
 }
 
+function mapInvoiceRelation(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]["invoiceRelations"]["primary"] {
+  const raw = objectValue(rawValue);
+  const id = stringValue(raw.id ?? camelOrSnake(raw, "invoiceId", "invoice_id") ?? camelOrSnake(raw, "primaryInvoiceId", "primary_invoice_id"));
+  const invoiceNo = stringValue(camelOrSnake(raw, "invoiceNo", "invoice_no"));
+  const invoiceCode = stringValue(camelOrSnake(raw, "invoiceCode", "invoice_code"));
+  const digitalInvoiceNo = stringValue(camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no"));
+  const explicitDisplayNo = stringValue(camelOrSnake(raw, "displayNo", "display_no")).trim();
+  const displayNo = explicitDisplayNo || digitalInvoiceNo || [invoiceCode, invoiceNo].filter(Boolean).join(" ");
+  const sellerName = stringValue(camelOrSnake(raw, "sellerName", "seller_name"));
+  const totalWithTax = stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax"));
+  if (!id && !displayNo && !sellerName && !totalWithTax) {
+    return null;
+  }
+  return {
+    id,
+    displayNo,
+    invoiceNo,
+    invoiceCode,
+    digitalInvoiceNo,
+    invoiceDate: stringValue(camelOrSnake(raw, "invoiceDate", "invoice_date") ?? camelOrSnake(raw, "issueDate", "issue_date")),
+    sellerName,
+    sellerTaxNo: stringValue(camelOrSnake(raw, "sellerTaxNo", "seller_tax_no")),
+    totalWithTax,
+    taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
+  };
+}
+
 function mapRelation<T>(rawValue: unknown, mapper: (value: unknown) => T | null): {
   primary: T | null;
   relationCount: number;
@@ -225,6 +254,9 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
   return {
     rows: arrayValue(raw.rows).map((item) => {
       const row = objectValue(item);
+      const invoiceRelationsRaw = camelOrSnake(row, "invoiceRelations", "invoice_relations");
+      const invoiceRelations = mapRelation(invoiceRelationsRaw, mapInvoiceRelation);
+      const invoiceRelationsObject = objectValue(invoiceRelationsRaw);
       return {
         id: stringValue(row.id),
         invoice: {
@@ -234,6 +266,10 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
         paymentStatus: mapPaymentStatus(camelOrSnake(row, "paymentStatus", "payment_status")),
         oa: mapRelation(row.oa, mapOa),
         bank: mapRelation(camelOrSnake(row, "bank", "bankTransactions"), mapBank),
+        invoiceRelations: {
+          ...invoiceRelations,
+          totalWithTax: stringValue(camelOrSnake(invoiceRelationsObject, "totalWithTax", "total_with_tax")),
+        },
       };
     }),
     pagination: {
@@ -271,6 +307,19 @@ function objectEntriesSection(title: string, value: unknown) {
   const raw = objectValue(value);
   const fields = Object.entries(raw).map(([key, item]) => detailField(key, item));
   return fields.length > 0 ? detailSection(title, fields) : null;
+}
+
+function mapDetailSections(value: unknown): InputInvoiceUsageDetailResponse["sections"] {
+  return arrayValue(value).map((sectionValue) => {
+    const section = objectValue(sectionValue);
+    return detailSection(
+      stringValue(section.title) || "详情",
+      arrayValue(section.fields).map((fieldValue) => {
+        const field = objectValue(fieldValue);
+        return detailField(stringValue(field.label) || "字段", field.value);
+      }),
+    );
+  }).filter((section) => section.fields.length > 0);
 }
 
 function mapInvoiceDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse {
@@ -410,7 +459,9 @@ function mapOaDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse 
 
 function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse {
   const raw = objectValue(payload);
-  const kind = stringValue(raw.kind) === "bank" ? "流水" : "OA";
+  const rawKind = stringValue(raw.kind);
+  const kind = rawKind === "bank" ? "银行流水" : rawKind === "invoice" ? "发票" : "OA";
+  const detailSections = mapDetailSections(raw.sections);
   const summaries = arrayValue(raw.summaries);
   const sections: InputInvoiceUsageDetailResponse["sections"] = [
     detailSection("关联概况", [
@@ -420,7 +471,9 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
       detailField("是否多条", camelOrSnake(raw, "hasMultiple", "has_multiple") ? "是" : "否"),
     ]),
   ];
-  if (summaries.length > 0) {
+  if (detailSections.length > 0) {
+    sections.push(...detailSections);
+  } else if (summaries.length > 0) {
     sections.push(detailSection("关联摘要", summaries.map((item, index) => detailField(`${kind} ${index + 1}`, item))));
   }
   const relations = arrayValue(raw.relations);
@@ -428,7 +481,7 @@ function mapRelationDetailResponse(payload: unknown): InputInvoiceUsageDetailRes
     sections.push(detailSection("关联台证据", relations.map((item, index) => detailField(`关系 ${index + 1}`, item))));
   }
   return {
-    title: `${kind}关联明细`,
+    title: stringValue(raw.title) || `${kind}关联明细`,
     subtitle: stringValue(camelOrSnake(raw, "rowId", "row_id")),
     detailAvailable: camelOrSnake(raw, "detailAvailable", "detail_available") !== false,
     sections,

@@ -1959,8 +1959,8 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/settings/data-reset":
             return self._handle_api_workbench_settings_data_reset(body, headers)
         if method == "GET" and route_path.startswith("/api/workbench/rows/"):
-            row_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_api_workbench_row_detail(row_id)
+            row_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self._handle_api_workbench_row_detail(row_id, month=query.get("month", [None])[0])
         if method == "POST" and route_path == "/api/workbench/exception/preview":
             return self._handle_api_workbench_exception_preview(body)
         if method == "POST" and route_path == "/api/workbench/exception/apply":
@@ -11108,9 +11108,9 @@ class Application:
         if progress is not None:
             progress("parse_oa_attachments", f"OA 附件发票解析完成（{total_months}/{total_months}）。", 90)
 
-    def _handle_api_workbench_row_detail(self, row_id: str) -> Response:
+    def _handle_api_workbench_row_detail(self, row_id: str, *, month: str | None = None) -> Response:
         try:
-            payload = self._get_api_workbench_row_detail_payload(row_id)
+            payload = self._get_api_workbench_row_detail_payload(row_id, month=month)
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
@@ -11227,7 +11227,7 @@ class Application:
             },
         )
 
-    def _get_api_workbench_row_detail_payload(self, row_id: str) -> dict[str, object]:
+    def _get_api_workbench_row_detail_payload(self, row_id: str, *, month: str | None = None) -> dict[str, object]:
         etc_summary_row = self._etc_invoice_summary_row_detail(row_id)
         if etc_summary_row is not None:
             payload = {"row": etc_summary_row}
@@ -11236,13 +11236,15 @@ class Application:
         try:
             payload = {"row": self._live_workbench_service.get_row_detail(row_id)}
         except KeyError:
-            month_hint = self._row_month_scope_from_row_id(row_id)
+            month_hint = str(month).strip() if month not in (None, "") else self._row_month_scope_from_row_id(row_id)
             cached_rows = self._resolve_rows_from_cached_read_models(
                 [row_id],
                 month_hint=month_hint,
             )
             if row_id in cached_rows:
                 payload = {"row": cached_rows[row_id]}
+            elif query_facade_row := self._workbench_row_detail_from_query_facade(row_id, month_hint=month_hint):
+                payload = {"row": query_facade_row}
             elif month_hint is None and self._workbench_query_service._looks_like_oa_row_id(row_id):
                 raise KeyError(row_id)
             elif self._workbench_row_detail_route_fallback_allowed(row_id, month_hint):
@@ -11251,6 +11253,25 @@ class Application:
                 raise KeyError(row_id)
         payload["row"] = self._workbench_override_service.apply_to_row(payload["row"])
         return payload
+
+    def _workbench_row_detail_from_query_facade(
+        self,
+        row_id: str,
+        *,
+        month_hint: str | None,
+    ) -> dict[str, object] | None:
+        facade_factory = getattr(self, "_workbench_query_facade", None)
+        if not callable(facade_factory):
+            return None
+        try:
+            result = facade_factory().row_detail(month_hint, row_id=row_id)
+        except AttributeError:
+            return None
+        if result.status_code != HTTPStatus.OK:
+            return None
+        payload = result.payload if isinstance(result.payload, dict) else {}
+        row = payload.get("row")
+        return row if isinstance(row, dict) else None
 
     def _workbench_row_detail_route_fallback_allowed(
         self,
@@ -19689,7 +19710,35 @@ class Application:
             for row in selected_rows
             if str(row.get("id", "")).strip() and str(row.get("id", "")).strip() not in grouped_row_ids
         ]
-        if ungrouped_selected_rows == "separate":
+        if ungrouped_selected_rows == "individual":
+            for row in ungrouped_rows:
+                row_id = str(row.get("id", "")).strip()
+                if not row_id:
+                    continue
+                group = {
+                    "group_id": f"selected:{row_id}",
+                    "group_type": "selection",
+                    "match_confidence": "low",
+                    "reason": "selected_row",
+                    "oa_rows": [],
+                    "bank_rows": [],
+                    "invoice_rows": [],
+                }
+                preview_row = dict(row)
+                preview_row["case_id"] = ""
+                preview_row["tags"] = []
+                preview_row["oa_bank_relation"] = None
+                preview_row["invoice_relation"] = None
+                preview_row["invoice_bank_relation"] = None
+                row_type = str(preview_row.get("type", ""))
+                if row_type == "oa":
+                    group["oa_rows"].append(preview_row)
+                elif row_type == "bank":
+                    group["bank_rows"].append(preview_row)
+                elif row_type == "invoice":
+                    group["invoice_rows"].append(preview_row)
+                groups.append(group)
+        elif ungrouped_selected_rows == "separate":
             selected_groups: dict[str, dict[str, object]] = {str(group.get("group_id", "")): group for group in groups}
             for row in ungrouped_rows:
                 row_id = str(row.get("id", "")).strip()

@@ -100,11 +100,38 @@ const rowsPayload = {
   filterConfig: [],
 };
 
-function installInputInvoiceUsageFetch() {
+function installInputInvoiceUsageFetch(payload: unknown = rowsPayload) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/input-invoice-usage/rows") {
-      return new Response(JSON.stringify(rowsPayload), {
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.pathname.startsWith("/api/input-invoice-usage/rows/") && url.pathname.endsWith("/relation-details")) {
+      const kind = url.searchParams.get("kind") ?? "oa";
+      const title = kind === "bank" ? "银行流水关联明细" : kind === "invoice" ? "发票关联明细" : "OA关联明细";
+      const sectionTitle = kind === "bank" ? "银行流水 1" : kind === "invoice" ? "发票 1" : "OA 1";
+      const fieldLabel = kind === "bank" ? "对方户名" : kind === "invoice" ? "发票号码" : "申请人";
+      const fieldValue = kind === "bank" ? "云南银行交易对方户名很长很长需要换行显示" : kind === "invoice" ? "SD-INV-2026-0001" : "刘际涛";
+      return new Response(JSON.stringify({
+        rowId: decodeURIComponent(url.pathname.split("/").at(-2) ?? ""),
+        invoiceId: "invoice-001",
+        kind,
+        title,
+        relationCount: 2,
+        hasMultiple: true,
+        sections: [
+          {
+            title: sectionTitle,
+            fields: [
+              { label: fieldLabel, value: fieldValue },
+              { label: "金额", value: "100.00" },
+            ],
+          },
+        ],
+      }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -615,6 +642,157 @@ describe("Input invoice usage page", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "发票详情" })).toBeInTheDocument();
     });
+  });
+
+  test("shows relation totals with +N entry points for multi OA, bank, and invoice relations", async () => {
+    const user = userEvent.setup();
+    const multiRowsPayload = {
+      ...rowsPayload,
+      rows: [
+        {
+          ...rowsPayload.rows[0],
+          id: "usage-row-multi",
+          invoice: {
+            ...rowsPayload.rows[0].invoice,
+            totalWithTax: "100.00",
+            amountWithoutTax: "94.34",
+            taxAmount: "5.66",
+          },
+          oa: {
+            primary: {
+              id: "oa-multi-a",
+              applicant: "刘际涛",
+              applicationType: "支付申请",
+              projectName: "昭通卷烟厂2025年度信息化不可预见维护采购项目",
+              amount: "100.00",
+              detailAvailable: true,
+            },
+            relationCount: 2,
+            hasMultiple: true,
+            detailMode: "list",
+            summaries: [
+              {
+                id: "oa-multi-a",
+                applicant: "刘际涛",
+                applicationType: "支付申请",
+                projectName: "昭通卷烟厂2025年度信息化不可预见维护采购项目",
+                amount: "40.00",
+                detailAvailable: true,
+              },
+              {
+                id: "oa-multi-b",
+                applicant: "张三",
+                applicationType: "支付申请",
+                projectName: "红塔集团2025年度信息化维护采购项目",
+                amount: "60.00",
+                detailAvailable: true,
+              },
+            ],
+          },
+          bank: {
+            primary: {
+              ...rowsPayload.rows[0].bank.primary,
+              id: "bank-multi-a",
+              amount: "100.00",
+            },
+            relationCount: 2,
+            hasMultiple: true,
+            detailMode: "list",
+            summaries: [
+              {
+                ...rowsPayload.rows[0].bank.primary,
+                id: "bank-multi-a",
+                amount: "40.00",
+              },
+              {
+                ...rowsPayload.rows[0].bank.primary,
+                id: "bank-multi-b",
+                amount: "60.00",
+              },
+            ],
+          },
+          invoiceRelations: {
+            primary: {
+              id: "invoice-001",
+              displayNo: "SD-INV-2026-0001",
+              invoiceNo: "0001",
+              invoiceCode: "5300",
+              digitalInvoiceNo: "SD-INV-2026-0001",
+              invoiceDate: "2026-05-02",
+              sellerName: "云南长文本供应商科技发展有限公司第一分公司",
+              sellerTaxNo: "91530100MA6KTEST01",
+              totalWithTax: "40.00",
+              taxableItemName: "维护服务",
+            },
+            totalWithTax: "100.00",
+            relationCount: 2,
+            hasMultiple: true,
+            detailMode: "list",
+            summaries: [
+              {
+                id: "invoice-001",
+                displayNo: "SD-INV-2026-0001",
+                invoiceNo: "0001",
+                invoiceCode: "5300",
+                digitalInvoiceNo: "SD-INV-2026-0001",
+                invoiceDate: "2026-05-02",
+                sellerName: "云南长文本供应商科技发展有限公司第一分公司",
+                sellerTaxNo: "91530100MA6KTEST01",
+                totalWithTax: "40.00",
+                taxableItemName: "维护服务",
+              },
+              {
+                id: "invoice-002",
+                displayNo: "SD-INV-2026-0002",
+                invoiceNo: "0002",
+                invoiceCode: "5300",
+                digitalInvoiceNo: "SD-INV-2026-0002",
+                invoiceDate: "2026-05-03",
+                sellerName: "云南长文本供应商科技发展有限公司第一分公司",
+                sellerTaxNo: "91530100MA6KTEST01",
+                totalWithTax: "60.00",
+                taxableItemName: "维护服务",
+              },
+            ],
+          },
+        },
+      ],
+      pagination: {
+        ...rowsPayload.pagination,
+        total: 1,
+      },
+    };
+    const fetchMock = installInputInvoiceUsageFetch(multiRowsPayload);
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    await within(page).findByRole("table", { name: "进项发票使用情况表" });
+    const firstBodyRow = within(page).getAllByRole("row").slice(2)[0];
+    const firstRowCells = firstBodyRow.querySelectorAll("td");
+    expect(within(firstRowCells[2] as HTMLElement).getByText("100.00")).toBeInTheDocument();
+    expect(within(firstRowCells[5] as HTMLElement).getByText("合计 100.00")).toBeInTheDocument();
+    expect(within(firstRowCells[8] as HTMLElement).getByText("100.00")).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "查看OA 刘际涛 详情" })).not.toBeInTheDocument();
+
+    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联OA 2 条" }));
+    const oaDrawer = await screen.findByRole("dialog", { name: "OA关联明细" });
+    expect(within(oaDrawer).getByText("刘际涛")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看云南银行交易对方户名很长很长需要换行显示关联流水 2 条" }));
+    const bankDrawer = await screen.findByRole("dialog", { name: "银行流水关联明细" });
+    expect(within(bankDrawer).getByText("银行流水 1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
+
+    await user.click(within(page).getByRole("button", { name: "查看发票 SD-INV-2026-0001 关联发票 2 张" }));
+    const invoiceDrawer = await screen.findByRole("dialog", { name: "发票关联明细" });
+    expect(within(invoiceDrawer).getByText("发票 1")).toBeInTheDocument();
+
+    const relationRequests = fetchMock.mock.calls
+      .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+      .filter((url) => url.pathname === "/api/input-invoice-usage/rows/usage-row-multi/relation-details");
+    expect(relationRequests.map((url) => url.searchParams.get("kind"))).toEqual(["oa", "bank", "invoice"]);
   });
 
   test("opens OA reverse workspace with one-step draft creation and submitted history tabs", async () => {

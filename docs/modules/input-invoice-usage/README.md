@@ -17,7 +17,9 @@
 - `web/src/pages/InputInvoiceUsagePage.tsx`
 - `web/src/components/inputInvoiceUsage/*`
 - `web/src/features/inputInvoiceUsage/api.ts`
+- `backend/src/fin_ops_platform/services/input_invoice_usage_service.py`
 - `backend/src/fin_ops_platform/services/input_invoice_usage_oa_reverse_service.py`
+- `backend/src/fin_ops_platform/services/workbench_relation_read_facade.py`
 - `backend/src/fin_ops_platform/services/oa_applicant_credentials.py`
 - `backend/src/fin_ops_platform/app/server.py`
 - `backend/src/fin_ops_platform/services/postgres_repositories/oa_applicant_credentials.py`
@@ -29,6 +31,8 @@
 `以发票反提 OA` 的当前目标是：操作人在 FinOps 中选择目标 OA 申请人与发票，FinOps 后端使用目标 OA 申请人的已配置凭据创建 OA 暂存草稿；OA 提交流程由用户在 OA 系统中手动完成，FinOps 只记录本地确认后的已提交历史。
 
 OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须通过 `WorkbenchRelationCommandService` 写入 `input_invoice_oa_reverse` 并由 `workbench_relation` read model 分发给相关页面。
+
+进项发票使用情况的列表和关系详情是读路径：关系证据来自 `WorkbenchRelationReadFacade` / `DistributedInvoiceRelationContext`，不直接调用 `WorkbenchRelationCommandService`。同一 active relation 中存在多条 OA、银行流水或进项发票时，rows DTO 必须聚合为一条使用情况行，金额展示各自合计，并用 `relationCount`、`detailMode=list`、`summaries` 和 `invoiceRelations` 支持前端显示 `+N` 后打开关系明细。
 
 ## 维护触发器
 

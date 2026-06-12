@@ -375,8 +375,8 @@ class InputInvoiceUsageQueryService:
 
     def row_relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
         normalized_kind = str(kind or "").strip()
-        if normalized_kind not in {"oa", "bank"}:
-            raise InputInvoiceUsageError("invalid_relation_kind", "kind must be oa or bank.")
+        if normalized_kind not in {"oa", "bank", "invoice"}:
+            raise InputInvoiceUsageError("invalid_relation_kind", "kind must be oa, bank or invoice.")
         context = self._query_context()
         row = self._row_by_id(row_id, context=context)
         if row is None:
@@ -385,15 +385,26 @@ class InputInvoiceUsageQueryService:
                 f"Input invoice usage row not found: {row_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
-        relation_payload = row["oa"] if normalized_kind == "oa" else row["bankTransactions"]
+        relation_payload = {
+            "oa": row["oa"],
+            "bank": row["bankTransactions"],
+            "invoice": row["invoiceRelations"],
+        }[normalized_kind]
+        title = {
+            "oa": "OA关联明细",
+            "bank": "银行流水关联明细",
+            "invoice": "发票关联明细",
+        }[normalized_kind]
         return {
             "rowId": row["id"],
             "invoiceId": row["invoiceId"],
             "kind": normalized_kind,
+            "title": title,
             "detailAvailable": relation_payload.get("detailMode") != "none",
             "relationCount": relation_payload.get("relationCount", 0),
             "hasMultiple": relation_payload.get("hasMultiple", False),
             "summaries": relation_payload.get("summaries", []),
+            "sections": _relation_detail_sections(normalized_kind, list(relation_payload.get("summaries") or [])),
             "relations": context.relation_summaries_for_row(row["invoiceId"]),
         }
 
@@ -455,6 +466,7 @@ class InputInvoiceUsageQueryService:
         relations = context.distributed_relations_for_row_ids(invoice_ids)
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
+        invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)
         payment_status = self._payment_status(primary, line_items, relations, oa_payload, bank_payload, context=context)
         row_id = "invoice_usage_row_" + sha1(str(group["identity_key"]).encode("utf-8")).hexdigest()[:16]
         return {
@@ -465,6 +477,7 @@ class InputInvoiceUsageQueryService:
             "paymentStatus": payment_status,
             "oa": oa_payload,
             "bankTransactions": bank_payload,
+            "invoiceRelations": invoice_relation_payload,
         }
 
     def _invoice_summary(self, primary: Invoice, line_items: list[Invoice]) -> dict[str, Any]:
@@ -508,11 +521,12 @@ class InputInvoiceUsageQueryService:
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
+        total_amount = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
         return {
             "primaryBankTransactionId": primary.get("bankTransactionId"),
             "counterpartyName": primary.get("counterpartyName", ""),
             "tradeTime": primary.get("tradeTime", ""),
-            "amount": primary.get("amount", ""),
+            "amount": _money(total_amount) if public_summaries else "",
             "direction": primary.get("direction", ""),
             "directionLabel": primary.get("directionLabel", ""),
             "bankName": primary.get("bankName", ""),
@@ -574,11 +588,14 @@ class InputInvoiceUsageQueryService:
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
+        has_complete_amounts = all(str(summary.get("amount") or "").strip() for summary in public_summaries)
+        total_amount = sum((_decimal(summary.get("amount")) for summary in public_summaries), start=ZERO)
         return {
             "primaryOaId": primary.get("oaId"),
             "applicantName": primary.get("applicantName", ""),
             "applicationType": primary.get("applicationType", ""),
             "projectName": primary.get("projectName", ""),
+            "amount": _money(total_amount) if public_summaries and has_complete_amounts else "",
             "relationCount": len(public_summaries),
             "hasMultiple": len(public_summaries) > 1,
             "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
@@ -608,6 +625,72 @@ class InputInvoiceUsageQueryService:
             "detailAvailable": record is not None,
             "relationCaseId": relation.get("case_id", "") if relation else "",
             "_sort": (completeness, diff, 0, oa_id),
+        }
+
+    def _invoice_relation_payload(
+        self,
+        primary_invoice: Invoice,
+        line_items: list[Invoice],
+        relations: list[dict[str, Any]],
+        *,
+        context: DistributedInvoiceRelationContext,
+    ) -> dict[str, Any]:
+        invoice_map = {
+            invoice.id: invoice
+            for invoice in context.list_invoices(month="all", invoice_type=InvoiceType.INPUT)
+        }
+        summaries = []
+        seen: set[str] = set()
+        for relation in relations:
+            for row_id, row_type in self._typed_relation_rows(relation):
+                invoice = invoice_map.get(row_id)
+                if row_type == "invoice" and invoice is not None and invoice.id not in seen:
+                    seen.add(invoice.id)
+                    summaries.append(self._invoice_relation_summary(invoice, primary_invoice, relation))
+        if not summaries:
+            for invoice in line_items:
+                if invoice.id not in seen:
+                    seen.add(invoice.id)
+                    summaries.append(self._invoice_relation_summary(invoice, primary_invoice, None))
+        summaries.sort(key=lambda item: item["_sort"])
+        public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
+        primary = public_summaries[0] if public_summaries else {}
+        total_with_tax = sum((_decimal(summary.get("totalWithTax")) for summary in public_summaries), start=ZERO)
+        return {
+            "primaryInvoiceId": primary.get("invoiceId"),
+            "digitalInvoiceNo": primary.get("digitalInvoiceNo", ""),
+            "invoiceNo": primary.get("invoiceNo", ""),
+            "invoiceCode": primary.get("invoiceCode", ""),
+            "sellerName": primary.get("sellerName", ""),
+            "sellerTaxNo": primary.get("sellerTaxNo", ""),
+            "invoiceDate": primary.get("invoiceDate", ""),
+            "taxableItemName": primary.get("taxableItemName", ""),
+            "totalWithTax": _money(total_with_tax) if public_summaries else "",
+            "relationCount": len(public_summaries),
+            "hasMultiple": len(public_summaries) > 1,
+            "detailMode": "none" if not public_summaries else "list" if len(public_summaries) > 1 else "single",
+            "summaries": public_summaries,
+        }
+
+    @staticmethod
+    def _invoice_relation_summary(
+        invoice: Invoice,
+        primary_invoice: Invoice,
+        relation: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        same_primary = invoice.id == primary_invoice.id
+        return {
+            "invoiceId": invoice.id,
+            "invoiceNo": invoice.invoice_no or "",
+            "invoiceCode": invoice.invoice_code or "",
+            "digitalInvoiceNo": invoice.digital_invoice_no or "",
+            "invoiceDate": invoice.invoice_date or "",
+            "sellerName": invoice.seller_name or invoice.counterparty.name,
+            "sellerTaxNo": invoice.seller_tax_no or invoice.counterparty.tax_no or "",
+            "totalWithTax": _money(_invoice_total(invoice)),
+            "taxableItemName": invoice.taxable_item_name or "",
+            "relationCaseId": relation.get("case_id", "") if relation else "",
+            "_sort": (0 if same_primary else 1, str(invoice.invoice_date or ""), invoice.id),
         }
 
     def _payment_status(
@@ -947,6 +1030,59 @@ def _bank_account_label(transaction: BankTransaction) -> str:
     bank_name = str(transaction.imported_bank_name or "").strip()
     account_last4 = str(transaction.imported_bank_last4 or str(transaction.account_no or "")[-4:]).strip()
     return " ".join(part for part in [bank_name, account_last4] if part)
+
+
+def _relation_detail_sections(kind: str, summaries: list[Any]) -> list[dict[str, Any]]:
+    typed_summaries = [summary for summary in summaries if isinstance(summary, dict)]
+    if not typed_summaries:
+        return [{"title": "关联明细", "fields": [{"label": "状态", "value": "暂无关联记录"}]}]
+    if kind == "oa":
+        return [
+            {
+                "title": f"OA {index}",
+                "fields": [
+                    {"label": "申请人", "value": summary.get("applicantName")},
+                    {"label": "类型", "value": summary.get("applicationType")},
+                    {"label": "项目名称", "value": summary.get("projectName")},
+                    {"label": "金额", "value": summary.get("amount")},
+                    {"label": "状态", "value": summary.get("status")},
+                    {"label": "关系 case", "value": summary.get("relationCaseId")},
+                ],
+            }
+            for index, summary in enumerate(typed_summaries, start=1)
+        ]
+    if kind == "bank":
+        return [
+            {
+                "title": f"银行流水 {index}",
+                "fields": [
+                    {"label": "对方户名", "value": summary.get("counterpartyName")},
+                    {"label": "交易时间", "value": summary.get("tradeTime")},
+                    {"label": "金额", "value": summary.get("amount")},
+                    {"label": "收支方向", "value": summary.get("directionLabel") or summary.get("direction")},
+                    {"label": "银行账户", "value": summary.get("bankAccount")},
+                    {"label": "摘要", "value": summary.get("summary")},
+                    {"label": "备注", "value": summary.get("remark")},
+                    {"label": "关系 case", "value": summary.get("relationCaseId")},
+                ],
+            }
+            for index, summary in enumerate(typed_summaries, start=1)
+        ]
+    return [
+        {
+            "title": f"发票 {index}",
+            "fields": [
+                {"label": "发票号码", "value": summary.get("digitalInvoiceNo") or summary.get("invoiceNo")},
+                {"label": "销方名称", "value": summary.get("sellerName")},
+                {"label": "销方识别号", "value": summary.get("sellerTaxNo")},
+                {"label": "开票日期", "value": summary.get("invoiceDate")},
+                {"label": "价税合计", "value": summary.get("totalWithTax")},
+                {"label": "货物或应税劳务名称", "value": summary.get("taxableItemName")},
+                {"label": "关系 case", "value": summary.get("relationCaseId")},
+            ],
+        }
+        for index, summary in enumerate(typed_summaries, start=1)
+    ]
 
 
 def _sortable_time(value: str | None) -> float:

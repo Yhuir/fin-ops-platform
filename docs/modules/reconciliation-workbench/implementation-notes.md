@@ -26,6 +26,16 @@
 
 ## 历史记录
 
+## 2026-06-12 - 关联台撤回 preview 分组与后台刷新交互收敛
+
+- 目标：修复撤回 preview “操作后”三栏仍按旧 `case_id` 合并的问题；提交成功后先做本地 optimistic update，后台刷新期间只锁定刚操作 row/group，避免全页面不可操作。
+- 影响范围：`Application._relation_groups`、`WorkbenchWriteFacade._withdraw_relation_preview_payload`、`ReconciliationWorkbenchPage` 写操作 gate/pending row lock、`AppHealthStatusProvider` source mapping、Workbench 前端 mock。
+- 关键决策：withdraw preview after 中没有进入 after relation 的 row 使用逐行独立 group，并清理 preview-only 旧 relation 展示字段；Workbench active generation stale/loading 只提示刷新，不映射为 `oaSync=dirty`，不全局禁用无关写；真正的 OA sync dirty/refreshing、无权限和 App Health blocked 继续阻断写。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 和 `implementation-notes.md`。
+- 测试覆盖：新增 backend facade preview 分组回归；新增前端 workbench stale 放行、OA dirty 阻断、提交后 pending group 局部锁；更新 App Health provider source mapping 断言。
+- 验证命令：`PYTHONPATH=backend/src python -m unittest tests.test_workbench_auth_context_idempotency.WorkbenchAuthContextIdempotencyTests.test_withdraw_preview_after_groups_unrestored_bank_invoice_rows_individually`；`cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx -t "workbench stale refresh does not globally disable selected group actions|OA dirty sync still disables selected group actions"`；`cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx -t "confirm link locks only the operated group while the background refresh is pending"`；`cd web && npm test -- --run src/test/AppHealthStatusContext.test.tsx -t "reports yellow when the backend says the workbench read model is stale"`。
+- 未测风险：尚未做真实浏览器截图/生产数据 smoke；后续如对所有 action 都加入更细粒度 row-scope stale 判断，需要继续补跨 group 并发交互测试。
+
 ## 2026-06-12 - 关联台 group 级统一撤回/拆分闭环
 
 - 目标：已配对区和未配对区点击任意 row 都带入完整 group；统一撤回按钮先打开三栏 preview，再由后端判定 `withdraw_relation` 或 `split_candidate`。

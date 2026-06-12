@@ -4366,6 +4366,61 @@ class PostgresReadModelRepository:
         result["read_model_version"] = active_generation_id
         return result
 
+    def get_workbench_row_detail(self, *, scope_key: str, row_id: str) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        normalized_row_id = text(row_id)
+        if not normalized_row_id:
+            return None
+        if normalized_scope_key == "all":
+            scope_clause = "true"
+            scope_params: tuple[Any, ...] = ()
+        else:
+            scope_clause = "r.scope_key in (%s, 'all')"
+            scope_params = (normalized_scope_key,)
+        row = self._connection.fetch_one(
+            f"""
+            select
+              r.row_id,
+              r.source_kind,
+              r.status,
+              r.payload,
+              r.raw_payload,
+              r.scope_key,
+              r.generation_id,
+              gen.source_versions
+            from read_model.workbench_rows r
+            join read_model.workbench_generations gen
+              on gen.generation_id = r.generation_id
+             and gen.scope_key = r.scope_key
+             and gen.status = 'active'
+            where r.row_id = %s
+              and {scope_clause}
+            order by
+              case
+                when r.scope_key = %s then 0
+                when r.scope_key = 'all' then 1
+                else 2
+              end,
+              r.updated_at desc nulls last
+            limit 1
+            """,
+            (normalized_row_id, *scope_params, normalized_scope_key),
+        )
+        if not isinstance(row, dict):
+            return None
+        payload = _read_model_payload(row)
+        if not isinstance(payload, dict):
+            payload = {"id": normalized_row_id, "type": text(row.get("source_kind")) or "unknown"}
+        resolved_scope_key = text(row.get("scope_key")) or normalized_scope_key
+        return {
+            "row": payload,
+            "scope_key": resolved_scope_key,
+            "source_versions": row.get("source_versions"),
+            "active_generation_id": row.get("generation_id"),
+            "read_model_version": row.get("generation_id"),
+            "read_model_status": self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key),
+        }
+
     def _workbench_read_model_status_for_groups_page(self, *, scope_key: str) -> str:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         scope_clause = ""

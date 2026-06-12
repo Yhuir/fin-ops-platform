@@ -28,6 +28,7 @@ type MockApiOptions = {
   sessionDisplayName?: string;
   actionDelayMs?: number;
   workbenchLoadDelayMs?: number;
+  workbenchBackgroundLoadDelayMs?: number;
   workbenchPrimaryDelayMs?: number;
   workbenchIgnoredDelayMs?: number;
   workbenchSettingsDelayMs?: number;
@@ -2903,6 +2904,10 @@ function buildRelationPreviewGroups(
 }
 
 function buildWithdrawAfterPreviewGroups(rows: RawWorkbenchRow[]) {
+  const hasOaRow = rows.some((row) => row.type === "oa");
+  if (!hasOaRow) {
+    return rows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "open", "together"));
+  }
   const restoredRows = rows.filter((row) => row.type !== "bank");
   const restoredRowIds = new Set(restoredRows.map((row) => String(row.id)));
   const ungroupedRows = rows.filter((row) => !restoredRowIds.has(String(row.id)));
@@ -4407,6 +4412,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailAutoTagRulesSaved = false;
   let bankDetailPostSaveAccountRequestCount = 0;
   let bankDetailPostSaveTransactionRequestCount = 0;
+  let workbenchWriteActionCount = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -6499,6 +6505,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/workbench/actions/confirm-link": ({ jsonBody }) => {
+      workbenchWriteActionCount += 1;
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
       const month = String(jsonBody?.month ?? "");
       const touchedMonths = new Set(
@@ -6538,6 +6545,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/workbench/actions/withdraw-link": ({ jsonBody }) => {
+      workbenchWriteActionCount += 1;
       const rowIds = Array.isArray(jsonBody?.row_ids) ? (jsonBody.row_ids as string[]) : [];
       const month = String(jsonBody?.month ?? "");
       const touchedMonths = new Set(
@@ -7442,24 +7450,28 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
 
     const response = await handler({ url, init, jsonBody, formData });
+    const isWorkbenchReadPath =
+      url.pathname === "/api/workbench"
+      || url.pathname === "/api/workbench/summary"
+      || url.pathname === "/api/workbench/groups"
+      || url.pathname === "/api/workbench/ignored"
+      || url.pathname === "/api/workbench/settings";
     const workbenchSpecificDelay =
       (url.pathname === "/api/workbench" || url.pathname === "/api/workbench/summary"
         ? options.workbenchPrimaryDelayMs
         : undefined)
       ?? (url.pathname === "/api/workbench/ignored" ? options.workbenchIgnoredDelayMs : undefined)
       ?? (url.pathname === "/api/workbench/settings" ? options.workbenchSettingsDelayMs : undefined);
+    const workbenchDelay =
+      options.workbenchBackgroundLoadDelayMs && workbenchWriteActionCount > 0 && isWorkbenchReadPath
+        ? options.workbenchBackgroundLoadDelayMs
+        : workbenchSpecificDelay;
 
-    if (workbenchSpecificDelay) {
-      await new Promise((resolve) => window.setTimeout(resolve, workbenchSpecificDelay));
+    if (workbenchDelay) {
+      await new Promise((resolve) => window.setTimeout(resolve, workbenchDelay));
     } else if (
       options.workbenchLoadDelayMs
-      && (
-        url.pathname === "/api/workbench"
-        || url.pathname === "/api/workbench/summary"
-        || url.pathname === "/api/workbench/groups"
-        || url.pathname === "/api/workbench/ignored"
-        || url.pathname === "/api/workbench/settings"
-      )
+      && isWorkbenchReadPath
     ) {
       await new Promise((resolve) => window.setTimeout(resolve, options.workbenchLoadDelayMs));
     }

@@ -31,7 +31,7 @@ export type InputInvoiceUsageDetailTarget = {
   kind: "invoice" | "bank" | "oa" | "relationList";
   id: string;
   rowId?: string;
-  relationKind?: "oa" | "bank";
+  relationKind?: "oa" | "bank" | "invoice";
 };
 
 export type InputInvoiceUsageInvoiceSummary = {
@@ -62,6 +62,7 @@ export type InputInvoiceUsageOaSummary = {
   applicant: string;
   applicationType: string;
   projectName: string;
+  amount: string;
   detailAvailable: boolean;
 };
 
@@ -88,12 +89,30 @@ export type InputInvoiceUsageRelationSummary<T> = {
   summaries: T[];
 };
 
+export type InputInvoiceUsageInvoiceRelationSummary = {
+  id: string;
+  displayNo: string;
+  invoiceNo: string;
+  invoiceCode: string;
+  digitalInvoiceNo: string;
+  invoiceDate: string;
+  sellerName: string;
+  sellerTaxNo: string;
+  totalWithTax: string;
+  taxableItemName: string;
+};
+
+export type InputInvoiceUsageInvoiceRelations = InputInvoiceUsageRelationSummary<InputInvoiceUsageInvoiceRelationSummary> & {
+  totalWithTax: string;
+};
+
 export type InputInvoiceUsageRow = {
   id: string;
   invoice: InputInvoiceUsageInvoiceSummary;
   paymentStatus: InputInvoiceUsagePaymentStatus;
   oa: InputInvoiceUsageRelationSummary<InputInvoiceUsageOaSummary>;
   bank: InputInvoiceUsageRelationSummary<InputInvoiceUsageBankSummary>;
+  invoiceRelations: InputInvoiceUsageInvoiceRelations;
 };
 
 export type InputInvoiceUsageRowsResponse = {

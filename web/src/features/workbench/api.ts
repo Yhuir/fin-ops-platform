@@ -2990,11 +2990,24 @@ export async function deleteWorkbenchSettingsProject(projectId: string): Promise
   return mapWorkbenchSettings(payload.settings);
 }
 
-export async function fetchWorkbenchRowDetail(rowId: string, signal?: AbortSignal): Promise<WorkbenchRecord> {
-  const payload = await requestJson<{ row: ApiWorkbenchRow }>(`/api/workbench/rows/${rowId}`, {
+export async function fetchWorkbenchRowDetail(
+  rowId: string,
+  options: AbortSignal | { month?: string; signal?: AbortSignal } = {},
+): Promise<WorkbenchRecord> {
+  const signal = options instanceof AbortSignal ? options : options.signal;
+  const month = options instanceof AbortSignal ? "" : options.month?.trim() ?? "";
+  const params = new URLSearchParams();
+  if (month) {
+    params.set("month", month);
+  }
+  const query = params.toString();
+  const payload = await requestJson<{ row: ApiWorkbenchRow }>(
+    `/api/workbench/rows/${encodeURIComponent(rowId)}${query ? `?${query}` : ""}`,
+    {
     method: "GET",
     signal,
-  });
+    },
+  );
   return mapRow(payload.row);
 }
 

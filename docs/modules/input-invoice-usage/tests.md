@@ -24,7 +24,7 @@
 
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| rows/filter/detail/relation API contract | P0 | `tests/test_input_invoice_usage_api.py` | covered | 覆盖筛选、排序、分页、filter-options、invoice/bank/OA/detail/relation routes。 |
+| rows/filter/detail/relation API contract | P0 | `tests/test_input_invoice_usage_api.py` | covered | 覆盖筛选、排序、分页、filter-options、invoice/bank/OA/detail/relation routes；同一 active relation 多 OA/流水/发票必须聚合合计并返回 relation summaries。 |
 | all scope source_versions 聚合 | P0 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_read_model_freshness.py` | covered | 月份 relation 嵌套版本不同仍可返回 fresh all scope；缺失基础版本仍 refreshing。 |
 | read model miss/stale enqueue | P0 | `tests/test_invoice_usage_collection_sql_runtime.py` | covered | API miss/source version stale 入队刷新，不 live scan 伪 fresh。 |
 | export preview/download | P1 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` | covered | 当前筛选导出、read model refreshing、文件下载。 |
@@ -36,7 +36,7 @@
 | 已提交/未提交确认 | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered | `submitted_confirmed` 历史、`not_submitted` 回到可创建状态并可重新创建。 |
 | 已提交历史不暴露内部字段 | P0 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered | 历史只展示申请人、时间、金额、发票摘要，不展示 batch/draft/preview/internal status。 |
 | 设置页凭据 UI | P1 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | covered | admin 可维护、非 admin 隐藏、密码保存后清空、普通 settings save 不含密码。 |
-| 进项发票页面 UI | P1 | `web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered | loading/empty/refreshing、table、filter/sort、drawer、待处理/已提交 tab、一键草稿和确认弹窗。 |
+| 进项发票页面 UI | P1 | `web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered | loading/empty/refreshing、table、filter/sort、drawer、多关系 `+N`、待处理/已提交 tab、一键草稿和确认弹窗。 |
 | 真实 OA 登录/草稿联调 | P2 | 发布前手动或 staging smoke | documented-risk | 需要真实 OA base URL、公钥、账号密码和浏览器人工提交路径。 |
 
 ## 七类测试适用性
@@ -61,6 +61,7 @@
 | 2026-06-10 | `未提交 OA` 后不能重新创建草稿，或被误记为已提交历史。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |
 | 2026-06-10 | 已提交历史展示内部 batch/draft/preview/status 字段。 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |
 | 2026-06-12 | OA reverse evidence detected 直接写 pair service，导致 relation 事实源绕过 command service/read model freshness。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered |
+| 2026-06-12 | 同一 active relation 下多条 OA、流水或发票在进项发票使用情况列表中只显示 primary，未展示合计和 `+N` 详情入口。 | `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_rows_and_relation_details_return_multi_relation_totals_for_oa_bank_and_invoice`、`web/src/test/InputInvoiceUsagePage.test.tsx::shows relation totals with +N entry points for multi OA, bank, and invoice relations` | covered |
 | 长期 | read model stale/missing 时页面显示假空态。 | `tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` | covered |
 
 ## 关键 smoke flows

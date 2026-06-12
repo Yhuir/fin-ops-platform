@@ -38,11 +38,11 @@
 | UI 状态 | 来源 | 语义 |
 | --- | --- | --- |
 | loading | 初次请求 `/api/workbench*`、分页/详情加载 | 显示加载，不保留旧页面 snapshot 作为事实。 |
-| refreshing | `read_model_status=refreshing`、OA sync refreshing、dirty scope processing | 可展示旧 active generation 和刷新提示，但写操作可能被 health/freshness gate 禁用。 |
-| stale | `read_model_status=stale`、failed/dirty scope、source mismatch | 页面必须提示陈旧；不能把空 rows 解释成真实业务结论。 |
+| refreshing | `read_model_status=refreshing`、OA sync refreshing、dirty scope processing | 可展示旧 active generation 和刷新提示；OA sync refreshing 需要阻断写入，Workbench active generation 后台刷新不全局禁用无关 group。 |
+| stale | `read_model_status=stale`、failed/dirty scope、source mismatch | 页面必须提示陈旧；不能把空 rows 解释成真实业务结论。Workbench active generation stale 不等同于 OA dirty，不应把页面所有写操作全局禁用。 |
 | error | API/action/read model unavailable 或 failed | 展示业务错误；不暴露底层 SQL 细节。 |
 | empty | fresh active generation 中目标 zone/group 为空 | 只有 fresh 后才能认为 open/paired 为空。 |
-| permission disabled/hidden | session 权限、App Health mutation gate、workbench freshness gate | 无写权限或全局 blocked 时禁用确认/撤回，仍可只读查看。 |
+| permission disabled/hidden | session 权限、App Health mutation gate、OA sync write gate、局部 pending row lock | 无写权限、全局 blocked 或 OA sync dirty/refreshing 时禁用确认/撤回；提交成功后只锁定刚操作 row/group，仍可浏览和操作无关 group。 |
 
 前端 domain event：
 
@@ -78,6 +78,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-12 | 关联台撤回 preview 操作后未恢复 row 逐行独立展示，并拆分 Workbench stale 与 OA dirty 写阻断 | `Application._relation_groups`、`WorkbenchWriteFacade` withdraw preview、App Health source mapping、前端 optimistic update/pending row lock | `tests/test_workbench_auth_context_idempotency.py`；`web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/AppHealthStatusContext.test.tsx` |
 | 2026-06-11 | 补齐测试闭环状态机 | open/paired/exception/dirty/active generation/UI/read model 状态边界 | 待本轮 Workbench 验证 |
 | 2026-06-11 | active pair relation 增加 row id 去重和跨 active case 复用防线，修复 paired 详情重复 OA 展示 | WorkbenchPairRelationService、server relation grouping、integrity repair、pending invoice attach relation 合并 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py`、`tests/test_pending_invoice_service.py` |
 | 2026-06-11 | 外部往来 bank-only 手动闭环移除 paired 例外，只有 OA + 银行 + 发票三栏完整才进入 paired | WorkbenchCandidateGroupingService、server relation display payload、关联台本地 optimistic update | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx` |

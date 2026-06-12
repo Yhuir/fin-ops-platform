@@ -18,7 +18,9 @@ afterEach(() => {
 
 async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("link", { name: "设置" }));
-  return await screen.findByTestId("settings-page");
+  const settingsPage = await screen.findByTestId("settings-page");
+  await within(settingsPage).findByRole("tree", { name: "设置分类" });
+  return settingsPage;
 }
 
 function expectRelationPreviewSummary(section: HTMLElement) {
@@ -200,7 +202,30 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(dialog).getByText("支出")).toHaveClass("direction-tag");
     expect(oaRow).toHaveAttribute("data-row-state", "related");
     expect(bankRow).toHaveAttribute("data-row-state", "selected");
-    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/bk-p-202603-001", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/bk-p-202603-001?month=all", expect.any(Object));
+  });
+
+  test("OA applicant column keeps the detail icon on the first line and time chip on the second line", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderWorkbenchPage();
+
+    const oaRow = await screen.findByRole("row", {
+      name: /赵华.*2026-03-25 11:05/,
+    });
+    const detailButton = within(oaRow).getByRole("button", { name: "查看OA 赵华 详情" });
+    const applicantCell = detailButton.closest("[role='cell']") as HTMLElement;
+
+    expect(detailButton).toHaveClass("row-action-btn-icon");
+    expect(within(oaRow).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
+    expect(within(applicantCell).getByText("2026-03-25")).toHaveClass("inline-meta-tag-datetime-date");
+    expect(within(applicantCell).getByText("11:05")).toHaveClass("inline-meta-tag-datetime-time");
+
+    await user.click(detailButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "详情弹窗" });
+    expect(within(dialog).getByText("OA详情")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/oa-p-202603-001?month=all", expect.any(Object));
   });
 
   test("modal can be closed after opening from row action", async () => {
@@ -749,6 +774,36 @@ describe("Workbench row selection and detail modal", () => {
     ).toBeInTheDocument();
   });
 
+  test("confirm link locks only the operated group while the background refresh is pending", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 1000 });
+    renderWorkbenchPage();
+
+    const openBankRow = await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    const openInvoiceRow = await screen.findByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+
+    await user.click(openBankRow);
+    await user.click(openInvoiceRow);
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
+
+    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确定" }));
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const operatedPairedRow = within(pairedZone).getByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    await user.click(operatedPairedRow);
+
+    expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
+  });
+
   test("initial workbench rows render before slow ignored and settings requests finish", async () => {
     installMockApiFetch({
       workbenchPrimaryDelayMs: 20,
@@ -948,6 +1003,82 @@ describe("Workbench row selection and detail modal", () => {
     expect(confirmButton).toBeEnabled();
     expect(exceptionButton).toBeEnabled();
     expect(withdrawButton).toBeEnabled();
+  });
+
+  test("workbench stale refresh does not globally disable selected group actions", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      appHealth: {
+        status: "ok",
+        generated_at: "2026-05-06T00:00:00+08:00",
+        session: { status: "authenticated" },
+        oa_sync: {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+        },
+        workbench_read_model: {
+          status: "stale",
+          dirty_scopes: ["2026-04"],
+          stale_scopes: ["2026-04"],
+          rebuilding_scopes: ["2026-04"],
+        },
+        background_jobs: {
+          active: 0,
+          queued: 0,
+          running: 0,
+          attention: 0,
+        },
+        dependencies: {},
+      },
+    });
+    renderAppAt("/");
+
+    const openZone = await screen.findByTestId("zone-open");
+    expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
+    await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+
+    expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
+    expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeEnabled();
+    expect(within(openZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
+  });
+
+  test("OA dirty sync still disables selected group actions", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      appHealth: {
+        status: "ok",
+        generated_at: "2026-05-06T00:00:00+08:00",
+        session: { status: "authenticated" },
+        oa_sync: {
+          status: "synced",
+          message: "OA 有待处理变更",
+          dirty_scopes: ["2026-04"],
+        },
+        workbench_read_model: {
+          status: "ready",
+          dirty_scopes: [],
+          stale_scopes: [],
+          rebuilding_scopes: [],
+        },
+        background_jobs: {
+          active: 0,
+          queued: 0,
+          running: 0,
+          attention: 0,
+        },
+        dependencies: {},
+      },
+    });
+    renderAppAt("/");
+
+    const openZone = await screen.findByTestId("zone-open");
+    expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
+    await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+
+    expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
+    expect(within(openZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
   });
 
   test("workbench settings can manage allowed app accounts", async () => {

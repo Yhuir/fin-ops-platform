@@ -3905,6 +3905,53 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
         self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-stale"})
 
+    def test_row_detail_sql_runtime_uses_query_facade_for_opaque_oa_after_live_and_cache_miss(self) -> None:
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = SimpleNamespace(storage_backend="postgres")
+        app._etc_invoice_summary_row_detail = lambda _row_id: None
+        app._live_workbench_service = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
+        )
+        app._row_month_scope_from_row_id = lambda _row_id: None
+        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
+        app._workbench_query_service = SimpleNamespace(
+            _looks_like_oa_row_id=lambda row_id: str(row_id).startswith("oa-"),
+            _records_by_id={},
+        )
+        app._workbench_api_routes = SimpleNamespace(
+            get_row_detail=lambda row_id: (_ for _ in ()).throw(
+                AssertionError(f"opaque OA detail must not fallback to legacy route: {row_id}")
+            )
+        )
+        app._workbench_override_service = SimpleNamespace(apply_to_row=lambda row: row)
+        facade_calls: list[tuple[str | None, str]] = []
+
+        class Facade:
+            def row_detail(self, month: str | None, *, row_id: str):
+                facade_calls.append((month, row_id))
+                return SimpleNamespace(
+                    status_code=HTTPStatus.OK,
+                    payload={
+                        "row": {
+                            "id": row_id,
+                            "type": "oa",
+                            "applicant": "刘际涛",
+                            "detail_fields": {"OA单号": row_id},
+                        },
+                        "read_model_status": "fresh",
+                    },
+                )
+
+        app._workbench_query_facade = lambda: Facade()
+
+        response = app._handle_api_workbench_row_detail("oa-pay-1976")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.OK))
+        self.assertEqual(payload["row"]["id"], "oa-pay-1976")
+        self.assertEqual(facade_calls, [(None, "oa-pay-1976")])
+
     def test_repository_persists_workbench_rows_alongside_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
@@ -3950,6 +3997,47 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             params for statement, params in connection.executed if "insert into read_model.workbench_group_rows" in statement
         )
         self.assertIn("1000.00", group_row_write[14])
+
+    def test_repository_reads_workbench_row_detail_from_active_generation_rows(self) -> None:
+        class RowDetailConnection(WorkbenchWriteConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from read_model.workbench_rows r" in normalized and "join read_model.workbench_generations gen" in normalized:
+                    return {
+                        "row_id": "oa-pay-1976",
+                        "source_kind": "oa",
+                        "status": "paired",
+                        "scope_key": "2026-01",
+                        "generation_id": "gen-2026-01-active",
+                        "source_versions": {"builder": "workbench-sql:v1"},
+                        "payload": {
+                            "id": "oa-pay-1976",
+                            "type": "oa",
+                            "applicant": "刘际涛",
+                            "detail_fields": {"OA单号": "oa-pay-1976"},
+                        },
+                    }
+                return None
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                if "from job.read_model_dirty_scopes" in self.fetch_all_calls[-1][0]:
+                    return []
+                return []
+
+        connection = RowDetailConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_row_detail(scope_key="2026-01", row_id="oa-pay-1976")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["row"]["id"], "oa-pay-1976")
+        self.assertEqual(payload["scope_key"], "2026-01")
+        self.assertEqual(payload["source_versions"], {"builder": "workbench-sql:v1"})
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertTrue(any("from read_model.workbench_rows r" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_repository_does_not_delete_generation_rows_when_scope_snapshot_is_absent(self) -> None:
         connection = WorkbenchWriteConnection()
