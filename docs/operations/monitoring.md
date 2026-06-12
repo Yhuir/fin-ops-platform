@@ -173,6 +173,35 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sync_slo_baseline --jso
 
 该工具不采集登录态页面 API p95，因为当前 API 性能 recorder 是进程内窗口且 dashboard 接口需要认证。页面首包 p95 必须用登录态 HTTP/browser 采样另行证明，不能用只读 DB baseline 代替。
 
+## 登录态 HTTP SLO 采样
+
+页面首包和关键读 API p95 使用只读 HTTP probe 采集：
+
+```bash
+export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --page-path /fin-ops/ \
+  --iterations 20 \
+  --warmup 2 \
+  --output /tmp/finops-http-slo-$(date +%Y%m%d%H%M%S).json
+```
+
+默认 probe 覆盖：
+
+- `/fin-ops/` 页面 shell 首包。
+- `/api/session/me`、`/api/app-health`、`/api/operations/app-health-dashboard`。
+- 工作台 summary/groups、银行明细、待找发票、进项发票使用、OA 待付款核对、销项收款、税金抵扣、成本统计和搜索首屏 API。
+
+判定原则：
+
+- 默认目标是每个 probe p95 `< 1000ms`；可用 `--target-ms` 调整单次阶段验收阈值。
+- read model API 可接受 `200` 或 `202`，但必须记录响应中的 `read_model_status`、`cache_status` 和 `refresh_enqueued`，用于区分 fresh snapshot、refreshing 和后台追赶。
+- 工具默认要求真实认证；没有 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`、`FIN_OPS_HTTP_SLO_BEARER_TOKEN`、`FIN_OPS_HTTP_SLO_COOKIE` 或 CLI auth 参数时返回 `auth_missing`，不能作为生产页面 SLO 证据。
+- `--allow-unauthenticated` 只允许做 public page shell smoke，不能用于最终“登录态页面/API p95”验收。
+- 输出不包含 token、cookie 或 Authorization header；采样结果可以进入阶段报告和事故复盘。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：

@@ -1080,6 +1080,57 @@ Stage 20 结论：
 - 这仍不是“几秒内全部同步”最终验收：read model 历史 refresh p95 仍含重型构建样本，页面首包/API p95
   仍需登录态 HTTP 采样。
 
+## Stage 21：补齐登录态 HTTP SLO 采样入口
+
+Stage 20 之后的主要证据缺口不是 App Status，而是用户真实页面体验：页面 shell 首包、关键 read model API 首包、
+以及这些 API 返回时的 `read_model_status` / `cache_status`。只看 `/health` 或数据库 baseline 不能证明用户页面
+已在几秒内拿到 fresh snapshot。
+
+Stage 21 新增只读采样工具：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --page-path /fin-ops/ \
+  --iterations 20 \
+  --warmup 2 \
+  --output /tmp/finops-http-slo-$(date +%Y%m%d%H%M%S).json
+```
+
+工具默认要求真实登录态凭证：
+
+- `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`
+- `FIN_OPS_HTTP_SLO_BEARER_TOKEN`
+- `FIN_OPS_HTTP_SLO_COOKIE`
+
+没有真实凭证时返回 `auth_missing`，不能生成最终生产 SLO 证据；`--allow-unauthenticated` 仅用于 public page
+shell smoke。输出不会包含 token、cookie 或 Authorization header。
+
+默认采样覆盖 `/fin-ops/` 页面 shell，以及 session、App Health、Operations Dashboard、workbench、bank details、
+pending invoices、input invoice usage、OA pending payments、output invoice collections、tax offset、cost statistics
+和 search 首屏 API。默认目标是每个 probe p95 `< 1000ms`，read model API 同时记录响应中的 freshness/cache
+元数据，避免把“假同步”当作通过。
+
+本地验证：
+
+- `PYTHONPATH=backend/src:tests python3 -m unittest tests.test_http_slo_probe -v`
+- `bash scripts/verify.sh backend`：2838 tests pass，25 skipped
+
+生产 smoke：
+
+- public page shell only：
+  `PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe --base-url https://www.yn-sourcing.com --page-path /fin-ops/ --replace-default-probes --iterations 5 --warmup 1 --allow-unauthenticated`
+- 结果文件：`/tmp/finops-http-slo-stage21-public-shell-20260613023043.json`
+- 5 个 measured samples，status `200`，p95 `108.325ms`。
+- 不带 token 采集登录态 API 时返回 exit code `2` / `auth_missing`，符合“缺真实登录态不生成生产 SLO 证据”的保护。
+
+Stage 21 结论：
+
+- 现在具备可重复、不会泄露凭证的登录态 HTTP SLO 采样入口。
+- 尚未形成最终生产 SLO 证据：仍需要在真实管理员登录态下采集 20+ 次样本，并把结果与 runtime freshness
+  baseline 放在同一阶段报告中。
+
 ## 当前闭环状态
 
 已闭环：
@@ -1098,12 +1149,13 @@ Stage 20 结论：
 - 状态页 read model health 热路径不再 live recompute `workbench_generation_consistency` 全量视图。
 - 状态页 read model duration metric 热路径不再全局排序 `job.outbox_events` 历史样本，clean mean 约 `49ms`，
   `dashboard_read_model_metrics()` warm run 约 `63-69ms`。
+- 登录态 HTTP SLO probe 已具备，可重复采集页面 shell 和关键读 API p95，并记录 freshness/cache 元数据。
 
 尚未完成“几秒内全部同步”性能 SLO：
 
 - `read_model_refresh_duration_ms.p95` 仍约 17.76s；Stage 16 近 1 小时样本中 `workbench`、`invoice_lifecycle`、
   `input_invoice_usage` p95 仍约 8-9s。
-- 页面首包/API p95 仍未采集；Stage 11 已完成 relation-details SQL read model 单行读取优化，但仍需登录态 HTTP 样本验证端到端 p95。
+- 生产真实登录态页面首包/API p95 仍未采集；Stage 21 已补工具，但需要真实管理员 token/cookie 才能生成最终证据。
 - Stage 20 clean top SQL 显示状态页剩余热查询主要是 bounded duration metric、dirty scope group by、
   outbox percentile 和 outbox summary，已经不再出现历史全局 window sort。
 - Redis fresh-cache 还未启用；Prometheus/Grafana 或 OpenTelemetry 长期 SLO 还未替换现有进程内窗口。
