@@ -709,7 +709,11 @@ class WorkbenchRelationCommandService:
             raise WorkbenchRelationCommandError(
                 "workbench_relation_preview_conflict",
                 "Withdraw relation preview is stale.",
-                payload={"reason": "stale_preview_id", "current_preview_id": current_preview_id},
+                payload={
+                    "reason": "stale_preview_id",
+                    "preview_id": resolved_preview_id,
+                    "current_preview_id": current_preview_id,
+                },
             )
         if isinstance(expected_versions, dict) and expected_versions:
             current_expected = dict(preview.get("submit_expected_versions") or {})
@@ -719,6 +723,7 @@ class WorkbenchRelationCommandService:
                     "Withdraw relation expected_versions do not match the current relation state.",
                     payload={
                         "reason": "stale_relation_identity",
+                        "expected_versions": dict(expected_versions),
                         "current_expected_versions": current_expected,
                     },
                 )

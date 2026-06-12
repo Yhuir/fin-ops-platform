@@ -623,11 +623,12 @@ class WorkbenchWriteFacade:
 
     @staticmethod
     def _relation_command_error_result(exc: WorkbenchRelationCommandError) -> WorkbenchWriteResult:
+        if exc.error_code == "workbench_relation_preview_conflict":
+            return WorkbenchWriteFacade._relation_preview_conflict_result(exc)
         conflict_errors = {
             "workbench_relation_active_row_conflict",
             "workbench_relation_idempotency_conflict",
             "workbench_relation_multiple_groups_selected",
-            "workbench_relation_preview_conflict",
             "workbench_relation_read_model_not_fresh",
         }
         unavailable_errors = {
@@ -643,6 +644,33 @@ class WorkbenchWriteFacade:
         payload: dict[str, object] = {"error": exc.error_code, "message": exc.message}
         payload.update(exc.payload)
         return WorkbenchWriteResult(status_code, payload)
+
+    @staticmethod
+    def _relation_preview_conflict_result(exc: WorkbenchRelationCommandError) -> WorkbenchWriteResult:
+        reason = str(exc.payload.get("reason") or "stale_relation_identity").strip() or "stale_relation_identity"
+        expected: dict[str, object] = {}
+        actual: dict[str, object] = {}
+        expected_versions = exc.payload.get("expected_versions")
+        current_expected_versions = exc.payload.get("current_expected_versions")
+        if isinstance(expected_versions, dict):
+            expected.update(expected_versions)
+        if isinstance(current_expected_versions, dict):
+            actual.update(current_expected_versions)
+        preview_id = str(exc.payload.get("preview_id") or "").strip()
+        current_preview_id = str(exc.payload.get("current_preview_id") or "").strip()
+        if preview_id:
+            expected["preview_id"] = preview_id
+        if current_preview_id:
+            actual["preview_id"] = current_preview_id
+        conflict = WorkbenchWriteConflict(
+            action="withdraw_link",
+            reason=reason,
+            expected=expected,
+            actual=actual,
+            message=f"409 workbench_write_conflict: {reason}",
+        )
+        response = conflict.to_response_payload()
+        return WorkbenchWriteResult(HTTPStatus.CONFLICT, dict(response["payload"]))
 
     def cancel_link(
         self,
