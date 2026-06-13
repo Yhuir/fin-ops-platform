@@ -168,14 +168,7 @@ def audit_write_operation_slo(
         lookback_hours=lookback_hours,
         limit=limit,
     )
-    results = [
-        _evaluate_expectation(
-            expectation,
-            rows,
-            target_ms=target_ms,
-        )
-        for expectation in expectations
-    ]
+    results = evaluate_operation_expectations(rows, expectations=expectations, target_ms=target_ms)
     failures = [result for result in results if result.status != "pass"]
     missing = [result for result in results if result.status == "missing"]
     return {
@@ -192,6 +185,74 @@ def audit_write_operation_slo(
         "operations": sorted({expectation.operation for expectation in expectations}),
         "results": [asdict(result) for result in results],
     }
+
+
+def evaluate_operation_expectations(
+    rows: Sequence[dict[str, Any]],
+    *,
+    expectations: Sequence[OperationExpectation],
+    target_ms: float,
+) -> list[OperationExpectationResult]:
+    return [
+        _evaluate_expectation(
+            expectation,
+            rows,
+            target_ms=target_ms,
+        )
+        for expectation in expectations
+    ]
+
+
+def selected_expectations_for_operations(operations: Sequence[str] | None) -> list[OperationExpectation]:
+    return _selected_expectations(operations)
+
+
+def recent_read_model_refresh_events_since(
+    connection: Any,
+    *,
+    tenant_id: str,
+    started_at: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows = connection.fetch_all(
+        """
+        select
+          e.id::text as event_id,
+          e.tenant_id,
+          e.event_type,
+          e.scope_type,
+          e.scope_key,
+          coalesce(e.payload->>'reason', e.raw_payload->>'reason', d.reason) as reason,
+          coalesce(
+            e.payload->>'action_name',
+            e.payload->'metadata'->>'action_name',
+            e.raw_payload->>'action_name',
+            e.raw_payload->'metadata'->>'action_name'
+          ) as action_name,
+          e.status as event_status,
+          e.source_version,
+          e.created_at,
+          e.processed_at,
+          e.updated_at,
+          e.last_error as event_last_error,
+          e.raw_payload,
+          d.status as dirty_status,
+          d.last_error as dirty_last_error
+        from job.outbox_events e
+        left join job.read_model_dirty_scopes d
+          on d.tenant_id = e.tenant_id
+         and d.scope_type = e.scope_type
+         and d.scope_key = e.scope_key
+         and d.source_version = e.source_version
+        where e.tenant_id = %s
+          and e.event_type like '%%.read_model.refresh'
+          and e.created_at >= %s
+        order by e.created_at desc, e.id desc
+        limit %s
+        """,
+        (tenant_id, started_at, limit),
+    )
+    return [dict(row) for row in rows]
 
 
 def _selected_expectations(operations: Sequence[str] | None) -> list[OperationExpectation]:

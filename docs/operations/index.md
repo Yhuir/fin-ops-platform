@@ -14,6 +14,7 @@
 - `runtime-sync-stage3-2026-06-13.md`：2026-06-13 Stage 3 dispatcher 0.5s 调度、bank-account-balance required worker、生产三轮 direct-scope 5 秒 SLO 通过和剩余页面/API 验收。
 - `runtime-sync-stage4-2026-06-13.md`：2026-06-13 Stage 4 全页面 HTTP SLO 默认覆盖、Kafka 取舍、登录态生产验收命令和仍未闭环的写操作链路。
 - `runtime-sync-stage5-2026-06-13.md`：2026-06-13 Stage 5 真实写操作 durable outbox SLO 审计入口、高影响 operation profile 和仍需受控 E2E 写操作 smoke 的边界。
+- `runtime-sync-stage6-2026-06-13.md`：2026-06-13 Stage 6 受控写操作 E2E smoke 入口、scenario JSON、认证保护、写后 outbox/readiness 和 API SLO 判定边界。
 - `monitoring.md`：健康状态、后台任务和告警。
 
 部署资产和 OA 联调细节见 `../../deploy/oa/README.md`。

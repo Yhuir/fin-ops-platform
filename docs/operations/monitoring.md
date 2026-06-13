@@ -320,6 +320,74 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 该工具能证明“最近真实写操作产生的 refresh 是否及时完成”，但不能证明没有被执行过的操作；最终闭环仍需要受控
   E2E 写操作 smoke 覆盖关联、撤回、导入确认和规则变更。
 
+## 受控写操作 E2E SLO Smoke
+
+真实写操作闭环使用 `write_operation_e2e_smoke` 执行。该工具默认只校验 scenario 并输出计划；只有显式 `--apply`
+且存在真实认证 header/cookie 时才会发起 mutating HTTP 请求。
+
+scenario 文件示例：
+
+```json
+{
+  "scenarios": [
+    {
+      "name": "turnover-withdraw-smoke",
+      "operation": "turnover_manual_closure_or_withdraw",
+      "steps": [
+        {
+          "name": "withdraw",
+          "method": "POST",
+          "path": "/api/turnover-ledger/relations/<relation_id>/withdraw",
+          "json": {
+            "note": "controlled SLO smoke"
+          },
+          "expected_statuses": [200]
+        }
+      ],
+      "post_api_probes": [
+        {
+          "name": "turnover_ledger_grouped",
+          "path": "/api/turnover-ledger?view=grouped&page=1&page_size=50",
+          "expected_statuses": [200, 202],
+          "target_ms": 1000
+        }
+      ]
+    }
+  ]
+}
+```
+
+dry-run：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smoke \
+  --scenario /tmp/finops-write-e2e-scenarios.json \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api
+```
+
+apply：
+
+```bash
+export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smoke \
+  --scenario /tmp/finops-write-e2e-scenarios.json \
+  --apply \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --write-target-ms 5000 \
+  --http-target-ms 1000 \
+  --output /tmp/finops-write-e2e-slo-$(date +%Y%m%d%H%M%S).json
+```
+
+执行前要求：
+
+- scenario 必须使用可控测试对象或已确认可回滚的业务对象；不要直接对生产真实待处理业务做破坏性测试。
+- 每个 mutating step 必须有预期状态码；工具不会把 409/403/500 继续包装成已同步。
+- 写步骤成功后，工具以数据库 `clock_timestamp()` 为起点，等待对应 operation profile 的 outbox/dirty scope 达到 5 秒 SLO。
+- post API probe 只用于验证写后页面首屏 API；最终仍要结合登录态 HTTP SLO、App Health 和审计记录。
+- 输出不包含 token、cookie、Authorization header，也不输出 scenario 请求 body，只记录路径、状态码、耗时和 outbox/readiness 结果。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：

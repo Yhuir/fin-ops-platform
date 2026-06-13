@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from io import StringIO
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+
+from fin_ops_platform.tools import http_slo_probe, write_operation_e2e_smoke
+
+
+class FakeConnection:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.started_at = datetime(2026, 6, 13, 10, 0, 0, tzinfo=timezone.utc)
+        self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+        self.fetch_one_calls.append((sql, params))
+        return {"started_at": self.started_at}
+
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        self.fetch_all_calls.append((sql, params))
+        return [dict(row) for row in self.rows]
+
+
+def _event(
+    *,
+    scope_type: str,
+    reason: str,
+    action_name: str,
+    seconds: float = 1.0,
+) -> dict[str, object]:
+    created_at = datetime(2026, 6, 13, 10, 0, 1, tzinfo=timezone.utc)
+    return {
+        "event_id": f"{scope_type}-{reason}",
+        "tenant_id": "default",
+        "event_type": f"{scope_type}.read_model.refresh",
+        "scope_type": scope_type,
+        "scope_key": "all",
+        "reason": reason,
+        "action_name": action_name,
+        "event_status": "done",
+        "source_version": 1,
+        "created_at": created_at,
+        "processed_at": created_at + timedelta(seconds=seconds),
+        "updated_at": created_at + timedelta(seconds=seconds),
+        "event_last_error": None,
+        "raw_payload": {},
+        "dirty_status": "done",
+        "dirty_last_error": None,
+    }
+
+
+def _turnover_withdraw_rows() -> list[dict[str, object]]:
+    return [
+        _event(scope_type="turnover_ledger", reason="turnover_relation_changed", action_name="withdraw_relation"),
+        _event(scope_type="workbench", reason="turnover_relation_changed", action_name="withdraw_relation"),
+        _event(scope_type="workbench_relation", reason="turnover_relation_changed", action_name="withdraw_relation"),
+        _event(scope_type="cost_statistics", reason="turnover_relation_changed", action_name="withdraw_relation"),
+        _event(scope_type="search", reason="turnover_relation_changed", action_name="withdraw_relation"),
+    ]
+
+
+class WriteOperationE2ESmokeTests(unittest.TestCase):
+    def test_load_scenarios_and_dry_run_redacts_write_body(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "scenarios": [
+                            {
+                                "name": "turnover-withdraw",
+                                "operation": "turnover_manual_closure_or_withdraw",
+                                "steps": [
+                                    {
+                                        "name": "withdraw",
+                                        "method": "POST",
+                                        "path": "/api/turnover-ledger/relations/REL-1/withdraw",
+                                        "json": {"note": "secret business note"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            scenarios = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=scenarios,
+                apply=False,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={},
+            )
+
+        self.assertEqual(report["status"], "dry_run")
+        step_plan = report["planned_scenarios"][0]["steps"][0]
+        self.assertEqual(step_plan["path"], "/api/turnover-ledger/relations/REL-1/withdraw")
+        self.assertTrue(step_plan["has_json_body"])
+        self.assertNotIn("secret business note", json.dumps(report))
+
+    def test_cli_dry_run_does_not_require_postgres_configuration(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "name": "turnover-withdraw",
+                            "operation": "turnover_manual_closure_or_withdraw",
+                            "steps": [
+                                {
+                                    "name": "withdraw",
+                                    "method": "POST",
+                                    "path": "/api/turnover-ledger/relations/REL-1/withdraw",
+                                    "json": {"note": "dry-run"},
+                                }
+                            ],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            stdout = StringIO()
+
+            exit_code = write_operation_e2e_smoke.main(
+                ["--scenario", str(path), "--base-url", "https://example.test"],
+                stdout=stdout,
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "dry_run")
+
+    def test_apply_requires_auth_before_mutating_requests(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="turnover-withdraw",
+            operations=("turnover_manual_closure_or_withdraw",),
+            steps=(
+                write_operation_e2e_smoke.WriteStep(
+                    name="withdraw",
+                    method="POST",
+                    path="/api/turnover-ledger/relations/REL-1/withdraw",
+                    json_body={"note": "smoke"},
+                    expected_statuses=(200,),
+                ),
+            ),
+            post_api_probes=(),
+        )
+        calls: list[str] = []
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            calls.append(url)
+            return http_slo_probe.HttpProbeResponse(status_code=200, headers={}, body=b"{}")
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection([]),
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={},
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "auth_missing")
+        self.assertEqual(calls, [])
+
+    def test_apply_executes_step_and_waits_for_required_write_refreshes(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="turnover-withdraw",
+            operations=("turnover_manual_closure_or_withdraw",),
+            steps=(
+                write_operation_e2e_smoke.WriteStep(
+                    name="withdraw",
+                    method="POST",
+                    path="/api/turnover-ledger/relations/REL-1/withdraw",
+                    json_body={"note": "smoke"},
+                    expected_statuses=(200,),
+                ),
+            ),
+            post_api_probes=(),
+        )
+        observed: list[tuple[str, str, bytes | None]] = []
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            observed.append((url, method, body))
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"ok":true}',
+            )
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection(_turnover_withdraw_rows()),
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(observed[0][1], "POST")
+        self.assertEqual(observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw")
+        self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
+        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 5)
+
+    def test_write_step_failure_skips_write_slo_claim(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="turnover-withdraw",
+            operations=("turnover_manual_closure_or_withdraw",),
+            steps=(
+                write_operation_e2e_smoke.WriteStep(
+                    name="withdraw",
+                    method="POST",
+                    path="/api/turnover-ledger/relations/REL-1/withdraw",
+                    json_body={"note": "smoke"},
+                    expected_statuses=(200,),
+                ),
+            ),
+            post_api_probes=(),
+        )
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=409,
+                headers={"content-type": "application/json"},
+                body=b'{"error":"conflict"}',
+            )
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection(_turnover_withdraw_rows()),
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["results"][0]["write_slo"]["status"], "skipped")
+
+    def test_unknown_operation_in_scenario_is_rejected(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "name": "bad",
+                            "operation": "does_not_exist",
+                            "steps": [{"path": "/api/test"}],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Unknown write-operation SLO profiles"):
+                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
+
+if __name__ == "__main__":
+    unittest.main()
