@@ -388,6 +388,35 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 - post API probe 只用于验证写后页面首屏 API；最终仍要结合登录态 HTTP SLO、App Health 和审计记录。
 - 输出不包含 token、cookie、Authorization header，也不输出 scenario 请求 body，只记录路径、状态码、耗时和 outbox/readiness 结果。
 
+## 全 App 同步闭环 Gate
+
+最终闭环使用 `runtime_sync_closure_gate` 聚合检查，避免把 direct smoke、页面 shell 或历史 audit 中任意单项误判为“全 app 已闭环”。
+
+```bash
+export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_gate \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --apply-read-model-smoke \
+  --write-scenario /tmp/finops-write-e2e-scenarios.json \
+  --apply-write-scenarios \
+  --http-target-ms 1000 \
+  --read-model-target-ms 5000 \
+  --write-target-ms 5000 \
+  --output /tmp/finops-runtime-sync-closure-gate-$(date +%Y%m%d%H%M%S).json
+```
+
+该 gate 必须全部通过才可宣称“所有页面 5 秒内真同步”：
+
+- runtime health：required worker、RabbitMQ queue/unacked/DLQ、dirty scope、failure rate 没有当前 blocker。
+- direct read model smoke：显式 `--apply-read-model-smoke` 后，每个 App Status read model 的 enqueue-to-fresh 在目标内。
+- 登录态 HTTP SLO：必须使用真实 OA token/Admin-Token/cookie，覆盖全 app 页面 shell 与首屏 API p95。
+- 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
+- 受控写操作 E2E：必须提供安全、可回滚的 scenario，并显式 `--apply-write-scenarios` 通过 mutating HTTP + 写后 outbox/readiness + 可选 post API。
+
+缺少真实认证、缺少 scenario、只 dry-run、或 write audit 没有样本时，gate 会返回 `fail`。这是预期行为，不应改成
+`pass` 或 `skip` 来绕过最终验收。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：
