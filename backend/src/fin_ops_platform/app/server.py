@@ -60,7 +60,7 @@ from fin_ops_platform.app.routes_turnover_ledger import (
 )
 from fin_ops_platform.app.turnover_ledger_read_facade import TurnoverLedgerReadFacade
 from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
-from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.domain.enums import BatchType, InvoiceType
 from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder, request_database_timing
 from fin_ops_platform.services.app_health_alert_service import AppHealthAlertService
@@ -17615,13 +17615,21 @@ class Application:
 
     def _build_oa_workbench_row_payload(self, month: str) -> dict[str, object]:
         if month == "all" and isinstance(self._workbench_query_service._oa_adapter, MongoOAAdapter):
-            return self._build_retained_all_oa_row_payload()
-        return self._serialize_value(self._workbench_api_routes.get_workbench(month))
+            payload = self._build_retained_all_oa_row_payload()
+        else:
+            payload = self._serialize_value(self._workbench_api_routes.get_workbench(month))
+            if SEARCH_MONTH_RE.match(month):
+                self._promote_oa_attachment_invoices_to_canonical({month})
+        self._append_canonical_oa_attachment_invoice_rows(payload)
+        return payload
 
     def _build_retained_all_oa_row_payload(self) -> dict[str, object]:
         cutoff_date = self._parse_oa_retention_date(self._app_settings_service.get_oa_retention_cutoff_date())
         if cutoff_date is None:
-            return self._serialize_value(self._workbench_api_routes.get_workbench("all"))
+            payload = self._serialize_value(self._workbench_api_routes.get_workbench("all"))
+            if self._raw_payload_has_oa_attachment_invoice_signal(payload):
+                self._promote_oa_attachment_invoices_to_canonical(self._oa_months_from_raw_workbench_payload(payload))
+            return payload
 
         scoped_months = self._retained_oa_months_for_all_scope(cutoff_date)
         supplemental_oa_row_ids = self._supplemental_retained_oa_row_ids(cutoff_date)
@@ -17633,12 +17641,24 @@ class Application:
                 self._workbench_query_service._sync_oa_rows(scoped_month)
             if supplemental_oa_row_ids:
                 self._workbench_query_service.sync_oa_row_ids(supplemental_oa_row_ids)
-        return self._serialize_value(
+        promotion_scopes = set(scoped_months)
+        if supplemental_oa_row_ids:
+            promotion_scopes.update(
+                str(row.get("_month", "")).strip()
+                for row in self._workbench_query_service.list_record_snapshots()
+                if str(row.get("id", "")).strip() in supplemental_oa_row_ids
+            )
+        payload = self._serialize_value(
             self._raw_oa_payload_for_selected_scope(
                 months=set(scoped_months),
                 supplemental_oa_row_ids=set(supplemental_oa_row_ids),
             )
         )
+        if self._raw_payload_has_oa_attachment_invoice_signal(payload):
+            self._promote_oa_attachment_invoices_to_canonical(
+                {scope_key for scope_key in promotion_scopes if SEARCH_MONTH_RE.match(scope_key)}
+            )
+        return payload
 
     def _retained_oa_months_for_all_scope(self, cutoff_date: datetime) -> list[str]:
         cutoff_month = cutoff_date.strftime("%Y-%m")
@@ -17769,6 +17789,368 @@ class Application:
             "open": open_rows,
         }
 
+    def _append_canonical_oa_attachment_invoice_rows(self, payload: dict[str, object]) -> None:
+        oa_rows_by_id: dict[str, dict[str, object]] = {}
+        oa_sections_by_id: dict[str, str] = {}
+        existing_invoice_row_ids: set[str] = set()
+        for section_name in ("paired", "open"):
+            section_payload = payload.get(section_name)
+            if not isinstance(section_payload, dict):
+                continue
+            for oa_row in list(section_payload.get("oa") or []):
+                if not isinstance(oa_row, dict):
+                    continue
+                oa_row_id = str(oa_row.get("id", "")).strip()
+                if not oa_row_id or oa_row_id in oa_rows_by_id:
+                    continue
+                oa_rows_by_id[oa_row_id] = oa_row
+                oa_sections_by_id[oa_row_id] = section_name
+            for invoice_row in list(section_payload.get("invoice") or []):
+                if isinstance(invoice_row, dict) and str(invoice_row.get("id", "")).strip():
+                    existing_invoice_row_ids.add(str(invoice_row.get("id", "")).strip())
+
+        if not oa_rows_by_id:
+            return
+
+        appended = 0
+        changed = False
+        for invoice in self._import_service.list_invoices():
+            invoice_id = str(getattr(invoice, "id", "") or "").strip()
+            if not invoice_id:
+                continue
+            source_link = self._oa_attachment_source_link_for_invoice(invoice, set(oa_rows_by_id))
+            if source_link is None:
+                continue
+            derived_from_oa_id = str(source_link.get("derived_from_oa_id") or getattr(invoice, "oa_form_id", "") or "").strip()
+            if derived_from_oa_id not in oa_rows_by_id:
+                continue
+            row = self._canonical_oa_attachment_invoice_workbench_row(
+                invoice,
+                source_link=source_link,
+                oa_row=oa_rows_by_id[derived_from_oa_id],
+            )
+            if invoice_id in existing_invoice_row_ids:
+                if self._replace_raw_workbench_row(payload, row_type="invoice", replacement=row):
+                    changed = True
+                continue
+            section_name = oa_sections_by_id.get(derived_from_oa_id, "open")
+            section_payload = payload.setdefault(section_name, {})
+            if not isinstance(section_payload, dict):
+                continue
+            invoice_rows = section_payload.setdefault("invoice", [])
+            if not isinstance(invoice_rows, list):
+                continue
+            invoice_rows.append(row)
+            existing_invoice_row_ids.add(invoice_id)
+            appended += 1
+            changed = True
+
+        if appended or changed:
+            self._dedupe_raw_workbench_rows_by_id(payload, row_type="invoice")
+            self._refresh_raw_workbench_payload_summary(payload)
+
+    @staticmethod
+    def _replace_raw_workbench_row(
+        payload: dict[str, object],
+        *,
+        row_type: str,
+        replacement: dict[str, object],
+    ) -> bool:
+        replacement_id = str(replacement.get("id", "")).strip()
+        if not replacement_id:
+            return False
+        replaced = False
+        for section_name in ("paired", "open"):
+            section_payload = payload.get(section_name)
+            if not isinstance(section_payload, dict):
+                continue
+            rows = section_payload.get(row_type)
+            if not isinstance(rows, list):
+                continue
+            for index, row in enumerate(rows):
+                if isinstance(row, dict) and str(row.get("id", "")).strip() == replacement_id:
+                    rows[index] = Application._serialize_value(replacement)
+                    replaced = True
+        return replaced
+
+    @staticmethod
+    def _dedupe_raw_workbench_rows_by_id(payload: dict[str, object], *, row_type: str) -> None:
+        seen_row_ids: set[str] = set()
+        for section_name in ("paired", "open"):
+            section_payload = payload.get(section_name)
+            if not isinstance(section_payload, dict):
+                continue
+            rows = section_payload.get(row_type)
+            if not isinstance(rows, list):
+                continue
+            deduped_rows: list[object] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    deduped_rows.append(row)
+                    continue
+                row_id = str(row.get("id", "")).strip()
+                if row_id and row_id in seen_row_ids:
+                    continue
+                if row_id:
+                    seen_row_ids.add(row_id)
+                deduped_rows.append(row)
+            section_payload[row_type] = deduped_rows
+
+    @staticmethod
+    def _oa_attachment_source_link_for_invoice(
+        invoice: object,
+        oa_row_ids: set[str],
+    ) -> dict[str, str] | None:
+        fallback_link: dict[str, str] | None = None
+        for link in list(getattr(invoice, "source_links", []) or []):
+            if not isinstance(link, dict):
+                continue
+            if str(link.get("source_type") or "").strip() != "oa_attachment_invoice":
+                continue
+            normalized_link = {str(key): str(value) for key, value in link.items() if value is not None}
+            derived_from_oa_id = str(
+                normalized_link.get("derived_from_oa_id") or getattr(invoice, "oa_form_id", "") or ""
+            ).strip()
+            if derived_from_oa_id in oa_row_ids:
+                return normalized_link
+            if fallback_link is None:
+                fallback_link = normalized_link
+        return fallback_link
+
+    def _canonical_oa_attachment_invoice_workbench_row(
+        self,
+        invoice: object,
+        *,
+        source_link: dict[str, str],
+        oa_row: dict[str, object],
+    ) -> dict[str, object]:
+        source_links = [
+            {str(key): str(value) for key, value in link.items() if value is not None}
+            for link in list(getattr(invoice, "source_links", []) or [])
+            if isinstance(link, dict)
+        ]
+        tags = [
+            str(tag).strip()
+            for tag in list(getattr(invoice, "tags", []) or [])
+            if str(tag).strip()
+        ]
+        if any(str(link.get("source_type") or "").strip() == "manual_invoice_import" for link in source_links):
+            self._append_unique_text(tags, "人工导入")
+        self._append_unique_text(tags, "OA附件")
+
+        invoice_type_label = (
+            "销项发票"
+            if getattr(getattr(invoice, "invoice_type", None), "value", getattr(invoice, "invoice_type", None))
+            == InvoiceType.OUTPUT.value
+            else "进项发票"
+        )
+        invoice_no = str(getattr(invoice, "invoice_no", "") or "").strip() or "—"
+        digital_invoice_no = str(getattr(invoice, "digital_invoice_no", "") or "").strip() or "—"
+        invoice_code = str(getattr(invoice, "invoice_code", "") or "").strip() or "—"
+        issue_date = str(getattr(invoice, "invoice_date", "") or "").strip() or "—"
+        seller_name = str(getattr(invoice, "seller_name", "") or "").strip()
+        buyer_name = str(getattr(invoice, "buyer_name", "") or "").strip()
+        counterparty_name = str(getattr(getattr(invoice, "counterparty", None), "name", "") or "").strip()
+        amount_text = self._workbench_invoice_money_text(getattr(invoice, "amount", None))
+        tax_amount_text = self._workbench_invoice_money_text(getattr(invoice, "tax_amount", None))
+        total_with_tax_text = self._workbench_invoice_money_text(
+            getattr(invoice, "total_with_tax", None) if getattr(invoice, "total_with_tax", None) is not None else getattr(invoice, "amount", None)
+        )
+        source_oa_no = self._oa_display_number_for_attachment_invoice(oa_row)
+        detail_fields = {
+            "序号": str(getattr(invoice, "id", "") or ""),
+            "发票代码": invoice_code,
+            "发票号码": invoice_no,
+            "数电发票号码": digital_invoice_no,
+            "销方识别号": str(getattr(invoice, "seller_tax_no", "") or "—"),
+            "销方名称": seller_name or "—",
+            "购方识别号": str(getattr(invoice, "buyer_tax_no", "") or "—"),
+            "购买方名称": buyer_name or "—",
+            "开票日期": issue_date,
+            "金额": amount_text,
+            "税率": str(getattr(invoice, "tax_rate", "") or "—"),
+            "税额": tax_amount_text,
+            "价税合计": total_with_tax_text,
+            "发票类型": invoice_type_label,
+            "税收分类编码": str(getattr(invoice, "tax_classification_code", "") or "—"),
+            "特定业务类型": str(getattr(invoice, "specific_business_type", "") or "—"),
+            "货物或应税劳务名称": str(getattr(invoice, "taxable_item_name", "") or "—"),
+            "规格型号": str(getattr(invoice, "specification_model", "") or "—"),
+            "单位": str(getattr(invoice, "unit", "") or "—"),
+            "数量": self._workbench_invoice_money_text(getattr(invoice, "quantity", None)),
+            "单价": self._workbench_invoice_money_text(getattr(invoice, "unit_price", None)),
+            "发票来源": str(getattr(invoice, "invoice_source", "") or "OA附件解析"),
+            "发票票种": str(getattr(invoice, "invoice_kind", "") or "—"),
+            "发票状态": str(getattr(invoice, "invoice_status_from_source", "") or "—"),
+            "是否正数发票": str(getattr(invoice, "is_positive_invoice", "") or "—"),
+            "发票风险等级": str(getattr(invoice, "risk_level", "") or "—"),
+            "开票人": str(getattr(invoice, "issuer", "") or "—"),
+            "备注": str(getattr(invoice, "remark", "") or "—"),
+            "标签": "、".join(tags) or "—",
+            "来源OA单号": source_oa_no,
+            "来源付款项ID": str(source_link.get("source_expense_item_id") or "—"),
+            "来源附件Key": str(source_link.get("source_attachment_key") or "—"),
+            "附件文件名": str(source_link.get("source_attachment_name") or "—"),
+        }
+        derived_from_oa_id = str(source_link.get("derived_from_oa_id") or getattr(invoice, "oa_form_id", "") or "").strip()
+        return {
+            "id": str(getattr(invoice, "id", "") or ""),
+            "type": "invoice",
+            "source_kind": "oa_attachment_invoice",
+            "status": "open",
+            "case_id": None,
+            "seller_tax_no": str(getattr(invoice, "seller_tax_no", "") or ""),
+            "seller_name": seller_name or counterparty_name,
+            "buyer_tax_no": str(getattr(invoice, "buyer_tax_no", "") or ""),
+            "buyer_name": buyer_name,
+            "invoice_code": invoice_code,
+            "invoice_no": invoice_no,
+            "digital_invoice_no": digital_invoice_no,
+            "issue_date": issue_date,
+            "counterparty_name": counterparty_name or seller_name or buyer_name,
+            "amount": amount_text,
+            "tax_rate": str(getattr(invoice, "tax_rate", "") or "—"),
+            "tax_amount": tax_amount_text,
+            "total_with_tax": total_with_tax_text,
+            "invoice_type": invoice_type_label,
+            "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+            "tags": tags,
+            "source_links": source_links,
+            "derived_from_oa_id": derived_from_oa_id,
+            "source_workbench_row_id": str(source_link.get("source_workbench_row_id") or ""),
+            "source_attachment_key": str(source_link.get("source_attachment_key") or ""),
+            "source_attachment_name": str(source_link.get("source_attachment_name") or ""),
+            "source_expense_item_id": str(source_link.get("source_expense_item_id") or ""),
+            "source_expense_row_index": str(source_link.get("source_expense_row_index") or ""),
+            "source_region_key": str(source_link.get("source_region_key") or ""),
+            "evidence_type": str(source_link.get("evidence_type") or ""),
+            "document_kind": str(source_link.get("document_kind") or ""),
+            "source_oa_month": self._first_month_from_oa_row(oa_row) or "",
+            "available_actions": ["detail", "confirm_link", "mark_exception", "ignore"],
+            "summary_fields": {
+                "销方识别号": str(getattr(invoice, "seller_tax_no", "") or "—"),
+                "销方名称": seller_name or "—",
+                "购方识别号": str(getattr(invoice, "buyer_tax_no", "") or "—"),
+                "购买方名称": buyer_name or "—",
+                "开票日期": issue_date,
+                "金额": amount_text,
+                "税率": str(getattr(invoice, "tax_rate", "") or "—"),
+                "税额": tax_amount_text,
+                "价税合计": total_with_tax_text,
+                "发票类型": invoice_type_label,
+                "发票来源": "OA附件解析",
+            },
+            "detail_fields": detail_fields,
+        }
+
+    @staticmethod
+    def _workbench_invoice_money_text(value: object) -> str:
+        if value in (None, "", "--", "—"):
+            return "—"
+        if isinstance(value, Decimal):
+            return f"{value:.2f}"
+        return str(value)
+
+    @staticmethod
+    def _append_unique_text(values: list[str], value: str) -> None:
+        if value and value not in values:
+            values.append(value)
+
+    @staticmethod
+    def _oa_display_number_for_attachment_invoice(oa_row: dict[str, object]) -> str:
+        for fields_key in ("detail_fields", "summary_fields"):
+            fields = oa_row.get(fields_key)
+            if isinstance(fields, dict):
+                for key in ("OA单号", "单据编号", "申请单号"):
+                    value = str(fields.get(key) or "").strip()
+                    if value:
+                        return value
+        return str(oa_row.get("id") or "—")
+
+    @staticmethod
+    def _oa_months_from_raw_workbench_payload(payload: dict[str, object]) -> set[str]:
+        months: set[str] = set()
+        for section_name in ("paired", "open"):
+            section_payload = payload.get(section_name)
+            if not isinstance(section_payload, dict):
+                continue
+            for row in list(section_payload.get("oa") or []):
+                if isinstance(row, dict):
+                    month = Application._first_month_from_oa_row(row)
+                    if month:
+                        months.add(month)
+        return months
+
+    @staticmethod
+    def _raw_payload_has_oa_attachment_invoice_signal(payload: dict[str, object]) -> bool:
+        for section_name in ("paired", "open"):
+            section_payload = payload.get(section_name)
+            if not isinstance(section_payload, dict):
+                continue
+            for row in list(section_payload.get("oa") or []):
+                if not isinstance(row, dict):
+                    continue
+                tags = {str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()}
+                if "OA附件" in tags:
+                    return True
+                for fields_key in ("detail_fields", "summary_fields"):
+                    fields = row.get(fields_key)
+                    if not isinstance(fields, dict):
+                        continue
+                    for key in ("附件发票数量", "附件证据数量", "附件发票明细"):
+                        value = str(fields.get(key) or "").strip()
+                        if value and value not in {"0", "0 张", "—", "--"}:
+                            return True
+        return False
+
+    @staticmethod
+    def _first_month_from_oa_row(row: dict[str, object]) -> str | None:
+        candidates: list[object] = [
+            row.get("month"),
+            row.get("application_date"),
+            row.get("apply_date"),
+        ]
+        for fields_key in ("detail_fields", "summary_fields"):
+            fields = row.get(fields_key)
+            if isinstance(fields, dict):
+                candidates.extend(
+                    fields.get(key)
+                    for key in ("申请日期", "报销日期", "审批完成时间", "单据日期", "日期")
+                )
+        for candidate in candidates:
+            text = str(candidate or "").strip()
+            if len(text) >= 7 and SEARCH_MONTH_RE.match(text[:7]):
+                return text[:7]
+        return None
+
+    @staticmethod
+    def _refresh_raw_workbench_payload_summary(payload: dict[str, object]) -> None:
+        paired = payload.get("paired") if isinstance(payload.get("paired"), dict) else {}
+        open_rows = payload.get("open") if isinstance(payload.get("open"), dict) else {}
+        payload["summary"] = {
+            "oa_count": len(list(paired.get("oa") or [])) + len(list(open_rows.get("oa") or [])),
+            "bank_count": len(list(paired.get("bank") or [])) + len(list(open_rows.get("bank") or [])),
+            "invoice_count": len(list(paired.get("invoice") or [])) + len(list(open_rows.get("invoice") or [])),
+            "paired_count": sum(len(list(paired.get(row_type) or [])) for row_type in ("oa", "bank", "invoice")),
+            "open_count": sum(len(list(open_rows.get(row_type) or [])) for row_type in ("oa", "bank", "invoice")),
+            "exception_count": sum(
+                1
+                for row in [
+                    *list(open_rows.get("oa") or []),
+                    *list(open_rows.get("bank") or []),
+                    *list(open_rows.get("invoice") or []),
+                ]
+                if isinstance(row, dict)
+                and str(
+                    row.get("oa_bank_relation", row.get("invoice_relation", row.get("invoice_bank_relation", {}))).get(
+                        "tone",
+                        "",
+                    )
+                )
+                == "danger"
+            ),
+        }
+
     @staticmethod
     def _merge_live_workbench_with_oa_rows(
         live_payload: dict[str, object],
@@ -17778,23 +18160,41 @@ class Application:
         merged["oa_status"] = Application._serialize_value(oa_payload.get("oa_status") or {"code": "ready", "message": "OA 已同步"})
         merged["paired"]["oa"] = Application._serialize_value(oa_payload["paired"]["oa"])
         merged["open"]["oa"] = Application._serialize_value(oa_payload["open"]["oa"])
-        merged["paired"]["invoice"] = [
+        merged["paired"]["invoice"] = Application._dedupe_workbench_rows_by_id_preferring_last([
             *Application._serialize_value(merged["paired"].get("invoice", [])),
             *[
                 row
                 for row in Application._serialize_value(oa_payload["paired"].get("invoice", []))
                 if str(row.get("source_kind", "")) == "oa_attachment_invoice"
             ],
-        ]
-        merged["open"]["invoice"] = [
+        ])
+        merged["open"]["invoice"] = Application._dedupe_workbench_rows_by_id_preferring_last([
             *Application._serialize_value(merged["open"].get("invoice", [])),
             *[
                 row
                 for row in Application._serialize_value(oa_payload["open"].get("invoice", []))
                 if str(row.get("source_kind", "")) == "oa_attachment_invoice"
             ],
-        ]
+        ])
         return merged
+
+    @staticmethod
+    def _dedupe_workbench_rows_by_id_preferring_last(rows: list[object]) -> list[object]:
+        row_ids_in_order: list[str] = []
+        rows_by_id: dict[str, object] = {}
+        passthrough_rows: list[object] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                passthrough_rows.append(row)
+                continue
+            row_id = str(row.get("id", "")).strip()
+            if not row_id:
+                passthrough_rows.append(row)
+                continue
+            if row_id not in rows_by_id:
+                row_ids_in_order.append(row_id)
+            rows_by_id[row_id] = row
+        return [rows_by_id[row_id] for row_id in row_ids_in_order] + passthrough_rows
 
     @staticmethod
     def _merge_live_workbench_with_oa(
