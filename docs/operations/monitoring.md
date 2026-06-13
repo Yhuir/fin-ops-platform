@@ -251,6 +251,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.read_model_slo_smoke --
 enqueue-to-fresh 是否满足目标。生产运行必须把 JSON 输出保存到 `/tmp` 或运维归档路径，且在运行后
 复核 `/health/ready`、dirty scope、outbox、RabbitMQ DLQ 均收敛。
 
+`--critical-only` 只在未显式传 `--read-model-key` 时按 App Status registry 的 `critical=true`
+过滤 smoke scope。它适合先验证当前会阻断页面可用性的 read model；最终全 app 验收仍必须解释
+`critical=false` read model 的产品含义，不能用 critical-only 结果代替全量闭环。
+
 ## 登录态 HTTP SLO 采样
 
 页面首包和关键读 API p95 使用只读 HTTP probe 采集：

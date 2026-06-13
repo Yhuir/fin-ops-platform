@@ -61,6 +61,14 @@ class FakeConnection:
                 "row_count": 3,
                 "updated_at": "2026-06-13 10:03:00+08",
             },
+            {
+                "read_model_key": "bank_account_balance",
+                "scope_type": "bank_account_balance",
+                "scope_key": "all",
+                "status": "fresh",
+                "row_count": 2,
+                "updated_at": "2026-06-13 10:04:00+08",
+            },
         ]
         self.workbench_generations = [
             {"scope_key": "all", "row_count": 100, "updated_at": "2026-06-13 10:05:00+08"},
@@ -130,6 +138,32 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(scopes["search"], "2026-01")
         self.assertEqual(scopes["cost_statistics"], "active:2026-01")
         self.assertEqual(scopes["turnover_ledger"], "all")
+
+    def test_critical_only_excludes_non_critical_read_models_by_default(self) -> None:
+        report = read_model_slo_smoke.run_smoke(
+            FakeConnection(),
+            apply=False,
+            critical_only=True,
+        )
+
+        self.assertEqual(report["status"], "dry_run")
+        self.assertEqual(report["critical_only"], True)
+        planned_keys = {item["read_model_key"] for item in report["planned_scopes"]}
+        self.assertIn("workbench", planned_keys)
+        self.assertIn("turnover_ledger", planned_keys)
+        self.assertNotIn("bank_account_balance", planned_keys)
+
+    def test_explicit_key_still_includes_non_critical_read_model(self) -> None:
+        report = read_model_slo_smoke.run_smoke(
+            FakeConnection(),
+            apply=False,
+            critical_only=True,
+            read_model_keys=["bank_account_balance"],
+        )
+
+        self.assertEqual(report["status"], "dry_run")
+        self.assertEqual(report["critical_only"], True)
+        self.assertEqual(report["planned_scopes"][0]["read_model_key"], "bank_account_balance")
 
     def test_apply_enqueues_and_waits_for_done_fresh_under_target(self) -> None:
         connection = FakeConnection()

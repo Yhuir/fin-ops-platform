@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--apply", action="store_true", help="Actually enqueue and wait. Default is dry-run only.")
     parser.add_argument("--read-model-key", action="append", default=[], help="Limit to one App Status read model key. Repeatable.")
     parser.add_argument(
+        "--critical-only",
+        action="store_true",
+        help="When no --read-model-key is provided, smoke only read models marked critical in App Status registry.",
+    )
+    parser.add_argument(
         "--scope",
         action="append",
         default=[],
@@ -87,6 +92,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         apply=bool(args.apply),
         tenant_id=str(args.tenant_id or "default"),
         read_model_keys=args.read_model_key,
+        critical_only=bool(args.critical_only),
         scope_overrides=_parse_scope_overrides(args.scope),
         reason=str(args.reason or "read_model_slo_smoke"),
         priority=str(args.priority or "high"),
@@ -111,6 +117,7 @@ def run_smoke(
     apply: bool,
     tenant_id: str = "default",
     read_model_keys: Sequence[str] | None = None,
+    critical_only: bool = False,
     scope_overrides: dict[str, str] | None = None,
     reason: str = "read_model_slo_smoke",
     priority: str = "high",
@@ -119,7 +126,7 @@ def run_smoke(
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> dict[str, Any]:
-    selected_keys = _selected_read_model_keys(read_model_keys)
+    selected_keys = _selected_read_model_keys(read_model_keys, critical_only=critical_only)
     scopes = discover_smoke_scopes(
         connection,
         tenant_id=tenant_id,
@@ -136,6 +143,7 @@ def run_smoke(
             "generated_at": datetime.now(UTC).isoformat(),
             "target_ms": target_ms,
             "tenant_id": tenant_id,
+            "critical_only": bool(critical_only),
             "missing_read_model_keys": missing_keys,
             "planned_scope_count": len(scopes),
             "planned_scopes": plan_payload,
@@ -214,6 +222,7 @@ def run_smoke(
         "generated_at": datetime.now(UTC).isoformat(),
         "target_ms": target_ms,
         "tenant_id": tenant_id,
+        "critical_only": bool(critical_only),
         "missing_read_model_keys": missing_keys,
         "planned_scope_count": len(scopes),
         "planned_scopes": plan_payload,
@@ -228,9 +237,10 @@ def discover_smoke_scopes(
     *,
     tenant_id: str = "default",
     read_model_keys: Sequence[str] | None = None,
+    critical_only: bool = False,
     scope_overrides: dict[str, str] | None = None,
 ) -> list[SmokeScope]:
-    selected_keys = _selected_read_model_keys(read_model_keys)
+    selected_keys = _selected_read_model_keys(read_model_keys, critical_only=critical_only)
     overrides = scope_overrides or {}
     readiness = _fresh_readiness_by_key(connection, tenant_id=tenant_id)
     workbench_generations = _active_workbench_generations(connection, tenant_id=tenant_id)
@@ -513,9 +523,15 @@ def _parse_scope_overrides(values: Sequence[str]) -> dict[str, str]:
     return overrides
 
 
-def _selected_read_model_keys(read_model_keys: Sequence[str] | None) -> list[str]:
+def _selected_read_model_keys(read_model_keys: Sequence[str] | None, *, critical_only: bool = False) -> list[str]:
     raw_keys = [str(key or "").strip() for key in (read_model_keys or []) if str(key or "").strip()]
     if not raw_keys:
+        if critical_only:
+            return [
+                key
+                for key, definition in APP_STATUS_READ_MODEL_REGISTRY.items()
+                if bool(getattr(definition, "critical", True))
+            ]
         return list(APP_STATUS_READ_MODEL_REGISTRY.keys())
     unknown = [key for key in raw_keys if key not in APP_STATUS_READ_MODEL_REGISTRY]
     if unknown:

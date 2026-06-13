@@ -10,6 +10,7 @@
 - `runtime-sync-repair-2026-06-12.md`：2026-06-12 生产 scope repair 发布、dry-run/apply、audit、replacement scope 收敛和剩余风险。
 - `runtime-sync-slo-baseline-2026-06-13.md`：2026-06-13 全 app 同步 SLO 基线、read model/page 覆盖、组件取舍和下一阶段执行入口。
 - `runtime-sync-stage1-2026-06-13.md`：2026-06-13 Stage 1 生产 SLO 采集、PostgreSQL/RabbitMQ 观测、read model smoke 工具和下一阶段执行入口。
+- `runtime-sync-stage2-2026-06-13.md`：2026-06-13 Stage 2 direct-scope smoke、optional worker 缺口、critical read model 5 秒 SLO 结果和下一阶段执行入口。
 - `monitoring.md`：健康状态、后台任务和告警。
 
 部署资产和 OA 联调细节见 `../../deploy/oa/README.md`。
