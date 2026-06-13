@@ -30,6 +30,14 @@ def _current_year() -> str:
     return datetime.now().strftime("%Y")
 
 
+def _current_year_start() -> str:
+    return f"{_current_year()}-01-01"
+
+
+def _current_year_end() -> str:
+    return f"{_current_year()}-12-31"
+
+
 @dataclass(frozen=True)
 class HttpProbe:
     name: str
@@ -116,8 +124,16 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("workbench_summary_all", "/api/workbench/summary?month=all", expected_statuses=(200, 202)),
     HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
-    HttpProbe("bank_details_accounts", "/api/bank-details/accounts", expected_statuses=(200, 202)),
-    HttpProbe("bank_details_transactions", "/api/bank-details/transactions?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe(
+        "bank_details_accounts",
+        f"/api/bank-details/accounts?date_from={_current_year_start()}&date_to={_current_year_end()}",
+        expected_statuses=(200, 202),
+    ),
+    HttpProbe(
+        "bank_details_transactions",
+        f"/api/bank-details/transactions?date_from={_current_year_start()}&date_to={_current_year_end()}&page=1&page_size=50",
+        expected_statuses=(200, 202),
+    ),
     HttpProbe("bank_details_auto_tag_rules", "/api/bank-details/auto-tag-rules", expected_statuses=(200, 202)),
     HttpProbe(
         "pending_invoices_rows",
@@ -170,7 +186,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("import_facts_batches", "/api/import-facts/batches?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("import_facts_files", "/api/import-facts/files?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("import_facts_invoices", "/api/import-facts/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
-    HttpProbe("search_all", "/api/search?q=&scope=all&month=all&limit=20", expected_statuses=(200, 202)),
+    HttpProbe("search_all", "/api/search?q=%E5%85%AC%E5%8F%B8&scope=all&month=all&limit=5", expected_statuses=(200, 202)),
 )
 
 

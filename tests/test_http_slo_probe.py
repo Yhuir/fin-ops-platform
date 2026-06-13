@@ -47,11 +47,14 @@ class HttpSloProbeTests(unittest.TestCase):
         ):
             self.assertIn(name, api_probe_names)
         probe_paths = {probe.name: probe.path for probe in http_slo_probe.DEFAULT_API_PROBES}
+        self.assertIn("date_from=", probe_paths["bank_details_transactions"])
+        self.assertIn("date_to=", probe_paths["bank_details_transactions"])
         self.assertIn("direction=expense", probe_paths["pending_invoices_filter_options"])
         self.assertIn("month=2026-03", probe_paths["tax_offset_rows"])
         self.assertIn("project_scope=active", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("bucket=unsubmitted", probe_paths["no_oa_bank_batches"])
         self.assertIn("bank_year=", probe_paths["batch_accounting"])
+        self.assertIn("q=%E5%85%AC%E5%8F%B8", probe_paths["search_all"])
 
     def test_configured_default_page_probes_have_stable_page_names(self) -> None:
         args = http_slo_probe.build_parser().parse_args(["--target-ms", "5000"])

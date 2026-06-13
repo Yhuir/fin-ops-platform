@@ -31,7 +31,7 @@
 
 - 目标：让全 app 页面“5 秒内已同步”的验收不再只看 HTTP 200/202 和耗时，而是检查真实 read model freshness。
 - 影响范围：`http_slo_probe.py` 默认 probe 参数、`runtime_sync_closure_gate.py` 默认 HTTP target、闭环验收报告语义。
-- 关键决策：默认 HTTP target 调整为 5000ms；默认探针使用更贴近前端首屏的参数；probe 只读取显式 `read_model_status`/`readModelStatus`，不把普通业务 `status` 字段误判为 read model 状态；非 fresh 或 refresh enqueued 直接失败。
+- 关键决策：默认 HTTP target 调整为 5000ms；默认探针使用更贴近前端首屏的参数，包括银行明细当前年日期范围和非空 search 查询；probe 只读取显式 `read_model_status`/`readModelStatus`，不把普通业务 `status` 字段误判为 read model 状态；非 fresh 或 refresh enqueued 直接失败。
 - 文档影响：更新 read-models 实施记录和测试矩阵。
 - 测试覆盖：`tests/test_http_slo_probe.py` 覆盖默认 probe、普通 status 字段、非 fresh/refresh enqueued 失败。
 - 验证命令：见最终交付说明。
