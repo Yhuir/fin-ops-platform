@@ -62,6 +62,38 @@ python3 -m py_compile backend/src/fin_ops_platform/tools/write_operation_slo_aud
 
 结果：`tests/test_write_operation_slo_audit.py` 6 passed；write audit + runtime queue 40 passed；语法检查通过。
 
+## 生产发布与只读审计
+
+- release：`main-8014aa6e-stage5-sync-202606131208`。
+- 发布方式：`./scripts/deploy-oa.sh --skip-build --no-activate --release-name main-8014aa6e-stage5-sync-202606131208`。
+- 激活方式：`sudo -n /usr/local/sbin/finops-deploy-control activate main-8014aa6e-stage5-sync-202606131208`。
+- migration：`0001` 到 `0070` 均 skipped 或 accepted checksum drift，没有新增 DDL。
+- 激活后 `fin-ops.service` 与 `fin-ops-rabbitmq-dispatcher.service` 的 `WorkingDirectory` 均指向该 release。
+- `/health/ready` 返回 `status=ready`。
+
+生产只读 audit：
+
+```bash
+PYTHONPATH=backend/src /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.write_operation_slo_audit \
+  --lookback-hours 168 \
+  --target-ms 5000 \
+  --output /tmp/finops-write-operation-slo-202606131209.json
+```
+
+结果：
+
+| 指标 | 值 |
+| --- | ---: |
+| status | `fail` |
+| event_sample_count | 2000 |
+| expectation_count | 13 |
+| failed_expectation_count | 13 |
+| missing_expectation_count | 13 |
+
+解释：168 小时窗口内有大量 read model refresh 事件，但没有任何一个满足 Stage 5 高影响写操作 profile。对 turnover UoW
+profile 来说，历史事件在本 release 之前没有 `action_name` metadata；对其它 profile 来说，窗口内没有匹配 reason/scope
+样本。该结果不是性能失败，而是证据缺口：目前仍不能证明真实写操作链路已经闭环。
+
 ## 判定边界
 
 该工具能证明：
