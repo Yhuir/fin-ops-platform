@@ -60,3 +60,54 @@ python3 -m py_compile \
 ```
 
 结果：18 passed；语法检查通过。
+
+## 生产只读验证
+
+已部署并激活 release：
+
+```text
+main-3ab6e2ed-stage8-sync-202606131242
+```
+
+`/health/ready` 关键状态：
+
+```json
+{
+  "status": "ready",
+  "rabbitmq_queue_depth": 0,
+  "rabbitmq_unacked_messages": 0,
+  "rabbitmq_dlq_count": 0,
+  "stale_dirty_scope_count": 0
+}
+```
+
+生产只读 discovery：
+
+```bash
+PYTHONPATH=/opt/fin-ops/releases/main-3ab6e2ed-stage8-sync-202606131242/src/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.write_operation_scenario_discovery \
+  --output /tmp/finops-write-operation-scenario-discovery-stage8-202606131242.json \
+  --scenario-output /tmp/finops-write-e2e-scenarios-stage8-202606131242.json
+```
+
+结果：
+
+```json
+{
+  "status": "ready",
+  "candidate_counts": {
+    "turnover_manual_closure_or_withdraw": 3,
+    "workbench_pair_withdraw_context": 10,
+    "no_oa_bank_batch_withdraw_context": 10
+  },
+  "scenario_count": 3,
+  "first_scenario": "turnover-withdraw-turnover_rel_89e8fb47e3ffce91",
+  "requires_manual_approval": true
+}
+```
+
+结论：
+
+- discovery 已能在真实 PostgreSQL 中找出可用于写操作 E2E 的候选 scenario。
+- scenario 文件仍必须经业务确认后才能用于 `--apply-write-scenarios`，因为它会撤回现有关联并产生真实审计记录。
+- 全 app 同步闭环的最终证明仍需要真实 OA/Admin-Token/cookie 跑 Stage 7 closure gate；不能用假登录态或 local-dev session 代替。
