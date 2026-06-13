@@ -417,6 +417,24 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 缺少真实认证、缺少 scenario、只 dry-run、或 write audit 没有样本时，gate 会返回 `fail`。这是预期行为，不应改成
 `pass` 或 `skip` 来绕过最终验收。
 
+## 写操作 Scenario 发现
+
+`write_operation_scenario_discovery` 是只读工具，用于从 PostgreSQL 事实表生成可审核的
+`write_operation_e2e_smoke` scenario 草稿。
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenario_discovery \
+  --output /tmp/finops-write-operation-scenario-discovery-$(date +%Y%m%d%H%M%S).json \
+  --scenario-output /tmp/finops-write-e2e-scenarios-$(date +%Y%m%d%H%M%S).json
+```
+
+边界：
+
+- 工具只读，不发 mutating HTTP，也不写数据库。
+- 默认只把已被 write-operation audit profile 覆盖的 `turnover_manual_closure_or_withdraw` 候选写入 scenario。
+- `workbench_pair_withdraw_context` 和 `no_oa_bank_batch_withdraw_context` 只作为上下文输出；加入最终 gate 前必须先补对应 audit profile。
+- 生成的 scenario 仍需要人工确认测试对象、业务影响和回滚路径；不能直接对真实待处理业务盲目 `--apply`。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：
