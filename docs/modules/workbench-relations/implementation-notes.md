@@ -1,5 +1,21 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-13 - fresh scope partial row 缺失不阻断下游读模型
+
+目标：修复 invoice usage / output collection read model 在读取 `workbench_relation` distribution 时，因为同一 fresh scope 中个别 row 缺失而把整页判为 non-fresh 的问题。
+
+结论：
+
+- `workbench_relation` scope 本身仍是 freshness 事实源；scope missing/stale/refreshing 必须继续阻断并入队。
+- 对 `get_by_row_ids`，如果已返回 row 所属 scope 都是 fresh，部分请求 row 不存在时返回 fresh 的已有 rows；调用方把缺失 row 视为无 relation / unlinked。
+- 这样不会伪造 relation fact，也不会绕过 stale scope；只是避免 fresh scope 中一个无关系或已缺席 row 让整个月份下游 read model 长期 refreshing。
+
+验证：
+
+- `tests/test_workbench_relation_read_facade.py::WorkbenchRelationReadFacadeTests::test_repository_treats_missing_row_in_fresh_scope_as_unlinked_context`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_read_facade tests.test_workbench_relation_sql_projection -q`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_api tests.test_invoice_usage_collection_sql_runtime -q`
+
 ## 2026-06-12 Phase 7O Downstream candidate closure
 
 目标：把 `WorkbenchRelationReadFacade` 分发的 `relation_status='candidate'` 显式传递到各下游页面，同时保持所有业务金额、状态、占用和冲突判断只使用 `linked`。

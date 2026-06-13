@@ -5,6 +5,7 @@ import unittest
 from fin_ops_platform.services.workbench_relation_distribution_mapper import (
     relation_dicts_by_row_id_from_distribution_payload,
 )
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
@@ -60,6 +61,46 @@ class FakeRelationRepository:
         return self.payload
 
 
+class PartialFreshRelationConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_relation_rows" in normalized:
+            return [
+                {
+                    "row_id": "txn-present",
+                    "row_type": "bank_transaction",
+                    "scope_key": "2026-03",
+                    "scope_month": "2026-03-01",
+                    "relation_status": "unlinked",
+                    "group_ids": [],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                    "source_versions": {"workbench_relation_schema_version": "test"},
+                    "payload": {"row_id": "txn-present", "row_type": "bank_transaction", "relation_status": "unlinked"},
+                    "raw_payload": {},
+                }
+            ]
+        if "from read_model.workbench_relation_groups" in normalized:
+            return []
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_relation_scopes" in normalized:
+            return {
+                "scope_key": "2026-03",
+                "row_count": 1,
+                "group_count": 0,
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "cache_status": "fresh",
+            }
+        if "from job.read_model_dirty_scopes" in normalized:
+            return None
+        return None
+
+
 class WorkbenchRelationReadFacadeTests(unittest.TestCase):
     def test_get_by_row_ids_returns_fresh_linked_and_unlinked_contexts(self) -> None:
         repository = FakeRelationRepository(
@@ -105,6 +146,17 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["linked_input_invoices"][1]["invoice_no"], "INV-002")
         self.assertEqual(payload["rows"][1]["relation_status"], "unlinked")
         self.assertEqual(queue.refreshes, [])
+
+    def test_repository_treats_missing_row_in_fresh_scope_as_unlinked_context(self) -> None:
+        repository = PostgresReadModelRepository(PartialFreshRelationConnection())
+
+        payload = repository.get_workbench_relation_rows_by_ids(["txn-present", "txn-missing"])
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual([row["row_id"] for row in payload["rows"]], ["txn-present"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
 
     def test_non_fresh_result_enqueues_refresh_when_required(self) -> None:
         repository = FakeRelationRepository(

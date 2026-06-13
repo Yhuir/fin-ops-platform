@@ -2753,6 +2753,20 @@ class PostgresReadModelRepository:
         returned_ids = {text(row.get("row_id")) for row in rows if text(row.get("row_id"))}
         if len(returned_ids) < len(normalized_ids):
             scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows)
+            if self._workbench_relation_scope_keys_are_fresh(scope_keys=scope_keys, tenant_id=tenant_id):
+                groups = self._workbench_relation_groups_for_scope_group_ids(
+                    scope_keys=scope_keys,
+                    group_ids=_dedupe_preserve_order(
+                        group_id for row in rows for group_id in text_list(row.get("group_ids"))
+                    ),
+                    tenant_id=tenant_id,
+                )
+                return self._workbench_relation_payload_from_rows(
+                    rows=rows,
+                    groups=groups,
+                    scope_keys=scope_keys,
+                    tenant_id=tenant_id,
+                )
             return {
                 "read_model_status": "missing",
                 "rows": [],
@@ -2859,6 +2873,17 @@ class PostgresReadModelRepository:
             tenant_id=tenant_id,
             fallback_source_versions=_source_versions_from_relation_records(groups),
         )
+
+    def _workbench_relation_scope_keys_are_fresh(self, *, scope_keys: list[str], tenant_id: str) -> bool:
+        normalized_scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys or []))
+        if not normalized_scope_keys:
+            return False
+        for scope_key in normalized_scope_keys:
+            if self._workbench_relation_scope_row(scope_key=scope_key, tenant_id=tenant_id) is None:
+                return False
+            if self._refresh_status(scope_type="workbench_relation", scope_key=scope_key) != "fresh":
+                return False
+        return True
 
     def _workbench_relation_scope_row(
         self,

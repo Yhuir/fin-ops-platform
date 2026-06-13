@@ -66,7 +66,7 @@
 - worker rebuild 后 relation distribution fresh。
 - open/proposed unmatched candidate decision 必须分发为 `relation_status='candidate'`，并由 `WorkbenchRelationReadFacade` 统一提供给下游页面；paired/active 关系才是 `linked`。
 - OA 待付款、待找发票、进项发票使用情况、销项发票收款、银行明细必须覆盖至少一个 candidate relation status 不丢失的 regression；其中支付/收款/待补票状态和金额汇总必须证明 candidate 不参与 linked-only 业务计算。成本统计等非 relation chip 页面必须覆盖 candidate 不进入业务金额/状态计算。
-- read facade missing/stale/source mismatch 返回非 fresh，不伪装空关系。
+- read facade missing/stale/source mismatch 返回非 fresh，不伪装空关系；但 scope 已 fresh 时，`get_by_row_ids` 中个别请求 row 缺失应由调用方按无 relation/unlinked 处理，不能阻断整页 read model。
 - App Status registry 仍能观测 `workbench_relation`。
 - PostgreSQL history replay 必须报告 readiness missing/not fresh，不能把 read model 状态缺失当成 pass。
 
