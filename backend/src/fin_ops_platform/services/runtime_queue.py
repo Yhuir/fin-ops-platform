@@ -236,6 +236,7 @@ class RuntimeQueueRepository:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> RuntimeQueueEvent:
         with self._connection.transaction() as transaction:
             return self.enqueue_read_model_refresh_in_transaction(
@@ -246,6 +247,7 @@ class RuntimeQueueRepository:
                 tenant_id=tenant_id,
                 priority=priority,
                 trace_id=trace_id,
+                metadata=metadata,
             )
 
     def enqueue_read_model_refresh_in_transaction(
@@ -258,6 +260,7 @@ class RuntimeQueueRepository:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> RuntimeQueueEvent:
         normalized_scope_type = str(scope_type or "").strip()
         normalized_scope_key = str(scope_key or "").strip()
@@ -266,10 +269,13 @@ class RuntimeQueueRepository:
         normalized_trace_id = str(trace_id or "").strip() or None
         if not normalized_scope_type or not normalized_scope_key:
             raise RuntimeQueueDataError("scope_type and scope_key are required for read model refresh.")
+        metadata_payload = _safe_read_model_refresh_metadata(metadata)
         payload = {
             "scope_type": normalized_scope_type,
             "scope_key": normalized_scope_key,
             "reason": normalized_reason,
+            **({"metadata": metadata_payload} if metadata_payload else {}),
+            **({"action_name": metadata_payload["action_name"]} if metadata_payload.get("action_name") else {}),
         }
         event_type = f"{normalized_scope_type}.read_model.refresh"
         dirty_row = transaction.fetch_one(
@@ -1236,6 +1242,15 @@ def _optional_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise RuntimeQueueDataError(f"source_version must be an integer, got {value!r}.") from exc
+
+
+def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dict[str, str]:
+    if not isinstance(metadata, dict):
+        return {}
+    action_name = str(metadata.get("action_name") or "").strip()
+    if not action_name:
+        return {}
+    return {"action_name": action_name[:120]}
 
 
 def _positive_int(raw: Any, *, default: int, name: str) -> int:

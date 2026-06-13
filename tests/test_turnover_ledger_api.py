@@ -93,8 +93,9 @@ class _PostgresQueueRecorder:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        _ = tenant_id, priority, trace_id
+        _ = tenant_id, priority, trace_id, metadata
         self.transactional.append((scope_type, scope_key, reason, transaction))
         return {"scope_type": scope_type, "scope_key": scope_key, "reason": reason}
 

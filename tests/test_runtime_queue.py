@@ -609,6 +609,63 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             ),
         )
 
+    def test_enqueue_read_model_refresh_metadata_records_action_name_only(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                {"source_version": 9},
+                event_row(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="2026-05",
+                    scope_type="workbench",
+                    scope_key="2026-05",
+                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                    payload={
+                        "scope_type": "workbench",
+                        "scope_key": "2026-05",
+                        "reason": "confirm_link",
+                        "metadata": {"action_name": "confirm_relation"},
+                        "action_name": "confirm_relation",
+                        "source_version": 9,
+                    },
+                    source_version=9,
+                ),
+            ]
+        )
+        repository = RuntimeQueueRepository(FailingTransactionConnection())  # type: ignore[arg-type]
+        enqueue_in_transaction = self._enqueue_read_model_refresh_in_transaction(repository)
+
+        enqueue_in_transaction(
+            transaction=transaction,
+            scope_type="workbench",
+            scope_key="2026-05",
+            reason="confirm_link",
+            metadata={
+                "action_name": "confirm_relation",
+                "actor_id": "finance-user",
+                "cookie": "secret",
+                "authorization": "Bearer secret",
+            },
+        )
+
+        _, _dirty_sql, dirty_params = transaction.calls[0]
+        _, _outbox_sql, outbox_params = transaction.calls[1]
+        expected_payload = {
+            "scope_type": "workbench",
+            "scope_key": "2026-05",
+            "reason": "confirm_link",
+            "metadata": {"action_name": "confirm_relation"},
+            "action_name": "confirm_relation",
+        }
+        self.assertEqual(dirty_params[4], expected_payload)
+        self.assertNotIn("actor_id", dirty_params[4])
+        self.assertNotIn("cookie", json_dumps := str(outbox_params[9]).lower())
+        self.assertNotIn("authorization", json_dumps)
+        self.assertEqual(
+            outbox_params[9],
+            {**expected_payload, "source_version": 9},
+        )
+
     def test_enqueue_read_model_refresh_delegates_to_transaction_bound_writer(self) -> None:
         transaction = FakeTransaction(
             rows=[

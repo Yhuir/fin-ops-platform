@@ -2199,6 +2199,7 @@ class TurnoverLedgerDirtyOutboxWriter:
                     tenant_id=self._tenant_id,
                     priority=self._priority,
                     trace_id=self._trace_id,
+                    metadata={"action_name": str((payload or {}).get("action_name") or "").strip()},
                 )
             )
         return events

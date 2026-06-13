@@ -289,6 +289,37 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 - `--allow-unauthenticated` 只允许做 public page shell smoke，不能用于最终“登录态页面/API p95”验收。
 - 输出不包含 token、cookie 或 Authorization header；采样结果可以进入阶段报告和事故复盘。
 
+## 真实写操作刷新 SLO 审计
+
+`read_model_slo_smoke` 证明 worker 对受控 direct scope 的处理能力；它不证明每个真实写入口都正确写入 dirty scope/outbox。
+真实写操作链路使用 durable outbox 历史审计：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit \
+  --lookback-hours 24 \
+  --target-ms 5000 \
+  --output /tmp/finops-write-operation-slo-$(date +%Y%m%d%H%M%S).json
+```
+
+默认 profile 覆盖当前高影响写操作的 read model refresh 事件：
+
+- `turnover_manual_closure_or_withdraw`：`turnover_relation_changed` 必须覆盖 `turnover_ledger`、`workbench`、
+  `workbench_relation`、`cost_statistics`、`search`，并匹配 `turnover_relation_zero_difference_closure`、
+  `withdraw_relation` 或 `turnover_relation_withdraw` action metadata。
+- `turnover_relation_extra`、`turnover_tag_selection`：必须刷新 `turnover_ledger`。
+- `bank_row_tags_batch`：必须覆盖银行明细、关联台和往来款相关 refresh，并匹配 bank row tags action metadata。
+- `bank_auto_tag_rules`、`bank_category_confirmation`、`no_oa_tag_selection`：必须能在 durable outbox 中看到对应
+  read model refresh。
+
+判定原则：
+
+- 工具只读 `job.outbox_events` 和 `job.read_model_dirty_scopes`，不会发起业务写操作。
+- 每个 required expectation 必须在 lookback window 内有真实样本；没有样本返回 `missing`，不能当作通过。
+- 新发布后的 turnover UoW 事件会把非敏感 `action_name` 写入 outbox payload；工具会用它区分共享同一 reason 的不同写操作。
+- 样本必须 `event_status=done`，dirty scope 必须为空或 `done`，且 p95 enqueue-to-done `< target-ms`。
+- 该工具能证明“最近真实写操作产生的 refresh 是否及时完成”，但不能证明没有被执行过的操作；最终闭环仍需要受控
+  E2E 写操作 smoke 覆盖关联、撤回、导入确认和规则变更。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：

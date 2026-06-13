@@ -570,6 +570,7 @@ class _TransactionOnlyQueueRepository:
         tenant_id: str,
         priority: str,
         trace_id: str | None,
+        metadata: dict[str, object] | None = None,
     ) -> dict[str, object]:
         event = {
             "transaction": transaction,
@@ -579,6 +580,7 @@ class _TransactionOnlyQueueRepository:
             "tenant_id": tenant_id,
             "priority": priority,
             "trace_id": trace_id,
+            "metadata": dict(metadata or {}),
         }
         self.calls.append(event)
         return event
@@ -2626,7 +2628,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             scope_type="turnover_ledger",
             scope_keys=["all", "2026-05"],
             reason="relation_extra_update",
-            payload={"ignored": "not part of queue primitive"},
+            payload={"action_name": "turnover_relation_extra_update", "actor_id": "finance-user"},
         )
 
         self.assertEqual(events, queue.calls)
@@ -2637,6 +2639,13 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual([call["tenant_id"] for call in queue.calls], ["tenant-a", "tenant-a"])
         self.assertEqual([call["priority"] for call in queue.calls], ["high", "high"])
         self.assertEqual([call["trace_id"] for call in queue.calls], ["trace-1", "trace-1"])
+        self.assertEqual(
+            [call["metadata"] for call in queue.calls],
+            [
+                {"action_name": "turnover_relation_extra_update"},
+                {"action_name": "turnover_relation_extra_update"},
+            ],
+        )
 
     def test_turnover_dirty_outbox_writer_rejects_non_transactional_queue(self) -> None:
         writer_class = getattr(self._write_adapters_module(), "TurnoverLedgerDirtyOutboxWriter")
