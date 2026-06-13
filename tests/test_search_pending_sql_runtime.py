@@ -44,12 +44,14 @@ class SearchPendingConnection:
         search_rows: list[dict] | None = None,
         pending_rows: list[dict] | None = None,
         pending_source_counts: dict[str, int] | None = None,
+        pending_filter_option_rows: list[dict] | None = None,
         dirty: bool = False,
         pending_scope_exists: bool = True,
     ) -> None:
         self.search_rows = list(search_rows or [])
         self.pending_rows = list(pending_rows or [])
         self.pending_source_counts = dict(pending_source_counts or {"expense": len(self.pending_rows)})
+        self.pending_filter_option_rows = list(pending_filter_option_rows or [])
         self.dirty = dirty
         self.pending_scope_exists = pending_scope_exists
         self.fetch_all_calls: list[tuple[str, tuple]] = []
@@ -64,6 +66,8 @@ class SearchPendingConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
+        if "from ranked_options" in normalized:
+            return self.pending_filter_option_rows
         if "from read_model.search_index_rows" in normalized:
             return self.search_rows
         if "from read_model.pending_invoice_scopes" in normalized:
@@ -964,6 +968,36 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("direction", executed_sql)
         self.assertIn("application_type", executed_sql)
         self.assertIn(" and ", executed_sql)
+
+    def test_pending_invoice_repository_builds_filter_options_in_sql(self) -> None:
+        connection = SearchPendingConnection(
+            pending_filter_option_rows=[
+                {"field": "bank_account", "value": "光大 8826", "option_count": 3},
+                {"field": "status_code", "value": "paid_pending_invoice", "option_count": 2},
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_filter_options(
+            direction="expense",
+            filter="all",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            filters=json.dumps([{"field": "status_code", "operator": "in", "values": ["paid_pending_invoice"]}]),
+        )
+
+        self.assertEqual(payload["direction"], "expense")
+        self.assertEqual(payload["filter"], "all")
+        self.assertEqual(payload["options"]["bank_account"], [{"value": "光大 8826", "label": "光大 8826", "count": 3}])
+        self.assertEqual(
+            payload["options"]["status_code"],
+            [{"value": "paid_pending_invoice", "label": "paid_pending_invoice", "count": 2}],
+        )
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("ranked_options", executed_sql)
+        self.assertIn("status_code", executed_sql)
+        self.assertNotIn("limit %s offset %s", executed_sql)
 
     def test_pending_invoice_api_miss_enqueues_refresh_without_sync_scan(self) -> None:
         queue = QueueRecorder()

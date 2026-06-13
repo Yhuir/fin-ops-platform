@@ -43,16 +43,18 @@ class PendingInvoiceApiRoutes:
         return _read_model_status_code(payload), payload
 
     def filter_options(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        rows_payload = self._read_model_service.all_rows(query)
-        if rows_payload.get("read_model_status") != "fresh":
-            return HTTPStatus.ACCEPTED, rows_payload
+        options_payload = self._read_model_service.filter_options(query)
+        if options_payload.get("read_model_status") != "fresh":
+            return HTTPStatus.ACCEPTED, options_payload
         payload = self._query_service.filter_options_for_rows(
-            rows=list(rows_payload.get("rows") or []),
-            direction=str(rows_payload.get("direction") or query.get("direction", ["expense"])[0]),
-            filter=str(rows_payload.get("filter") or query.get("filter", ["all"])[0]),
+            rows=list(options_payload.get("rows") or []),
+            direction=str(options_payload.get("direction") or query.get("direction", ["expense"])[0]),
+            filter=str(options_payload.get("filter") or query.get("filter", ["all"])[0]),
         )
+        if isinstance(options_payload.get("options"), dict):
+            payload["options"] = options_payload["options"]
         payload["read_model_status"] = "fresh"
-        payload["read_model_scope_key"] = rows_payload.get("read_model_scope_key")
+        payload["read_model_scope_key"] = options_payload.get("read_model_scope_key")
         return HTTPStatus.OK, payload
 
     def invoice_candidates(self, query: dict[str, list[str]]) -> dict[str, Any]:

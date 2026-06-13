@@ -46,6 +46,7 @@
 | `read_model_status=failed/unavailable` | 适用 | `tests/test_read_model_readiness_reporter.py`、App Status 测试、`tests/test_read_model_scope_contract.py` 覆盖 outbox failure 是否 current-effective | 各页面 failed/unavailable 展示由业务模块覆盖 | P1 |
 | background job queued/running/succeeded/failed | 适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_readiness_reporter.py` | 后台任务 UI 属 app-health/background-jobs 模块 | P1 |
 | cache hit/cache miss | 适用 | `tests/test_read_model_query_gateway.py` | Redis 真连接不在本地单测覆盖 | P2 |
+| authenticated HTTP SLO fresh gate | 适用 | `tests/test_http_slo_probe.py` | 真实生产登录态 HTTP SLO 需发布后运行；本地覆盖 probe 语义和默认参数 | P1 |
 | external dependency timeout/failure | 不直接适用 | runtime/app-health 模块覆盖依赖状态 | OA/Redis/RabbitMQ/PostgreSQL 真失败需 staging | P2 |
 | frontend loading | 间接适用 | 业务页面测试 | 本模块无 UI | 不适用 |
 | frontend empty | 间接适用 | 业务页面测试 | 本模块无 UI | 不适用 |
@@ -77,6 +78,7 @@
 | 日期 | Bug | 根因 | 回归测试 | 验证命令 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | 2026-06-12 | App Status 不能把已覆盖历史 failure 与当前未覆盖 failure 混为同一类，也不能删除真实 current blocker | 旧 outbox failure 可能已有 later done/fresh readiness 覆盖；另一些失败仍是当前真实阻塞 | `tests/test_read_model_scope_contract.py::test_check_reports_repair_manifest_categories_and_outbox_current_state`、`test_apply_records_audit_with_manifest_cleanup_and_rollback_without_deleting_current_failures`、`test_apply_is_idempotent_after_rows_are_deleted` | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_scope_contract -v` | 自动化已覆盖服务层语义；生产真实库 dry-run 仍需执行 |
+| 2026-06-13 | HTTP SLO 只看 status/latency，导致快速返回 refreshing 或 refresh_enqueued 被误判为通过 | probe 未把 freshness 纳入 pass/fail；普通业务 `status` 字段还可能被误判为 read model status | `tests/test_http_slo_probe.py::HttpSloProbeTests::test_non_fresh_read_model_or_refresh_enqueue_fails_probe`、`test_plain_status_field_does_not_count_as_read_model_status` | `PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe -v` | 自动化已覆盖 probe 语义；生产真实 HTTP SLO 需发布后验证 |
 | 2026-06-10 | legacy/invalid `cost_statistics` dirty/outbox/readiness scope 影响生产 runtime 状态 | 成本统计 scope policy 收敛后旧运行时状态仍保留裸月份/裸 all/非法 scope | `tests/test_read_model_scope_contract.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_scope_contract tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v` | 自动化已覆盖；生产 `--apply` 为 documented-risk |
 
 ## 关键 smoke flows

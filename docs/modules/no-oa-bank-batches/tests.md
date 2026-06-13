@@ -78,6 +78,7 @@
 | PostgreSQL no-OA read model 清理缺席旧批次 | `test_save_no_oa_bank_batches_replaces_absent_read_model_rows` |
 | stale/category drift | `test_stale_batch_after_category_drift_clears_relation_and_is_not_withdrawable` |
 | read model stale/missing | `test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh`、`test_no_oa_bank_batches_missing_sql_read_model_does_not_refresh_in_get_path` |
+| read model fresh empty | `test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh`、`test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing` |
 | worker stale source version / relation repair 边界 | `test_stale_source_version_does_not_rebuild_or_overwrite_read_model`、`test_refresh_does_not_repair_workbench_relations_from_read_model_path` |
 | 前端 stale polling | `shows read model stale state and reloads until the no OA read model is fresh`、`cleans up stale read model retry reload after route unmount` |
 | 前端分类/规则事件刷新 | `refreshes tag selection, list, and detail cache after bank transaction category updates`、`refreshes tag selection, list, and detail cache after bank auto tag rules update` |
@@ -87,6 +88,7 @@
 | 风险/历史问题 | 当前保护 |
 | --- | --- |
 | GET list/detail 在 read model missing 时同步 rebuild，拖慢热路径或伪造 fresh | `tests/test_no_oa_bank_batch_workbench_integration.py` read model tests |
+| 当前月份没有候选 rows 时被误判为 missing，导致页面持续刷新并反复入队 | `test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh`、`test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing` |
 | internal transfer 从 Workbench confirm-link 直接写 `manual_confirmed` | `test_workbench_confirm_internal_transfer_bank_rows_submits_no_oa_batch` |
 | 混合 internal transfer 和非 internal transfer 被静默普通确认 | `test_workbench_confirm_mixed_internal_transfer_bank_rows_rejects_no_oa_conflict` |
 | no-OA 页面和关联台对同一组 internal transfer 形成两条 active relation | `test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact`、`test_create_active_relation_rejects_active_row_reuse_by_different_case_id` |

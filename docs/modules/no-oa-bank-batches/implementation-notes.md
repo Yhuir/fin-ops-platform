@@ -7,6 +7,7 @@
 - 免 OA 流水批量处理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、application/service、API contract、read model/worker、前端交互、Workbench integration 和旧功能回归。
 - 本模块是 Bankdetail 高风险子域。后续不要把 no-OA 机械拆成脱离 Bankdetail 的独立事实源。
 - `GET /api/no-oa-bank-batches` 和 detail 读路径不得在 missing/stale 时同步重建全量批次；必须返回 read model status 并 enqueue refresh。
+- PostgreSQL list 读路径允许返回 fresh empty rows，但必须由 `job.read_model_dirty_scopes` 无 active blocker 且 `read_model.app_status_readiness` 记录为 fresh 共同证明；不能把无 rows 直接当 fresh。
 - Workbench confirm-link 的 internal transfer 特例必须最终写 no-OA submitted batch 和 `relation_mode=no_oa_bank_batch`，不得绕过批次写普通 `manual_confirmed`。
 - no-OA legacy migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 必须通过 `WorkbenchRelationCommandService` 写 relation；缺 command service 时 fail fast，不回退 direct pair mutation。
 - no-OA submit/withdraw 的长期目标是 facts/audit/dirty/outbox 同事务；当前目标契约由 `tests/test_bankdetail_write_uow_contract.py` 保护，真实收敛前保持 `documented-risk`。
@@ -125,3 +126,14 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_service.py 
   - 真实 PostgreSQL 历史数据的全量回放和 repair dry-run 仍需 staging/生产前 smoke。
   - relation command service 的生产级并发 row occupation 仍未引入 PostgreSQL 锁或唯一占用约束。
   - 前端跨页面即时反馈仍需完整浏览器 smoke；domain event 仍只是刷新提示，不是事实源。
+
+## 2026-06-13 - fresh empty rows readiness 证明
+
+- 目标：修复当前月份没有免 OA 候选时 API 持续返回 missing/refresh_enqueued，导致页面一直“同步中”或 authenticated HTTP SLO freshness gate 失败。
+- 影响范围：`PostgresReadModelRepository.list_no_oa_bank_batch_rows(...)`、no-OA list API 读取语义、HTTP SLO 默认 no-OA 探针。
+- 关键决策：list 查询无 rows 时，只有 dirty scope 已 fresh 且 `read_model.app_status_readiness` 对 `no_oa_bank_batch/all` 为 fresh，才返回 `[]`；否则保持 `None`，让上层继续返回 refreshing 并入队真实刷新。
+- 文档影响：更新本实施记录和测试矩阵。
+- 测试覆盖：`tests/test_no_oa_bank_batch_workbench_integration.py::NoOaBankBatchWorkbenchIntegrationTests::test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh`、`test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing`。
+- 验证命令：见最终交付说明。
+- 未测风险：需要发布后用真实生产 readiness 行验证当前月份 empty state 不再被误判为 missing。
+- 后续事项：若后续把 no-OA scope 从 `all` 拆到月份维度，必须同步更新 readiness 证明条件和测试。

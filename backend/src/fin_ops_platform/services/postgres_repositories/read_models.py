@@ -2015,6 +2015,106 @@ class PostgresReadModelRepository:
                 "source_versions": source_versions,
             }
 
+    def list_pending_invoice_filter_options(
+        self,
+        *,
+        direction: str,
+        filter: str = "all",
+        date_from: str | None = None,
+        date_to: str | None = None,
+        keyword: str | None = None,
+        filters: str | list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        normalized_direction = str(direction or "").strip()
+        normalized_filter = str(filter or "all").strip() or "all"
+        if normalized_direction == "all" and normalized_filter != "all":
+            raise ValueError("all direction only supports filter=all.")
+        where: list[str] = []
+        params: list[Any] = []
+        if normalized_direction != "all":
+            where.append("direction = %s")
+            params.append(normalized_direction)
+        if normalized_filter != "all":
+            clause, clause_params = _pending_invoice_visible_filter_clause(
+                direction=normalized_direction,
+                filter_name=normalized_filter,
+            )
+            where.append(clause)
+            params.extend(clause_params)
+        if date_from:
+            where.append("trade_date >= %s::date")
+            params.append(date_from)
+        if date_to:
+            where.append("trade_date <= %s::date")
+            params.append(date_to)
+        if keyword:
+            where.append("searchable_text ilike %s")
+            params.append(f"%{keyword}%")
+        for clause, clause_params in _pending_invoice_filter_clauses(filters):
+            where.append(clause)
+            params.extend(clause_params)
+        where_sql = " and ".join(where) if where else "true"
+        option_values = ",\n                    ".join(
+            f"('{field}', {_pending_invoice_option_expression(field)})"
+            for field in PENDING_INVOICE_FILTER_FIELDS
+        )
+        rows = self._connection.fetch_all(
+            f"""
+            with filtered_rows as (
+                select
+                    direction,
+                    filter_group,
+                    trade_date,
+                    counterparty_name,
+                    amount,
+                    status_code,
+                    seller_name,
+                    invoice_total,
+                    oa_applicant,
+                    project_name,
+                    payload
+                from read_model.pending_invoice_rows
+                where {where_sql}
+            ),
+            option_values(field, value) as (
+                select option_value.field, nullif(btrim(option_value.value), '') as value
+                from filtered_rows
+                cross join lateral (
+                    values
+                    {option_values}
+                ) as option_value(field, value)
+            ),
+            option_counts as (
+                select field, value, count(*)::integer as option_count
+                from option_values
+                where value is not null
+                group by field, value
+            ),
+            ranked_options as (
+                select
+                    field,
+                    value,
+                    option_count,
+                    row_number() over (partition by field order by option_count desc, value) as option_rank
+                from option_counts
+            )
+            select field, value, option_count
+            from ranked_options
+            where option_rank <= 50
+            order by field, option_rank
+            """,
+            tuple(params),
+        )
+        options: dict[str, list[dict[str, Any]]] = {field: [] for field in PENDING_INVOICE_FILTER_FIELDS}
+        for row in rows:
+            field = text(row.get("field")) or ""
+            value = text(row.get("value")) or ""
+            if field not in options or not value:
+                continue
+            count = int_value(row.get("option_count"), 0)
+            options[field].append({"value": value, "label": value, "count": count})
+        return {"direction": normalized_direction, "filter": normalized_filter, "options": options}
+
     def save_pending_invoice_rows(
         self,
         *,
@@ -6774,7 +6874,7 @@ class PostgresReadModelRepository:
             tuple(params),
         )
         if not rows:
-            return None
+            return [] if self._no_oa_bank_batch_readiness_is_fresh() else None
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = _read_model_payload(row)
@@ -6788,6 +6888,22 @@ class PostgresReadModelRepository:
                     payload["source_versions"] = row.get("source_versions")
                 result.append(payload)
         return result
+
+    def _no_oa_bank_batch_readiness_is_fresh(self) -> bool:
+        if self._refresh_status(scope_type="no_oa_bank_batch", scope_key="all") != "fresh":
+            return False
+        row = self._connection.fetch_one(
+            """
+            select status
+            from read_model.app_status_readiness
+            where tenant_id = 'default'
+              and read_model_key = 'no_oa_bank_batch'
+              and scope_type = 'no_oa_bank_batch'
+              and scope_key = 'all'
+            limit 1
+            """
+        )
+        return isinstance(row, dict) and text(row.get("status")) == "fresh"
 
     def list_turnover_ledger_view(
         self,
@@ -7828,6 +7944,70 @@ def _pending_invoice_filter_expression(field: str) -> str:
     if field == "oa_application_type":
         return "coalesce(payload->'oa'->'primary'->>'application_type', '')"
     return PENDING_INVOICE_SORT_EXPRESSIONS.get(field, field)
+
+
+def _pending_invoice_option_expression(field: str) -> str:
+    if field == "trade_date":
+        return "coalesce(to_char(trade_date, 'YYYY-MM-DD'), left(coalesce(payload->'bank_transaction'->>'trade_time', ''), 10), '')"
+    if field == "bank_name":
+        return "coalesce(payload->'bank_transaction'->>'bank_name', '')"
+    if field == "account_name":
+        return "coalesce(payload->'bank_transaction'->>'account_name', '')"
+    if field == "bank_account":
+        return (
+            "trim(concat_ws(' ', "
+            "nullif(coalesce(payload->'bank_transaction'->>'bank_short_name', payload->'bank_transaction'->>'bank_name', ''), ''), "
+            "nullif(coalesce(payload->'bank_transaction'->>'account_last4', ''), '')"
+            "))"
+        )
+    if field == "counterparty_name":
+        return "coalesce(counterparty_name, payload->'bank_transaction'->>'counterparty_name', '')"
+    if field == "transaction_tag":
+        return (
+            "coalesce("
+            "nullif((select string_agg(label, ' / ') from jsonb_array_elements_text("
+            "case when jsonb_typeof(payload->'bank_transaction'->'effective_tag_label_path') = 'array' "
+            "then payload->'bank_transaction'->'effective_tag_label_path' else '[]'::jsonb end"
+            ") as labels(label)), ''), "
+            "nullif(trim(concat_ws(' / ', "
+            "nullif(coalesce(payload->'bank_transaction'->>'effective_tag_primary_label', ''), ''), "
+            "nullif(coalesce(payload->'bank_transaction'->>'effective_tag_sub_label', ''), '')"
+            ")), ''), "
+            "nullif(coalesce(payload->'bank_transaction'->>'effective_tag_label', ''), ''), "
+            "coalesce(payload->'bank_transaction'->>'effective_tag_code', '')"
+            ")"
+        )
+    if field == "direction":
+        return "direction"
+    if field == "amount":
+        return (
+            "coalesce("
+            "nullif(payload->'bank_transaction'->>'amount', ''), "
+            "case when amount is null then '' else trim(to_char(amount, 'FM999999999999990.00')) end"
+            ")"
+        )
+    if field == "summary_remark":
+        return "(coalesce(payload->'bank_transaction'->>'summary', '') || ' ' || coalesce(payload->'bank_transaction'->>'remark', ''))"
+    if field == "status_code":
+        return "coalesce(status_code, payload->'invoice_acquisition_status'->>'code', '')"
+    if field == "rule_group":
+        return "coalesce(payload->'invoice_acquisition_status'->'matched_rule'->>'group', '')"
+    if field == "seller_name":
+        return "coalesce(seller_name, payload->'input_invoices'->'primary'->>'seller_name', '')"
+    if field == "invoice_total":
+        return (
+            "coalesce("
+            "nullif(payload->'input_invoices'->'payment_summary'->>'invoice_total', ''), "
+            "case when invoice_total is null then '' else trim(to_char(invoice_total, 'FM999999999999990.00')) end"
+            ")"
+        )
+    if field == "oa_applicant":
+        return "coalesce(oa_applicant, payload->'oa'->'primary'->>'applicant', payload->>'oa_applicant', '')"
+    if field == "oa_application_type":
+        return "coalesce(payload->'oa'->'primary'->>'application_type', '')"
+    if field == "project_name":
+        return "coalesce(project_name, payload->'oa'->'primary'->>'project_name', '')"
+    raise ValueError(f"unsupported pending invoice filter option field: {field}")
 
 
 def _pending_invoice_visible_filter_clause(*, direction: str, filter_name: str) -> tuple[str, list[Any]]:

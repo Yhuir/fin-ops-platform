@@ -8,6 +8,7 @@
 - read model refresh 入队前由统一 scope policy/gateway 负责 normalize、validate 和 dedupe；`RuntimeQueueRepository` 继续只负责 PostgreSQL durable queue 持久化。
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
+- authenticated HTTP SLO gate 的默认目标是 5 秒内返回，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。
 
 ## 记录模板
 
@@ -25,6 +26,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-13 - authenticated HTTP SLO fresh gate 收紧
+
+- 目标：让全 app 页面“5 秒内已同步”的验收不再只看 HTTP 200/202 和耗时，而是检查真实 read model freshness。
+- 影响范围：`http_slo_probe.py` 默认 probe 参数、`runtime_sync_closure_gate.py` 默认 HTTP target、闭环验收报告语义。
+- 关键决策：默认 HTTP target 调整为 5000ms；默认探针使用更贴近前端首屏的参数；probe 只读取显式 `read_model_status`/`readModelStatus`，不把普通业务 `status` 字段误判为 read model 状态；非 fresh 或 refresh enqueued 直接失败。
+- 文档影响：更新 read-models 实施记录和测试矩阵。
+- 测试覆盖：`tests/test_http_slo_probe.py` 覆盖默认 probe、普通 status 字段、非 fresh/refresh enqueued 失败。
+- 验证命令：见最终交付说明。
+- 未测风险：authenticated HTTP SLO 的最终证明依赖真实登录态 cookie/token 和生产发布后的接口。
+- 后续事项：接入 Prometheus/Grafana 或 OpenTelemetry 后，应把 enqueue-to-fresh latency、HTTP SLO p95、non-fresh count 和 refresh_enqueued count 变成持续指标。
 
 ## 2026-06-13 - Required RabbitMQ real consumers 生产切换
 

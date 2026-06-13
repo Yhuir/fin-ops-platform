@@ -4,6 +4,7 @@ import unittest
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 
 
 def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[str, object]]:
@@ -77,6 +78,27 @@ class PairSnapshotRelationFacade:
 class FailingConfirmLinkUow:
     def run(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("internal transfer confirm-link must be submitted through no-OA, not workbench UoW")
+
+
+class NoOaReadModelConnection:
+    def __init__(self, *, readiness_status: str | None = "fresh", dirty_status: str | None = None) -> None:
+        self.readiness_status = readiness_status
+        self.dirty_status = dirty_status
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from job.read_model_dirty_scopes" in normalized:
+            return {"status": self.dirty_status} if self.dirty_status else None
+        if "from read_model.app_status_readiness" in normalized:
+            return {"status": self.readiness_status} if self.readiness_status else None
+        return None
 
 
 class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
@@ -404,6 +426,26 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh(self) -> None:
+        connection = NoOaReadModelConnection(readiness_status="fresh")
+        repository = PostgresReadModelRepository(connection)
+
+        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
+
+        self.assertEqual(rows, [])
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("read_model.app_status_readiness", executed_sql)
+        self.assertIn("job.read_model_dirty_scopes", executed_sql)
+
+    def test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing(self) -> None:
+        missing_repository = PostgresReadModelRepository(NoOaReadModelConnection(readiness_status=None))
+        refreshing_repository = PostgresReadModelRepository(
+            NoOaReadModelConnection(readiness_status="fresh", dirty_status="pending")
+        )
+
+        self.assertIsNone(missing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
+        self.assertIsNone(refreshing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
 
     def test_no_oa_bank_batch_detail_does_not_refresh_all_batches(self) -> None:
         app = build_application()

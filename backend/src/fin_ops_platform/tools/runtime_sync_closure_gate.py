@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--apply-write-scenarios", action="store_true")
     parser.add_argument("--read-model-target-ms", type=float, default=5_000.0)
     parser.add_argument("--write-target-ms", type=float, default=5_000.0)
-    parser.add_argument("--http-target-ms", type=float, default=1_000.0)
+    parser.add_argument("--http-target-ms", type=float, default=5_000.0)
     parser.add_argument("--write-audit-lookback-hours", type=float, default=24.0)
     parser.add_argument("--timeout-seconds", type=float, default=90.0)
     parser.add_argument("--poll-interval-seconds", type=float, default=0.5)

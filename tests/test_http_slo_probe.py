@@ -46,6 +46,12 @@ class HttpSloProbeTests(unittest.TestCase):
             "background_jobs_active",
         ):
             self.assertIn(name, api_probe_names)
+        probe_paths = {probe.name: probe.path for probe in http_slo_probe.DEFAULT_API_PROBES}
+        self.assertIn("direction=expense", probe_paths["pending_invoices_filter_options"])
+        self.assertIn("month=2026-03", probe_paths["tax_offset_rows"])
+        self.assertIn("project_scope=active", probe_paths["cost_statistics_explorer_all"])
+        self.assertIn("bucket=unsubmitted", probe_paths["no_oa_bank_batches"])
+        self.assertIn("bank_year=", probe_paths["batch_accounting"])
 
     def test_configured_default_page_probes_have_stable_page_names(self) -> None:
         args = http_slo_probe.build_parser().parse_args(["--target-ms", "5000"])
@@ -104,6 +110,54 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertNotIn("secret-token", json.dumps(report))
         self.assertEqual(report["probes"][0]["read_model_statuses"], {"fresh": 2})
         self.assertEqual(report["probes"][0]["cache_statuses"], {"fresh": 2})
+
+    def test_plain_status_field_does_not_count_as_read_model_status(self) -> None:
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"status":"ok"}',
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            probes=[http_slo_probe.HttpProbe("session", "/api/session/me")],
+            headers={"Cookie": "Admin-Token=token"},
+            iterations=1,
+            warmup=0,
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["probes"][0]["read_model_statuses"], {})
+
+    def test_non_fresh_read_model_or_refresh_enqueue_fails_probe(self) -> None:
+        responses = [
+            {"read_model_status": "missing", "refresh_enqueued": True},
+            {"read_model_status": "fresh", "refresh_enqueued": False},
+        ]
+
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            payload = responses.pop(0)
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode("utf-8"),
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            probes=[http_slo_probe.HttpProbe("no_oa", "/api/no-oa-bank-batches")],
+            headers={"Cookie": "Admin-Token=token"},
+            iterations=2,
+            warmup=0,
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertFalse(report["probes"][0]["freshness_pass"])
+        self.assertEqual(report["probes"][0]["non_fresh_read_model_statuses"], {"missing": 1})
+        self.assertEqual(report["probes"][0]["refresh_enqueued_count"], 1)
 
     def test_unexpected_status_fails_probe(self) -> None:
         def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:

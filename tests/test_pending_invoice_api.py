@@ -287,6 +287,60 @@ class PendingInvoiceApiTests(unittest.TestCase):
             queue_repository.enqueued,
         )
 
+    def test_filter_options_uses_sql_aggregation_after_fresh_gate(self) -> None:
+        app = build_application()
+
+        class AggregatingPendingInvoiceSqlReadRepository:
+            def __init__(self) -> None:
+                self.option_calls: list[dict[str, object]] = []
+
+            def list_pending_invoice_rows(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-filter-options-gate",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {"page": 1, "page_size": 1, "total": 128},
+                    "summary": {"total_rows": 128, "missing_invoice_rows": 128, "create_invoice_available_rows": 12},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": pending_invoice_source_versions(
+                        app._app_settings_service.get_settings_payload(),
+                        attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
+                        oa_projection_sync_version=app._current_oa_projection_sync_version(),
+                    ),
+                }
+
+            def list_pending_invoice_filter_options(self, **kwargs: object) -> dict[str, object]:
+                self.option_calls.append(dict(kwargs))
+                return {
+                    "direction": "expense",
+                    "filter": "all",
+                    "options": {
+                        "bank_account": [{"value": "光大 8826", "label": "光大 8826", "count": 9}],
+                    },
+                }
+
+        repository = AggregatingPendingInvoiceSqlReadRepository()
+        app._pending_invoice_sql_read_repository = repository
+        if hasattr(app, "_pending_invoice_api_routes"):
+            delattr(app, "_pending_invoice_api_routes")
+
+        response = app.handle_request("GET", "/api/pending-invoices/filter-options?direction=expense")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["options"]["bank_account"], [{"value": "光大 8826", "label": "光大 8826", "count": 9}])
+        self.assertEqual(repository.option_calls[0]["direction"], "expense")
+
     def test_rows_endpoint_rejects_unconfigured_read_model_without_sync_scan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

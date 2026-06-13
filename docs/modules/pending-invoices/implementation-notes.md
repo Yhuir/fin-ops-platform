@@ -9,6 +9,7 @@
 - 支出规则版本是 `pending_invoice_tag_groups.version`，收入规则版本是 `pending_output_invoice_tag_groups.version`；二者独立，且都不同于 `bank_transaction_tags.version`。
 - `requires_invoice` 是 active tag complement，由后端实时派生；保存规则时即使请求包含该字段也必须忽略。
 - rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
+- filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
 - OA/流水/发票 relation 不是待找发票私有事实；manual invoice 和 attach existing 写入必须委托 `WorkbenchRelationCommandService`，读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖支出/收入状态、规则保存、人工补票、attach existing、income status、API 契约、SQL read model、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 
@@ -28,6 +29,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-13 - filter-options fresh-gated SQL 聚合
+
+- 目标：把待找发票筛选项从全量 rows Python 聚合改为 fresh gate 后的 PostgreSQL 聚合，降低认证态页面 HTTP SLO 长尾。
+- 影响范围：`PendingInvoiceReadModelService.filter_options(...)`、pending invoice route、`PostgresReadModelRepository.list_pending_invoice_filter_options(...)`、HTTP SLO probe 默认待找发票探针。
+- 关键决策：filter-options 仍必须先通过 rows freshness/source-version gate；SQL 只读取 `read_model.pending_invoice_rows` 中符合方向、业务筛选、日期、关键字和表头筛选的候选值，并按 field/count/value 取前 50 个选项。
+- 文档影响：更新本实施记录和测试矩阵。
+- 测试覆盖：`tests/test_pending_invoice_api.py::PendingInvoiceApiTests::test_filter_options_uses_sql_aggregation_after_fresh_gate`、`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_builds_filter_options_in_sql`、`tests/test_http_slo_probe.py`。
+- 验证命令：见最终交付说明。
+- 未测风险：本地 repository fake 不执行真实 PostgreSQL EXPLAIN；生产 authenticated HTTP SLO 需要发布后用真实登录态验证。
+- 后续事项：如果真实数据下仍有长尾，继续用 `pg_stat_statements` / EXPLAIN 优化 `read_model.pending_invoice_rows` 筛选列索引。
 
 ## 2026-06-11 - 多流水选择已有进项发票闭环
 

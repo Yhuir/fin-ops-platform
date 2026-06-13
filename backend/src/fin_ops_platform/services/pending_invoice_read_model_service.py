@@ -156,6 +156,39 @@ class PendingInvoiceReadModelService:
             "read_model_scope_key": first_payload.get("read_model_scope_key"),
         }
 
+    def filter_options(self, query: dict[str, list[str]]) -> dict[str, Any]:
+        direction = str(query.get("direction", ["expense"])[0] or "expense").strip()
+        filter_name = str(query.get("filter", ["all"])[0] or "all").strip() or "all"
+        self._validate_direction_filter(direction=direction, filter_name=filter_name)
+        list_options = getattr(self._repository, "list_pending_invoice_filter_options", None)
+        if not callable(list_options):
+            return self.all_rows(query)
+
+        gate_query = {key: list(values) for key, values in query.items()}
+        gate_query["page"] = ["1"]
+        gate_query["page_size"] = ["1"]
+        gate_payload = self.rows(gate_query)
+        if gate_payload.get("read_model_status") != "fresh":
+            return gate_payload
+        try:
+            payload = list_options(
+                direction=direction,
+                filter=filter_name,
+                date_from=query.get("date_from", [None])[0],
+                date_to=query.get("date_to", [None])[0],
+                keyword=query.get("keyword", [None])[0],
+                filters=query.get("filters", [None])[0],
+            )
+        except ValueError as exc:
+            raise PendingInvoiceError("invalid_pending_invoice_query", str(exc)) from exc
+        result = dict(payload) if isinstance(payload, dict) else {}
+        result.setdefault("direction", gate_payload.get("direction") or direction)
+        result.setdefault("filter", gate_payload.get("filter") or filter_name)
+        result["read_model_status"] = "fresh"
+        result["read_model_scope_key"] = gate_payload.get("read_model_scope_key")
+        result["summary"] = gate_payload.get("summary") if isinstance(gate_payload.get("summary"), dict) else {}
+        return result
+
     def expected_source_versions(
         self,
         *,
