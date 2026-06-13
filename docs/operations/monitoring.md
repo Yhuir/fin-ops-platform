@@ -239,6 +239,18 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sync_slo_baseline --jso
 
 该工具不采集登录态页面 API p95，因为当前 API 性能 recorder 是进程内窗口且 dashboard 接口需要认证。页面首包 p95 必须用登录态 HTTP/browser 采样另行证明，不能用只读 DB baseline 代替。
 
+受控 synthetic read model refresh 使用：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.read_model_slo_smoke --json
+```
+
+该工具默认 dry-run，只选择已有 fresh readiness 或 active generation 中的 direct scope；显式加
+`--apply` 后才会通过 `ReadModelRefreshGateway` 入队，并等待 outbox event `done` 与
+`read_model.app_status_readiness.status='fresh'`，用真实 `created_at -> processed_at` 判断
+enqueue-to-fresh 是否满足目标。生产运行必须把 JSON 输出保存到 `/tmp` 或运维归档路径，且在运行后
+复核 `/health/ready`、dirty scope、outbox、RabbitMQ DLQ 均收敛。
+
 ## 登录态 HTTP SLO 采样
 
 页面首包和关键读 API p95 使用只读 HTTP probe 采集：
