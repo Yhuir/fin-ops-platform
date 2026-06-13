@@ -55,6 +55,31 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 
 这说明当前主要缺口不是 Kafka、PgBouncer 或 worker wakeup，而是最终验收材料：真实登录态和可回滚业务对象。
 
+Stage 7 release `main-557f2262-stage7-sync-202606131232` 激活后运行 closure gate：
+
+```text
+/tmp/finops-runtime-sync-closure-gate-stage7-202606131232.json
+status=fail
+failed_checks=["authenticated_http_slo","write_operation_audit","write_operation_e2e"]
+runtime_health=pass
+read_model_direct_smoke=pass
+```
+
+本次 gate 中 direct read model smoke 14/14 通过，最慢为：
+
+| read model | scope | enqueue-to-fresh | handler |
+|---|---:|---:|---:|
+| no_oa_bank_batch | 2026-01 | 1095.367ms | 951.095ms |
+| search | 2025-12 | 772.548ms | 614.172ms |
+| workbench_relation | 2026-01 | 634.501ms | 474.673ms |
+| workbench | 2025-12 | 560.897ms | 413.171ms |
+
+失败项解释：
+
+- `authenticated_http_slo`：生产没有提供 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN` / bearer token / cookie。
+- `write_operation_audit`：24h 内 13 个高影响 operation expectation 全部缺真实写操作样本。
+- `write_operation_e2e`：未提供受控、可回滚的 mutating scenario。
+
 ## 验收命令
 
 ```bash
