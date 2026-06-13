@@ -114,6 +114,14 @@ class FinancialObjectIdentityPolicyTests(unittest.TestCase):
         self.assertEqual(identity.canonical_key_kind, "digital_invoice_no")
         self.assertEqual(len(self.policy.oa_attachment_invoice_stable_identity(attachment)), 16)
         self.assertEqual(len(self.policy.oa_attachment_invoice_candidate_identity(attachment)), 16)
+        self.assertEqual(
+            self.policy.oa_attachment_invoice_row_id("oa-exp-001", 0, attachment),
+            f"oa-att-inv-oa-exp-001-{self.policy.oa_attachment_invoice_stable_identity(attachment)}",
+        )
+        self.assertEqual(
+            self.policy.oa_attachment_invoice_row_id("oa-exp-001", 2, None),
+            "oa-att-inv-oa-exp-001-03",
+        )
 
     def test_oa_attachment_invoice_weak_tax_amount_key_is_only_suspected(self) -> None:
         attachment = {

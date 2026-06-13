@@ -5,7 +5,6 @@ from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import re
-from types import SimpleNamespace
 from typing import Any
 
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
@@ -65,7 +64,6 @@ class WorkbenchSqlProjectionBuilder:
                 oa_adapter=PostgresOAProjectionAdapter(oa_repository),
                 seed_demo_rows=False,
             )
-        self._structured_attachment_rows_by_parent_oa_id: dict[str, list[dict[str, Any]]] | None = None
 
     def list_workbench_scope_shards(self, scope_key: str) -> list[str]:
         normalized_scope = str(scope_key or "").strip()
@@ -131,53 +129,48 @@ class WorkbenchSqlProjectionBuilder:
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench SQL projection scope_key must be a month shard YYYY-MM.")
         self._bank_account_mapping_cache = None
-        previous_structured_attachment_cache = self._structured_attachment_rows_by_parent_oa_id
-        self._structured_attachment_rows_by_parent_oa_id = {}
-        try:
-            resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
-            rows_by_id = self._workbench_rows_for_month(normalized_scope)
-            relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
-            decisions = self._active_reconciliation_decisions_for_month(normalized_scope)
-            self._supplement_missing_relation_rows(rows_by_id, relations)
-            self._supplement_missing_decision_rows(rows_by_id, decisions)
-            payload = self._group_payload(
-                normalized_scope,
-                rows_by_id,
-                relations,
-                decisions=decisions,
-            )
-            snapshot = {
-                "read_models": {
-                    normalized_scope: {
-                        "scope_key": normalized_scope,
-                        "scope_month": normalized_scope,
-                        "generated_at": datetime.now().isoformat(),
-                        "cache_status": "fresh",
-                        "payload": payload,
-                        "source_versions": {
-                            "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-                            "source_version": resolved_source_version,
-                            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
-                            "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
-                            "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
-                        },
+        resolved_source_version = _int_value(source_version, self._current_dirty_scope_source_version(normalized_scope))
+        rows_by_id = self._workbench_rows_for_month(normalized_scope)
+        relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
+        decisions = self._active_reconciliation_decisions_for_month(normalized_scope)
+        self._supplement_missing_relation_rows(rows_by_id, relations)
+        self._supplement_missing_decision_rows(rows_by_id, decisions)
+        payload = self._group_payload(
+            normalized_scope,
+            rows_by_id,
+            relations,
+            decisions=decisions,
+        )
+        snapshot = {
+            "read_models": {
+                normalized_scope: {
+                    "scope_key": normalized_scope,
+                    "scope_month": normalized_scope,
+                    "generated_at": datetime.now().isoformat(),
+                    "cache_status": "fresh",
+                    "payload": payload,
+                    "source_versions": {
+                        "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+                        "source_version": resolved_source_version,
+                        "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+                        "oa_attachment_invoice_parser_version": MongoOAAdapter._attachment_invoice_cache_parser_version(),
+                        "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
                     },
-                }
+                },
             }
-            self._read_model_repository.save_workbench_read_models(
-                snapshot,
-                changed_scope_keys={normalized_scope},
-                refresh_all_scope_from_month_shards=False,
-            )
-            row_count = sum(len(group.get(f"{kind}_rows") or []) for group in payload["paired"]["groups"] + payload["open"]["groups"] for kind in ("oa", "bank", "invoice"))
-            return {
-                "scope_key": normalized_scope,
-                "base_scope_key": normalized_scope,
-                "row_count": row_count,
-                "ignored_row_count": 0,
-            }
-        finally:
-            self._structured_attachment_rows_by_parent_oa_id = previous_structured_attachment_cache
+        }
+        self._read_model_repository.save_workbench_read_models(
+            snapshot,
+            changed_scope_keys={normalized_scope},
+            refresh_all_scope_from_month_shards=False,
+        )
+        row_count = sum(len(group.get(f"{kind}_rows") or []) for group in payload["paired"]["groups"] + payload["open"]["groups"] for kind in ("oa", "bank", "invoice"))
+        return {
+            "scope_key": normalized_scope,
+            "base_scope_key": normalized_scope,
+            "row_count": row_count,
+            "ignored_row_count": 0,
+        }
 
     def _current_bank_auto_tag_rules_version(self) -> int:
         row = self._connection.fetch_one(
@@ -236,546 +229,35 @@ class WorkbenchSqlProjectionBuilder:
     def _oa_projection_rows(self, month: str) -> list[dict[str, Any]]:
         self._oa_query_service.get_workbench(month)
         result: list[dict[str, Any]] = []
-        oa_rows_by_id: dict[str, dict[str, Any]] = {}
         for row in self._oa_query_service.list_record_snapshots():
             row_month = str(row.get("_month") or "").strip()
             row_type = str(row.get("type") or "").strip()
-            if row_month != month or row_type not in {"oa", "invoice"}:
-                continue
-            if row_type == "invoice" and str(row.get("source_kind") or "").strip() != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
+            if row_month != month or row_type != "oa":
                 continue
             payload = self._oa_query_service.serialize_row(row)
             payload["status"] = "open"
             payload.setdefault("source_kind", payload.get("type") or row_type)
             result.append(payload)
-            if row_type == "oa":
-                oa_rows_by_id[str(payload.get("id") or "")] = payload
-        result.extend(self._attachment_invoice_rows_from_expense_items(month, oa_rows_by_id))
         return result
 
     def _oa_projection_rows_by_ids(self, row_ids: set[str]) -> list[dict[str, Any]]:
         if not row_ids:
             return []
         oa_row_ids = {row_id for row_id in row_ids if row_id.startswith("oa-") and not row_id.startswith("oa-att-")}
-        attachment_parent_ids = {
-            match.group("oa_id")
-            for row_id in row_ids
-            if (match := re.match(r"^oa-att-(?:inv|pay|unk)-(?P<oa_id>oa-[^-]+-\d+)-", row_id))
-        }
         wanted = set(row_ids)
-        self._oa_query_service.sync_oa_row_ids(sorted(oa_row_ids | attachment_parent_ids))
+        self._oa_query_service.sync_oa_row_ids(sorted(oa_row_ids))
         result: list[dict[str, Any]] = []
         for row in self._oa_query_service.list_record_snapshots():
             row_id = str(row.get("id") or "").strip()
             if row_id not in wanted:
                 continue
+            if str(row.get("type") or "").strip() != "oa":
+                continue
             payload = self._oa_query_service.serialize_row(row)
             payload["status"] = "open"
             payload.setdefault("source_kind", payload.get("type") or row.get("type"))
             result.append(payload)
-        if attachment_parent_ids:
-            oa_rows_by_id = {
-                str(row.get("id") or ""): self._oa_query_service.serialize_row(row)
-                for row in self._oa_query_service.list_record_snapshots()
-                if str(row.get("id") or "") in attachment_parent_ids and str(row.get("type") or "") == "oa"
-            }
-            result.extend(
-                row
-                for row in self._attachment_invoice_rows_from_expense_items("all", oa_rows_by_id)
-                if str(row.get("id") or "") in wanted
-            )
         return result
-
-    def _attachment_invoice_rows_from_expense_items(
-        self,
-        month: str,
-        oa_rows_by_id: dict[str, dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        if not oa_rows_by_id:
-            return []
-        structured = self._attachment_invoice_rows_from_structured_oa_tables(month, oa_rows_by_id)
-        structured_ids = {str(row.get("id") or "") for row in structured}
-        structured_attachment_keys = {
-            str(row.get("source_attachment_key") or "").strip()
-            for row in structured
-            if str(row.get("source_attachment_key") or "").strip()
-        }
-        structured_attachment_identities = {
-            identity
-            for row in structured
-            if (identity := self._attachment_source_identity(row)) is not None
-        }
-        rows = self._connection.fetch_all(
-            """
-            select row_id, scope_month, normalized_payload, raw_payload
-            from app.oa_applications
-            where row_id = any(%s)
-              and (%s = 'all' or scope_month = %s::date)
-            order by row_id
-            """,
-            (sorted(oa_rows_by_id), month, month_start(month) if month != "all" else None),
-        )
-        result: list[dict[str, Any]] = []
-        seen: set[str] = set(structured_ids)
-        for row in rows:
-            payload = row_payload(row, "normalized_payload", "raw_payload")
-            if not isinstance(payload, dict):
-                continue
-            oa_row_id = str(row.get("row_id") or payload.get("id") or "").strip()
-            oa_row = oa_rows_by_id.get(oa_row_id)
-            if not isinstance(oa_row, dict):
-                continue
-            attachment_evidences = self._attachment_evidences_from_expense_items(payload)
-            if structured_attachment_keys:
-                attachment_evidences = [
-                    evidence
-                    for evidence in attachment_evidences
-                    if str(evidence.get("source_attachment_key") or "").strip() not in structured_attachment_keys
-                    and self._attachment_source_identity(evidence) not in structured_attachment_identities
-                ]
-            if not attachment_evidences:
-                continue
-            record = SimpleNamespace(attachment_evidences=attachment_evidences, attachment_invoices=[])
-            internal_oa_row = {
-                **dict(oa_row),
-                "_month": str(row.get("scope_month") or "")[:7] or str(oa_row.get("month") or month),
-                "_section": "paired" if str(oa_row.get("status") or "") == "paired" else "open",
-                "_detail_fields": dict(oa_row.get("detail_fields") if isinstance(oa_row.get("detail_fields"), dict) else {}),
-            }
-            for attachment_row in self._oa_query_service._build_attachment_invoice_rows(record, oa_row=internal_oa_row):
-                serialized = self._oa_query_service.serialize_row(attachment_row)
-                row_id = str(serialized.get("id") or "").strip()
-                if not row_id or row_id in seen:
-                    continue
-                seen.add(row_id)
-                serialized["status"] = "open"
-                serialized.setdefault("source_kind", serialized.get("source_kind") or "oa_attachment_invoice")
-                result.append(serialized)
-        return [*structured, *result]
-
-    def _attachment_invoice_rows_from_structured_oa_tables(
-        self,
-        month: str,
-        oa_rows_by_id: dict[str, dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        cache = self._structured_attachment_rows_by_parent_oa_id
-        requested_oa_ids = [row_id for row_id in sorted(oa_rows_by_id) if str(row_id).strip()]
-        cached_result: list[dict[str, Any]] = []
-        if cache is not None:
-            missing_oa_ids: list[str] = []
-            for oa_row_id in requested_oa_ids:
-                cached_rows = cache.get(oa_row_id)
-                if cached_rows is None:
-                    missing_oa_ids.append(oa_row_id)
-                    continue
-                cached_result.extend(deepcopy(cached_rows))
-            if not missing_oa_ids:
-                return cached_result
-            oa_rows_to_fetch = {
-                oa_row_id: oa_rows_by_id[oa_row_id]
-                for oa_row_id in missing_oa_ids
-                if oa_row_id in oa_rows_by_id
-            }
-        else:
-            oa_rows_to_fetch = {
-                oa_row_id: oa_rows_by_id[oa_row_id]
-                for oa_row_id in requested_oa_ids
-                if oa_row_id in oa_rows_by_id
-            }
-        if not oa_rows_to_fetch:
-            return cached_result
-        rows = self._connection.fetch_all(
-            """
-            select
-                oa.row_id as oa_row_id,
-                oa.scope_month,
-                item.normalized_payload as item_payload,
-                attachment.normalized_payload as attachment_payload,
-                coalesce(direct_cache.cache_source_attachment_key, fallback_cache.cache_source_attachment_key) as cache_source_attachment_key,
-                coalesce(direct_cache.invoices, fallback_cache.invoices, '[]'::jsonb) as cache_invoices,
-                coalesce(direct_cache.evidences, fallback_cache.evidences, '[]'::jsonb) as cache_evidences,
-                coalesce(
-                    case
-                        when jsonb_typeof(coalesce(direct_cache.artifacts, fallback_cache.artifacts)) = 'array'
-                            then coalesce(direct_cache.artifacts, fallback_cache.artifacts)
-                        else '[]'::jsonb
-                    end,
-                    '[]'::jsonb
-                ) as cache_artifacts
-            from app.oa_application_items item
-            join app.oa_applications oa on oa.id = item.oa_application_id
-            left join app.oa_attachments attachment
-              on attachment.oa_application_id = oa.id
-             and (
-                    attachment.row_id = item.row_id
-                    or attachment.normalized_payload->>'source_expense_item_id' = item.row_id
-                 )
-            left join lateral (
-                select matched.cache_source_attachment_key, matched.parsed_at, matched.invoices, matched.evidences, matched.artifacts
-                from (
-                    select
-                        0 as match_rank,
-                        source.cache_source_attachment_key,
-                        cache.parsed_at,
-                        cache.invoices,
-                        cache.evidences,
-                        cache.artifacts
-                    from app.oa_attachment_invoice_cache_sources source
-                    join app.oa_attachment_invoice_cache cache
-                      on cache.source_attachment_key = source.cache_source_attachment_key
-                    where source.source_attachment_key = attachment.source_attachment_key
-                    union all
-                    select
-                        1 as match_rank,
-                        cache.source_attachment_key as cache_source_attachment_key,
-                        cache.parsed_at,
-                        cache.invoices,
-                        cache.evidences,
-                        cache.artifacts
-                    from app.oa_attachment_invoice_cache cache
-                    where cache.source_attachment_key = attachment.source_attachment_key
-                ) matched
-                order by matched.match_rank, matched.parsed_at desc nulls last, matched.cache_source_attachment_key
-                limit 1
-            ) direct_cache on true
-            left join lateral (
-                select cache.source_attachment_key as cache_source_attachment_key, cache.parsed_at, cache.invoices, cache.evidences, cache.artifacts
-                from app.oa_attachment_invoice_cache cache
-                where direct_cache.cache_source_attachment_key is null
-                  and nullif(
-                        coalesce(
-                            item.normalized_payload->>'expense_item_id',
-                            item.normalized_payload->>'row_id'
-                        ),
-                        ''
-                      ) is not null
-                  and nullif(
-                        coalesce(
-                            attachment.normalized_payload->>'source_attachment_name',
-                            attachment.normalized_payload->>'attachment_name',
-                            attachment.normalized_payload->>'fileName',
-                            attachment.normalized_payload->>'filename'
-                        ),
-                        ''
-                      ) is not null
-                  and exists (
-                        select 1
-                        from jsonb_array_elements(
-                            coalesce(cache.invoices, '[]'::jsonb)
-                            || coalesce(cache.evidences, '[]'::jsonb)
-                            || coalesce(
-                                case
-                                    when jsonb_typeof(cache.artifacts) = 'array' then cache.artifacts
-                                    else '[]'::jsonb
-                                end,
-                                '[]'::jsonb
-                            )
-                        ) as evidence(value)
-                        where nullif(evidence.value->>'source_expense_item_id', '') = nullif(
-                                coalesce(
-                                    item.normalized_payload->>'expense_item_id',
-                                    item.normalized_payload->>'row_id'
-                                ),
-                                ''
-                              )
-                          and nullif(
-                                coalesce(
-                                    evidence.value->>'source_attachment_name',
-                                    evidence.value->>'attachment_name',
-                                    evidence.value->>'fileName',
-                                    evidence.value->>'filename'
-                                ),
-                                ''
-                              ) = nullif(
-                                coalesce(
-                                    attachment.normalized_payload->>'source_attachment_name',
-                                    attachment.normalized_payload->>'attachment_name',
-                                    attachment.normalized_payload->>'fileName',
-                                    attachment.normalized_payload->>'filename'
-                                ),
-                                ''
-                              )
-                    )
-                order by cache.parsed_at desc nulls last, cache.source_attachment_key
-                limit 1
-            ) fallback_cache on true
-            where oa.row_id = any(%s)
-              and (%s = 'all' or oa.scope_month = %s::date)
-            order by oa.row_id, item.row_id, attachment.source_attachment_key
-            """,
-            (sorted(oa_rows_to_fetch), month, month_start(month) if month != "all" else None),
-        )
-        evidence_by_oa_id: dict[str, list[dict[str, Any]]] = {}
-        scope_month_by_oa_id: dict[str, str] = {}
-        for row in rows:
-            oa_row_id = str(row.get("oa_row_id") or "").strip()
-            if not oa_row_id or oa_row_id not in oa_rows_to_fetch:
-                continue
-            scope_month_by_oa_id[oa_row_id] = str(row.get("scope_month") or "")[:7]
-            item_payload = row.get("item_payload") if isinstance(row.get("item_payload"), dict) else {}
-            attachment_payload = row.get("attachment_payload") if isinstance(row.get("attachment_payload"), dict) else {}
-            source_expense_item_id = item_payload.get("expense_item_id") or item_payload.get("row_id")
-            source_expense_row_index = item_payload.get("row_index") or item_payload.get("item_no")
-            source_attachment_key = attachment_payload.get("source_attachment_key")
-            source_attachment_name = (
-                attachment_payload.get("source_attachment_name")
-                or attachment_payload.get("attachment_name")
-                or attachment_payload.get("filename")
-            )
-            source_attachment_key_text = str(source_attachment_key or "").strip()
-            cache_source_attachment_key = str(row.get("cache_source_attachment_key") or "").strip()
-            cache_artifacts = row.get("cache_artifacts") if isinstance(row.get("cache_artifacts"), list) else []
-            for evidence in self._select_structured_attachment_evidences(
-                invoices=row.get("cache_invoices") if isinstance(row.get("cache_invoices"), list) else [],
-                evidences=row.get("cache_evidences") if isinstance(row.get("cache_evidences"), list) else [],
-                artifacts=cache_artifacts,
-            ):
-                if not isinstance(evidence, dict):
-                    continue
-                evidence_attachment_key = str(evidence.get("source_attachment_key") or "").strip()
-                allowed_attachment_keys = {
-                    key for key in (source_attachment_key_text, cache_source_attachment_key) if key
-                }
-                evidence_source_identity_matches_attachment = (
-                    str(evidence.get("source_expense_item_id") or "").strip() == str(source_expense_item_id or "").strip()
-                    and str(
-                        evidence.get("source_attachment_name")
-                        or evidence.get("attachment_name")
-                        or evidence.get("fileName")
-                        or evidence.get("filename")
-                        or ""
-                    ).strip() == str(source_attachment_name or "").strip()
-                )
-                if (
-                    allowed_attachment_keys
-                    and evidence_attachment_key
-                    and evidence_attachment_key not in allowed_attachment_keys
-                    and not evidence_source_identity_matches_attachment
-                ):
-                    continue
-                normalized = dict(evidence)
-                normalized.setdefault("source_expense_item_id", source_expense_item_id)
-                normalized.setdefault("source_expense_row_index", source_expense_row_index)
-                if cache_source_attachment_key:
-                    normalized.setdefault("cache_source_attachment_key", cache_source_attachment_key)
-                normalized["source_attachment_key"] = source_attachment_key_text or evidence_attachment_key
-                normalized.setdefault("source_attachment_name", source_attachment_name)
-                evidence_by_oa_id.setdefault(oa_row_id, []).append(normalized)
-        result: list[dict[str, Any]] = []
-        result_by_oa_id: dict[str, list[dict[str, Any]]] = {oa_row_id: [] for oa_row_id in oa_rows_to_fetch}
-        seen: set[str] = set()
-        for oa_row_id, attachment_evidences in evidence_by_oa_id.items():
-            oa_row = oa_rows_to_fetch.get(oa_row_id)
-            if not isinstance(oa_row, dict) or not attachment_evidences:
-                continue
-            attachment_evidences = self._dedupe_attachment_evidences_by_source_identity(attachment_evidences)
-            record = SimpleNamespace(attachment_evidences=attachment_evidences, attachment_invoices=[])
-            internal_oa_row = {
-                **dict(oa_row),
-                "_month": scope_month_by_oa_id.get(oa_row_id) or str(oa_row.get("month") or month),
-                "_section": "paired" if str(oa_row.get("status") or "") == "paired" else "open",
-                "_detail_fields": dict(oa_row.get("detail_fields") if isinstance(oa_row.get("detail_fields"), dict) else {}),
-            }
-            for attachment_row in self._oa_query_service._build_attachment_invoice_rows(record, oa_row=internal_oa_row):
-                serialized = self._oa_query_service.serialize_row(attachment_row)
-                row_id = str(serialized.get("id") or "").strip()
-                if not row_id or row_id in seen:
-                    continue
-                seen.add(row_id)
-                serialized["status"] = "open"
-                serialized.setdefault("source_kind", serialized.get("source_kind") or "oa_attachment_invoice")
-                result.append(serialized)
-                result_by_oa_id.setdefault(oa_row_id, []).append(serialized)
-        if cache is not None:
-            for oa_row_id, attachment_rows in result_by_oa_id.items():
-                cache[oa_row_id] = deepcopy(attachment_rows)
-        if not cached_result:
-            return result
-        combined_result: list[dict[str, Any]] = []
-        combined_seen: set[str] = set()
-        for row in [*cached_result, *result]:
-            row_id = str(row.get("id") or "").strip()
-            if row_id and row_id in combined_seen:
-                continue
-            if row_id:
-                combined_seen.add(row_id)
-            combined_result.append(row)
-        return combined_result
-
-    @classmethod
-    def _select_structured_attachment_evidences(
-        cls,
-        *,
-        invoices: list[Any],
-        evidences: list[Any],
-        artifacts: list[Any],
-    ) -> list[dict[str, Any]]:
-        parsed_payloads = [
-            dict(payload)
-            for payload in [*invoices, *evidences]
-            if isinstance(payload, dict) and _is_formal_attachment_invoice_evidence(payload)
-        ]
-        if parsed_payloads:
-            return cls._dedupe_structured_attachment_evidences(parsed_payloads)
-
-        artifact_payloads = [
-            dict(payload)
-            for payload in artifacts
-            if (
-                isinstance(payload, dict)
-                and _looks_like_invoice_artifact(payload)
-                and _is_formal_attachment_invoice_evidence(payload)
-            )
-        ]
-        return cls._dedupe_structured_attachment_evidences(artifact_payloads)
-
-    @classmethod
-    def _dedupe_structured_attachment_evidences(cls, evidences: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        seen: set[tuple[str, ...]] = set()
-        for evidence in evidences:
-            identity = cls._structured_attachment_evidence_identity(evidence)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            result.append(evidence)
-        return result
-
-    @staticmethod
-    def _structured_attachment_evidence_identity(evidence: dict[str, Any]) -> tuple[str, ...]:
-        def clean(value: Any) -> str:
-            text = str(value or "").strip()
-            return "" if text in {"—", "--"} else text
-
-        return (
-            clean(evidence.get("source_attachment_key")),
-            clean(evidence.get("invoice_no")),
-            clean(evidence.get("digital_invoice_no")),
-            clean(evidence.get("issue_date")),
-            clean(evidence.get("seller_tax_no")),
-            clean(evidence.get("seller_name")),
-            clean(evidence.get("buyer_tax_no")),
-            clean(evidence.get("buyer_name")),
-            clean(evidence.get("total_with_tax") or evidence.get("amount")),
-            clean(evidence.get("tax_amount")),
-            clean(evidence.get("evidence_type")),
-            clean(evidence.get("transaction_no") or evidence.get("merchant_order_no")),
-        )
-
-    @classmethod
-    def _dedupe_attachment_evidences_by_source_identity(cls, evidences: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        by_identity: dict[tuple[str, str], dict[str, Any]] = {}
-        passthrough: list[dict[str, Any]] = []
-        for evidence in evidences:
-            identity = cls._attachment_source_identity(evidence)
-            if identity is None:
-                passthrough.append(evidence)
-                continue
-            current = by_identity.get(identity)
-            if current is None or cls._attachment_evidence_quality_score(evidence) > cls._attachment_evidence_quality_score(current):
-                by_identity[identity] = evidence
-        return [*by_identity.values(), *passthrough]
-
-    @staticmethod
-    def _attachment_evidence_quality_score(evidence: dict[str, Any]) -> int:
-        score = 0
-        for key in (
-            "digital_invoice_no",
-            "invoice_no",
-            "invoice_code",
-            "seller_tax_no",
-            "seller_name",
-            "buyer_tax_no",
-            "buyer_name",
-            "total_with_tax",
-            "tax_amount",
-            "transaction_no",
-            "merchant_order_no",
-        ):
-            value = str(evidence.get(key) or "").strip()
-            if value and value not in {"—", "--"}:
-                score += 1
-        return score
-
-    @staticmethod
-    def _attachment_source_identity(evidence: dict[str, Any]) -> tuple[str, str] | None:
-        source_expense_item_id = str(evidence.get("source_expense_item_id") or "").strip()
-        source_attachment_name = str(
-            evidence.get("source_attachment_name")
-            or evidence.get("attachment_name")
-            or evidence.get("fileName")
-            or evidence.get("filename")
-            or ""
-        ).strip()
-        if not source_expense_item_id or not source_attachment_name:
-            return None
-        return (source_expense_item_id, source_attachment_name)
-
-    @staticmethod
-    def _attachment_evidences_from_expense_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
-        evidences: list[dict[str, Any]] = []
-        for item in list(payload.get("expense_items") or []):
-            if not isinstance(item, dict):
-                continue
-            source_expense_item_id = item.get("expense_item_id")
-            source_expense_row_index = item.get("row_index")
-            parsed_evidences = [
-                evidence
-                for source_key in ("attachment_invoices", "attachment_evidences")
-                for evidence in list(item.get(source_key) or [])
-                if isinstance(evidence, dict)
-            ]
-            parsed_attachment_keys = {
-                str(evidence.get("source_attachment_key") or "").strip()
-                for evidence in parsed_evidences
-                if str(evidence.get("source_attachment_key") or "").strip()
-            }
-            item_evidences = [*parsed_evidences]
-            for artifact in list(item.get("attachment_artifacts") or []):
-                if not isinstance(artifact, dict):
-                    continue
-                normalized_artifact = dict(artifact)
-                artifact_attachment_key = str(normalized_artifact.get("source_attachment_key") or "").strip()
-                if artifact_attachment_key and artifact_attachment_key in parsed_attachment_keys:
-                    continue
-                if not _looks_like_invoice_artifact(normalized_artifact):
-                    continue
-                item_evidences.append(normalized_artifact)
-            file_offset = len(item_evidences)
-            for file_index, attachment_file in enumerate(list(item.get("attachment_files") or [])):
-                if not isinstance(attachment_file, dict):
-                    continue
-                normalized_file = dict(attachment_file)
-                if not _looks_like_invoice_artifact(normalized_file):
-                    continue
-                file_attachment_key = str(normalized_file.get("source_attachment_key") or "").strip()
-                if file_attachment_key and file_attachment_key in parsed_attachment_keys:
-                    continue
-                normalized_file.setdefault("source_attachment_name", normalized_file.get("fileName") or normalized_file.get("filename"))
-                normalized_file.setdefault("attachment_name", normalized_file.get("source_attachment_name"))
-                normalized_file.setdefault(
-                    "source_attachment_key",
-                    _fallback_attachment_source_key(
-                        payload,
-                        source_expense_item_id=source_expense_item_id,
-                        fallback_index=file_offset + file_index,
-                        attachment=normalized_file,
-                    ),
-                )
-                item_evidences.append(normalized_file)
-
-            normalized_item_evidences: list[dict[str, Any]] = []
-            for item_evidence in item_evidences:
-                normalized_item_evidence = dict(item_evidence)
-                normalized_item_evidence.setdefault("source_expense_item_id", source_expense_item_id)
-                normalized_item_evidence.setdefault("source_expense_row_index", source_expense_row_index)
-                normalized_item_evidences.append(normalized_item_evidence)
-            deduped_item_evidences = WorkbenchSqlProjectionBuilder._dedupe_attachment_evidences_by_source_identity(
-                normalized_item_evidences
-            )
-            for evidence in WorkbenchSqlProjectionBuilder._dedupe_structured_attachment_evidences(deduped_item_evidences):
-                evidences.append(evidence)
-        return evidences
 
     def _legacy_oa_rows(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
@@ -900,7 +382,7 @@ class WorkbenchSqlProjectionBuilder:
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
                    buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
-                   workbench_visibility, raw_payload
+                   workbench_visibility, tags, source_links, raw_payload
             from app.invoices
             where invoice_month = %s::date
               and status <> 'deleted'
@@ -926,7 +408,7 @@ class WorkbenchSqlProjectionBuilder:
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
                    buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
-                   workbench_visibility, raw_payload
+                   workbench_visibility, tags, source_links, raw_payload
             from app.invoices
             where coalesce(legacy_mongo_id, id::text) = any(%s)
               and status <> 'deleted'
@@ -947,6 +429,14 @@ class WorkbenchSqlProjectionBuilder:
         detail_fields = detail_fields if isinstance(detail_fields, dict) else {}
         if self._invoice_hidden_after_etc_submission(row, detail_fields):
             return None
+        source_links = _list_of_dicts(row.get("source_links") if isinstance(row.get("source_links"), list) else detail_fields.get("source_links"))
+        oa_attachment_source_link = _first_source_link(source_links, "oa_attachment_invoice")
+        source_kind = OA_ATTACHMENT_INVOICE_SOURCE_KIND if oa_attachment_source_link is not None else "invoice"
+        tags = _text_list(row.get("tags"))
+        if _first_source_link(source_links, "manual_invoice_import") is not None and "人工导入" not in tags:
+            tags.append("人工导入")
+        if source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND and "OA附件" not in tags:
+            tags.append("OA附件")
         invoice_code = _first_display_value(row.get("invoice_code"), detail_fields.get("发票代码"))
         invoice_no = _first_display_value(row.get("invoice_no"), detail_fields.get("发票号码"))
         digital_invoice_no = _first_display_value(row.get("digital_invoice_no"), detail_fields.get("数电发票号码"))
@@ -955,7 +445,7 @@ class WorkbenchSqlProjectionBuilder:
         return {
             "id": row_id,
             "type": "invoice",
-            "source_kind": "invoice",
+            "source_kind": source_kind,
             "status": "open",
             "case_id": None,
             "invoice_type": row.get("invoice_type"),
@@ -973,6 +463,14 @@ class WorkbenchSqlProjectionBuilder:
             "tax_amount": tax_amount,
             "total_with_tax": str(row.get("total_with_tax") or row.get("amount") or ""),
             "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
+            "tags": tags,
+            "source_links": source_links,
+            "derived_from_oa_id": _metadata_value(oa_attachment_source_link, detail_fields, "derived_from_oa_id"),
+            "source_workbench_row_id": _metadata_value(oa_attachment_source_link, detail_fields, "source_workbench_row_id"),
+            "source_attachment_key": _metadata_value(oa_attachment_source_link, detail_fields, "source_attachment_key"),
+            "source_attachment_name": _metadata_value(oa_attachment_source_link, detail_fields, "source_attachment_name"),
+            "source_expense_item_id": _metadata_value(oa_attachment_source_link, detail_fields, "source_expense_item_id"),
+            "source_expense_row_index": _metadata_value(oa_attachment_source_link, detail_fields, "source_expense_row_index"),
             "available_actions": ["detail", "confirm_link", "mark_exception", "ignore"],
             "summary_fields": {
                 "销方识别号": row.get("seller_tax_no") or "—",
@@ -985,6 +483,7 @@ class WorkbenchSqlProjectionBuilder:
                 "税额": tax_amount,
                 "价税合计": str(row.get("total_with_tax") or row.get("amount") or "—"),
                 "发票类型": row.get("invoice_type") or "—",
+                "发票来源": "OA附件解析" if source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND else ("人工导入" if "人工导入" in tags else "—"),
             },
             "detail_fields": detail_fields,
         }
@@ -1925,6 +1424,50 @@ def _first_display_value(*values: object) -> str:
     return "—"
 
 
+def _text_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or normalized in {"—", "--", "None"}:
+        return None
+    return normalized
+
+
+def _text_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        normalized = _text_or_none(item)
+        if normalized is None or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _list_of_dicts(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _first_source_link(source_links: list[dict[str, Any]], source_type: str) -> dict[str, Any] | None:
+    for source_link in source_links:
+        if str(source_link.get("source_type") or "").strip() == source_type:
+            return source_link
+    return None
+
+
+def _metadata_value(source_link: dict[str, Any] | None, detail_fields: dict[str, Any], key: str) -> str | None:
+    if source_link is not None:
+        value = _text_or_none(source_link.get(key))
+        if value is not None:
+            return value
+    return _text_or_none(detail_fields.get(key))
+
+
 def _decimal_value(value: object) -> Decimal:
     try:
         return Decimal(str(value or "0").replace(",", "")).quantize(Decimal("0.01"))
@@ -1994,48 +1537,3 @@ def _int_or_none(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _is_formal_attachment_invoice_evidence(evidence: dict[str, Any]) -> bool:
-    source_kind = str(evidence.get("source_kind") or "").strip()
-    if source_kind:
-        return source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND
-    return OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence)
-
-
-def _looks_like_invoice_artifact(evidence: dict[str, Any]) -> bool:
-    evidence_type = str(evidence.get("evidence_type") or "").strip()
-    if OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(evidence):
-        return True
-    document_kind = str(evidence.get("document_kind") or "").strip()
-    if "发票" in document_kind:
-        return True
-    file_name = str(
-        evidence.get("source_attachment_name")
-        or evidence.get("attachment_name")
-        or evidence.get("fileName")
-        or evidence.get("filename")
-        or ""
-    )
-    suffix = str(evidence.get("suffix") or "").strip().lower()
-    return "发票" in file_name
-
-
-def _fallback_attachment_source_key(
-    payload: dict[str, Any],
-    *,
-    source_expense_item_id: Any,
-    fallback_index: int,
-    attachment: dict[str, Any],
-) -> str:
-    oa_row_id = str(payload.get("id") or payload.get("row_id") or "").strip()
-    source_item = str(source_expense_item_id or "root").strip() or "root"
-    name = str(
-        attachment.get("source_attachment_name")
-        or attachment.get("attachment_name")
-        or attachment.get("fileName")
-        or attachment.get("filename")
-        or attachment.get("filePath")
-        or "unnamed"
-    ).strip() or "unnamed"
-    return f"{oa_row_id}:attachment:{source_item}:{fallback_index}:{name}"

@@ -8,6 +8,7 @@
 - 税金抵扣认证状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 和认证导入事实共同决定，页面不私有定义认证状态。
 - `tax_offset` read model 只物化月份 scope `YYYY-MM`；`all` refresh 只用于 fan-out 月份 shard，不写普通 tax offset payload。
 - 税金抵扣计划保存必须校验 `read_model_scope_key`、`source_versions` 和 `idempotency_key`；source mismatch 返回 conflict，不能基于旧 read model 保存。
+- 进项计划行只从 canonical invoice facts 读取；OA 附件正式发票必须先 promotion 到 Invoice repository / `app.invoices`，`app.oa_attachment_invoice_cache` 只作为解析缓存，不是税金抵扣事实源。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖税额试算、已认证导入、权限、计划保存、SQL read model、Redis cache、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 
 ## 记录模板
@@ -26,6 +27,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-13 - OA 附件发票计划行改走 canonical invoice facts
+
+- 目标：删除税金抵扣从 Workbench/OA 附件缓存临时读取发票行的旁路，确保 OA 附件发票和人工导入发票统一进入 `app.invoices` 后再纳入进项计划。
+- 影响范围：`TaxOffsetService`、tax offset API 测试、成本税务 SQL projection 共享发票读取链路。
+- 关键决策：`TaxOffsetService` 不再接收 OA 附件发票行加载器；`/api/tax-offset` 读取 OA 附件发票的前提是 import service 已写入 canonical invoice fact。付款凭证、非税收据和未知附件不会被 promotion，也不会进入计划行。
+- 文档影响：更新本模块测试矩阵和 Workbench/成本统计关联记录。
+- 测试覆盖：`tests/test_tax_offset_service.py` 和 `tests/test_tax_offset_api.py` 均改为通过 `upsert_oa_attachment_invoice` 写入 canonical fact 后验证计划行。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：未跑真实税局大样本和真实生产缓存 backfill；需要发布前对存量 OA 附件发票 promotion 覆盖率做只读抽样。
 
 ## 2026-06-11 - 税金抵扣测试闭环矩阵与状态机补齐
 

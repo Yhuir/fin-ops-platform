@@ -471,7 +471,7 @@ class TaxOffsetSqlProjectionBuilder:
         month_data = {
             month: {
                 "output_items": self._invoice_items(month, output=True),
-                "input_plan_items": [*self._invoice_items(month, output=False), *self._oa_attachment_invoice_items(month)],
+                "input_plan_items": self._invoice_items(month, output=False),
             }
         }
         service = TaxOffsetService(
@@ -498,50 +498,6 @@ class TaxOffsetSqlProjectionBuilder:
             (month_start(month), output, output),
         )
         return [_tax_invoice_item(row, output=output) for row in rows]
-
-    def _oa_attachment_invoice_items(self, month: str) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
-            """
-            select cache.source_attachment_key, cache.invoices, attachment.oa_source_id, attachment.form_id
-            from app.oa_attachment_invoice_cache cache
-            left join app.oa_attachments attachment on attachment.source_attachment_key = cache.source_attachment_key
-            where cache.invoices is not null
-            order by cache.source_attachment_key
-            """
-        )
-        items: list[dict[str, Any]] = []
-        for row in rows:
-            invoices = row.get("invoices")
-            if not isinstance(invoices, list):
-                continue
-            for index, invoice in enumerate(invoices):
-                if not isinstance(invoice, dict):
-                    continue
-                issue_date = str(invoice.get("issue_date") or invoice.get("invoice_date") or invoice.get("开票日期") or "")
-                if not issue_date.startswith(month):
-                    continue
-                invoice_type = str(invoice.get("invoice_type") or invoice.get("发票类型") or "进项发票")
-                if "销" in invoice_type:
-                    continue
-                items.append(
-                    {
-                        "id": f"oa-attachment-invoice:{row.get('source_attachment_key')}:{index}",
-                        "seller_name": str(invoice.get("seller_name") or invoice.get("销售方名称") or ""),
-                        "seller_tax_no": invoice.get("seller_tax_no") or invoice.get("销售方识别号"),
-                        "issue_date": issue_date,
-                        "invoice_no": invoice.get("invoice_no") or invoice.get("发票号码"),
-                        "invoice_code": invoice.get("invoice_code") or invoice.get("发票代码"),
-                        "digital_invoice_no": invoice.get("digital_invoice_no") or invoice.get("数电发票号码"),
-                        "tax_amount": _money(invoice.get("tax_amount") or invoice.get("税额")),
-                        "total_with_tax": _money(invoice.get("total_with_tax") or invoice.get("价税合计") or invoice.get("amount")),
-                        "risk_level": str(invoice.get("risk_level") or "待评估"),
-                        "invoice_type": invoice_type,
-                        "tax_rate": str(invoice.get("tax_rate") or "—"),
-                        "source_kind": "oa_attachment_invoice",
-                        "derived_from_oa_id": row.get("form_id") or row.get("oa_source_id"),
-                    }
-                )
-        return items
 
     def _certified_items(self, month: str) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(

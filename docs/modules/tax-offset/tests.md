@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 税额试算 | `TaxOffsetService` | 销项税额、已认证进项税额、未认证计划进项税额、可抵扣税额、应纳/留抵结果不能由页面重算。 |
 | 发票生命周期 | `InvoiceLifecyclePolicy`、`invoice_lifecycle` read boundary | `certified_status` / `is_locked_certified` shape 保持兼容；页面不能私有定义认证状态。 |
-| 进项计划行 | 发票导入、OA 附件发票 cache、SQL projection | 真实导入进项票和 OA 附件发票按开票月份进入计划；收据/未知附件不能进入。 |
+| 进项计划行 | Invoice repository / `app.invoices`、SQL projection | 真实导入进项票和已 promotion 的 OA 附件正式发票按开票月份进入计划；收据/未知附件不能进入。 |
 | 已认证结果 | `TaxCertifiedImportService`、`TaxCertifiedImportApplicationService` | preview、confirm、重复导入去重、行级识别状态、计划内/计划外拆分。 |
 | 计划保存 | `TaxOffsetPlanService` | 写权限、idempotency key、read model scope/source version 乐观锁、summary snapshot。 |
 | API/read cache | `/api/tax-offset*`、`TaxOffsetQueryService`、Redis hot cache、SQL read model | fresh gate 后才能缓存；miss/stale 返回 refreshing 并入队，不同步重建伪 fresh。 |
@@ -25,7 +25,7 @@
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
 | 税金试算核心规则 | P0 | `tests/test_tax_offset_service.py` | covered | 销项/进项/已认证/计划选择、锁定已认证进项、应纳/留抵结果。 |
-| 真实导入发票进入计划 | P0 | `tests/test_tax_offset_service.py`、`tests/test_tax_offset_api.py` | covered | 导入进项票、OA 附件发票、空真实数据不返回硬编码计划行。 |
+| 真实导入发票进入计划 | P0 | `tests/test_tax_offset_service.py`、`tests/test_tax_offset_api.py` | covered | 导入进项票、OA 附件发票 canonical promotion、空真实数据不返回硬编码计划行。 |
 | 已认证导入解析与去重 | P0 | `tests/test_tax_certified_import_service.py`、`tests/test_tax_offset_api.py` | covered | 文件解析、行级状态、唯一键 fallback、重复导入幂等。 |
 | 已认证 preview/confirm/job polling API | P0 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts` | covered | preview 权限、confirm 幂等、job payload contract、modal queued/running/completed。 |
 | 权限 | P0 | `tests/test_tax_offset_api.py`、`web/src/test/TaxOffsetPage.test.tsx` | covered | read endpoint 访问控制、preview/save 写权限、只读用户隐藏导入。 |
@@ -64,6 +64,7 @@
 | 长期 | 保存税金抵扣计划时没有校验 read model source version，导致基于旧数据保存。 | `tests/test_tax_offset_api.py::test_tax_offset_plan_save_rejects_stale_source_versions`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | 税金认证导入确认后页面不刷新税金 read model。 | `tests/test_tax_offset_api.py::test_tax_certified_confirm_invalidates_tax_offset_month_cache`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | 银行流水导入误刷新税金抵扣。 | `tests/test_tax_offset_api.py::test_bank_import_confirm_does_not_invalidate_tax_offset_cache` | covered |
+| 2026-06-13 | 税金抵扣从 OA 附件 parser cache/Workbench 临时行读取发票，绕过统一 Invoice repository。 | `tests/test_tax_offset_service.py::test_month_payload_includes_oa_attachment_invoices_by_issue_month`、`tests/test_tax_offset_api.py::test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month` | covered |
 
 ## 关键 smoke flows
 

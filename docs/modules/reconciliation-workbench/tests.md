@@ -8,7 +8,7 @@
 
 | 影响面 | 当前事实源 | 需要关注的旧功能 |
 | --- | --- | --- |
-| 自动候选规则 | `WorkbenchMatchingRules`、`WorkbenchFreeMatchingEngine`、special pair rule service | 单笔 OA-bank、OA-bank 多流水合计、OA-发票、OA-bank-invoice、附件发票、免 OA、内部转账、工资等 legacy/special rules |
+| 自动候选规则 | `WorkbenchMatchingRules`、`WorkbenchFreeMatchingEngine`、special pair rule service | 单笔 OA-bank、OA-bank 多流水合计、OA-发票、OA-bank-invoice、canonical OA 附件发票、免 OA、内部转账、工资等 legacy/special rules |
 | 人工确认/撤回/候选拆分 | `/api/workbench/actions/confirm-link`、`cancel-link`、`withdraw-link`、idempotency、UoW | active pair relation、审计、preview lock、版本冲突、重复提交、in-progress replay、撤回恢复上一状态、无 history 撤到无关联、操作后未恢复 row 逐行独立、纯候选 split/suppress |
 | 异常处理 | exception classifier/application/projection | open/closed exception、ignore/unignore、金额差异 note、OA 免单、异常取消 |
 | Active generation read model | `read_model.workbench_generations`、`workbench_rows/groups/summary/stats` | 原子发布、active pinning、failed generation 不可提升、retention 不删 active |
@@ -37,11 +37,13 @@
 | Refresh handler / dirty scope done | P0 | `tests/test_workbench_sql_runtime.py` | covered | worker refresh 后发布 generation 并完成 dirty scope。 |
 | Matching dirty queue | P0 | `tests/test_workbench_dirty_queue_wiring.py`、`tests/test_workbench_matching_dirty_scope_worker.py` | covered | DB dirty queue 是主路径，失败不回退 legacy dirty scopes。 |
 | Relation tags 下游投影 | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_read_facade.py`、`tests/test_bank_details_service.py` | covered | 银行明细、批量账务和下游页面不能读旧 relation。 |
+| OA 附件正式发票统一事实源 | P0 | `tests/test_import_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_query_service.py`、`tests/test_workbench_relation_sql_projection.py` | covered | OA 附件正式发票通过 import service promotion 到 `app.invoices`；Workbench SQL 投影只读 canonical invoice；legacy OA query service 不发布 invoice row；relation projection 不回捞 `read_model.workbench_rows` 作为事实源。 |
 | Active relation row 去重 | P0 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py` | covered | 同一 relation 重复 row id 被 normalize/repair/query grouping 去重，跨 active case 复用 row 被拒绝。 |
 | 外部往来 bank-only open 规则 | P0 | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx` | covered | `turnover_manual_closure` 是共同事实源但不再是 bank-only paired 例外；三栏补齐前留 open。 |
 | OA offset / 附件上下文 repair | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_command_service.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | OA 附件发票冲抵自动闭环和缺失附件上下文 repair 必须通过 relation command service 写入。 |
 | 前端 action 后 emit `workbenchRelationUpdated` | P1 | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/CandidateGroupGrid.test.tsx`、页面事件 listener tests | covered | 保护当前页面/同会话刷新提示。 |
 | 前端 loading/stale/error/permission | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx` | covered for current gates | Workbench stale/loading 不全局禁用无关写；OA dirty/refreshing 仍禁写；提交成功后局部锁刚操作 group；OA 申请人列详情 icon 和第二行时间 chip 受交互测试保护。 |
+| 前端三栏列布局与选择状态 | P1 | `web/src/test/WorkbenchColumns.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchSelectionHook.test.tsx` | covered | 银行详情 icon 移到对方户名、发票详情 icon 移到发票号码、发票金额列合并、seller chip 第三行；打开详情不再让“已选 0”的行呈 selected 高亮。 |
 | 真实生产 active generation 回放 | P2 | 运维 runbook / SQL dry-run | documented-risk | 需要真实历史数据和 worker/staging 环境。 |
 
 ## 七类测试适用性
@@ -77,6 +79,8 @@
 | 2026-06-12 | 关联台三栏点击 OA 详情时，opaque row id 无法解析月份且 live/cache miss 后未读取 SQL active generation，导致详情抽屉显示“详情加载失败”。 | `tests/test_workbench_query_facade.py::WorkbenchQueryFacadeTests::test_row_detail_reads_sql_row_without_application_live_sync`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_row_detail_sql_runtime_uses_query_facade_for_opaque_oa_after_live_and_cache_miss`、`web/src/test/WorkbenchSelection.test.tsx::OA applicant column keeps the detail icon on the first line and time chip on the second line` | covered |
 | 2026-06-13 | OA 附件发票历史 parser cache 只有费用项 ID + 附件名身份，`app.oa_attachment_invoice_cache_sources` 未持续维护 `attachment_identity_*` bridge，导致 Workbench rebuild 退回全 cache JSON 扫描并把同步拖到十几秒以上。 | `tests/test_postgres_repositories_boundaries.py::test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows`、`tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_oa_attachment_invoice_cache_sources_is_indexed_lookup_table`、`tests/test_workbench_sql_runtime.py` | covered |
 | 2026-06-13 | all-scope publish 主要耗时在写 `workbench_rows/groups/group_rows`；盲目把所有批量写入改成 multi-row VALUES 会让 `rows/groups` 变慢。 | `tests/test_postgres_connection.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_workbench_unused_write_indexes_are_dropped`、生产 `scripts/rehydrate-workbench-read-models.py --profile-internal` | covered |
+| 2026-06-13 | OA 附件发票和人工导入发票走不同事实源，导致 Workbench、税金/成本下游读取不一致，且人工导入进/销 chip 因 `input/output` 未映射而缺失。 | `tests/test_import_service.py`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_oa_attachment_invoice_cache_update_promotes_formal_invoice_to_canonical_source`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_invoice_row_preserves_canonical_oa_attachment_source_metadata`、`web/src/test/WorkbenchColumns.test.tsx` | covered |
+| 2026-06-13 | 取消所有选择后，详情焦点 row 因 `selectedRowId` fallback 被误判为 selected，表现为“已选 0”但蓝色高亮。 | `web/src/test/WorkbenchSelectionHook.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | covered |
 | 长期 | stale/failed active generation 被读成 fresh 或缓存到 Redis。 | `tests/test_workbench_sql_runtime.py`、`tests/test_workbench_query_facade.py` | covered |
 | 长期 | 关系确认/撤回影响银行明细、批量账务、往来款、成本统计等旧页面。 | `tests/test_workbench_v2_api.py`、`tests/test_batch_accounting_api.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/*` | covered / per-module continuation |
 

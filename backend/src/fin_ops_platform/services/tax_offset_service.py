@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Callable
 from typing import Any
 
@@ -20,13 +20,11 @@ class TaxOffsetService:
         import_service: ImportNormalizationService | None = None,
         month_data: dict[str, dict[str, Any]] | None = None,
         certified_records_loader: Callable[[str], list[Any]] | None = None,
-        oa_attachment_invoice_rows_loader: Callable[[str], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._import_service = import_service
         self._month_data = month_data or {}
         self._month_data_cache: dict[str, dict[str, Any] | None] = {}
         self._certified_records_loader = certified_records_loader or (lambda month: [])
-        self._oa_attachment_invoice_rows_loader = oa_attachment_invoice_rows_loader or (lambda month: [])
 
     def clear_month_cache(self, months: list[str] | None = None) -> None:
         if months is None:
@@ -245,16 +243,6 @@ class TaxOffsetService:
                 else:
                     input_plan_items.append(self._build_input_plan_item(invoice))
 
-        for row in self._oa_attachment_invoice_rows_loader(month):
-            item = self._build_oa_attachment_invoice_item(row, month)
-            if item is None:
-                continue
-            found_any = True
-            if self._is_output_invoice_item(item):
-                output_items.append(item)
-            else:
-                input_plan_items.append(item)
-
         if not found_any:
             return None
         return {
@@ -294,55 +282,6 @@ class TaxOffsetService:
             "tax_rate": invoice.tax_rate or "—",
         }
 
-    def _build_oa_attachment_invoice_item(self, row: dict[str, Any], month: str) -> dict[str, Any] | None:
-        if row.get("source_kind") != "oa_attachment_invoice":
-            return None
-        issue_date = self._clean_optional(row.get("issue_date")) or self._clean_row_detail(row, "开票日期")
-        if not issue_date or not issue_date.startswith(month):
-            return None
-
-        tax_amount = self._format_optional_money(row.get("tax_amount"))
-        if tax_amount is None:
-            return None
-
-        total_with_tax = self._format_optional_money(row.get("total_with_tax")) or self._format_optional_money(row.get("amount"))
-        if total_with_tax is None:
-            total_with_tax = tax_amount
-
-        invoice_no = (
-            self._clean_optional(row.get("invoice_no"))
-            or self._clean_row_detail(row, "发票号码")
-            or self._clean_optional(row.get("digital_invoice_no"))
-            or self._clean_row_detail(row, "数电发票号码")
-            or str(row.get("id") or "oa-attachment-invoice")
-        )
-        invoice_code = self._clean_optional(row.get("invoice_code")) or self._clean_row_detail(row, "发票代码")
-        digital_invoice_no = self._clean_optional(row.get("digital_invoice_no")) or self._clean_row_detail(row, "数电发票号码")
-        invoice_type = self._clean_optional(row.get("invoice_type")) or "进项发票"
-
-        return {
-            "id": str(row.get("id") or f"oa-attachment-invoice:{invoice_no}"),
-            "buyer_name": self._clean_optional(row.get("buyer_name")) or "",
-            "buyer_tax_no": self._clean_optional(row.get("buyer_tax_no")),
-            "seller_name": self._clean_optional(row.get("seller_name")) or "",
-            "seller_tax_no": self._clean_optional(row.get("seller_tax_no")),
-            "issue_date": issue_date,
-            "invoice_no": invoice_no,
-            "invoice_code": invoice_code,
-            "digital_invoice_no": digital_invoice_no,
-            "tax_amount": tax_amount,
-            "total_with_tax": total_with_tax,
-            "risk_level": self._clean_row_detail(row, "发票风险等级") or "待评估",
-            "invoice_type": invoice_type,
-            "tax_rate": self._clean_optional(row.get("tax_rate")) or "—",
-            "source_kind": "oa_attachment_invoice",
-            "derived_from_oa_id": self._clean_optional(row.get("derived_from_oa_id")),
-        }
-
-    @staticmethod
-    def _is_output_invoice_item(item: dict[str, Any]) -> bool:
-        return "销" in str(item.get("invoice_type") or "")
-
     @classmethod
     def _dedupe_tax_items(cls, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         deduped: list[dict[str, Any]] = []
@@ -372,13 +311,6 @@ class TaxOffsetService:
             cls._clean_optional(item.get("tax_amount")) or "",
         )
 
-    @classmethod
-    def _clean_row_detail(cls, row: dict[str, Any], key: str) -> str | None:
-        detail_fields = row.get("detail_fields") or row.get("_detail_fields")
-        if not isinstance(detail_fields, dict):
-            return None
-        return cls._clean_optional(detail_fields.get(key))
-
     @staticmethod
     def _clean_optional(value: Any) -> str | None:
         if value is None:
@@ -387,15 +319,6 @@ class TaxOffsetService:
         if cleaned in {"", "—", "--", "None"}:
             return None
         return cleaned
-
-    def _format_optional_money(self, value: Any) -> str | None:
-        cleaned = self._clean_optional(value)
-        if cleaned is None:
-            return None
-        try:
-            return self._format_money(self._to_decimal(cleaned))
-        except (InvalidOperation, ValueError):
-            return None
 
     @staticmethod
     def _resolve_total_with_tax(invoice: Invoice) -> Decimal:

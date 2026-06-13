@@ -456,7 +456,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 - 页面显示“关联台刷新失败”：查看 `/api/workbench/refresh-status.last_error`、`job.read_model_dirty_scopes.status=failed` 和 worker 日志。
 - 页面显示“关联台读模型不可用”：优先检查 PostgreSQL migration、read repository 初始化和生产配置，不要回落旧全量 snapshot。
 - 用户只能刷新浏览器才看到新数据：检查 `/api/workbench/events` 是否被代理缓冲或断开，以及前端是否回退轮询 `/api/workbench/refresh-status`。
-- 工作台 rebuild profile 中 `_attachment_invoice_rows_from_structured_oa_tables` 退回秒级 JSON 扫描时，先检查 `app.oa_attachment_invoice_cache_sources` 的 `attachment_identity_*` bridge。生产 repair 必须先 dry-run：
+- OA 附件正式发票在 Workbench/税金中缺失时，先检查是否已 promotion 到 `app.invoices` 且 `raw_payload.source_links[].source_type='oa_attachment_invoice'`；再检查 `app.oa_attachment_invoice_cache_sources` 的 `attachment_identity_*` bridge 是否能把 parser cache 映射回真实附件。生产 repair 必须先 dry-run：
 
 ```bash
 sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name> \

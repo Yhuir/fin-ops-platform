@@ -67,8 +67,8 @@ function WorkbenchRecordCard({
   readOnly = false,
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
-  const hasActionColumn = !readOnly && (actionMode === "cancel-exception-only" || paneId === "invoice");
-  const showInlineDetail = !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank");
+  const hasActionColumn = !readOnly && actionMode === "cancel-exception-only" && paneId !== "invoice";
+  const showInlineDetail = !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
       ? " record-card-sheet-selected"
@@ -244,7 +244,7 @@ function renderCellValue(
     return renderBankNoteValue(
       value,
       row.tableValues.invoiceRelationStatus ?? "",
-      showInlineDetail,
+      false,
       onOpenDetail,
       row.bankTextFields,
     );
@@ -255,7 +255,7 @@ function renderCellValue(
       value,
       row.tableValues.transactionTime ?? "",
       row.tableValues.invoiceRelationStatus ?? "",
-      false,
+      showInlineDetail,
       onOpenDetail,
     );
   }
@@ -269,11 +269,16 @@ function renderCellValue(
   }
 
   if (paneId === "invoice" && column.key === "issueDate") {
-    return renderInvoiceIdentityValue(row.tableValues.invoiceNo ?? "", value);
+    return renderInvoiceIdentityValue(row.tableValues.invoiceNo ?? "", value, showInlineDetail, onOpenDetail);
   }
 
-  if (paneId === "invoice" && column.key === "amount") {
-    return renderInvoiceAmountValue(value, row.tableValues.taxRate ?? "", row.tableValues.taxAmount ?? "");
+  if (paneId === "invoice" && column.key === "grossAmount") {
+    return renderInvoiceAmountValue(
+      value,
+      row.tableValues.amount ?? "",
+      row.tableValues.taxRate ?? "",
+      row.tableValues.taxAmount ?? "",
+    );
   }
 
   return <span className={buildTextValueClassName(column)}>{highlightSearchText(value, searchQuery)}</span>;
@@ -705,25 +710,27 @@ function renderBankCounterpartyValue(
 
   return (
     <span className="compound-cell-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{counterparty}</span>
-      {hasTransactionTime || hasRelationStatus ? (
-        <span className="compound-cell-secondary compound-cell-secondary-nowrap">
-          {hasTransactionTime ? renderInlineDateTimeTag(transactionTime) : null}
-          {relationTag}
-        </span>
-      ) : null}
-      {showInlineDetail ? (
-        <span className="inline-cell-action-row">
+      <span className="compound-cell-primary bank-counterparty-primary">
+        <span className="cell-text-value cell-text-value-full">{counterparty}</span>
+        {showInlineDetail ? (
           <button
-            className="row-action-btn row-action-btn-inline"
+            aria-label={`查看银行流水 ${counterparty} 详情`}
+            className="row-action-btn row-action-btn-inline row-action-btn-icon"
+            title="查看银行流水详情"
             type="button"
             onClick={(event) => {
               event.stopPropagation();
               onOpenDetail();
             }}
           >
-            详情
+            <Info aria-hidden="true" size={12} strokeWidth={2.2} />
           </button>
+        ) : null}
+      </span>
+      {hasTransactionTime || hasRelationStatus ? (
+        <span className="compound-cell-secondary compound-cell-secondary-nowrap">
+          {hasTransactionTime ? renderInlineDateTimeTag(transactionTime) : null}
+          {relationTag}
         </span>
       ) : null}
     </span>
@@ -776,24 +783,25 @@ function renderInvoicePartyValue(value: string, taxId: string, invoiceType: stri
   return (
     <span className="compound-cell-value invoice-party-value">
       <span className="compound-cell-primary invoice-party-primary">
-        {flowLabel || sourceLabel ? (
-          <span className="invoice-direction-stack">
-            {flowLabel ? (
-              <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{flowLabel}</span>
-            ) : null}
-            {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{sourceLabel}</span> : null}
-          </span>
-        ) : null}
         <span className="invoice-party-text-stack">
           <span className="cell-text-value cell-text-value-full">{value}</span>
           {hasTaxId ? <span className="cell-text-value cell-text-value-full cell-subtext-value">{taxId}</span> : null}
+          {flowLabel || sourceLabel ? (
+            <span className="invoice-chip-row">
+              {flowLabel ? (
+                <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{flowLabel}</span>
+              ) : null}
+              {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{sourceLabel}</span> : null}
+            </span>
+          ) : null}
         </span>
       </span>
     </span>
   );
 }
 
-function renderInvoiceAmountValue(amount: string, taxRate: string, taxAmount: string) {
+function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: string, taxAmount: string) {
+  const hasAmount = amount !== "--" && amount !== "—" && amount !== "";
   const showTaxMeta =
     taxRate !== "--" &&
     taxRate !== "—" &&
@@ -804,11 +812,11 @@ function renderInvoiceAmountValue(amount: string, taxRate: string, taxAmount: st
 
   return (
     <span className="compound-cell-value invoice-amount-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{amount}</span>
-      {showTaxMeta ? (
+      <span className="compound-cell-primary cell-text-value cell-text-value-full">{grossAmount}</span>
+      {hasAmount || showTaxMeta ? (
         <span className="compound-cell-secondary">
           <span className="cell-text-value cell-text-value-full cell-subtext-value">
-            {`${taxRate} (${taxAmount})`}
+            {`${hasAmount ? amount : "--"}${showTaxMeta ? ` ${taxRate} (${taxAmount})` : ""}`}
           </span>
         </span>
       ) : null}
@@ -816,14 +824,33 @@ function renderInvoiceAmountValue(amount: string, taxRate: string, taxAmount: st
   );
 }
 
-function renderInvoiceIdentityValue(invoiceNo: string, issueDate: string) {
+function renderInvoiceIdentityValue(
+  invoiceNo: string,
+  issueDate: string,
+  showInlineDetail: boolean,
+  onOpenDetail: () => void,
+) {
   const normalizedNo = normalizeDisplayText(invoiceNo);
   const hasIssueDate = issueDate !== "--" && issueDate !== "—" && issueDate !== "";
 
   return (
     <span className="compound-cell-value invoice-identity-value">
-      <span className="compound-cell-primary">
+      <span className="compound-cell-primary invoice-identity-primary">
         <span className="cell-text-value cell-text-value-full invoice-identity-no">{normalizedNo}</span>
+        {showInlineDetail ? (
+          <button
+            aria-label={`查看发票 ${normalizedNo} 详情`}
+            className="row-action-btn row-action-btn-inline row-action-btn-icon"
+            title="查看发票详情"
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenDetail();
+            }}
+          >
+            <Info aria-hidden="true" size={12} strokeWidth={2.2} />
+          </button>
+        ) : null}
       </span>
       {hasIssueDate ? (
         <span className="compound-cell-tertiary">
@@ -855,10 +882,11 @@ function renderInlineInvoiceDateTag(value: string) {
 }
 
 function resolveInvoiceFlowLabel(invoiceType: string) {
-  if (invoiceType.includes("销")) {
+  const normalized = invoiceType.trim().toLowerCase();
+  if (normalized.includes("销") || normalized.includes("output") || normalized.includes("sale")) {
     return "销";
   }
-  if (invoiceType.includes("进")) {
+  if (normalized.includes("进") || normalized.includes("input") || normalized.includes("purchase")) {
     return "进";
   }
   return null;

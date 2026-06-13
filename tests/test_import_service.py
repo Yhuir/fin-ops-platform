@@ -657,6 +657,108 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(created.source_links[0]["source_type"], "manual_invoice_import")
         self.assertEqual(created.source_links[0]["batch_id"], preview.id)
 
+    def test_oa_attachment_invoice_upsert_creates_canonical_invoice_with_source_context(self) -> None:
+        invoice = self.service.upsert_oa_attachment_invoice(
+            {
+                "evidence_type": "tax_invoice",
+                "document_kind": "digital_invoice",
+                "digital_invoice_no": "26532000000141671581",
+                "seller_tax_no": "91530000431200506F",
+                "seller_name": "云南建筑技术发展中心（云南地基技术发展中心）",
+                "buyer_tax_no": "915300007194052520",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-27",
+                "amount": "400.00",
+                "tax_amount": "0.00",
+                "total_with_tax": "400.00",
+                "tax_rate": "0%",
+                "invoice_type": "进项发票",
+                "source_attachment_key": "attachment-key-001",
+                "source_attachment_name": "invoice.pdf",
+                "source_expense_item_id": "expense-item-001",
+                "source_expense_row_index": "1",
+                "source_region_key": "document:1",
+            },
+            oa_form_id="oa-form-001",
+            oa_row_id="oa-exp-001",
+            source_workbench_row_id="oa-att-inv-oa-exp-001-stable",
+        )
+
+        self.assertIsNotNone(invoice)
+        assert invoice is not None
+        self.assertEqual(invoice.id, "oa-att-inv-oa-exp-001-stable")
+        self.assertEqual(invoice.invoice_type, InvoiceType.INPUT)
+        self.assertEqual(invoice.amount, Decimal("400.00"))
+        self.assertEqual(invoice.total_with_tax, Decimal("400.00"))
+        self.assertEqual(invoice.oa_form_id, "oa-form-001")
+        self.assertIn("OA附件", invoice.tags)
+        self.assertEqual(invoice.source_links[0]["source_type"], "oa_attachment_invoice")
+        self.assertEqual(invoice.source_links[0]["source_workbench_row_id"], "oa-att-inv-oa-exp-001-stable")
+        self.assertEqual(invoice.source_links[0]["derived_from_oa_id"], "oa-exp-001")
+
+    def test_oa_attachment_invoice_upsert_merges_existing_canonical_invoice(self) -> None:
+        first = self.service.upsert_oa_attachment_invoice(
+            {
+                "evidence_type": "tax_invoice",
+                "digital_invoice_no": "26532000000141671582",
+                "seller_tax_no": "91530000431200506F",
+                "seller_name": "云南建筑技术发展中心（云南地基技术发展中心）",
+                "buyer_tax_no": "915300007194052520",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-27",
+                "amount": "400.00",
+                "total_with_tax": "400.00",
+                "source_attachment_key": "attachment-key-001",
+            },
+            oa_form_id="oa-form-001",
+            oa_row_id="oa-exp-001",
+            source_workbench_row_id="oa-att-inv-oa-exp-001-first",
+        )
+        second = self.service.upsert_oa_attachment_invoice(
+            {
+                "evidence_type": "tax_invoice",
+                "digital_invoice_no": "26532000000141671582",
+                "seller_tax_no": "91530000431200506F",
+                "seller_name": "云南建筑技术发展中心（云南地基技术发展中心）",
+                "buyer_tax_no": "915300007194052520",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-01-27",
+                "amount": "400.00",
+                "total_with_tax": "400.00",
+                "source_attachment_key": "attachment-key-002",
+            },
+            oa_form_id="oa-form-002",
+            oa_row_id="oa-exp-002",
+            source_workbench_row_id="oa-att-inv-oa-exp-002-second",
+        )
+
+        self.assertIs(first, second)
+        self.assertEqual(len([invoice for invoice in self.service.list_invoices() if invoice.invoice_no == "26532000000141671582"]), 1)
+        assert first is not None
+        self.assertEqual(
+            [link["source_attachment_key"] for link in first.source_links if link["source_type"] == "oa_attachment_invoice"],
+            ["attachment-key-001", "attachment-key-002"],
+        )
+
+    def test_oa_attachment_non_tax_receipt_is_not_promoted_as_formal_invoice(self) -> None:
+        invoice = self.service.upsert_oa_attachment_invoice(
+            {
+                "evidence_type": "non_tax_receipt",
+                "document_kind": "non_tax_receipt",
+                "seller_name": "云南省财政厅",
+                "issue_date": "2026-01-27",
+                "amount": "400.00",
+                "total_with_tax": "400.00",
+                "source_attachment_key": "receipt-key-001",
+            },
+            oa_form_id="oa-form-001",
+            oa_row_id="oa-exp-001",
+            source_workbench_row_id="oa-att-inv-oa-exp-001-receipt",
+        )
+
+        self.assertIsNone(invoice)
+        self.assertFalse(any(link.get("source_type") == "oa_attachment_invoice" for inv in self.service.list_invoices() for link in inv.source_links))
+
 
 if __name__ == "__main__":
     unittest.main()

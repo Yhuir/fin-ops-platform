@@ -81,32 +81,38 @@ class WorkbenchRelationProjectionConnection:
                 }
             ]
         if "from app.invoices" in normalized:
-            return []
-        if "from read_model.workbench_rows" in normalized and "oa_attachment_invoice" in normalized:
             return [
                 {
                     "row_id": "oa-att-inv-70",
-                    "scope_month": "2026-01-01",
-                    "payload": {
-                        "invoice_no": "9132019MA1XM5TX71",
-                        "issue_date": "2026-01-20",
-                        "seller_name": "中科视拓（南京）科技有限公司",
-                        "seller_tax_no": "9132019MA1XM5TX71",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "total_with_tax": "70.00",
-                    },
+                    "invoice_type": "input",
+                    "invoice_code": None,
+                    "invoice_no": "9132019MA1XM5TX71",
+                    "digital_invoice_no": None,
+                    "invoice_date": "2026-01-20",
+                    "invoice_month": "2026-01-01",
+                    "seller_name": "中科视拓（南京）科技有限公司",
+                    "seller_tax_no": "9132019MA1XM5TX71",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": None,
+                    "amount": "70.00",
+                    "total_with_tax": "70.00",
+                    "raw_payload": {"source_links": [{"source_type": "oa_attachment_invoice"}]},
                 },
                 {
                     "row_id": "oa-att-inv-126",
-                    "scope_month": "2026-01-01",
-                    "payload": {
-                        "invoice_no": "92532324MAC296HG5K",
-                        "issue_date": "2026-01-20",
-                        "seller_name": "南华县沙桥镇润华清真饭店",
-                        "seller_tax_no": "92532324MAC296HG5K",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "total_with_tax": "126.00",
-                    },
+                    "invoice_type": "input",
+                    "invoice_code": None,
+                    "invoice_no": "92532324MAC296HG5K",
+                    "digital_invoice_no": None,
+                    "invoice_date": "2026-01-20",
+                    "invoice_month": "2026-01-01",
+                    "seller_name": "南华县沙桥镇润华清真饭店",
+                    "seller_tax_no": "92532324MAC296HG5K",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": None,
+                    "amount": "126.00",
+                    "total_with_tax": "126.00",
+                    "raw_payload": {"source_links": [{"source_type": "oa_attachment_invoice"}]},
                 },
             ]
         if "from read_model.workbench_reconciliation_decisions" in normalized:
@@ -140,6 +146,22 @@ class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProj
         if "from app.invoices" in normalized:
             return [
                 {
+                    "row_id": "oa-att-inv-project-1",
+                    "invoice_type": "input",
+                    "invoice_code": None,
+                    "invoice_no": "265320000000992",
+                    "digital_invoice_no": "265320000000992",
+                    "invoice_date": "2026-01-20",
+                    "invoice_month": "2026-01-01",
+                    "seller_name": "溯源科技有限公司",
+                    "seller_tax_no": "300007194052520",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": None,
+                    "amount": "283.02",
+                    "total_with_tax": "300.00",
+                    "raw_payload": {"source_links": [{"source_type": "oa_attachment_invoice"}]},
+                },
+                {
                     "row_id": "invoice-formal-project-1",
                     "invoice_type": "input",
                     "invoice_code": None,
@@ -154,23 +176,6 @@ class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProj
                     "amount": "283.02",
                     "total_with_tax": "300.00",
                     "raw_payload": {},
-                }
-            ]
-        if "from read_model.workbench_rows" in normalized and "oa_attachment_invoice" in normalized:
-            return [
-                {
-                    "row_id": "oa-att-inv-project-1",
-                    "scope_month": "2026-01-01",
-                    "payload": {
-                        "invoice_no": "265320000000992",
-                        "digital_invoice_no": "265320000000992",
-                        "issue_date": "2026-01-20",
-                        "seller_name": "溯源科技有限公司",
-                        "seller_tax_no": "300007194052520",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "total_with_tax": "300.00",
-                        "amount": "283.02",
-                    },
                 }
             ]
         if "from app.workbench_pair_relations" in normalized:
@@ -248,8 +253,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         )
         self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
         self.assertEqual(rows_by_id["txn-unlinked"]["group_ids"], [])
-        self.assertTrue(any("gen.generation_id = r.generation_id" in sql for sql in connection.sql_statements))
-        self.assertFalse(any("gen.id = r.generation_id" in sql for sql in connection.sql_statements))
+        self.assertFalse(any("from read_model.workbench_rows" in sql for sql in connection.sql_statements))
 
     def test_rebuild_deduplicates_formal_and_oa_attachment_invoice_with_same_identity(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

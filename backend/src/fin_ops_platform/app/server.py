@@ -1107,7 +1107,6 @@ class Application:
         self._tax_offset_service = TaxOffsetService(
             import_service=self._import_service,
             certified_records_loader=self._tax_certified_import_service.list_records_for_month,
-            oa_attachment_invoice_rows_loader=self._list_tax_offset_oa_attachment_invoice_rows,
         )
         self._configure_tax_offset_application_services()
         self._cost_statistics_service = CostStatisticsService(
@@ -7986,13 +7985,62 @@ class Application:
         }
         if not scope_keys:
             return
+        promoted_count = self._promote_oa_attachment_invoices_to_canonical(scope_keys)
         scope_keys.add("all")
         normalized_scope_keys = sorted(scope_keys)
+        if promoted_count:
+            self._persist_state_with_workbench_invalidation(
+                cost_statistics_scope_keys=[
+                    scope_key for scope_key in normalized_scope_keys if SEARCH_MONTH_RE.match(scope_key)
+                ],
+                invalidate_cost_statistics=True,
+            )
         self._handle_oa_source_changed(normalized_scope_keys, reason="oa_attachment_invoice_cache")
         self._invalidate_tax_offset_read_model_scopes(
             [scope_key for scope_key in normalized_scope_keys if SEARCH_MONTH_RE.match(scope_key)],
             reason="oa_attachment_invoice_cache",
         )
+
+    def _promote_oa_attachment_invoices_to_canonical(self, scope_keys: set[str]) -> int:
+        adapter = getattr(self._workbench_query_service, "_oa_adapter", None)
+        list_application_records = getattr(adapter, "list_application_records", None)
+        if not callable(list_application_records):
+            return 0
+        promoted_count = 0
+        for month in sorted(scope_keys):
+            if not SEARCH_MONTH_RE.match(month):
+                continue
+            for record in list_application_records(month):
+                record_id = str(getattr(record, "id", "") or "").strip()
+                if not record_id:
+                    continue
+                for index, attachment_invoice in enumerate(self._formal_oa_attachment_invoice_candidates(record)):
+                    if not isinstance(attachment_invoice, dict):
+                        continue
+                    row_id = self._import_service.oa_attachment_invoice_row_id(record_id, index, attachment_invoice)
+                    invoice = self._import_service.upsert_oa_attachment_invoice(
+                        attachment_invoice,
+                        oa_form_id=record_id,
+                        oa_row_id=record_id,
+                        source_workbench_row_id=row_id,
+                    )
+                    if invoice is not None:
+                        promoted_count += 1
+        return promoted_count
+
+    def _formal_oa_attachment_invoice_candidates(self, record: object) -> list[dict[str, object]]:
+        attachment_invoices = [
+            dict(invoice)
+            for invoice in list(getattr(record, "attachment_invoices", []) or [])
+            if isinstance(invoice, dict)
+        ]
+        if attachment_invoices:
+            return attachment_invoices
+        return [
+            dict(evidence)
+            for evidence in list(getattr(record, "attachment_evidences", []) or [])
+            if isinstance(evidence, dict)
+        ]
 
     def _handle_oa_source_changed(
         self,
@@ -13947,9 +13995,6 @@ class Application:
             },
             schedule_cost_warmup=False,
         )
-
-    def _list_tax_offset_oa_attachment_invoice_rows(self, month: str) -> list[dict[str, object]]:
-        return self._workbench_query_service.list_attachment_invoice_rows_by_issue_month(month)
 
     def _handle_api_tax_certified_import_preview(
         self,

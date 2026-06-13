@@ -8,6 +8,7 @@
 - `oa_bank_exact_sum` 属于后端自动候选规则，必须同时覆盖 legacy candidate mode 和 decision/free engine mode；不能只在 `server.py` 或前端补展示逻辑。
 - Workbench matching 仍保留 legacy candidate 与 SQL decision 两条生产相关链路。新增规则时先复用现有 service/helper/test 工具，后续再单独规划匹配逻辑收敛。
 - 旧逻辑清理不和业务规则变更混做。`WorkbenchMatchingRules`、`WorkbenchFreeMatchingEngine`、`WorkbenchReconciliationEngine`、工资/内部转账 legacy rule code 仍有 orchestrator、worker、免 OA、分组和异常投影调用或兼容引用，不能无测试删除。
+- OA 附件解析缓存不是正式发票事实源。正式发票必须先 promotion 到 Invoice repository / `app.invoices`，Workbench 发票栏和 relation projection 只读取 canonical invoice/read model；旧 OA query service 只保留 OA detail 附件摘要。
 
 ## 记录模板
 
@@ -25,6 +26,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-13 - Workbench 发票事实源收敛与列交互修复
+
+- 目标：修复关联台三栏列布局、详情 icon 和 selection 高亮问题，同时把 OA 附件正式发票统一 promotion 到 Invoice repository / `app.invoices`，Workbench 发票栏不再从 OA 附件解析缓存临时生成发票行。
+- 影响范围：`ImportNormalizationService.upsert_oa_attachment_invoice`、OA attachment cache update callback、Workbench SQL projection、legacy `WorkbenchQueryService`、Workbench relation SQL projection、前端 Workbench columns/selection。
+- 关键决策：`app.oa_attachment_invoice_cache` 只保留解析缓存职责；正式发票事实必须以 canonical `Invoice` 写入 import service/repository，并通过 `source_links.source_type='oa_attachment_invoice'` 保留 OA/附件/费用项来源。Workbench SQL 发票行、relation projection、tax/cost 下游都从 canonical invoice/read model 读取。旧 `WorkbenchQueryService` 只在 OA detail 中展示附件解析摘要，不再发布 `source_kind=oa_attachment_invoice` 的 invoice row。
+- 文档影响：更新本模块测试矩阵、税金抵扣/成本统计模块记录和运维监控说明。
+- 测试覆盖：新增/更新 OA 附件 promotion、Workbench SQL projection、relation projection、legacy query service 不发布发票行、前端列布局和 selection hook 回归。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：未对真实生产历史 `app.oa_attachment_invoice_cache` 做全量 backfill/dry-run；发布前应对存量 OA 附件正式发票做只读抽样，确认 canonical `app.invoices.source_links` 已补齐。
 
 ## 2026-06-12 - 关联台撤回 preview 分组与后台刷新交互收敛
 

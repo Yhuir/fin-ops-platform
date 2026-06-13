@@ -11494,19 +11494,17 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   min-width: 770px;
 }
 
-.candidate-pane-columnheaders-invoice.pane-layout-with-action,
-.record-card-invoice.record-card-has-action {
+.candidate-pane-columnheaders-invoice.pane-layout-no-action,
+.record-card-invoice.record-card-no-action {
   grid-template-columns:
     minmax(156px, 1.1fr)
     minmax(156px, 1.1fr)
-    96px
-    108px
-    84px
-    92px;
-  min-width: 692px;
+    minmax(124px, 0.9fr)
+    minmax(132px, 0.92fr);
+  min-width: 568px;
 }
 
-.candidate-pane-columnheaders-invoice.pane-layout-with-action {
+.candidate-pane-columnheaders-invoice.pane-layout-no-action {
   height: 56px;
 }
 
@@ -11704,11 +11702,6 @@ body.column-layout-dragging {
 
 .candidate-pane-columnheaders-invoice .candidate-columnheader.column-invoice-identity-compact,
 .record-card-invoice .record-card-cell.column-invoice-identity-compact {
-  min-width: 0;
-}
-
-.candidate-pane-columnheaders-invoice .candidate-columnheader.column-invoice-amount-compact,
-.record-card-invoice .record-card-cell.column-invoice-amount-compact {
   min-width: 0;
 }
 
@@ -12492,6 +12485,15 @@ body.column-layout-dragging {
   gap: 4px;
 }
 
+.bank-counterparty-primary,
+.invoice-identity-primary {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
 .inline-cell-action-row {
   display: flex;
   align-items: center;
@@ -12545,13 +12547,11 @@ body.column-layout-dragging {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  gap: 8px;
   width: 100%;
   min-width: 0;
   max-width: 100%;
 }
 
-.invoice-direction-stack,
 .invoice-party-text-stack {
   display: inline-flex;
   flex-direction: column;
@@ -12559,15 +12559,19 @@ body.column-layout-dragging {
   min-width: 0;
 }
 
-.invoice-direction-stack {
-  flex: 0 0 auto;
-  gap: 4px;
-}
-
 .invoice-party-text-stack {
   flex: 1 1 auto;
   gap: 6px;
   max-width: 100%;
+}
+
+.invoice-chip-row {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .record-card-cell .invoice-party-text-stack .cell-text-value-full,

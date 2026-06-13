@@ -21,7 +21,6 @@ from fin_ops_platform.services.oa_adapter import (
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND = "oa_attachment_payment_receipt"
 OA_ATTACHMENT_UNKNOWN_SOURCE_KIND = "oa_attachment_unknown"
-MAX_ATTACHMENT_DISPLAY_AMOUNT_ABS = Decimal("1000000000000")
 OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS = {
     OA_ATTACHMENT_INVOICE_SOURCE_KIND,
     OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND,
@@ -42,7 +41,6 @@ class WorkbenchQueryService:
         self._oa_adapter = oa_adapter or InMemoryOAAdapter(self._seed_oa_records() if seed_demo_rows else {})
         self._records_by_id: dict[str, dict[str, Any]] = {}
         self._records_lock = RLock()
-        self._attachment_invoice_rows_by_issue_month_cache: dict[str, list[dict[str, Any]]] = {}
         self._has_full_oa_snapshot = False
         if seed_demo_rows:
             self._seed_all_rows()
@@ -122,28 +120,6 @@ class WorkbenchQueryService:
                 if str(month).strip()
             )
         return sorted(months)
-
-    def list_attachment_invoice_rows_by_issue_month(self, month: str) -> list[dict[str, Any]]:
-        normalized_month = str(month or "").strip()
-        if not normalized_month:
-            return []
-
-        cached_rows = self._attachment_invoice_rows_by_issue_month_cache.get(normalized_month)
-        if cached_rows is not None:
-            return [deepcopy(row) for row in cached_rows]
-
-        if not self._has_full_oa_snapshot:
-            self._sync_all_oa_rows()
-        rows = [
-            self.serialize_row(row)
-            for row in self.list_record_snapshots()
-            if row.get("type") == "invoice"
-            and row.get("source_kind") == OA_ATTACHMENT_INVOICE_SOURCE_KIND
-            and str(row.get("issue_date", "")).strip().startswith(normalized_month)
-        ]
-        sorted_rows = sorted(rows, key=lambda row: (str(row.get("issue_date") or ""), str(row.get("id") or "")))
-        self._attachment_invoice_rows_by_issue_month_cache[normalized_month] = [deepcopy(row) for row in sorted_rows]
-        return sorted_rows
 
     def get_row_detail(self, row_id: str) -> dict[str, Any]:
         row = self.get_row_record(row_id)
@@ -256,9 +232,7 @@ class WorkbenchQueryService:
         prune_missing: bool = True,
     ) -> None:
         with self._records_lock:
-            self._attachment_invoice_rows_by_issue_month_cache.clear()
             seen_ids: set[str] = set()
-            seen_attachment_invoice_ids: set[str] = set()
             normalized_target_months = {
                 str(month).strip()
                 for month in list(target_months or [])
@@ -274,15 +248,10 @@ class WorkbenchQueryService:
                     new_row = self._merge_existing_oa_row(existing, new_row)
                 self._records_by_id[new_row["id"]] = new_row
                 seen_ids.add(new_row["id"])
-                for attachment_invoice_row in self._build_attachment_invoice_rows(record, oa_row=new_row):
-                    existing_attachment_row = self._records_by_id.get(attachment_invoice_row["id"])
-                    if existing_attachment_row is not None:
-                        attachment_invoice_row = self._merge_existing_attachment_invoice_row(
-                            existing_attachment_row,
-                            attachment_invoice_row,
-                        )
-                    self._records_by_id[attachment_invoice_row["id"]] = attachment_invoice_row
-                    seen_attachment_invoice_ids.add(attachment_invoice_row["id"])
+            self._remove_legacy_attachment_invoice_rows(
+                target_months=normalized_target_months if prune_missing else set(),
+                derived_from_oa_ids=seen_ids,
+            )
 
             if not prune_missing:
                 return
@@ -295,23 +264,26 @@ class WorkbenchQueryService:
                     if row["_section"] == "open" and relation["code"] in {"pending_match", "oa_pending_approval"}:
                         del self._records_by_id[row_id]
                     continue
-                if (
-                    row["type"] == "invoice"
-                    and row.get("source_kind") in OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS
-                    and row_id not in seen_attachment_invoice_ids
-                ):
-                    relation = row["invoice_bank_relation"]
-                    if row["_section"] == "open" and relation["code"] in {"pending_collection"}:
-                        del self._records_by_id[row_id]
+
+    def _remove_legacy_attachment_invoice_rows(
+        self,
+        *,
+        target_months: set[str],
+        derived_from_oa_ids: set[str],
+    ) -> None:
+        for row_id, row in list(self._records_by_id.items()):
+            if row.get("type") != "invoice" or row.get("source_kind") not in OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS:
+                continue
+            row_month = str(row.get("_month", "")).strip()
+            derived_from_oa_id = str(row.get("derived_from_oa_id", "")).strip()
+            if derived_from_oa_id in derived_from_oa_ids or (target_months and row_month in target_months):
+                del self._records_by_id[row_id]
 
     def _tracked_oa_months(self) -> set[str]:
         tracked_months: set[str] = set()
         for row in self.list_record_snapshots():
             row_type = str(row.get("type"))
-            if row_type == "oa" or (
-                row_type == "invoice"
-                and str(row.get("source_kind", "")) in OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS
-            ):
+            if row_type == "oa":
                 row_month = str(row.get("_month", "")).strip()
                 if row_month:
                     tracked_months.add(row_month)
@@ -561,19 +533,6 @@ class WorkbenchQueryService:
         quantizer = Decimal("1").scaleb(-decimal_places)
         return f"{total.quantize(quantizer):f}"
 
-    def _merge_existing_attachment_invoice_row(
-        self,
-        existing: dict[str, Any],
-        refreshed: dict[str, Any],
-    ) -> dict[str, Any]:
-        relation = existing.get("invoice_bank_relation", {})
-        if relation.get("code") not in {"pending_collection"}:
-            refreshed["invoice_bank_relation"] = deepcopy(relation)
-            refreshed["case_id"] = existing.get("case_id")
-            refreshed["_section"] = existing.get("_section", refreshed["_section"])
-            refreshed["available_actions"] = self.available_actions("invoice", refreshed["_section"])
-        return refreshed
-
     @staticmethod
     def _attachment_invoices(record: OAApplicationRecord | object) -> list[dict[str, str]]:
         invoices = getattr(record, "attachment_invoices", [])
@@ -587,20 +546,6 @@ class WorkbenchQueryService:
         if not isinstance(evidences, list):
             return []
         return [dict(evidence) for evidence in evidences if isinstance(evidence, dict)]
-
-    def _formal_attachment_invoice_candidates(self, record: OAApplicationRecord | object) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for candidate in [*self._attachment_evidences(record), *self._attachment_invoices(record)]:
-            if self._attachment_evidence_source_kind(candidate) != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
-                continue
-            identity = self._attachment_invoice_candidate_identity(candidate)
-            if identity and identity in seen:
-                continue
-            if identity:
-                seen.add(identity)
-            result.append(candidate)
-        return result
 
     @staticmethod
     def _attachment_artifacts(record: OAApplicationRecord | object) -> list[dict[str, Any]]:
@@ -616,165 +561,10 @@ class WorkbenchQueryService:
         except (TypeError, ValueError):
             return 0
 
-    @classmethod
-    def _attachment_invoice_row_id(
-        cls,
-        oa_row_id: str,
-        index: int,
-        attachment_invoice: dict[str, Any] | None = None,
-    ) -> str:
-        stable_identity = cls._attachment_invoice_stable_identity(attachment_invoice)
-        if stable_identity:
-            return f"oa-att-inv-{oa_row_id}-{stable_identity}"
-        return f"oa-att-inv-{oa_row_id}-{index + 1:02d}"
-
-    @classmethod
-    def _attachment_invoice_stable_identity(cls, attachment_invoice: dict[str, Any] | None) -> str:
-        return OBJECT_IDENTITY_POLICY.oa_attachment_invoice_stable_identity(attachment_invoice)
-
-    @classmethod
-    def _attachment_invoice_candidate_identity(cls, attachment_invoice: dict[str, Any]) -> str:
-        return OBJECT_IDENTITY_POLICY.oa_attachment_invoice_candidate_identity(attachment_invoice)
-
-    @staticmethod
-    def _clean_identity_part(value: Any) -> str:
-        text = str(value or "").strip()
-        return "" if text in {"—", "--"} else text
-
     @staticmethod
     def _invoice_identity_display_value(value: Any) -> str:
         text = str(value or "").strip()
         return text if text and text not in {"—", "--"} else "—"
-
-    @classmethod
-    def _attachment_invoice_source_value(cls, attachment_invoice: dict[str, Any], key: str) -> str | None:
-        value = cls._clean_identity_part(attachment_invoice.get(key))
-        return value or None
-
-    @classmethod
-    def _attachment_invoice_display_name(cls, attachment_invoice: dict[str, Any]) -> str:
-        return (
-            cls._attachment_invoice_source_value(attachment_invoice, "source_attachment_name")
-            or cls._attachment_invoice_source_value(attachment_invoice, "attachment_name")
-            or "—"
-        )
-
-    def _build_attachment_invoice_rows(
-        self,
-        record: OAApplicationRecord | object,
-        *,
-        oa_row: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        attachment_invoices = self._formal_attachment_invoice_candidates(record)
-        if not attachment_invoices:
-            return []
-
-        section = str(oa_row["_section"])
-        relation = self.linked_relation() if section == "paired" else self.pending_relation("invoice")
-        source_detail_fields = dict(oa_row.get("_detail_fields") or {})
-        invoice_rows: list[dict[str, Any]] = []
-        for index, attachment_invoice in enumerate(attachment_invoices):
-            source_kind = self._attachment_evidence_source_kind(attachment_invoice)
-            if source_kind != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
-                continue
-            row_id = self._attachment_evidence_row_id(oa_row["id"], index, source_kind, attachment_invoice)
-            source_expense_row_index = self._attachment_invoice_source_value(
-                attachment_invoice,
-                "source_expense_row_index",
-            )
-            source_expense_item_id = self._attachment_invoice_source_value(
-                attachment_invoice,
-                "source_expense_item_id",
-            )
-            source_attachment_key = self._attachment_invoice_source_value(
-                attachment_invoice,
-                "source_attachment_key",
-            )
-            source_attachment_name = self._attachment_invoice_display_name(attachment_invoice)
-            display_amount = self._first_valid_attachment_money(
-                attachment_invoice.get("net_amount"),
-                attachment_invoice.get("amount"),
-                attachment_invoice.get("total_with_tax"),
-            )
-            display_total_with_tax = self._first_valid_attachment_money(
-                attachment_invoice.get("total_with_tax"),
-                attachment_invoice.get("amount"),
-                display_amount,
-            )
-            display_tax_amount = self._first_valid_attachment_money(attachment_invoice.get("tax_amount"))
-            detail_fields = self._attachment_invoice_detail_fields(
-                attachment_invoice,
-                row_id=row_id,
-                source_detail_fields=source_detail_fields,
-                source_expense_row_index=source_expense_row_index,
-                source_expense_item_id=source_expense_item_id,
-                source_attachment_key=source_attachment_key,
-                source_attachment_name=source_attachment_name,
-            )
-            invoice_row = self._build_invoice_row(
-                row_id=row_id,
-                month=str(oa_row["_month"]),
-                section=section,
-                case_id=oa_row.get("case_id"),
-                seller_tax_no=str(attachment_invoice.get("seller_tax_no") or "—"),
-                seller_name=str(attachment_invoice.get("seller_name") or oa_row.get("counterparty_name") or "—"),
-                buyer_tax_no=str(attachment_invoice.get("buyer_tax_no") or "—"),
-                buyer_name=str(attachment_invoice.get("buyer_name") or "—"),
-                issue_date=str(
-                    attachment_invoice.get("issue_date")
-                    or source_detail_fields.get("报销日期")
-                    or source_detail_fields.get("申请日期")
-                    or "—"
-                ),
-                amount=display_amount or "—",
-                tax_rate=str(attachment_invoice.get("tax_rate") or "—"),
-                tax_amount=display_tax_amount or "—",
-                total_with_tax=display_total_with_tax or "—",
-                invoice_type=str(attachment_invoice.get("invoice_type") or "进项发票"),
-                relation=relation,
-                detail_fields=detail_fields,
-            )
-            invoice_row["source_kind"] = source_kind
-            invoice_row["derived_from_oa_id"] = oa_row["id"]
-            invoice_row["source_expense_row_index"] = source_expense_row_index
-            invoice_row["source_expense_item_id"] = source_expense_item_id
-            invoice_row["source_attachment_key"] = source_attachment_key
-            invoice_row["source_attachment_name"] = source_attachment_name if source_attachment_name != "—" else None
-            invoice_rows.append(invoice_row)
-        return invoice_rows
-
-    @classmethod
-    def _first_valid_attachment_money(cls, *values: Any) -> str | None:
-        for value in values:
-            text = str(value or "").replace(",", "").strip()
-            if not text or text in {"—", "--"}:
-                continue
-            try:
-                amount = Decimal(text)
-            except InvalidOperation:
-                continue
-            if abs(amount) >= MAX_ATTACHMENT_DISPLAY_AMOUNT_ABS:
-                continue
-            return format(amount, "f")
-        return None
-
-    @classmethod
-    def _attachment_evidence_row_id(
-        cls,
-        oa_row_id: str,
-        index: int,
-        source_kind: str,
-        attachment_evidence: dict[str, Any] | None = None,
-    ) -> str:
-        prefix = {
-            OA_ATTACHMENT_INVOICE_SOURCE_KIND: "oa-att-inv",
-            OA_ATTACHMENT_PAYMENT_RECEIPT_SOURCE_KIND: "oa-att-pay",
-            OA_ATTACHMENT_UNKNOWN_SOURCE_KIND: "oa-att-unk",
-        }.get(source_kind, "oa-att")
-        stable_identity = cls._attachment_invoice_stable_identity(attachment_evidence)
-        if stable_identity:
-            return f"{prefix}-{oa_row_id}-{stable_identity}"
-        return f"{prefix}-{oa_row_id}-{index + 1:02d}"
 
     @staticmethod
     def _attachment_evidence_source_kind(attachment_evidence: dict[str, Any]) -> str:
@@ -797,51 +587,6 @@ class WorkbenchQueryService:
     @staticmethod
     def _attachment_evidence_has_invoice_identity(attachment_evidence: dict[str, Any]) -> bool:
         return OBJECT_IDENTITY_POLICY.is_oa_attachment_invoice_evidence(attachment_evidence)
-
-    def _attachment_invoice_detail_fields(
-        self,
-        attachment_invoice: dict[str, Any],
-        *,
-        row_id: str,
-        source_detail_fields: dict[str, Any],
-        source_expense_row_index: str | None,
-        source_expense_item_id: str | None,
-        source_attachment_key: str | None,
-        source_attachment_name: str,
-    ) -> dict[str, str]:
-        return {
-            "序号": row_id,
-            "发票代码": str(attachment_invoice.get("invoice_code") or "—"),
-            "发票号码": str(attachment_invoice.get("invoice_no") or "—"),
-            "数电发票号码": str(attachment_invoice.get("digital_invoice_no") or "—"),
-            "税收分类编码": str(attachment_invoice.get("tax_classification_code") or "—"),
-            "特定业务类型": str(attachment_invoice.get("specific_business_type") or "—"),
-            "货物或应税劳务名称": str(attachment_invoice.get("taxable_item_name") or "—"),
-            "规格型号": str(attachment_invoice.get("specification_model") or "—"),
-            "单位": str(attachment_invoice.get("unit") or "—"),
-            "数量": str(attachment_invoice.get("quantity") or "—"),
-            "单价": str(attachment_invoice.get("unit_price") or "—"),
-            "发票来源": "OA附件解析",
-            "发票票种": str(attachment_invoice.get("invoice_kind") or "—"),
-            "发票状态": str(attachment_invoice.get("invoice_status") or "—"),
-            "是否正数发票": str(attachment_invoice.get("is_positive_invoice") or "—"),
-            "发票风险等级": str(attachment_invoice.get("risk_level") or "—"),
-            "开票人": str(attachment_invoice.get("issuer") or "—"),
-            "备注": str(attachment_invoice.get("remark") or "—"),
-            "来源OA单号": str(source_detail_fields.get("OA单号") or "—"),
-            "来源OA明细行号": str(
-                source_expense_row_index
-                or source_detail_fields.get("明细行号")
-                or "整单"
-            ),
-            "来源付款项ID": str(source_expense_item_id or "—"),
-            "来源附件Key": str(source_attachment_key or "—"),
-            "附件文件名": source_attachment_name,
-            "不含税金额": self._first_valid_attachment_money(
-                attachment_invoice.get("net_amount"),
-                attachment_invoice.get("amount"),
-            ) or "—",
-        }
 
     def _seed_oa_records(self) -> dict[str, list[OAApplicationRecord]]:
         return {

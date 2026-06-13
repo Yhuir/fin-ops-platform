@@ -6,7 +6,7 @@ from typing import Any
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
-from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload, text, text_list
+from fin_ops_platform.services.postgres_repositories.common import month_start, text, text_list
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 
@@ -42,8 +42,6 @@ class WorkbenchRelationSqlProjectionBuilder:
                 select invoice_month as scope_month from app.invoices where invoice_month is not null and status <> 'deleted'
                 union
                 select date_trunc('month', application_date)::date as scope_month from app.oa_applications where application_date is not null
-                union
-                select scope_month from read_model.workbench_rows where scope_month is not null and source_kind = 'oa_attachment_invoice'
             ) months
             order by scope_key desc
             """
@@ -115,8 +113,6 @@ class WorkbenchRelationSqlProjectionBuilder:
             _put_object(objects, _oa_object(row, month=month))
         for row in self._formal_invoice_rows(month, ids):
             _put_object(objects, _formal_invoice_object(row, month=month))
-        for row in self._oa_attachment_invoice_rows(month, ids):
-            _put_object(objects, _oa_attachment_invoice_object(row, month=month))
         return objects
 
     def _bank_transaction_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
@@ -153,22 +149,6 @@ class WorkbenchRelationSqlProjectionBuilder:
               and (invoice_month = %s::date or coalesce(legacy_mongo_id, id::text) = any(%s))
             """,
             (month_start(month), row_ids),
-        )
-
-    def _oa_attachment_invoice_rows(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
-        return self._connection.fetch_all(
-            """
-            select r.row_id, r.scope_month, r.payload, r.raw_payload
-            from read_model.workbench_rows r
-            join read_model.workbench_generations gen
-              on gen.generation_id = r.generation_id
-             and gen.tenant_id = %s
-             and gen.scope_key = r.scope_key
-             and gen.status = 'active'
-            where r.source_kind = 'oa_attachment_invoice'
-              and (r.scope_month = %s::date or r.row_id = any(%s))
-            """,
-            (self._tenant_id, month_start(month), row_ids),
         )
 
     def _active_relations_for_scope(self, *, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
@@ -368,38 +348,6 @@ def _formal_invoice_object(row: dict[str, Any], *, month: str) -> dict[str, Any]
             "buyer_tax_no": text(row.get("buyer_tax_no")),
             "invoice_type": invoice_type,
             "source_kind": "formal_invoice",
-            **_object_identity_columns(identity),
-        },
-    }
-
-
-def _oa_attachment_invoice_object(row: dict[str, Any], *, month: str) -> dict[str, Any]:
-    payload = row_payload(row, "payload", "raw_payload")
-    payload = payload if isinstance(payload, dict) else {}
-    row_id = text(row.get("row_id") or payload.get("id") or payload.get("row_id")) or ""
-    identity = OBJECT_IDENTITY_POLICY.identify_oa_attachment_invoice(
-        payload,
-        source_kind="oa_attachment_invoice",
-        source_row_id=row_id,
-    )
-    return {
-        "row_id": row_id,
-        "row_type": "input_invoice",
-        "scope_month": month,
-        **_object_identity_columns(identity),
-        "summary": {
-            "id": row_id,
-            "invoice_no": text(payload.get("invoice_no") or payload.get("invoiceNumber") or payload.get("seller_tax_no")),
-            "digital_invoice_no": text(payload.get("digital_invoice_no")),
-            "issue_date": text(payload.get("issue_date") or payload.get("invoice_date") or payload.get("date")),
-            "total_with_tax": _decimal_text(payload.get("total_with_tax") or payload.get("amount")),
-            "amount": _decimal_text(payload.get("amount")),
-            "seller_name": text(payload.get("seller_name") or payload.get("counterparty_name")),
-            "seller_tax_no": text(payload.get("seller_tax_no") or payload.get("tax_no")),
-            "buyer_name": text(payload.get("buyer_name")),
-            "buyer_tax_no": text(payload.get("buyer_tax_no")),
-            "invoice_type": "input",
-            "source_kind": "oa_attachment_invoice",
             **_object_identity_columns(identity),
         },
     }

@@ -332,6 +332,18 @@ class FinancialObjectIdentityPolicy:
         return f"id:{invoice.id}"
 
     @classmethod
+    def oa_attachment_invoice_row_id(
+        cls,
+        oa_row_id: str,
+        index: int,
+        attachment_invoice: dict[str, Any] | None = None,
+    ) -> str:
+        stable_identity = cls.oa_attachment_invoice_stable_identity(attachment_invoice)
+        if stable_identity:
+            return f"oa-att-inv-{oa_row_id}-{stable_identity}"
+        return f"oa-att-inv-{oa_row_id}-{index + 1:02d}"
+
+    @classmethod
     def oa_attachment_invoice_stable_identity(cls, attachment_invoice: dict[str, Any] | None) -> str:
         if not isinstance(attachment_invoice, dict):
             return ""

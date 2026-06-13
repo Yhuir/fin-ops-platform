@@ -596,7 +596,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(refreshed_row["case_id"], "CASE-MANUAL-001")
         self.assertEqual(refreshed_row["oa_bank_relation"]["code"], "fully_linked")
 
-    def test_attachment_invoices_become_invoice_rows_and_oa_detail_contains_summary(self) -> None:
+    def test_attachment_invoices_stay_on_oa_detail_without_publishing_invoice_rows(self) -> None:
         service = WorkbenchQueryService(oa_adapter=AttachmentAwareOAAdapter())
 
         payload = service.get_workbench("2026-03")
@@ -607,25 +607,12 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("detail_fields", {}).get("来源OA单号") == "OA-ATT-001"
         ]
-        self.assertEqual(len(attachment_invoice_rows), 1)
-        invoice_row = attachment_invoice_rows[0]
+        self.assertEqual(attachment_invoice_rows, [])
         self.assertIsNone(oa_row["case_id"])
-        self.assertIsNone(invoice_row["case_id"])
-        self.assertEqual(invoice_row["source_kind"], "oa_attachment_invoice")
-        self.assertEqual(invoice_row["derived_from_oa_id"], oa_row["id"])
-        self.assertEqual(invoice_row["invoice_code"], "053002200111")
-        self.assertEqual(invoice_row["invoice_no"], "40512344")
-        self.assertEqual(invoice_row["digital_invoice_no"], "—")
-        self.assertEqual(invoice_row["invoice_type"], "进项发票")
-        self.assertEqual(invoice_row["seller_name"], "智能工厂设备商")
-        self.assertEqual(invoice_row["detail_fields"]["附件文件名"], "设备发票.pdf")
 
         oa_detail = service.get_row_detail(oa_row["id"])
-        invoice_detail = service.get_row_detail(invoice_row["id"])
         self.assertEqual(oa_detail["detail_fields"]["附件发票数量"], "1")
         self.assertIn("40512344", oa_detail["detail_fields"]["附件发票摘要"])
-        self.assertEqual(invoice_detail["detail_fields"]["来源OA单号"], "OA-ATT-001")
-        self.assertEqual(invoice_detail["detail_fields"]["发票号码"], "40512344")
 
     def test_aggregated_expense_claim_row_exposes_detail_fields_tags_and_multiple_attachment_invoices(self) -> None:
         service = WorkbenchQueryService(oa_adapter=AggregatedAttachmentOAAdapter())
@@ -640,11 +627,8 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == oa_row["id"]
         ]
-        self.assertEqual(len(attachment_invoice_rows), 2)
+        self.assertEqual(attachment_invoice_rows, [])
         self.assertIsNone(oa_row["case_id"])
-        self.assertEqual({row["case_id"] for row in attachment_invoice_rows}, {None})
-        self.assertEqual({row["source_kind"] for row in attachment_invoice_rows}, {"oa_attachment_invoice"})
-        self.assertEqual({row["derived_from_oa_id"] for row in attachment_invoice_rows}, {oa_row["id"]})
         self.assertIn("多明细", oa_row["tags"])
         self.assertIn("金额差异", oa_row["tags"])
 
@@ -654,15 +638,10 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(detail_fields["明细金额合计"], "1500.00")
         self.assertEqual(detail_fields["金额差异"], "主表总金额 1549.00；明细合计 1500.00；差异 49.00")
         self.assertEqual(detail_fields["费用内容摘要"], "设备材料；邮寄费用")
+        self.assertEqual(detail_fields["附件发票数量"], "2")
         self.assertIn("40512344", detail_fields["附件发票摘要"])
-        row_numbers = {
-            row["detail_fields"]["发票号码"]: row["detail_fields"]["来源OA明细行号"]
-            for row in attachment_invoice_rows
-        }
-        self.assertEqual(row_numbers["40512344"], "0")
-        self.assertEqual(row_numbers["40512345"], "整单")
 
-    def test_source_bound_attachment_invoice_rows_expose_payment_and_attachment_origin(self) -> None:
+    def test_source_bound_attachment_invoice_rows_are_not_published_by_oa_query_service(self) -> None:
         service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
 
         payload = service.get_workbench("2026-03")
@@ -674,36 +653,11 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-exp-hurong-248"
         ]
-        self.assertEqual(len(invoice_rows), 3)
-        self.assertEqual({row["source_kind"] for row in invoice_rows}, {"oa_attachment_invoice"})
-        self.assertTrue(
-            all(
-                row["id"] != f"oa-att-inv-oa-exp-hurong-248-{index:02d}"
-                for index, row in enumerate(invoice_rows, start=1)
-            )
-        )
+        self.assertEqual(invoice_rows, [])
+        self.assertEqual(oa_rows[0]["detail_fields"]["附件发票数量"], "3")
+        self.assertIn("24800003", oa_rows[0]["detail_fields"]["附件发票摘要"])
 
-        by_invoice_no = {
-            row["detail_fields"]["发票号码"]: row
-            for row in invoice_rows
-        }
-        first_detail = by_invoice_no["24800001"]["detail_fields"]
-        self.assertEqual(first_detail["来源OA单号"], "OA-HR-248")
-        self.assertEqual(first_detail["来源OA明细行号"], "0")
-        self.assertEqual(first_detail["来源付款项ID"], "oa-exp-hurong-248:item:0:maint")
-        self.assertEqual(first_detail["来源附件Key"], "oa-exp-hurong-248:item:0:att:a")
-        self.assertEqual(first_detail["附件文件名"], "付款项1-发票A.pdf")
-        self.assertEqual(by_invoice_no["24800003"]["detail_fields"]["来源OA明细行号"], "1")
-        self.assertEqual(
-            by_invoice_no["24800003"]["source_expense_item_id"],
-            "oa-exp-hurong-248:item:1:service",
-        )
-        self.assertEqual(
-            by_invoice_no["24800003"]["source_attachment_key"],
-            "oa-exp-hurong-248:item:1:att:c",
-        )
-
-    def test_attachment_evidences_project_only_formal_invoice_rows_with_origin_fields(self) -> None:
+    def test_attachment_evidences_update_oa_detail_without_formal_invoice_projection(self) -> None:
         service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
 
         payload = service.get_workbench("2026-03")
@@ -717,79 +671,10 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-evidence-2035"
         ]
-        self.assertEqual([row["source_kind"] for row in evidence_rows], ["oa_attachment_invoice"])
-        for row in evidence_rows:
-            self.assertEqual(row["derived_from_oa_id"], "oa-evidence-2035")
-            self.assertTrue(row["source_expense_item_id"])
-            self.assertTrue(row["source_attachment_key"])
-            self.assertTrue(row["source_attachment_name"])
+        self.assertEqual(evidence_rows, [])
+        self.assertIn("53000125", oa_row["detail_fields"]["附件发票摘要"])
 
-        invoice_row = evidence_rows[0]
-        self.assertEqual(invoice_row["detail_fields"]["发票号码"], "53000125")
-        self.assertEqual(invoice_row["detail_fields"]["附件文件名"], "过路费发票合图.jpg")
-
-    def test_payment_receipt_evidence_does_not_become_invoice_row(self) -> None:
-        service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
-
-        rows = service._build_attachment_invoice_rows(
-            type(
-                "Record",
-                (),
-                {
-                    "attachment_evidences": [
-                        {
-                            "evidence_type": "payment_receipt",
-                            "source_attachment_key": "pay-key",
-                            "source_attachment_name": "付款截图.jpg",
-                            "source_expense_item_id": "item-1",
-                            "amount": "295402470149308264.00",
-                            "transaction_no": "26030211100301670006197203184255",
-                        }
-                    ],
-                    "attachment_invoices": [],
-                },
-            )(),
-            oa_row={
-                "id": "oa-exp-pay",
-                "_month": "2026-03",
-                "_section": "open",
-                "_detail_fields": {"OA单号": "2062", "申请日期": "2026-03-27"},
-            },
-        )
-
-        self.assertEqual(rows, [])
-
-    def test_attachment_artifact_without_invoice_identity_does_not_become_invoice_row(self) -> None:
-        service = WorkbenchQueryService(oa_adapter=EvidenceAttachmentOAAdapter())
-
-        rows = service._build_attachment_invoice_rows(
-            type(
-                "Record",
-                (),
-                {
-                    "attachment_evidences": [
-                        {
-                            "source_attachment_key": "artifact-key",
-                            "source_attachment_name": "顺丰电子发票2026.5.18.pdf",
-                            "source_expense_item_id": "item-1",
-                            "document_kind": "发票附件",
-                            "parse_status": "no_evidence",
-                        }
-                    ],
-                    "attachment_invoices": [],
-                },
-            )(),
-            oa_row={
-                "id": "oa-exp-unknown",
-                "_month": "2026-05",
-                "_section": "open",
-                "_detail_fields": {"OA单号": "2189", "申请日期": "2026-05-18"},
-            },
-        )
-
-        self.assertEqual(rows, [])
-
-    def test_single_source_attachment_invoice_is_not_duplicated_from_expense_item_copy(self) -> None:
+    def test_single_source_attachment_invoice_is_not_published_from_expense_item_copy(self) -> None:
         service = WorkbenchQueryService(oa_adapter=SourceBoundAttachmentOAAdapter())
 
         payload = service.get_workbench("2026-03")
@@ -801,15 +686,9 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             for row in payload["open"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-exp-hurong-292"
         ]
-        self.assertEqual(len(invoice_rows), 1)
-        self.assertEqual(
-            invoice_rows[0]["detail_fields"]["来源付款项ID"],
-            "oa-exp-hurong-292:item:0:energy",
-        )
-        self.assertEqual(
-            invoice_rows[0]["detail_fields"]["来源附件Key"],
-            "oa-exp-hurong-292:item:0:att:only",
-        )
+        self.assertEqual(invoice_rows, [])
+        self.assertEqual(oa_rows[0]["detail_fields"]["附件发票数量"], "1")
+        self.assertIn("29200001", oa_rows[0]["detail_fields"]["附件发票摘要"])
 
     def test_oa_row_uses_project_display_without_polluting_real_project_summary(self) -> None:
         service = WorkbenchQueryService(oa_adapter=MultiProjectDisplayOAAdapter())
@@ -921,60 +800,6 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["oa_count"], 2)
         self.assertEqual(adapter.bulk_call_count, 1)
         self.assertEqual(adapter.month_call_count, 0)
-
-    def test_attachment_invoice_issue_month_rows_reuse_bulk_oa_sync_result(self) -> None:
-        adapter = BulkOAAdapter(
-            [
-                OAApplicationRecord(
-                    id="oa-bulk-202602-001",
-                    month="2026-02",
-                    section="open",
-                    case_id=None,
-                    applicant="周洁莹",
-                    project_name="云南溯源科技",
-                    apply_type="日常报销",
-                    amount="200.00",
-                    counterparty_name="",
-                    reason="汽油费",
-                    relation_code="pending_match",
-                    relation_label="待找流水与发票",
-                    relation_tone="warn",
-                    attachment_invoices=[
-                        {
-                            "invoice_no": "15312761",
-                            "invoice_code": "053002200111",
-                            "seller_name": "云南中油严家山交通服务有限公司",
-                            "seller_tax_no": "91530000709708479E",
-                            "buyer_name": "云南溯源科技有限公司",
-                            "buyer_tax_no": "530111199504054424",
-                            "issue_date": "2026-03-24",
-                            "tax_rate": "13%",
-                            "tax_amount": "23.01",
-                            "total_with_tax": "200.00",
-                            "amount": "176.99",
-                            "invoice_type": "进项发票",
-                            "attachment_name": "20240424-汽油费-200.jpg",
-                        }
-                    ],
-                )
-            ]
-        )
-        service = WorkbenchQueryService(oa_adapter=adapter)
-
-        first_rows = service.list_attachment_invoice_rows_by_issue_month("2026-03")
-        second_rows = service.list_attachment_invoice_rows_by_issue_month("2026-03")
-
-        self.assertEqual(len(first_rows), 1)
-        self.assertEqual(first_rows[0]["detail_fields"]["发票号码"], "15312761")
-        self.assertEqual(first_rows[0]["amount"], "176.99")
-        self.assertEqual(first_rows[0]["total_with_tax"], "200.00")
-        self.assertEqual(len(second_rows), 1)
-        self.assertEqual(adapter.bulk_call_count, 1)
-        self.assertEqual(adapter.month_call_count, 0)
-        self.assertEqual(len(second_rows), 1)
-        self.assertEqual(adapter.bulk_call_count, 1)
-        self.assertEqual(adapter.month_call_count, 0)
-
 
 if __name__ == "__main__":
     unittest.main()

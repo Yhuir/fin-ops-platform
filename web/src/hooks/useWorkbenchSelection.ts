@@ -11,7 +11,6 @@ export default function useWorkbenchSelection() {
   const [selectedOpenRows, setSelectedOpenRows] = useState<WorkbenchRecord[]>([]);
 
   const selectedCaseId = useMemo(() => selectedRow?.caseId ?? null, [selectedRow]);
-  const selectedRowId = selectedRow?.id ?? null;
   const selectedPairedRowIds = useMemo(() => selectedPairedRows.map((row) => row.id), [selectedPairedRows]);
   const selectedOpenRowIds = useMemo(() => selectedOpenRows.map((row) => row.id), [selectedOpenRows]);
   const selectedPairedRowIdSet = useMemo(() => new Set(selectedPairedRowIds), [selectedPairedRowIds]);
@@ -71,16 +70,12 @@ export default function useWorkbenchSelection() {
       return "selected";
     }
 
-    if (selectedPairedRowIds.length === 0 && selectedRowId === row.id) {
-      return "selected";
-    }
-
     if (selectedPairedRowIds.length === 0 && selectedCaseId && row.caseId && row.caseId === selectedCaseId) {
       return "related";
     }
 
     return "idle";
-  }, [selectedCaseId, selectedOpenRowIdSet, selectedPairedRowIdSet, selectedPairedRowIds.length, selectedRowId]);
+  }, [selectedCaseId, selectedOpenRowIdSet, selectedPairedRowIdSet, selectedPairedRowIds.length]);
 
   return {
     detailRow,

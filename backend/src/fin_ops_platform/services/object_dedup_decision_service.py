@@ -106,6 +106,36 @@ class ObjectDedupDecisionService:
             identity=identity,
         )
 
+    def decide_oa_attachment_invoice_import(self, normalized: dict[str, Any]) -> ObjectDedupDecision:
+        identity = self._identity_policy.identify_oa_attachment_invoice(
+            normalized,
+            source_row_id=_text(normalized.get("source_workbench_row_id") or normalized.get("source_attachment_key")),
+        )
+        existing = self._find_invoice(identity)
+        if identity.canonical_key and existing is not None:
+            return ObjectDedupDecision(
+                decision=ImportDecision.DUPLICATE_SKIPPED,
+                decision_reason="OA attachment invoice identity matched an existing invoice.",
+                identity=identity,
+                linked_object_type="invoice",
+                linked_object_id=existing.id,
+                matched_object=existing,
+            )
+        if not identity.canonical_key and identity.suspected_key and existing is not None:
+            return ObjectDedupDecision(
+                decision=ImportDecision.SUSPECTED_DUPLICATE,
+                decision_reason="OA attachment invoice fingerprint matched an existing invoice without a stable official unique key.",
+                identity=identity,
+                linked_object_type="invoice",
+                linked_object_id=existing.id,
+                matched_object=existing,
+            )
+        return ObjectDedupDecision(
+            decision=ImportDecision.CREATED,
+            decision_reason="Ready to create new OA attachment invoice.",
+            identity=identity,
+        )
+
     def decide_invoice_confirm(self, normalized: dict[str, Any]) -> ObjectDedupDecision:
         decision = self.decide_invoice_import(normalized)
         if decision.decision == ImportDecision.STATUS_UPDATED:

@@ -66,19 +66,18 @@ describe("Workbench columns and inline actions", () => {
     expect(onOpenDetail).not.toHaveBeenCalled();
   });
 
-  test("keeps record card action column clicks from bubbling into row selection", async () => {
+  test("keeps invoice inline detail icon clicks from bubbling into row selection", async () => {
     const user = userEvent.setup();
     const onSelectRow = vi.fn();
     const onOpenDetail = vi.fn();
-    const onRowAction = vi.fn();
 
     render(
       <WorkbenchRecordCard
         actionMode="default"
         canMutateData
-        columns={[{ key: "sellerName", label: "销方名称/识别号" }]}
+        columns={[{ key: "issueDate", label: "发票号码" }]}
         onOpenDetail={onOpenDetail}
-        onRowAction={onRowAction}
+        onRowAction={() => {}}
         onSelectRow={onSelectRow}
         paneId="invoice"
         row={{
@@ -98,6 +97,8 @@ describe("Workbench columns and inline actions", () => {
           tableValues: {
             sellerName: "弥勒市豪荟酒店",
             sellerTaxId: "92532526MA6NTMA00H",
+            invoiceNo: "26532000000065242711",
+            issueDate: "2026-01-14",
             invoiceType: "进项专票",
           },
         }}
@@ -107,11 +108,9 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "详情" }));
-    await user.click(screen.getByRole("button", { name: "忽略" }));
+    await user.click(screen.getByRole("button", { name: "查看发票 26532000000065242711 详情" }));
 
     expect(onOpenDetail).toHaveBeenCalledTimes(1);
-    expect(onRowAction).toHaveBeenCalledWith(expect.objectContaining({ id: "invoice-action-1" }), "ignore-row");
     expect(onSelectRow).not.toHaveBeenCalled();
   });
 
@@ -154,13 +153,12 @@ describe("Workbench columns and inline actions", () => {
     expect(within(invoicePane).getByRole("columnheader", { name: "购方名称/识别号" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "发票号码" })).toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "发票代码/发票号码" })).not.toBeInTheDocument();
-    expect(within(invoicePane).getByRole("columnheader", { name: "不含税价格/税率（税额）" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
-    expect(within(invoicePane).getByRole("columnheader", { name: "操作" })).toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("columnheader", { name: "不含税价格/税率（税额）" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("columnheader", { name: "操作" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "发票类型" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "销方识别号" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("columnheader", { name: "购方识别号" })).not.toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("button", { name: "筛选 不含税价格/税率（税额）" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
   });
 
@@ -309,11 +307,12 @@ describe("Workbench columns and inline actions", () => {
     expect(pairedInvoiceRow).toBeDefined();
     expect(openInvoiceRow).toBeDefined();
     expect(within(oaRow as HTMLElement).getByRole("button", { name: "查看OA 赵华 详情" })).toHaveClass("row-action-btn-icon");
-    expect(within(bankRow as HTMLElement).getByRole("button", { name: "详情" })).toBeInTheDocument();
+    expect(within(bankRow as HTMLElement).getByRole("button", { name: /查看银行流水 .* 详情/ })).toBeInTheDocument();
     expect(within(bankRow as HTMLElement).queryByRole("button", { name: "更多" })).not.toBeInTheDocument();
-    expect(within(pairedInvoiceRow as HTMLElement).getByRole("button", { name: "详情" })).toBeInTheDocument();
-    expect(within(openInvoiceRow as HTMLElement).getByRole("button", { name: "详情" })).toBeInTheDocument();
-    expect(within(openInvoiceRow as HTMLElement).getByRole("button", { name: "忽略" })).toBeInTheDocument();
+    expect(within(bankRow as HTMLElement).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
+    expect(within(pairedInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
+    expect(within(openInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
+    expect(within(openInvoiceRow as HTMLElement).queryByRole("button", { name: "忽略" })).not.toBeInTheDocument();
   });
 
   test("renders compact two-line datetime tags in bank rows", async () => {
@@ -370,7 +369,7 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "详情" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /查看银行流水 .* 详情/ })).toBeInTheDocument();
     expect(screen.getByText("已匹配：")).toBeInTheDocument();
     expect(screen.getByText("内部往来款")).toBeInTheDocument();
   });
@@ -672,13 +671,13 @@ describe("Workbench columns and inline actions", () => {
 
     expect(oaSourceTag).toHaveClass("inline-meta-tag");
     expect(manualSourceTag).toHaveClass("inline-meta-tag");
-    const oaDirectionStack = within(oaRow).getByText("进").closest(".invoice-direction-stack");
-    const manualDirectionStack = within(manualRow).getByText("进").closest(".invoice-direction-stack");
+    const oaChipRow = within(oaRow).getByText("进").closest(".invoice-chip-row");
+    const manualChipRow = within(manualRow).getByText("进").closest(".invoice-chip-row");
 
-    expect(oaDirectionStack).not.toBeNull();
-    expect(manualDirectionStack).not.toBeNull();
-    expect(oaSourceTag.closest(".invoice-direction-stack")).toBe(oaDirectionStack);
-    expect(manualSourceTag.closest(".invoice-direction-stack")).toBe(manualDirectionStack);
+    expect(oaChipRow).not.toBeNull();
+    expect(manualChipRow).not.toBeNull();
+    expect(oaSourceTag.closest(".invoice-chip-row")).toBe(oaChipRow);
+    expect(manualSourceTag.closest(".invoice-chip-row")).toBe(manualChipRow);
   });
 
   test("renders invoice number and issue date tag without the issue date filter menu", async () => {
@@ -705,7 +704,7 @@ describe("Workbench columns and inline actions", () => {
     expect(issueDateTag).toHaveClass("invoice-issue-date-tag");
   });
 
-  test("restores invoice amount summary columns without adding filter menus to them", async () => {
+  test("renders invoice merged amount summary without adding filter menus to it", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("赵华");
@@ -717,25 +716,21 @@ describe("Workbench columns and inline actions", () => {
       .find((row) => row.classList.contains("record-card-invoice"));
 
     expect(invoiceRow).toBeDefined();
-    expect(within(invoicePane).getByRole("columnheader", { name: "不含税价格/税率（税额）" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "价税合计" })).toBeInTheDocument();
     expect(within(invoicePane).getByRole("columnheader", { name: "发票号码" })).toBeInTheDocument();
-    expect(within(invoicePane).queryByRole("button", { name: "筛选 不含税价格/税率（税额）" })).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByRole("columnheader", { name: "不含税价格/税率（税额）" })).not.toBeInTheDocument();
     expect(within(invoicePane).queryByRole("button", { name: "筛选 价税合计" })).not.toBeInTheDocument();
     expect(within(invoiceRow as HTMLElement).getByText("2026-03-25")).toBeInTheDocument();
-    expect(within(invoiceRow as HTMLElement).getByText("128000")).toBeInTheDocument();
     expect(within(invoiceRow as HTMLElement).getByText("144640")).toBeInTheDocument();
+    expect(within(invoiceRow as HTMLElement).getByText("128000 13% (16640)")).toBeInTheDocument();
   });
 
-  test("renders invoice amount column as net amount with tax meta on the second line", () => {
+  test("renders invoice gross amount column with net amount and tax meta on the second line", () => {
     render(
       <WorkbenchRecordCard
         actionMode="default"
         canMutateData
-        columns={[
-          { key: "amount", label: "不含税价格/税率（税额）" },
-          { key: "grossAmount", label: "价税合计" },
-        ]}
+        columns={[{ key: "grossAmount", label: "价税合计" }]}
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
@@ -774,8 +769,7 @@ describe("Workbench columns and inline actions", () => {
       />,
     );
 
-    expect(screen.getByText("49.50")).toBeInTheDocument();
-    expect(screen.getByText("1% (0.50)")).toBeInTheDocument();
+    expect(screen.getByText("49.50 1% (0.50)")).toBeInTheDocument();
     expect(screen.getByText("50.00")).toBeInTheDocument();
   });
 

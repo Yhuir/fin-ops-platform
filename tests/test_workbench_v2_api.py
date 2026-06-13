@@ -28,6 +28,7 @@ from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
+from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
 from fin_ops_platform.services.settings_data_reset_service import RESET_OA_AND_REBUILD_ACTION
 from fin_ops_platform.services.workbench_action_service import WorkbenchActionService
@@ -6532,6 +6533,70 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         schedule_rebuild.assert_called_once()
         self.assertEqual(status_payload["status"], "refreshing")
         self.assertCountEqual(status_payload["dirty_scopes"], ["2026-03", "all"])
+
+    def test_oa_attachment_invoice_cache_update_promotes_formal_invoice_to_canonical_source(self) -> None:
+        attachment_invoice = {
+            "source_attachment_key": "oa-exp-202603-001:file:1",
+            "source_attachment_name": "发票.pdf",
+            "evidence_type": "tax_invoice",
+            "invoice_type": "进项发票",
+            "seller_name": "云南城建物业运营集团",
+            "seller_tax_no": "91530103MA6KHJWK8C",
+            "buyer_name": "云南溯源科技有限公司",
+            "buyer_tax_no": "915300007194052520",
+            "issue_date": "2026-03-06",
+            "invoice_no": "26532000000021026521",
+            "tax_rate": "6%",
+            "tax_amount": "33.96",
+            "amount": "566.04",
+            "total_with_tax": "600.00",
+        }
+        receipt = {
+            "source_attachment_key": "oa-exp-202603-001:file:2",
+            "source_attachment_name": "付款截图.jpg",
+            "evidence_type": "payment_receipt",
+            "issue_date": "2026-03-06",
+            "amount": "600.00",
+        }
+        oa_record = OAApplicationRecord(
+            id="oa-exp-202603-001",
+            month="2026-03",
+            section="open",
+            case_id=None,
+            applicant="刘际涛",
+            project_name="冷水机组维护",
+            apply_type="付款申请",
+            amount="600.00",
+            counterparty_name="云南城建物业运营集团",
+            reason="维护费",
+            relation_code="pending_match",
+            relation_label="待找流水与发票",
+            relation_tone="warn",
+            attachment_invoices=[attachment_invoice, receipt],
+        )
+        expected_row_id = FinancialObjectIdentityPolicy.oa_attachment_invoice_row_id(
+            oa_record.id,
+            0,
+            attachment_invoice,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._workbench_query_service._oa_adapter = InMemoryOAAdapter({"2026-03": [oa_record]})
+
+            with patch.object(app, "_schedule_oa_sync_dirty_scope_rebuild"):
+                app._handle_oa_attachment_invoice_cache_updated(["2026-03"])
+
+            invoices = app._import_service.list_invoices()
+
+        self.assertEqual([invoice.id for invoice in invoices], [expected_row_id])
+        invoice = invoices[0]
+        self.assertEqual(invoice.invoice_no, "26532000000021026521")
+        self.assertEqual(invoice.seller_name, "云南城建物业运营集团")
+        self.assertEqual(invoice.tags, ["OA附件"])
+        self.assertEqual(invoice.source_links[0]["source_type"], "oa_attachment_invoice")
+        self.assertEqual(invoice.source_links[0]["source_workbench_row_id"], expected_row_id)
+        self.assertEqual(invoice.source_links[0]["derived_from_oa_id"], "oa-exp-202603-001")
+        self.assertEqual(invoice.source_links[0]["source_attachment_key"], "oa-exp-202603-001:file:1")
 
     def test_oa_sync_change_marks_dirty_without_evicting_hot_read_model(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

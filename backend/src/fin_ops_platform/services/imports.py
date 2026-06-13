@@ -135,6 +135,18 @@ class ImportNormalizationService:
             object_identity_repository=self._object_identity_repository,
         )
 
+    def oa_attachment_invoice_row_id(
+        self,
+        oa_row_id: str,
+        index: int,
+        attachment_invoice: dict[str, Any] | None = None,
+    ) -> str:
+        return self._object_identity_policy.oa_attachment_invoice_row_id(
+            oa_row_id,
+            index,
+            attachment_invoice,
+        )
+
     @classmethod
     def from_snapshot(
         cls,
@@ -511,6 +523,43 @@ class ImportNormalizationService:
             return invoice
 
         invoice = self._build_etc_invoice_from_normalized(normalized)
+        self._register_invoice(invoice)
+        return invoice
+
+    def upsert_oa_attachment_invoice(
+        self,
+        attachment_invoice: dict[str, Any],
+        *,
+        oa_form_id: str | None = None,
+        oa_row_id: str | None = None,
+        source_workbench_row_id: str | None = None,
+    ) -> Invoice | None:
+        normalized = self._normalize_oa_attachment_invoice(
+            attachment_invoice,
+            oa_form_id=oa_form_id,
+            oa_row_id=oa_row_id,
+            source_workbench_row_id=source_workbench_row_id,
+        )
+        if normalized is None:
+            return None
+        decision = self._dedup_decision_service.decide_oa_attachment_invoice_import(normalized)
+        linked_invoice_id = decision.linked_object_id
+
+        if linked_invoice_id is not None:
+            invoice = self._ensure_invoice_loaded(linked_invoice_id)
+            if invoice is None and isinstance(decision.matched_object, Invoice):
+                invoice = decision.matched_object
+                self._register_invoice(invoice)
+            if invoice is None:
+                raise KeyError(linked_invoice_id)
+            self._merge_invoice_from_oa_attachment_normalized(invoice, normalized)
+            return invoice
+
+        if not decision.identity.canonical_key:
+            return None
+        normalized["source_unique_key"] = decision.identity.canonical_key
+        normalized["data_fingerprint"] = decision.identity.suspected_key
+        invoice = self._build_oa_attachment_invoice_from_normalized(normalized)
         self._register_invoice(invoice)
         return invoice
 
@@ -1029,6 +1078,228 @@ class ImportNormalizationService:
             else "visible"
         )
         return normalized
+
+    def _normalize_oa_attachment_invoice(
+        self,
+        attachment_invoice: dict[str, Any],
+        *,
+        oa_form_id: str | None,
+        oa_row_id: str | None,
+        source_workbench_row_id: str | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(attachment_invoice, dict):
+            return None
+        if not self._is_promotable_oa_attachment_invoice(attachment_invoice):
+            return None
+
+        issue_date = self._parse_date(
+            attachment_invoice.get("issue_date") or attachment_invoice.get("invoice_date")
+        )
+        amount = self._parse_decimal(
+            attachment_invoice.get("net_amount")
+            or attachment_invoice.get("amount")
+            or attachment_invoice.get("total_with_tax")
+        )
+        if issue_date is None or amount is None:
+            return None
+        tax_amount = self._parse_decimal(attachment_invoice.get("tax_amount"))
+        total_with_tax = self._parse_decimal(attachment_invoice.get("total_with_tax")) or amount
+        quantity = self._parse_decimal(attachment_invoice.get("quantity"))
+        unit_price = self._parse_decimal(attachment_invoice.get("unit_price"))
+        invoice_type = self._normalize_invoice_type_value(attachment_invoice.get("invoice_type"))
+        seller_name = self._string_or_none(attachment_invoice.get("seller_name"))
+        buyer_name = self._string_or_none(attachment_invoice.get("buyer_name"))
+        counterparty_name = (
+            seller_name
+            if invoice_type == InvoiceType.INPUT
+            else buyer_name
+        ) or seller_name or buyer_name or self._string_or_none(attachment_invoice.get("counterparty_name")) or "OA附件发票"
+        normalized: dict[str, Any] = {
+            "counterparty_name": counterparty_name,
+            "normalized_counterparty_name": normalize_name(counterparty_name),
+            "invoice_code": self._string_or_none(attachment_invoice.get("invoice_code")),
+            "invoice_no": self._string_or_none(attachment_invoice.get("invoice_no")),
+            "digital_invoice_no": self._string_or_none(attachment_invoice.get("digital_invoice_no")),
+            "invoice_date": issue_date,
+            "amount": self._format_decimal(amount),
+            "signed_amount": self._format_decimal(amount),
+            "seller_tax_no": self._string_or_none(attachment_invoice.get("seller_tax_no")),
+            "seller_name": seller_name,
+            "buyer_tax_no": self._string_or_none(attachment_invoice.get("buyer_tax_no")),
+            "buyer_name": buyer_name,
+            "tax_rate": self._string_or_none(attachment_invoice.get("tax_rate")),
+            "tax_amount": self._format_decimal(tax_amount) if tax_amount is not None else None,
+            "total_with_tax": self._format_decimal(total_with_tax),
+            "tax_classification_code": self._string_or_none(attachment_invoice.get("tax_classification_code")),
+            "specific_business_type": self._string_or_none(attachment_invoice.get("specific_business_type")),
+            "taxable_item_name": self._string_or_none(attachment_invoice.get("taxable_item_name")),
+            "specification_model": self._string_or_none(attachment_invoice.get("specification_model")),
+            "unit": self._string_or_none(attachment_invoice.get("unit")),
+            "quantity": self._format_decimal(quantity) if quantity is not None else None,
+            "unit_price": self._format_decimal(unit_price) if unit_price is not None else None,
+            "invoice_source": "OA附件解析",
+            "invoice_kind": self._string_or_none(attachment_invoice.get("invoice_kind")),
+            "is_positive_invoice": self._string_or_none(attachment_invoice.get("is_positive_invoice")),
+            "risk_level": self._string_or_none(attachment_invoice.get("risk_level")),
+            "issuer": self._string_or_none(attachment_invoice.get("issuer")),
+            "remark": self._string_or_none(attachment_invoice.get("remark")),
+            "project_id": self._string_or_none(attachment_invoice.get("project_id")),
+            "invoice_type": invoice_type.value,
+            "oa_form_id": self._string_or_none(oa_form_id or attachment_invoice.get("oa_form_id") or oa_row_id),
+            "derived_from_oa_id": self._string_or_none(oa_row_id or attachment_invoice.get("derived_from_oa_id")),
+            "source_workbench_row_id": self._string_or_none(source_workbench_row_id or attachment_invoice.get("source_workbench_row_id")),
+            "source_attachment_key": self._string_or_none(attachment_invoice.get("source_attachment_key")),
+            "source_attachment_name": self._string_or_none(
+                attachment_invoice.get("source_attachment_name")
+                or attachment_invoice.get("attachment_name")
+                or attachment_invoice.get("fileName")
+                or attachment_invoice.get("filename")
+            ),
+            "source_expense_item_id": self._string_or_none(attachment_invoice.get("source_expense_item_id")),
+            "source_expense_row_index": self._string_or_none(attachment_invoice.get("source_expense_row_index")),
+            "source_region_key": self._string_or_none(attachment_invoice.get("source_region_key")),
+            "evidence_type": self._string_or_none(attachment_invoice.get("evidence_type")),
+            "document_kind": self._string_or_none(attachment_invoice.get("document_kind")),
+            "source_unique_key": None,
+            "data_fingerprint": None,
+            "tags": ["OA附件"],
+            "workbench_visibility": "visible",
+        }
+        identity = self._object_identity_policy.identify_oa_attachment_invoice(
+            normalized,
+            source_row_id=normalized.get("source_workbench_row_id") or normalized.get("source_attachment_key"),
+        )
+        if not identity.canonical_key:
+            return None
+        normalized["source_unique_key"] = identity.canonical_key
+        normalized["data_fingerprint"] = identity.suspected_key
+        return normalized
+
+    def _build_oa_attachment_invoice_from_normalized(self, normalized: dict[str, Any]) -> Invoice:
+        counterparty = self._get_or_create_counterparty(normalized["counterparty_name"])
+        invoice_id = normalized.get("source_workbench_row_id") or self._next_invoice_id()
+        amount = Decimal(normalized["amount"])
+        return Invoice(
+            id=invoice_id,
+            invoice_type=InvoiceType(normalized.get("invoice_type") or InvoiceType.INPUT.value),
+            invoice_no=normalized.get("digital_invoice_no") or normalized.get("invoice_no") or invoice_id,
+            digital_invoice_no=normalized.get("digital_invoice_no"),
+            invoice_code=normalized.get("invoice_code"),
+            counterparty=counterparty,
+            amount=amount,
+            signed_amount=Decimal(normalized["signed_amount"]),
+            invoice_date=normalized.get("invoice_date"),
+            seller_tax_no=normalized.get("seller_tax_no"),
+            seller_name=normalized.get("seller_name"),
+            buyer_tax_no=normalized.get("buyer_tax_no"),
+            buyer_name=normalized.get("buyer_name"),
+            tax_rate=normalized.get("tax_rate"),
+            tax_amount=Decimal(normalized["tax_amount"]) if normalized.get("tax_amount") else None,
+            total_with_tax=Decimal(normalized["total_with_tax"]) if normalized.get("total_with_tax") else None,
+            tax_classification_code=normalized.get("tax_classification_code"),
+            specific_business_type=normalized.get("specific_business_type"),
+            taxable_item_name=normalized.get("taxable_item_name"),
+            specification_model=normalized.get("specification_model"),
+            unit=normalized.get("unit"),
+            quantity=Decimal(normalized["quantity"]) if normalized.get("quantity") else None,
+            unit_price=Decimal(normalized["unit_price"]) if normalized.get("unit_price") else None,
+            invoice_source=normalized.get("invoice_source"),
+            invoice_kind=normalized.get("invoice_kind"),
+            is_positive_invoice=normalized.get("is_positive_invoice"),
+            risk_level=normalized.get("risk_level"),
+            issuer=normalized.get("issuer"),
+            remark=normalized.get("remark"),
+            project_id=normalized.get("project_id"),
+            source_unique_key=normalized.get("source_unique_key"),
+            data_fingerprint=normalized.get("data_fingerprint"),
+            oa_form_id=normalized.get("oa_form_id"),
+            tags=list(normalized.get("tags") or []),
+            source_links=[self._build_oa_attachment_invoice_source_link(normalized)],
+            workbench_visibility=normalized.get("workbench_visibility") or "visible",
+        )
+
+    def _merge_invoice_from_oa_attachment_normalized(self, invoice: Invoice, normalized: dict[str, Any]) -> None:
+        self._ensure_invoice_metadata_fields(invoice)
+        for tag in normalized.get("tags") or []:
+            self._append_unique_tag(invoice.tags, str(tag))
+        self._append_invoice_source_link(invoice, self._build_oa_attachment_invoice_source_link(normalized))
+        if not invoice.oa_form_id:
+            invoice.oa_form_id = normalized.get("oa_form_id")
+        for field_name in (
+            "invoice_code",
+            "digital_invoice_no",
+            "invoice_date",
+            "seller_tax_no",
+            "seller_name",
+            "buyer_tax_no",
+            "buyer_name",
+            "tax_rate",
+            "tax_classification_code",
+            "specific_business_type",
+            "taxable_item_name",
+            "specification_model",
+            "unit",
+            "invoice_source",
+            "invoice_kind",
+            "is_positive_invoice",
+            "risk_level",
+            "issuer",
+            "remark",
+            "project_id",
+        ):
+            incoming = normalized.get(field_name)
+            if incoming and not getattr(invoice, field_name):
+                setattr(invoice, field_name, incoming)
+        for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
+            incoming = normalized.get(field_name)
+            if incoming and getattr(invoice, field_name) is None:
+                setattr(invoice, field_name, Decimal(incoming))
+        if not invoice.source_unique_key:
+            invoice.source_unique_key = normalized.get("source_unique_key")
+            if invoice.source_unique_key:
+                self._invoice_unique_index[invoice.source_unique_key] = invoice.id
+        self._clear_weak_invoice_fingerprint_when_canonical(invoice)
+
+    def _build_oa_attachment_invoice_source_link(self, normalized: dict[str, Any]) -> dict[str, str]:
+        source_link = {
+            "source_type": "oa_attachment_invoice",
+            "source_id": normalized.get("source_attachment_key")
+            or normalized.get("source_workbench_row_id")
+            or normalized.get("source_unique_key")
+            or "",
+            "batch_id": "",
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+        for key in (
+            "source_workbench_row_id",
+            "derived_from_oa_id",
+            "source_attachment_key",
+            "source_attachment_name",
+            "source_expense_item_id",
+            "source_expense_row_index",
+            "source_region_key",
+            "evidence_type",
+            "document_kind",
+        ):
+            value = str(normalized.get(key) or "").strip()
+            if value:
+                source_link[key] = value
+        return source_link
+
+    def _is_promotable_oa_attachment_invoice(self, attachment_invoice: dict[str, Any]) -> bool:
+        evidence_type = str(attachment_invoice.get("evidence_type") or "").strip()
+        if evidence_type in {"payment_receipt", "non_tax_receipt"}:
+            return False
+        if evidence_type and evidence_type not in {"tax_invoice", "machine_invoice"}:
+            return False
+        return self._object_identity_policy.is_oa_attachment_invoice_evidence(attachment_invoice)
+
+    @staticmethod
+    def _normalize_invoice_type_value(value: Any) -> InvoiceType:
+        text = str(value or "").strip().lower()
+        if "销" in text or text == InvoiceType.OUTPUT.value or "output" in text:
+            return InvoiceType.OUTPUT
+        return InvoiceType.INPUT
 
     def _build_etc_invoice_from_normalized(self, normalized: dict[str, Any]) -> Invoice:
         counterparty = self._get_or_create_counterparty(normalized["counterparty_name"])

@@ -7,9 +7,7 @@ import unittest
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
-from fin_ops_platform.services.oa_adapter import InMemoryOAAdapter, OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 from tests.mock_import_files import CERTIFIED_JAN, MockImportFile
 
 
@@ -482,41 +480,30 @@ class TaxOffsetApiTests(unittest.TestCase):
 
     def test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month(self) -> None:
         app = build_application()
-        target_oa_record = OAApplicationRecord(
-            id="oa-tax-202602-001",
-            month="2026-02",
-            section="open",
-            case_id=None,
-            applicant="周洁莹",
-            project_name="云南溯源科技",
-            apply_type="日常报销",
-            amount="600.00",
-            counterparty_name="云南城建物业运营集团",
-            reason="物业费",
-            relation_code="pending_match",
-            relation_label="待找流水与发票",
-            relation_tone="warn",
-            detail_fields={"OA单号": "OA-TAX-001", "申请日期": "2026-02-09"},
-            attachment_invoices=[
-                {
-                    "invoice_code": "",
-                    "invoice_no": "26532000000021026521",
-                    "seller_name": "云南城建物业运营集团",
-                    "seller_tax_no": "91530103MA6KHJWK8C",
-                    "buyer_name": "云南溯源科技有限公司",
-                    "buyer_tax_no": "915300007194052520",
-                    "issue_date": "2026-01-06",
-                    "amount": "600.00",
-                    "tax_rate": "6%",
-                    "tax_amount": "33.96",
-                    "total_with_tax": "600.00",
-                    "invoice_type": "进项发票",
-                    "attachment_name": "物业费.pdf",
-                }
-            ],
-        )
-        app._workbench_query_service = WorkbenchQueryService(
-            oa_adapter=InMemoryOAAdapter({"2026-02": [target_oa_record]})
+        attachment_invoice = {
+            "invoice_code": "",
+            "invoice_no": "26532000000021026521",
+            "seller_name": "云南城建物业运营集团",
+            "seller_tax_no": "91530103MA6KHJWK8C",
+            "buyer_name": "云南溯源科技有限公司",
+            "buyer_tax_no": "915300007194052520",
+            "issue_date": "2026-01-06",
+            "amount": "600.00",
+            "tax_rate": "6%",
+            "tax_amount": "33.96",
+            "total_with_tax": "600.00",
+            "invoice_type": "进项发票",
+            "attachment_name": "物业费.pdf",
+        }
+        app._import_service.upsert_oa_attachment_invoice(
+            attachment_invoice,
+            oa_form_id="OA-TAX-001",
+            oa_row_id="oa-tax-202602-001",
+            source_workbench_row_id=app._import_service.oa_attachment_invoice_row_id(
+                "oa-tax-202602-001",
+                0,
+                attachment_invoice,
+            ),
         )
 
         response = app.handle_request("GET", "/api/tax-offset?month=2026-01")

@@ -113,23 +113,14 @@ export const workbenchColumns: Record<WorkbenchRecordType, WorkbenchColumn[]> = 
       minWidth: 124,
     },
     {
-      key: "amount",
-      label: "不含税价格/税率（税额）",
-      headerLines: ["不含税价格", "税率（税额）"],
-      kind: "money",
-      className: "column-compact column-invoice-amount-compact column-money-centered",
-      filterable: false,
-      track: "minmax(108px, 108fr)",
-      minWidth: 108,
-    },
-    {
       key: "grossAmount",
       label: "价税合计",
+      headerLines: ["价税合计", "不含税价格 税率（税额）"],
       kind: "money",
       className: "column-compact column-invoice-gross-compact column-money-centered",
       filterable: false,
-      track: "minmax(84px, 84fr)",
-      minWidth: 84,
+      track: "minmax(132px, 132fr)",
+      minWidth: 132,
     },
   ],
 };
@@ -176,7 +167,7 @@ export function getWorkbenchColumns(
 const ACTION_COLUMN_WIDTHS: Record<WorkbenchRecordType, { track: string; minWidth: number }> = {
   oa: { track: "minmax(168px, 168fr)", minWidth: 168 },
   bank: { track: "minmax(168px, 168fr)", minWidth: 168 },
-  invoice: { track: "minmax(92px, 92fr)", minWidth: 92 },
+  invoice: { track: "minmax(0px, 0fr)", minWidth: 0 },
 };
 
 export function getWorkbenchPaneGridStyle(

@@ -227,7 +227,7 @@ function CandidateGroupGrid({
     });
   };
 
-  const paneHasActionColumn = (paneId: WorkbenchRecordType) => actionMode === "cancel-exception-only" || paneId === "invoice";
+  const paneHasActionColumn = (paneId: WorkbenchRecordType) => actionMode === "cancel-exception-only" && paneId !== "invoice";
   const paneLayoutClass = (paneId: WorkbenchRecordType) =>
     paneHasActionColumn(paneId) ? "pane-layout-with-action" : "pane-layout-no-action";
   const hasTrailingColumns = trailingColumns.length > 0;
