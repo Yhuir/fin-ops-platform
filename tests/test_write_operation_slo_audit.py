@@ -185,6 +185,68 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["results"][0]["status"], "missing")
 
+    def test_workbench_relation_withdraw_profile_requires_cross_page_refresh_scopes(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="workbench_scope_invalidated", action_name="withdraw_link"),
+            _event(scope_type="bank_detail", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="workbench_relation", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="invoice_lifecycle", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="pending_invoice", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="input_invoice_usage", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="output_invoice_collection", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="oa_pending_payment", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="cost_statistics", reason="pair_relation_changed"),
+            _event(scope_type="search", reason="pair_relation_changed", action_name="withdraw_link"),
+            _event(scope_type="tax_offset", reason="pair_relation_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["workbench_relation_withdraw"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 11)
+
+    def test_no_oa_withdraw_profile_requires_no_oa_and_cross_page_refresh_scopes(self) -> None:
+        rows = [
+            _event(
+                scope_type="no_oa_bank_batch",
+                reason="no_oa_bank_batch_changed",
+                action_name="no_oa_bank_batch_withdraw",
+            ),
+            _event(
+                scope_type="workbench",
+                reason="workbench_scope_invalidated",
+                action_name="no_oa_bank_batch_withdraw",
+            ),
+            _event(
+                scope_type="workbench_relation",
+                reason="no_oa_bank_batch_changed",
+                action_name="no_oa_bank_batch_withdraw",
+            ),
+            _event(
+                scope_type="cost_statistics",
+                reason="no_oa_bank_batch_changed",
+                action_name="no_oa_bank_batch_withdraw",
+            ),
+            _event(
+                scope_type="search",
+                reason="no_oa_bank_batch_changed",
+                action_name="no_oa_bank_batch_withdraw",
+            ),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["no_oa_bank_batch_withdraw"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 5)
+
     def test_unknown_operation_profile_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unknown write-operation SLO profiles"):
             write_operation_slo_audit.audit_write_operation_slo(

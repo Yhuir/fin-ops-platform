@@ -91,11 +91,13 @@ class WorkbenchWriteUnitOfWork:
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
             for scope_key in _scope_keys_for(command, result):
+                action_name = str(getattr(command, "action_name", "") or "")
                 event = self._read_model_refresh_writer.enqueue_refresh(
                     transaction=transaction,
                     scope_type="workbench",
                     scope_key=scope_key,
-                    reason=str(getattr(command, "action_name", "") or ""),
+                    reason=action_name,
+                    metadata={"action_name": action_name} if action_name else None,
                 )
                 source_versions[scope_key] = _event_value(event, "source_version")
                 outbox_event_ids.append(_event_value(event, "event_id"))
@@ -147,6 +149,7 @@ class RuntimeQueueReadModelRefreshWriter:
         scope_type: str,
         scope_key: str,
         reason: str,
+        metadata: dict[str, object] | None = None,
     ) -> Any:
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
         if not callable(enqueue):
@@ -159,6 +162,7 @@ class RuntimeQueueReadModelRefreshWriter:
             tenant_id=self._tenant_id,
             priority=self._priority,
             trace_id=self._trace_id,
+            metadata=metadata,
         )
 
 

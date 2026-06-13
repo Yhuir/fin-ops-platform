@@ -815,6 +815,7 @@ class NoOaBankBatchApplicationService:
         *,
         changed_case_ids: list[str],
         persist: bool,
+        action_name: str | None = None,
     ) -> bool:
         normalized_months = [
             str(month).strip()
@@ -825,7 +826,10 @@ class NoOaBankBatchApplicationService:
         self._execute_derived_data_lifecycle_event(
             "no_oa_bank_batch_changed",
             months=normalized_months,
-            metadata={"source": "no_oa_bank_batch"},
+            metadata={
+                "source": "no_oa_bank_batch",
+                **({"action_name": str(action_name).strip()} if str(action_name or "").strip() else {}),
+            },
             schedule_cost_warmup=False,
         )
         if persist:
@@ -875,10 +879,15 @@ class NoOaBankBatchApplicationService:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         relation = self.pair_relation_snapshot_by_case_id(relation_case_id)
         affected_months = self.affected_months(batch)
+        action_name = {
+            "submitted": "no_oa_bank_batch_submit",
+            "withdrawn": "no_oa_bank_batch_withdraw",
+        }.get(str(status or "").strip())
         workbench_rebuild_queued = self.after_mutation(
             affected_months,
             changed_case_ids=[relation_case_id] if relation_case_id else [],
             persist=persist,
+            action_name=action_name,
         )
         return {
             "batch": self.resolve_labels([batch])[0],

@@ -110,6 +110,22 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("bank_auto_tag_rules", "bank_detail", "bank_auto_tag_rules_changed_priority"),
     OperationExpectation("bank_category_confirmation", "bank_detail", "bank_detail_category_confirmation_changed"),
     OperationExpectation("no_oa_tag_selection", "no_oa_bank_batch", "no_oa_bank_batch_tag_selection_changed"),
+    OperationExpectation("workbench_relation_withdraw", "workbench", "workbench_scope_invalidated", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "bank_detail", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "workbench_relation", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "invoice_lifecycle", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "pending_invoice", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "input_invoice_usage", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "output_invoice_collection", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "oa_pending_payment", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "cost_statistics", "pair_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "search", "pair_relation_changed", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "tax_offset", "pair_relation_changed"),
+    OperationExpectation("no_oa_bank_batch_withdraw", "no_oa_bank_batch", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
+    OperationExpectation("no_oa_bank_batch_withdraw", "workbench", "workbench_scope_invalidated", ("no_oa_bank_batch_withdraw",)),
+    OperationExpectation("no_oa_bank_batch_withdraw", "workbench_relation", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
+    OperationExpectation("no_oa_bank_batch_withdraw", "cost_statistics", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
+    OperationExpectation("no_oa_bank_batch_withdraw", "search", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
 )
 
 

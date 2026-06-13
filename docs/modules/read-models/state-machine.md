@@ -44,6 +44,7 @@
 - schema version mismatch
 - source version missing/mismatch
 - 业务写入后的 `DerivedDataLifecycleService` dirty cascade
+- 高影响写操作可把 `metadata.action_name` 随 dirty/outbox 一起传递，用于 write operation SLO 审计区分具体动作；metadata 不替代权限、审计或业务状态事实源
 - `startup_stale_scan` 之后的 workbench matching dirty worker 间接更新；startup scan 本身默认不运行，且不得直接刷新用户可见 read model
 - worker shard fan-out / parent scope convergence
 - 手工 runtime scope contract 清理后的 replacement scope
@@ -70,5 +71,6 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-13 | 写操作 refresh metadata/action_name 透传 | `workbench_relation_withdraw`、`no_oa_bank_batch_withdraw` 可按具体动作审计跨页面 enqueue-to-fresh；不改变 freshness 事实源 | `PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_refresh_gateway.py tests/test_workbench_uow_contract.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_dirty_queue_wiring.py tests/test_write_operation_slo_audit.py tests/test_write_operation_scenario_discovery.py -q` |
 | 2026-06-12 | 补齐 repair manifest 与 current-effective failure 保留规则 | dry-run/apply 可审计区分历史已覆盖失败和当前未覆盖 blocker；禁止假同步 | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_scope_contract tests.test_platform_runtime_boundary_guards tests.test_runtime_queue_ops -v` |
 | 2026-06-11 | 补齐共享 read model 状态机 | 明确 fresh/missing/refreshing/stale/failed/unavailable、非法状态和恢复路径 | `bash scripts/verify.sh docs` |

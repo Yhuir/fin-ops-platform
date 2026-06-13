@@ -62,20 +62,34 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         self.assertEqual(report["candidate_counts"]["workbench_pair_withdraw_context"], 1)
         self.assertEqual(report["candidate_counts"]["no_oa_bank_batch_withdraw_context"], 1)
         scenarios = report["scenario_json"]["scenarios"]
-        self.assertEqual(len(scenarios), 1)
-        self.assertEqual(scenarios[0]["operation"], "turnover_manual_closure_or_withdraw")
+        self.assertEqual(len(scenarios), 3)
+        operations = [scenario["operation"] for scenario in scenarios]
         self.assertEqual(
-            scenarios[0]["steps"][0]["path"],
-            "/api/turnover-ledger/relations/turnover_rel_1/withdraw",
+            operations,
+            [
+                "turnover_manual_closure_or_withdraw",
+                "workbench_relation_withdraw",
+                "no_oa_bank_batch_withdraw",
+            ],
         )
-        self.assertTrue(scenarios[0]["metadata"]["requires_manual_approval_before_apply"])
+        self.assertEqual(scenarios[0]["steps"][0]["path"], "/api/turnover-ledger/relations/turnover_rel_1/withdraw")
+        self.assertEqual(scenarios[1]["steps"][0]["path"], "/api/workbench/actions/withdraw-link")
+        self.assertEqual(scenarios[1]["steps"][0]["json"]["row_ids"], ["oa-1", "bank-1"])
+        self.assertEqual(scenarios[2]["steps"][0]["path"], "/api/no-oa-bank-batches/BATCH-1/withdraw")
+        self.assertTrue(all(scenario["metadata"]["requires_manual_approval_before_apply"] for scenario in scenarios))
 
-    def test_context_candidates_are_not_added_to_default_scenario_json(self) -> None:
+    def test_generated_context_scenarios_are_guarded_by_manual_approval(self) -> None:
         report = discovery.discover_write_operation_scenarios(FakeConnection(), limit=5)
-        text = json.dumps(report["scenario_json"], ensure_ascii=False)
+        scenarios = report["scenario_json"]["scenarios"]
 
-        self.assertNotIn("/api/workbench/actions/withdraw-link", text)
-        self.assertNotIn("/api/no-oa-bank-batches/BATCH-1/withdraw", text)
+        self.assertTrue(
+            all(
+                scenario["metadata"]["requires_manual_approval_before_apply"]
+                for scenario in scenarios
+            )
+        )
+        self.assertTrue(report["safety"]["requires_real_auth_to_apply"])
+        self.assertTrue(report["safety"]["requires_manual_approval_before_apply"])
 
     def test_cli_writes_report_and_scenario_files_without_mutating(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -100,7 +114,7 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(report["mode"], "read_only")
-        self.assertEqual(len(scenario["scenarios"]), 1)
+        self.assertEqual(len(scenario["scenarios"]), 3)
 
 
 if __name__ == "__main__":

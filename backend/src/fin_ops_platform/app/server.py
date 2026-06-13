@@ -4018,11 +4018,17 @@ class Application:
         queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         return ReadModelRefreshGateway(queue_repository=queue_repository)
 
-    def _enqueue_workbench_read_model_refresh(self, scope_key: str, *, reason: str) -> None:
+    def _enqueue_workbench_read_model_refresh(
+        self,
+        scope_key: str,
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return
-        refresh_gateway.enqueue_one("workbench", scope_key, reason=reason)
+        refresh_gateway.enqueue_one("workbench", scope_key, reason=reason, metadata=metadata)
 
     def _handle_api_oa_sync_status(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._oa_sync_service.status_payload())
@@ -4511,11 +4517,17 @@ class Application:
             "oa_projection_sync_version": self._current_oa_projection_sync_version(),
         }
 
-    def _enqueue_search_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+    def _enqueue_search_read_model_refresh(
+        self,
+        scope_key: str,
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_one("search", scope_key, reason=reason))
+        return bool(refresh_gateway.enqueue_one("search", scope_key, reason=reason, metadata=metadata))
 
     def _handle_api_etc_import(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
         return self._json_response(
@@ -9761,23 +9773,41 @@ class Application:
             payload["readModelStatus"] = "refreshing"
         return payload
 
-    def _enqueue_input_invoice_usage_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+    def _enqueue_input_invoice_usage_read_model_refresh(
+        self,
+        scope_key: str,
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_one("input_invoice_usage", scope_key, reason=reason))
+        return bool(refresh_gateway.enqueue_one("input_invoice_usage", scope_key, reason=reason, metadata=metadata))
 
-    def _enqueue_output_invoice_collection_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+    def _enqueue_output_invoice_collection_read_model_refresh(
+        self,
+        scope_key: str,
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_one("output_invoice_collection", scope_key, reason=reason))
+        return bool(refresh_gateway.enqueue_one("output_invoice_collection", scope_key, reason=reason, metadata=metadata))
 
-    def _enqueue_oa_pending_payment_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+    def _enqueue_oa_pending_payment_read_model_refresh(
+        self,
+        scope_key: str,
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_one("oa_pending_payment", scope_key, reason=reason))
+        return bool(refresh_gateway.enqueue_one("oa_pending_payment", scope_key, reason=reason, metadata=metadata))
 
     def _pending_invoice_routes(self) -> PendingInvoiceApiRoutes:
         routes = getattr(self, "_pending_invoice_api_routes", None)
@@ -12702,14 +12732,20 @@ class Application:
             return False
         return self._enqueue_bank_detail_read_model_refreshes(scope_keys, reason=reason)
 
-    def _enqueue_bank_detail_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
+    def _enqueue_bank_detail_read_model_refreshes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
         target_scope_keys = [str(item).strip() for item in list(scope_keys or []) if str(item).strip()]
         for scope_key in target_scope_keys:
             self._delete_bank_detail_redis_cache(scope_key)
-        return bool(refresh_gateway.enqueue_many("bank_detail", target_scope_keys, reason=reason))
+        return bool(refresh_gateway.enqueue_many("bank_detail", target_scope_keys, reason=reason, metadata=metadata))
 
     def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
@@ -12724,7 +12760,13 @@ class Application:
             normalized_scope_keys = ["all"]
         return bool(refresh_gateway.enqueue_many("turnover_ledger", sorted(dict.fromkeys(normalized_scope_keys)), reason=reason))
 
-    def _enqueue_no_oa_bank_batch_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
+    def _enqueue_no_oa_bank_batch_read_model_refreshes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
@@ -12735,7 +12777,14 @@ class Application:
         ]
         if not normalized_scope_keys:
             normalized_scope_keys = ["all"]
-        return bool(refresh_gateway.enqueue_many("no_oa_bank_batch", sorted(dict.fromkeys(normalized_scope_keys)), reason=reason))
+        return bool(
+            refresh_gateway.enqueue_many(
+                "no_oa_bank_batch",
+                sorted(dict.fromkeys(normalized_scope_keys)),
+                reason=reason,
+                metadata=metadata,
+            )
+        )
 
     def _bank_detail_redis_cache_key(self, kind: str, query: dict[str, object], *, scope_summary: dict[str, object]) -> str:
         signature = {
@@ -18715,9 +18764,12 @@ class Application:
             metadata=metadata,
         )
         reason = str((metadata or {}).get("reason") or event).strip()
+        action_name = str((metadata or {}).get("action_name") or "").strip()
         for domain_plan in list(plan.get("domains") or []):
             if isinstance(domain_plan, dict):
                 domain_plan["reason"] = reason
+                if action_name:
+                    domain_plan["metadata"] = {"action_name": action_name}
         return self._derived_data_lifecycle_service.execute_plan(
             plan,
             executors={
@@ -18745,6 +18797,7 @@ class Application:
     def _derived_lifecycle_workbench_read_model_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         months = self._months_from_lifecycle_scope_keys(scope_keys)
+        refresh_metadata = self._read_model_refresh_metadata(domain_plan)
         if "all" in scope_keys and not months:
             deleted_scope_keys = list(self._workbench_read_model_service.snapshot().get("read_models", {}).keys())
             for scope_key in deleted_scope_keys:
@@ -18752,6 +18805,7 @@ class Application:
             self._enqueue_workbench_read_model_refresh(
                 "all",
                 reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_read_model"),
+                metadata=refresh_metadata,
             )
             if deleted_scope_keys:
                 self._persist_workbench_read_models_best_effort(
@@ -18765,6 +18819,7 @@ class Application:
             deleted_scope_keys = self._invalidate_workbench_read_model_scopes(
                 scope_keys,
                 invalidate_cost_statistics=False,
+                metadata=refresh_metadata,
             )
             if not isinstance(deleted_scope_keys, list):
                 deleted_scope_keys = list(scope_keys)
@@ -18776,6 +18831,7 @@ class Application:
         self._invalidate_invoice_usage_collection_read_model_scopes(
             scope_keys or deleted_scope_keys or ["all"],
             reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_read_model"),
+            metadata=refresh_metadata,
         )
         return {
             "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
@@ -18789,6 +18845,7 @@ class Application:
             "workbench_relation",
             target_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_relation"),
+            metadata=self._read_model_refresh_metadata(domain_plan),
         )
         return {
             "deleted_counts": {"workbench_relation_read_models": 0},
@@ -18803,6 +18860,7 @@ class Application:
             "invoice_lifecycle",
             target_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_invoice_lifecycle"),
+            metadata=self._read_model_refresh_metadata(domain_plan),
         )
         return {
             "deleted_counts": {"invoice_lifecycle_read_models": 0},
@@ -18810,11 +18868,18 @@ class Application:
             "enqueued_jobs": ["invoice_lifecycle.read_model.refresh"] if enqueued else [],
         }
 
-    def _enqueue_generic_read_model_refreshes(self, scope_type: str, scope_keys: list[str], *, reason: str) -> bool:
+    def _enqueue_generic_read_model_refreshes(
+        self,
+        scope_type: str,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(refresh_gateway.enqueue_many(scope_type, scope_keys, reason=reason))
+        return bool(refresh_gateway.enqueue_many(scope_type, scope_keys, reason=reason, metadata=metadata))
 
     def _derived_lifecycle_candidate_matches_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
@@ -18883,6 +18948,7 @@ class Application:
                 "cost_statistics",
                 target_scope_keys or ["all"],
                 reason=reason,
+                metadata=self._read_model_refresh_metadata(domain_plan),
             )
             if enqueued:
                 enqueued_jobs.append("cost_statistics.read_model.refresh")
@@ -18926,7 +18992,8 @@ class Application:
 
     def _derived_lifecycle_pending_invoice_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         invalidated_scope_keys = self._invalidate_pending_invoice_read_model_scopes(
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_pending_invoice")
+            reason=str(domain_plan.get("reason") or "derived_lifecycle_pending_invoice"),
+            metadata=self._read_model_refresh_metadata(domain_plan),
         )
         return {
             "deleted_counts": {"pending_invoice_read_models": len(invalidated_scope_keys)},
@@ -18945,6 +19012,7 @@ class Application:
         enqueued = self._enqueue_bank_detail_read_model_refreshes(
             target_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_bank_detail"),
+            metadata=self._read_model_refresh_metadata(domain_plan),
         )
         return {
             "deleted_counts": {"bank_detail_read_models": 0},
@@ -18959,6 +19027,7 @@ class Application:
         enqueued = self._enqueue_no_oa_bank_batch_read_model_refreshes(
             target_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_no_oa_bank_batch"),
+            metadata=self._read_model_refresh_metadata(domain_plan),
         )
         return {
             "deleted_counts": {"no_oa_bank_batch_read_models": 0},
@@ -19001,6 +19070,10 @@ class Application:
 
     def _derived_lifecycle_search_cache_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         self._search_service.clear_cache()
+        reason = str(domain_plan.get("reason") or "derived_lifecycle_search")
+        metadata = self._read_model_refresh_metadata(domain_plan)
+        for scope_key in self._domain_plan_scope_keys(domain_plan) or ["all"]:
+            self._enqueue_search_read_model_refresh(scope_key, reason=reason, metadata=metadata)
         return {
             "deleted_counts": {"search_cache": 1},
             "invalidated_scopes": self._domain_plan_scope_keys(domain_plan),
@@ -19036,6 +19109,14 @@ class Application:
         ]
 
     @staticmethod
+    def _read_model_refresh_metadata(domain_plan: dict[str, object]) -> dict[str, object] | None:
+        metadata = domain_plan.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        action_name = str(metadata.get("action_name") or "").strip()
+        return {"action_name": action_name} if action_name else None
+
+    @staticmethod
     def _months_from_lifecycle_scope_keys(scope_keys: list[str]) -> list[str]:
         return sorted(
             {
@@ -19059,6 +19140,7 @@ class Application:
         *,
         invalidate_cost_statistics: bool = True,
         schedule_cost_statistics_warmup: bool = True,
+        metadata: dict[str, object] | None = None,
     ) -> list[str]:
         normalized_scope_keys = {
             str(scope_key).strip()
@@ -19068,7 +19150,7 @@ class Application:
         expanded_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(list(normalized_scope_keys))
         for scope_key in expanded_scope_keys:
             self._workbench_read_model_service.delete_read_model(scope_key)
-            self._enqueue_workbench_read_model_refresh(scope_key, reason="workbench_scope_invalidated")
+            self._enqueue_workbench_read_model_refresh(scope_key, reason="workbench_scope_invalidated", metadata=metadata)
         if invalidate_cost_statistics:
             self._invalidate_cost_statistics_read_model_scopes(
                 list(normalized_scope_keys),
@@ -19082,15 +19164,23 @@ class Application:
             self._invalidate_search_read_model_scopes(
                 list(normalized_scope_keys),
                 reason="workbench_scope_invalidated",
+                metadata=metadata,
             )
-            self._invalidate_pending_invoice_read_model_scopes(reason="workbench_scope_invalidated")
+            self._invalidate_pending_invoice_read_model_scopes(reason="workbench_scope_invalidated", metadata=metadata)
             self._invalidate_invoice_usage_collection_read_model_scopes(
                 list(normalized_scope_keys),
                 reason="workbench_scope_invalidated",
+                metadata=metadata,
             )
         return expanded_scope_keys
 
-    def _invalidate_search_read_model_scopes(self, scope_keys: list[str], *, reason: str) -> None:
+    def _invalidate_search_read_model_scopes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         months = {
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
@@ -19099,7 +19189,7 @@ class Application:
         if not months and any(str(scope_key).strip() == "all" for scope_key in list(scope_keys or [])):
             months.add("all")
         for scope_key in sorted(months or {"all"}):
-            self._enqueue_search_read_model_refresh(scope_key, reason=reason)
+            self._enqueue_search_read_model_refresh(scope_key, reason=reason, metadata=metadata)
 
     @staticmethod
     def _pending_invoice_read_model_scope_keys() -> list[str]:
@@ -19114,23 +19204,34 @@ class Application:
             "income:cash_income",
         ]
 
-    def _invalidate_pending_invoice_read_model_scopes(self, *, reason: str) -> list[str]:
+    def _invalidate_pending_invoice_read_model_scopes(
+        self,
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> list[str]:
         scope_keys = self._pending_invoice_read_model_scope_keys()
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return []
-        return refresh_gateway.enqueue_many("pending_invoice", scope_keys, reason=reason)
+        return refresh_gateway.enqueue_many("pending_invoice", scope_keys, reason=reason, metadata=metadata)
 
-    def _invalidate_invoice_usage_collection_read_model_scopes(self, scope_keys: list[str], *, reason: str) -> list[str]:
+    def _invalidate_invoice_usage_collection_read_model_scopes(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> list[str]:
         months = self._months_from_lifecycle_scope_keys(scope_keys)
         target_scope_keys = months or (["all"] if any(str(scope_key).strip() == "all" for scope_key in scope_keys) else ["all"])
         invalidated: list[str] = []
         for scope_key in target_scope_keys:
-            if self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason):
+            if self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason, metadata=metadata):
                 invalidated.append(f"input_invoice_usage:{scope_key}")
-            if self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason=reason):
+            if self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason=reason, metadata=metadata):
                 invalidated.append(f"output_invoice_collection:{scope_key}")
-            if self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason=reason):
+            if self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason=reason, metadata=metadata):
                 invalidated.append(f"oa_pending_payment:{scope_key}")
         return invalidated
 

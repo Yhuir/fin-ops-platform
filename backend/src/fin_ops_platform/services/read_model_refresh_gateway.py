@@ -30,6 +30,7 @@ class ReadModelRefreshGateway:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> list[str]:
         return self.enqueue_many(
             scope_type,
@@ -38,6 +39,7 @@ class ReadModelRefreshGateway:
             tenant_id=tenant_id,
             priority=priority,
             trace_id=trace_id,
+            metadata=metadata,
         )
 
     def enqueue_many(
@@ -49,6 +51,7 @@ class ReadModelRefreshGateway:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> list[str]:
         normalized_scope_type = str(scope_type or "").strip()
         normalized_scope_keys = self._scope_policy_registry.normalize_and_validate(
@@ -58,7 +61,7 @@ class ReadModelRefreshGateway:
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
         for scope_key in normalized_scope_keys:
             if callable(enqueue):
-                enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id))
+                enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata))
         return normalized_scope_keys
 
     def enqueue_many_events(
@@ -70,6 +73,7 @@ class ReadModelRefreshGateway:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> list[Any]:
         normalized_scope_type = str(scope_type or "").strip()
         normalized_scope_keys = self._scope_policy_registry.normalize_and_validate(
@@ -81,7 +85,7 @@ class ReadModelRefreshGateway:
             return []
         events: list[Any] = []
         for scope_key in normalized_scope_keys:
-            events.append(enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id)))
+            events.append(enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata)))
         return events
 
     @staticmethod
@@ -92,6 +96,7 @@ class ReadModelRefreshGateway:
         tenant_id: str,
         priority: str,
         trace_id: str | None,
+        metadata: dict[str, object] | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"scope_type": scope_type, "scope_key": scope_key, "reason": reason}
         if tenant_id != "default":
@@ -100,4 +105,6 @@ class ReadModelRefreshGateway:
             kwargs["priority"] = priority
         if trace_id is not None:
             kwargs["trace_id"] = trace_id
+        if isinstance(metadata, dict) and metadata:
+            kwargs["metadata"] = dict(metadata)
         return kwargs

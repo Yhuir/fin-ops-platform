@@ -17,6 +17,7 @@
 - `runtime-sync-stage6-2026-06-13.md`：2026-06-13 Stage 6 受控写操作 E2E smoke 入口、scenario JSON、认证保护、写后 outbox/readiness 和 API SLO 判定边界。
 - `runtime-sync-stage7-2026-06-13.md`：2026-06-13 Stage 7 全 app 同步闭环 gate，聚合 runtime health、direct read model、登录态 HTTP、真实写操作 audit/E2E。
 - `runtime-sync-stage8-2026-06-13.md`：2026-06-13 Stage 8 写操作 E2E scenario 只读 discovery，生成候选 scenario JSON 和人工审批边界。
+- `runtime-sync-stage9-2026-06-13.md`：2026-06-13 Stage 9 写操作闭环 profile 扩展，补齐 Workbench/no-OA action metadata、审计 expectation 和受控 scenario 生成。
 - `monitoring.md`：健康状态、后台任务和告警。
 
 部署资产和 OA 联调细节见 `../../deploy/oa/README.md`。

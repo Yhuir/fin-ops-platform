@@ -68,7 +68,11 @@ def discover_write_operation_scenarios(
     turnover_candidates = _turnover_withdraw_candidates(connection, limit=normalized_limit)
     workbench_candidates = _workbench_withdraw_candidates(connection, limit=normalized_limit)
     no_oa_candidates = _no_oa_withdraw_candidates(connection, limit=normalized_limit)
-    scenarios = [_turnover_withdraw_scenario(candidate) for candidate in turnover_candidates]
+    scenarios = [
+        *[_turnover_withdraw_scenario(candidate) for candidate in turnover_candidates],
+        *[_workbench_withdraw_scenario(candidate) for candidate in workbench_candidates],
+        *[_no_oa_withdraw_scenario(candidate) for candidate in no_oa_candidates],
+    ]
     return {
         "version": 1,
         "status": "ready" if scenarios else "no_candidates",
@@ -95,8 +99,8 @@ def discover_write_operation_scenarios(
             "requires_manual_approval_before_apply": True,
             "notes": [
                 "Discovery is read-only and does not call mutating HTTP endpoints.",
-                "Generated turnover scenarios withdraw existing relations; use only on reviewed test or reversible objects.",
-                "Workbench/no-OA candidates are context only until matching write-operation audit profiles are added.",
+                "Generated scenarios withdraw existing turnover, Workbench, or no-OA relations; use only on reviewed test or reversible objects.",
+                "Every generated scenario remains blocked for --apply until real OA/Admin auth and manual approval are supplied.",
             ],
         },
     }
@@ -169,7 +173,7 @@ def _workbench_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[
             "version": row.get("version"),
             "updated_at": str(row.get("updated_at") or ""),
             "candidate_path": "/api/workbench/actions/withdraw-link",
-            "risk": "context_only_until_audit_profile_is_enabled",
+            "risk": "existing_workbench_relation_withdraw_requires_manual_business_approval",
         }
         for row in rows
         if _text(row.get("case_id"))
@@ -203,7 +207,7 @@ def _no_oa_withdraw_candidates(connection: Any, *, limit: int) -> list[dict[str,
             "version": row.get("version"),
             "updated_at": str(row.get("updated_at") or ""),
             "candidate_path": f"/api/no-oa-bank-batches/{quote(_text(row.get('batch_id')), safe='')}/withdraw",
-            "risk": "context_only_until_audit_profile_is_enabled",
+            "risk": "existing_no_oa_batch_withdraw_requires_manual_business_approval",
         }
         for row in rows
         if _text(row.get("batch_id"))
@@ -245,6 +249,93 @@ def _turnover_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
             "requires_manual_approval_before_apply": True,
             "candidate_status": candidate.get("status"),
             "candidate_scope_month": candidate.get("scope_month"),
+            "risk": candidate.get("risk"),
+        },
+    }
+
+
+def _workbench_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
+    case_id = _text(candidate.get("case_id"))
+    row_ids = [_text(item) for item in list(candidate.get("row_ids") or []) if _text(item)]
+    month = _month_text(candidate.get("month")) or "all"
+    return {
+        "name": f"workbench-withdraw-{case_id}",
+        "operation": "workbench_relation_withdraw",
+        "steps": [
+            {
+                "name": "withdraw",
+                "method": "POST",
+                "path": "/api/workbench/actions/withdraw-link",
+                "json": {
+                    "month": month,
+                    "row_ids": row_ids,
+                    "note": "controlled runtime sync SLO smoke withdraw; review rollback before apply",
+                },
+                "expected_statuses": [200],
+            }
+        ],
+        "post_api_probes": [
+            {
+                "name": "workbench_groups",
+                "path": f"/api/workbench/groups?month={quote(month, safe='')}&zone=paired&page=1&page_size=20",
+                "expected_statuses": [200, 202],
+                "target_ms": 1000,
+            },
+            {
+                "name": "operations_app_health_dashboard",
+                "path": "/api/operations/app-health-dashboard",
+                "expected_statuses": [200, 202],
+                "target_ms": 1000,
+            },
+        ],
+        "metadata": {
+            "requires_manual_approval_before_apply": True,
+            "candidate_case_id": case_id,
+            "candidate_relation_mode": candidate.get("relation_mode"),
+            "candidate_month": month,
+            "risk": candidate.get("risk"),
+        },
+    }
+
+
+def _no_oa_withdraw_scenario(candidate: dict[str, Any]) -> dict[str, Any]:
+    batch_id = _text(candidate.get("batch_id"))
+    month = _month_text(candidate.get("month")) or "all"
+    version = candidate.get("version")
+    return {
+        "name": f"no-oa-withdraw-{batch_id}",
+        "operation": "no_oa_bank_batch_withdraw",
+        "steps": [
+            {
+                "name": "withdraw",
+                "method": "POST",
+                "path": f"/api/no-oa-bank-batches/{quote(batch_id, safe='')}/withdraw",
+                "json": {
+                    "expected_version": version,
+                    "reason": "controlled runtime sync SLO smoke withdraw; review rollback before apply",
+                },
+                "expected_statuses": [200],
+            }
+        ],
+        "post_api_probes": [
+            {
+                "name": "no_oa_bank_batches",
+                "path": f"/api/no-oa-bank-batches?month={quote(month, safe='')}&bucket=submitted",
+                "expected_statuses": [200, 202],
+                "target_ms": 1000,
+            },
+            {
+                "name": "operations_app_health_dashboard",
+                "path": "/api/operations/app-health-dashboard",
+                "expected_statuses": [200, 202],
+                "target_ms": 1000,
+            },
+        ],
+        "metadata": {
+            "requires_manual_approval_before_apply": True,
+            "candidate_batch_id": batch_id,
+            "candidate_month": month,
+            "candidate_version": version,
             "risk": candidate.get("risk"),
         },
     }

@@ -327,6 +327,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             ["2026-05", "not-a-month", "2026-06"],
             changed_case_ids=["case-001", "case-002"],
             persist=True,
+            action_name="no_oa_bank_batch_withdraw",
         )
 
         self.assertTrue(changed)
@@ -336,7 +337,10 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                 {
                     "event_type": "no_oa_bank_batch_changed",
                     "months": ["2026-05", "2026-06"],
-                    "metadata": {"source": "no_oa_bank_batch"},
+                    "metadata": {
+                        "source": "no_oa_bank_batch",
+                        "action_name": "no_oa_bank_batch_withdraw",
+                    },
                     "schedule_cost_warmup": False,
                 }
             ],

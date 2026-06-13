@@ -119,6 +119,14 @@ class FailingMarkDirtyQueue(RecordingDirtyQueue):
         raise RuntimeError("db queue unavailable")
 
 
+class RecordingReadModelQueue:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+        self.calls.append(dict(kwargs))
+
+
 class RecordingHeartbeatRecorder:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -193,6 +201,27 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             [(call["months"], call["reason"]) for call in queue.mark_calls],
             [(["2026-05"], "confirm_link"), (["2026-04"], "cancel_exception")],
         )
+
+    def test_lifecycle_read_model_refreshes_keep_action_name_metadata(self) -> None:
+        app = build_application()
+        queue = RecordingReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+
+        app._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=["2026-05"],
+            include_all=False,
+            metadata={"action_name": "withdraw_link"},
+            schedule_cost_warmup=False,
+        )
+
+        workbench_relation_calls = [
+            call
+            for call in queue.calls
+            if call.get("scope_type") == "workbench_relation" and call.get("scope_key") == "2026-05"
+        ]
+        self.assertTrue(workbench_relation_calls)
+        self.assertEqual(workbench_relation_calls[0].get("metadata"), {"action_name": "withdraw_link"})
 
     def test_dirty_scope_worker_claims_db_queue_and_completes_with_lease_identity(self) -> None:
         app = build_application()

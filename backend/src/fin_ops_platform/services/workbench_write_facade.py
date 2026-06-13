@@ -2568,7 +2568,7 @@ class WorkbenchWriteFacade:
         self._execute_derived_data_lifecycle_event(
             "pair_relation_changed",
             scope_keys=changed_scope_keys,
-            metadata=metadata,
+            metadata={**dict(metadata), "action_name": action_name},
         )
         self._emit_timing_if_requested(
             request_id=request_id,

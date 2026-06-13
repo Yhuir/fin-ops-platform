@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 class QueueRecorder:
     def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
+        self.refreshes: list[dict[str, object]] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.refreshes.append((scope_type, scope_key, reason))
+    def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+        self.refreshes.append(dict(kwargs))
 
 
 class ReadModelRefreshGatewayTests(unittest.TestCase):
@@ -37,12 +37,12 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         self.assertEqual(
             queue.refreshes,
             [
-                ("cost_statistics", "active:2026-03", "unit_test"),
-                ("cost_statistics", "all:2026-03", "unit_test"),
-                ("cost_statistics", "active:2026-04", "unit_test"),
-                ("cost_statistics", "all:2026-04", "unit_test"),
-                ("cost_statistics", "active:all", "unit_test"),
-                ("cost_statistics", "all:all", "unit_test"),
+                {"scope_type": "cost_statistics", "scope_key": "active:2026-03", "reason": "unit_test"},
+                {"scope_type": "cost_statistics", "scope_key": "all:2026-03", "reason": "unit_test"},
+                {"scope_type": "cost_statistics", "scope_key": "active:2026-04", "reason": "unit_test"},
+                {"scope_type": "cost_statistics", "scope_key": "all:2026-04", "reason": "unit_test"},
+                {"scope_type": "cost_statistics", "scope_key": "active:all", "reason": "unit_test"},
+                {"scope_type": "cost_statistics", "scope_key": "all:all", "reason": "unit_test"},
             ],
         )
 
@@ -58,8 +58,34 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         self.assertEqual(
             queue.refreshes,
             [
-                ("tax_offset", "2026-03", "unit_test"),
-                ("tax_offset", "all", "unit_test"),
+                {"scope_type": "tax_offset", "scope_key": "2026-03", "reason": "unit_test"},
+                {"scope_type": "tax_offset", "scope_key": "all", "reason": "unit_test"},
+            ],
+        )
+
+    def test_metadata_is_passed_to_queue_repository(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = QueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "workbench_relation",
+            ["2026-03"],
+            reason="pair_relation_changed",
+            metadata={"action_name": "withdraw_link"},
+        )
+
+        self.assertEqual(enqueued, ["2026-03"])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_key": "2026-03",
+                    "reason": "pair_relation_changed",
+                    "metadata": {"action_name": "withdraw_link"},
+                }
             ],
         )
 

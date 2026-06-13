@@ -54,6 +54,7 @@
 | filters/sorting/pagination/search | 间接适用 | 业务模块测试 | 本模块只保护 freshness 边界 | P2 |
 | export shape | 间接适用 | 业务 export tests | 本模块只保护 fresh gate 语义 | P2 |
 | cross-page refresh | 适用 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | 前端事件和业务 page refresh 在 domain-events/business 模块继续审计 | P1 |
+| write operation action attribution | 适用 | `tests/test_workbench_uow_contract.py`、`tests/test_no_oa_bank_batch_application_service.py`、`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_scenario_discovery.py` | 生产仍需真实登录态和人工批准 scenario 才能执行 mutating gate | P1 |
 | old feature regression | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_scope_contract.py` | 旧业务 shape 由各模块继续覆盖 | P1 |
 | historical bug regression | 适用 | `tests/test_read_model_scope_contract.py`、`tests/test_read_model_refresh_gateway.py` | 生产真实库 dry-run 仍需发布前执行 | P2 |
 | production data / migration risk | 适用 | `scripts/check-read-model-scope-contracts.py`、`tests/test_read_model_scope_contract.py` 覆盖 repair manifest、audit、rollback 和幂等 apply | 未连接真实生产 PostgreSQL 执行 dry-run/`--apply` | P2 documented-risk |
@@ -84,6 +85,7 @@
 - Source version stale smoke：SQL view 存在但 source/schema 不匹配时，API 不能标 fresh；应返回 refreshing/stale reasons 并入队 refresh，且不能写 Redis fresh cache。
 - Worker readiness smoke：read model worker 成功后记录 readiness；失败时记录 failed/unavailable 类状态；fan-out-only 结果不能写假 fresh。
 - Scope contract smoke：生产旧 dirty/outbox/readiness scope 可 dry-run 检测，repair manifest 必须区分已覆盖历史 failure 与 current uncovered blocker；`--apply` 只删除非规范旧状态、补投可归一化 replacement scope、记录 audit/rollback，不清理 current uncovered blocker。
+- Write operation attribution smoke：Workbench/no-OA 等高影响写操作必须把 action metadata 透传到 durable refresh request，`write_operation_slo_audit` 只能在 required scopes 都按 operation profile fresh 后通过；scenario discovery 生成的 mutating scenario 默认需要人工审批。
 
 ## 本模块验证命令
 

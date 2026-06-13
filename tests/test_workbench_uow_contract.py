@@ -141,7 +141,15 @@ class _RecordingDirtyOutboxWriter:
         self.fail = fail
         self.calls: list[dict[str, object]] = []
 
-    def enqueue_refresh(self, *, transaction: object, scope_type: str, scope_key: str, reason: str) -> dict[str, object]:
+    def enqueue_refresh(
+        self,
+        *,
+        transaction: object,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         if self.fail:
             raise RuntimeError("forced outbox failure")
         event = {
@@ -150,6 +158,7 @@ class _RecordingDirtyOutboxWriter:
             "scope_key": scope_key,
             "source_version": len(self.calls) + 1,
             "reason": reason,
+            "metadata": dict(metadata or {}),
         }
         self.calls.append({"transaction": transaction, **event})
         return event
@@ -473,6 +482,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
         self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(writer.calls[0]["metadata"], {"action_name": "confirm_link"})
         self.assertEqual(result["source_versions"]["2026-05"], 1)
         self.assertEqual(result["outbox_event_ids"], ["event-1"])
 
