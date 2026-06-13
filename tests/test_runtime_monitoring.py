@@ -494,7 +494,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(by_instance["workbench"]["worker_kind"], "unexpected-kind")
         self.assertEqual(by_instance["bank-detail"]["warning_code"], "worker_heartbeat_stale")
         self.assertEqual(by_instance["bank-detail"]["status"], "stale")
-        self.assertFalse(by_instance["bank-account-balance"]["required"])
+        self.assertTrue(by_instance["bank-account-balance"]["required"])
         self.assertEqual(by_instance["bank-account-balance"]["status"], "available")
         self.assertFalse(by_instance["cost-tax-read-model"]["required"])
         self.assertFalse(by_instance["cost-tax-read-model"]["current_effective"])

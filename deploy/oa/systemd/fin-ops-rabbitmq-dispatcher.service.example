@@ -10,10 +10,11 @@ Group=fin-ops
 WorkingDirectory=/opt/fin-ops/current/backend
 Environment=PYTHONPATH=/opt/fin-ops/current/backend/src
 Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
+Environment=RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5
 EnvironmentFile=/etc/fin-ops/fin-ops.common.env
 EnvironmentFile=/etc/fin-ops/fin-ops.secrets.env
 EnvironmentFile=/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env
-ExecStart=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60
+ExecStart=/opt/fin-ops/venv/bin/python -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60 --poll-interval-seconds ${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS}
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60

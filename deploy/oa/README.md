@@ -209,7 +209,10 @@ RabbitMQ 切换不是发布脚本的默认副作用。先保持 `FIN_OPS_QUEUE_B
 RabbitMQ 生产 env 拆分：
 
 - `/etc/fin-ops/fin-ops.rabbitmq-topology.env`：bootstrap-only，用于 `rabbitmq_topology --apply`，不加载到 API 或 worker。
-- `/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env`：dispatcher shadow publish/real publish 配置。
+- `/etc/fin-ops/fin-ops.rabbitmq-dispatcher.env`：dispatcher shadow publish/real publish 配置。同步 SLO 发布默认
+  `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5`，避免 outbox 写入后最多等待 5 秒才投递到 RabbitMQ；
+  如生产需要临时降频，可在该 env 文件中覆盖，但必须用 `rabbitmq_dispatcher_lag_seconds` 和
+  read model enqueue-to-fresh smoke 证明仍满足页面 SLO。
 - `/etc/fin-ops/fin-ops.rabbitmq-monitoring.env`：API 只读 management metrics 配置。
 - `/etc/fin-ops/fin-ops.rabbitmq-worker.env`：worker consumer 共享 `RABBITMQ_URL` 凭据；该文件不得设置 `FIN_OPS_QUEUE_BACKEND`。
 - `/etc/fin-ops/fin-ops.worker.<instance>.env`：单 worker 实例配置。只有灰度到 RabbitMQ 的实例才把本文件切为 `FIN_OPS_QUEUE_BACKEND=rabbitmq`。
@@ -230,6 +233,7 @@ sudo systemctl enable --now fin-ops-worker@oa-sync.service
 sudo systemctl enable --now fin-ops-worker@workbench.service
 sudo systemctl enable --now fin-ops-worker@workbench-matching.service
 sudo systemctl enable --now fin-ops-worker@bank-detail.service
+sudo systemctl enable --now fin-ops-worker@bank-account-balance.service
 sudo systemctl enable --now fin-ops-worker@no-oa-bank-batch.service
 sudo systemctl enable --now fin-ops-worker@turnover-ledger.service
 sudo systemctl enable --now fin-ops-worker@search-pending.service

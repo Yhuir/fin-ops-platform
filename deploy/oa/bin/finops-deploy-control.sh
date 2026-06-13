@@ -169,12 +169,13 @@ write_dispatcher_dropin() {
 [Service]
 WorkingDirectory=$src
 EnvironmentFile=
+Environment=RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5
 EnvironmentFile=$COMMON_ENV
 EnvironmentFile=$SECRETS_ENV
 EnvironmentFile=-$ENV_DIR/fin-ops.rabbitmq-dispatcher.env
 Environment=PYTHONPATH=$src/backend/src
 ExecStart=
-ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-shadow-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60 --poll-interval-seconds 5
+ExecStart=$WORKER_PYTHON -m fin_ops_platform.app.rabbitmq_dispatcher --publisher-id rabbitmq-dispatcher-shadow-1 --batch-size 100 --lock-timeout-seconds 300 --retry-delay-seconds 60 --poll-interval-seconds \${RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS}
 DROPIN
 }
 

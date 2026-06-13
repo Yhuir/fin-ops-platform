@@ -139,7 +139,7 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(scopes["cost_statistics"], "active:2026-01")
         self.assertEqual(scopes["turnover_ledger"], "all")
 
-    def test_critical_only_excludes_non_critical_read_models_by_default(self) -> None:
+    def test_critical_only_includes_bank_account_balance_page_read_model(self) -> None:
         report = read_model_slo_smoke.run_smoke(
             FakeConnection(),
             apply=False,
@@ -151,9 +151,9 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         planned_keys = {item["read_model_key"] for item in report["planned_scopes"]}
         self.assertIn("workbench", planned_keys)
         self.assertIn("turnover_ledger", planned_keys)
-        self.assertNotIn("bank_account_balance", planned_keys)
+        self.assertIn("bank_account_balance", planned_keys)
 
-    def test_explicit_key_still_includes_non_critical_read_model(self) -> None:
+    def test_explicit_key_still_limits_critical_only_selection(self) -> None:
         report = read_model_slo_smoke.run_smoke(
             FakeConnection(),
             apply=False,

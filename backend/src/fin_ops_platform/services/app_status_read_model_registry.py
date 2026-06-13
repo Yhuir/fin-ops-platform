@@ -38,7 +38,6 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
         scope_type="bank_account_balance",
         worker_instance="bank-account-balance",
         refresh_event_type="bank_account_balance.read_model.refresh",
-        critical=False,
     ),
     "pending_invoice": AppStatusReadModelDefinition(
         key="pending_invoice",

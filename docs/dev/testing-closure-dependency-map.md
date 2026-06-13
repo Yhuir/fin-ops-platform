@@ -607,7 +607,7 @@
 | `workbench` | `workbench` | `workbench` | `workbench.read_model.refresh` | 关联台、搜索、成本间接依赖 | active generation 原子发布，不能读 building/failed 中间态 |
 | `workbench_relation` | `workbench_relation` | `workbench-relation` | `workbench_relation.read_model.refresh` | 批量账务、关联台、下游关系 | 非 fresh 时不能把空关系当全部未提交 |
 | `bank_detail` | `bank_detail` | `bank-detail` | `bank_detail.read_model.refresh` | 银行明细、免 OA 上游 | 标签规则版本、stale 后台刷新 |
-| `bank_account_balance` | `bank_account_balance` | `bank-account-balance` | `bank_account_balance.read_model.refresh` | 银行明细余额 | 非 critical，但不能用 stale 覆盖 fresh total |
+| `bank_account_balance` | `bank_account_balance` | `bank-account-balance` | `bank_account_balance.read_model.refresh` | 银行明细余额 | critical required；不能用 stale 覆盖 fresh total |
 | `pending_invoice` | `pending_invoice` | `search-pending` | `pending_invoice.read_model.refresh` | 待找发票 | 规则版本、人工发票、候选刷新 |
 | `search` | `search` | `search-pending` | `search.read_model.refresh` | 搜索/候选相关 | 多事件共同写入，避免全局误清 |
 | `invoice_lifecycle` | `invoice_lifecycle` | `invoice-lifecycle` | `invoice_lifecycle.read_model.refresh` | 待找发票、税金、进项/销项/OA 待付款 | 必须先于下游发票页面刷新 |

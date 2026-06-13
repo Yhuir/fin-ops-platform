@@ -145,6 +145,7 @@ fin-ops-worker@workbench-relation.service
 fin-ops-worker@invoice-lifecycle.service
 fin-ops-worker@workbench-matching.service
 fin-ops-worker@bank-detail.service
+fin-ops-worker@bank-account-balance.service
 fin-ops-worker@no-oa-bank-batch.service
 fin-ops-worker@turnover-ledger.service
 fin-ops-worker@search-pending.service
@@ -195,7 +196,9 @@ RabbitMQ 是 outbox envelope transport，不是业务事实源。生产切换必
 1. 应用 PostgreSQL migration，确认 `job.outbox_events` 已有 publish 状态字段，`job.runtime_outbox_envelope_v1` 可读。
 2. 用 `fin-ops-rabbitmq-topology.service` 或同等 one-shot 命令显式创建 durable topology。
 3. 保持 PostgreSQL polling worker 运行，启动 `fin-ops-rabbitmq-dispatcher.service` 的 shadow publish 模式；用 `RABBITMQ_DISPATCH_EVENT_TYPES` 控制灰度事件族。
-4. 观察 outbox unpublished backlog、publish failed backlog、dispatcher lag、RabbitMQ per-queue depth、DLQ count。
+4. 观察 outbox unpublished backlog、publish failed backlog、dispatcher lag、RabbitMQ per-queue depth、DLQ count。同步 SLO 场景下
+   dispatcher idle poll 默认应为 `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5`；如果仍是 5 秒，单个新事件可能在
+   投递前就消耗完整页面同步预算。
 5. 按 worker 族逐个切到 `FIN_OPS_QUEUE_BACKEND=rabbitmq`：workbench、search/pending、cost/tax、oa-sync、file-migration、import-job。RabbitMQ consumer 仍会按 heartbeat 间隔低频 drain PostgreSQL durable queue，RabbitMQ 只作为唤醒层。
 6. 每切一组都要触发受控事件验证 PostgreSQL publish/ack 与 RabbitMQ queue/DLQ，再扩 worker 数量和 prefetch。
 

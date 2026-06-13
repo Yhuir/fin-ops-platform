@@ -107,7 +107,8 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 告警建议：
 
 - `rabbitmq_publish_failed_backlog > 0` 且持续 5 分钟。
-- `rabbitmq_dispatcher_lag_seconds` 持续超过 worker SLO。
+- `rabbitmq_dispatcher_lag_seconds` 持续超过 worker SLO。5 秒页面同步目标下，dispatcher idle poll 应保持
+  `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5` 量级；5 秒 poll 会把 outbox-to-broker 等待本身变成 SLO 风险。
 - `rabbitmq_queue_depth` 持续增长且 `consumer_count=0`。
 - `rabbitmq_unacked_messages` 长时间不下降。
 - `rabbitmq_dlq_count > 0`。
