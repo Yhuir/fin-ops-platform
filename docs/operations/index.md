@@ -12,6 +12,7 @@
 - `runtime-sync-stage1-2026-06-13.md`：2026-06-13 Stage 1 生产 SLO 采集、PostgreSQL/RabbitMQ 观测、read model smoke 工具和下一阶段执行入口。
 - `runtime-sync-stage2-2026-06-13.md`：2026-06-13 Stage 2 direct-scope smoke、optional worker 缺口、critical read model 5 秒 SLO 结果和下一阶段执行入口。
 - `runtime-sync-stage3-2026-06-13.md`：2026-06-13 Stage 3 dispatcher 0.5s 调度、bank-account-balance required worker、生产三轮 direct-scope 5 秒 SLO 通过和剩余页面/API 验收。
+- `runtime-sync-stage4-2026-06-13.md`：2026-06-13 Stage 4 全页面 HTTP SLO 默认覆盖、Kafka 取舍、登录态生产验收命令和仍未闭环的写操作链路。
 - `monitoring.md`：健康状态、后台任务和告警。
 
 部署资产和 OA 联调细节见 `../../deploy/oa/README.md`。

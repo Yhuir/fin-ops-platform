@@ -78,20 +78,65 @@ class HttpProbeSample:
 RequestFn = Callable[[str, Mapping[str, str], float], HttpProbeResponse]
 
 
+DEFAULT_PAGE_PATHS: tuple[str, ...] = (
+    "/fin-ops/",
+    "/fin-ops/bank-details",
+    "/fin-ops/pending-invoices",
+    "/fin-ops/input-invoice-usage",
+    "/fin-ops/oa-pending-payments",
+    "/fin-ops/output-invoice-collections",
+    "/fin-ops/tax-offset",
+    "/fin-ops/cost-statistics",
+    "/fin-ops/no-oa-bank-batches",
+    "/fin-ops/batch-accounting",
+    "/fin-ops/turnover-ledger",
+    "/fin-ops/etc-tickets",
+    "/fin-ops/imports/bank-transactions",
+    "/fin-ops/imports/invoices",
+    "/fin-ops/imports/etc-invoices",
+    "/fin-ops/settings",
+    "/fin-ops/operations/app-health",
+)
+
+
 DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("session_me", "/api/session/me"),
     HttpProbe("app_health", "/api/app-health"),
+    HttpProbe("background_jobs_active", "/api/background-jobs/active"),
     HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard"),
     HttpProbe("workbench_summary_all", "/api/workbench/summary?month=all", expected_statuses=(200, 202)),
     HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
     HttpProbe("bank_details_accounts", "/api/bank-details/accounts", expected_statuses=(200, 202)),
     HttpProbe("bank_details_transactions", "/api/bank-details/transactions?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("bank_details_auto_tag_rules", "/api/bank-details/auto-tag-rules", expected_statuses=(200, 202)),
     HttpProbe("pending_invoices_rows", "/api/pending-invoices/rows?direction=all&page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("pending_invoices_filter_options", "/api/pending-invoices/filter-options?direction=all", expected_statuses=(200, 202)),
+    HttpProbe("pending_invoices_rules", "/api/pending-invoices/rules", expected_statuses=(200, 202)),
     HttpProbe("input_invoice_usage_rows", "/api/input-invoice-usage/rows?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("input_invoice_usage_filter_options", "/api/input-invoice-usage/filter-options", expected_statuses=(200, 202)),
+    HttpProbe("input_invoice_usage_payment_status_rules", "/api/input-invoice-usage/payment-status-rules", expected_statuses=(200, 202)),
     HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("oa_pending_payments_filter_options", "/api/oa-pending-payments/filter-options", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("output_invoice_collections_filter_options", "/api/output-invoice-collections/filter-options", expected_statuses=(200, 202)),
+    HttpProbe("output_invoice_collections_status_rules", "/api/output-invoice-collections/status-rules", expected_statuses=(200, 202)),
     HttpProbe("tax_offset_summary", "/api/tax-offset/summary?month=all", expected_statuses=(200, 202)),
+    HttpProbe("tax_offset_rows", "/api/tax-offset?month=all", expected_statuses=(200, 202)),
     HttpProbe("cost_statistics_explorer_all", "/api/cost-statistics/explorer?month=all&project_scope=all", expected_statuses=(200, 202)),
+    HttpProbe("cost_statistics_summary_all", "/api/cost-statistics?month=all&project_scope=all", expected_statuses=(200, 202)),
+    HttpProbe("no_oa_bank_batches", "/api/no-oa-bank-batches?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("no_oa_bank_batches_tag_selection", "/api/no-oa-bank-batches/tag-selection", expected_statuses=(200, 202)),
+    HttpProbe("batch_accounting", "/api/batch-accounting?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("turnover_ledger_grouped", "/api/turnover-ledger?view=grouped&page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("turnover_ledger_tag_selection", "/api/turnover-ledger/tag-selection", expected_statuses=(200, 202)),
+    HttpProbe("etc_invoices", "/api/etc/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("etc_batches", "/api/etc/batches?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("etc_business_batches", "/api/etc/business-batches?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("etc_reconciliation_tasks", "/api/etc/reconciliation-tasks?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("import_facts_batches", "/api/import-facts/batches?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("import_facts_files", "/api/import-facts/files?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("import_facts_invoices", "/api/import-facts/invoices?page=1&page_size=50", expected_statuses=(200, 202)),
     HttpProbe("search_all", "/api/search?q=&scope=all&month=all&limit=20", expected_statuses=(200, 202)),
 )
 
@@ -106,7 +151,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--page-path",
         action="append",
         default=[],
-        help="Page shell path to sample. Can be repeated. Defaults to /fin-ops/ unless --no-default-page-probe is set.",
+        help="Page shell path to sample. Can be repeated. Defaults to all core page shells unless --no-default-page-probe is set.",
     )
     parser.add_argument("--no-default-page-probe", action="store_true")
     parser.add_argument("--probe-config", type=Path, help="Optional JSON file with additional or replacement probes.")
@@ -354,10 +399,10 @@ def _configured_probes(args: argparse.Namespace) -> list[HttpProbe]:
     probes: list[HttpProbe] = []
     page_paths = list(args.page_path or [])
     if not args.no_default_page_probe and not page_paths:
-        page_paths.append("/fin-ops/")
+        page_paths.extend(DEFAULT_PAGE_PATHS)
     probes.extend(
         HttpProbe(
-            name=f"page_shell_{index}",
+            name=_page_probe_name(path, fallback_index=index),
             path=path,
             kind="page",
             expected_statuses=(200,),
@@ -370,6 +415,16 @@ def _configured_probes(args: argparse.Namespace) -> list[HttpProbe]:
     if args.probe_config is not None:
         probes.extend(_load_probe_config(args.probe_config, default_target_ms=float(args.target_ms)))
     return probes
+
+
+def _page_probe_name(path: str, *, fallback_index: int) -> str:
+    normalized = str(path or "").strip().strip("/")
+    if normalized.startswith("fin-ops/"):
+        normalized = normalized.removeprefix("fin-ops/")
+    elif normalized == "fin-ops":
+        normalized = "home"
+    normalized = normalized.replace("/", "_").replace("-", "_") or "home"
+    return f"page_shell_{normalized or fallback_index}"
 
 
 def _load_probe_config(path: Path, *, default_target_ms: float) -> list[HttpProbe]:

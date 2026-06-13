@@ -7,6 +7,65 @@ from fin_ops_platform.tools import http_slo_probe
 
 
 class HttpSloProbeTests(unittest.TestCase):
+    def test_default_probes_cover_page_domains_and_known_slow_endpoints(self) -> None:
+        api_probe_names = {probe.name for probe in http_slo_probe.DEFAULT_API_PROBES}
+
+        self.assertGreaterEqual(len(http_slo_probe.DEFAULT_PAGE_PATHS), 17)
+        for path in (
+            "/fin-ops/",
+            "/fin-ops/bank-details",
+            "/fin-ops/pending-invoices",
+            "/fin-ops/input-invoice-usage",
+            "/fin-ops/oa-pending-payments",
+            "/fin-ops/output-invoice-collections",
+            "/fin-ops/tax-offset",
+            "/fin-ops/cost-statistics",
+            "/fin-ops/no-oa-bank-batches",
+            "/fin-ops/batch-accounting",
+            "/fin-ops/turnover-ledger",
+            "/fin-ops/etc-tickets",
+            "/fin-ops/imports/bank-transactions",
+            "/fin-ops/imports/invoices",
+            "/fin-ops/imports/etc-invoices",
+            "/fin-ops/settings",
+            "/fin-ops/operations/app-health",
+        ):
+            self.assertIn(path, http_slo_probe.DEFAULT_PAGE_PATHS)
+
+        for name in (
+            "pending_invoices_filter_options",
+            "input_invoice_usage_filter_options",
+            "oa_pending_payments_filter_options",
+            "output_invoice_collections_filter_options",
+            "no_oa_bank_batches",
+            "batch_accounting",
+            "turnover_ledger_grouped",
+            "etc_business_batches",
+            "import_facts_batches",
+            "workbench_settings",
+            "background_jobs_active",
+        ):
+            self.assertIn(name, api_probe_names)
+
+    def test_configured_default_page_probes_have_stable_page_names(self) -> None:
+        args = http_slo_probe.build_parser().parse_args(["--target-ms", "5000"])
+
+        probes = http_slo_probe._configured_probes(args)
+        page_probes = [probe for probe in probes if probe.kind == "page"]
+
+        self.assertEqual(len(page_probes), len(http_slo_probe.DEFAULT_PAGE_PATHS))
+        self.assertEqual(page_probes[0].name, "page_shell_home")
+        self.assertIn(
+            http_slo_probe.HttpProbe(
+                name="page_shell_pending_invoices",
+                path="/fin-ops/pending-invoices",
+                kind="page",
+                expected_statuses=(200,),
+                target_ms=5000.0,
+            ),
+            page_probes,
+        )
+
     def test_requires_auth_by_default_without_sampling(self) -> None:
         report = http_slo_probe.collect_http_slo(
             base_url="https://example.test",

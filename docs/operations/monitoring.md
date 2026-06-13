@@ -265,7 +265,6 @@ export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
-  --page-path /fin-ops/ \
   --iterations 20 \
   --warmup 2 \
   --output /tmp/finops-http-slo-$(date +%Y%m%d%H%M%S).json
@@ -273,9 +272,14 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 
 默认 probe 覆盖：
 
-- `/fin-ops/` 页面 shell 首包。
+- `/fin-ops/` 以及主要业务页面 shell：关联台、银行明细、待找发票、进项使用、OA 待付款、销项收款、
+  税金抵扣、成本统计、免 OA、批量账务、往来款、ETC、导入、设置和 App Health。只想临时采样单个页面时才显式传
+  `--page-path`。
 - `/api/session/me`、`/api/app-health`、`/api/operations/app-health-dashboard`。
-- 工作台 summary/groups、银行明细、待找发票、进项发票使用、OA 待付款核对、销项收款、税金抵扣、成本统计和搜索首屏 API。
+- 工作台 summary/groups/settings、银行明细账户/流水/规则、待找发票 rows/filter-options/rules、进项发票使用
+  rows/filter-options/rules、OA 待付款 rows/filter-options、销项收款 rows/filter-options/rules、税金抵扣、
+  成本统计、免 OA、批量账务、往来款、ETC、导入 facts、后台任务和搜索首屏 API。
+  `pending-invoices/filter-options` 是历史慢接口，默认必须覆盖。
 
 判定原则：
 
