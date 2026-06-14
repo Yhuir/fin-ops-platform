@@ -500,6 +500,41 @@ class WorkbenchDuplicateIdentityConsistencyConnection(WorkbenchConsistencySqlCon
         ]
 
 
+class WorkbenchDuplicateRowMembershipConsistencyConnection(WorkbenchConsistencySqlConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return [
+            {
+                "scope_key": "all",
+                "generation_id": "gen-row-duplicate",
+                "row_count": 2,
+                "group_count": 2,
+                "summary_count": 1,
+                "build_metadata": {},
+                "actual_row_count": 2,
+                "actual_group_count": 2,
+                "actual_group_row_count": 2,
+                "actual_summary_count": 1,
+                "duplicate_invoice_identity_count": 0,
+                "duplicate_bank_identity_count": 0,
+                "duplicate_identity_samples": [],
+                "duplicate_row_membership_count": 1,
+                "duplicate_row_membership_samples": [
+                    {
+                        "pane": "oa",
+                        "row_id": "oa-pay-2050",
+                        "zones": ["open"],
+                        "groups": [
+                            "open:case:decision:2026-02:oa_bank_exact_sum:oa-pay-2050",
+                            "open:scope:2026-03:temp:0001",
+                        ],
+                    }
+                ],
+            }
+        ]
+
+
 class FailedWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1762,6 +1797,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("duplicate_identity_counts as", sql)
         self.assertIn("object_identity_kind in ('digital_invoice_no', 'invoice_code_no')", sql)
 
+    def test_repository_generation_consistency_reports_duplicate_row_memberships(self) -> None:
+        connection = WorkbenchDuplicateRowMembershipConsistencyConnection()
+
+        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
+            connection,
+            scope_key="all",
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["duplicate_row_membership_count"], 1)
+        self.assertIn("duplicate_row_membership count=1", failures[0]["reasons"])
+        self.assertEqual(
+            failures[0]["duplicate_row_membership_samples"][0]["row_id"],
+            "oa-pay-2050",
+        )
+        sql = connection.fetch_all_calls[0][0]
+        self.assertIn("duplicate_row_membership_counts as", sql)
+
     def test_workbench_refresh_status_api_maps_statement_timeout_to_retryable_unavailable(self) -> None:
         app = object.__new__(Application)
         app._runtime_repositories = SimpleNamespace(queue_repository=QueueRecorder(), redis_helper=None)
@@ -2852,6 +2905,241 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["inv_imported_1609"])
         self.assertEqual(open_group["invoice_rows"], [])
         self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-open-context"])
+
+    def test_repository_all_scope_drops_partial_automatic_decision_groups_claimed_by_paired_shards(self) -> None:
+        class AggregateAllPartialAutomaticDecisionConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                decision_key = "decision:2026-02:oa_bank_exact_sum:oa-1:bank-a:bank-b:bank-held"
+                decision_group_id = f"case:{decision_key}"
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "open",
+                        "group_id": decision_group_id,
+                        "generated_at": "2026-06-14T00:02:00+08:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": decision_group_id,
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "reason": "existing_case_candidate",
+                            "oa_rows": [
+                                {
+                                    "id": "oa-1",
+                                    "type": "oa",
+                                    "source_kind": "oa",
+                                    "case_id": decision_key,
+                                    "relation_mode": "automatic_decision",
+                                }
+                            ],
+                            "bank_rows": [
+                                {
+                                    "id": "bank-a",
+                                    "type": "bank",
+                                    "source_kind": "bank",
+                                    "case_id": decision_key,
+                                    "relation_mode": "automatic_decision",
+                                },
+                                {
+                                    "id": "bank-b",
+                                    "type": "bank",
+                                    "source_kind": "bank",
+                                    "case_id": decision_key,
+                                    "relation_mode": "automatic_decision",
+                                },
+                                {
+                                    "id": "bank-held",
+                                    "type": "bank",
+                                    "source_kind": "bank",
+                                    "case_id": decision_key,
+                                    "relation_mode": "automatic_decision",
+                                },
+                            ],
+                            "invoice_rows": [],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-03",
+                        "scope_month": "2026-03-01",
+                        "zone": "paired",
+                        "group_id": "case:no_oa_batch_1",
+                        "generated_at": "2026-06-14T00:03:00+08:00",
+                        "source_versions": {"source_version": 3},
+                        "payload": {
+                            "group_id": "case:no_oa_batch_1",
+                            "zone": "paired",
+                            "group_type": "auto_closed",
+                            "oa_rows": [],
+                            "bank_rows": [{"id": "bank-held", "type": "bank", "source_kind": "bank"}],
+                            "invoice_rows": [],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllPartialAutomaticDecisionConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        self.assertNotIn(
+            "case:decision:2026-02:oa_bank_exact_sum:oa-1:bank-a:bank-b:bank-held",
+            [group["group_id"] for group in aggregate_group_payloads],
+        )
+        self.assertIn("case:no_oa_batch_1", [group["group_id"] for group in aggregate_group_payloads])
+
+    def test_repository_all_scope_suppresses_open_invoice_rows_claimed_by_stronger_open_group(self) -> None:
+        class AggregateAllOpenInvoiceDuplicateConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                invoice_row = {
+                    "type": "invoice",
+                    "source_kind": "invoice",
+                    "object_identity_key": "26322000000129268441",
+                    "object_identity_kind": "digital_invoice_no",
+                    "object_identity_source": "invoice",
+                    "object_identity_confidence": "canonical",
+                    "seller_name": "中科视拓（南京）科技有限公司",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "total_with_tax": "500.00",
+                }
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "open",
+                        "group_id": "candidate:bank-invoice-500",
+                        "generated_at": "2026-05-24T00:02:00+00:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "candidate:bank-invoice-500",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "match_confidence": "medium",
+                            "reason": "bank_invoice_exact_amount",
+                            "oa_rows": [],
+                            "bank_rows": [{"id": "bank-500", "type": "bank", "source_kind": "bank_transaction"}],
+                            "invoice_rows": [{**invoice_row, "id": "inv-imported-500"}],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "zone": "open",
+                        "group_id": "temp:standalone-invoice-500",
+                        "generated_at": "2026-05-24T00:01:00+00:00",
+                        "source_versions": {"source_version": 1},
+                        "payload": {
+                            "group_id": "temp:standalone-invoice-500",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "match_confidence": "low",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [],
+                            "bank_rows": [],
+                            "invoice_rows": [{**invoice_row, "id": "inv-imported-500-alias"}],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllOpenInvoiceDuplicateConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        self.assertEqual(len(aggregate_group_payloads), 1)
+        self.assertEqual(aggregate_group_payloads[0]["group_id"], "scope:2026-02:candidate:bank-invoice-500")
+        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["invoice_rows"]], ["inv-imported-500"])
+        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["bank_rows"]], ["bank-500"])
+
+    def test_repository_all_scope_suppresses_open_bank_rows_claimed_by_stronger_open_group(self) -> None:
+        class AggregateAllOpenBankDuplicateConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                bank_row = {
+                    "id": "bank-row-500",
+                    "type": "bank",
+                    "source_kind": "bank_transaction",
+                    "object_identity_key": "bank-business-fields-500",
+                    "object_identity_kind": "business_fields",
+                    "object_identity_source": "bank_transaction",
+                    "object_identity_confidence": "stable",
+                    "counterparty_name": "中科视拓（南京）科技有限公司",
+                    "amount": "500.00",
+                }
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "open",
+                        "group_id": "candidate:bank-invoice-500",
+                        "generated_at": "2026-05-24T00:02:00+00:00",
+                        "source_versions": {"source_version": 2},
+                        "payload": {
+                            "group_id": "candidate:bank-invoice-500",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "match_confidence": "medium",
+                            "reason": "bank_invoice_exact_amount",
+                            "oa_rows": [],
+                            "bank_rows": [bank_row],
+                            "invoice_rows": [{"id": "inv-500", "type": "invoice", "source_kind": "invoice"}],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-03",
+                        "scope_month": "2026-03-01",
+                        "zone": "open",
+                        "group_id": "temp:standalone-bank-500",
+                        "generated_at": "2026-05-24T00:01:00+00:00",
+                        "source_versions": {"source_version": 1},
+                        "payload": {
+                            "group_id": "temp:standalone-bank-500",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "match_confidence": "low",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [],
+                            "bank_rows": [bank_row],
+                            "invoice_rows": [],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllOpenBankDuplicateConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        self.assertEqual(len(aggregate_group_payloads), 1)
+        self.assertEqual(aggregate_group_payloads[0]["group_id"], "scope:2026-02:candidate:bank-invoice-500")
+        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["bank_rows"]], ["bank-row-500"])
+        self.assertEqual([row["id"] for row in aggregate_group_payloads[0]["invoice_rows"]], ["inv-500"])
 
     def test_repository_persists_no_oa_collapsed_group_fact_and_display_counts(self) -> None:
         connection = WorkbenchWriteConnection()

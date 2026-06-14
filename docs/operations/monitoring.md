@@ -88,7 +88,7 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - `read_model_refresh_slow_events`：最近 bounded 样本中最慢的有限条 outbox event 摘要，包含 event/scope/status/source_version/duration/enqueue-to-fresh/skipped 信息；该字段只用于 `/health/ready` drilldown，不把 `event_id` 或 `scope_key` 作为 Prometheus label。
 - `read_model_refresh_current_slow_events`：`recent_6h` bounded 样本中最慢的有限条 event/scope 摘要，用于定位当前窗口内具体慢 scope；同样不作为 Prometheus label 导出。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。
-- `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups 和对象身份跨区一致性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。
+- `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups、对象身份跨区一致性和可见 row 归属唯一性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone`、`duplicate_bank_identity_cross_zone` 或 `duplicate_row_membership`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。发布前也要用同一审计命令确认 `workbench_open_visible_owner_duplicate_group_count=0`；同一命令的 `blocking_issue_count` 只计入强发票 identity、银行 identity、OA 附件强 identity、Workbench 归属和 active relation orphan 风险，弱税额指纹与 `app.etc_invoices` 原始来源重复只作为 warning。
 - `redis_hit_count` / `redis_miss_count`：进程内 Redis helper 计数。
 
 RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 只能补充投递层健康度，不能代替 outbox/dirty scope 的事实状态。RabbitMQ 相关指标包括：
@@ -103,6 +103,39 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 - `rabbitmq_consumer_count`：RabbitMQ consumer 数量。
 - `rabbitmq_dlq_count`：RabbitMQ DLQ 消息数量。
 - `rabbitmq_metric_error`：RabbitMQ Management API 不可用或权限错误。
+
+### Workbench 自动决策污染修复
+
+当关联台出现 `oa_bank_exact_sum` 把弱文本证据或已被 active relation 占用的 row 拼成候选时，必须先确认生成规则已修复，再清理旧 decision；只删页面缓存或手工改一条 SQL 会被下一次 matching upsert 污染回来。
+
+dry-run：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.repair_workbench_reconciliation_decisions \
+  --scope 2026-02 \
+  --json
+```
+
+执行清理：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.repair_workbench_reconciliation_decisions \
+  --scope 2026-02 \
+  --execute \
+  --reason invalid_oa_bank_exact_sum_cleanup_2026_06_14 \
+  --json
+```
+
+清理后重建受影响 Workbench generation，并让 `all` 从 active shards 重新聚合：
+
+```bash
+PYTHONPATH=backend/src python3 scripts/rehydrate-workbench-read-models.py \
+  --scope 2026-02 \
+  --scope 2026-03 \
+  --json
+```
+
+如果 relation facts 也发生变更，再通过既有 runtime queue/backfill 入口刷新下游 `workbench_relation`、`bank_detail`、`cost_statistics`、`search` 等 scope；仅清理 reconciliation decision 时，不要直接改 `app.workbench_pair_relations` 中正确的 no-OA/internal-transfer active relation。
 
 告警建议：
 

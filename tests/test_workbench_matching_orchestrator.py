@@ -309,6 +309,35 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(summary["decision_count"], 1)
         self.assertEqual(summary["candidate_count"], 0)
 
+    def test_legacy_mode_excludes_active_relation_rows_in_matching_window(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-next-month-no-oa",
+            row_ids=["bank-held-3000", "bank-held-6000"],
+            row_types=["bank", "bank"],
+            relation_mode="no_oa_bank_batch",
+            created_by="tester",
+            month_scope="2026-03",
+        )
+        rules = EchoRules()
+
+        self._orchestrator(
+            row_provider=FakeRowProvider(
+                oa_rows={"2026-02": [oa_row("oa-loan-interest", month="2026-02", amount="9600.00")]},
+                bank_rows={
+                    "2026-02": [
+                        bank_row("bank-fee-a", month="2026-02", amount="300.00"),
+                        bank_row("bank-held-3000", month="2026-03", amount="3000.00"),
+                        bank_row("bank-held-6000", month="2026-03", amount="6000.00"),
+                    ]
+                },
+            ),
+            pair_relation_service=pair_service,
+            rules=rules,
+        ).run(changed_scope_months=["2026-02"], reason="unit-test", request_id="req-legacy-held-window")
+
+        self.assertEqual([row["id"] for row in rules.calls[0]["bank_rows"]], ["bank-fee-a"])
+
     def test_decision_store_mode_uses_source_oa_month_for_attachment_invoice_ownership(self) -> None:
         decision_store = WorkbenchReconciliationDecisionStore()
 

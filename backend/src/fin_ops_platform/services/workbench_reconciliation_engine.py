@@ -13,6 +13,7 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     MATCH_DOMAIN_FREE,
     MATCH_DOMAIN_SPECIAL,
     WorkbenchDecision,
+    expand_scope_month_window,
 )
 from fin_ops_platform.services.workbench_special_reconciliation_adapter import (
     WorkbenchSpecialReconciliationAdapter,
@@ -114,6 +115,7 @@ class WorkbenchReconciliationEngine:
         list_active_relations = getattr(self._pair_relation_service, "list_active_relations", None)
         if not callable(list_active_relations):
             raise ValueError("pair_relation_service must provide list_active_relations().")
+        window_months = set(expand_scope_month_window(scope_month))
         held: set[str] = set()
         extendable_payment_rows: set[str] = set()
         for relation in list_active_relations():
@@ -121,8 +123,8 @@ class WorkbenchReconciliationEngine:
                 raise ValueError("pair_relation_service returned a non-dict active relation.")
             if str(relation.get("status") or ACTIVE_RELATION_STATUS) != ACTIVE_RELATION_STATUS:
                 continue
-            month_scope = str(relation.get("month_scope") or "all").strip()
-            if month_scope not in {"all", scope_month}:
+            month_scope = self._relation_month_scope(relation)
+            if month_scope != "all" and month_scope not in window_months:
                 continue
             row_ids = [str(row_id or "").strip() for row_id in list(relation.get("row_ids") or [])]
             row_types = [str(row_type or "").strip() for row_type in list(relation.get("row_types") or [])]
@@ -134,11 +136,18 @@ class WorkbenchReconciliationEngine:
                     row_type = row_types[index] if index < len(row_types) and row_types[index] else self._row_type_for_row_id(normalized_row_id)
                     typed_row_ids.append((normalized_row_id, row_type))
             relation_types = {row_type for _, row_type in typed_row_ids}
-            if {"oa", "bank"}.issubset(relation_types) and "invoice" not in relation_types:
+            if month_scope in {"all", scope_month} and {"oa", "bank"}.issubset(relation_types) and "invoice" not in relation_types:
                 extendable_payment_rows.update(
                     row_id for row_id, row_type in typed_row_ids if row_type in {"oa", "bank"}
                 )
         return held, extendable_payment_rows
+
+    @staticmethod
+    def _relation_month_scope(relation: dict[str, Any]) -> str:
+        month_scope = str(relation.get("month_scope") or "all").strip()
+        if month_scope == "all":
+            return "all"
+        return month_scope[:7] if len(month_scope) >= 7 else month_scope
 
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:

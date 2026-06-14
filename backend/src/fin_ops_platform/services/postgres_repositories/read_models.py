@@ -3454,6 +3454,39 @@ class PostgresReadModelRepository:
                 ) duplicate_rows
                 where duplicate_rows.object_kind is not null
                 group by duplicate_rows.generation_id, duplicate_rows.scope_key
+            ),
+            duplicate_row_membership_counts as (
+                select
+                    duplicate_rows.generation_id,
+                    duplicate_rows.scope_key,
+                    count(*)::bigint as duplicate_row_membership_count,
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'pane', duplicate_rows.pane,
+                            'row_id', duplicate_rows.row_id,
+                            'zones', duplicate_rows.zones,
+                            'groups', duplicate_rows.groups
+                        )
+                        order by duplicate_rows.pane, duplicate_rows.row_id
+                    ) as duplicate_row_membership_samples
+                from (
+                    select
+                        gr.generation_id,
+                        gr.scope_key,
+                        gr.pane,
+                        gr.row_id,
+                        array_agg(distinct gr.zone order by gr.zone) as zones,
+                        array_agg(distinct gr.zone || ':' || gr.group_id order by gr.zone || ':' || gr.group_id) as groups
+                    from read_model.workbench_group_rows gr
+                    join target_generations
+                      on target_generations.generation_id = gr.generation_id
+                     and target_generations.scope_key = gr.scope_key
+                    where gr.row_role <> 'summary'
+                      and gr.zone in ('paired', 'open')
+                    group by gr.generation_id, gr.scope_key, gr.pane, gr.row_id
+                    having count(distinct gr.zone || ':' || gr.group_id) > 1
+                ) duplicate_rows
+                group by duplicate_rows.generation_id, duplicate_rows.scope_key
             )
             select
                 gen.scope_key,
@@ -3471,7 +3504,11 @@ class PostgresReadModelRepository:
                 coalesce(duplicate_identity_counts.duplicate_bank_identity_count, 0)::bigint
                     as duplicate_bank_identity_count,
                 coalesce(duplicate_identity_counts.duplicate_identity_samples, '[]'::jsonb)
-                    as duplicate_identity_samples
+                    as duplicate_identity_samples,
+                coalesce(duplicate_row_membership_counts.duplicate_row_membership_count, 0)::bigint
+                    as duplicate_row_membership_count,
+                coalesce(duplicate_row_membership_counts.duplicate_row_membership_samples, '[]'::jsonb)
+                    as duplicate_row_membership_samples
             from target_generations gen
             left join row_counts
               on row_counts.generation_id = gen.generation_id
@@ -3488,6 +3525,9 @@ class PostgresReadModelRepository:
             left join duplicate_identity_counts
               on duplicate_identity_counts.generation_id = gen.generation_id
              and duplicate_identity_counts.scope_key = gen.scope_key
+            left join duplicate_row_membership_counts
+              on duplicate_row_membership_counts.generation_id = gen.generation_id
+             and duplicate_row_membership_counts.scope_key = gen.scope_key
             order by gen.scope_key
             """,
             tuple(params),
@@ -3506,6 +3546,7 @@ class PostgresReadModelRepository:
             actual_summary_count = int_value(row.get("actual_summary_count"), 0)
             duplicate_invoice_identity_count = int_value(row.get("duplicate_invoice_identity_count"), 0)
             duplicate_bank_identity_count = int_value(row.get("duplicate_bank_identity_count"), 0)
+            duplicate_row_membership_count = int_value(row.get("duplicate_row_membership_count"), 0)
             reasons: list[str] = []
             if group_count != actual_group_count:
                 reasons.append(f"group_count metadata={group_count} actual={actual_group_count}")
@@ -3517,6 +3558,8 @@ class PostgresReadModelRepository:
                 reasons.append(f"duplicate_invoice_identity_cross_zone count={duplicate_invoice_identity_count}")
             if duplicate_bank_identity_count:
                 reasons.append(f"duplicate_bank_identity_cross_zone count={duplicate_bank_identity_count}")
+            if duplicate_row_membership_count:
+                reasons.append(f"duplicate_row_membership count={duplicate_row_membership_count}")
             if reasons:
                 failures.append(
                     {
@@ -3533,6 +3576,10 @@ class PostgresReadModelRepository:
                         "duplicate_bank_identity_count": duplicate_bank_identity_count,
                         "duplicate_identity_samples": row.get("duplicate_identity_samples")
                         if isinstance(row.get("duplicate_identity_samples"), list)
+                        else [],
+                        "duplicate_row_membership_count": duplicate_row_membership_count,
+                        "duplicate_row_membership_samples": row.get("duplicate_row_membership_samples")
+                        if isinstance(row.get("duplicate_row_membership_samples"), list)
                         else [],
                         "reasons": reasons,
                     }
@@ -6244,6 +6291,161 @@ class PostgresReadModelRepository:
         )
         return [_workbench_reconciliation_decision_payload(row) for row in rows]
 
+    def list_active_workbench_reconciliation_decisions_for_cleanup(
+        self,
+        *,
+        tenant_id: str,
+        scope_months: list[str] | None = None,
+        decision_keys: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        where = [
+            "dec.tenant_id = %s",
+            "dec.decision_status in ('proposed', 'paired', 'open')",
+        ]
+        params: list[Any] = [text(tenant_id) or "default"]
+        normalized_scope_months = sorted(
+            {month for month in (month_start(value) for value in list(scope_months or [])) if month}
+        )
+        normalized_decision_keys = sorted({value for value in (text(value) for value in list(decision_keys or [])) if value})
+        if normalized_scope_months:
+            where.append("dec.scope_month = any(%s::date[])")
+            params.append(normalized_scope_months)
+        if normalized_decision_keys:
+            where.append("dec.decision_key = any(%s)")
+            params.append(normalized_decision_keys)
+        rows = self._connection.fetch_all(
+            f"""
+            select
+                dec.decision_key,
+                dec.scope_month,
+                dec.display_state,
+                dec.decision_status,
+                dec.match_domain,
+                dec.match_shape,
+                dec.rule_code,
+                dec.rule_version,
+                dec.row_ids,
+                dec.oa_row_ids,
+                dec.bank_row_ids,
+                dec.invoice_row_ids,
+                dec.amount,
+                dec.direction,
+                dec.payment_amount_closed,
+                dec.invoice_amount_closed,
+                dec.warnings,
+                dec.evidence,
+                dec.blockers,
+                dec.source_versions,
+                dec.consumed_by_relation_id,
+                dec.suppressed_by_exception_case_id,
+                dec.decision_id,
+                dec.explanation,
+                dec.raw_payload,
+                dec.updated_at,
+                coalesce(active_relation_overlaps.items, '[]'::jsonb) as active_relation_overlaps
+            from read_model.workbench_reconciliation_decisions dec
+            left join lateral (
+                select jsonb_agg(
+                    jsonb_build_object(
+                        'case_id', rel.case_id,
+                        'relation_mode', rel.relation_mode,
+                        'month_scope', coalesce(to_char(rel.month_scope, 'YYYY-MM'), 'all'),
+                        'row_ids', rel.row_ids,
+                        'row_types', rel.row_types,
+                        'overlap_row_ids', overlap_rows.overlap_row_ids
+                    )
+                    order by rel.case_id
+                ) as items
+                from app.workbench_pair_relations rel
+                cross join lateral (
+                    select array_agg(decision_row_id order by decision_row_id) as overlap_row_ids
+                    from unnest(dec.row_ids) decision_row_id
+                    where decision_row_id = any(rel.row_ids)
+                ) overlap_rows
+                where rel.status = 'active'
+                  and rel.row_ids && dec.row_ids
+                  and cardinality(overlap_rows.overlap_row_ids) > 0
+                  and (
+                    rel.month_scope is null
+                    or rel.month_scope between (dec.scope_month - interval '2 months')::date
+                                           and (dec.scope_month + interval '2 months')::date
+                  )
+            ) active_relation_overlaps on true
+            where {" and ".join(where)}
+            order by dec.scope_month, dec.decision_key
+            """,
+            tuple(params),
+        )
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _workbench_reconciliation_decision_payload(row)
+            payload["active_relation_overlaps"] = (
+                row.get("active_relation_overlaps") if isinstance(row.get("active_relation_overlaps"), list) else []
+            )
+            payload["updated_at"] = text(row.get("updated_at"))
+            payloads.append(payload)
+        return payloads
+
+    def expire_workbench_reconciliation_decisions_by_keys(
+        self,
+        *,
+        tenant_id: str,
+        decision_keys: list[str],
+        reason: str,
+        actor: str = "repair_workbench_reconciliation_decisions",
+    ) -> dict[str, Any]:
+        normalized_decision_keys = sorted({value for value in (text(value) for value in list(decision_keys or [])) if value})
+        if not normalized_decision_keys:
+            return {"expired_count": 0, "scope_keys": []}
+
+        def write(connection: Any) -> dict[str, Any]:
+            rows = connection.fetch_all(
+                """
+                with expired as (
+                    update read_model.workbench_reconciliation_decisions
+                    set decision_status = 'expired',
+                        raw_payload = raw_payload || jsonb_build_object(
+                            'expired_reason', %s,
+                            'expired_by', %s
+                        ),
+                        updated_at = now()
+                    where tenant_id = %s
+                      and decision_key = any(%s)
+                      and decision_status in ('proposed', 'paired', 'open')
+                    returning to_char(scope_month, 'YYYY-MM') as scope_key
+                )
+                select scope_key, count(*)::bigint as expired_count
+                from expired
+                group by scope_key
+                order by scope_key
+                """,
+                (
+                    text(reason) or "invalid_workbench_reconciliation_decision",
+                    text(actor) or "repair_workbench_reconciliation_decisions",
+                    text(tenant_id) or "default",
+                    normalized_decision_keys,
+                ),
+            )
+            scope_keys = [str(row.get("scope_key") or "").strip() for row in rows if str(row.get("scope_key") or "").strip()]
+            expired_count = sum(int_value(row.get("expired_count"), 0) for row in rows)
+            for scope_key in scope_keys:
+                _enqueue_workbench_relation_refresh_in_transaction(
+                    connection,
+                    tenant_id=text(tenant_id) or "default",
+                    scope_key=scope_key,
+                    reason="workbench_reconciliation_decision_expired",
+                )
+            return {"expired_count": expired_count, "scope_keys": scope_keys}
+
+        result: dict[str, Any] = {"expired_count": 0, "scope_keys": []}
+
+        def capture(connection: Any) -> None:
+            nonlocal result
+            result = write(connection)
+
+        run_in_transaction(self._connection, capture)
+        return result
+
     def consume_workbench_reconciliation_decisions_by_row_ids(
         self,
         *,
@@ -8396,6 +8598,7 @@ def _aggregate_workbench_all_scope_payload(groups: list[dict[str, Any]]) -> dict
         finalized_by_zone["paired"],
         finalized_by_zone["open"],
     )
+    _suppress_all_scope_open_rows_claimed_by_other_open_groups(finalized_by_zone["open"])
     for zone in ("paired", "open"):
         aggregate[zone]["groups"] = [
             group
@@ -8428,12 +8631,144 @@ def _suppress_all_scope_open_rows_claimed_by_paired(
         return
 
     for group in open_groups:
+        before_row_count = _workbench_group_fact_row_counts(group)["rows"]
         _remove_workbench_rows_from_group(
             group,
             paired_row_keys=paired_row_keys,
             paired_identity_keys=paired_identity_keys,
         )
+        _drop_partial_all_scope_automatic_decision_group(group, before_row_count=before_row_count)
         _finalize_all_scope_group(group, zone="open")
+
+
+def _suppress_all_scope_open_rows_claimed_by_other_open_groups(open_groups: list[dict[str, Any]]) -> None:
+    owner_by_claim_key: dict[tuple[str, ...], tuple[tuple[Any, ...], dict[str, Any]]] = {}
+    for group in open_groups:
+        rank = _all_scope_open_group_claim_rank(group)
+        for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
+            if row_role == "summary":
+                continue
+            for claim_key in _workbench_open_visible_owner_claim_keys(row, pane):
+                owner = owner_by_claim_key.get(claim_key)
+                if owner is None or rank < owner[0]:
+                    owner_by_claim_key[claim_key] = (rank, group)
+
+    if not owner_by_claim_key:
+        return
+
+    for group in open_groups:
+        before_row_count = _workbench_group_fact_row_counts(group)["rows"]
+        _remove_workbench_rows_from_group_claimed_by_other_open_group(
+            group,
+            owner_by_claim_key=owner_by_claim_key,
+        )
+        _drop_partial_all_scope_automatic_decision_group(group, before_row_count=before_row_count)
+        _finalize_all_scope_group(group, zone="open")
+
+
+def _drop_partial_all_scope_automatic_decision_group(group: dict[str, Any], *, before_row_count: int) -> None:
+    after_row_count = _workbench_group_fact_row_counts(group)["rows"]
+    if 0 < after_row_count < before_row_count and _is_all_scope_automatic_decision_group(group):
+        _clear_workbench_group_rows(group)
+
+
+def _is_all_scope_automatic_decision_group(group: dict[str, Any]) -> bool:
+    group_id = text(group.get("group_id") or group.get("id")) or ""
+    if group_id.startswith("case:decision:"):
+        return True
+    for row in _iter_group_rows(group):
+        if text(row.get("relation_mode")) == "automatic_decision":
+            return True
+        case_id = text(row.get("case_id"))
+        if case_id and case_id.startswith("decision:"):
+            return True
+    return False
+
+
+def _clear_workbench_group_rows(group: dict[str, Any]) -> None:
+    for row_key in ("oa_rows", "bank_rows", "invoice_rows"):
+        group[row_key] = []
+    collapsed_rows = group.get("collapsed_rows")
+    if isinstance(collapsed_rows, dict):
+        for pane in list(collapsed_rows):
+            collapsed_rows[pane] = []
+
+
+def _all_scope_open_group_claim_rank(group: dict[str, Any]) -> tuple[Any, ...]:
+    group_type = text(group.get("group_type")) or ""
+    reason = text(group.get("reason")) or ""
+    fact_counts = _workbench_group_fact_row_counts(group)
+    pane_count = sum(1 for pane in WORKBENCH_PANES if fact_counts.get(pane, 0) > 0)
+    row_count = fact_counts.get("rows", 0)
+    has_reconciliation_decision = any(
+        isinstance(row.get("workbench_reconciliation_decision"), dict) for row in _iter_group_rows(group)
+    )
+    if group_type == "source_linked":
+        group_type_priority = 0
+    elif group_type in {"auto_closed", "manual_confirmed", "open_exception", "ignored", "legacy_exception"}:
+        group_type_priority = 1
+    elif group_type == "open" and (reason == "reconciliation_decision_open" or has_reconciliation_decision):
+        group_type_priority = 2
+    elif group_type == "candidate":
+        group_type_priority = 3
+    elif group_type == "open":
+        group_type_priority = 4
+    else:
+        group_type_priority = 5
+    confidence_priority = {"high": 0, "medium": 1, "low": 2}.get(text(group.get("match_confidence")) or "", 3)
+    stable_group_id = text(group.get("group_id") or group.get("id")) or ""
+    return (group_type_priority, -pane_count, -row_count, confidence_priority, stable_group_id)
+
+
+def _remove_workbench_rows_from_group_claimed_by_other_open_group(
+    group: dict[str, Any],
+    *,
+    owner_by_claim_key: dict[tuple[str, ...], tuple[tuple[Any, ...], dict[str, Any]]],
+) -> None:
+    for pane, row_key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
+        rows = group.get(row_key)
+        if isinstance(rows, list):
+            group[row_key] = [
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and _workbench_row_owned_by_group(
+                    row,
+                    pane,
+                    group=group,
+                    owner_by_claim_key=owner_by_claim_key,
+                )
+            ]
+    collapsed_rows = group.get("collapsed_rows")
+    if isinstance(collapsed_rows, dict):
+        for pane, rows in list(collapsed_rows.items()):
+            if not isinstance(rows, list):
+                continue
+            collapsed_rows[pane] = [
+                row
+                for row in rows
+                if isinstance(row, dict)
+                and _workbench_row_owned_by_group(
+                    row,
+                    str(pane),
+                    group=group,
+                    owner_by_claim_key=owner_by_claim_key,
+                )
+            ]
+
+
+def _workbench_row_owned_by_group(
+    row: dict[str, Any],
+    pane: str,
+    *,
+    group: dict[str, Any],
+    owner_by_claim_key: dict[tuple[str, ...], tuple[tuple[Any, ...], dict[str, Any]]],
+) -> bool:
+    for claim_key in _workbench_open_visible_owner_claim_keys(row, pane):
+        owner = owner_by_claim_key.get(claim_key)
+        if owner is not None and owner[1] is not group:
+            return False
+    return True
 
 
 def _remove_workbench_rows_from_group(
@@ -8486,6 +8821,17 @@ def _workbench_row_claimed_by_paired(
         return True
     identity = _workbench_strong_object_identity(row, pane)
     return identity is not None and identity in paired_identity_keys
+
+
+def _workbench_open_visible_owner_claim_keys(row: dict[str, Any], pane: str) -> list[tuple[str, ...]]:
+    keys: list[tuple[str, ...]] = []
+    row_id = _workbench_row_id(row)
+    if row_id is not None:
+        keys.append(("row", pane, row_id))
+    identity = _workbench_strong_object_identity(row, pane)
+    if pane == "invoice" and identity is not None:
+        keys.append(("identity", *identity))
+    return keys
 
 
 def _workbench_strong_object_identity(row: dict[str, Any], pane: str) -> tuple[str, str, str] | None:

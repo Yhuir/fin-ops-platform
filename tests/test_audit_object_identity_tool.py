@@ -59,6 +59,7 @@ class _FakeConnection:
         attachment_cache_source_rows: list[dict[str, object]] | None = None,
         attachment_rows: list[dict[str, object]] | None = None,
         workbench_cross_zone_duplicates: list[dict[str, object]] | None = None,
+        workbench_open_visible_owner_duplicates: list[dict[str, object]] | None = None,
         workbench_oa_alias_groups: list[dict[str, object]] | None = None,
         workbench_orphan_relation_groups: list[dict[str, object]] | None = None,
         missing_tables: set[str] | None = None,
@@ -70,6 +71,7 @@ class _FakeConnection:
         self._attachment_cache_source_rows = attachment_cache_source_rows
         self._attachment_rows = attachment_rows
         self._workbench_cross_zone_duplicates = workbench_cross_zone_duplicates
+        self._workbench_open_visible_owner_duplicates = workbench_open_visible_owner_duplicates
         self._workbench_oa_alias_groups = workbench_oa_alias_groups
         self._workbench_orphan_relation_groups = workbench_orphan_relation_groups
         self._missing_tables = set(missing_tables or set())
@@ -87,7 +89,11 @@ class _FakeConnection:
             "app.oa_applications",
             "app.workbench_pair_relations",
         }:
-            if table_name == "read_model.workbench_group_rows" and self._workbench_cross_zone_duplicates is None:
+            if (
+                table_name == "read_model.workbench_group_rows"
+                and self._workbench_cross_zone_duplicates is None
+                and self._workbench_open_visible_owner_duplicates is None
+            ):
                 return {"table_name": None}
             if table_name == "app.oa_applications" and self._workbench_oa_alias_groups is None:
                 return {"table_name": None}
@@ -98,6 +104,8 @@ class _FakeConnection:
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         normalized = " ".join(sql.split()).lower()
+        if "from read_model.workbench_group_rows" in normalized and "visible_owner_claims" in normalized:
+            return list(self._workbench_open_visible_owner_duplicates or [])
         if "from read_model.workbench_group_rows" in normalized and "duplicate_rows" in normalized:
             return list(self._workbench_cross_zone_duplicates or [])
         if "from app.oa_applications" in normalized and "having count(distinct row_id) > 1" in normalized:
@@ -243,8 +251,97 @@ class AuditObjectIdentityToolTests(unittest.TestCase):
         )
 
         self.assertEqual(report["summary"]["invoice_duplicate_group_count"], 3)
+        self.assertEqual(report["summary"]["invoice_blocking_duplicate_group_count"], 3)
+        self.assertEqual(report["summary"]["invoice_weak_duplicate_group_count"], 0)
         self.assertEqual(report["summary"]["blocking_issue_count"], 3)
         self.assertEqual(len(report["invoice_duplicate_groups"]), 1)
+        self.assertEqual(len(report["invoice_blocking_duplicate_groups"]), 1)
+
+    def test_audit_keeps_invoice_tax_amount_duplicates_as_warning_not_blocking(self) -> None:
+        invoice_rows = []
+        for index in range(2):
+            invoice_rows.append(
+                {
+                    "id": f"weak-inv-{index}",
+                    "legacy_id": f"weak-inv-{index}",
+                    "invoice_type": "input",
+                    "invoice_no": "",
+                    "invoice_code": None,
+                    "digital_invoice_no": None,
+                    "source_unique_key": f"invoice:legacy:{index}",
+                    "data_fingerprint": None,
+                    "invoice_date": "2026-03-01",
+                    "counterparty_name": "供应商",
+                    "seller_name": "供应商",
+                    "seller_tax_no": "SELLER-TAX",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "buyer_tax_no": "BUYER-TAX",
+                    "amount": Decimal("70.00"),
+                    "signed_amount": Decimal("70.00"),
+                    "total_with_tax": Decimal("70.00"),
+                    "status": "active",
+                    "etc_invoice_id": None,
+                }
+            )
+
+        report = audit_object_identity(
+            connection=_FakeConnection(
+                invoice_rows=invoice_rows,
+                bank_rows=[],
+                etc_rows=[],
+                attachment_cache_rows=[],
+            ),
+            policy=FinancialObjectIdentityPolicy(),
+            example_limit=10,
+        )
+
+        self.assertEqual(report["summary"]["invoice_duplicate_group_count"], 1)
+        self.assertEqual(report["summary"]["invoice_blocking_duplicate_group_count"], 0)
+        self.assertEqual(report["summary"]["invoice_weak_duplicate_group_count"], 1)
+        self.assertEqual(report["summary"]["invoice_key_mismatch_count"], 2)
+        self.assertEqual(report["summary"]["invoice_blocking_key_mismatch_count"], 0)
+        self.assertEqual(report["summary"]["invoice_weak_key_mismatch_count"], 2)
+        self.assertEqual(report["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(len(report["invoice_weak_duplicate_groups"]), 1)
+        self.assertEqual(len(report["invoice_blocking_duplicate_groups"]), 0)
+        self.assertEqual(len(report["invoice_weak_key_mismatches"]), 2)
+
+    def test_audit_keeps_raw_etc_duplicates_as_warning_not_blocking(self) -> None:
+        etc_rows = []
+        for index in range(2):
+            etc_rows.append(
+                {
+                    "id": f"etc-raw-{index}",
+                    "legacy_id": f"etc-raw-{index}",
+                    "etc_invoice_id": f"etc-raw-{index}",
+                    "invoice_no": "ETC-DUP-001",
+                    "invoice_code": None,
+                    "invoice_date": "2026-03-01",
+                    "seller_name": "ETC",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "amount": Decimal("70.00"),
+                    "tax_amount": Decimal("0.00"),
+                    "total_with_tax": Decimal("70.00"),
+                    "status": "active",
+                }
+            )
+
+        report = audit_object_identity(
+            connection=_FakeConnection(
+                invoice_rows=[],
+                bank_rows=[],
+                etc_rows=etc_rows,
+                attachment_cache_rows=[],
+            ),
+            policy=FinancialObjectIdentityPolicy(),
+            example_limit=10,
+        )
+
+        self.assertEqual(report["summary"]["etc_duplicate_group_count"], 1)
+        self.assertEqual(report["summary"]["etc_duplicate_warning_group_count"], 1)
+        self.assertEqual(report["summary"]["etc_blocking_duplicate_group_count"], 0)
+        self.assertEqual(report["summary"]["blocking_issue_count"], 0)
+        self.assertEqual(len(report["etc_duplicate_groups"]), 1)
 
     def test_audit_does_not_block_oa_attachment_invoice_cache_aliases_for_same_attachment(self) -> None:
         attachment_cache_rows = [
@@ -462,6 +559,46 @@ class AuditObjectIdentityToolTests(unittest.TestCase):
         self.assertEqual(
             report["workbench_identity_audit"]["cross_zone_identity_duplicates"][0]["object_identity_key"],
             "265320000000992",
+        )
+
+    def test_audit_reports_workbench_open_visible_owner_duplicates(self) -> None:
+        report = audit_object_identity(
+            connection=_FakeConnection(
+                invoice_rows=[],
+                bank_rows=[],
+                etc_rows=[],
+                attachment_cache_rows=[],
+                workbench_cross_zone_duplicates=[],
+                workbench_open_visible_owner_duplicates=[
+                    {
+                        "scope_key": "all",
+                        "object_kind": "invoice",
+                        "claim_kind": "digital_invoice_no",
+                        "claim_key": "26322000000129268441",
+                        "zones": ["open"],
+                        "group_ids": [
+                            "scope:2026-01:temp:standalone-invoice-500",
+                            "scope:2026-02:candidate:bank-invoice-500",
+                        ],
+                        "row_ids": ["inv-imported-500", "inv-imported-500-alias"],
+                        "source_kinds": ["invoice"],
+                        "total_count": 3,
+                    }
+                ],
+            ),
+            policy=FinancialObjectIdentityPolicy(),
+            example_limit=1,
+            workbench_scope="all",
+        )
+
+        self.assertEqual(report["summary"]["workbench_audit_status"], "available")
+        self.assertEqual(report["summary"]["workbench_cross_zone_identity_duplicate_group_count"], 0)
+        self.assertEqual(report["summary"]["workbench_open_visible_owner_duplicate_group_count"], 3)
+        self.assertEqual(report["summary"]["blocking_issue_count"], 3)
+        self.assertEqual(len(report["workbench_identity_audit"]["open_visible_owner_duplicates"]), 1)
+        self.assertEqual(
+            report["workbench_identity_audit"]["open_visible_owner_duplicates"][0]["claim_key"],
+            "26322000000129268441",
         )
 
 

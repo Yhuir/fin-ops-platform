@@ -443,20 +443,28 @@ class WorkbenchMatchingOrchestrator:
         if not callable(list_active_relations):
             raise ValueError("pair_relation_service must provide list_active_relations().")
 
+        window_months = set(expand_scope_month_window(scope_month))
         held_row_ids: set[str] = set()
         for relation in list_active_relations():
             if not isinstance(relation, dict):
                 raise ValueError("pair_relation_service returned a non-dict active relation.")
             if str(relation.get("status") or ACTIVE_RELATION_STATUS) != ACTIVE_RELATION_STATUS:
                 continue
-            month_scope = str(relation.get("month_scope") or "all").strip()
-            if month_scope not in {"all", scope_month}:
+            month_scope = self._relation_month_scope(relation)
+            if month_scope != "all" and month_scope not in window_months:
                 continue
             for row_id in list(relation.get("row_ids") or []):
                 resolved_row_id = str(row_id or "").strip()
                 if resolved_row_id:
                     held_row_ids.add(resolved_row_id)
         return held_row_ids
+
+    @staticmethod
+    def _relation_month_scope(relation: dict[str, Any]) -> str:
+        month_scope = str(relation.get("month_scope") or "all").strip()
+        if month_scope == "all":
+            return "all"
+        return month_scope[:7] if len(month_scope) >= 7 else month_scope
 
     def _suppress_candidates_for_active_exception_cases(
         self,

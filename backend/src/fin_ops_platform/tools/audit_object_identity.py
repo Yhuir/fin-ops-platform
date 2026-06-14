@@ -11,6 +11,9 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 
 
+STRONG_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Dry-run audit for financial object identity/dedup rules.")
     parser.add_argument("--json", action="store_true", help="Print JSON report.")
@@ -94,6 +97,12 @@ def audit_object_identity(
     etc_identities = [_etc_identity_payload(policy, row) for row in etc_rows]
     attachment_invoice_identities = _oa_attachment_invoice_identity_payloads(policy, attachment_cache_rows)
     all_invoice_duplicate_groups = _duplicate_groups(invoice_identities, key_name="policy_canonical_key")
+    blocking_invoice_duplicate_groups = _strong_invoice_duplicate_groups(all_invoice_duplicate_groups)
+    weak_invoice_duplicate_groups = [
+        group
+        for group in all_invoice_duplicate_groups
+        if group not in blocking_invoice_duplicate_groups
+    ]
     all_bank_duplicate_groups = _duplicate_groups(bank_identities, key_name="policy_canonical_key")
     all_etc_duplicate_groups = _duplicate_groups(etc_identities, key_name="policy_canonical_key")
     all_attachment_invoice_classified_duplicate_groups = _classify_oa_attachment_invoice_duplicate_groups(
@@ -117,6 +126,12 @@ def audit_object_identity(
         for item in invoice_identities
         if item.get("stored_source_unique_key") and item.get("policy_canonical_key") and item["stored_source_unique_key"] != item["policy_canonical_key"]
     ]
+    blocking_invoice_key_mismatches = [
+        item for item in all_invoice_key_mismatches if _is_strong_invoice_identity_kind(item.get("policy_canonical_key_kind"))
+    ]
+    weak_invoice_key_mismatches = [
+        item for item in all_invoice_key_mismatches if not _is_strong_invoice_identity_kind(item.get("policy_canonical_key_kind"))
+    ]
     all_bank_key_mismatches = [
         item
         for item in bank_identities
@@ -134,13 +149,13 @@ def audit_object_identity(
     )
     workbench_summary = workbench_audit["summary"] if isinstance(workbench_audit.get("summary"), dict) else {}
     blocking_issue_count = (
-        len(all_invoice_duplicate_groups)
+        len(blocking_invoice_duplicate_groups)
         + len(all_bank_duplicate_groups)
-        + len(all_etc_duplicate_groups)
         + len(all_attachment_invoice_blocking_duplicate_groups)
-        + len(all_invoice_key_mismatches)
+        + len(blocking_invoice_key_mismatches)
         + len(all_bank_key_mismatches)
         + int(workbench_summary.get("cross_zone_identity_duplicate_group_count") or 0)
+        + int(workbench_summary.get("open_visible_owner_duplicate_group_count") or 0)
         + int(workbench_summary.get("orphan_relation_group_count") or 0)
     )
     return {
@@ -156,8 +171,12 @@ def audit_object_identity(
             "oa_attachment_invoice_cache_entry_count": len(attachment_cache_rows),
             "oa_attachment_invoice_count": len(attachment_invoice_identities),
             "invoice_duplicate_group_count": len(all_invoice_duplicate_groups),
+            "invoice_blocking_duplicate_group_count": len(blocking_invoice_duplicate_groups),
+            "invoice_weak_duplicate_group_count": len(weak_invoice_duplicate_groups),
             "bank_duplicate_group_count": len(all_bank_duplicate_groups),
             "etc_duplicate_group_count": len(all_etc_duplicate_groups),
+            "etc_duplicate_warning_group_count": len(all_etc_duplicate_groups),
+            "etc_blocking_duplicate_group_count": 0,
             "oa_attachment_invoice_duplicate_group_count": len(all_attachment_invoice_duplicate_groups),
             "oa_attachment_invoice_blocking_duplicate_group_count": len(all_attachment_invoice_blocking_duplicate_groups),
             "oa_attachment_invoice_duplicate_classification_counts": _classification_counts(all_attachment_invoice_duplicate_groups),
@@ -165,6 +184,8 @@ def audit_object_identity(
             "oa_attachment_invoice_cache_alias_classification_counts": _classification_counts(all_attachment_invoice_cache_alias_groups),
             "oa_attachment_invoice_suspected_duplicate_group_count": len(all_attachment_invoice_suspected_groups),
             "invoice_key_mismatch_count": len(all_invoice_key_mismatches),
+            "invoice_blocking_key_mismatch_count": len(blocking_invoice_key_mismatches),
+            "invoice_weak_key_mismatch_count": len(weak_invoice_key_mismatches),
             "bank_key_mismatch_count": len(all_bank_key_mismatches),
             "missing_canonical_invoice_count": len(all_missing_canonical_invoices),
             "missing_canonical_bank_transaction_count": len(all_missing_canonical_bank_transactions),
@@ -179,11 +200,16 @@ def audit_object_identity(
             "workbench_cross_zone_identity_duplicate_group_count": workbench_summary.get(
                 "cross_zone_identity_duplicate_group_count", 0
             ),
+            "workbench_open_visible_owner_duplicate_group_count": workbench_summary.get(
+                "open_visible_owner_duplicate_group_count", 0
+            ),
             "workbench_oa_alias_group_count": workbench_summary.get("oa_alias_group_count", 0),
             "workbench_orphan_relation_group_count": workbench_summary.get("orphan_relation_group_count", 0),
             "blocking_issue_count": blocking_issue_count,
         },
         "invoice_duplicate_groups": _limit_examples(all_invoice_duplicate_groups, example_limit),
+        "invoice_blocking_duplicate_groups": _limit_examples(blocking_invoice_duplicate_groups, example_limit),
+        "invoice_weak_duplicate_groups": _limit_examples(weak_invoice_duplicate_groups, example_limit),
         "bank_duplicate_groups": _limit_examples(all_bank_duplicate_groups, example_limit),
         "etc_duplicate_groups": _limit_examples(all_etc_duplicate_groups, example_limit),
         "oa_attachment_invoice_duplicate_groups": _limit_examples(all_attachment_invoice_duplicate_groups, example_limit),
@@ -191,6 +217,8 @@ def audit_object_identity(
         "oa_attachment_invoice_cache_alias_groups": _limit_examples(all_attachment_invoice_cache_alias_groups, example_limit),
         "oa_attachment_invoice_suspected_duplicate_groups": _limit_examples(all_attachment_invoice_suspected_groups, example_limit),
         "invoice_key_mismatches": _limit_examples(all_invoice_key_mismatches, example_limit),
+        "invoice_blocking_key_mismatches": _limit_examples(blocking_invoice_key_mismatches, example_limit),
+        "invoice_weak_key_mismatches": _limit_examples(weak_invoice_key_mismatches, example_limit),
         "bank_key_mismatches": _limit_examples(all_bank_key_mismatches, example_limit),
         "missing_canonical_invoices": _limit_examples(all_missing_canonical_invoices, example_limit),
         "missing_canonical_bank_transactions": _limit_examples(all_missing_canonical_bank_transactions, example_limit),
@@ -243,7 +271,7 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
                 group by gr.scope_key, gr.pane, gr.object_identity_key, gr.object_identity_kind
                 having bool_or(gr.zone = 'paired') and bool_or(gr.zone = 'open')
             )
-            select *
+            select duplicate_rows.*, count(*) over ()::bigint as total_count
             from duplicate_rows
             where object_kind is not null
             order by scope_key, object_kind, object_identity_key
@@ -253,6 +281,74 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
         )
     except Exception as exc:  # pragma: no cover - depends on pre-migration production databases
         return {"summary": {"status": "unavailable", "error": str(exc)}}
+
+    open_visible_owner_duplicates = connection.fetch_all(
+        f"""
+        with active_generations as (
+            select tenant_id, scope_key, generation_id
+            from read_model.workbench_generations gen
+            where gen.tenant_id = 'default'
+              and gen.status = 'active'
+              {scope_clause}
+        ),
+        visible_owner_claims as (
+            select
+                gr.scope_key,
+                gr.pane as object_kind,
+                'row_id' as claim_kind,
+                gr.row_id as claim_key,
+                gr.zone,
+                gr.group_id,
+                gr.row_id,
+                gr.source_kind
+            from read_model.workbench_group_rows gr
+            join active_generations gen
+              on gen.generation_id = gr.generation_id
+             and gen.scope_key = gr.scope_key
+            where gr.row_role <> 'summary'
+              and gr.zone = 'open'
+              and gr.row_id is not null
+            union all
+            select
+                gr.scope_key,
+                'invoice' as object_kind,
+                gr.object_identity_kind as claim_kind,
+                gr.object_identity_key as claim_key,
+                gr.zone,
+                gr.group_id,
+                gr.row_id,
+                gr.source_kind
+            from read_model.workbench_group_rows gr
+            join active_generations gen
+              on gen.generation_id = gr.generation_id
+             and gen.scope_key = gr.scope_key
+            where gr.row_role <> 'summary'
+              and gr.zone = 'open'
+              and gr.pane = 'invoice'
+              and gr.object_identity_kind in ('digital_invoice_no', 'invoice_code_no')
+              and gr.object_identity_key is not null
+        ),
+        duplicate_rows as (
+            select
+                scope_key,
+                object_kind,
+                claim_kind,
+                claim_key,
+                array_agg(distinct zone order by zone) as zones,
+                array_agg(distinct group_id order by group_id) as group_ids,
+                array_agg(distinct row_id order by row_id) as row_ids,
+                array_agg(distinct source_kind order by source_kind) as source_kinds
+            from visible_owner_claims
+            group by scope_key, object_kind, claim_kind, claim_key
+            having count(distinct group_id) > 1
+        )
+        select duplicate_rows.*, count(*) over ()::bigint as total_count
+        from duplicate_rows
+        order by scope_key, object_kind, claim_kind, claim_key
+        limit %s
+        """,
+        (*params, example_limit),
+    )
 
     oa_alias_groups = []
     if _table_exists(connection, "app.oa_applications"):
@@ -314,14 +410,26 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
         "summary": {
             "status": "available",
             "scope_key": normalized_scope,
-            "cross_zone_identity_duplicate_group_count": len(cross_zone_duplicates),
+            "cross_zone_identity_duplicate_group_count": _workbench_audit_total_count(cross_zone_duplicates),
+            "open_visible_owner_duplicate_group_count": _workbench_audit_total_count(open_visible_owner_duplicates),
             "oa_alias_group_count": len(oa_alias_groups),
             "orphan_relation_group_count": len(orphan_relation_groups),
         },
         "cross_zone_identity_duplicates": cross_zone_duplicates,
+        "open_visible_owner_duplicates": open_visible_owner_duplicates,
         "oa_alias_groups": oa_alias_groups,
         "orphan_relation_groups": orphan_relation_groups,
     }
+
+
+def _workbench_audit_total_count(rows: list[dict[str, Any]]) -> int:
+    if not rows:
+        return 0
+    first = rows[0]
+    try:
+        return int(first.get("total_count") or len(rows))
+    except (TypeError, ValueError):
+        return len(rows)
 
 
 def _invoice_identity_payload(policy: FinancialObjectIdentityPolicy, row: dict[str, Any]) -> dict[str, Any]:
@@ -589,6 +697,21 @@ def _duplicate_groups(items: list[dict[str, Any]], *, key_name: str) -> list[dic
     ]
     duplicates.sort(key=lambda item: (str(item["identity_key"]), len(item["rows"])))
     return duplicates
+
+
+def _strong_invoice_duplicate_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        group
+        for group in groups
+        if any(
+            _is_strong_invoice_identity_kind(row.get("policy_canonical_key_kind"))
+            for row in list(group.get("rows") or [])
+        )
+    ]
+
+
+def _is_strong_invoice_identity_kind(value: Any) -> bool:
+    return str(value or "").strip() in STRONG_INVOICE_IDENTITY_KINDS
 
 
 def _limit_examples(items: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:

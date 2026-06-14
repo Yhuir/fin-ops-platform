@@ -34,13 +34,14 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 
 报告覆盖：
 
-- `app.invoices`：正式发票 canonical key、stored key mismatch、duplicate canonical、missing canonical。
+- `app.invoices`：正式发票 canonical key、stored key mismatch、duplicate canonical、missing canonical；其中 blocking 只看数电发票号、发票代码+号码这两类强 identity，税额指纹只作为 warning。
 - `app.bank_transactions`：银行流水 canonical key、stored key mismatch、duplicate canonical、missing canonical。
-- `app.etc_invoices`：ETC 原始票 canonical key、duplicate canonical、missing canonical。
+- `app.etc_invoices`：ETC 原始票 canonical key、duplicate canonical、missing canonical。该表是原始来源事实，重复只作为 warning；正式发票是否重复以 canonical `app.invoices` 为准。
 - `app.invoices.etc_invoice_id`：已同步到 canonical 发票的 ETC 数量。
 - `app.oa_attachment_invoice_cache`：OA 附件票缓存中的正式发票 evidence/invoices canonical、suspected duplicate、missing canonical。
 - `app.oa_attachment_invoice_cache_sources` / `app.oa_attachments`：将 OA 附件票缓存 key 映射回真实附件和 OA，用于区分“缓存内部重复”和“跨 OA 重复发票”。
 - `read_model.workbench_group_rows` active generation：同一强发票 identity 或稳定银行 identity 是否同时存在于 `paired` 和 `open` zone。
+- `read_model.workbench_group_rows` active generation：同一 row id 或同一强发票 identity 是否在多个 open group 中同时成为 visible/operable owner；银行流水 open/open 只按 row id 审计，不按稳定 business-fields identity 阻断。
 - `app.oa_applications`：同一 `form_id` 是否映射多个 `row_id`，用于排查 OA alias 风险。
 - `app.workbench_pair_relations`：active relation 中是否存在指向已不存在对象的 row_id。
 
@@ -62,18 +63,20 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 
 Blocking issue 包含：
 
-- 同一 canonical key 下出现多条正式发票。
+- 同一强发票 identity 下出现多条正式发票。强 identity 只包含数电发票号、发票代码+号码。
 - 同一 canonical key 下出现多条银行流水。
-- 同一 canonical key 下出现多条 ETC 原始票。
 - 同一 OA 附件票强 canonical key 出现在多个不同 OA 报销中。强 key 包含数电票号、发票代码+号码、附件稳定 hash；`seller_tax_no + buyer_tax_no + invoice_date + total_with_tax` 这类弱税额指纹不作为 OA 附件票 blocking key。
-- 历史 `source_unique_key` 与当前 policy canonical key 不一致。
+- 历史 `source_unique_key` 与当前强发票或银行 policy canonical key 不一致。正式发票弱税额指纹 mismatch 不阻断发布。
 - Workbench active generation 中同一强发票 identity 或稳定银行 identity 同时出现在 `paired` 与 `open`。
+- Workbench active generation 中同一 row id 或同一强发票 identity 同时出现在多个 open group，导致同一事实有多个 visible/operable owner。
 - Active workbench relation 指向已不存在的 row_id。
 
 非 blocking warning：
 
 - missing canonical 示例。
 - suspected duplicate group。
+- 正式发票只命中弱税额指纹的 duplicate 或 key mismatch；必须人工核对票号、税号、日期和金额后再决定是否需要业务 repair。
+- `app.etc_invoices` 原始来源表的 duplicate canonical group；该表重复不代表 canonical `app.invoices` 正式事实重复。
 - OA 附件票同一实际附件、同一 OA 内多个附件或历史 cache key 产生的重复 evidence。
 - OA 附件票只命中弱税额指纹的跨 OA 疑似重复；必须人工核对发票号码、乘车人、行程等票面信息。
 - OA `form_id` 对应多个 `row_id` 的 alias group；需要结合 `PostgresOAProjectionRepository` 的 alias migration 和源系统事实处理。

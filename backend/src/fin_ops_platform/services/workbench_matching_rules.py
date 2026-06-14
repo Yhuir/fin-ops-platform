@@ -9,13 +9,18 @@ from typing import Any
 
 from fin_ops_platform.services.imports import normalize_name
 from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
-from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
+from fin_ops_platform.services.workbench_free_matching_engine import (
+    OA_BANK_SUM_MIN_EVIDENCE_TOKEN_LENGTH,
+    OA_BANK_SUM_WEAK_TOKENS,
+    WorkbenchFreeMatchingEngine,
+)
 from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_OPEN,
     DECISION_STATUS_PAIRED,
     WorkbenchDecision,
 )
 from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
+from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
 
 ZERO = Decimal("0.00")
@@ -40,7 +45,7 @@ GENERIC_COUNTERPARTY_NAMES = {
 }
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
-WORKBENCH_MATCHING_RULES_VERSION = "2026-05-28-oa-attachment-source-month-v1"
+WORKBENCH_MATCHING_RULES_VERSION = "2026-06-14-oa-bank-sum-strong-evidence-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 NON_INVOICE_OA_ATTACHMENT_SOURCE_KINDS = {
     "oa_attachment_payment_receipt",
@@ -213,6 +218,8 @@ class WorkbenchMatchingRules:
                     continue
                 evidence = self._oa_bank_evidence(oa_row, bank_row)
                 if not evidence["eligible"]:
+                    continue
+                if not self._has_strong_oa_bank_sum_evidence(oa_row, bank_row):
                     continue
                 eligible_banks.append(bank_row)
                 evidence_by_bank_id[self._row_id(bank_row)] = evidence
@@ -408,6 +415,37 @@ class WorkbenchMatchingRules:
             "medium": sorted(set(medium)),
             "negative": sorted(set(negative)),
         }
+
+    def _has_strong_oa_bank_sum_evidence(self, oa_row: dict[str, Any], bank_row: dict[str, Any]) -> bool:
+        return any(
+            self._is_strong_oa_bank_sum_match(match)
+            for match in matching_tokens(
+                self._sum_evidence_tokens(oa_row, "oa"),
+                self._sum_evidence_tokens(bank_row, "bank"),
+            )
+        )
+
+    @staticmethod
+    def _is_strong_oa_bank_sum_match(match: dict[str, str]) -> bool:
+        token = normalize_match_text(match.get("token"))
+        return len(token) >= OA_BANK_SUM_MIN_EVIDENCE_TOKEN_LENGTH and token not in OA_BANK_SUM_WEAK_TOKENS
+
+    def _sum_evidence_tokens(self, row: dict[str, Any], row_type: str) -> list[Any]:
+        if row_type == "oa":
+            return evidence_tokens(
+                {
+                    "counterparty": self._counterparty(row) or "",
+                    "project": self._text_from_fields(row, ("project_name", "project", "project_title")),
+                    "reason": self._text_from_fields(row, ("reason", "purpose", "description", "summary")),
+                    "applicant": self._applicant_text(row) or "",
+                }
+            )
+        return evidence_tokens(
+            {
+                "counterparty": self._counterparty(row) or "",
+                "summary": self._bank_text(row),
+            }
+        )
 
     def _oa_attachment_invoice_source_link(
         self,

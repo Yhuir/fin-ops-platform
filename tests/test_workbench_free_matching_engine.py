@@ -606,6 +606,39 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(decision.evidence["amount_relation"], "bank_sum_exact_amount")
         self.assertEqual(decision.evidence["bank_count"], 2)
 
+    def test_single_oa_multiple_bank_sum_rejects_generic_technology_token_only(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [
+                {
+                    "row_id": "oa-loan-interest",
+                    "amount": "600.00",
+                    "direction": "expenditure",
+                    "month": "2026-02",
+                    "project_name": "云南溯源科技",
+                    "reason": "光大新一期贷款一季度利息",
+                    "counterparty_name": "中国光大银行",
+                }
+            ],
+            [
+                bank(
+                    "bk-service-fee-a",
+                    "300.00",
+                    month="2026-02",
+                    counterparty="中科视拓（南京）科技有限公司",
+                ),
+                bank(
+                    "bk-service-fee-b",
+                    "300.00",
+                    month="2026-03",
+                    counterparty="中科视拓（南京）科技有限公司",
+                ),
+            ],
+            [],
+        )
+
+        self.assertFalse(any(decision.rule_code == "oa_bank_exact_sum" for decision in decisions))
+
     def test_single_oa_multiple_bank_transactions_ambiguous_sum_does_not_auto_pair(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-04",

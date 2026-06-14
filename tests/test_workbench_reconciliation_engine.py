@@ -45,6 +45,37 @@ class WorkbenchReconciliationEngineTests(unittest.TestCase):
         self.assertEqual(summary["suppressed_by_pair_relation_count"], 2)
         self.assertEqual([decision["row_ids"] for decision in decisions], [["oa-free", "bank-free"]])
 
+    def test_active_relation_rows_in_matching_window_are_excluded_before_matching(self) -> None:
+        store = WorkbenchReconciliationDecisionStore()
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="case-next-month-no-oa",
+            row_ids=["bank-held-3000", "bank-held-6000"],
+            row_types=["bank", "bank"],
+            relation_mode="no_oa_bank_batch",
+            created_by="tester",
+            month_scope="2026-03",
+        )
+
+        summary = WorkbenchReconciliationEngine(
+            decision_store=store,
+            pair_relation_service=pair_service,
+        ).run_scope(
+            "2026-02",
+            oa_rows=[oa_row("oa-loan-interest", month="2026-02", amount="9600.00")],
+            bank_rows=[
+                bank_row("bank-fee-a", month="2026-02", amount="300.00"),
+                bank_row("bank-fee-b", month="2026-03", amount="300.00"),
+                bank_row("bank-held-3000", month="2026-03", amount="3000.00"),
+                bank_row("bank-held-6000", month="2026-03", amount="6000.00"),
+            ],
+            invoice_rows=[],
+            source_versions={"engine": "v2"},
+        )
+
+        self.assertEqual(summary["suppressed_by_pair_relation_count"], 2)
+        self.assertEqual(store.list_decisions("2026-02"), [])
+
     def test_active_oa_bank_relation_can_extend_to_matching_invoice(self) -> None:
         store = WorkbenchReconciliationDecisionStore()
         pair_service = WorkbenchPairRelationService()

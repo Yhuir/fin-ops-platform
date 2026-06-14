@@ -20,13 +20,15 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
 from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
 
-RULE_VERSION = "2026-05-26-bank-invoice-scored-sum"
+RULE_VERSION = "2026-06-14-oa-bank-sum-strong-evidence-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 MATCHABLE_DIRECTIONS = {"expenditure", "income"}
 MAX_INVOICE_COMBINATION_SIZE = 6
 MAX_PAYMENT_PAIR_COMBINATION_SIZE = 6
 MAX_SUBSET_GROUP_RESULTS = 2
 MAX_SUBSET_SEARCH_STATES = 20000
+OA_BANK_SUM_MIN_EVIDENCE_TOKEN_LENGTH = 4
+OA_BANK_SUM_WEAK_TOKENS = frozenset({"科技"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,7 +453,7 @@ class WorkbenchFreeMatchingEngine:
                 if bank.row_id not in claimed_row_ids
                 and bank.direction == oa.direction
                 and Decimal("0.00") < bank.amount <= oa.amount
-                and self._has_pair_evidence(oa, bank, "oa_bank")
+                and self._has_oa_bank_sum_evidence(oa, bank)
             ]
             bank_groups = [
                 tuple(sorted(group, key=lambda row: row.row_id))
@@ -1230,6 +1232,17 @@ class WorkbenchFreeMatchingEngine:
         if match_shape == "bank_invoice":
             return self._has_bank_invoice_counterparty_evidence(left, right)
         return self._has_evidence(left, right)
+
+    def _has_oa_bank_sum_evidence(self, oa: _Row, bank: _Row) -> bool:
+        return any(
+            self._is_strong_oa_bank_sum_match(match)
+            for match in matching_tokens(self._tokens(oa), self._tokens(bank))
+        )
+
+    @staticmethod
+    def _is_strong_oa_bank_sum_match(match: dict[str, str]) -> bool:
+        token = normalize_match_text(match.get("token"))
+        return len(token) >= OA_BANK_SUM_MIN_EVIDENCE_TOKEN_LENGTH and token not in OA_BANK_SUM_WEAK_TOKENS
 
     def _has_bank_invoice_counterparty_evidence(self, left: _Row, right: _Row) -> bool:
         bank = left if left.row_type == "bank" else right if right.row_type == "bank" else None

@@ -137,11 +137,94 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         self.assertNotIn("to_char(scope_month", expire_sql)
         self.assertEqual(expire_params[1], ["2026-05-01"])
 
+    def test_repository_cleanup_audit_lists_active_relation_overlaps_in_matching_window(self) -> None:
+        connection = RepositoryRecordingConnection(
+            fetch_all_rows=[
+                {
+                    "decision_key": "decision-bad",
+                    "scope_month": "2026-02-01",
+                    "display_state": "paired",
+                    "decision_status": "paired",
+                    "match_domain": "free",
+                    "match_shape": "oa_bank",
+                    "rule_code": "oa_bank_exact_sum",
+                    "rule_version": "v1",
+                    "row_ids": ["oa-pay-2050", "txn_imported_1385"],
+                    "oa_row_ids": ["oa-pay-2050"],
+                    "bank_row_ids": ["txn_imported_1385"],
+                    "invoice_row_ids": [],
+                    "amount": "9600.00",
+                    "direction": "expenditure",
+                    "payment_amount_closed": True,
+                    "invoice_amount_closed": False,
+                    "warnings": [],
+                    "evidence": {},
+                    "blockers": [],
+                    "source_versions": {},
+                    "consumed_by_relation_id": None,
+                    "suppressed_by_exception_case_id": None,
+                    "decision_id": "decision-bad",
+                    "explanation": "",
+                    "raw_payload": {},
+                    "active_relation_overlaps": [
+                        {
+                            "case_id": "no_oa_batch_b1a825c98bf5d29b67f0",
+                            "relation_mode": "no_oa_bank_batch",
+                            "month_scope": "2026-03",
+                            "overlap_row_ids": ["txn_imported_1385"],
+                        }
+                    ],
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        rows = repository.list_active_workbench_reconciliation_decisions_for_cleanup(
+            tenant_id="tenant-a",
+            scope_months=["2026-02"],
+        )
+
+        self.assertEqual(rows[0]["decision_key"], "decision-bad")
+        self.assertEqual(rows[0]["active_relation_overlaps"][0]["overlap_row_ids"], ["txn_imported_1385"])
+        sql, params = connection.fetch_all_calls[0]
+        self.assertIn("from app.workbench_pair_relations", sql)
+        self.assertIn("interval '2 months'", sql)
+        self.assertEqual(params[0], "tenant-a")
+        self.assertEqual(params[1], ["2026-02-01"])
+
+    def test_repository_cleanup_execute_expires_by_key_and_enqueues_relation_refresh(self) -> None:
+        connection = RepositoryRecordingConnection(
+            fetch_all_rows=[{"scope_key": "2026-02", "expired_count": 1}]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        result = repository.expire_workbench_reconciliation_decisions_by_keys(
+            tenant_id="tenant-a",
+            decision_keys=["decision-bad"],
+            reason="unit-test",
+        )
+
+        self.assertEqual(result, {"expired_count": 1, "scope_keys": ["2026-02"]})
+        expire_sql, expire_params = connection.fetch_all_calls[0]
+        self.assertIn("update read_model.workbench_reconciliation_decisions", expire_sql)
+        self.assertIn("decision_status = 'expired'", expire_sql)
+        self.assertEqual(expire_params[0], "unit-test")
+        self.assertEqual(expire_params[2], "tenant-a")
+        self.assertEqual(expire_params[3], ["decision-bad"])
+        self.assertTrue(
+            any(
+                params[1] == "2026-02" and params[2] == "workbench_reconciliation_decision_expired"
+                for _sql, params in connection.fetch_one_calls
+            )
+        )
+
 
 class RepositoryRecordingConnection:
-    def __init__(self) -> None:
+    def __init__(self, *, fetch_all_rows: list[dict[str, object]] | None = None) -> None:
         self.execute_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_all_rows = list(fetch_all_rows or [])
 
     def execute(self, sql: str, params: tuple = ()) -> int:
         self.execute_calls.append((" ".join(sql.lower().split()), params))
@@ -150,6 +233,10 @@ class RepositoryRecordingConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, int]:
         self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
         return {"source_version": 1}
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+        return list(self.fetch_all_rows)
 
 
 if __name__ == "__main__":
