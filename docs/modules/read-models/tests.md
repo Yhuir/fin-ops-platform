@@ -6,10 +6,12 @@
 
 - 页面入口：无独立页面；所有列表/统计页面都依赖 read model freshness/status 语义。
 - API client：`web/src/features/*/api.ts` 中消费 `read_model_status`、`read_model_stale_reasons`、`refresh_enqueued`、`source_versions` 的 API mapper。
+- 操作闭环 API client：`web/src/features/operationBarrier/api.ts` 只轮询后端 freshness barrier，不能在前端自行推断 read model fresh。
 - 后端 route：`backend/src/fin_ops_platform/app/server.py` 与 `backend/src/fin_ops_platform/app/routes_*.py` 中所有 read model 查询型 endpoint。
 - Service / repository：
   - `backend/src/fin_ops_platform/services/read_model_query_gateway.py`
   - `backend/src/fin_ops_platform/services/read_model_refresh_gateway.py`
+  - `backend/src/fin_ops_platform/services/operation_freshness_barrier.py`
   - `backend/src/fin_ops_platform/services/read_model_scope_policy.py`
   - `backend/src/fin_ops_platform/services/read_model_scope_contract.py`
   - `backend/src/fin_ops_platform/services/read_model_readiness.py`
@@ -47,6 +49,7 @@
 | background job queued/running/succeeded/failed | 适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_readiness_reporter.py` | 后台任务 UI 属 app-health/background-jobs 模块 | P1 |
 | cache hit/cache miss | 适用 | `tests/test_read_model_query_gateway.py` | Redis 真连接不在本地单测覆盖 | P2 |
 | authenticated HTTP SLO fresh gate | 适用 | `tests/test_http_slo_probe.py` | 真实生产登录态 HTTP SLO 需发布后运行；本地覆盖 probe 语义和默认参数 | P1 |
+| operation freshness barrier | 适用 | `tests/test_operation_freshness_barrier.py`、`tests/test_app_health_api.py`、`web/src/test/OperationBarrierApi.test.ts` | 真实生产写操作后的 barrier latency 需发布后用登录态 scenario 证明 | P1 |
 | external dependency timeout/failure | 不直接适用 | runtime/app-health 模块覆盖依赖状态 | OA/Redis/RabbitMQ/PostgreSQL 真失败需 staging | P2 |
 | frontend loading | 间接适用 | 业务页面测试 | 本模块无 UI | 不适用 |
 | frontend empty | 间接适用 | 业务页面测试 | 本模块无 UI | 不适用 |
@@ -68,8 +71,8 @@
 | 1. Business core unit tests | 适用 | `tests/test_read_model_freshness.py`、`tests/test_read_model_refresh_gateway.py` | source version normalize、fresh/stale/missing/schema/source mismatch、scope normalize/validate/dedupe | 无 P0 缺口 | P1 | 新增 read model 特殊 scope policy 时需补业务规则测试 |
 | 2. Service-layer tests | 适用 | `tests/test_read_model_query_gateway.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_read_model_scope_contract.py`、`tests/test_read_model_readiness_reporter.py` | gateway 委托 queue、cache hit/miss、missing/stale 入队、scope contract 检查/清理、repair manifest、audit、rollback、readiness 成功/失败记录 | 无 P0 缺口 | P1 | 真实 repository/DB 清理需 dry-run |
 | 3. API contract tests | 按需适用 | `tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_generic_cost_statistics_enqueue_expands_month_scopes` 和各业务 API tests | API 必须透出 `read_model_status`、`refresh_enqueued`、`stale_reasons` 等关键字段 | 本模块不拥有单一 HTTP contract；需各模块继续补齐 | P1 | 如果业务 route 绕过 gateway，可能只在模块 API tests 暴露 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_read_model_*`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_queue.py` | dirty scope/outbox durable truth、worker lifecycle 使用 gateway、Redis 只缓存 fresh payload、readiness scope 状态、current uncovered outbox failure 不被清理 | 无 P0 缺口 | P1 | Redis/RabbitMQ 真连接属于 runtime/staging 风险 |
-| 5. Frontend component and interaction tests | 间接适用 | `web/src/test/*Page.test.tsx`、`web/src/test/domainEvents.test.ts` | 页面必须正确消费 fresh/refreshing/stale/empty/error | 本模块无 UI；由业务页面矩阵继续审计 | P1 | 页面可能把 refreshing 空 rows 当真实空结果，需业务模块逐一保护 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_read_model_*`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_queue.py`、`tests/test_operation_freshness_barrier.py` | dirty scope/outbox durable truth、worker lifecycle 使用 gateway、Redis 只缓存 fresh payload、readiness scope 状态、current uncovered outbox failure 不被清理、barrier 只读 runtime facts | 无 P0 缺口 | P1 | Redis/RabbitMQ 真连接属于 runtime/staging 风险 |
+| 5. Frontend component and interaction tests | 间接适用 | `web/src/test/*Page.test.tsx`、`web/src/test/domainEvents.test.ts`、`web/src/test/OperationBarrierApi.test.ts` | 页面必须正确消费 fresh/refreshing/stale/empty/error；写操作 overlay 必须等待后端 barrier fresh 才消失 | 真实浏览器多页面写操作需生产/Playwright smoke | P1 | 页面可能把 refreshing 空 rows 当真实空结果，需业务模块逐一保护 |
 | 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、各业务 integration tests | 写入 -> dirty scope -> worker/readiness -> 页面/API 的关键路径 | 完整导入到 worker 投影端到端不在本模块集中覆盖 | P2 | 生产 worker drain 和历史数据需 dry-run/smoke |
 | 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_scope_contract.py` | runtime 边界不被绕过；service 不 import HTTP/auth；producer 不绕过 gateway；旧非法 scope 可检测/清理 | 无 P0 缺口 | P1 | 新增 producer 时必须同步边界守卫 |
 
@@ -86,6 +89,7 @@
 - API miss smoke：业务 API 没有 SQL view 时，`ReadModelQueryGateway` 返回 refreshing 空 payload，设置 `refresh_enqueued=true`，并通过 `ReadModelRefreshGateway` 入队规范 scope。
 - Source version stale smoke：SQL view 存在但 source/schema 不匹配时，API 不能标 fresh；应返回 refreshing/stale reasons 并入队 refresh，且不能写 Redis fresh cache。
 - Worker readiness smoke：read model worker 成功后记录 readiness；失败时记录 failed/unavailable 类状态；fan-out-only 结果不能写假 fresh。
+- Operation barrier smoke：写操作返回 affected scopes 后，前端轮询 `/api/operation-barrier/status`；后端基于 current-effective readiness/dirty/outbox 判定 fresh/refreshing/blocked，blocked 必须返回具体 target，不能关闭 overlay 后让页面显示旧关系。
 - Scope contract smoke：生产旧 dirty/outbox/readiness scope 可 dry-run 检测，repair manifest 必须区分已覆盖历史 failure 与 current uncovered blocker；`--apply` 只删除非规范旧状态、补投可归一化 replacement scope、记录 audit/rollback，不清理 current uncovered blocker。
 - Write operation attribution smoke：Workbench/no-OA 等高影响写操作必须把 action metadata 透传到 durable refresh request，`write_operation_slo_audit` 只能在 required scopes 都按 operation profile fresh 后通过；scenario discovery 生成的 mutating scenario 默认需要人工审批。
 
@@ -96,6 +100,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_platform_runtime_boundary_guards -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_generic_cost_statistics_enqueue_expands_month_scopes -v
+python3 -m pytest tests/test_operation_freshness_barrier.py tests/test_app_health_api.py -q
+cd web && npm test -- --run src/test/OperationBarrierApi.test.ts
 bash scripts/verify.sh docs
 ```
 

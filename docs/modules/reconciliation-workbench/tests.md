@@ -15,7 +15,7 @@
 | Query facade / Redis cache | `WorkbenchQueryFacade`、groups page cache warmer | 只缓存 fresh payload；refreshing/stale/unavailable 不写 Redis；query timeout 有明确 refreshing/unavailable |
 | Matching dirty scope | workbench matching dirty queue/worker | lifecycle 只 mark dirty；worker drain matching；失败不回退 legacy dirty scope |
 | Relation read model | `workbench_relation` | 批量账务、银行明细 relation tags、下游 invoice lifecycle/cost/tax/search |
-| 前端交互 | `ReconciliationWorkbenchPage`、`CandidateGroupGrid`、selection hooks、column/filter tests | loading/refreshing/stale/error、权限禁用、三栏 selection、详情、筛选排序、domain event 刷新、后台刷新期间局部 pending row lock |
+| 前端交互 | `ReconciliationWorkbenchPage`、`CandidateGroupGrid`、selection hooks、column/filter tests、global operation overlay | loading/refreshing/stale/error、权限禁用、三栏 selection、详情、筛选排序、domain event 刷新、写操作期间全屏 operation pending |
 | 跨页面 fan-out | bank details、pending invoices、batch accounting、turnover ledger、cost statistics、App Health | relation 确认/撤回后旧页面不能读 stale/empty 伪 fresh |
 
 ## 场景覆盖清单
@@ -42,7 +42,7 @@
 | 外部往来 bank-only open 规则 | P0 | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx` | covered | `turnover_manual_closure` 是共同事实源但不再是 bank-only paired 例外；三栏补齐前留 open。 |
 | OA offset / 附件上下文 repair | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_command_service.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | OA 附件发票冲抵自动闭环和缺失附件上下文 repair 必须通过 relation command service 写入。 |
 | 前端 action 后 emit `workbenchRelationUpdated` | P1 | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/CandidateGroupGrid.test.tsx`、页面事件 listener tests | covered | 保护当前页面/同会话刷新提示。 |
-| 前端 loading/stale/error/permission | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx` | covered for current gates | Workbench stale/loading 不全局禁用无关写；OA dirty/refreshing 仍禁写；提交成功后局部锁刚操作 group；OA 申请人列详情 icon 和第二行时间 chip 受交互测试保护。 |
+| 前端 loading/stale/error/permission/operation overlay | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | covered for current gates | Workbench stale/loading 不全局禁用无关写；OA dirty/refreshing 仍禁写；提交成功后不做本地 optimistic paired/open 重排，必须等待 operation barrier 和 active generation fresh；OA 申请人列详情 icon 和第二行时间 chip 受交互测试保护。 |
 | 前端三栏列布局与选择状态 | P1 | `web/src/test/WorkbenchColumns.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchSelectionHook.test.tsx` | covered | 银行详情 icon 移到对方户名、发票详情 icon 移到发票号码、发票金额列合并、seller chip 第三行；打开详情不再让“已选 0”的行呈 selected 高亮。 |
 | 真实生产 active generation 回放 | P2 | `fin_ops_platform.tools.audit_workbench_relation_display`、`fin_ops_platform.tools.audit_object_identity`、运维 runbook | covered by production dry-run | 发布前或生产修复后用只读审计验证 active relation 与 active Workbench generation 的同组展示、重复 visible owner 和 all-scope 滞后；发现问题只通过正式 refresh/repair contract 处理。 |
 
@@ -73,6 +73,7 @@
 | 2026-06-14 | withdraw history 中未标记 manual snapshot 或同 row-set snapshot 被默认恢复，导致撤回预览/提交后仍把流水和发票显示在同一行。 | `tests/test_workbench_pair_relation_service.py::WorkbenchPairRelationServiceTests::test_withdraw_ignores_historical_unmarked_manual_before_relation`、`tests/test_workbench_pair_relation_service.py::WorkbenchPairRelationServiceTests::test_withdraw_ignores_explicit_restorable_snapshot_with_same_row_set`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_withdraw_link_splits_bank_invoice_rows_when_history_snapshot_is_not_restorable`、`tests/test_workbench_relation_history_replay_tool.py::WorkbenchRelationHistoryReplayToolTests::test_dry_run_reports_relation_issues_without_writing` | covered |
 | 2026-06-12 | App Health 把 workbench read model dirty/stale/rebuilding scopes 映射成 `oaSync=dirty`，导致后台刷新期间关联台全局禁写。 | `web/src/test/AppHealthStatusContext.test.tsx::reports yellow when the backend says the workbench read model is stale`、`web/src/test/WorkbenchSelection.test.tsx::workbench stale refresh does not globally disable selected group actions`、`web/src/test/WorkbenchSelection.test.tsx::OA dirty sync still disables selected group actions` | covered |
 | 2026-06-12 | relation submit 成功后后台刷新未结束期间，用户可能对刚操作 group 触发二次写；旧方案也容易把全页面锁住。 | `web/src/test/WorkbenchSelection.test.tsx::confirm link locks only the operated group while the background refresh is pending` | covered |
+| 2026-06-14 | 写操作成功后前端本地 optimistic 重排导致几秒内显示旧/假关系，或 overlay 在后端 read model 未 fresh 前消失。 | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`tests/test_operation_freshness_barrier.py` | covered |
 | 2026-06-12 | 未配对区只有部分 relation snapshot group 会带入整组，普通自动候选需要手动点多栏，无法用统一按钮拆分候选。 | `web/src/test/WorkbenchSelectionModel.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_splits_pure_candidate_group_without_relation_history` | covered |
 | 2026-06-12 | 个人暂借款还清先写 exception case 再 direct pair relation，绕过 relation command freshness/审计边界。 | `tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_personal_advance_repayment_delegates_relation_write_to_command_service`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_personal_advance_repayment_fails_fast_without_relation_command_service`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_personal_advance_repayment_uses_relation_command_boundary` | covered |
 | 2026-06-12 | Workbench exception closed apply 直接调用 pair service 创建 `normal_match` / `oa_exempt` relation，绕过统一 freshness/审计边界。 | `tests/test_workbench_exception_application_service.py::WorkbenchExceptionApplicationServiceTests::test_apply_closed_exception_delegates_pair_relation_to_command_service`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_workbench_exception_application_uses_relation_command_boundary` | covered |
@@ -96,7 +97,8 @@
 3. `paired relation -> withdraw preview locked by preview_id/expected_versions -> previous state restored or no-history unlinked -> dirty scopes/readiness/App Health 收敛`
 4. `open automatic candidate -> group selection -> split_candidate preview -> submit suppresses candidate -> workbench refresh no longer groups the same candidate`
 5. `ETC business batch submitted -> etc_invoice_summary open row -> OA/bank/invoice 三项确认 -> paired 区展开明细`
-6. `Workbench query refreshing/stale -> 页面展示刷新/陈旧状态 -> Redis 不缓存 stale payload -> 无关 group 可继续操作 -> 后续 fresh 后更新`
+6. `Workbench query refreshing/stale -> 页面展示刷新/陈旧状态 -> Redis 不缓存 stale payload -> 后续 fresh 后更新`
+7. `confirm/withdraw/exception/ignore 写操作 -> 写 API 成功 -> operation barrier 等待目标 read model/scope fresh -> Workbench active generation 重新读取 fresh -> 全屏 overlay 释放`
 
 ## 本模块验证命令
 
@@ -109,6 +111,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_audit_workbench_relation_d
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_status_api_exposes_dirty_scopes_and_worker_lag -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_keeps_oa_bank_exact_sum_candidate_in_one_open_group tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v
 cd web && npm test -- --run src/test/WorkbenchApi.test.ts src/test/WorkbenchApiRuntimePath.test.ts src/test/WorkbenchSelection.test.tsx src/test/CandidateGroupGrid.test.tsx
+cd web && npm test -- --run src/test/GlobalOperationOverlayContext.test.tsx src/test/OperationBarrierApi.test.ts
 bash scripts/verify.sh docs
 ```
 

@@ -48,6 +48,7 @@
 - Read model 保存：`save_no_oa_bank_batches` 写入的是当前完整 no-OA snapshot；缺席于新 snapshot 的旧 draft/conflict/submitted row 必须从 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows` 移除，避免旧未提交/冲突批次残留。
 - 自动决策清理：submitted no-OA batch 的 `bank_transaction_ids` 是历史 cleanup 的闭环占用证据。即使对应 Workbench relation snapshot 已取消或暂时缺失，`oa_bank_exact_sum` repair dry-run 也必须把这些银行流水视为已闭环，避免旧自动 decision 重新污染关联台。
 - 撤回路径：已提交批次必须从 no-OA 批次 API 撤回，撤回通过 relation command service 取消 Workbench active relation，并使流水回到可匹配状态。
+- 操作闭环：前端 submit-selection、单批次 submit、withdraw 和 tag-selection 保存必须接入 `GlobalOperationOverlayProvider`。写 API 成功后等待 `no_oa_bank_batch` operation barrier 对 affected months/current scope fresh，再重新加载列表或标签选择；overlay 关闭不能依赖本地列表移动或前端事件。
 - App Status：`no_oa_bank_batches` domain 绑定 `no-oa-bank-batch` worker、`no_oa_bank_batch` read model、`no_oa_bank_batch.read_model.refresh` job type。
 
 不属于本模块事实源：

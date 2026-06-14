@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { sidebarGroups } from "../components/shell/sidebarItems";
+import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
@@ -265,9 +266,11 @@ function cssRule(source: string, selector: string) {
 
 function renderPage() {
   return render(
-    <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
-      <NoOaBankBatchPage />
-    </PageRuntimeProvider>,
+    <GlobalOperationOverlayProvider>
+      <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
+        <NoOaBankBatchPage />
+      </PageRuntimeProvider>
+    </GlobalOperationOverlayProvider>,
   );
 }
 
@@ -320,6 +323,9 @@ function installFetchMock(payload = listPayload) {
     }
     if (url.pathname === "/api/no-oa-bank-batches/batch-submitted-salary/withdraw") {
       return jsonResponse({ batch: payload.batches[2], affected_months: ["2026-05"], workbench_rebuild_queued: true, results: [] });
+    }
+    if (url.pathname === "/api/operation-barrier/status") {
+      return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
     }
     return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
   });
@@ -501,20 +507,17 @@ describe("NoOaBankBatchPage", () => {
   });
 
   test("main and child label rails support keyboard activation", async () => {
+    const user = userEvent.setup();
     installFetchMock();
     renderPage();
 
     const welfareMain = await screen.findByRole("button", { name: "福利 1批 · 5条" });
-    act(() => {
-      welfareMain.focus();
-      fireEvent.keyDown(welfareMain, { key: "Enter" });
-    });
+    welfareMain.focus();
+    await user.keyboard("{Enter}");
 
     const holidayChild = await screen.findByRole("button", { name: "过节费 1批 · 5条" });
-    act(() => {
-      holidayChild.focus();
-      fireEvent.keyDown(holidayChild, { key: " " });
-    });
+    holidayChild.focus();
+    await user.keyboard(" ");
 
     await waitFor(() => expect(holidayChild).toHaveAttribute("aria-pressed", "true"));
   });
@@ -689,6 +692,9 @@ describe("NoOaBankBatchPage", () => {
       }
       if (url.pathname === "/api/no-oa-bank-batches/submit-selection") {
         return jsonResponse({ affected_case_ids: [], affected_months: ["2026-05"] });
+      }
+      if (url.pathname === "/api/operation-barrier/status") {
+        return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
       }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
     });

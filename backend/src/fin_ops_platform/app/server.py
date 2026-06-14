@@ -177,6 +177,10 @@ from fin_ops_platform.services.input_invoice_usage_service import (
 )
 from fin_ops_platform.services.input_invoice_usage_read_model_detail_service import InputInvoiceUsageReadModelDetailService
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
+from fin_ops_platform.services.operation_freshness_barrier import (
+    OperationFreshnessBarrierService,
+    targets_from_payload,
+)
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
@@ -1838,6 +1842,8 @@ class Application:
             return self._handle_api_app_health_stream(headers)
         if method == "GET" and route_path == "/api/app-health":
             return self._handle_api_app_health(headers)
+        if method == "POST" and route_path == "/api/operation-barrier/status":
+            return self._handle_api_operation_barrier_status(body, headers)
         if method == "GET" and route_path == "/api/operations/app-health-dashboard":
             return self._handle_api_operations_app_health_dashboard(headers)
         if method == "GET" and route_path == "/api/search":
@@ -4089,6 +4095,32 @@ class Application:
         assert session is not None
         snapshot = self._build_app_health_snapshot(session, started_at=started_at)
         return self._json_response(HTTPStatus.OK, snapshot)
+
+    def _handle_api_operation_barrier_status(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
+        session, error_response = self._resolve_app_health_session(headers)
+        if error_response is not None:
+            return error_response
+        assert session is not None
+        payload, body_error = self._load_json_body(body)
+        if body_error is not None:
+            return body_error
+        try:
+            targets = targets_from_payload(payload)
+        except ValueError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_operation_barrier_request", "message": str(exc)},
+            )
+        service = OperationFreshnessBarrierService(runtime_snapshot_provider=self._operation_barrier_runtime_snapshot)
+        return self._json_response(HTTPStatus.OK, service.status_payload(targets))
+
+    def _operation_barrier_runtime_snapshot(self) -> dict[str, object]:
+        state_store = getattr(self, "_state_store", None)
+        snapshot_loader = getattr(state_store, "app_status_runtime_snapshot", None)
+        if callable(snapshot_loader):
+            snapshot = snapshot_loader()
+            return snapshot if isinstance(snapshot, dict) else {}
+        return {"read_model_statuses": {}, "outbox_statuses": {}, "worker_statuses": {}}
 
     def _handle_api_app_health_stream(self, headers: dict[str, str] | None) -> Response:
         session, error_response = self._resolve_app_health_session(headers)

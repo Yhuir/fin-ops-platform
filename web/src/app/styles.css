@@ -14589,6 +14589,66 @@ body.column-layout-dragging {
   justify-content: center;
 }
 
+.global-operation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.42);
+  backdrop-filter: blur(5px);
+}
+
+.global-operation-overlay__panel {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 28px;
+  border: 1px solid #d8e1eb;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.26);
+  color: #243b53;
+  text-align: center;
+}
+
+.global-operation-overlay__title {
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.global-operation-overlay__body {
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #d8e1eb;
+  border-radius: 14px;
+  background: #f8fbff;
+  color: #486581;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.global-operation-overlay__spinner {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 2px solid #c6d8f0;
+  border-top-color: #155e75;
+  animation: action-status-spin 0.9s linear infinite;
+}
+
+.global-operation-overlay__actions {
+  display: flex;
+  justify-content: center;
+}
+
 .ignored-items-modal {
   width: min(1180px, calc(100vw - 48px));
   max-height: min(78vh, 860px);

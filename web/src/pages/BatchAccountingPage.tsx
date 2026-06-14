@@ -4,8 +4,10 @@ import { AlertTriangle, RefreshCw, Search, X } from "lucide-react";
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { ApiClientError } from "../features/apiClient";
+import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -98,6 +100,11 @@ function oaSearchText(row: BatchAccountingOaRow) {
 
 function mutationEventDetail(result: { affectedMonths?: string[] }) {
   return { affectedMonths: result.affectedMonths ?? [] };
+}
+
+function monthFromBankRow(row: BatchAccountingBankRow | null) {
+  const month = String(row?.tradeTime ?? "").slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(month) ? month : "all";
 }
 
 function stringListFromPayload(value: unknown) {
@@ -197,6 +204,7 @@ function AmountMismatchWarning({
 }
 
 export default function BatchAccountingPage() {
+  const { runOperation } = useGlobalOperationOverlay();
   const [bankYear, setBankYear] = useState(currentYear);
   const [oaYear, setOaYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
@@ -275,9 +283,35 @@ export default function BatchAccountingPage() {
     && isValidYear(bankYear)
     && isValidYear(oaYear)
     && !mutating
-    && !readModelNeedsRefresh
     && (differenceCents === 0 || differenceNote.trim().length > 0);
-  const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating && !readModelNeedsRefresh;
+  const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating;
+
+  const applyBatchAccountingPayload = useCallback((nextPayload: BatchAccountingResponse) => {
+    setPayload(nextPayload);
+    setBankRowsById((current) => ({
+      ...current,
+      ...Object.fromEntries(nextPayload.bankRows.map((row) => [row.id, row])),
+    }));
+    const relationOaRows = Object.values(nextPayload.relationsByBankRowId).flatMap((relation) => relation.oaRows);
+    setOaRowsById((current) => ({
+      ...current,
+      ...Object.fromEntries([...nextPayload.oaRows, ...relationOaRows].map((row) => [row.id, row])),
+    }));
+    setSelectedBankRowId((current) => (
+      current
+        ? current
+        : nextPayload.bankRows[0]?.id ?? null
+    ));
+  }, []);
+
+  const reloadDataAfterMutation = useCallback(async () => {
+    if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
+      return null;
+    }
+    const nextPayload = await fetchBatchAccounting({ bankYear, oaYear, bucket });
+    applyBatchAccountingPayload(nextPayload);
+    return nextPayload;
+  }, [applyBatchAccountingPayload, bankYear, bucket, oaYear]);
 
   const loadData = useCallback((signal?: AbortSignal) => {
     if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
@@ -286,23 +320,7 @@ export default function BatchAccountingPage() {
     setLoading(true);
     setError(null);
     fetchBatchAccounting({ bankYear, oaYear, bucket, signal })
-      .then((nextPayload) => {
-        setPayload(nextPayload);
-        setBankRowsById((current) => ({
-          ...current,
-          ...Object.fromEntries(nextPayload.bankRows.map((row) => [row.id, row])),
-        }));
-        const relationOaRows = Object.values(nextPayload.relationsByBankRowId).flatMap((relation) => relation.oaRows);
-        setOaRowsById((current) => ({
-          ...current,
-          ...Object.fromEntries([...nextPayload.oaRows, ...relationOaRows].map((row) => [row.id, row])),
-        }));
-        setSelectedBankRowId((current) => (
-          current
-            ? current
-            : nextPayload.bankRows[0]?.id ?? null
-        ));
-      })
+      .then(applyBatchAccountingPayload)
       .catch((caught: unknown) => {
         if (isAbortLikeError(caught)) {
           return;
@@ -311,7 +329,7 @@ export default function BatchAccountingPage() {
         setError(caught instanceof Error ? caught.message : "批量账务数据加载失败");
       })
       .finally(() => setLoading(false));
-  }, [bankYear, bucket, oaYear]);
+  }, [applyBatchAccountingPayload, bankYear, bucket, oaYear]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -378,28 +396,42 @@ export default function BatchAccountingPage() {
       source: "batch_accounting_mutation",
     });
     setFeedback({ severity: "success", message: result.message || fallbackMessage });
-    loadData();
   };
 
   const handleSubmit = async () => {
     if (!selectedBankRow || !canSubmit) {
       return;
     }
-    setMutating(true);
-    try {
-      const result = await submitBatchAccounting({
-        bankYear,
-        oaYear,
-        bankRowId: selectedBankRow.id,
-        oaRowIds: selectedOaRows.map((row) => row.id),
-        expectedVersion: selectedBankRow.version,
-        note: isAmountMismatch ? differenceNote : "",
-      });
-      handleMutationComplete("已关联批量账务流水与 OA。", result);
-    } catch (caught) {
-      setFeedback({ severity: "error", message: mutationErrorMessage(caught, "关联OA项与流水失败") });
-    } finally {
-      setMutating(false);
+    const result = await runOperation({
+      loadingMessage: "正在保存批量账务关联...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const submitResult = await submitBatchAccounting({
+            bankYear,
+            oaYear,
+            bankRowId: selectedBankRow.id,
+            oaRowIds: selectedOaRows.map((row) => row.id),
+            expectedVersion: selectedBankRow.version,
+            note: isAmountMismatch ? differenceNote : "",
+          });
+          setMessage("正在等待批量账务关联读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths("workbench_relation", submitResult.affectedMonths, monthFromBankRow(selectedBankRow)),
+          );
+          setMessage("正在刷新批量账务关联数据...");
+          await reloadDataAfterMutation();
+          return submitResult;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => mutationErrorMessage(caught, "关联OA项与流水失败"),
+    });
+    if (result.status === "success") {
+      handleMutationComplete("已关联批量账务流水与 OA。", result.value);
+    } else {
+      setFeedback({ severity: "error", message: mutationErrorMessage(result.error, "关联OA项与流水失败") });
     }
   };
 
@@ -407,20 +439,38 @@ export default function BatchAccountingPage() {
     if (!selectedBankRow?.relationId || !withdrawReason.trim() || mutating) {
       return;
     }
-    setMutating(true);
-    try {
-      const result = await withdrawBatchAccounting({
-        relationId: selectedBankRow.relationId,
-        expectedVersion: selectedBankRow.version,
-        reason: withdrawReason.trim(),
-      });
-      setWithdrawOpen(false);
-      setWithdrawReason("");
-      handleMutationComplete("已撤回批量账务关联。", result);
-    } catch (caught) {
-      setFeedback({ severity: "error", message: mutationErrorMessage(caught, "撤回关联失败") });
-    } finally {
-      setMutating(false);
+    const relationId = selectedBankRow.relationId;
+    const expectedVersion = selectedBankRow.version;
+    const reason = withdrawReason.trim();
+    const result = await runOperation({
+      loadingMessage: "正在撤回批量账务关联...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const withdrawResult = await withdrawBatchAccounting({
+            relationId,
+            expectedVersion,
+            reason,
+          });
+          setWithdrawOpen(false);
+          setWithdrawReason("");
+          setMessage("正在等待批量账务关联读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths("workbench_relation", withdrawResult.affectedMonths, monthFromBankRow(selectedBankRow)),
+          );
+          setMessage("正在刷新批量账务关联数据...");
+          await reloadDataAfterMutation();
+          return withdrawResult;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => mutationErrorMessage(caught, "撤回关联失败"),
+    });
+    if (result.status === "success") {
+      handleMutationComplete("已撤回批量账务关联。", result.value);
+    } else {
+      setFeedback({ severity: "error", message: mutationErrorMessage(result.error, "撤回关联失败") });
     }
   };
 

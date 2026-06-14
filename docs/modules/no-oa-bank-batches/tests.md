@@ -7,6 +7,7 @@
 | 影响面 | 当前事实源 | 需要保护的行为 |
 | --- | --- | --- |
 | 页面和 API client | `web/src/pages/NoOaBankBatchPage.tsx`、`web/src/features/noOaBankBatches/api.ts` | 三栏布局、标签抽屉、提交选择、内部往来提交、撤回 dialog、stale retry、跨账户选择保护 |
+| Operation overlay | `GlobalOperationOverlayProvider`、`web/src/features/operationBarrier/api.ts` | submit-selection、submit、withdraw、tag-selection 保存后等待 `no_oa_bank_batch` barrier fresh，再 reload；失败不假装同步 |
 | API contract | `backend/src/fin_ops_platform/app/routes_no_oa_bank_batches.py`、`docs/dev/api-contracts.md` | list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit 的 response shape、错误码、version、affected months、relation read model freshness 字段 |
 | Business core | `NoOaBankBatchService`、`NoOaManagedRulePolicy` | draft/submitted/withdrawn/stale/conflict、内部往来配对、active relation 占用排除、legacy relation migration/repair/consolidation command 委托 |
 | Application service | `NoOaBankBatchApplicationService` | read model fallback、tag selection、submit/withdraw、relation command service 委托、rollback、after_mutation、derived lifecycle、durable queue enqueue |
@@ -49,7 +50,7 @@
 | 2. Service-layer tests | 适用 | `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_bankdetail_write_uow_contract.py` | 已覆盖 relation command service 委托、after_mutation persist/non-persist、durable queue enqueue、stale expected version、batch/relation/audit/dirty/outbox 同事务目标和 rollback。 |
 | 3. API contract tests | 适用 | `tests/test_no_oa_bank_batch_api.py`、`tests/test_no_oa_bank_batch_routes.py`、`tests/test_no_oa_bank_batch_tag_selection_api.py` | 已覆盖 list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit、409 version conflict、relation freshness 诊断、404 unknown、invalid JSON、persistence error、partial results。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 missing SQL read model 不同步重建、stale SQL source versions 不伪装 fresh、detail 不刷新全量、PostgreSQL save full snapshot 清理缺席旧 no-OA read model row、worker stale source version skip、worker refresh 不执行 relation repair 写入、月度 refresh 只读目标月并保留其它月份批次、依赖 Bankdetail non-fresh 时不写 failed readiness、worker registry/App Status 登记。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts` | 已覆盖三栏布局、tag drawer、主/子标签键盘操作、提交选择、跨账户选择保护、内部往来 batch submit、撤回、stale polling、route unmount cleanup、保持 stale rows 可见。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | 已覆盖三栏布局、tag drawer、主/子标签键盘操作、提交选择、跨账户选择保护、内部往来 batch submit、撤回、operation overlay、stale polling、route unmount cleanup、保持 stale rows 可见。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py` | 已覆盖 Workbench confirm internal transfer 走 no-OA batch、no-OA 页面先提交后 Workbench 再确认同一组时复用同一 fact、非内部往来保持 manual relation、混合 internal transfer 拒绝、no-OA relation 配对/撤回回到 open。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_pair_relation_service.py`、`tests/test_bank_auto_tag_rules_api.py`、domain event tests | 已保护旧 summary/category labels、legacy relation collapsed summaries、active relation row 独占、legacy repair 不回退 direct pair write、Bankdetail tag/rule changes refresh no-OA、前端事件不在 route unmount 后 replay。 |
 
@@ -84,6 +85,7 @@
 | worker stale source version / relation repair 边界 | `test_stale_source_version_does_not_rebuild_or_overwrite_read_model`、`test_refresh_does_not_repair_workbench_relations_from_read_model_path` |
 | worker 月度刷新和 Bankdetail 依赖 | `test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches`、`test_refresh_reads_effective_categories_once_for_same_rows`、`tests/test_read_model_readiness_reporter.py::ReadModelReadinessReporterTests::test_dependency_not_fresh_exception_records_refreshing_not_failed` |
 | 前端 stale polling | `shows read model stale state and reloads until the no OA read model is fresh`、`cleans up stale read model retry reload after route unmount` |
+| 前端 operation-to-fresh closure | `submit-selection`、单批次 submit、withdraw、tag-selection 保存后保持全屏 overlay，等待 `no_oa_bank_batch` barrier fresh，再 reload |
 | 前端分类/规则事件刷新 | `refreshes tag selection, list, and detail cache after bank transaction category updates`、`refreshes tag selection, list, and detail cache after bank auto tag rules update` |
 
 ## 历史 bug 回归库
@@ -106,6 +108,7 @@
 | submitted no-OA batch 对应 relation 已取消或暂缺时，旧 `oa_bank_exact_sum` decision 继续复用 batch 内银行流水 | `tests/test_workbench_reconciliation_decision_cleanup.py::WorkbenchReconciliationDecisionCleanupServiceTests::test_plan_expires_decisions_overlapping_submitted_no_oa_batches`、`tests/test_workbench_reconciliation_decision_store.py::WorkbenchReconciliationDecisionStoreTests::test_repository_cleanup_audit_lists_active_relation_overlaps_in_matching_window` |
 | 标签规则变更后 no-OA 标签选择或候选未刷新 | `tests/test_bank_auto_tag_rules_api.py`、前端 category/rules event tests |
 | route unmount 后 stale polling 继续 replay | `web/src/test/NoOaBankBatchPage.test.tsx` route unmount cleanup test |
+| 写操作成功但 no-OA read model 仍 refreshing 时页面提前可操作，导致用户看到旧批次或重复提交 | `web/src/test/NoOaBankBatchPage.test.tsx` operation overlay 回归、`web/src/test/OperationBarrierApi.test.ts` |
 
 新增线上或手工发现 bug 时，必须先在本节补复现测试名称，再修实现。
 
@@ -118,6 +121,7 @@
 3. Workbench 选择两条 internal_transfer 银行流水 -> confirm-link 委托 no-OA batch submit -> Workbench active pair relation 使用 `relation_mode=no_oa_bank_batch`。
 4. submitted batch 撤回 -> pair relation cancel -> 流水回到未配对/open。
 5. SQL read model stale/missing -> API 返回当前/空 payload + refresh enqueued，不同步 rebuild，不伪装 fresh。
+6. submit/withdraw/tag-selection -> 全屏 overlay -> `no_oa_bank_batch` operation barrier fresh -> reload list/detail/tag selection -> overlay 释放。
 
 真实环境 smoke 仍需在发布前执行：
 
@@ -137,7 +141,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_service t
 前端目标验证：
 
 ```bash
-cd web && npm test -- --run src/test/NoOaBankBatchApi.test.ts src/test/NoOaBankBatchPage.test.tsx src/test/domainEvents.test.ts src/test/useActiveFinanceDomainEvent.test.tsx
+cd web && npm test -- --run src/test/NoOaBankBatchApi.test.ts src/test/NoOaBankBatchPage.test.tsx src/test/GlobalOperationOverlayContext.test.tsx src/test/OperationBarrierApi.test.ts src/test/domainEvents.test.ts src/test/useActiveFinanceDomainEvent.test.tsx
 ```
 
 文档验证：

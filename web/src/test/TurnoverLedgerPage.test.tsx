@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
+import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import TurnoverLedgerPage from "../pages/TurnoverLedgerPage";
@@ -43,11 +44,13 @@ function renderTurnoverLedgerPage(session: SessionPayload = fullSession) {
     refresh: () => undefined,
   };
   return render(
-    <SessionContext.Provider value={value}>
-      <PageSessionStateProvider>
-        <TurnoverLedgerPage />
-      </PageSessionStateProvider>
-    </SessionContext.Provider>,
+    <GlobalOperationOverlayProvider>
+      <SessionContext.Provider value={value}>
+        <PageSessionStateProvider>
+          <TurnoverLedgerPage />
+        </PageSessionStateProvider>
+      </SessionContext.Provider>
+    </GlobalOperationOverlayProvider>,
   );
 }
 
@@ -848,6 +851,9 @@ function installTurnoverLedgerFetch(options: {
     if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/withdraw" && method === "POST") {
       return Response.json({ relation_id: "rel-personal-1", status: "withdrawn" });
     }
+    if (url.pathname === "/api/operation-barrier/status" && method === "POST") {
+      return Response.json({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
+    }
     throw new Error(`Unexpected request ${method} ${url.pathname}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -1392,7 +1398,7 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).queryByText("rel-jiaxiaohua")).not.toBeInTheDocument();
   });
 
-  test("disables turnover write actions while grouped read model is stale", async () => {
+  test("shows grouped read model stale warning without blocking row actions", async () => {
     const user = userEvent.setup();
     installTurnoverLedgerFetch({
       groupedOverrides: {
@@ -1404,14 +1410,13 @@ describe("Turnover ledger page", () => {
 
     const page = await screen.findByTestId("turnover-ledger-page");
     expect(await within(page).findByText("往来款台账正在刷新，当前展示的是非最新数据。")).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeDisabled();
 
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
     await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
 
-    expect(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" })).toBeDisabled();
-    expect(within(table).getByRole("button", { name: "编辑流水 bank-company-expense-1000" })).toBeDisabled();
+    expect(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" })).toBeEnabled();
+    expect(within(table).getByRole("button", { name: "编辑流水 bank-company-expense-1000" })).toBeEnabled();
   });
 
   test("shows bank-detail tags as read-only in turnover management", async () => {

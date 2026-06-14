@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { sidebarGroups } from "../components/shell/sidebarItems";
+import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import BatchAccountingPage from "../pages/BatchAccountingPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
 
@@ -155,7 +156,11 @@ function cssRule(source: string, selector: string) {
 }
 
 function renderPage() {
-  return render(<BatchAccountingPage />);
+  return render(
+    <GlobalOperationOverlayProvider>
+      <BatchAccountingPage />
+    </GlobalOperationOverlayProvider>,
+  );
 }
 
 function installFetchMock() {
@@ -194,6 +199,9 @@ function installFetchMock() {
         affected_months: ["2026-02"],
         message: "已撤回批量账务关联。",
       }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.pathname === "/api/operation-barrier/status") {
+      return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
     }
     return new Response(JSON.stringify({ message: `Unhandled ${url.pathname}` }), { status: 404, headers: { "Content-Type": "application/json" } });
   });
@@ -507,7 +515,7 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
 
-  test("pauses submission when relation read model is not fresh", async () => {
+  test("shows relation read model warning without blocking canonical submit", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () => jsonResponse({
       ...unsubmittedPayload,
@@ -525,13 +533,7 @@ describe("BatchAccountingPage", () => {
     await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
-
-    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/batch-accounting/submit",
-      expect.anything(),
-    );
+    expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
   });
 
   test("shows operation guidance when relation read model refresh is not enqueued", async () => {
@@ -580,7 +582,9 @@ describe("BatchAccountingPage", () => {
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
-    expect(await screen.findByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01")).toBeInTheDocument();
+    const overlay = await screen.findByRole("dialog", { name: "全局操作进度" });
+    expect(within(overlay).getByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01")).toBeInTheDocument();
+    expect(screen.getAllByText("关联台关系读模型 stale，请刷新后再处理。 dirty_scope:2026-01 影响范围：2026-01").length).toBeGreaterThanOrEqual(1);
   });
 
   test("clears cached bank and OA selection when refreshed bank rows disappear", async () => {

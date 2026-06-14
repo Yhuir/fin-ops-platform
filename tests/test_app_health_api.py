@@ -7,6 +7,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
@@ -104,6 +105,68 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["version"], 1)
         self.assertIn("metrics", payload)
         self.assertEqual(payload["alerts"]["active"], [])
+
+    def test_operation_barrier_status_returns_runtime_readiness_contract(self) -> None:
+        app = build_application()
+        app._state_store = SimpleNamespace(
+            app_status_runtime_snapshot=lambda: {
+                "read_model_statuses": {
+                    "workbench_relation": {
+                        "status": "refreshing",
+                        "scopes": [
+                            {
+                                "scope_type": "workbench_relation",
+                                "scope_key": "2026-02",
+                                "status": "refreshing",
+                                "updated_at": "2026-06-14T10:00:00+00:00",
+                            }
+                        ],
+                    }
+                },
+                "outbox_statuses": {},
+                "worker_statuses": {"workbench-relation": {"status": "ready"}},
+            }
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/api/operation-barrier/status",
+            body=json.dumps({"targets": [{"read_model_key": "workbench_relation", "scope_key": "2026-02"}]}),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertFalse(payload["fresh"])
+        self.assertEqual(payload["targets"][0]["read_model_key"], "workbench_relation")
+        self.assertEqual(payload["targets"][0]["scope_key"], "2026-02")
+        self.assertEqual(payload["targets"][0]["worker_status"], "ready")
+
+    def test_operation_barrier_rejects_invalid_target_contract(self) -> None:
+        app = build_application()
+
+        response = app.handle_request(
+            "POST",
+            "/api/operation-barrier/status",
+            body=json.dumps({"targets": [{"scope_key": "all"}]}),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_operation_barrier_request")
+
+    def test_operation_barrier_rejects_non_object_target_entries(self) -> None:
+        app = build_application()
+
+        response = app.handle_request(
+            "POST",
+            "/api/operation-barrier/status",
+            body=json.dumps({"targets": ["workbench_relation"]}),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "invalid_operation_barrier_request")
 
     def test_app_health_reports_dirty_oa_scopes_as_busy_and_stale(self) -> None:
         app = build_application()

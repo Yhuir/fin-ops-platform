@@ -54,7 +54,7 @@
 2. 进项发票使用：恢复 session 中 filters/sort，rows API 使用恢复后的参数。
 3. 待找发票：header dropdown filters 与 AND field clauses 生效，refreshing 时禁用导出。
 4. 成本统计：表格 drilldown 后打开详情 dialog，导出中心按当前 view/filter 预览和下载。
-5. 往来款：read model stale 时禁用写动作，导出下载当前 tab。
+5. 往来款：read model stale 时显示诊断，写操作仍交给后端 stale precondition/canonical write safety，导出下载当前 tab。
 6. 导入预览：preview stale/error 清理旧预览并要求重新 preview。
 
 ## 模块验证命令

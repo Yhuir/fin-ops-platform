@@ -9,6 +9,7 @@ import AppTopBar from "../components/shell/AppTopBar";
 import BackgroundProgressBlock from "../components/common/BackgroundProgressBlock";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { AppHealthStatusProvider } from "../contexts/AppHealthStatusContext";
+import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import { ImportWorkflowDraftProvider } from "../contexts/ImportWorkflowDraftContext";
 import { ImportProgressProvider } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
@@ -190,7 +191,9 @@ export default function App() {
                 <AppChromeProvider initialShellHeaderMounted>
                   <BackgroundJobProgressProvider>
                     <AppHealthStatusProvider>
-                      <AppShell />
+                      <GlobalOperationOverlayProvider>
+                        <AppShell />
+                      </GlobalOperationOverlayProvider>
                     </AppHealthStatusProvider>
                   </BackgroundJobProgressProvider>
                 </AppChromeProvider>

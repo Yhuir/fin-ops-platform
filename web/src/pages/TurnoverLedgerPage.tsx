@@ -7,11 +7,13 @@ import StatePanel from "../components/common/StatePanel";
 import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
 import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedgerExtraDrawer";
 import TurnoverLedgerGroupedTable, { formatMoney, formatNullable } from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
+import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
 } from "../features/domainEvents";
+import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { ApiClientError } from "../features/apiClient";
 import {
@@ -285,6 +287,7 @@ function tagSubLabel(tag: TurnoverLedgerTagDefinition) {
 }
 
 export default function TurnoverLedgerPage() {
+  const { runOperation } = useGlobalOperationOverlay();
   const { canMutateData } = useSessionPermissions();
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
@@ -321,7 +324,7 @@ export default function TurnoverLedgerPage() {
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
   const readModelStatus = cleanText(ledger?.readModelStatus) || "fresh";
-  const ledgerActionsDisabled = readModelStatus !== "fresh";
+  const readModelNeedsRefresh = readModelStatus !== "fresh";
   const familySummaryMap = useMemo(() => new Map((ledger?.familySummaries ?? []).map((item) => [item.family, item])), [
     ledger?.familySummaries,
   ]);
@@ -353,16 +356,24 @@ export default function TurnoverLedgerPage() {
       .finally(() => setTagLoading(false));
   }, []);
 
+  const fetchLedger = useCallback((signal?: AbortSignal) => fetchTurnoverLedgerGrouped({
+    family,
+    direction: "all",
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    signal,
+  }), [family]);
+
+  const reloadLedgerAfterMutation = useCallback(async () => {
+    const nextLedger = await fetchLedger();
+    setLedger(nextLedger);
+    return nextLedger;
+  }, [fetchLedger]);
+
   const loadLedger = useCallback((signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
-    fetchTurnoverLedgerGrouped({
-      family,
-      direction: "all",
-      page: 1,
-      pageSize: DEFAULT_PAGE_SIZE,
-      signal,
-    })
+    fetchLedger(signal)
       .then(setLedger)
       .catch((caught: unknown) => {
         if (isAbortLikeError(caught)) {
@@ -371,7 +382,7 @@ export default function TurnoverLedgerPage() {
         setError(caught instanceof Error ? caught.message : "往来款台账加载失败");
       })
       .finally(() => setLoading(false));
-  }, [family]);
+  }, [fetchLedger]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -428,10 +439,6 @@ export default function TurnoverLedgerPage() {
   };
 
   const handleToggleClosureRow = (group: { groupId: string; counterpartyName: string; familyLabel: string }, row: TurnoverLedgerGroupedRow) => {
-    if (ledgerActionsDisabled) {
-      setToast({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再操作" });
-      return;
-    }
     const rowId = flowBankRowId(row);
     if (!rowId) {
       setToast({ severity: "error", message: "这条流水缺少银行流水 ID，无法选择" });
@@ -466,35 +473,50 @@ export default function TurnoverLedgerPage() {
     if (bankRowIds.length < 2) {
       return;
     }
-    setClosureSubmitting(true);
-    try {
-      const result = await confirmTurnoverClosure({
-        bankRowIds,
-        expectedVersions: closureExpectedVersions(selectedClosureRows),
-        idempotencyKey: closureIdempotencyKey(bankRowIds),
-      });
+    const selectedRows = selectedClosureRows;
+    const result = await runOperation({
+      loadingMessage: "正在确认外部往来闭环...",
+      action: async ({ setMessage }) => {
+        setClosureSubmitting(true);
+        try {
+          const closureResult = await confirmTurnoverClosure({
+            bankRowIds,
+            expectedVersions: closureExpectedVersions(selectedRows),
+            idempotencyKey: closureIdempotencyKey(bankRowIds),
+          });
+          setClosureSelection(null);
+          setClosureDrawerOpen(false);
+          setMessage("正在等待往来款台账读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths("turnover_ledger", closureResult.affectedMonths, "all"),
+          );
+          setMessage("正在刷新往来款台账...");
+          await reloadLedgerAfterMutation();
+          return closureResult;
+        } finally {
+          setClosureSubmitting(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "外部往来闭环确认失败",
+    });
+    if (result.status === "success") {
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        relationId: result.relationId,
+        relationId: result.value.relationId,
         affectedRowIds: bankRowIds,
-        affectedMonths: result.affectedMonths,
+        affectedMonths: result.value.affectedMonths,
         action: "manual_closure",
         source: "turnover_manual_closure",
       });
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-        relationId: result.workbenchPairRelationId,
+        relationId: result.value.workbenchPairRelationId,
         affectedRowIds: bankRowIds,
-        affectedMonths: result.affectedMonths,
+        affectedMonths: result.value.affectedMonths,
         action: "turnover_manual_closure",
         source: "turnover_manual_closure",
       });
-      setClosureSelection(null);
-      setClosureDrawerOpen(false);
       setToast({ severity: "success", message: "外部往来闭环已确认" });
-      loadLedger();
-    } catch (caught) {
-      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来闭环确认失败" });
-    } finally {
-      setClosureSubmitting(false);
+    } else {
+      setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "外部往来闭环确认失败" });
     }
   };
 
@@ -509,10 +531,6 @@ export default function TurnoverLedgerPage() {
 
   const handleOpenEditor = (row: TurnoverLedgerGroupedRow) => {
     if (!isFlowRow(row)) {
-      return;
-    }
-    if (ledgerActionsDisabled) {
-      setToast({ severity: "error", message: "往来款台账正在刷新，请等待最新数据后再编辑" });
       return;
     }
     const normalizedRow = { ...row, relationId: relationIdForRow(row) };
@@ -553,21 +571,35 @@ export default function TurnoverLedgerPage() {
     if (!selectedRow || savingExtra) {
       return;
     }
-    setSavingExtra(true);
-    try {
-      const saved = await saveTurnoverRelationExtra(selectedRow.relationId, extraForm);
-      setExtraForm(saved.extra);
-      setExtraDirty(false);
+    const targetRow = selectedRow;
+    const nextExtra = extraForm;
+    const result = await runOperation({
+      loadingMessage: "正在保存往来关系补充信息...",
+      action: async ({ setMessage }) => {
+        setSavingExtra(true);
+        try {
+          const saved = await saveTurnoverRelationExtra(targetRow.relationId, nextExtra);
+          setExtraForm(saved.extra);
+          setExtraDirty(false);
+          setMessage("正在等待往来款台账读模型同步...");
+          await waitForOperationFreshness(operationBarrierTargetsFromMonths("turnover_ledger", [], "all"));
+          setMessage("正在刷新往来款台账...");
+          await reloadLedgerAfterMutation();
+          return saved;
+        } finally {
+          setSavingExtra(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "补充信息保存失败",
+    });
+    if (result.status === "success") {
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverLedgerExtraUpdated, {
-        relationId: selectedRow.relationId,
+        relationId: targetRow.relationId,
         source: "turnover_extra_save",
       });
       setToast({ severity: "success", message: "补充信息已保存" });
-      loadLedger();
-    } catch (caught) {
-      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "补充信息保存失败" });
-    } finally {
-      setSavingExtra(false);
+    } else {
+      setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "补充信息保存失败" });
     }
   };
 
@@ -575,30 +607,45 @@ export default function TurnoverLedgerPage() {
     if (!selectedRow || mutatingRelation) {
       return;
     }
-    setMutatingRelation(true);
-    try {
-      const result = kind === "confirm"
-        ? await confirmTurnoverRelation({ bankRowIds: selectedRow.bankRowIds })
-        : await withdrawTurnoverRelation({ relationId: selectedRow.relationId });
+    const targetRow = selectedRow;
+    const result = await runOperation({
+      loadingMessage: kind === "confirm" ? "正在确认往来归并..." : "正在撤销往来归并...",
+      action: async ({ setMessage }) => {
+        setMutatingRelation(true);
+        try {
+          const mutationResult = kind === "confirm"
+            ? await confirmTurnoverRelation({ bankRowIds: targetRow.bankRowIds })
+            : await withdrawTurnoverRelation({ relationId: targetRow.relationId });
+          setMessage("正在等待往来款台账读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths("turnover_ledger", mutationResult.affectedMonths, "all"),
+          );
+          setMessage("正在刷新往来款台账...");
+          await reloadLedgerAfterMutation();
+          return mutationResult;
+        } finally {
+          setMutatingRelation(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "往来关系操作失败",
+    });
+    if (result.status === "success") {
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        relationId: result.relationId || selectedRow.relationId,
+        relationId: result.value.relationId || targetRow.relationId,
         action: kind,
         source: "turnover_relation_mutation",
       });
       if (kind === "withdraw") {
         emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-          relationId: result.relationId || selectedRow.relationId,
-          affectedRowIds: selectedRow.bankRowIds,
+          relationId: result.value.relationId || targetRow.relationId,
+          affectedRowIds: targetRow.bankRowIds,
           action: "turnover_relation_withdraw",
           source: "turnover_relation_mutation",
         });
       }
       setToast({ severity: "success", message: kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销" });
-      loadLedger();
-    } catch (caught) {
-      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "往来关系操作失败" });
-    } finally {
-      setMutatingRelation(false);
+    } else {
+      setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "往来关系操作失败" });
     }
   };
 
@@ -613,21 +660,34 @@ export default function TurnoverLedgerPage() {
     if (tagSaving) {
       return;
     }
-    setTagSaving(true);
-    try {
-      const saved = await saveTurnoverLedgerTagSelection({
-        expectedVersion: tagSelection.version,
-        selectedTagCodes: Array.from(draftSelectedTagCodes),
-      });
-      setTagSelection(saved);
-      setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
-      setTagDrawerOpen(false);
+    const selectedTagCodes = Array.from(draftSelectedTagCodes);
+    const result = await runOperation({
+      loadingMessage: "正在保存外部往来款标签设置...",
+      action: async ({ setMessage }) => {
+        setTagSaving(true);
+        try {
+          const saved = await saveTurnoverLedgerTagSelection({
+            expectedVersion: tagSelection.version,
+            selectedTagCodes,
+          });
+          setTagSelection(saved);
+          setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
+          setTagDrawerOpen(false);
+          setMessage("正在等待往来款台账读模型同步...");
+          await waitForOperationFreshness(operationBarrierTargetsFromMonths("turnover_ledger", [], "all"));
+          setMessage("正在刷新往来款台账...");
+          await reloadLedgerAfterMutation();
+          return saved;
+        } finally {
+          setTagSaving(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "外部往来款标签设置保存失败",
+    });
+    if (result.status === "success") {
       setToast({ severity: "success", message: "外部往来款标签设置已保存" });
-      loadLedger();
-    } catch (caught) {
-      setToast({ severity: "error", message: caught instanceof Error ? caught.message : "外部往来款标签设置保存失败" });
-    } finally {
-      setTagSaving(false);
+    } else {
+      setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "外部往来款标签设置保存失败" });
     }
   };
 
@@ -679,7 +739,7 @@ export default function TurnoverLedgerPage() {
             {error}
           </StatePanel>
         ) : null}
-        {ledgerActionsDisabled ? (
+        {readModelNeedsRefresh ? (
           <div className="turnover-ledger-page-notice turnover-ledger-page-notice--warning" role="alert">
             往来款台账正在刷新，当前展示的是非最新数据。
           </div>
@@ -732,7 +792,7 @@ export default function TurnoverLedgerPage() {
               <div className="turnover-ledger-actions">
                 <button
                   className="turnover-ledger-button"
-                  disabled={!canMutateData || ledgerActionsDisabled || selectedClosureRows.length < 2}
+                  disabled={!canMutateData || selectedClosureRows.length < 2}
                   onClick={() => setClosureDrawerOpen(true)}
                   type="button"
                 >
@@ -751,7 +811,7 @@ export default function TurnoverLedgerPage() {
               onEdit={handleOpenEditor}
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
-              actionsDisabled={ledgerActionsDisabled}
+              actionsDisabled={false}
             />
           </div>
         </section>
@@ -904,7 +964,7 @@ export default function TurnoverLedgerPage() {
         detail={detail}
         extra={extraForm}
         dirty={extraDirty}
-        canMutateData={canMutateData && !ledgerActionsDisabled}
+        canMutateData={canMutateData}
         loading={detailLoading}
         saving={savingExtra}
         mutating={mutatingRelation}

@@ -13,6 +13,7 @@
 - 侧边栏：`web/src/components/shell/sidebarItems.ts`（从页面注册表派生）
 - 页面入口：`web/src/pages/*`
 - API client：`web/src/features/*/api.ts`
+- 操作闭环 API client：`web/src/features/operationBarrier/api.ts`
 - 前端 domain event：`web/src/features/domainEvents.ts`
 - 后端路由：`backend/src/fin_ops_platform/app/routes_*.py` 与仍在 `server.py` 的 legacy handler
 
@@ -62,6 +63,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 ## 页面职责边界
 
 - 页面可以决定筛选、排序、分页、空状态、导出列、drawer/dialog 状态。
+- 页面写操作可以接入 `GlobalOperationOverlayProvider`，在 operation 完成前显示全屏阻塞层，防止用户在同一事实链路尚未收敛时继续操作。overlay 只包裹会改变后端事实或跨页面 read model 的操作；普通页面初始读取、筛选、分页、详情打开不使用全屏阻塞。
 - 页面切换时 `PageRouteHost` 只挂载当前匹配 route；离开页面会卸载页面 React tree，不保留隐藏 DOM frame、mounted cache、TTL/LRU 策略或页面数据 snapshot。返回页面时页面重新 mount，并通过现有 API/read boundary 重新加载数据。
 - 页面注册表不声明保活策略；`AppPageRoute` 只维护 `path`、`pageKey`、`component`、`preload()` 和 `end`。侧栏分组继续从页面注册表派生，不能在侧栏里维护第二份路由事实。
 - `PageRuntimeContext` 仍为当前页面提供 active runtime context，供页面 hook 统一读取当前页面身份；因为旧页面会卸载，inactive 页面不再接收或延迟 replay finance domain event。
@@ -92,6 +94,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 - `DerivedDataLifecycleService` 负责把业务事件转换成 dirty scope、outbox 和 read model refresh 请求。
 - `RuntimeQueueRepository.enqueue_read_model_refresh(...)` 是 read model refresh 的标准入队边界。
 - `ReadModelQueryGateway` 负责 freshness/status/enqueue 判断，页面不能绕过它读取旧 projection 并显示为 fresh。
+- `/api/operation-barrier/status` 只读取 runtime snapshot 判定写操作后的目标 read model/scope 是否 fresh；它不写 queue、不重建 read model、不把状态改成 green。前端只有在 barrier fresh 且页面自身重新读取到 fresh payload 后，才能释放写操作 overlay。
 - worker registry 定义哪些 read model 可被后台刷新、如何 drain、如何被 App Health 观测。
 
 ## 维护要求

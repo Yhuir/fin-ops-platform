@@ -2,6 +2,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
 import { AppChromeProvider } from "../contexts/AppChromeContext";
+import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
@@ -44,7 +45,9 @@ export function renderWorkbenchPage() {
         <MonthProvider>
           <SessionContext.Provider value={staticWorkbenchSession}>
             <PageSessionStateProvider>
-              <WorkbenchPageHarness />
+              <GlobalOperationOverlayProvider>
+                <WorkbenchPageHarness />
+              </GlobalOperationOverlayProvider>
             </PageSessionStateProvider>
           </SessionContext.Provider>
         </MonthProvider>

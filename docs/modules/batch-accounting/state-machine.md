@@ -37,13 +37,14 @@
 | empty | 银行列表或 OA 表无行时分别展示空态；空态不能替代 non-fresh warning。 |
 | error | GET 失败时显示页面错误 fallback；mutation 失败通过 feedback 展示错误信息。 |
 | fresh | 可按 bucket 操作；unsubmitted 可提交，submitted 可打开撤回 dialog。 |
-| stale/refreshing/missing/failed/unavailable | 显示 relation read model warning、后端 stale reason 和 scope；提交/撤回按钮禁用；用户可刷新等待 worker 收敛。`refresh_enqueued=false` 时提示刷新未入队并转向系统状态排查。 |
+| stale/refreshing/missing/failed/unavailable | 显示 relation read model warning、后端 stale reason 和 scope；不能把空关系当真实未提交。普通 relation distribution non-fresh 不应作为长期全局禁用理由，提交/撤回仍由后端 canonical write safety 判定。`refresh_enqueued=false` 时提示刷新未入队并转向系统状态排查。 |
 | mismatch | 显示金额不一致提示和差额说明输入；说明为空时前端阻止提交，后端再次校验。 |
 | bucket 切换 | `unsubmitted` 与 `submitted` 切换时清空 bank/OA selection、差额说明、撤回状态。 |
 | OA 年份切换 | 只切换 OA 年份时尽量保留仍存在的选中银行/OA 行；刷新后不存在的行必须清理。 |
 | search/filter | 右侧 OA 搜索只过滤展示，不改变后端事实或已选中金额。 |
-| submit success | 显示成功 feedback，发送 `workbenchRelationUpdated`，重新加载当前 bucket。 |
-| withdraw success | 关闭撤回 dialog，显示成功 feedback，发送 `workbenchRelationUpdated`，重新加载当前 bucket。 |
+| operation pending | submit/withdraw API 成功后显示全屏 overlay，等待 `workbench_relation` operation barrier fresh，再重新加载当前 bucket。 |
+| submit success | barrier 与 reload 完成后显示成功 feedback，发送 `workbenchRelationUpdated`。 |
+| withdraw success | barrier 与 reload 完成后关闭撤回 dialog，显示成功 feedback，发送 `workbenchRelationUpdated`。 |
 | permission disabled/hidden | 当前没有独立权限开关；若后续接入权限，必须同时覆盖 API 403 和前端 hidden/disabled。 |
 
 ## Read Model / Worker 状态
@@ -81,3 +82,4 @@ Refresh 触发来源：
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确业务、UI、relation read model、worker 状态和禁止流转 | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、relation facade/projection tests |
 | 2026-06-11 | relation read model missing/stale 闭环 | 列表读取走 require_fresh 入队；页面展示 reason/scope 和未入队提示。写阻断口径已由 2026-06-13 canonical write safety 更新替代。 | `test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh` |
 | 2026-06-13 | 写安全改为默认 canonical relation gate | 普通 relation distribution non-fresh 只作为读侧诊断；submit/withdraw 默认由 relation command service、owner 状态、权限/session、DB 可写性、version/idempotency 决定 | `tests/test_workbench_relation_command_service.py`、`tests/test_batch_accounting_api.py` |
+| 2026-06-14 | submit/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `workbench_relation` barrier fresh 并 reload，避免旧 bucket/旧关系暴露给用户 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |

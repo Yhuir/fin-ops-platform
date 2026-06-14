@@ -7,8 +7,6 @@ import { installMockApiFetch } from "./apiMock";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderAppAt, renderAuthenticatedAppAt } from "./renderHelpers";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
-import { updateWorkbenchAfterConfirmLink } from "../pages/ReconciliationWorkbenchPage";
-import type { WorkbenchCandidateGroup, WorkbenchData, WorkbenchRecord } from "../features/workbench/types";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -56,81 +54,7 @@ function isWorkbenchSummaryRequest(input: RequestInfo | URL) {
   return fetchPath(input).startsWith("/api/workbench/summary?");
 }
 
-function workbenchRecord(id: string, recordType: WorkbenchRecord["recordType"], caseId: string): WorkbenchRecord {
-  return {
-    id,
-    caseId,
-    recordType,
-    label: id,
-    status: "待关联",
-    statusCode: "pending_match",
-    statusTone: "warn",
-    exceptionHandled: false,
-    amount: "100.00",
-    counterparty: "测试往来",
-    tableValues: {},
-    detailFields: [],
-    actionVariant: "open",
-    availableActions: [],
-  };
-}
-
-function minimalWorkbenchData(openGroups: WorkbenchCandidateGroup[], pairedGroups: WorkbenchCandidateGroup[] = []): WorkbenchData {
-  return {
-    month: "2026-03",
-    oaStatus: { synced: true, message: "" },
-    summary: {
-      oaCount: 0,
-      bankCount: 0,
-      invoiceCount: 0,
-      pairedCount: pairedGroups.length,
-      openCount: openGroups.length,
-      exceptionCount: 0,
-      totalCount: openGroups.length + pairedGroups.length,
-      zoneCounts: {
-        open: { total: openGroups.length, oa: 0, bank: 0, invoice: 0 },
-        paired: { total: pairedGroups.length, oa: 0, bank: 0, invoice: 0 },
-        ignored: { total: 0, oa: 0, bank: 0, invoice: 0 },
-      },
-    },
-    invoiceInventory: { importedCount: 0, linkedCount: 0, unlinkedCount: 0 },
-    paired: { groups: pairedGroups },
-    open: { groups: openGroups },
-  } as WorkbenchData;
-}
-
 describe("Workbench row selection and detail modal", () => {
-  test("turnover bank-only optimistic confirm stays in open zone", () => {
-    const bankRows = [
-      workbenchRecord("bank-turnover-in", "bank", "turnover:rel-1"),
-      workbenchRecord("bank-turnover-out", "bank", "turnover:rel-1"),
-    ];
-    const data = minimalWorkbenchData([
-      {
-        id: "open-turnover",
-        groupType: "open",
-        rawGroupType: "candidate",
-        matchConfidence: "medium",
-        reason: "existing_case_candidate",
-        rows: { oa: [], bank: bankRows, invoice: [] },
-      },
-    ]);
-
-    const nextData = updateWorkbenchAfterConfirmLink(
-      data,
-      ["bank-turnover-in", "bank-turnover-out"],
-      "turnover:rel-1",
-    );
-
-    expect(nextData.paired.groups).toHaveLength(0);
-    expect(nextData.open.groups).toHaveLength(1);
-    expect(nextData.open.groups[0].id).toBe("local-open-turnover:rel-1");
-    expect(nextData.open.groups[0].rows.bank.map((row) => row.id)).toEqual([
-      "bank-turnover-in",
-      "bank-turnover-out",
-    ]);
-  });
-
   test("clicking an open row toggles multi-selection without opening the detail modal", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -356,18 +280,19 @@ describe("Workbench row selection and detail modal", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/actions/confirm-link",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          month: "all",
-          row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-          case_id: "CASE-202603-101",
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/confirm-link",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            month: "all",
+            row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+            case_id: "CASE-202603-101",
+          }),
         }),
-      }),
-    );
+      );
+    });
     await waitFor(() => {
       expectCustomEventDetailContaining(relationUpdatedListener, { affectedMonths: ["2026-03"] });
     });
@@ -404,14 +329,15 @@ describe("Workbench row selection and detail modal", () => {
     await user.type(within(dialog).getByRole("textbox", { name: "备注" }), "发票税额尾差，财务已复核");
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/actions/confirm-link",
-      expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining("\"note\":\"发票税额尾差，财务已复核\""),
-      }),
-    );
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/confirm-link",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining("\"note\":\"发票税额尾差，财务已复核\""),
+        }),
+      );
+    });
   });
 
   test("open zone header confirm link uses the whole selected group from one clicked row", async () => {
@@ -465,18 +391,19 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(after).getByTestId("pane-oa")).not.toHaveClass("mismatch");
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/actions/confirm-link",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          month: "all",
-          row_ids: ["bk-o-202603-001", "iv-o-202603-001", "oa-o-202603-001"],
-          case_id: "CASE-202603-101",
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/confirm-link",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            month: "all",
+            row_ids: ["bk-o-202603-001", "iv-o-202603-001", "oa-o-202603-001"],
+            case_id: "CASE-202603-101",
+          }),
         }),
-      }),
-    );
+      );
+    });
   });
 
   test("open selection summary and confirm preview keep explicitly selected rows hidden by pane time filters", async () => {
@@ -709,39 +636,9 @@ describe("Workbench row selection and detail modal", () => {
     );
   });
 
-  test("workbench action shows a blocking loading modal and requires acknowledgement after completion", async () => {
+  test("workbench action shows a global operation overlay until the fresh refetch completes", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({ actionDelayMs: 80 });
-    renderWorkbenchPage();
-
-    const openBankRow = await screen.findByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
-    });
-    const openInvoiceRow = await screen.findByRole("row", {
-      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
-    });
-
-    await user.click(openBankRow);
-    await user.click(openInvoiceRow);
-    await user.click(screen.getByRole("button", { name: "确认关联" }));
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
-    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
-
-    expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
-    expect(screen.getByText("正在确认关联...")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "确定" })).not.toBeInTheDocument();
-
-    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "确定" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "确定" }));
-
-    expect(screen.queryByRole("dialog", { name: "操作状态弹窗" })).not.toBeInTheDocument();
-  });
-
-  test("confirm link finishes the blocking modal before the background workbench refresh completes", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch({ actionDelayMs: 80, workbenchLoadDelayMs: 160 });
+    installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -759,9 +656,21 @@ describe("Workbench row selection and detail modal", () => {
     const preview = await screen.findByRole("dialog", { name: "关联预览" });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
-    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
+    const overlay = await screen.findByRole("dialog", { name: "全局操作进度" });
+    expect(overlay).toBeInTheDocument();
+    expect(screen.getByText("正在确认关联...")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确定" })).not.toBeInTheDocument();
 
+    expect(await screen.findByText("正在同步关联台最新数据...")).toBeInTheDocument();
+    expect(
+      within(openZone).getByRole("row", {
+        name: /2026-03-28.*智能工厂设备商/,
+      }),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
+    });
     expect(
       within(openZone).queryByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,
@@ -774,11 +683,12 @@ describe("Workbench row selection and detail modal", () => {
     ).toBeInTheDocument();
   });
 
-  test("confirm link locks only the operated group while the background refresh is pending", async () => {
+  test("confirm link does not expose local optimistic row movement before the fresh refetch", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 1000 });
+    installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
     renderWorkbenchPage();
 
+    const openZone = await screen.findByTestId("zone-open");
     const openBankRow = await screen.findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
@@ -792,16 +702,15 @@ describe("Workbench row selection and detail modal", () => {
     const preview = await screen.findByRole("dialog", { name: "关联预览" });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByText("已确认 3 条记录关联。")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "确定" }));
-
-    const pairedZone = await screen.findByTestId("zone-paired");
-    const operatedPairedRow = within(pairedZone).getByRole("row", {
-      name: /2026-03-28.*智能工厂设备商/,
+    expect(await screen.findByText("正在同步关联台最新数据...")).toBeInTheDocument();
+    expect(
+      within(openZone).getByRole("row", {
+        name: /2026-03-28.*智能工厂设备商/,
+      }),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
     });
-    await user.click(operatedPairedRow);
-
-    expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
   });
 
   test("initial workbench rows render before slow ignored and settings requests finish", async () => {
@@ -819,7 +728,7 @@ describe("Workbench row selection and detail modal", () => {
     ).toBeInTheDocument();
   });
 
-  test("cancel link finishes the blocking modal after local state moves the group back to open", async () => {
+  test("withdraw link finishes only after the fresh refetch moves the group back to open", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
     const relationUpdatedListener = vi.fn();
@@ -862,8 +771,11 @@ describe("Workbench row selection and detail modal", () => {
     expect(within(bankOnlyGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
-    expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
-    expect(await screen.findByText("已撤回 1 组关联。")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "全局操作进度" })).toBeInTheDocument();
+    expect(await screen.findByText("正在同步关联台最新数据...")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
+    });
     expect(
       within(pairedZone).queryByRole("row", {
         name: /2026-03-25 14:22.*华东设备供应商/,
@@ -1808,29 +1720,32 @@ describe("Workbench row selection and detail modal", () => {
     const preview = await screen.findByRole("dialog", { name: "关联预览" });
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
-    expect(await screen.findByText("已撤回 1 组关联。")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/actions/withdraw-link",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          month: "all",
-          row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
-          operation_type: "withdraw_relation",
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/withdraw-link",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            month: "all",
+            row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
+            operation_type: "withdraw_relation",
+          }),
         }),
-      }),
-    );
+      );
+    });
 
-    expect(
-      within(pairedZone).queryByRole("row", {
-        name: /2026-03-25 14:22.*华东设备供应商/,
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(openZone).getByRole("row", {
-        name: /2026-03-25 14:22.*华东设备供应商/,
-      }),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        within(pairedZone).queryByRole("row", {
+          name: /2026-03-25 14:22.*华东设备供应商/,
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        within(openZone).getByRole("row", {
+          name: /2026-03-25 14:22.*华东设备供应商/,
+        }),
+      ).toBeInTheDocument();
+    });
   });
 
   test("open zone header exception action opens the unified modal instead of the OA-bank modal", async () => {
@@ -1983,35 +1898,34 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(confirmModal).getByRole("button", { name: "确认取消异常处理" }));
 
     expect(screen.queryByRole("dialog", { name: "已处理异常弹窗" })).not.toBeInTheDocument();
-    expect(await screen.findByRole("dialog", { name: "操作状态弹窗" })).toBeInTheDocument();
-    expect(screen.getByText("正在取消异常处理...")).toBeInTheDocument();
-    expect(await screen.findByText("已取消 2 条记录的异常处理。")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workbench/actions/cancel-exception",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          month: "all",
-          row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
-          comment: "由已处理异常弹窗撤回异常处理",
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/cancel-exception",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            month: "all",
+            row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
+            comment: "由已处理异常弹窗撤回异常处理",
+          }),
         }),
-      }),
-    );
-
-    await user.click(screen.getByRole("button", { name: "确定" }));
-    expect(
-      within(openZone).getByRole("row", {
-        name: /陈涛.*智能工厂设备商/,
-      }),
-    ).toBeInTheDocument();
-    expect(
-      within(openZone).getByRole("row", {
-        name: /2026-03-28.*智能工厂设备商/,
-      }),
-    ).toBeInTheDocument();
+      );
+    });
+    await waitFor(() => {
+      expect(
+        within(openZone).getByRole("row", {
+          name: /陈涛.*智能工厂设备商/,
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(openZone).getByRole("row", {
+          name: /2026-03-28.*智能工厂设备商/,
+        }),
+      ).toBeInTheDocument();
+    });
   });
 
-  test("canceling processed exception restores rows locally without starting an all-scope refresh", async () => {
+  test("canceling processed exception restores rows after the fresh workbench refetch", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -2044,23 +1958,31 @@ describe("Workbench row selection and detail modal", () => {
     const confirmModal = await screen.findByRole("dialog", { name: "取消异常处理确认弹窗" });
     await user.click(within(confirmModal).getByRole("button", { name: "确认取消异常处理" }));
 
-    expect(await screen.findByText("已取消 2 条记录的异常处理。")).toBeInTheDocument();
-    const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
-      return isWorkbenchSummaryRequest(input as RequestInfo | URL);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/cancel-exception",
+        expect.objectContaining({ method: "POST" }),
+      );
     });
-    expect(workbenchRefreshCalls).toHaveLength(0);
-    await user.click(screen.getByRole("button", { name: "确定" }));
+    await waitFor(() => {
+      const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
+        return isWorkbenchSummaryRequest(input as RequestInfo | URL);
+      });
+      expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
+    });
 
-    expect(
-      within(openZone).getByRole("row", {
-        name: /陈涛.*智能工厂设备商/,
-      }),
-    ).toBeInTheDocument();
-    expect(
-      within(openZone).getByRole("row", {
-        name: /2026-03-28.*智能工厂设备商/,
-      }),
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        within(openZone).getByRole("row", {
+          name: /陈涛.*智能工厂设备商/,
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(openZone).getByRole("row", {
+          name: /2026-03-28.*智能工厂设备商/,
+        }),
+      ).toBeInTheDocument();
+    });
   }, 30_000);
 
   test("renders an error state when the workbench request fails", async () => {

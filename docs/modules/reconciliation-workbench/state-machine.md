@@ -42,7 +42,8 @@
 | stale | `read_model_status=stale`、failed/dirty scope、source mismatch | 页面必须提示陈旧；不能把空 rows 解释成真实业务结论。Workbench active generation stale 不等同于 OA dirty，不应把页面所有写操作全局禁用。 |
 | error | API/action/read model unavailable 或 failed | 展示业务错误；不暴露底层 SQL 细节。 |
 | empty | fresh active generation 中目标 zone/group 为空 | 只有 fresh 后才能认为 open/paired 为空。 |
-| permission disabled/hidden | session 权限、App Health write safety gate、OA sync write gate、局部 pending row lock | 无写权限、`overall.write_safety.blocks_mutations=true` 或 OA sync dirty/refreshing 时禁用确认/撤回；普通 read model blocked/red 只提示读侧故障并交给具体写 API precondition，不全局禁用无关 group。提交成功后只锁定刚操作 row/group，仍可浏览和操作无关 group。 |
+| operation pending | `GlobalOperationOverlayProvider` 包裹中的确认、撤回、异常、忽略等写操作 | 写 API 成功后继续等待 `workbench_relation` barrier 和 Workbench active generation fresh；期间全屏阻塞，避免用户继续操作旧关系。失败时展示错误并保持阻塞，用户确认后返回页面。 |
+| permission disabled/hidden | session 权限、App Health write safety gate、OA sync write gate | 无写权限、`overall.write_safety.blocks_mutations=true` 或 OA sync dirty/refreshing 时禁用确认/撤回；普通 read model blocked/red 只提示读侧故障并交给具体写 API precondition，不全局禁用无关 group。 |
 
 前端 domain event：
 
@@ -74,12 +75,13 @@ Refresh 触发来源：
 1. 查 `/api/workbench/refresh-status`、App Health、dirty scopes、outbox 和 worker heartbeat。
 2. 如果是 matching dirty scope，重试 `workbench-matching` worker；不要回退 legacy dirty scope。
 3. 如果是 active generation inconsistency，修复 generation 或重建 scope；不得手工把 failed 改 fresh。
-4. 如果是页面交互问题，先确认 API response 的 `read_model_status` 和 affected months，再看 domain event/selection 状态。
+4. 如果是页面交互问题，先确认写 API response 的 affected months、operation barrier target、`/api/workbench*` 的 `read_model_status` 和 active generation freshness，再看 domain event/selection 状态。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-14 | 关联台写操作从本地 optimistic 重排改为全屏 operation overlay，等待 `workbench_relation` barrier 与 Workbench active generation fresh 后释放 | `ReconciliationWorkbenchPage` 写操作 gate、`GlobalOperationOverlayProvider`、`/api/operation-barrier/status` | `web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/GlobalOperationOverlayContext.test.tsx`；`web/src/test/OperationBarrierApi.test.ts`；`tests/test_operation_freshness_barrier.py` |
 | 2026-06-12 | 关联台撤回 preview 操作后未恢复 row 逐行独立展示，并拆分 Workbench stale 与 OA dirty 写阻断 | `Application._relation_groups`、`WorkbenchWriteFacade` withdraw preview、App Health source mapping、前端 optimistic update/pending row lock | `tests/test_workbench_auth_context_idempotency.py`；`web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/AppHealthStatusContext.test.tsx` |
 | 2026-06-11 | 补齐测试闭环状态机 | open/paired/exception/dirty/active generation/UI/read model 状态边界 | 待本轮 Workbench 验证 |
 | 2026-06-11 | active pair relation 增加 row id 去重和跨 active case 复用防线，修复 paired 详情重复 OA 展示 | WorkbenchPairRelationService、server relation grouping、integrity repair、pending invoice attach relation 合并 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py`、`tests/test_pending_invoice_service.py` |

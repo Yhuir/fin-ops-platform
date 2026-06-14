@@ -137,6 +137,7 @@ submitted no-OA batch
 | tag drawer | 打开时重新 fetch tag selection；保存后 reload list | tag drawer tests |
 | selection guard | 只允许一个银行账户区域的 rows 同时被选择 | `prevents selecting rows from another bank before clearing the current bank region` |
 | internal transfer action | internal_transfer draft 走 batch submit endpoint，不走 selected rows submit | `submits internal transfer draft batches through the batch endpoint` |
+| operation pending | submit-selection、submit、withdraw、tag-selection 保存成功后显示全屏 overlay，等待 `no_oa_bank_batch` operation barrier fresh，再 reload list/detail/tag selection | operation overlay / page tests |
 | withdrawn history | 历史 bucket 只读，不显示提交/撤回动作 | `shows withdrawn history as read-only` |
 
 前端跨页事件：
@@ -208,3 +209,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 2026-06-11 | 补齐免 OA 流水批量处理状态机 | 固定 tag selection、batch lifecycle、internal transfer from Workbench、UI stale polling、read model/worker 状态 | 待本轮模块验证命令 |
 | 2026-06-11 | 固定内部往来双入口闭环 | Workbench/no-OA 同一组内部往来幂等复用同一 no-OA fact；存量两行 manual internal-transfer relation 迁移；active relation row 独占；SQL read model 保存清理缺席旧批次 | `pytest` no-OA service/workbench integration、pair relation service 目标用例 |
 | 2026-06-14 | no-OA 月度 read model refresh 和依赖未 fresh 状态收敛 | `no_oa_bank_batch` scope policy 支持 `all`/月份；月度 worker 不全量读取、不删除其它月份批次；Bankdetail 依赖未 fresh 时记录 refreshing，不再污染 failed blocker | `tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_workbench_integration`、`tests.test_read_model_readiness_reporter`、`tests.test_read_model_refresh_gateway` |
+| 2026-06-14 | submit/withdraw/tag-selection 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `no_oa_bank_batch` barrier fresh 并 reload，避免旧批次/旧候选暴露给用户 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |

@@ -7,6 +7,7 @@
 | 影响面 | 需要保护的行为 | 当前测试入口 |
 | --- | --- | --- |
 | 页面交互 | 加载、空态、错误、筛选、bucket 切换、银行/OA 选择、差额说明、提交、撤回、feedback、侧栏入口 | `web/src/test/BatchAccountingPage.test.tsx` |
+| Operation overlay | 提交/撤回写操作成功后等待 `workbench_relation` barrier fresh，再 reload 页面并关闭 overlay；失败时不假装成功 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx` |
 | API contract | `GET /api/batch-accounting`、`POST /api/batch-accounting/submit`、`POST /api/batch-accounting/{relation_id}/withdraw` 的状态码、错误码、DTO shape、freshness 字段 | `tests/test_batch_accounting_api.py` |
 | 业务核心 | 日常报销 OA 过滤、批量账务银行流水过滤、金额差异说明、version conflict、active relation 排除、跨年选择、撤回原因 | `tests/test_batch_accounting_api.py` |
 | Service / repository | `BatchAccountingService` 调用 Workbench payload、relation command service、relation facade、legacy collision repair；提交失败回滚 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py` |
@@ -28,6 +29,7 @@
 | submitted 列表来自 active batch relation，并按 relation distribution 归桶 | covered | `test_submitted_list_is_derived_from_active_batch_accounting_relations`、`test_submitted_list_relation_bucket_uses_workbench_relation_distribution` |
 | 撤回恢复旧 OA invoice snapshot、保留历史说明、要求撤回原因且只能撤回 batch relation | covered | `test_withdraw_restores_previous_oa_invoice_snapshot`、`test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes`、`test_withdraw_requires_reason_and_batch_accounting_relation` |
 | 前端提交/撤回后广播 `workbenchRelationUpdated`，选中行和差额说明在刷新/bucket/选择变化时正确清理 | covered | `BatchAccountingPage.test.tsx` |
+| 前端提交/撤回后显示全屏 operation overlay，等待 `workbench_relation` barrier fresh 后再 reload 和释放 | covered | `BatchAccountingPage.test.tsx`、operation overlay/API tests |
 
 ## 七类测试适用性
 
@@ -37,7 +39,7 @@
 | 2. Service-layer tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `BatchAccountingService` 与 relation command service、relation facade、提交失败回滚、历史关系 command 恢复，以及 submit/withdraw 的 canonical write safety。 |
 | 3. API contract tests | 适用 | `tests/test_batch_accounting_api.py` | 覆盖 GET/submit/withdraw 的成功 shape、错误码、freshness 字段、summary/relations/mutation result；read model non-fresh 由 GET/facade 透出诊断，mutation 默认不因普通 distribution 追赶中被拒。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 `workbench_relation` facade、projection、non-fresh enqueue、worker registry 和 App Status 绑定；批量账务列表读取必须通过 facade `require_fresh` 触发入队。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/BatchAccountingPage.test.tsx` | 覆盖 loading/empty/error、freshness 诊断、刷新未入队提示、筛选、搜索、选择、提交、撤回、CSS/组件契约和侧栏入口；普通 non-fresh 不应全局禁用具备 canonical write safety 的操作。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | 覆盖 loading/empty/error、freshness 诊断、刷新未入队提示、筛选、搜索、选择、提交、撤回、operation overlay、CSS/组件契约和侧栏入口；普通 non-fresh 不应全局禁用具备 canonical write safety 的操作。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/domainEvents.test.ts` | 覆盖 submit -> Workbench relation -> submitted list / Workbench projection、withdraw -> snapshot restore、前端刷新事件。真实 worker drain 仍是 documented-risk。 |
 | 7. Existing feature regression tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/BatchAccountingPage.test.tsx` | 覆盖旧 case_id collision、非 batch relation 不被覆盖、GET 不执行 legacy repair、旧页面不把 non-fresh relation 当真实空。 |
 
@@ -51,6 +53,7 @@
 | Mismatch note | 金额不一致必须填写非空说明；切换银行、bucket、OA 选择时清空旧说明 | covered |
 | Submit rollback | pair relation 持久化或调度失败不能留下半写入关系 | covered |
 | Withdraw history | 撤回差额批量账务时保留提交和撤回备注；不把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation | covered |
+| Operation-to-fresh closure | submit/withdraw 后不靠前端事件假装完成，必须等 `workbench_relation` barrier fresh 并重新加载页面 | covered |
 
 ## 关键 Smoke Flows
 
@@ -58,6 +61,7 @@
 2. 金额不一致 -> 空说明被拒 -> 填写说明提交 -> 关联台/银行明细/成本统计下游通过 relation read model 看到关系标签。
 3. submitted bucket -> 填写撤回原因 -> 撤回 -> relation read model refresh -> 原银行/OA 行回到可处理状态。
 4. `workbench_relation` missing/stale -> API 透出 freshness 并经 facade/gateway 入队刷新 -> 页面显示 warning/reason/scope，但不因普通 read model non-fresh 全局禁用具备 canonical write safety 的操作 -> worker 刷新后恢复。
+5. submit/withdraw -> 全屏 overlay -> `workbench_relation` operation barrier fresh -> 重新加载当前 bucket -> overlay 释放。
 
 ## 现有验证命令
 
@@ -73,6 +77,8 @@ PYTHONPATH=backend/src python3 -m unittest \
 
 cd web && npm test -- --run \
   src/test/BatchAccountingPage.test.tsx \
+  src/test/GlobalOperationOverlayContext.test.tsx \
+  src/test/OperationBarrierApi.test.ts \
   src/test/domainEvents.test.ts \
   src/test/useActiveFinanceDomainEvent.test.tsx
 

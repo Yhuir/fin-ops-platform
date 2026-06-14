@@ -16,9 +16,9 @@
 
 - 批量账务不拥有独立 read model；列表和 mutation 前置判断依赖 `workbench_relation` read model freshness。
 - `GET /api/batch-accounting` 必须保持只读，不能为了修复历史关系在 GET 路径写入。
-- `read_model_status !== "fresh"` 时前端必须显示 warning 并禁用提交/撤回；不能把空关系当作真实未提交。
+- `read_model_status !== "fresh"` 时前端必须显示 warning，不能把空关系当作真实未提交；写操作是否可提交由后端 canonical write safety、权限/session、DB 和 owner/version/idempotency 判定，普通 relation distribution 追赶中不应作为长期全局禁用理由。
 - 批量账务 submit relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`；缺少 command service 时 fail fast，不回退 direct `WorkbenchPairRelationService.replace_with_confirmed_relation(...)`。
-- 提交/撤回成功后的前端 `workbenchRelationUpdated` 只是刷新提示，不替代后端 dirty scope、worker 和 readiness。
+- 提交/撤回成功后的前端 `workbenchRelationUpdated` 只是刷新提示，不替代后端 dirty scope、worker、operation barrier 和 readiness。页面释放全屏操作 overlay 前必须等 `workbench_relation` barrier fresh 并重新加载。
 - 历史 case id collision 修复保留在 service 显式路径和 mutation/repair 语义中，不能重新散落到列表读取。
 
 ## 记录模板
@@ -37,6 +37,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-14 - submit/withdraw 操作后 freshness barrier
+
+- 目标：批量账务提交/撤回后隐藏短暂 read model 收敛时间，避免用户在 relation distribution 未 fresh 时看到旧 bucket 或继续重复操作。
+- 影响范围：`BatchAccountingPage` submit/withdraw、`GlobalOperationOverlayProvider`、`operationBarrier` API client。
+- 关键决策：写 API 成功不是页面可继续操作的完成点；前端等待 `workbench_relation` barrier 对 affected months fresh，再 reload 当前 payload 并关闭 overlay。前端事件仍只作为刷新提示，不是同步事实。
+- 文档影响：更新本模块 `README.md`、`tests.md`、`implementation-notes.md`。
+- 测试覆盖：更新 `web/src/test/BatchAccountingPage.test.tsx`，并由 `GlobalOperationOverlayContext.test.tsx`、`OperationBarrierApi.test.ts` 覆盖共享 overlay/barrier 行为。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：真实生产登录态 operation-to-fresh latency 需要发布后度量。
 
 ## 2026-06-12 - legacy repair relation command fallback 删除
 

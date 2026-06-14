@@ -5,12 +5,14 @@ import { RefreshCw } from "lucide-react";
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
 import StatePanel from "../components/common/StatePanel";
+import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
 } from "../features/domainEvents";
 import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
+import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatchTagSelection,
@@ -318,6 +320,7 @@ function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey
 }
 
 export default function NoOaBankBatchPage() {
+  const { runOperation } = useGlobalOperationOverlay();
   const { active } = useOptionalPageActivation("no-oa-bank-batches");
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
@@ -368,6 +371,27 @@ export default function NoOaBankBatchPage() {
     setSelectedAccountForSubmit(null);
   }, []);
 
+  const applyBatchesPayload = useCallback((nextPayload: NoOaBankBatchesResponse) => {
+    setPayload(nextPayload);
+    clearSelection();
+  }, [clearSelection]);
+
+  const reloadBatchesAfterMutation = useCallback(async () => {
+    const requestId = batchRequestSeqRef.current + 1;
+    batchRequestSeqRef.current = requestId;
+    const nextPayload = await fetchNoOaBankBatches({
+      month,
+      bucket,
+    });
+    if (requestId !== batchRequestSeqRef.current) {
+      return null;
+    }
+    applyBatchesPayload(nextPayload);
+    setLoading(false);
+    setBackgroundRefreshing(false);
+    return nextPayload;
+  }, [applyBatchesPayload, bucket, month]);
+
   const loadBatches = useCallback((signal?: AbortSignal, options: { background?: boolean } = {}) => {
     const background = options.background === true;
     const requestId = batchRequestSeqRef.current + 1;
@@ -387,8 +411,7 @@ export default function NoOaBankBatchPage() {
         if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
           return;
         }
-        setPayload(nextPayload);
-        clearSelection();
+        applyBatchesPayload(nextPayload);
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== batchRequestSeqRef.current) {
@@ -411,7 +434,7 @@ export default function NoOaBankBatchPage() {
           }
         }
       });
-  }, [bucket, clearSelection, month]);
+  }, [applyBatchesPayload, bucket, month]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -644,7 +667,7 @@ export default function NoOaBankBatchPage() {
     };
   }, []);
 
-  const handleMutationComplete = (message: string, result: { affectedMonths?: string[] }) => {
+  const handleMutationComplete = useCallback((message: string, result: { affectedMonths?: string[] }) => {
     emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
       ...mutationEventDetail(result),
     });
@@ -652,8 +675,7 @@ export default function NoOaBankBatchPage() {
     setDetails({});
     setDetailErrors({});
     setFeedback({ severity: "success", message });
-    loadBatches();
-  };
+  }, [clearSelection]);
 
   const toggleTransaction = (row: NoOaBankBatchDetailRow, checked: boolean) => {
     setSelectedTransactionIds((current) => {
@@ -703,17 +725,33 @@ export default function NoOaBankBatchPage() {
     if (selectedTransactionIds.size === 0 || mutating) {
       return;
     }
-    setMutating(true);
-    try {
-      const result = await submitNoOaBankBatchSelection({
-        transactionIds: Array.from(selectedTransactionIds),
-        note: "",
-      });
-      handleMutationComplete("选中流水已提交", result);
-    } catch (caught) {
-      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "提交选中流水失败" });
-    } finally {
-      setMutating(false);
+    const transactionIds = Array.from(selectedTransactionIds);
+    const result = await runOperation({
+      loadingMessage: "正在提交选中免OA流水...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const submitResult = await submitNoOaBankBatchSelection({
+            transactionIds,
+            note: "",
+          });
+          setMessage("正在等待免OA批次读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths("no_oa_bank_batch", submitResult.affectedMonths, month),
+          );
+          setMessage("正在刷新免OA流水批次...");
+          await reloadBatchesAfterMutation();
+          return submitResult;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "提交选中流水失败",
+    });
+    if (result.status === "success") {
+      handleMutationComplete("选中流水已提交", result.value);
+    } else {
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "提交选中流水失败" });
     }
   };
 
@@ -721,18 +759,33 @@ export default function NoOaBankBatchPage() {
     if (!canSubmitInternalTransferBatch(batch, bucket) || mutating) {
       return;
     }
-    setMutating(true);
-    try {
-      const result = await submitNoOaBankBatch({
-        batchId: batch.batchId,
-        expectedVersion: batch.version,
-        note: "",
-      });
-      handleMutationComplete("内部往来批次已提交", result);
-    } catch (caught) {
-      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "提交内部往来批次失败" });
-    } finally {
-      setMutating(false);
+    const result = await runOperation({
+      loadingMessage: "正在提交内部往来免OA批次...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const submitResult = await submitNoOaBankBatch({
+            batchId: batch.batchId,
+            expectedVersion: batch.version,
+            note: "",
+          });
+          setMessage("正在等待免OA批次读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths("no_oa_bank_batch", submitResult.affectedMonths, batch.scopeMonth || month),
+          );
+          setMessage("正在刷新免OA流水批次...");
+          await reloadBatchesAfterMutation();
+          return submitResult;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "提交内部往来批次失败",
+    });
+    if (result.status === "success") {
+      handleMutationComplete("内部往来批次已提交", result.value);
+    } else {
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "提交内部往来批次失败" });
     }
   };
 
@@ -740,41 +793,74 @@ export default function NoOaBankBatchPage() {
     if (!withdrawTarget || !withdrawReason.trim() || mutating) {
       return;
     }
-    setMutating(true);
-    try {
-      const result = await withdrawNoOaBankBatch({
-        batchId: withdrawTarget.batchId,
-        expectedVersion: withdrawTarget.version,
-        reason: withdrawReason.trim(),
-      });
-      setWithdrawTarget(null);
-      setWithdrawReason("");
-      handleMutationComplete("批次已撤回", result);
-    } catch (caught) {
-      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "撤回批次失败" });
-    } finally {
-      setMutating(false);
+    const target = withdrawTarget;
+    const reason = withdrawReason.trim();
+    const result = await runOperation({
+      loadingMessage: "正在撤回免OA流水批次...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const withdrawResult = await withdrawNoOaBankBatch({
+            batchId: target.batchId,
+            expectedVersion: target.version,
+            reason,
+          });
+          setWithdrawTarget(null);
+          setWithdrawReason("");
+          setMessage("正在等待免OA批次读模型同步...");
+          await waitForOperationFreshness(
+            operationBarrierTargetsFromMonths("no_oa_bank_batch", withdrawResult.affectedMonths, target.scopeMonth || month),
+          );
+          setMessage("正在刷新免OA流水批次...");
+          await reloadBatchesAfterMutation();
+          return withdrawResult;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "撤回批次失败",
+    });
+    if (result.status === "success") {
+      handleMutationComplete("批次已撤回", result.value);
+    } else {
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "撤回批次失败" });
     }
   };
 
   const saveTagSelection = async () => {
-    setMutating(true);
-    try {
-      const saved = await saveNoOaBankBatchTagSelection({
-        expectedVersion: tagSelection.version,
-        selectedTagCodes: Array.from(draftSelectedTagCodes),
-      });
-      setTagSelection(saved);
-      setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
-      setTagDrawerOpen(false);
-      setDetails({});
-      setDetailErrors({});
+    if (mutating) {
+      return;
+    }
+    const selectedTagCodes = Array.from(draftSelectedTagCodes);
+    const result = await runOperation({
+      loadingMessage: "正在保存免OA流水标签范围...",
+      action: async ({ setMessage }) => {
+        setMutating(true);
+        try {
+          const saved = await saveNoOaBankBatchTagSelection({
+            expectedVersion: tagSelection.version,
+            selectedTagCodes,
+          });
+          setTagSelection(saved);
+          setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
+          setTagDrawerOpen(false);
+          setDetails({});
+          setDetailErrors({});
+          setMessage("正在等待免OA批次读模型同步...");
+          await waitForOperationFreshness(operationBarrierTargetsFromMonths("no_oa_bank_batch", [], month));
+          setMessage("正在刷新免OA流水批次...");
+          await reloadBatchesAfterMutation();
+          return saved;
+        } finally {
+          setMutating(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "保存免OA标签范围失败",
+    });
+    if (result.status === "success") {
       setFeedback({ severity: "success", message: "免OA流水标签范围已保存" });
-      loadBatches();
-    } catch (caught) {
-      setFeedback({ severity: "error", message: caught instanceof Error ? caught.message : "保存免OA标签范围失败" });
-    } finally {
-      setMutating(false);
+    } else {
+      setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "保存免OA标签范围失败" });
     }
   };
 

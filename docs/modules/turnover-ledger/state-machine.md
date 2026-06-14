@@ -139,12 +139,13 @@ extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `tu
 | loading | 首次或筛选加载 grouped ledger | `web/src/test/TurnoverLedgerPage.test.tsx` |
 | empty | grouped response 无 groups 时展示空态 | `web/src/test/TurnoverLedgerPage.test.tsx` |
 | error | ledger/detail/export/extra API 失败时显示错误或 toast | `shows a business error when relation detail disappears after the ledger was rendered` |
-| stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据但禁用写动作 | `disables turnover write actions while grouped read model is stale` |
+| stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据和诊断，不能把 grouped payload 当作最终业务结论；写操作仍由后端 stale precondition/canonical write safety 判定 | read model / page tests |
 | permission disabled | `canMutateData=false` 时禁用保存、确认、撤回等写动作 | API 403 + 前端 disabled tests |
 | tag drawer | 加载 active tags，保存 selected codes 后 reload ledger | `opens tag selection drawer, saves selected bank detail labels, and reloads ledger` |
 | closure drawer | 允许同组多条 flow rows；至少一收一支且收支合计差额为 0 才允许确认 | manual closure/cross-group tests |
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
+| operation pending | tag-selection、extra、confirm、withdraw 成功后显示全屏 overlay，等待 `turnover_ledger` operation barrier fresh，再 reload grouped ledger | operation overlay / page tests |
 
 前端跨页事件：
 
@@ -169,7 +170,7 @@ Refresh event：`turnover_ledger.read_model.refresh`
 | 状态 | 含义 | 页面/API 行为 |
 | --- | --- | --- |
 | `fresh` | read model source versions 与当前事实源一致 | 可读可写 |
-| `refreshing` | 缺失或 stale 后已入队刷新 | 可展示当前 payload 或空 payload；前端禁用写动作 |
+| `refreshing` | 缺失或 stale 后已入队刷新 | 可展示当前 payload 或空 payload；写动作由后端 stale precondition/canonical write safety 判定 |
 | `stale` | source versions 不一致 | 不得伪装 fresh；应 enqueue `api_stale` refresh |
 | `missing` | required SQL read model 缺失 | 返回 empty refreshing payload 并 enqueue `api_miss` |
 | `failed` | worker 或 readiness 记录失败 | App Status 标记 domain blocked |
@@ -207,3 +208,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |
+| 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `turnover_ledger` barrier fresh 并 reload，避免旧 grouped payload 暴露给用户 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |

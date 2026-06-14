@@ -17,6 +17,7 @@
 ## 代码入口
 
 - `web/src/app/App.tsx`：provider 组合、BrowserRouter、shell layout、compact sidebar、本地 sidebar 展开状态。
+- `web/src/contexts/GlobalOperationOverlayContext.tsx`：写操作级全屏 overlay provider；页面通过 hook 包裹 mutating action。
 - `web/src/app/pageRegistry.tsx`：页面注册表、route chunks、sidebar groups 的唯一事实源。
 - `web/src/app/router.tsx`：把 `appPageRoutes` 交给 `PageRouteHost`。
 - `web/src/app/PageRouteHost.tsx`：route match、未知路由 redirect、当前页面挂载、lazy fallback、`PageRuntimeProvider`。
@@ -36,6 +37,7 @@
 - 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
 - `SessionGate` 是 shell 级入口。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
 - `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。
+- `GlobalOperationOverlayProvider` 是 shell 级交互保护层。它只承载写操作后的短暂等待和错误反馈，不保存业务 payload，不决定 freshness，不替代 App Status 或页面 read boundary。页面不得各自实现第二套全屏操作阻塞层。
 - import pages 是独立 route，但其侧栏入口设置 `active: false`，避免进入导入页时误把导入入口高亮为当前业务页面。
 
 ## 影响面
@@ -46,6 +48,7 @@
 | `PageRouteHost.tsx` route match/mount 策略 | 页面状态清理、domain event listener、旧页面 API 请求和 toast、lazy fallback |
 | `AppSidebar.tsx` active/preload/mobile drawer | 侧栏高亮、移动端导航关闭、hover/focus 预加载、导入页 active 行为 |
 | `App.tsx` provider 顺序 | session、page session、import draft、background jobs、App Health、MonthProvider |
+| `GlobalOperationOverlayContext.tsx` 语义 | 所有接入页面的写操作 loading/error 体验；不能污染普通页面 loading、App Status 或业务事实 |
 | `PageSessionStateContext.tsx` key/scope/TTL | 所有页面筛选/分页/排序/选中状态恢复、用户切换隔离 |
 | `PageRuntimeContext.tsx` event activation | 跨页面刷新提示、旧页面卸载后的事件清理 |
 
@@ -54,6 +57,7 @@
 - `web/src/test/PageRouteHost.test.tsx`
 - `web/src/test/AppSidebar.test.tsx`
 - `web/src/test/App.test.tsx`
+- `web/src/test/GlobalOperationOverlayContext.test.tsx`
 - `web/src/test/SessionGate.test.tsx`
 - `web/src/test/PageSessionStateContext.test.tsx`
 - `web/src/test/useFinanceTableSession.test.tsx`

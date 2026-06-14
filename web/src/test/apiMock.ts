@@ -4584,6 +4584,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         templates: templateRegistry,
       },
     }),
+    "/api/operation-barrier/status": () => ({
+      body: {
+        status: "fresh",
+        fresh: true,
+        targets: [],
+        blocked_targets: [],
+        refreshing_targets: [],
+      },
+    }),
     "/api/workbench": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.workbenchErrorMonths?.includes(month)) {
