@@ -19083,6 +19083,17 @@ class Application:
         return str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
 
     @staticmethod
+    def _oa_id_from_attachment_invoice_id(invoice_id: str, oa_row_ids: list[str]) -> str | None:
+        prefix = "oa-att-inv-"
+        if not invoice_id.startswith(prefix):
+            return None
+        tail = invoice_id[len(prefix):]
+        for oa_row_id in sorted(oa_row_ids, key=len, reverse=True):
+            if tail == oa_row_id or tail.startswith(f"{oa_row_id}-"):
+                return oa_row_id
+        return None
+
+    @staticmethod
     def _raw_workbench_payload_row_ids(payload: dict[str, object]) -> set[str]:
         row_ids: set[str] = set()
         for section in ("paired", "open"):
@@ -20597,77 +20608,7 @@ class Application:
         rows = self._resolve_rows_for_amount_check(affected_row_ids, month=month, allow_direct=True)
         if after_relations:
             return rows, after_relations, affected_row_ids
-
-        inferred_relations = self._infer_oa_attachment_withdraw_relations(
-            active_relation=active_relation,
-            rows=rows,
-        )
-        if inferred_relations:
-            affected_row_ids = self._normalize_row_ids(
-                [
-                    *affected_row_ids,
-                    *[row_id for relation in inferred_relations for row_id in list(relation.get("row_ids") or [])],
-                ]
-            )
-        return rows, inferred_relations, affected_row_ids
-
-    def _infer_oa_attachment_withdraw_relations(
-        self,
-        *,
-        active_relation: dict[str, object],
-        rows: list[dict[str, object]],
-    ) -> list[dict[str, object]]:
-        active_row_ids = {
-            str(row_id).strip()
-            for row_id in list(active_relation.get("row_ids") or [])
-            if str(row_id).strip()
-        }
-        oa_row_ids = [
-            str(row.get("id", "")).strip()
-            for row in rows
-            if str(row.get("id", "")).strip() in active_row_ids and str(row.get("type", "")) == "oa"
-        ]
-        if not oa_row_ids:
-            return []
-
-        invoice_ids_by_oa_id: dict[str, list[str]] = {}
-        for row in rows:
-            invoice_id = str(row.get("id", "")).strip()
-            is_invoice_row = str(row.get("type", "")) == "invoice" or invoice_id.startswith("oa-att-inv-")
-            if invoice_id not in active_row_ids or not is_invoice_row:
-                continue
-            source_oa_id = self._oa_id_from_attachment_invoice_id(invoice_id, oa_row_ids)
-            if source_oa_id:
-                invoice_ids_by_oa_id.setdefault(source_oa_id, []).append(invoice_id)
-
-        month_scope = str(active_relation.get("month_scope") or "all")
-        inferred_relations: list[dict[str, object]] = []
-        for oa_row_id in oa_row_ids:
-            invoice_ids = invoice_ids_by_oa_id.get(oa_row_id, [])
-            if not invoice_ids:
-                continue
-            inferred_relations.append(
-                {
-                    "case_id": f"CASE-OA-ATT-{oa_row_id}",
-                    "row_ids": [oa_row_id, *invoice_ids],
-                    "row_types": ["oa", *(["invoice"] * len(invoice_ids))],
-                    "status": "active",
-                    "relation_mode": "oa_attachment_invoice",
-                    "month_scope": month_scope,
-                }
-            )
-        return inferred_relations
-
-    @staticmethod
-    def _oa_id_from_attachment_invoice_id(invoice_id: str, oa_row_ids: list[str]) -> str | None:
-        prefix = "oa-att-inv-"
-        if not invoice_id.startswith(prefix):
-            return None
-        tail = invoice_id[len(prefix):]
-        for oa_row_id in sorted(oa_row_ids, key=len, reverse=True):
-            if tail == oa_row_id or tail.startswith(f"{oa_row_id}-"):
-                return oa_row_id
-        return None
+        return rows, [], affected_row_ids
 
     def _synthetic_existing_case_relations(
         self,

@@ -1,5 +1,23 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-14 - Withdraw restorable relation 策略收敛
+
+目标：把 Workbench relation mode registry、display ownership 和 withdraw 可恢复判断收敛到统一策略，防止未标记 history/自动候选/同 row-set snapshot 在撤回后继续把行显示到同一组。
+
+结论：
+
+- 新增 `backend/src/fin_ops_platform/services/workbench_relation_modes.py`，集中维护 `VALID_WORKBENCH_RELATION_MODES`、`DISPLAY_ONLY_WORKBENCH_RELATION_MODES` 和 `restorable_on_withdraw` 判定。
+- `WorkbenchRelationCommandService` 复用同一 registry 做 active write fact 校验，不再本地维护 mode 集合。
+- `WorkbenchPairRelationService` 只为真实 active before relation 写入 `special_metadata.restorable_on_withdraw=true`；外部传入的 preview/display/candidate/history snapshot 没有该标记时不可恢复。
+- 同一 row-set snapshot 即使带 `restorable_on_withdraw` 也不可恢复，避免撤回后仍显示成同一行。
+- PostgreSQL history replay dry-run 新增 `non_restorable_relation_in_confirm_history` 和 summary count，用于发布前识别撤回后会拆行的历史。
+- 移除 withdraw preview 的 OA 附件无 history 合成恢复路径；OA 附件 ID 解析 helper 只保留给 active relation repair。
+
+验证：
+
+- `pytest -q tests/test_workbench_pair_relation_service.py tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_withdraw_link_splits_bank_invoice_rows_when_history_snapshot_is_not_restorable tests/test_workbench_relation_history_replay_tool.py`
+- `pytest -q tests/test_workbench_relation_command_service.py tests/test_workbench_v2_api.py -k "withdraw_link or withdraw_relation or relation_mode_registry or confirm_link_preview_preserves_existing_case"`
+
 ## 2026-06-14 - Display ownership 不作为可恢复 relation
 
 目标：把 `existing_case` 从“可恢复 before relation”中剥离，只作为读侧 display ownership；撤回只恢复真实 active relation snapshot。
@@ -666,7 +684,7 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_gu
 改动：
 
 - 新增 `backend/src/fin_ops_platform/services/workbench_relation_command_service.py`。
-- 新增 `VALID_WORKBENCH_RELATION_MODES`，明确 active write fact 允许的 relation modes，并排除 `automatic_decision`。
+- 新增 `VALID_WORKBENCH_RELATION_MODES`，明确 active write fact 允许的 relation modes，并排除 `automatic_decision`；2026-06-14 后该 registry 由 `workbench_relation_modes.py` 统一维护。
 - 新增 `WorkbenchRelationCommandError`，统一携带 `error_code`、`message` 和 structured `payload`。
 - 新增 `WorkbenchRelationCommandService`，当前最小支持：
   - `confirm_relation`。

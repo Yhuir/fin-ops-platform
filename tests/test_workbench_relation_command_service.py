@@ -81,6 +81,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
             "created_at": "2026-05-01T10:00:00+00:00",
             "updated_at": "2026-05-01T10:00:00+00:00",
             "version": 1,
+            "special_metadata": {"restorable_on_withdraw": True},
         }
         active_relation = {
             "case_id": "case-new",

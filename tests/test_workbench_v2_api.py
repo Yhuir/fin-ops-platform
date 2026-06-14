@@ -7175,7 +7175,64 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BANK-INVOICE"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-DISPLAY-BANK-INVOICE"))
 
-    def test_withdraw_link_without_history_restores_oa_attachment_invoice_relation(self) -> None:
+    def test_withdraw_link_splits_bank_invoice_rows_when_history_snapshot_is_not_restorable(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="500.00")
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+
+        row_ids = ["bk-o-202605-001", "iv-o-202605-001"]
+        active_relation = app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-BANK-INVOICE",
+            row_ids=row_ids,
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+        )
+        app._workbench_pair_relation_service.record_history(
+            operation_type="confirm_link",
+            before_relations=[
+                {
+                    "case_id": "CASE-UNOWNED-MANUAL",
+                    "row_ids": row_ids,
+                    "row_types": ["bank", "invoice"],
+                    "status": "active",
+                    "relation_mode": "manual_confirmed",
+                    "month_scope": "2026-05",
+                }
+            ],
+            after_relations=[active_relation],
+            affected_row_ids=row_ids,
+            created_by="test",
+        )
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link/preview",
+            json.dumps({"month": "2026-05", "row_ids": row_ids}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_payload["restored_relations"], [])
+        after_groups = preview_payload["after"]["groups"]
+        self.assertEqual(
+            [group["group_id"] for group in after_groups],
+            ["selected:bk-o-202605-001", "selected:iv-o-202605-001"],
+        )
+        self.assertFalse(any(group["bank_rows"] and group["invoice_rows"] for group in after_groups))
+
+        withdraw_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link",
+            json.dumps({"month": "2026-05", "row_ids": row_ids}),
+        )
+        self.assertEqual(withdraw_response.status_code, 200)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-BANK-INVOICE"))
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-UNOWNED-MANUAL"))
+
+    def test_withdraw_link_without_history_does_not_restore_oa_attachment_invoice_relation(self) -> None:
         app = build_application()
         raw_payload = build_relation_amount_raw_payload(invoice_amount="500.00")
         raw_payload["open"]["oa"][0]["id"] = "oa-exp-2066-2"

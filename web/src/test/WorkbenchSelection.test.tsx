@@ -807,15 +807,15 @@ describe("Workbench row selection and detail modal", () => {
   test("initial workbench rows render before slow ignored and settings requests finish", async () => {
     installMockApiFetch({
       workbenchPrimaryDelayMs: 20,
-      workbenchIgnoredDelayMs: 180,
-      workbenchSettingsDelayMs: 180,
+      workbenchIgnoredDelayMs: 3000,
+      workbenchSettingsDelayMs: 3000,
     });
     renderWorkbenchPage();
 
     expect(
       await screen.findByRole("row", {
         name: /陈涛.*智能工厂设备商/,
-      }, { timeout: 500 }),
+      }, { timeout: 2000 }),
     ).toBeInTheDocument();
   });
 

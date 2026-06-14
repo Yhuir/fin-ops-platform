@@ -1168,7 +1168,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertIs(writer.calls[0]["transaction"], connection.transaction_obj)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-UOW"))
 
-    def test_stale_withdraw_preview_withdraws_current_relation_and_restores_previous_relation(self) -> None:
+    def test_stale_withdraw_preview_withdraws_current_relation_without_restoring_same_row_set(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
@@ -1191,10 +1191,10 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(replacement.status_code, 200, replacement.body)
         self.assertEqual(stale_submit.status_code, 200, stale_submit.body)
         # TODO(PF-P017+): stale submit acts on the current relation, not on the previewed relation version.
-        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-OLD"))
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-OLD"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-NEW"))
         restored_case_ids = [relation["case_id"] for relation in _json_response(stale_submit)["restored_relations"]]
-        self.assertIn("CASE-WITHDRAW-OLD", restored_case_ids)
+        self.assertNotIn("CASE-WITHDRAW-OLD", restored_case_ids)
 
     def test_withdraw_submit_with_stale_preview_expected_versions_rejects_replacement_relation(self) -> None:
         app = self._build_app()

@@ -76,6 +76,13 @@ class FakeConnection:
                             "status": "active",
                             "row_ids": ["bank-1", "invoice-1"],
                             "row_types": ["bank", "invoice"],
+                        },
+                        {
+                            "case_id": "case-unmarked-manual-history",
+                            "relation_mode": "manual_confirmed",
+                            "status": "active",
+                            "row_ids": ["bank-2", "invoice-2"],
+                            "row_types": ["bank", "invoice"],
                         }
                     ],
                     "after_payload": [],
@@ -119,9 +126,11 @@ class WorkbenchRelationHistoryReplayToolTests(unittest.TestCase):
         self.assertIn("unknown_relation_mode", issue_codes)
         self.assertIn("display_only_relation_mode_in_write_model", issue_codes)
         self.assertIn("display_only_relation_in_confirm_history", issue_codes)
+        self.assertIn("non_restorable_relation_in_confirm_history", issue_codes)
         self.assertIn("relation_without_history", issue_codes)
         self.assertIn("orphan_history_case", issue_codes)
         self.assertEqual(payload["summary"]["display_only_history_before_relation_count"], 1)
+        self.assertEqual(payload["summary"]["non_restorable_history_before_relation_count"], 2)
         unknown_mode_issues = [
             issue
             for issue in payload["issues"]

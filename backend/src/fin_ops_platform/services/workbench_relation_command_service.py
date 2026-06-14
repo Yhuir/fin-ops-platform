@@ -6,27 +6,7 @@ import json
 from typing import Any
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-
-
-VALID_WORKBENCH_RELATION_MODES = frozenset(
-    {
-        "manual_confirmed",
-        "normal_match",
-        "oa_exempt",
-        "pending_invoice_attach_existing_invoice",
-        "pending_invoice_attach_existing",
-        "pending_invoice_manual_invoice",
-        "no_oa_bank_batch",
-        "turnover_manual_closure",
-        "batch_accounting",
-        "etc_business_batch",
-        "etc_historical_repair",
-        "etc_batch_invoice_link",
-        "input_invoice_oa_reverse",
-        "personal_advance_repayment_settlement",
-        "oa_invoice_offset_auto_match",
-    }
-)
+from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
 
 FRESH_WORKBENCH_RELATION_STATUS = "fresh"
 

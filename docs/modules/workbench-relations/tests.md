@@ -2,7 +2,7 @@
 
 ## 现有可复用测试
 
-- `tests/test_workbench_pair_relation_service.py`：领域规则、row 去重、row type 对齐、active overlap、cancel、ETC 删除不恢复旧二栏 relation。
+- `tests/test_workbench_pair_relation_service.py`：领域规则、row 去重、row type 对齐、active overlap、cancel、withdraw 可恢复关系策略、ETC 删除不恢复旧二栏 relation。
 - `tests/test_workbench_relation_command_service.py`：command service confirm/cancel/withdraw 基座、withdraw preview lock、row-id batch cancel、metadata update、freshness precondition、idempotency、mode registry 和 active row conflict。
 - `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service、withdraw route 复用 request-local OA session actor/tenant，以及纯候选 `split_candidate` suppress 边界。
 - `tests/test_workbench_write_characterization.py`：confirm/withdraw UoW、idempotency、rollback、stale precondition、以及 confirm/withdraw 只刷新目标 scope、不直接触发 global all fan-out。
@@ -16,7 +16,7 @@
 - `tests/test_pending_invoice_service.py`：待找发票 attach/create 幂等、relation detail 读 distribution、manual/attach relation 写入委托 command service、relation read model freshness 诊断。
 - `tests/test_etc_backend.py`：ETC 删除、历史修复、existing batch link、summary relation command service 委托、缺 command fail-fast 和 canonical write safety。
 - `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`：进项发票 OA reverse evidence detected 后通过 relation command service 写 `input_invoice_oa_reverse`，缺 command fail-fast，command stale/conflict 返回 409 且不推进本地 batch。
-- `tests/test_workbench_relation_history_replay_tool.py`：PostgreSQL history replay 只读巡检，覆盖 active row 多 case 占用、row shape、未注册 mode severity、display-only relation mode/history 污染、relation/history 差异、readiness 状态和 `--fail-on-issues`。
+- `tests/test_workbench_relation_history_replay_tool.py`：PostgreSQL history replay 只读巡检，覆盖 active row 多 case 占用、row shape、未注册 mode severity、display-only relation mode/history 污染、非可恢复 history before_relations、relation/history 差异、readiness 状态和 `--fail-on-issues`。
 
 ## 七类测试要求
 
@@ -28,6 +28,7 @@
 - history replay 对 active 未注册 mode 报 error，对历史非 active 未注册 mode 报 warning。
 - active row occupation、case reuse、duplicate row、conflicting row type。
 - cancel、withdraw、supersede、repair 状态转换。
+- withdraw 可恢复策略：真实 active before relation 可恢复，display/candidate/unowned history 不可恢复，同 row-set snapshot 不可恢复。
 - idempotent replay 同 request 返回同 relation。
 - 正式发票与 OA 附件发票强 identity 去重不被绕过。
 

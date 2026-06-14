@@ -11,8 +11,12 @@ from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.common import row_payload, text_list
-from fin_ops_platform.services.workbench_pair_relation_service import DISPLAY_ONLY_PAIR_RELATION_MODES
-from fin_ops_platform.services.workbench_relation_command_service import VALID_WORKBENCH_RELATION_MODES
+from fin_ops_platform.services.workbench_relation_modes import (
+    DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
+    VALID_WORKBENCH_RELATION_MODES,
+    is_workbench_relation_snapshot_restorable,
+    relation_has_withdraw_restore_marker,
+)
 
 
 KNOWN_RELATION_STATUSES = {"active", "cancelled", "withdrawn", "superseded", "repair_attention"}
@@ -74,6 +78,7 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
     issues.extend(_active_row_occupation_issues(active_relations))
     issues.extend(_history_issues(relation_case_ids, history_counts))
     issues.extend(_history_display_only_relation_issues(history_rows))
+    issues.extend(_history_non_restorable_relation_issues(history_rows))
     issues.extend(_readiness_issues(readiness_rows))
 
     issue_payloads = [asdict(issue) for issue in issues]
@@ -83,6 +88,11 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
         int(issue.details.get("relation_count") or 0)
         for issue in issues
         if issue.code == "display_only_relation_in_confirm_history" and isinstance(issue.details, dict)
+    )
+    non_restorable_history_before_relation_count = sum(
+        int(issue.details.get("relation_count") or 0)
+        for issue in issues
+        if issue.code == "non_restorable_relation_in_confirm_history" and isinstance(issue.details, dict)
     )
     return {
         "mode": "dry-run",
@@ -97,6 +107,7 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
             "error_count": error_count,
             "warning_count": warning_count,
             "display_only_history_before_relation_count": display_only_history_before_relation_count,
+            "non_restorable_history_before_relation_count": non_restorable_history_before_relation_count,
         },
         "issues": issue_payloads,
         "readiness": readiness_rows,
@@ -220,7 +231,7 @@ def _relation_shape_issues(relations: list[dict[str, Any]]) -> list[RelationRepl
                     details={"status": status},
                 )
             )
-        if relation_mode in DISPLAY_ONLY_PAIR_RELATION_MODES:
+        if relation_mode in DISPLAY_ONLY_WORKBENCH_RELATION_MODES:
             severity = "error" if status == "active" else "warning"
             issues.append(
                 RelationReplayIssue(
@@ -406,16 +417,67 @@ def _history_display_only_relation_issues(history_rows: list[dict[str, Any]]) ->
     return issues
 
 
+def _history_non_restorable_relation_issues(history_rows: list[dict[str, Any]]) -> list[RelationReplayIssue]:
+    issues: list[RelationReplayIssue] = []
+    for row in history_rows:
+        case_id = str(row.get("case_id") or "").strip()
+        payload = row_payload(row, "raw_payload")
+        history_payload = payload if isinstance(payload, dict) else {}
+        operation_type = str(row.get("event_type") or history_payload.get("operation_type") or "").strip()
+        if operation_type != "confirm_link":
+            continue
+        before_relations = row.get("before_payload")
+        if not isinstance(before_relations, list):
+            before_relations = history_payload.get("before_relations")
+        non_restorable_relations = [
+            relation
+            for relation in list(before_relations or [])
+            if isinstance(relation, dict)
+            and not is_workbench_relation_snapshot_restorable(relation)
+        ]
+        if not non_restorable_relations:
+            continue
+        relation_modes = sorted(
+            {
+                str(relation.get("relation_mode") or "").strip()
+                for relation in non_restorable_relations
+                if isinstance(relation, dict)
+            }
+        )
+        relation_case_ids = sorted(
+            {
+                str(relation.get("case_id") or "").strip()
+                for relation in non_restorable_relations
+                if isinstance(relation, dict) and str(relation.get("case_id") or "").strip()
+            }
+        )
+        issues.append(
+            RelationReplayIssue(
+                severity="warning",
+                code="non_restorable_relation_in_confirm_history",
+                message=(
+                    "Confirm history contains before_relations that withdraw will not restore. "
+                    "Rows will split after withdraw unless the history is repaired with an explicit recoverable relation."
+                ),
+                case_ids=[case_id],
+                details={
+                    "operation_type": operation_type,
+                    "relation_count": len(non_restorable_relations),
+                    "relation_modes": relation_modes,
+                    "relation_case_ids": relation_case_ids,
+                },
+            )
+        )
+    return issues
+
+
 def _is_non_restorable_display_only_relation(relation: Any) -> bool:
     if not isinstance(relation, dict):
         return False
     relation_mode = str(relation.get("relation_mode") or "").strip()
-    if relation_mode not in DISPLAY_ONLY_PAIR_RELATION_MODES:
+    if relation_mode not in DISPLAY_ONLY_WORKBENCH_RELATION_MODES:
         return False
-    if relation.get("restorable_on_withdraw") is True:
-        return False
-    special_metadata = relation.get("special_metadata")
-    return not (isinstance(special_metadata, dict) and special_metadata.get("restorable_on_withdraw") is True)
+    return not relation_has_withdraw_restore_marker(relation)
 
 
 def _readiness_issues(readiness_rows: list[dict[str, Any]]) -> list[RelationReplayIssue]:

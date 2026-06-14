@@ -5,12 +5,19 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from fin_ops_platform.services.workbench_relation_modes import (
+    DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
+    is_workbench_relation_snapshot_restorable,
+    mark_relation_restorable_on_withdraw,
+    relation_mode_can_be_restored_on_withdraw,
+    workbench_relations_have_same_row_set,
+)
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 ACTIVE_PAIR_RELATION_STATUS = "active"
 CANCELLED_PAIR_RELATION_STATUS = "cancelled"
-DISPLAY_ONLY_PAIR_RELATION_MODES = {"existing_case"}
+DISPLAY_ONLY_PAIR_RELATION_MODES = set(DISPLAY_ONLY_WORKBENCH_RELATION_MODES)
 
 
 class WorkbenchPairRelationService:
@@ -192,10 +199,20 @@ class WorkbenchPairRelationService:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         normalized_row_ids, normalized_row_types = self._normalize_relation_entries(row_ids, row_types)
         active_before_relations = self.active_relations_for_row_ids(normalized_row_ids)
+        replacement_relation = {
+            "row_ids": normalized_row_ids,
+            "row_types": normalized_row_types,
+        }
         history_before_relations = (
-            self._restorable_relation_snapshots(before_relations)
+            self._restorable_relation_snapshots(
+                self._mark_owned_before_relations_restorable(before_relations, active_before_relations),
+                active_relation=replacement_relation,
+            )
             if before_relations is not None
-            else self._restorable_relation_snapshots(active_before_relations)
+            else self._restorable_relation_snapshots(
+                self._mark_owned_before_relations_restorable(active_before_relations, active_before_relations),
+                active_relation=replacement_relation,
+            )
         )
         timestamp = created_at or self._timestamp()
         for relation in active_before_relations:
@@ -368,7 +385,10 @@ class WorkbenchPairRelationService:
             "confirm_history": deepcopy(confirm_history) if isinstance(confirm_history, dict) else {},
             "before_relations": [deepcopy(active_relation)],
             "after_relations": (
-                self._restorable_relation_snapshots(confirm_history.get("before_relations") or [])
+                self._restorable_relation_snapshots(
+                    confirm_history.get("before_relations") or [],
+                    active_relation=active_relation,
+                )
                 if isinstance(confirm_history, dict)
                 else []
             ),
@@ -387,7 +407,10 @@ class WorkbenchPairRelationService:
         active_relation = preview["active_relation"]
         restored_relations = list(preview["after_relations"])
         if not restored_relations and fallback_after_relations:
-            restored_relations = self._restorable_relation_snapshots(fallback_after_relations)
+            restored_relations = self._restorable_relation_snapshots(
+                fallback_after_relations,
+                active_relation=active_relation,
+            )
         timestamp = created_at or self._timestamp()
         self.cancel_relation(str(active_relation.get("case_id", "")), cancelled_at=timestamp)
         normalized_restored_relations: list[dict[str, Any]] = []
@@ -662,24 +685,52 @@ class WorkbenchPairRelationService:
         return None
 
     @classmethod
-    def _restorable_relation_snapshots(cls, relations: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    def _mark_owned_before_relations_restorable(
+        cls,
+        relations: list[dict[str, Any]] | None,
+        active_before_relations: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        active_by_case_id = {
+            str(relation.get("case_id") or "").strip(): relation
+            for relation in list(active_before_relations or [])
+            if isinstance(relation, dict) and str(relation.get("case_id") or "").strip()
+        }
+        marked_relations: list[dict[str, Any]] = []
+        for relation in list(relations or []):
+            if not isinstance(relation, dict):
+                continue
+            case_id = str(relation.get("case_id") or "").strip()
+            active_relation = active_by_case_id.get(case_id)
+            if (
+                isinstance(active_relation, dict)
+                and workbench_relations_have_same_row_set(relation, active_relation)
+                and relation_mode_can_be_restored_on_withdraw(str(relation.get("relation_mode") or ""))
+            ):
+                marked_relations.append(mark_relation_restorable_on_withdraw(relation))
+            else:
+                marked_relations.append(deepcopy(relation))
+        return marked_relations
+
+    @classmethod
+    def _restorable_relation_snapshots(
+        cls,
+        relations: list[dict[str, Any]] | None,
+        *,
+        active_relation: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         return [
             deepcopy(relation)
             for relation in list(relations or [])
-            if cls._is_restorable_relation_snapshot(relation)
+            if cls._is_restorable_relation_snapshot(relation, active_relation=active_relation)
         ]
 
     @staticmethod
-    def _is_restorable_relation_snapshot(relation: dict[str, Any]) -> bool:
-        if not isinstance(relation, dict):
-            return False
-        relation_mode = str(relation.get("relation_mode") or "").strip()
-        if relation_mode not in DISPLAY_ONLY_PAIR_RELATION_MODES:
-            return True
-        if relation.get("restorable_on_withdraw") is True:
-            return True
-        special_metadata = relation.get("special_metadata")
-        return isinstance(special_metadata, dict) and special_metadata.get("restorable_on_withdraw") is True
+    def _is_restorable_relation_snapshot(
+        relation: dict[str, Any],
+        *,
+        active_relation: dict[str, Any] | None = None,
+    ) -> bool:
+        return is_workbench_relation_snapshot_restorable(relation, active_relation=active_relation)
 
     def _latest_confirm_history_for_relation(self, relation: dict[str, Any]) -> dict[str, Any] | None:
         case_id = str(relation.get("case_id", "")).strip()
