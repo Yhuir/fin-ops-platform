@@ -81,9 +81,18 @@ class FailingConfirmLinkUow:
 
 
 class NoOaReadModelConnection:
-    def __init__(self, *, readiness_status: str | None = "fresh", dirty_status: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        readiness_status: str | None = "fresh",
+        dirty_status: str | None = None,
+        readiness_by_scope: dict[str, str | None] | None = None,
+        dirty_by_scope: dict[str, str | None] | None = None,
+    ) -> None:
         self.readiness_status = readiness_status
         self.dirty_status = dirty_status
+        self.readiness_by_scope = dict(readiness_by_scope or {})
+        self.dirty_by_scope = dict(dirty_by_scope or {})
         self.fetch_all_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
 
@@ -95,9 +104,13 @@ class NoOaReadModelConnection:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized:
-            return {"status": self.dirty_status} if self.dirty_status else None
+            scope_key = str(params[1]) if len(params) > 1 else "all"
+            status = self.dirty_by_scope.get(scope_key, self.dirty_status)
+            return {"status": status} if status else None
         if "from read_model.app_status_readiness" in normalized:
-            return {"status": self.readiness_status} if self.readiness_status else None
+            scope_key = str(params[0]) if params else "all"
+            status = self.readiness_by_scope.get(scope_key, self.readiness_status)
+            return {"status": status} if status else None
         return None
 
 
@@ -446,6 +459,44 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
 
         self.assertIsNone(missing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
         self.assertIsNone(refreshing_repository.list_no_oa_bank_batch_rows({"month": "2026-06"}))
+
+    def test_no_oa_repository_does_not_treat_all_fresh_as_month_fresh_when_month_is_dirty(self) -> None:
+        connection = NoOaReadModelConnection(
+            readiness_by_scope={"all": "fresh", "2026-06": "fresh"},
+            dirty_by_scope={"2026-06": "pending"},
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
+
+        self.assertIsNone(rows)
+        self.assertIn(
+            ("no_oa_bank_batch", "2026-06"),
+            [
+                tuple(params)
+                for sql, params in connection.fetch_one_calls
+                if "from job.read_model_dirty_scopes" in sql
+            ],
+        )
+
+    def test_no_oa_repository_accepts_month_fresh_without_all_readiness_record(self) -> None:
+        connection = NoOaReadModelConnection(
+            readiness_status=None,
+            readiness_by_scope={"2026-06": "fresh"},
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        rows = repository.list_no_oa_bank_batch_rows({"month": "2026-06", "bucket": "unsubmitted"})
+
+        self.assertEqual(rows, [])
+        self.assertIn(
+            ("2026-06",),
+            [
+                tuple(params)
+                for sql, params in connection.fetch_one_calls
+                if "from read_model.app_status_readiness" in sql
+            ],
+        )
 
     def test_no_oa_bank_batch_detail_does_not_refresh_all_batches(self) -> None:
         app = build_application()

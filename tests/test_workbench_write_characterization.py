@@ -1009,7 +1009,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         assert relation is not None
         self.assertCountEqual(relation["row_ids"], row_ids)
 
-    def test_duplicate_withdraw_link_replays_against_restored_relation_current_behavior(self) -> None:
+    def test_duplicate_withdraw_link_after_display_only_history_returns_not_found_current_behavior(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
 
@@ -1024,18 +1024,19 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         self.assertEqual(first_withdraw.status_code, 200, first_withdraw.body)
-        self.assertEqual(second_withdraw.status_code, 200, second_withdraw.body)
+        self.assertEqual(second_withdraw.status_code, 400, second_withdraw.body)
         first_payload = _json_response(first_withdraw)
         second_payload = _json_response(second_withdraw)
         self.assertCountEqual(first_payload["affected_row_ids"], row_ids)
-        self.assertIn(row_ids[0], second_payload["affected_row_ids"])
+        self.assertEqual(second_payload["error"], "workbench_relation_not_found")
+        self.assertCountEqual(second_payload["row_ids"], row_ids)
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-DUP"))
         self.assertEqual(
             [entry["operation_type"] for entry in app._workbench_pair_relation_service.list_history()],
-            ["confirm_link", "withdraw_link", "withdraw_link"],
+            ["confirm_link", "withdraw_link"],
         )
-        self.assertEqual(pair_relation_persist.call_count, 3)
-        self.assertEqual(read_model_persist.call_count, 3)
+        self.assertEqual(pair_relation_persist.call_count, 2)
+        self.assertEqual(read_model_persist.call_count, 2)
 
     def test_withdraw_link_invalidates_only_affected_scopes_without_global_all(self) -> None:
         app = self._build_app()

@@ -7152,7 +7152,7 @@ class PostgresReadModelRepository:
             tuple(params),
         )
         if not rows:
-            return [] if self._no_oa_bank_batch_readiness_is_fresh() else None
+            return [] if self._no_oa_bank_batch_readiness_is_fresh(text(resolved_filters.get("month"))) else None
         result: list[dict[str, Any]] = []
         for row in rows:
             payload = _read_model_payload(row)
@@ -7167,9 +7167,21 @@ class PostgresReadModelRepository:
                 result.append(payload)
         return result
 
-    def _no_oa_bank_batch_readiness_is_fresh(self) -> bool:
-        if self._refresh_status(scope_type="no_oa_bank_batch", scope_key="all") != "fresh":
+    def _no_oa_bank_batch_readiness_is_fresh(self, scope_key: str | None = None) -> bool:
+        normalized_scope_key = text(scope_key)
+        candidate_scope_keys = [normalized_scope_key, "all"] if normalized_scope_key else ["all"]
+        if normalized_scope_key and self._refresh_status(scope_type="no_oa_bank_batch", scope_key=normalized_scope_key) != "fresh":
             return False
+        for candidate_scope_key in candidate_scope_keys:
+            if not candidate_scope_key:
+                continue
+            if self._refresh_status(scope_type="no_oa_bank_batch", scope_key=candidate_scope_key) != "fresh":
+                continue
+            if self._no_oa_bank_batch_readiness_scope_is_fresh(candidate_scope_key):
+                return True
+        return False
+
+    def _no_oa_bank_batch_readiness_scope_is_fresh(self, scope_key: str) -> bool:
         row = self._connection.fetch_one(
             """
             select status
@@ -7177,9 +7189,10 @@ class PostgresReadModelRepository:
             where tenant_id = 'default'
               and read_model_key = 'no_oa_bank_batch'
               and scope_type = 'no_oa_bank_batch'
-              and scope_key = 'all'
+              and scope_key = %s
             limit 1
-            """
+            """,
+            (scope_key,),
         )
         return isinstance(row, dict) and text(row.get("status")) == "fresh"
 

@@ -10,6 +10,7 @@ from fin_ops_platform.services.workbench_row_identity import row_type_for_workbe
 
 ACTIVE_PAIR_RELATION_STATUS = "active"
 CANCELLED_PAIR_RELATION_STATUS = "cancelled"
+DISPLAY_ONLY_PAIR_RELATION_MODES = {"existing_case"}
 
 
 class WorkbenchPairRelationService:
@@ -192,9 +193,9 @@ class WorkbenchPairRelationService:
         normalized_row_ids, normalized_row_types = self._normalize_relation_entries(row_ids, row_types)
         active_before_relations = self.active_relations_for_row_ids(normalized_row_ids)
         history_before_relations = (
-            [deepcopy(relation) for relation in before_relations if isinstance(relation, dict)]
+            self._restorable_relation_snapshots(before_relations)
             if before_relations is not None
-            else active_before_relations
+            else self._restorable_relation_snapshots(active_before_relations)
         )
         timestamp = created_at or self._timestamp()
         for relation in active_before_relations:
@@ -366,7 +367,11 @@ class WorkbenchPairRelationService:
             "active_relation": deepcopy(active_relation),
             "confirm_history": deepcopy(confirm_history) if isinstance(confirm_history, dict) else {},
             "before_relations": [deepcopy(active_relation)],
-            "after_relations": deepcopy(confirm_history.get("before_relations") or []) if isinstance(confirm_history, dict) else [],
+            "after_relations": (
+                self._restorable_relation_snapshots(confirm_history.get("before_relations") or [])
+                if isinstance(confirm_history, dict)
+                else []
+            ),
         }
 
     def withdraw_latest_for_row_ids(
@@ -382,11 +387,7 @@ class WorkbenchPairRelationService:
         active_relation = preview["active_relation"]
         restored_relations = list(preview["after_relations"])
         if not restored_relations and fallback_after_relations:
-            restored_relations = [
-                deepcopy(relation)
-                for relation in fallback_after_relations
-                if isinstance(relation, dict)
-            ]
+            restored_relations = self._restorable_relation_snapshots(fallback_after_relations)
         timestamp = created_at or self._timestamp()
         self.cancel_relation(str(active_relation.get("case_id", "")), cancelled_at=timestamp)
         normalized_restored_relations: list[dict[str, Any]] = []
@@ -659,6 +660,26 @@ class WorkbenchPairRelationService:
             if isinstance(relation, dict):
                 return relation
         return None
+
+    @classmethod
+    def _restorable_relation_snapshots(cls, relations: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        return [
+            deepcopy(relation)
+            for relation in list(relations or [])
+            if cls._is_restorable_relation_snapshot(relation)
+        ]
+
+    @staticmethod
+    def _is_restorable_relation_snapshot(relation: dict[str, Any]) -> bool:
+        if not isinstance(relation, dict):
+            return False
+        relation_mode = str(relation.get("relation_mode") or "").strip()
+        if relation_mode not in DISPLAY_ONLY_PAIR_RELATION_MODES:
+            return True
+        if relation.get("restorable_on_withdraw") is True:
+            return True
+        special_metadata = relation.get("special_metadata")
+        return isinstance(special_metadata, dict) and special_metadata.get("restorable_on_withdraw") is True
 
     def _latest_confirm_history_for_relation(self, relation: dict[str, Any]) -> dict[str, Any] | None:
         case_id = str(relation.get("case_id", "")).strip()

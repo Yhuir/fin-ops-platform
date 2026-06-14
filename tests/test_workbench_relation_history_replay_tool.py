@@ -55,11 +55,39 @@ class FakeConnection:
                     "row_types": ["bank"],
                     "raw_payload": {"normalized_payload": {"case_id": "legacy-cancelled"}},
                 },
+                {
+                    "case_id": "case-display-only",
+                    "relation_mode": "existing_case",
+                    "status": "active",
+                    "row_ids": ["invoice-display"],
+                    "row_types": ["invoice"],
+                    "raw_payload": {"normalized_payload": {"case_id": "case-display-only"}},
+                },
             ]
-        if "from app.workbench_pair_relation_history" in normalized and "group by case_id" in normalized:
+        if "from app.workbench_pair_relation_history" in normalized:
             return [
-                {"case_id": "case-a", "history_count": 1},
-                {"case_id": "orphan-case", "history_count": 1},
+                {
+                    "case_id": "case-a",
+                    "event_type": "confirm_link",
+                    "before_payload": [
+                        {
+                            "case_id": "case-display-history",
+                            "relation_mode": "existing_case",
+                            "status": "active",
+                            "row_ids": ["bank-1", "invoice-1"],
+                            "row_types": ["bank", "invoice"],
+                        }
+                    ],
+                    "after_payload": [],
+                    "raw_payload": {"normalized_payload": {"operation_type": "confirm_link"}},
+                },
+                {
+                    "case_id": "orphan-case",
+                    "event_type": "confirm_link",
+                    "before_payload": [],
+                    "after_payload": [],
+                    "raw_payload": {"normalized_payload": {"operation_type": "confirm_link"}},
+                },
             ]
         if "from read_model.app_status_readiness" in normalized:
             return [{"read_model_key": "workbench_relation", "status": "fresh", "scope_key": "all"}]
@@ -89,8 +117,11 @@ class WorkbenchRelationHistoryReplayToolTests(unittest.TestCase):
         self.assertIn("active_row_occupied_by_multiple_cases", issue_codes)
         self.assertIn("row_ids_row_types_length_mismatch", issue_codes)
         self.assertIn("unknown_relation_mode", issue_codes)
+        self.assertIn("display_only_relation_mode_in_write_model", issue_codes)
+        self.assertIn("display_only_relation_in_confirm_history", issue_codes)
         self.assertIn("relation_without_history", issue_codes)
         self.assertIn("orphan_history_case", issue_codes)
+        self.assertEqual(payload["summary"]["display_only_history_before_relation_count"], 1)
         unknown_mode_issues = [
             issue
             for issue in payload["issues"]
@@ -116,6 +147,12 @@ class WorkbenchRelationHistoryReplayToolTests(unittest.TestCase):
         }
         self.assertEqual(severity_by_mode["page_private_mode"], "error")
         self.assertEqual(severity_by_mode["legacy_page_private_mode"], "warning")
+        display_only_write_issues = [
+            issue
+            for issue in payload["issues"]
+            if issue["code"] == "display_only_relation_mode_in_write_model"
+        ]
+        self.assertEqual(display_only_write_issues[0]["severity"], "error")
         self.assertEqual(connection.executed, [])
 
     def test_fail_on_issues_returns_nonzero_after_printing_report(self) -> None:

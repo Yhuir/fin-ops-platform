@@ -104,7 +104,7 @@
 | Business service | `BatchAccountingService` | 金额不一致说明、active relation 排除、version conflict、合法日常报销 OA 行、历史 collision repair |
 | Relation read facade | `WorkbenchRelationReadFacade` | missing/stale/unavailable 不能伪装 fresh；non-fresh 时必须 enqueue refresh 并透出 reason/scope |
 | Relation projection | `WorkbenchRelationSqlProjectionBuilder`、`WorkbenchRelationDistributionMapper` | active batch relation、OA invoice snapshot、linked/unlinked rows、source version 和去重 |
-| Write target | `WorkbenchPairRelationService` | submit/withdraw 不能产生半写入；撤回必须恢复前一 OA invoice snapshot 并保留历史说明 |
+| Write target | `WorkbenchPairRelationService` | submit/withdraw 不能产生半写入；撤回只恢复真实 relation snapshot 并保留历史说明，OA invoice `existing_case` 显示归属不能恢复成 active relation |
 | Read model worker | `WorkbenchRelationReadModelRefreshService`、`workbench-relation` worker | `workbench_relation.read_model.refresh` 必须可注册、可观测、可重试 |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `batch_accounting` domain 必须绑定 `workbench_relation` readiness 和 relation refresh job |
 

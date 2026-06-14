@@ -8,6 +8,8 @@
 - 本模块是 Bankdetail 高风险子域。后续不要把 no-OA 机械拆成脱离 Bankdetail 的独立事实源。
 - `GET /api/no-oa-bank-batches` 和 detail 读路径不得在 missing/stale 时同步重建全量批次；必须返回 read model status 并 enqueue refresh。
 - PostgreSQL list 读路径允许返回 fresh empty rows，但必须由 `job.read_model_dirty_scopes` 无 active blocker 且 `read_model.app_status_readiness` 记录为 fresh 共同证明；不能把无 rows 直接当 fresh。
+- no-OA read model 支持 `all` 和月份 scope；月份 refresh 只读目标月银行流水，只替换目标月批次，合并保留其它月份 snapshot。
+- Bankdetail/effective category 依赖未 fresh 时属于依赖等待，应保持 no-OA readiness 为 `refreshing` 并由 runtime worker defer/retry，不能记录为 `failed` blocker。
 - Workbench confirm-link 的 internal transfer 特例必须最终写 no-OA submitted batch 和 `relation_mode=no_oa_bank_batch`，不得绕过批次写普通 `manual_confirmed`。
 - no-OA legacy migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 必须通过 `WorkbenchRelationCommandService` 写 relation；缺 command service 时 fail fast，不回退 direct pair mutation。
 - no-OA submit/withdraw 的长期目标是 facts/audit/dirty/outbox 同事务；当前目标契约由 `tests/test_bankdetail_write_uow_contract.py` 保护，真实收敛前保持 `documented-risk`。
@@ -137,3 +139,33 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_service.py 
 - 验证命令：见最终交付说明。
 - 未测风险：需要发布后用真实生产 readiness 行验证当前月份 empty state 不再被误判为 missing。
 - 后续事项：若后续把 no-OA scope 从 `all` 拆到月份维度，必须同步更新 readiness 证明条件和测试。
+
+## 2026-06-14 - no-OA 月度刷新和 Bankdetail 依赖状态闭环
+
+- 目标：修复生产 App Status 中 Bankdetail 已同步但免 OA 批次长期 failed/blocker 的链路，避免 no-OA worker 因依赖 read model 暂未 fresh 被误标失败，并把刷新范围从全量收敛到月份。
+- 根因：
+  - `NoOaBankBatchReadModelRefreshService` 没有把 runtime event 的 `scope_key` 传给 application service，月份 dirty scope 实际读取 `all`。
+  - `NoOaBankBatchApplicationService.refresh_batches(...)` 对同一批 rows 重复读取 Bankdetail effective categories，放大依赖读取和刷新时延。
+  - `NoOaBankBatchService.build_batches(...)` 原本按完整 snapshot 替换；如果直接传入月度 rows，会误删其它月份批次。
+  - `ReadModelReadinessReporter.record_event_failure(...)` 把 `bank_detail_read_model_not_fresh` 这类依赖等待记录为 `failed`，即使 runtime worker 后续会 defer/retry，也会污染 App Status current-effective blocker。
+- 决策：
+  - `no_oa_bank_batch` scope policy 明确只允许 `all` 或 `YYYY-MM`，防止 legacy/非法 scope 进入 durable queue。
+  - Worker refresh 按 event scope 读取银行流水；月份 scope 只重建目标月份，并把其它月份现有批次合并回完整 snapshot 后保存。
+  - effective category 对同一批 rows 只读一次；读完后显式装饰 row payload。
+  - `*_read_model_not_fresh` 在 readiness 层记录为 `refreshing`，保留 last_error 诊断，但不升级为 failed blocker。
+  - 月份查询空结果时，若目标月份 dirty scope 仍 pending/processing/failed，不允许用 `all` readiness 伪装 fresh empty；目标月自身 fresh 或 `all` fresh 且目标月无 dirty blocker 才能返回真实 `[]`。
+- 验收测试：
+  - `test_dependency_not_fresh_exception_records_refreshing_not_failed`
+  - `test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches`
+  - `test_refresh_reads_effective_categories_once_for_same_rows`
+  - `test_no_oa_bank_batch_policy_accepts_all_and_month_scopes_only`
+  - `test_no_oa_repository_does_not_treat_all_fresh_as_month_fresh_when_month_is_dirty`
+  - `test_no_oa_repository_accepts_month_fresh_without_all_readiness_record`
+- 七类测试覆盖：
+  - Business core unit tests：本次未改业务批次生成规则，只改 refresh scope 和合并方式；由 no-OA read model refresh/integration 测试覆盖。
+  - Service-layer tests：适用，覆盖 application service 对 scope_key、category provider 和 batch service 的调用。
+  - API contract tests：本次未改 HTTP response shape。
+  - Read model/cache/background job tests：适用，覆盖 dependency non-fresh、dirty scope、readiness、worker 月度 refresh 和 repository fresh-empty gate。
+  - Frontend component and interaction tests：本次未改前端。
+  - End-to-end business-flow integration tests：适用，通过 no-OA workbench integration 回归保护 no-OA/Workbench relation 事实。
+  - Existing feature regression tests：适用，通过 runtime worker/readiness/gateway/App Status/no-OA 回归保护旧链路。

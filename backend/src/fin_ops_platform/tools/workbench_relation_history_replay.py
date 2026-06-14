@@ -11,6 +11,7 @@ from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.common import row_payload, text_list
+from fin_ops_platform.services.workbench_pair_relation_service import DISPLAY_ONLY_PAIR_RELATION_MODES
 from fin_ops_platform.services.workbench_relation_command_service import VALID_WORKBENCH_RELATION_MODES
 
 
@@ -59,7 +60,8 @@ def main(
 
 def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[str, Any]:
     relation_rows = _fetch_relation_rows(connection)
-    history_counts = _fetch_history_counts(connection)
+    history_rows = _fetch_history_rows(connection)
+    history_counts = _history_counts(history_rows)
     readiness_rows = _fetch_readiness_rows(connection, tenant_id=tenant_id)
     issues: list[RelationReplayIssue] = []
 
@@ -71,11 +73,17 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
     issues.extend(_relation_shape_issues(normalized_relations))
     issues.extend(_active_row_occupation_issues(active_relations))
     issues.extend(_history_issues(relation_case_ids, history_counts))
+    issues.extend(_history_display_only_relation_issues(history_rows))
     issues.extend(_readiness_issues(readiness_rows))
 
     issue_payloads = [asdict(issue) for issue in issues]
     error_count = sum(1 for issue in issues if issue.severity == "error")
     warning_count = sum(1 for issue in issues if issue.severity == "warning")
+    display_only_history_before_relation_count = sum(
+        int(issue.details.get("relation_count") or 0)
+        for issue in issues
+        if issue.code == "display_only_relation_in_confirm_history" and isinstance(issue.details, dict)
+    )
     return {
         "mode": "dry-run",
         "tenant_id": tenant_id,
@@ -88,6 +96,7 @@ def build_replay_report(connection: Any, *, tenant_id: str = "default") -> dict[
             "issue_count": len(issues),
             "error_count": error_count,
             "warning_count": warning_count,
+            "display_only_history_before_relation_count": display_only_history_before_relation_count,
         },
         "issues": issue_payloads,
         "readiness": readiness_rows,
@@ -120,24 +129,29 @@ def _fetch_relation_rows(connection: Any) -> list[dict[str, Any]]:
     )
 
 
-def _fetch_history_counts(connection: Any) -> dict[str, int]:
-    rows = connection.fetch_all(
+def _fetch_history_rows(connection: Any) -> list[dict[str, Any]]:
+    return connection.fetch_all(
         """
-        select case_id, count(*)::int as history_count
+        select
+          case_id,
+          event_type,
+          occurred_at::text as occurred_at,
+          before_payload,
+          after_payload,
+          raw_payload
         from app.workbench_pair_relation_history
-        group by case_id
-        order by case_id
+        order by occurred_at, case_id
         """
     )
+
+
+def _history_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     result: dict[str, int] = {}
     for row in rows:
         case_id = str(row.get("case_id") or "").strip()
         if not case_id:
             continue
-        try:
-            result[case_id] = int(row.get("history_count") or 0)
-        except (TypeError, ValueError):
-            result[case_id] = 0
+        result[case_id] = int(result.get(case_id) or 0) + 1
     return result
 
 
@@ -206,7 +220,22 @@ def _relation_shape_issues(relations: list[dict[str, Any]]) -> list[RelationRepl
                     details={"status": status},
                 )
             )
-        if relation_mode not in VALID_WORKBENCH_RELATION_MODES:
+        if relation_mode in DISPLAY_ONLY_PAIR_RELATION_MODES:
+            severity = "error" if status == "active" else "warning"
+            issues.append(
+                RelationReplayIssue(
+                    severity=severity,
+                    code="display_only_relation_mode_in_write_model",
+                    message=(
+                        "Active relation uses a display-only relation mode."
+                        if severity == "error"
+                        else "Non-active relation uses a display-only relation mode."
+                    ),
+                    case_ids=[case_id],
+                    details={"relation_mode": relation_mode, "status": status},
+                )
+            )
+        elif relation_mode not in VALID_WORKBENCH_RELATION_MODES:
             severity = "error" if status == "active" else "warning"
             issues.append(
                 RelationReplayIssue(
@@ -324,6 +353,69 @@ def _history_issues(relation_case_ids: set[str], history_counts: dict[str, int])
             )
         )
     return issues
+
+
+def _history_display_only_relation_issues(history_rows: list[dict[str, Any]]) -> list[RelationReplayIssue]:
+    issues: list[RelationReplayIssue] = []
+    for row in history_rows:
+        case_id = str(row.get("case_id") or "").strip()
+        payload = row_payload(row, "raw_payload")
+        history_payload = payload if isinstance(payload, dict) else {}
+        operation_type = str(row.get("event_type") or history_payload.get("operation_type") or "").strip()
+        before_relations = row.get("before_payload")
+        if not isinstance(before_relations, list):
+            before_relations = history_payload.get("before_relations")
+        display_only_relations = [
+            relation
+            for relation in list(before_relations or [])
+            if _is_non_restorable_display_only_relation(relation)
+        ]
+        if not display_only_relations:
+            continue
+        relation_modes = sorted(
+            {
+                str(relation.get("relation_mode") or "").strip()
+                for relation in display_only_relations
+                if isinstance(relation, dict)
+            }
+        )
+        relation_case_ids = sorted(
+            {
+                str(relation.get("case_id") or "").strip()
+                for relation in display_only_relations
+                if isinstance(relation, dict) and str(relation.get("case_id") or "").strip()
+            }
+        )
+        issues.append(
+            RelationReplayIssue(
+                severity="warning",
+                code="display_only_relation_in_confirm_history",
+                message=(
+                    "Confirm history contains display-only before_relations. "
+                    "Runtime withdraw filters these snapshots; active display-only relations require data repair."
+                ),
+                case_ids=[case_id],
+                details={
+                    "operation_type": operation_type,
+                    "relation_count": len(display_only_relations),
+                    "relation_modes": relation_modes,
+                    "relation_case_ids": relation_case_ids,
+                },
+            )
+        )
+    return issues
+
+
+def _is_non_restorable_display_only_relation(relation: Any) -> bool:
+    if not isinstance(relation, dict):
+        return False
+    relation_mode = str(relation.get("relation_mode") or "").strip()
+    if relation_mode not in DISPLAY_ONLY_PAIR_RELATION_MODES:
+        return False
+    if relation.get("restorable_on_withdraw") is True:
+        return False
+    special_metadata = relation.get("special_metadata")
+    return not (isinstance(special_metadata, dict) and special_metadata.get("restorable_on_withdraw") is True)
 
 
 def _readiness_issues(readiness_rows: list[dict[str, Any]]) -> list[RelationReplayIssue]:

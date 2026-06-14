@@ -76,6 +76,32 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
         self.assertEqual(repository.records[0]["read_model_key"], "bank_detail")
         self.assertEqual(repository.records[0]["last_error"], "projection failed")
 
+    def test_dependency_not_fresh_exception_records_refreshing_not_failed(self) -> None:
+        repository = RecordingReadinessRepository()
+        reporter = ReadModelReadinessReporter(readiness_repository=repository)
+
+        def dependency_waiting_handler(_event: RuntimeQueueEvent) -> dict[str, object]:
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+
+        wrapped = reporter.wrap_handler(dependency_waiting_handler)
+
+        with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
+            wrapped(
+                _event(
+                    event_type="no_oa_bank_batch.read_model.refresh",
+                    scope_type="no_oa_bank_batch",
+                    scope_key="2026-04",
+                )
+            )
+
+        self.assertEqual(len(repository.records), 1)
+        record = repository.records[0]
+        self.assertEqual(record["read_model_key"], "no_oa_bank_batch")
+        self.assertEqual(record["scope_type"], "no_oa_bank_batch")
+        self.assertEqual(record["scope_key"], "2026-04")
+        self.assertEqual(record["status"], "refreshing")
+        self.assertEqual(record["last_error"], "bank_detail_read_model_not_fresh")
+
     def test_explicit_mismatch_result_is_not_recorded_as_fresh(self) -> None:
         repository = RecordingReadinessRepository()
         reporter = ReadModelReadinessReporter(readiness_repository=repository)

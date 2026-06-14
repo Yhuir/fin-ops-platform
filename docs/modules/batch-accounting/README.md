@@ -41,7 +41,7 @@
 - 银行流水、OA 行和已有关联关系来自 Workbench / Workbench relation read model。
 - `GET /api/batch-accounting` 必须返回 `summary`、`bank_rows`、`oa_rows`、`relations_by_bank_row_id`、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
 - `POST /api/batch-accounting/submit` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
-- `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注。
+- `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回只恢复真实 relation history，OA 附件 case_id / `existing_case` 显示归属不得被恢复成 active relation。
 - `repair_legacy_case_id_collisions(...)` 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 恢复历史 batch relation；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - 前端提交/撤回成功后发送 `workbenchRelationUpdated`，作为同浏览器会话刷新提示；事实源仍以后端 dirty scope、read model freshness 和 worker readiness 为准。
 

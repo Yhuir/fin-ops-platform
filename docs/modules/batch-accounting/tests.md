@@ -50,7 +50,7 @@
 | Submit command boundary | submit 缺少 relation command service 时不能 direct 写 pair service，必须返回结构化错误 | covered |
 | Mismatch note | 金额不一致必须填写非空说明；切换银行、bucket、OA 选择时清空旧说明 | covered |
 | Submit rollback | pair relation 持久化或调度失败不能留下半写入关系 | covered |
-| Withdraw history | 撤回差额批量账务时保留提交和撤回备注，恢复前一 OA invoice snapshot | covered |
+| Withdraw history | 撤回差额批量账务时保留提交和撤回备注；不把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation | covered |
 
 ## 关键 Smoke Flows
 

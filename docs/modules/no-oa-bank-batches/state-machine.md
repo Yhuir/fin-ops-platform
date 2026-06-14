@@ -151,7 +151,7 @@ Read model key：`no_oa_bank_batch`
 
 Scope type：`no_oa_bank_batch`
 
-Scope key：当前主路径为 `all`。
+Scope key：`all` 或 `YYYY-MM`。`all` 表示全量 snapshot 重建；月份 scope 只读取目标月银行流水，并在保存前与其它月份现有批次合并，不能删除其它月份批次。
 
 Worker instance：`no-oa-bank-batch`
 
@@ -186,8 +186,10 @@ worker 流程：
 job.outbox_events / job.read_model_dirty_scopes
   -> no-oa-bank-batch worker consumes no_oa_bank_batch.read_model.refresh
   -> NoOaBankBatchReadModelRefreshService.handle_runtime_event
-  -> NoOaBankBatchApplicationService.refresh_batches
-  -> save_no_oa_bank_batches 以当前完整 snapshot 覆盖，并删除缺席批次行
+  -> NoOaBankBatchApplicationService.refresh_batches(scope_key)
+  -> all scope: 读取全量银行流水并生成完整 no-OA snapshot
+  -> YYYY-MM scope: 只读取目标月银行流水，只替换目标月批次，保留其它月份批次
+  -> save_no_oa_bank_batches 以合并后的完整 snapshot 覆盖，并删除 snapshot 缺席批次行
   -> complete dirty scope and readiness
 ```
 
@@ -195,6 +197,7 @@ job.outbox_events / job.read_model_dirty_scopes
 
 - worker handler event type 或 scope type 错误必须拒绝。
 - stale source version event 必须 skip，不得 rebuild 或覆盖 read model。
+- 读取 Bankdetail tag/read model 时遇到 `*_read_model_not_fresh` 必须保持 `refreshing`/defer，不得把 no-OA readiness 标记为 `failed`。
 - GET list/detail 不得为了 missing/stale 同步 rebuild 全量批次。
 - 本地测试不能证明真实 RabbitMQ/Redis/systemd drain，发布前按运维 smoke 验证。
 
@@ -204,3 +207,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐免 OA 流水批量处理状态机 | 固定 tag selection、batch lifecycle、internal transfer from Workbench、UI stale polling、read model/worker 状态 | 待本轮模块验证命令 |
 | 2026-06-11 | 固定内部往来双入口闭环 | Workbench/no-OA 同一组内部往来幂等复用同一 no-OA fact；存量两行 manual internal-transfer relation 迁移；active relation row 独占；SQL read model 保存清理缺席旧批次 | `pytest` no-OA service/workbench integration、pair relation service 目标用例 |
+| 2026-06-14 | no-OA 月度 read model refresh 和依赖未 fresh 状态收敛 | `no_oa_bank_batch` scope policy 支持 `all`/月份；月度 worker 不全量读取、不删除其它月份批次；Bankdetail 依赖未 fresh 时记录 refreshing，不再污染 failed blocker | `tests.test_no_oa_bank_batch_read_model_refresh`、`tests.test_no_oa_bank_batch_workbench_integration`、`tests.test_read_model_readiness_reporter`、`tests.test_read_model_refresh_gateway` |

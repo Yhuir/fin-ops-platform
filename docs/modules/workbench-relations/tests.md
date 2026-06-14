@@ -16,7 +16,7 @@
 - `tests/test_pending_invoice_service.py`：待找发票 attach/create 幂等、relation detail 读 distribution、manual/attach relation 写入委托 command service、relation read model freshness 诊断。
 - `tests/test_etc_backend.py`：ETC 删除、历史修复、existing batch link、summary relation command service 委托、缺 command fail-fast 和 canonical write safety。
 - `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`：进项发票 OA reverse evidence detected 后通过 relation command service 写 `input_invoice_oa_reverse`，缺 command fail-fast，command stale/conflict 返回 409 且不推进本地 batch。
-- `tests/test_workbench_relation_history_replay_tool.py`：PostgreSQL history replay 只读巡检，覆盖 active row 多 case 占用、row shape、未注册 mode severity、relation/history 差异、readiness 状态和 `--fail-on-issues`。
+- `tests/test_workbench_relation_history_replay_tool.py`：PostgreSQL history replay 只读巡检，覆盖 active row 多 case 占用、row shape、未注册 mode severity、display-only relation mode/history 污染、relation/history 差异、readiness 状态和 `--fail-on-issues`。
 
 ## 七类测试要求
 

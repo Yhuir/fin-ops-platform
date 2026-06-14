@@ -29,7 +29,7 @@ Workbench active pair relation 是 OA、银行流水、发票跨页面关系的�
 
 关联台 selection 以 group 为操作上下文：已配对区和未配对区点击任意 OA、银行流水或发票 row，都会带入该 row 所在的完整 group。确认关联、异常处理和统一撤回/拆分入口都基于该 group context；统一撤回/拆分一次只能处理一个 group。已配对区只有撤回关联语义；未配对区的统一按钮由后端 preview 判定为 `withdraw_relation` 或 `split_candidate`。
 
-撤回 preview/submit 必须携带并锁定 `operation_type`、`preview_id` 和 `submit_expected_versions`。`withdraw_relation` 恢复上一状态；如果 active relation 没有 history，则撤到无关联状态，不再合成恢复 OA 附件关系。`split_candidate` 只 suppress 自动候选，不写 relation history。
+撤回 preview/submit 必须携带并锁定 `operation_type`、`preview_id` 和 `submit_expected_versions`。`withdraw_relation` 只恢复上一条真实 active relation snapshot；`relation_mode=existing_case` 代表读侧显示归属，不是可恢复关系，不能写入或恢复为 active relation，除非显式带有 `restorable_on_withdraw`。如果 active relation 没有可恢复 history，则撤到无关联状态，不再合成恢复 OA 附件关系。`split_candidate` 只 suppress 自动候选，不写 relation history。
 
 撤回 preview 的“操作后”三栏必须按真实 after relation 分组；没有被恢复进 after relation 的 row 逐行独立展示，不能因为 row 上残留旧 `case_id` 又合成一行。提交成功后前端先做本地 optimistic update，并只锁定刚操作 row/group；Workbench active generation 后台 stale/loading 只提示刷新，不全局禁用无关写操作。OA sync dirty/refreshing、无权限和 App Health write safety blocked 仍必须阻断写入；普通 read model blocked/red 只影响读侧诊断和具体 API precondition，不应全局禁用无关写操作。
 

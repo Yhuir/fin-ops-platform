@@ -56,6 +56,14 @@ def _cost_statistics_scope_policy() -> ReadModelScopePolicy:
     )
 
 
+def _month_or_all_scope_policy(scope_type: str) -> ReadModelScopePolicy:
+    return ReadModelScopePolicy(
+        scope_type=scope_type,
+        normalize_many=_dedupe_text,
+        validate_one=lambda scope_key: _validate_month_or_all_scope_key(scope_type, scope_key),
+    )
+
+
 def _normalize_cost_statistics_scope_keys(raw_scope_keys: list[str]) -> list[str]:
     from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 
@@ -82,6 +90,13 @@ def _validate_cost_statistics_scope_key(scope_key: str) -> None:
         raise ReadModelScopeError(f"Invalid cost_statistics read model scope_key: {scope_key}")
 
 
+def _validate_month_or_all_scope_key(scope_type: str, scope_key: str) -> None:
+    normalized_scope_key = str(scope_key or "").strip()
+    if normalized_scope_key == "all" or bool(MONTH_RE.match(normalized_scope_key)):
+        return
+    raise ReadModelScopeError(f"Invalid {scope_type} read model scope_key: {scope_key}")
+
+
 def _validate_non_empty(scope_type: str, scope_key: str) -> None:
     if not str(scope_key or "").strip():
         raise ReadModelScopeError(f"{scope_type} read model refresh scope_key is required.")
@@ -99,5 +114,6 @@ def _dedupe_text(values: list[str]) -> list[str]:
 DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
         "cost_statistics": _cost_statistics_scope_policy(),
+        "no_oa_bank_batch": _month_or_all_scope_policy("no_oa_bank_batch"),
     }
 )

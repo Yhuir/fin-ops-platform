@@ -70,6 +70,30 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
             ],
         )
 
+    def test_no_oa_bank_batch_policy_accepts_all_and_month_scopes_only(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+        from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
+
+        queue = QueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "no_oa_bank_batch",
+            ["2026-06", "all", "2026-06"],
+            reason="unit_test",
+        )
+
+        self.assertEqual(enqueued, ["2026-06", "all"])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                {"scope_type": "no_oa_bank_batch", "scope_key": "2026-06", "reason": "unit_test"},
+                {"scope_type": "no_oa_bank_batch", "scope_key": "all", "reason": "unit_test"},
+            ],
+        )
+        with self.assertRaises(ReadModelScopeError):
+            gateway.enqueue_many("no_oa_bank_batch", ["active:2026-06"], reason="unit_test")
+
     def test_metadata_is_passed_to_queue_repository(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 

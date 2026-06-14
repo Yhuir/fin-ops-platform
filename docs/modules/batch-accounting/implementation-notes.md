@@ -1,5 +1,14 @@
 # 批量账务 实施记录
 
+## 2026-06-14 - 撤回历史显示归属过滤
+
+- 目标：批量账务撤回复用 Workbench relation history 时，不再把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation。
+- 影响范围：`WorkbenchPairRelationService` 的可恢复 relation snapshot 边界、`BatchAccountingService.withdraw` 回归断言和本模块文档。
+- 关键决策：读侧仍可按 case_id 展示 OA 与附件发票的归属关系；写侧撤回只恢复真实 active relation snapshot，display-only 归属不进入 relation repository。
+- 测试覆盖：更新 `tests/test_batch_accounting_api.py::BatchAccountingApiTests::test_withdraw_does_not_restore_display_only_oa_invoice_snapshot_as_active_relation`。
+- 发布前审计：2026-06-14 已在生产执行只读 SQL 审计，`active_display_only_relation_count=0`、`display_only_history_before_relation_count=3`、`affected_history_case_count=3`；历史污染由运行时过滤覆盖，不需要 backfill。
+- 未测风险：未执行生产写入型 repair；本次审计结论为无需写入型 backfill。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

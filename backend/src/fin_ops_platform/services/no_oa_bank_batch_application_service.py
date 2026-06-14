@@ -399,9 +399,12 @@ class NoOaBankBatchApplicationService:
         self,
         *,
         apply_relation_repairs: bool = True,
+        scope_key: str = "all",
     ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
-        bank_rows = self.no_oa_bank_transaction_rows()
+        refresh_scope_key = str(scope_key or "all").strip() or "all"
+        bank_rows = self.no_oa_bank_transaction_rows(month=refresh_scope_key, include_categories=False)
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
+        self._apply_categories_to_rows(bank_rows, categories_by_transaction_id)
         self._no_oa_bank_batch_service.build_batches(
             bank_rows,
             categories_by_transaction_id,
@@ -409,6 +412,7 @@ class NoOaBankBatchApplicationService:
             self.no_oa_bank_batch_source_versions(),
             eligible_batch_types=self.selected_tag_codes(),
             apply_relation_repairs=apply_relation_repairs,
+            refresh_scope_key=refresh_scope_key,
         )
         migration_result = self._no_oa_bank_batch_service.last_legacy_migration_result()
         if apply_relation_repairs and migration_result.get("changed"):
@@ -427,16 +431,30 @@ class NoOaBankBatchApplicationService:
             )
         return bank_rows, categories_by_transaction_id
 
-    def no_oa_bank_transaction_rows(self) -> list[dict[str, object]]:
+    def no_oa_bank_transaction_rows(
+        self,
+        *,
+        month: str = "all",
+        include_categories: bool = True,
+    ) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
-        for transaction in list(self._import_service.list_transactions(month="all")):
+        normalized_month = str(month or "all").strip() or "all"
+        for transaction in list(self._import_service.list_transactions(month=normalized_month)):
             payload = self._serialize_value(transaction)
             if not isinstance(payload, dict):
                 continue
             row = self.normalize_no_oa_bank_transaction_payload(payload)
             if row is not None:
                 rows.append(row)
-        categories_by_transaction_id = self.effective_categories_for_rows(rows)
+        if include_categories:
+            self._apply_categories_to_rows(rows, self.effective_categories_for_rows(rows))
+        return rows
+
+    def _apply_categories_to_rows(
+        self,
+        rows: list[dict[str, object]],
+        categories_by_transaction_id: dict[str, dict[str, object]],
+    ) -> None:
         for row in rows:
             transaction_id = str(row.get("id") or "").strip()
             category = categories_by_transaction_id.get(transaction_id, {})
@@ -450,7 +468,6 @@ class NoOaBankBatchApplicationService:
                     category.get("category_label_path") or category.get("effective_category_label_path") or []
                 )
                 row["category_source"] = category.get("category_source") or category.get("source")
-        return rows
 
     def no_oa_bank_transaction_rows_by_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
         get_transaction = getattr(self._import_service, "get_transaction", None)

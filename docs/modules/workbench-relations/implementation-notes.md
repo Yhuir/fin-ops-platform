@@ -1,5 +1,21 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-14 - Display ownership 不作为可恢复 relation
+
+目标：把 `existing_case` 从“可恢复 before relation”中剥离，只作为读侧 display ownership；撤回只恢复真实 active relation snapshot。
+
+结论：
+
+- `WorkbenchPairRelationService` 统一过滤 display-only relation snapshot，覆盖 confirm history 写入、withdraw preview 和 withdraw submit。
+- PostgreSQL history replay 只读工具新增 display-only active relation/history 污染报告，用于发布前判断是否需要 repair。
+- 生产只读审计结果：`active_display_only_relation_count=0`，`display_only_history_before_relation_count=3`，因此无需写入型 backfill；历史污染由运行时过滤覆盖。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service tests.test_workbench_relation_history_replay_tool -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_command_service tests.test_batch_accounting_api -v`
+
 ## 2026-06-13 - Canonical write safety replaces default distribution freshness gate
 
 目标：修复关联台 confirm 成功后立即 withdraw 时被 `workbench_relation_read_model_not_fresh` 阻断的问题，并让 relation 写路径符合“普通 read model non-fresh 不全局阻断操作”的闭环目标。

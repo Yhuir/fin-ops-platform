@@ -108,7 +108,20 @@ class NoOaBankBatchService:
         source_versions: dict[str, Any] | None,
         eligible_batch_types: set[str] | list[str] | tuple[str, ...] | None = None,
         apply_relation_repairs: bool = True,
+        refresh_scope_key: str = "all",
     ) -> list[dict[str, Any]]:
+        normalized_refresh_scope_key = str(refresh_scope_key or "all").strip() or "all"
+        if self._is_month_scope_key(normalized_refresh_scope_key):
+            return self._build_batches_for_month_scope(
+                refresh_scope_key=normalized_refresh_scope_key,
+                bank_rows=bank_rows,
+                categories_by_transaction_id=categories_by_transaction_id,
+                active_relations=active_relations,
+                source_versions=source_versions,
+                eligible_batch_types=eligible_batch_types,
+                apply_relation_repairs=apply_relation_repairs,
+            )
+
         rows = [dict(row) for row in list(bank_rows or []) if isinstance(row, dict)]
         categories = categories_by_transaction_id if isinstance(categories_by_transaction_id, dict) else {}
         source_version_payload = dict(source_versions or {})
@@ -214,6 +227,70 @@ class NoOaBankBatchService:
             if isinstance(batch, dict):
                 batch["source_versions"] = deepcopy(source_version_payload)
         self._batches = {batch_id: self._normalize_batch(batch) for batch_id, batch in generated.items()}
+        return self.list_batches()
+
+    def _build_batches_for_month_scope(
+        self,
+        *,
+        refresh_scope_key: str,
+        bank_rows: list[dict[str, Any]],
+        categories_by_transaction_id: dict[str, dict[str, Any]],
+        active_relations: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None,
+        eligible_batch_types: set[str] | list[str] | tuple[str, ...] | None,
+        apply_relation_repairs: bool,
+    ) -> list[dict[str, Any]]:
+        original_batches = deepcopy(self._batches)
+        original_audit_log = deepcopy(self._audit_log)
+        scoped_batches = {
+            batch_id: deepcopy(batch)
+            for batch_id, batch in original_batches.items()
+            if self._batch_scope_month(batch) == refresh_scope_key
+        }
+        scoped_service = NoOaBankBatchService(
+            batches=scoped_batches,
+            audit_log=[],
+            pair_relation_service=self._pair_relation_service,
+            relation_command_service=self._relation_command_service,
+        )
+        scoped_service.build_batches(
+            bank_rows,
+            categories_by_transaction_id,
+            active_relations,
+            source_versions,
+            eligible_batch_types=eligible_batch_types,
+            apply_relation_repairs=apply_relation_repairs,
+            refresh_scope_key="all",
+        )
+        scoped_snapshot = scoped_service.snapshot()
+        scoped_snapshot_batches = scoped_snapshot.get("batches") if isinstance(scoped_snapshot, dict) else {}
+        merged_batches = {
+            batch_id: deepcopy(batch)
+            for batch_id, batch in original_batches.items()
+            if self._batch_scope_month(batch) != refresh_scope_key
+        }
+        merged_batches.update(
+            {
+                str(batch_id): deepcopy(batch)
+                for batch_id, batch in dict(scoped_snapshot_batches or {}).items()
+                if isinstance(batch, dict)
+            }
+        )
+        self._batches = {
+            str(batch_id): self._normalize_batch(batch)
+            for batch_id, batch in merged_batches.items()
+            if isinstance(batch, dict)
+        }
+        scoped_audit_log = scoped_service.audit_log()
+        self._audit_log = [
+            *original_audit_log,
+            *[
+                deepcopy(entry)
+                for entry in scoped_audit_log
+                if isinstance(entry, dict) and entry not in original_audit_log
+            ],
+        ]
+        self._last_legacy_migration_result = scoped_service.last_legacy_migration_result()
         return self.list_batches()
 
     def submit_selected_rows(
@@ -2445,6 +2522,15 @@ class NoOaBankBatchService:
         if values is None:
             return set(SUPPORTED_BATCH_TYPES)
         return {str(value).strip() for value in values if str(value).strip()}
+
+    @staticmethod
+    def _is_month_scope_key(scope_key: str) -> bool:
+        text = str(scope_key or "").strip()
+        return len(text) == 7 and text[4:5] == "-" and text[:4].isdigit() and text[5:].isdigit()
+
+    @staticmethod
+    def _batch_scope_month(batch: dict[str, Any]) -> str:
+        return str(batch.get("scope_month") or batch.get("month") or "").strip()
 
     @staticmethod
     def _row_id(row: dict[str, Any]) -> str:

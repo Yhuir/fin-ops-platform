@@ -1332,7 +1332,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(relation_payload["relation"]["amount_check"]["status"], "mismatch")
         self.assertTrue(relation_payload["relation"]["amount_check"]["requires_note"])
 
-    def test_withdraw_restores_previous_oa_invoice_snapshot(self) -> None:
+    def test_withdraw_does_not_restore_display_only_oa_invoice_snapshot_as_active_relation(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
         submit_response = app.handle_request(
             "POST",
@@ -1358,12 +1358,12 @@ class BatchAccountingApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["action"], "withdraw_batch_accounting")
+        self.assertEqual(payload["restored_relations"], [])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
-        restored = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-ba-001")
-        assert restored is not None
-        self.assertEqual(restored["case_id"], "CASE-OA-INVOICE")
-        self.assertCountEqual(restored["row_ids"], ["oa-exp-ba-001", "oa-att-inv-oa-exp-ba-001-01"])
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-ba-001"))
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-att-inv-oa-exp-ba-001-01"))
         self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["operation_type"], "withdraw_link")
+        self.assertEqual(app._workbench_pair_relation_service.list_history()[-1]["after_relations"], [])
 
     def test_withdraw_delegates_relation_write_to_command_service(self) -> None:
         pair_service = WriteBlockingPairRelationService()

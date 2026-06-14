@@ -220,6 +220,221 @@ class NoOaBankBatchReadModelRefreshTests(unittest.TestCase):
                 )
             )
 
+    def test_refresh_reads_effective_categories_once_for_same_rows(self) -> None:
+        class ImportService:
+            def list_transactions(self, *, month: str = "all"):
+                self.last_month = month
+                return [
+                    {
+                        "id": "txn-once",
+                        "txn_date": "2026-04-23",
+                        "txn_direction": "outflow",
+                        "amount": "12.00",
+                        "bank_name": "CCB",
+                        "account_no": "6222000000008106",
+                        "counterparty_name": "测试供应商",
+                    }
+                ]
+
+        class EffectiveCategoryProvider:
+            def __init__(self) -> None:
+                self.calls: list[list[str]] = []
+
+            def bulk_get_for_rows(self, rows):
+                self.calls.append([str(row.get("id") or "") for row in rows])
+                return {
+                    "txn-once": {
+                        "transaction_id": "txn-once",
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_source": "auto",
+                    }
+                }
+
+        class StateStore:
+            def save_no_oa_bank_batches(self, _snapshot) -> None:
+                return None
+
+        app = build_application()
+        provider = EffectiveCategoryProvider()
+        service = NoOaBankBatchReadModelRefreshService(
+            import_service=ImportService(),
+            effective_category_provider=provider,
+            no_oa_bank_batch_service=app._no_oa_bank_batch_service,
+            app_settings_service=type(
+                "Settings",
+                (),
+                {
+                    "get_no_oa_bank_batch_tag_selection_payload": lambda _self: {
+                        "version": 1,
+                        "selected_tag_codes": ["fee"],
+                    }
+                },
+            )(),
+            bank_transaction_category_service=app._bank_transaction_category_service,
+            pair_relation_service=app._workbench_pair_relation_service,
+            workbench_read_model_service=app._workbench_read_model_service,
+            state_store=StateStore(),
+            workbench_matching_source_versions_provider=app._workbench_matching_source_versions,
+        )
+
+        service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-once",
+                tenant_id="default",
+                event_type="no_oa_bank_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="all",
+                scope_type="no_oa_bank_batch",
+                scope_key="all",
+                dedupe_key="no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:all",
+                payload={"scope_type": "no_oa_bank_batch", "scope_key": "all", "source_version": 4},
+                attempts=1,
+                status="processing",
+                source_version=4,
+            )
+        )
+
+        self.assertEqual(provider.calls, [["txn-once"]])
+
+    def test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches(self) -> None:
+        class ImportService:
+            def __init__(self) -> None:
+                self.months: list[str] = []
+
+            def list_transactions(self, *, month: str = "all"):
+                self.months.append(month)
+                if month != "2026-04":
+                    raise AssertionError(f"monthly no-OA refresh must not read {month!r}")
+                return [
+                    {
+                        "id": "fee-apr",
+                        "txn_date": "2026-04-23",
+                        "txn_direction": "outflow",
+                        "amount": "12.00",
+                        "bank_name": "CCB",
+                        "account_no": "6222000000008106",
+                        "counterparty_name": "四月供应商",
+                    }
+                ]
+
+        class EffectiveCategoryProvider:
+            def bulk_get_for_rows(self, rows):
+                return {
+                    str(row["id"]): {
+                        "transaction_id": row["id"],
+                        "category_code": "fee",
+                        "category_label": "手续费",
+                        "category_source": "auto",
+                    }
+                    for row in rows
+                }
+
+        class StateStore:
+            def __init__(self) -> None:
+                self.saved_no_oa_snapshots: list[dict[str, object]] = []
+
+            def save_no_oa_bank_batches(self, snapshot) -> None:
+                self.saved_no_oa_snapshots.append(dict(snapshot))
+
+        old_batch = {
+            "batch_id": "submitted-mar",
+            "batch_key": "single:fee:2026-03:CCB:8106",
+            "batch_type": "fee",
+            "batch_label": "手续费",
+            "scope_month": "2026-03",
+            "account_key": "CCB:8106",
+            "bank_name": "CCB",
+            "account_last4": "8106",
+            "status": "submitted",
+            "status_bucket": "submitted",
+            "row_ids": ["fee-mar"],
+            "row_count": 1,
+            "total_amount": "8.00",
+            "tag_counts": {"fee": 1},
+            "direction_counts": {"income": 0, "expense": 1},
+            "relation_case_id": "submitted-mar",
+            "source_versions": {},
+            "evidence": {"source": "test"},
+            "category_source": "auto",
+            "created_by": "finance-user",
+            "created_at": "2026-03-10T00:00:00+00:00",
+            "submitted_by": "finance-user",
+            "submitted_at": "2026-03-10T00:00:00+00:00",
+            "version": 1,
+            "updated_at": "2026-03-10T00:00:00+00:00",
+        }
+        pair_relation_service = WorkbenchPairRelationService()
+        no_oa_service = NoOaBankBatchService.from_snapshot(
+            {"batches": {old_batch["batch_id"]: old_batch}},
+            pair_relation_service=pair_relation_service,
+        )
+        state_store = StateStore()
+        import_service = ImportService()
+        service = NoOaBankBatchReadModelRefreshService(
+            import_service=import_service,
+            effective_category_provider=EffectiveCategoryProvider(),
+            no_oa_bank_batch_service=no_oa_service,
+            app_settings_service=type(
+                "Settings",
+                (),
+                {
+                    "get_no_oa_bank_batch_tag_selection_payload": lambda _self: {
+                        "version": 1,
+                        "selected_tag_codes": ["fee"],
+                    }
+                },
+            )(),
+            bank_transaction_category_service=type("CategoryService", (), {"snapshot": lambda _self: {}})(),
+            pair_relation_service=pair_relation_service,
+            workbench_read_model_service=type("WorkbenchReadModel", (), {"snapshot": lambda _self: {}})(),
+            state_store=state_store,
+            workbench_matching_source_versions_provider=lambda: {},
+            relation_facade=type(
+                "RelationFacade",
+                (),
+                {
+                    "list_by_month": lambda _self, *_args, **_kwargs: {
+                        "status": "fresh",
+                        "rows": [],
+                        "groups": [],
+                        "source_versions": {},
+                    }
+                },
+            )(),
+        )
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-apr",
+                tenant_id="default",
+                event_type="no_oa_bank_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="2026-04",
+                scope_type="no_oa_bank_batch",
+                scope_key="2026-04",
+                dedupe_key="no_oa_bank_batch.read_model.refresh:no_oa_bank_batch:2026-04",
+                payload={"scope_type": "no_oa_bank_batch", "scope_key": "2026-04", "source_version": 4},
+                attempts=1,
+                status="processing",
+                source_version=4,
+            )
+        )
+
+        self.assertEqual(result["scope_key"], "2026-04")
+        self.assertEqual(import_service.months, ["2026-04"])
+        self.assertEqual(len(state_store.saved_no_oa_snapshots), 1)
+        batches = state_store.saved_no_oa_snapshots[0]["batches"]
+        self.assertIn("submitted-mar", batches)
+        self.assertTrue(
+            any(
+                isinstance(batch, dict)
+                and batch.get("scope_month") == "2026-04"
+                and batch.get("status") == "draft"
+                for batch in batches.values()
+            )
+        )
+
     def test_stale_source_version_does_not_rebuild_or_overwrite_read_model(self) -> None:
         class QueueRepository:
             def __init__(self) -> None:

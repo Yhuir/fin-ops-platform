@@ -2932,6 +2932,8 @@ function buildMockRelationPreview({
 }) {
   const rows = findWorkbenchRowsByIds(workbenchStateStore, month, rowIds);
   const isMismatch = rowIds.includes("iv-o-202603-003") || caseId === "CASE-202603-102";
+  const withdrawRestoredRows = rows.filter((row) => row.type !== "bank");
+  const canRestoreWithdrawRows = rows.some((row) => row.type === "oa") && withdrawRestoredRows.length >= 2;
   const amountSummary = {
     before: {
       oa_total: isMismatch ? "10000.00" : "58000.00",
@@ -2968,8 +2970,8 @@ function buildMockRelationPreview({
     },
     amount_summary: amountSummary,
     restored_relations:
-      operation === "withdraw_link"
-        ? [{ case_id: "CASE-RESTORED", row_ids: rows.filter((row) => row.type !== "bank").map((row) => String(row.id)) }]
+      operation === "withdraw_link" && canRestoreWithdrawRows
+        ? [{ case_id: "CASE-RESTORED", row_ids: withdrawRestoredRows.map((row) => String(row.id)) }]
         : [],
   };
 }

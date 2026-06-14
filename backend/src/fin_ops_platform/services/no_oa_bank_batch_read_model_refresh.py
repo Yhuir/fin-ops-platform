@@ -60,7 +60,8 @@ class NoOaBankBatchReadModelRefreshService:
             }
 
         bank_rows, _categories = self._application_service.refresh_batches(
-            apply_relation_repairs=False
+            apply_relation_repairs=False,
+            scope_key=scope_key,
         )
         snapshot = self._no_oa_bank_batch_service.snapshot()
         self._state_store.save_no_oa_bank_batches(snapshot)

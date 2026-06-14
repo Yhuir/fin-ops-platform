@@ -217,6 +217,70 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
             "cancelled",
         )
 
+    def test_replace_with_confirmed_relation_does_not_persist_display_only_existing_case_history(self) -> None:
+        service = WorkbenchPairRelationService()
+
+        _relation, history = service.replace_with_confirmed_relation(
+            case_id="CASE-FULL",
+            row_ids=["bank-001", "invoice-001"],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-04",
+            before_relations=[
+                {
+                    "case_id": "CASE-DISPLAY-ONLY",
+                    "row_ids": ["bank-001", "invoice-001"],
+                    "row_types": ["bank", "invoice"],
+                    "status": "active",
+                    "relation_mode": "existing_case",
+                    "month_scope": "2026-04",
+                }
+            ],
+        )
+
+        self.assertEqual(history["before_relations"], [])
+
+    def test_withdraw_ignores_historical_display_only_existing_case_before_relation(self) -> None:
+        service = WorkbenchPairRelationService()
+        active = service.create_active_relation(
+            case_id="CASE-FULL",
+            row_ids=["bank-001", "invoice-001"],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-04",
+        )
+        service.record_history(
+            operation_type="confirm_link",
+            before_relations=[
+                {
+                    "case_id": "CASE-DISPLAY-ONLY",
+                    "row_ids": ["bank-001", "invoice-001"],
+                    "row_types": ["bank", "invoice"],
+                    "status": "active",
+                    "relation_mode": "existing_case",
+                    "month_scope": "2026-04",
+                }
+            ],
+            after_relations=[active],
+            affected_row_ids=["bank-001", "invoice-001"],
+            created_by="finance",
+        )
+
+        preview = service.preview_withdraw_for_row_ids(["bank-001"])
+        self.assertEqual(preview["after_relations"], [])
+
+        restored_relations, history = service.withdraw_latest_for_row_ids(
+            ["bank-001"],
+            created_by="finance",
+        )
+        self.assertEqual(restored_relations, [])
+        self.assertEqual(history["after_relations"], [])
+        self.assertIsNone(service.get_active_relation_by_case_id("CASE-DISPLAY-ONLY"))
+        self.assertIsNone(service.get_active_relation_by_row_id("bank-001"))
+        self.assertIsNone(service.get_active_relation_by_row_id("invoice-001"))
+
     def test_snapshot_case_ids_only_deepcopies_requested_relations(self) -> None:
         service = WorkbenchPairRelationService.from_snapshot(
             {

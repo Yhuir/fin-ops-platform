@@ -79,6 +79,16 @@ class ReadModelReadinessReporter:
     def record_event_failure(self, event: RuntimeQueueEvent, error: BaseException) -> None:
         definition = self._definition_for_event(event)
         scope_key = str(event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "all").strip() or "all"
+        if self._is_dependency_not_fresh_error(error):
+            self._record(
+                read_model_key=definition.key,
+                scope_key=scope_key,
+                tenant_id=event.tenant_id,
+                status="refreshing",
+                source_versions=self._source_versions(event, {}),
+                last_error=self._error_text(error),
+            )
+            return
         self.record_failed(
             read_model_key=definition.key,
             scope_key=scope_key,
@@ -120,9 +130,7 @@ class ReadModelReadinessReporter:
         error: BaseException | str,
         source_versions: dict[str, Any] | None = None,
     ) -> None:
-        last_error = str(error)
-        if not last_error and isinstance(error, BaseException):
-            last_error = error.__class__.__name__
+        last_error = self._error_text(error)
         self._record(
             read_model_key=read_model_key,
             scope_key=scope_key,
@@ -225,3 +233,14 @@ class ReadModelReadinessReporter:
                 if source_versions.get(key) is not None:
                     return str(source_versions.get(key) or "")
         return ""
+
+    @staticmethod
+    def _error_text(error: BaseException | str) -> str:
+        last_error = str(error)
+        if not last_error and isinstance(error, BaseException):
+            last_error = error.__class__.__name__
+        return last_error
+
+    @staticmethod
+    def _is_dependency_not_fresh_error(error: BaseException | str) -> bool:
+        return "read_model_not_fresh" in str(error or "").strip().lower()

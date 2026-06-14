@@ -11,7 +11,7 @@
 | Business core | `NoOaBankBatchService`、`NoOaManagedRulePolicy` | draft/submitted/withdrawn/stale/conflict、内部往来配对、active relation 占用排除、legacy relation migration/repair/consolidation command 委托 |
 | Application service | `NoOaBankBatchApplicationService` | read model fallback、tag selection、submit/withdraw、relation command service 委托、rollback、after_mutation、derived lifecycle、durable queue enqueue |
 | Write contract | `bankdetail_write_uow.py`、`tests/test_bankdetail_write_uow_contract.py` | stale expected version、batch + Workbench pair relation + audit + dirty/outbox 同事务目标 |
-| Read model / worker | `NoOaBankBatchReadModelRefreshService`、`runtime_worker_registry.py` | missing/stale 不同步重建、source version 保护、worker complete dirty scope、refresh 不执行 relation repair 写入 |
+| Read model / worker | `NoOaBankBatchReadModelRefreshService`、`runtime_worker_registry.py` | missing/stale 不同步重建、source version 保护、worker complete dirty scope、refresh 不执行 relation repair 写入、月度 scope 不全量读取且不删除其它月份批次 |
 | 跨页面影响 | Bank Details、Workbench、Cost Statistics、Search、App Status | no-OA 提交/撤回影响 Workbench relation、银行明细关系状态、成本统计、搜索候选和 App Status |
 | 前端跨页事件 | `web/src/features/domainEvents.ts` | submit/withdraw 后发 `workbenchRelationUpdated`；分类/规则更新刷新 no-OA list/detail/tag drawer |
 
@@ -48,7 +48,7 @@
 | 1. Business core unit tests | 适用 | `tests/test_no_oa_bank_batch_service.py` | 已覆盖 fee/salary/bonus/internal_transfer draft 生成、active relation 排除、stale/superseded、legacy relation migration/repair/consolidation、两行 manual internal-transfer active relation 迁移、同 row set existing submitted batch 复用、submit/withdraw、audit/snapshot；submit 不再直写 relation，只暴露 command payload。 |
 | 2. Service-layer tests | 适用 | `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_bankdetail_write_uow_contract.py` | 已覆盖 relation command service 委托、after_mutation persist/non-persist、durable queue enqueue、stale expected version、batch/relation/audit/dirty/outbox 同事务目标和 rollback。 |
 | 3. API contract tests | 适用 | `tests/test_no_oa_bank_batch_api.py`、`tests/test_no_oa_bank_batch_routes.py`、`tests/test_no_oa_bank_batch_tag_selection_api.py` | 已覆盖 list/detail/tag-selection/submit-selection/submit/withdraw/bulk-submit、409 version conflict、relation freshness 诊断、404 unknown、invalid JSON、persistence error、partial results。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 missing SQL read model 不同步重建、stale SQL source versions 不伪装 fresh、detail 不刷新全量、PostgreSQL save full snapshot 清理缺席旧 no-OA read model row、worker stale source version skip、worker refresh 不执行 relation repair 写入、worker registry/App Status 登记。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py`、`tests/test_no_oa_bank_batch_read_model_refresh.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 missing SQL read model 不同步重建、stale SQL source versions 不伪装 fresh、detail 不刷新全量、PostgreSQL save full snapshot 清理缺席旧 no-OA read model row、worker stale source version skip、worker refresh 不执行 relation repair 写入、月度 refresh 只读目标月并保留其它月份批次、依赖 Bankdetail non-fresh 时不写 failed readiness、worker registry/App Status 登记。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/NoOaBankBatchApi.test.ts` | 已覆盖三栏布局、tag drawer、主/子标签键盘操作、提交选择、跨账户选择保护、内部往来 batch submit、撤回、stale polling、route unmount cleanup、保持 stale rows 可见。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_no_oa_bank_batch_workbench_integration.py` | 已覆盖 Workbench confirm internal transfer 走 no-OA batch、no-OA 页面先提交后 Workbench 再确认同一组时复用同一 fact、非内部往来保持 manual relation、混合 internal transfer 拒绝、no-OA relation 配对/撤回回到 open。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_pair_relation_service.py`、`tests/test_bank_auto_tag_rules_api.py`、domain event tests | 已保护旧 summary/category labels、legacy relation collapsed summaries、active relation row 独占、legacy repair 不回退 direct pair write、Bankdetail tag/rule changes refresh no-OA、前端事件不在 route unmount 后 replay。 |
@@ -79,7 +79,10 @@
 | stale/category drift | `test_stale_batch_after_category_drift_clears_relation_and_is_not_withdrawable` |
 | read model stale/missing | `test_no_oa_bank_batches_do_not_return_stale_sql_source_versions_as_fresh`、`test_no_oa_bank_batches_missing_sql_read_model_does_not_refresh_in_get_path` |
 | read model fresh empty | `test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh`、`test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing` |
+| read model 月度 freshness gate | `test_no_oa_repository_does_not_treat_all_fresh_as_month_fresh_when_month_is_dirty`、`test_no_oa_repository_accepts_month_fresh_without_all_readiness_record` |
+| read model scope policy | `tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_no_oa_bank_batch_policy_accepts_all_and_month_scopes_only` |
 | worker stale source version / relation repair 边界 | `test_stale_source_version_does_not_rebuild_or_overwrite_read_model`、`test_refresh_does_not_repair_workbench_relations_from_read_model_path` |
+| worker 月度刷新和 Bankdetail 依赖 | `test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches`、`test_refresh_reads_effective_categories_once_for_same_rows`、`tests/test_read_model_readiness_reporter.py::ReadModelReadinessReporterTests::test_dependency_not_fresh_exception_records_refreshing_not_failed` |
 | 前端 stale polling | `shows read model stale state and reloads until the no OA read model is fresh`、`cleans up stale read model retry reload after route unmount` |
 | 前端分类/规则事件刷新 | `refreshes tag selection, list, and detail cache after bank transaction category updates`、`refreshes tag selection, list, and detail cache after bank auto tag rules update` |
 
@@ -89,6 +92,9 @@
 | --- | --- |
 | GET list/detail 在 read model missing 时同步 rebuild，拖慢热路径或伪造 fresh | `tests/test_no_oa_bank_batch_workbench_integration.py` read model tests |
 | 当前月份没有候选 rows 时被误判为 missing，导致页面持续刷新并反复入队 | `test_no_oa_repository_returns_fresh_empty_rows_when_readiness_is_fresh`、`test_no_oa_repository_keeps_missing_when_readiness_is_absent_or_refreshing` |
+| Bankdetail 已同步但 no-OA 依赖读取暂未 fresh 时，no-OA readiness 被标 failed，App Status 长时间显示 blocker | `test_dependency_not_fresh_exception_records_refreshing_not_failed`、runtime worker dependency defer tests |
+| 月度 no-OA refresh 读取 `all` 并用月度结果覆盖完整 snapshot，导致其它月份批次被误删或刷新时间放大 | `test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches` |
+| no-OA refresh 对同一批银行流水重复读取 Bankdetail effective category，放大 fan-out 延迟 | `test_refresh_reads_effective_categories_once_for_same_rows` |
 | internal transfer 从 Workbench confirm-link 直接写 `manual_confirmed` | `test_workbench_confirm_internal_transfer_bank_rows_submits_no_oa_batch` |
 | 混合 internal transfer 和非 internal transfer 被静默普通确认 | `test_workbench_confirm_mixed_internal_transfer_bank_rows_rejects_no_oa_conflict` |
 | no-OA 页面和关联台对同一组 internal transfer 形成两条 active relation | `test_workbench_confirm_after_no_oa_submit_reuses_existing_internal_transfer_fact`、`test_create_active_relation_rejects_active_row_reuse_by_different_case_id` |

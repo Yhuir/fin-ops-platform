@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-14 - 撤回预览显示归属与可恢复关系边界收敛
+
+- 目标：修复 withdraw preview/submit 把 `existing_case` 显示归属当成可恢复 relation，导致“操作后”银行流水+发票或 OA+发票仍显示在同一行的问题。
+- 影响范围：`WorkbenchPairRelationService`、Workbench withdraw preview/submit API、批量账务 withdraw 回归、前端 Workbench mock 和本模块/批量账务文档。
+- 关键决策：`relation_mode=existing_case` 默认是读侧 display ownership，不是 relation repository 的可恢复事实；只有真实 active relation snapshot 或显式 `restorable_on_withdraw` 的关系才能在撤回时恢复。历史中已污染的 `existing_case` before_relations 由运行时过滤，避免破坏旧数据。
+- 文档影响：更新本模块 `README.md`、`tests.md`、`implementation-notes.md`，并同步批量账务模块 `README.md`、`state-machine.md`、`tests.md`、`implementation-notes.md`。
+- 测试覆盖：新增/更新 pair relation service、Workbench v2 API 和 batch accounting API 回归，覆盖新历史写入过滤、旧污染历史过滤、银行+发票撤回后分行、真实上一 relation 仍可恢复。
+- 验证命令：见本轮最终执行记录。
+- 发布前审计：2026-06-14 已在生产执行只读 SQL 审计，`active_display_only_relation_count=0`、`display_only_history_before_relation_count=3`、`affected_history_case_count=3`，运行时过滤覆盖历史污染，不需要 backfill。
+- 未测风险：未执行生产写入型 repair；本次审计结论为无需写入型 backfill。
+
 ## 2026-06-13 - Workbench 发票事实源收敛与列交互修复
 
 - 目标：修复关联台三栏列布局、详情 icon 和 selection 高亮问题，同时把 OA 附件正式发票统一 promotion 到 Invoice repository / `app.invoices`，Workbench 发票栏不再从 OA 附件解析缓存临时生成发票行。
