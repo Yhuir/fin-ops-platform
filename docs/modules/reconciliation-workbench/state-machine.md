@@ -32,7 +32,7 @@
 - 禁止 ETC 批次人工确认后直接进入 paired；必须仍经过普通 OA/银行/发票关系确认。
 - 禁止 failed generation、building generation 或 stale Redis payload 被展示为 fresh。
 - 禁止 active relation payload 保留重复 row id，或以不同 active case 复用同一 row id 来表达多付款/多发票场景；这类场景必须合并到同一 relation 并通过 summaries/+N 展开。
-- 禁止 all-scope open 区发布已被 `app.workbench_pair_relations.status='active'` 占用的 row；这类 generation 必须在 publish/consistency 阶段被抑制或标为 inconsistent，不能进入 fresh。
+- 禁止 all-scope open 区把已被 `app.workbench_pair_relations.status='active'` 占用的 row 发布到非 canonical owner（例如 `scope:*:temp:*`、standalone、candidate 残留）。active relation 的合法 open/display owner 必须是 `case:<case_id>`；非 canonical owner 必须在 publish/consistency 阶段被抑制或标为 inconsistent，不能进入 fresh。
 
 ## UI 状态
 
@@ -82,7 +82,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-15 | all-scope 聚合接入 canonical active relation occupancy gate，确认预览遇到已 active row-set 时返回撤回预览，防止 all scope 旧 open owner 继续误导用户确认 | `PostgresReadModelRepository` all-scope aggregate/generation consistency、`WorkbenchWriteFacade.preview_confirm_link`、`RelationPreviewDialog` existing operation flow | `tests/test_workbench_sql_runtime.py`；`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`；`web/src/test/WorkbenchSelection.test.tsx` |
+| 2026-06-15 | all-scope 聚合接入 canonical active relation occupancy gate：保留合法 `case:<case_id>` open/display owner，抑制 `scope:*:temp:*` 等旧 open owner；确认预览遇到已 active row-set 时返回撤回预览，防止 all scope 旧 open owner 继续误导用户确认 | `PostgresReadModelRepository` all-scope aggregate/generation consistency、`WorkbenchReadModelRefreshService` aggregate-only event、`WorkbenchWriteFacade.preview_confirm_link`、`RelationPreviewDialog` existing operation flow | `tests/test_workbench_sql_runtime.py`；`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`；`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-14 | 关联台写操作从本地 optimistic 重排改为全屏 operation overlay，等待 `workbench_relation` barrier 与 Workbench active generation fresh 后释放 | `ReconciliationWorkbenchPage` 写操作 gate、`GlobalOperationOverlayProvider`、`/api/operation-barrier/status` | `web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/GlobalOperationOverlayContext.test.tsx`；`web/src/test/OperationBarrierApi.test.ts`；`tests/test_operation_freshness_barrier.py` |
 | 2026-06-12 | 关联台撤回 preview 操作后未恢复 row 逐行独立展示，并拆分 Workbench stale 与 OA dirty 写阻断 | `Application._relation_groups`、`WorkbenchWriteFacade` withdraw preview、App Health source mapping、前端 optimistic update/pending row lock | `tests/test_workbench_auth_context_idempotency.py`；`web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/AppHealthStatusContext.test.tsx` |
 | 2026-06-11 | 补齐测试闭环状态机 | open/paired/exception/dirty/active generation/UI/read model 状态边界 | 待本轮 Workbench 验证 |

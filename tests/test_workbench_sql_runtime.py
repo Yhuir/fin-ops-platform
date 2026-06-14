@@ -1868,6 +1868,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("active_relation_open_membership_counts as", sql)
         self.assertIn("join app.workbench_pair_relations rel", sql)
 
+    def test_repository_generation_consistency_allows_active_relation_rows_in_canonical_case_open_group(self) -> None:
+        connection = WorkbenchConsistencySqlConnection()
+
+        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
+            connection,
+            scope_key="all",
+        )
+
+        self.assertEqual(failures, [])
+        sql = connection.fetch_all_calls[0][0]
+        self.assertIn("active_relation_open_membership_counts as", sql)
+        self.assertIn("gr.group_id <> ('case:' || rel.case_id)", sql)
+
     def test_workbench_refresh_status_api_maps_statement_timeout_to_retryable_unavailable(self) -> None:
         app = object.__new__(Application)
         app._runtime_repositories = SimpleNamespace(queue_repository=QueueRecorder(), redis_helper=None)
@@ -3036,6 +3049,105 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         ]
         self.assertEqual(aggregate_group_payloads, [])
         self.assertTrue(any("from app.workbench_pair_relations" in sql for sql, _params in connection.fetch_all_calls))
+
+    def test_repository_all_scope_preserves_canonical_case_open_group_when_temp_owner_is_claimed(self) -> None:
+        class AggregateAllCanonicalOwnerWithTempPollutionConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from app.workbench_pair_relations" in normalized:
+                    return [
+                        {
+                            "case_id": "CASE-AUTO-0013",
+                            "row_ids": ["txn_imported_1284", "inv_imported_1643"],
+                        }
+                    ]
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                bank_row = {
+                    "id": "txn_imported_1284",
+                    "type": "bank",
+                    "source_kind": "bank_transaction",
+                    "status": "open",
+                    "case_id": "CASE-AUTO-0013",
+                }
+                invoice_row = {
+                    "id": "inv_imported_1643",
+                    "type": "invoice",
+                    "source_kind": "invoice",
+                    "status": "open",
+                    "case_id": "CASE-AUTO-0013",
+                }
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "open",
+                        "group_id": "case:CASE-AUTO-0013",
+                        "generated_at": "2026-06-14T23:45:00+08:00",
+                        "source_versions": {"source_version": 14},
+                        "payload": {
+                            "group_id": "case:CASE-AUTO-0013",
+                            "zone": "open",
+                            "group_type": "manual_confirmed",
+                            "relation_mode": "manual_confirmed",
+                            "case_id": "CASE-AUTO-0013",
+                            "oa_rows": [],
+                            "bank_rows": [bank_row],
+                            "invoice_rows": [invoice_row],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "open",
+                        "group_id": "temp:0070",
+                        "generated_at": "2026-06-14T23:44:00+08:00",
+                        "source_versions": {"source_version": 12},
+                        "payload": {
+                            "group_id": "temp:0070",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [],
+                            "bank_rows": [dict(bank_row, case_id=None)],
+                            "invoice_rows": [],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "zone": "open",
+                        "group_id": "temp:0076",
+                        "generated_at": "2026-06-14T23:43:00+08:00",
+                        "source_versions": {"source_version": 11},
+                        "payload": {
+                            "group_id": "temp:0076",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [],
+                            "bank_rows": [],
+                            "invoice_rows": [dict(invoice_row, case_id=None)],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllCanonicalOwnerWithTempPollutionConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        group_ids = [group["group_id"] for group in aggregate_group_payloads]
+        self.assertEqual(group_ids, ["case:CASE-AUTO-0013"])
+        canonical_group = aggregate_group_payloads[0]
+        self.assertEqual([row["id"] for row in canonical_group["bank_rows"]], ["txn_imported_1284"])
+        self.assertEqual([row["id"] for row in canonical_group["invoice_rows"]], ["inv_imported_1643"])
 
     def test_repository_all_scope_drops_partial_automatic_decision_groups_claimed_by_paired_shards(self) -> None:
         class AggregateAllPartialAutomaticDecisionConnection(WorkbenchWriteConnection):
@@ -5005,6 +5117,75 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_workbench_refresh_handler_runs_all_aggregate_after_shard_publish_even_if_all_scope_source_is_newer(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, object]] = []
+
+            def refresh_workbench_all_scope_from_active_shards(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                self.calls.append((scope_key, source_version))
+                return {
+                    "scope_key": scope_key,
+                    "aggregate_only": True,
+                    "read_model_status": "fresh",
+                    "active_generation_id": "gen-all-clean",
+                }
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.current_checks: list[tuple[str, str, str, object]] = []
+                self.completed: list[tuple[str, str, str, object]] = []
+
+            def read_model_refresh_is_current(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object,
+            ) -> bool:
+                self.current_checks.append((tenant_id, scope_type, scope_key, source_version))
+                return False
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+        builder = FakeBuilder()
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all-aggregate-after-shard",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="workbench",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all", "aggregate_only": True, "source_version": 1147, "parent_scope_keys": ["2026-02"]},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(queue.current_checks, [])
+        self.assertEqual(builder.calls, [("all", 1147)])
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 1147)])
+        self.assertEqual(result["active_generation_id"], "gen-all-clean")
+
     def test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
@@ -5184,6 +5365,56 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(builder.calls, [("all", 9)])
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 9)])
         self.assertEqual(result["active_generation_id"], "gen-all")
+
+    def test_workbench_refresh_handler_does_not_complete_dirty_scope_when_all_aggregate_did_not_publish(self) -> None:
+        class FakeBuilder:
+            def refresh_workbench_all_scope_from_active_shards(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "aggregate_only": True,
+                    "read_model_status": "refreshing",
+                    "active_generation_id": None,
+                }
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.completed: list[tuple[str, str, str, object]] = []
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all-aggregate-miss",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="workbench",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all", "aggregate_only": True, "source_version": 9},
+            attempts=1,
+            status="processing",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "workbench_all_scope_aggregate_not_published"):
+            service.handle_runtime_event(event)
+
+        self.assertEqual(queue.completed, [])
 
     def test_workbench_refresh_handler_warms_homepage_pages_after_publish(self) -> None:
         class FakeBuilder:

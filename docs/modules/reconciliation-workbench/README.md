@@ -45,7 +45,7 @@ Workbench all-scope publish 的性能边界是 active generation 下的结构化
 
 Workbench all-scope 聚合还承担跨月分片的展示归属权收敛。统一事实源只保证正式 OA、银行流水、发票事实写入唯一；当 month shard 因补行、standalone row、自动候选或 source-linked 关系把同一事实带入多个 open group 时，all-scope 必须在写 active generation 前选出唯一 visible/operable owner。已配对 group 优先于 open；open 内部保留 source-linked/exception/auto-closed/decision/candidate 等证据更强、跨 pane 更多的 group，standalone 只能保留未被更强 group 认领的事实。发票 open/open 可用强发票 identity 去重；银行流水 open/open 只按 row id 去重，避免把真实重复交易按稳定 business-fields identity 折叠。
 
-all-scope 聚合必须同时读取 canonical active relation occupancy。即使某个月度 active generation 因历史污染或补投顺序仍把 active relation row 发布在 open zone，`app.workbench_pair_relations.status='active'` 中占用的 row 也不得在 all-scope open 区继续作为可操作 owner 发布；generation consistency 也必须把 active relation row 出现在 open zone 标成 inconsistent，不能让 worker 把污染 generation 完成成 fresh。
+all-scope 聚合必须同时读取 canonical active relation occupancy。即使某个月度 active generation 因历史污染或补投顺序仍把 active relation row 带入 open zone，`app.workbench_pair_relations.status='active'` 中占用的 row 也不得在 all-scope open 区继续由 `scope:*:temp:*`、standalone 或 candidate 残留作为可操作 owner 发布；合法的 active relation open/display owner 只能是 `case:<case_id>`。generation consistency 只把非 canonical owner 标成 inconsistent，不能把合法 `case:<case_id>` 撤回/显示 group 误判为失败，也不能让 worker 把污染 generation 完成成 fresh。
 
 ## 维护触发器
 

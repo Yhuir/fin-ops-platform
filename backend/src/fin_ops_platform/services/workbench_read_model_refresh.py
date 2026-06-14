@@ -29,7 +29,14 @@ class WorkbenchReadModelRefreshService:
             raise ValueError("Workbench read model refresh requires scope_type='workbench' and scope_key.")
 
         source_version = event.source_version or event.payload.get("source_version")
-        if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
+        aggregate_only = scope_key == "all" and _truthy(event.payload.get("aggregate_only"))
+        parent_scope_keys = event.payload.get("parent_scope_keys")
+        aggregate_from_parent_shards = aggregate_only and isinstance(parent_scope_keys, list) and bool(parent_scope_keys)
+        if not aggregate_from_parent_shards and not self._event_source_version_is_current(
+            event,
+            scope_key=scope_key,
+            source_version=source_version,
+        ):
             return {
                 "scope_key": scope_key,
                 "skipped": True,
@@ -37,12 +44,12 @@ class WorkbenchReadModelRefreshService:
                 "source_version": source_version,
             }
 
-        if scope_key == "all" and not _truthy(event.payload.get("aggregate_only")):
+        if scope_key == "all" and not aggregate_only:
             shard_result = self._enqueue_all_scope_shards(event, scope_key)
             if shard_result is not None:
                 return shard_result
 
-        if scope_key == "all" and _truthy(event.payload.get("aggregate_only")):
+        if aggregate_only:
             rebuild = getattr(self._projection_builder, "refresh_workbench_all_scope_from_active_shards", None)
         else:
             rebuild = getattr(self._projection_builder, "rebuild_workbench_read_model_scope", None)
@@ -53,6 +60,12 @@ class WorkbenchReadModelRefreshService:
         else:
             result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+        if aggregate_only and not _all_scope_aggregate_published(payload):
+            raise RuntimeError(
+                "workbench_all_scope_aggregate_not_published: "
+                f"scope_key={scope_key} status={payload.get('read_model_status')!r} "
+                f"active_generation_id={payload.get('active_generation_id')!r}"
+            )
 
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
@@ -167,3 +180,11 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _all_scope_aggregate_published(payload: dict[str, Any]) -> bool:
+    active_generation_id = str(payload.get("active_generation_id") or "").strip()
+    if not active_generation_id:
+        return False
+    read_model_status = str(payload.get("read_model_status") or "fresh").strip().lower()
+    return read_model_status == "fresh"

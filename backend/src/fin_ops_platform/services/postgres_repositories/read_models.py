@@ -3521,6 +3521,7 @@ class PostgresReadModelRepository:
                     where coalesce(gr.row_role, '') <> 'summary'
                       and gr.zone = 'open'
                       and gr.row_id is not null
+                      and (gr.group_id is null or gr.group_id <> ('case:' || rel.case_id))
                 ) active_rows
                 group by active_rows.generation_id, active_rows.scope_key
             )
@@ -5703,7 +5704,11 @@ class PostgresReadModelRepository:
         if not groups:
             return False
 
-        canonical_paired_row_keys, canonical_paired_identity_keys = _workbench_active_relation_claim_keys_for_groups(
+        (
+            canonical_paired_row_keys,
+            canonical_paired_identity_keys,
+            canonical_relation_claims_by_row_key,
+        ) = _workbench_active_relation_claim_keys_for_groups(
             connection,
             groups,
         )
@@ -5711,6 +5716,7 @@ class PostgresReadModelRepository:
             groups,
             paired_row_keys=canonical_paired_row_keys,
             paired_identity_keys=canonical_paired_identity_keys,
+            canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
         )
         aggregate_source_versions = {
             "builder": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
@@ -8680,7 +8686,7 @@ def _dedupe_workbench_payload_groups(payload: dict[str, Any]) -> None:
 def _workbench_active_relation_claim_keys_for_groups(
     executor: Any,
     groups: list[dict[str, Any]],
-) -> tuple[set[tuple[str, str]], set[tuple[str, str, str]]]:
+) -> tuple[set[tuple[str, str]], set[tuple[str, str, str]], dict[tuple[str, str], set[str]]]:
     row_panes_by_id: dict[str, set[str]] = {}
     for group in list(groups or []):
         if not isinstance(group, dict):
@@ -8693,7 +8699,7 @@ def _workbench_active_relation_claim_keys_for_groups(
                 continue
             row_panes_by_id.setdefault(row_id, set()).add(pane)
     if not row_panes_by_id:
-        return set(), set()
+        return set(), set(), {}
     rows = executor.fetch_all(
         """
         select case_id, row_ids
@@ -8706,11 +8712,16 @@ def _workbench_active_relation_claim_keys_for_groups(
     )
 
     paired_row_keys: set[tuple[str, str]] = set()
+    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] = {}
     for relation in list(rows or []):
+        case_id = text(relation.get("case_id"))
         for row_id in text_list(relation.get("row_ids")):
             for pane in row_panes_by_id.get(row_id, set()):
-                paired_row_keys.add((pane, row_id))
-    return paired_row_keys, set()
+                row_key = (pane, row_id)
+                paired_row_keys.add(row_key)
+                if case_id:
+                    canonical_relation_claims_by_row_key.setdefault(row_key, set()).add(case_id)
+    return paired_row_keys, set(), canonical_relation_claims_by_row_key
 
 
 def _aggregate_workbench_all_scope_payload(
@@ -8718,6 +8729,7 @@ def _aggregate_workbench_all_scope_payload(
     *,
     paired_row_keys: set[tuple[str, str]] | None = None,
     paired_identity_keys: set[tuple[str, str, str]] | None = None,
+    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
 ) -> dict[str, Any]:
     aggregate = {
         "month": "all",
@@ -8751,6 +8763,7 @@ def _aggregate_workbench_all_scope_payload(
         finalized_by_zone["open"],
         extra_paired_row_keys=paired_row_keys,
         extra_paired_identity_keys=paired_identity_keys,
+        canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
     )
     _suppress_all_scope_open_rows_claimed_by_other_open_groups(finalized_by_zone["open"])
     for zone in ("paired", "open"):
@@ -8770,9 +8783,14 @@ def _suppress_all_scope_open_rows_claimed_by_paired(
     *,
     extra_paired_row_keys: set[tuple[str, str]] | None = None,
     extra_paired_identity_keys: set[tuple[str, str, str]] | None = None,
+    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
 ) -> None:
     paired_row_keys: set[tuple[str, str]] = set(extra_paired_row_keys or set())
     paired_identity_keys: set[tuple[str, str, str]] = set(extra_paired_identity_keys or set())
+    relation_claims_by_row_key = {
+        key: set(value)
+        for key, value in (canonical_relation_claims_by_row_key or {}).items()
+    }
     for group in paired_groups:
         for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
             if row_role == "summary":
@@ -8793,6 +8811,7 @@ def _suppress_all_scope_open_rows_claimed_by_paired(
             group,
             paired_row_keys=paired_row_keys,
             paired_identity_keys=paired_identity_keys,
+            canonical_relation_claims_by_row_key=relation_claims_by_row_key,
         )
         _drop_partial_all_scope_automatic_decision_group(group, before_row_count=before_row_count)
         _finalize_all_scope_group(group, zone="open")
@@ -8933,7 +8952,9 @@ def _remove_workbench_rows_from_group(
     *,
     paired_row_keys: set[tuple[str, str]],
     paired_identity_keys: set[tuple[str, str, str]],
+    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
 ) -> None:
+    group_relation_case_id = _workbench_canonical_relation_case_id_for_group(group)
     for pane, row_key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
         rows = group.get(row_key)
         if isinstance(rows, list):
@@ -8946,6 +8967,8 @@ def _remove_workbench_rows_from_group(
                     pane,
                     paired_row_keys=paired_row_keys,
                     paired_identity_keys=paired_identity_keys,
+                    canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
+                    group_relation_case_id=group_relation_case_id,
                 )
             ]
     collapsed_rows = group.get("collapsed_rows")
@@ -8962,6 +8985,8 @@ def _remove_workbench_rows_from_group(
                     str(pane),
                     paired_row_keys=paired_row_keys,
                     paired_identity_keys=paired_identity_keys,
+                    canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
+                    group_relation_case_id=group_relation_case_id,
                 )
             ]
 
@@ -8972,12 +8997,24 @@ def _workbench_row_claimed_by_paired(
     *,
     paired_row_keys: set[tuple[str, str]],
     paired_identity_keys: set[tuple[str, str, str]],
+    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
+    group_relation_case_id: str | None = None,
 ) -> bool:
     row_id = _workbench_row_id(row)
     if row_id is not None and (pane, row_id) in paired_row_keys:
+        claim_case_ids = (canonical_relation_claims_by_row_key or {}).get((pane, row_id), set())
+        if group_relation_case_id and group_relation_case_id in claim_case_ids:
+            return False
         return True
     identity = _workbench_strong_object_identity(row, pane)
     return identity is not None and identity in paired_identity_keys
+
+
+def _workbench_canonical_relation_case_id_for_group(group: dict[str, Any]) -> str | None:
+    group_id = text(group.get("group_id") or group.get("id")) or ""
+    if group_id.startswith("case:"):
+        return group_id.removeprefix("case:")
+    return None
 
 
 def _workbench_open_visible_owner_claim_keys(row: dict[str, Any], pane: str) -> list[tuple[str, ...]]:
