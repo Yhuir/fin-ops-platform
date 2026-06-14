@@ -46,6 +46,7 @@
 - 内部往来：关联台 confirm-link 选中两条 `internal_transfer` 银行流水时，最终事实必须归入免 OA 批次，并写 `relation_mode=no_oa_bank_batch`，不能直接写普通 `manual_confirmed`；免 OA 页面先提交或关联台先提交都必须收敛到同一个 submitted batch / active relation，不能形成第二条 active relation。
 - 历史归并：当 `internal_transfer` 已纳入免 OA 标签准入时，存量两行、全银行流水、同金额、不同账户、收支成对且有效分类均为 `internal_transfer` 的 `manual_confirmed` active relation，可由显式兼容 repair 路径通过 command service 迁移为 submitted no-OA 批次；如果同一 row set 已存在 current submitted no-OA batch，迁移复用该 batch 的 relation case，不创建第二条 active relation。`no_oa_bank_batch.read_model.refresh` worker 不执行 relation repair 或 pair relation 持久化。
 - Read model 保存：`save_no_oa_bank_batches` 写入的是当前完整 no-OA snapshot；缺席于新 snapshot 的旧 draft/conflict/submitted row 必须从 `app.no_oa_bank_batches` 与 `read_model.no_oa_bank_batch_rows` 移除，避免旧未提交/冲突批次残留。
+- 自动决策清理：submitted no-OA batch 的 `bank_transaction_ids` 是历史 cleanup 的闭环占用证据。即使对应 Workbench relation snapshot 已取消或暂时缺失，`oa_bank_exact_sum` repair dry-run 也必须把这些银行流水视为已闭环，避免旧自动 decision 重新污染关联台。
 - 撤回路径：已提交批次必须从 no-OA 批次 API 撤回，撤回通过 relation command service 取消 Workbench active relation，并使流水回到可匹配状态。
 - App Status：`no_oa_bank_batches` domain 绑定 `no-oa-bank-batch` worker、`no_oa_bank_batch` read model、`no_oa_bank_batch.read_model.refresh` job type。
 

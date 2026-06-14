@@ -11,6 +11,14 @@ from fin_ops_platform.services.workbench_text_normalization import normalize_mat
 
 ACTIVE_DECISION_STATUSES = {"proposed", "paired", "open"}
 OA_BANK_EXACT_SUM_RULE_CODE = "oa_bank_exact_sum"
+OA_BANK_SUM_NON_BUSINESS_OA_SOURCE_FIELDS = frozenset(
+    {
+        "applicant",
+        "oa.applicant",
+        "project",
+        "oa.project",
+    }
+)
 
 
 class WorkbenchReconciliationDecisionCleanupService:
@@ -79,6 +87,15 @@ class WorkbenchReconciliationDecisionCleanupService:
                     "active_relation_overlaps": active_relation_overlaps,
                 }
             )
+        submitted_no_oa_batch_overlaps = decision.get("submitted_no_oa_batch_overlaps")
+        if isinstance(submitted_no_oa_batch_overlaps, list) and submitted_no_oa_batch_overlaps:
+            reasons.append(
+                {
+                    "code": "submitted_no_oa_batch_row_overlap",
+                    "message": "Decision reuses bank rows already closed by submitted no-OA bank batches.",
+                    "submitted_no_oa_batch_overlaps": submitted_no_oa_batch_overlaps,
+                }
+            )
         if self._has_weak_only_oa_bank_sum_evidence(decision):
             reasons.append(
                 {
@@ -123,4 +140,7 @@ class WorkbenchReconciliationDecisionCleanupService:
     @staticmethod
     def _is_strong_oa_bank_sum_match(match: dict[str, Any]) -> bool:
         token = normalize_match_text(match.get("token"))
+        left_source_field = str(match.get("left_source_field") or "").strip().lower()
+        if left_source_field in OA_BANK_SUM_NON_BUSINESS_OA_SOURCE_FIELDS:
+            return False
         return len(token) >= OA_BANK_SUM_MIN_EVIDENCE_TOKEN_LENGTH and token not in OA_BANK_SUM_WEAK_TOKENS

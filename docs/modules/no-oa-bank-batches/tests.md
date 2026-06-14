@@ -97,6 +97,7 @@
 | no-OA read model refresh 隐式创建/取消 pair relation，造成隐藏写入口 | `test_refresh_does_not_repair_workbench_relations_from_read_model_path`、`test_no_oa_read_model_refresh_does_not_run_relation_repairs` |
 | no-OA legacy repair/consolidation 回退 direct pair service mutation | `test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback` |
 | submitted no-OA relation 被未提交候选重复出现 | `test_unsubmitted_list_moves_internal_transfer_rows_occupied_by_manual_relation_to_submitted`、service active relation tests |
+| submitted no-OA batch 对应 relation 已取消或暂缺时，旧 `oa_bank_exact_sum` decision 继续复用 batch 内银行流水 | `tests/test_workbench_reconciliation_decision_cleanup.py::WorkbenchReconciliationDecisionCleanupServiceTests::test_plan_expires_decisions_overlapping_submitted_no_oa_batches`、`tests/test_workbench_reconciliation_decision_store.py::WorkbenchReconciliationDecisionStoreTests::test_repository_cleanup_audit_lists_active_relation_overlaps_in_matching_window` |
 | 标签规则变更后 no-OA 标签选择或候选未刷新 | `tests/test_bank_auto_tag_rules_api.py`、前端 category/rules event tests |
 | route unmount 后 stale polling 继续 replay | `web/src/test/NoOaBankBatchPage.test.tsx` route unmount cleanup test |
 

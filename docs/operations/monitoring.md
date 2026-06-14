@@ -106,7 +106,7 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 
 ### Workbench 自动决策污染修复
 
-当关联台出现 `oa_bank_exact_sum` 把弱文本证据或已被 active relation 占用的 row 拼成候选时，必须先确认生成规则已修复，再清理旧 decision；只删页面缓存或手工改一条 SQL 会被下一次 matching upsert 污染回来。
+当关联台出现 `oa_bank_exact_sum` 把弱文本证据、OA 项目/申请人 token、已被 active relation 占用的 row，或已被 submitted no-OA batch 闭环的银行流水拼成候选时，必须先确认生成规则和 cleanup dry-run 判定已修复，再清理旧 decision；只删页面缓存或手工改一条 SQL 会被下一次 matching upsert 或 read model rebuild 污染回来。
 
 dry-run：
 
@@ -115,6 +115,12 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.repair_workbench_reconc
   --scope 2026-02 \
   --json
 ```
+
+dry-run 的 `plan.items[].reasons[].code` 至少应明确命中一种已知污染原因，例如：
+
+- `active_relation_row_overlap`：decision 复用 active Workbench relation 已占用 row。
+- `submitted_no_oa_batch_row_overlap`：decision 复用 submitted no-OA batch 中的银行流水，即使对应 relation snapshot 已被取消或滞后也必须清理旧 decision。
+- `weak_only_oa_bank_sum_evidence`：`oa_bank_exact_sum` 只由弱 token 或 OA 项目/申请人来源 token 支撑。
 
 执行清理：
 
@@ -135,7 +141,7 @@ PYTHONPATH=backend/src python3 scripts/rehydrate-workbench-read-models.py \
   --json
 ```
 
-如果 relation facts 也发生变更，再通过既有 runtime queue/backfill 入口刷新下游 `workbench_relation`、`bank_detail`、`cost_statistics`、`search` 等 scope；仅清理 reconciliation decision 时，不要直接改 `app.workbench_pair_relations` 中正确的 no-OA/internal-transfer active relation。
+如果 relation facts 也发生变更，再通过既有 runtime queue/backfill 入口刷新下游 `workbench_relation`、`bank_detail`、`cost_statistics`、`search` 等 scope；仅清理 reconciliation decision 时，不要直接改 `app.workbench_pair_relations` 中正确的 no-OA/internal-transfer relation，也不要为了让 cleanup 命中而手工改 submitted no-OA batch。
 
 告警建议：
 

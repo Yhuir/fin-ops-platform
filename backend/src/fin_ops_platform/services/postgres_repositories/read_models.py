@@ -6342,7 +6342,8 @@ class PostgresReadModelRepository:
                 dec.explanation,
                 dec.raw_payload,
                 dec.updated_at,
-                coalesce(active_relation_overlaps.items, '[]'::jsonb) as active_relation_overlaps
+                coalesce(active_relation_overlaps.items, '[]'::jsonb) as active_relation_overlaps,
+                coalesce(submitted_no_oa_batch_overlaps.items, '[]'::jsonb) as submitted_no_oa_batch_overlaps
             from read_model.workbench_reconciliation_decisions dec
             left join lateral (
                 select jsonb_agg(
@@ -6371,6 +6372,34 @@ class PostgresReadModelRepository:
                                            and (dec.scope_month + interval '2 months')::date
                   )
             ) active_relation_overlaps on true
+            left join lateral (
+                select jsonb_agg(
+                    jsonb_build_object(
+                        'batch_id', batch.batch_id,
+                        'batch_type', batch.raw_payload->'normalized_payload'->>'batch_type',
+                        'batch_label', batch.raw_payload->'normalized_payload'->>'batch_label',
+                        'status', batch.status,
+                        'scope_month', coalesce(to_char(batch.scope_month, 'YYYY-MM'), 'all'),
+                        'bank_transaction_ids', batch.bank_transaction_ids,
+                        'overlap_row_ids', overlap_rows.overlap_row_ids
+                    )
+                    order by batch.batch_id
+                ) as items
+                from app.no_oa_bank_batches batch
+                cross join lateral (
+                    select array_agg(decision_bank_row_id order by decision_bank_row_id) as overlap_row_ids
+                    from unnest(dec.bank_row_ids) decision_bank_row_id
+                    where decision_bank_row_id = any(batch.bank_transaction_ids)
+                ) overlap_rows
+                where batch.status = 'submitted'
+                  and batch.bank_transaction_ids && dec.bank_row_ids
+                  and cardinality(overlap_rows.overlap_row_ids) > 0
+                  and (
+                    batch.scope_month is null
+                    or batch.scope_month between (dec.scope_month - interval '2 months')::date
+                                             and (dec.scope_month + interval '2 months')::date
+                  )
+            ) submitted_no_oa_batch_overlaps on true
             where {" and ".join(where)}
             order by dec.scope_month, dec.decision_key
             """,
@@ -6381,6 +6410,11 @@ class PostgresReadModelRepository:
             payload = _workbench_reconciliation_decision_payload(row)
             payload["active_relation_overlaps"] = (
                 row.get("active_relation_overlaps") if isinstance(row.get("active_relation_overlaps"), list) else []
+            )
+            payload["submitted_no_oa_batch_overlaps"] = (
+                row.get("submitted_no_oa_batch_overlaps")
+                if isinstance(row.get("submitted_no_oa_batch_overlaps"), list)
+                else []
             )
             payload["updated_at"] = text(row.get("updated_at"))
             payloads.append(payload)

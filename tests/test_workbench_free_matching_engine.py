@@ -639,6 +639,45 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
 
         self.assertFalse(any(decision.rule_code == "oa_bank_exact_sum" for decision in decisions))
 
+    def test_single_oa_multiple_bank_sum_rejects_project_name_only_vendor_token(self) -> None:
+        decisions = self.engine.generate_decisions(
+            "2026-02",
+            [
+                {
+                    "row_id": "oa-loan-interest",
+                    "amount": "9000.00",
+                    "direction": "expenditure",
+                    "month": "2026-02",
+                    "project_name": "云南溯源科技",
+                    "reason": "光大新一期贷款一季度利息",
+                    "counterparty_name": "中国光大银行",
+                }
+            ],
+            [
+                {
+                    "row_id": "bk-internal-transfer-3000",
+                    "amount": "3000.00",
+                    "direction": "expenditure",
+                    "trade_month": "2026-03",
+                    "counterparty": "云南溯源科技有限公司",
+                    "summary": "本公司帐户",
+                    "remark": "内部往来款",
+                },
+                {
+                    "row_id": "bk-internal-transfer-6000",
+                    "amount": "6000.00",
+                    "direction": "expenditure",
+                    "trade_month": "2026-03",
+                    "counterparty": "云南溯源科技有限公司",
+                    "summary": "本公司帐户",
+                    "remark": "内部往来款",
+                },
+            ],
+            [],
+        )
+
+        self.assertFalse(any(decision.rule_code == "oa_bank_exact_sum" for decision in decisions))
+
     def test_single_oa_multiple_bank_transactions_ambiguous_sum_does_not_auto_pair(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-04",

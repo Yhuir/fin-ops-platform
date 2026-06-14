@@ -174,6 +174,14 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
                             "overlap_row_ids": ["txn_imported_1385"],
                         }
                     ],
+                    "submitted_no_oa_batch_overlaps": [
+                        {
+                            "batch_id": "no_oa_batch_b1a825c98bf5d29b67f0",
+                            "batch_type": "internal_transfer",
+                            "scope_month": "2026-03",
+                            "overlap_row_ids": ["txn_imported_1385"],
+                        }
+                    ],
                 }
             ]
         )
@@ -186,8 +194,11 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["decision_key"], "decision-bad")
         self.assertEqual(rows[0]["active_relation_overlaps"][0]["overlap_row_ids"], ["txn_imported_1385"])
+        self.assertEqual(rows[0]["submitted_no_oa_batch_overlaps"][0]["overlap_row_ids"], ["txn_imported_1385"])
         sql, params = connection.fetch_all_calls[0]
         self.assertIn("from app.workbench_pair_relations", sql)
+        self.assertIn("from app.no_oa_bank_batches", sql)
+        self.assertIn("batch.status = 'submitted'", sql)
         self.assertIn("interval '2 months'", sql)
         self.assertEqual(params[0], "tenant-a")
         self.assertEqual(params[1], ["2026-02-01"])

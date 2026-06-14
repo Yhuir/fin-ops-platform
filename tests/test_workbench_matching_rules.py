@@ -251,6 +251,42 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
 
         self.assertIsNone(find_optional_candidate(candidates, "oa_bank_exact_sum"))
 
+    def test_oa_bank_exact_sum_rejects_project_name_only_vendor_token(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-02",
+            oa_rows=[
+                oa_row(
+                    "oa-loan-interest",
+                    "9000.00",
+                    counterparty_name="中国光大银行",
+                    project_name="云南溯源科技",
+                    reason="光大新一期贷款一季度利息",
+                    pay_receive_time="2026-02-04",
+                )
+            ],
+            bank_rows=[
+                bank_row(
+                    "bank-internal-transfer-3000",
+                    "3000.00",
+                    counterparty_name="云南溯源科技有限公司",
+                    summary="本公司帐户",
+                    remark="内部往来款",
+                    trade_time="2026-03-12 10:14:51",
+                ),
+                bank_row(
+                    "bank-internal-transfer-6000",
+                    "6000.00",
+                    counterparty_name="云南溯源科技有限公司",
+                    summary="本公司帐户",
+                    remark="内部往来款",
+                    trade_time="2026-03-27 11:45:20",
+                ),
+            ],
+            invoice_rows=[],
+        )
+
+        self.assertIsNone(find_optional_candidate(candidates, "oa_bank_exact_sum"))
+
     def test_oa_bank_exact_amount_takes_priority_over_bank_sum(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-04",
