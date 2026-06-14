@@ -25,6 +25,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
     without_keys,
 )
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -6469,6 +6470,12 @@ class PostgresReadModelRepository:
                     scope_key=scope_key,
                     reason="workbench_reconciliation_decision_expired",
                 )
+                _enqueue_workbench_refresh_in_transaction(
+                    connection,
+                    tenant_id=text(tenant_id) or "default",
+                    scope_key=scope_key,
+                    reason="workbench_reconciliation_decision_expired",
+                )
             return {"expired_count": expired_count, "scope_keys": scope_keys}
 
         result: dict[str, Any] = {"expired_count": 0, "scope_keys": []}
@@ -10120,6 +10127,23 @@ def _enqueue_workbench_relation_refresh_in_transaction(
             jsonb(event_payload),
             jsonb(event_payload),
         ),
+    )
+
+
+def _enqueue_workbench_refresh_in_transaction(
+    connection: Any,
+    *,
+    tenant_id: str,
+    scope_key: str,
+    reason: str,
+) -> None:
+    RuntimeQueueRepository(connection).enqueue_read_model_refresh_in_transaction(
+        transaction=connection,
+        tenant_id=text(tenant_id) or "default",
+        scope_type="workbench",
+        scope_key=text(scope_key) or "all",
+        reason=text(reason) or "workbench_changed",
+        metadata={"source": "workbench_reconciliation_decision_cleanup"},
     )
 
 

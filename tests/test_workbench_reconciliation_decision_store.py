@@ -232,6 +232,24 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
                 for _sql, params in connection.fetch_one_calls
             )
         )
+        self.assertTrue(
+            any(
+                "insert into job.read_model_dirty_scopes" in sql
+                and params[1] == "workbench"
+                and params[2] == "2026-02"
+                and params[3] == "workbench_reconciliation_decision_expired"
+                for sql, params in connection.fetch_one_calls
+            )
+        )
+        self.assertTrue(
+            any(
+                "insert into job.outbox_events" in sql
+                and params[1] == "workbench.read_model.refresh"
+                and params[3] == "workbench"
+                and params[4] == "2026-02"
+                for sql, params in connection.fetch_one_calls
+            )
+        )
 
 
 class RepositoryRecordingConnection:
@@ -245,8 +263,27 @@ class RepositoryRecordingConnection:
         self.execute_calls.append((" ".join(sql.lower().split()), params))
         return 1
 
-    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, int]:
-        self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object]:
+        normalized_sql = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized_sql, params))
+        if "insert into job.outbox_events" in normalized_sql and "returning id::text as event_id" in normalized_sql:
+            return {
+                "event_id": "event-1",
+                "tenant_id": params[0],
+                "event_type": params[1],
+                "aggregate_type": "read_model",
+                "aggregate_id": params[2],
+                "scope_type": params[3],
+                "scope_key": params[4],
+                "dedupe_key": params[5],
+                "payload": {},
+                "attempts": 0,
+                "status": "pending",
+                "schema_version": 1,
+                "source_version": params[6],
+                "priority": params[7],
+                "trace_id": params[8],
+            }
         return {"source_version": 1}
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:

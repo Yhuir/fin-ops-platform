@@ -132,6 +132,12 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.repair_workbench_reconc
   --json
 ```
 
+执行清理必须通过 repair 工具或同等 service/repository 边界完成。工具会在同一事务内 expire
+无效 decision，并补投受影响月份的 `workbench` 与 `workbench_relation` read model refresh；不要绕过
+source-version guard 直接改表。若历史上已用旧版本工具执行过 expire，导致 dry-run 已归零但月度
+active generation 仍保留旧 `case:decision:*` open 组，应先通过既有 read model refresh gateway/queue
+补投该月份 `workbench` scope，再重建页面 projection。
+
 清理后重建受影响 Workbench generation，并让 `all` 从 active shards 重新聚合：
 
 ```bash
