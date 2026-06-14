@@ -11838,7 +11838,7 @@ class Application:
         if error is not None:
             return error
         try:
-            preview = self._preview_confirm_link(payload)
+            preview = self._workbench_write_facade().preview_confirm_link(payload)
         except (KeyError, TypeError, ValueError) as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -14351,45 +14351,6 @@ class Application:
             tenant_id=tenant_id,
         )
         return self._workbench_write_response(result)
-
-    def _preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
-        month = str(payload["month"])
-        row_ids = self._normalize_row_ids(list(payload["row_ids"]))
-        requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=requested_row_types, month=month):
-            raise ValueError("confirm link requires rows from at least two panes.")
-        row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
-        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
-        rows_by_type = self._rows_by_type(rows)
-        amount_check = self._amount_check_for_rows_by_type(rows_by_type)
-        before_relations = self._workbench_pair_relation_service.active_relations_for_row_ids(row_ids)
-        before_groups = self._relation_groups(before_relations, selected_rows=rows, ungrouped_selected_rows="separate")
-        case_id = str(payload.get("case_id") or "preview:confirm")
-        after_relation = {
-            "case_id": case_id,
-            "row_ids": row_ids,
-            "row_types": row_types,
-            "status": "active",
-            "relation_mode": "manual_confirmed",
-            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-            "amount_check": amount_check,
-        }
-        after_groups = self._relation_groups([after_relation], selected_rows=rows)
-        requires_note = bool(amount_check.get("requires_note"))
-        return {
-            "operation": "confirm_link",
-            "can_submit": True,
-            "requires_note": requires_note,
-            "message": "金额不一致，请填写备注。" if requires_note else "",
-            "before": {"groups": before_groups},
-            "after": {"groups": after_groups},
-            "amount_summary": {
-                "before": amount_check,
-                "after": amount_check,
-                **amount_check,
-            },
-        }
 
     def _handle_live_workbench_mark_exception(self, payload: dict[str, object]) -> Response:
         result = self._workbench_write_facade().mark_exception(payload)

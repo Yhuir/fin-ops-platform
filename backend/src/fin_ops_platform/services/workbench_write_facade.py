@@ -219,6 +219,157 @@ class WorkbenchWriteFacade:
         self._relation_command_service = relation_command_service
         self._relation_command_service_factory = relation_command_service_factory
 
+    def preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
+        try:
+            month = str(payload["month"])
+            row_ids = self._normalize_row_ids(list(payload["row_ids"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from exc
+
+        requested_row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        if not self._can_confirm_link_row_types(row_ids=row_ids, row_types=requested_row_types, month=month):
+            raise ValueError("confirm link requires rows from at least two panes.")
+        row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
+        row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
+        rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+        rows_by_type = self._rows_by_type(rows)
+        amount_check = self._amount_check_for_rows_by_type(rows_by_type)
+        before_relations = self._pair_relation_service.active_relations_for_row_ids(row_ids)
+        active_relation_preview = self._already_active_relation_preview(
+            before_relations=before_relations,
+            selected_row_ids=row_ids,
+            selected_rows=rows,
+            amount_check=amount_check,
+            month=month,
+        )
+        if active_relation_preview is not None:
+            return active_relation_preview
+
+        before_groups = self._relation_groups(before_relations, selected_rows=rows, ungrouped_selected_rows="separate")
+        case_id = str(payload.get("case_id") or "preview:confirm")
+        after_relation = {
+            "case_id": case_id,
+            "row_ids": row_ids,
+            "row_types": row_types,
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            "amount_check": amount_check,
+        }
+        after_groups = self._relation_groups([after_relation], selected_rows=rows)
+        requires_note = bool(amount_check.get("requires_note"))
+        return {
+            "operation": "confirm_link",
+            "operation_type": "confirm_link",
+            "can_submit": True,
+            "requires_note": requires_note,
+            "message": "金额不一致，请填写备注。" if requires_note else "",
+            "before": {"groups": before_groups},
+            "after": {"groups": after_groups},
+            "amount_summary": {
+                "before": amount_check,
+                "after": amount_check,
+                **amount_check,
+            },
+        }
+
+    def _already_active_relation_preview(
+        self,
+        *,
+        before_relations: list[dict[str, object]],
+        selected_row_ids: list[str],
+        selected_rows: list[dict[str, object]],
+        amount_check: dict[str, object],
+        month: str,
+    ) -> dict[str, object] | None:
+        if not before_relations:
+            return None
+        if len(before_relations) > 1:
+            return None
+        active_relation = dict(before_relations[0])
+        active_row_ids = {
+            str(row_id).strip()
+            for row_id in list(active_relation.get("row_ids") or [])
+            if str(row_id).strip()
+        }
+        selected_ids = {str(row_id).strip() for row_id in list(selected_row_ids or []) if str(row_id).strip()}
+        if not selected_ids or selected_ids != active_row_ids:
+            return None
+
+        relation_command = self._relation_command_service_for()
+        if relation_command is not None:
+            try:
+                preview = self._preview_withdraw_relation_via_command_service(
+                    relation_command,
+                    row_ids=sorted(active_row_ids),
+                    month=month,
+                )
+            except WorkbenchRelationCommandError as exc:
+                return self._blocked_confirm_preview_payload(
+                    before_relations=before_relations,
+                    selected_rows=selected_rows,
+                    amount_check=amount_check,
+                    message=str(exc) or "所选记录已确认关联，但撤回预览暂时不可用。",
+                )
+            result = self._withdraw_relation_preview_payload(preview, month=month)
+            result["message"] = result.get("message") or "所选记录已确认关联，可在此撤回这组配对关系。"
+            return result
+
+        try:
+            preview = self._pair_relation_service.preview_withdraw_for_row_ids(sorted(active_row_ids))
+        except Exception:
+            return self._blocked_confirm_preview_payload(
+                before_relations=before_relations,
+                selected_rows=selected_rows,
+                amount_check=amount_check,
+                message="所选记录已确认关联，但撤回预览暂时不可用。",
+            )
+        active_relation = dict(preview.get("active_relation") or active_relation)
+        preview_payload = {
+            "operation": "withdraw_link",
+            "operation_type": "withdraw_relation",
+            "preview_id": f"withdraw_relation:{active_relation.get('case_id') or 'active'}",
+            "can_submit": True,
+            "requires_note": False,
+            "message": "所选记录已确认关联，可在此撤回这组配对关系。",
+            "active_relation": active_relation,
+            "before_relations": [active_relation],
+            "after_relations": list(preview.get("after_relations") or []),
+            "submit_expected_versions": {
+                str(active_relation.get("case_id") or ""): active_relation.get("version", 1)
+            },
+        }
+        return self._withdraw_relation_preview_payload(preview_payload, month=month)
+
+    def _blocked_confirm_preview_payload(
+        self,
+        *,
+        before_relations: list[dict[str, object]],
+        selected_rows: list[dict[str, object]],
+        amount_check: dict[str, object],
+        message: str,
+    ) -> dict[str, object]:
+        return {
+            "operation": "confirm_link",
+            "operation_type": "confirm_link",
+            "can_submit": False,
+            "requires_note": False,
+            "message": message,
+            "before": {
+                "groups": self._relation_groups(
+                    before_relations,
+                    selected_rows=selected_rows,
+                    ungrouped_selected_rows="separate",
+                )
+            },
+            "after": {"groups": []},
+            "amount_summary": {
+                "before": amount_check,
+                "after": amount_check,
+                **amount_check,
+            },
+        }
+
     def confirm_link(
         self,
         payload: dict[str, object],

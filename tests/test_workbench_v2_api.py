@@ -7001,6 +7001,45 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertIn("selected:bk-o-202605-001", [group["group_id"] for group in before_groups])
         self.assertEqual(len(preview_payload["after"]["groups"]), 1)
 
+    def test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview(self) -> None:
+        app = build_application()
+        raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-05")
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-ACTIVE-PREVIEW",
+            row_ids=["bk-o-202605-001", "iv-o-202605-001"],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-05",
+            amount_check={"status": "matched", "direction": "payment"},
+        )
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps(
+                {
+                    "month": "2026-05",
+                    "row_ids": ["bk-o-202605-001", "iv-o-202605-001"],
+                    "case_id": "CASE-ACTIVE-PREVIEW",
+                }
+            ),
+        )
+
+        self.assertEqual(preview_response.status_code, 200, preview_response.body)
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_payload["operation"], "withdraw_link")
+        self.assertEqual(preview_payload["operation_type"], "withdraw_relation")
+        self.assertTrue(preview_payload["can_submit"])
+        self.assertTrue(str(preview_payload["preview_id"]).startswith("withdraw_relation:"))
+        self.assertEqual(preview_payload["active_relation"]["case_id"], "CASE-ACTIVE-PREVIEW")
+        before_group = preview_payload["before"]["groups"][0]
+        self.assertEqual(before_group["group_id"], "case:CASE-ACTIVE-PREVIEW")
+        self.assertEqual([row["id"] for row in before_group["bank_rows"]], ["bk-o-202605-001"])
+        self.assertEqual([row["id"] for row in before_group["invoice_rows"]], ["iv-o-202605-001"])
+
     def test_withdraw_link_restores_previous_relation_snapshot(self) -> None:
         app = build_application()
         raw_payload = build_relation_amount_raw_payload(invoice_amount="100.00")

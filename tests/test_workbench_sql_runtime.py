@@ -535,6 +535,40 @@ class WorkbenchDuplicateRowMembershipConsistencyConnection(WorkbenchConsistencyS
         ]
 
 
+class WorkbenchActiveRelationOpenMembershipConsistencyConnection(WorkbenchConsistencySqlConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        return [
+            {
+                "scope_key": "all",
+                "generation_id": "gen-open-active-relation",
+                "row_count": 2,
+                "group_count": 2,
+                "summary_count": 1,
+                "build_metadata": {},
+                "actual_row_count": 2,
+                "actual_group_count": 2,
+                "actual_group_row_count": 2,
+                "actual_summary_count": 1,
+                "duplicate_invoice_identity_count": 0,
+                "duplicate_bank_identity_count": 0,
+                "duplicate_identity_samples": [],
+                "duplicate_row_membership_count": 0,
+                "duplicate_row_membership_samples": [],
+                "active_relation_open_membership_count": 2,
+                "active_relation_open_membership_samples": [
+                    {
+                        "case_id": "CASE-AUTO-0013",
+                        "pane": "bank",
+                        "row_id": "txn_imported_1284",
+                        "group_id": "scope:2026-02:temp:0070",
+                    }
+                ],
+            }
+        ]
+
+
 class FailedWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
@@ -1815,6 +1849,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         sql = connection.fetch_all_calls[0][0]
         self.assertIn("duplicate_row_membership_counts as", sql)
 
+    def test_repository_generation_consistency_reports_active_relation_rows_in_open_zone(self) -> None:
+        connection = WorkbenchActiveRelationOpenMembershipConsistencyConnection()
+
+        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
+            connection,
+            scope_key="all",
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["active_relation_open_membership_count"], 2)
+        self.assertIn("active_relation_open_membership count=2", failures[0]["reasons"])
+        self.assertEqual(
+            failures[0]["active_relation_open_membership_samples"][0]["row_id"],
+            "txn_imported_1284",
+        )
+        sql = connection.fetch_all_calls[0][0]
+        self.assertIn("active_relation_open_membership_counts as", sql)
+        self.assertIn("join app.workbench_pair_relations rel", sql)
+
     def test_workbench_refresh_status_api_maps_statement_timeout_to_retryable_unavailable(self) -> None:
         app = object.__new__(Application)
         app._runtime_repositories = SimpleNamespace(queue_repository=QueueRecorder(), redis_helper=None)
@@ -2905,6 +2958,84 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in paired_group["invoice_rows"]], ["inv_imported_1609"])
         self.assertEqual(open_group["invoice_rows"], [])
         self.assertEqual([row["id"] for row in open_group["oa_rows"]], ["oa-open-context"])
+
+    def test_repository_all_scope_suppresses_open_rows_claimed_by_canonical_active_relation(self) -> None:
+        class AggregateAllCanonicalActiveRelationConnection(WorkbenchWriteConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "from app.workbench_pair_relations" in normalized:
+                    return [
+                        {
+                            "case_id": "CASE-AUTO-0013",
+                            "row_ids": ["txn_imported_1284", "inv_imported_1643"],
+                        }
+                    ]
+                if "from read_model.workbench_groups" not in normalized or "scope_key <> 'all'" not in normalized:
+                    return []
+                return [
+                    {
+                        "scope_key": "2026-02",
+                        "scope_month": "2026-02-01",
+                        "zone": "open",
+                        "group_id": "temp:0070",
+                        "generated_at": "2026-06-14T23:44:00+08:00",
+                        "source_versions": {"source_version": 12},
+                        "payload": {
+                            "group_id": "temp:0070",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [],
+                            "bank_rows": [
+                                {
+                                    "id": "txn_imported_1284",
+                                    "type": "bank",
+                                    "source_kind": "bank_transaction",
+                                    "status": "open",
+                                }
+                            ],
+                            "invoice_rows": [],
+                        },
+                    },
+                    {
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "zone": "open",
+                        "group_id": "temp:0076",
+                        "generated_at": "2026-06-14T23:43:00+08:00",
+                        "source_versions": {"source_version": 11},
+                        "payload": {
+                            "group_id": "temp:0076",
+                            "zone": "open",
+                            "group_type": "candidate",
+                            "reason": "standalone_row_group",
+                            "oa_rows": [],
+                            "bank_rows": [],
+                            "invoice_rows": [
+                                {
+                                    "id": "inv_imported_1643",
+                                    "type": "invoice",
+                                    "source_kind": "invoice",
+                                    "status": "open",
+                                }
+                            ],
+                        },
+                    },
+                ]
+
+        connection = AggregateAllCanonicalActiveRelationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_workbench_read_models({"read_models": {}}, changed_scope_keys={"all"})
+
+        aggregate_group_payloads = [
+            params[16].obj
+            for sql, params in connection.executed
+            if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
+        ]
+        self.assertEqual(aggregate_group_payloads, [])
+        self.assertTrue(any("from app.workbench_pair_relations" in sql for sql, _params in connection.fetch_all_calls))
 
     def test_repository_all_scope_drops_partial_automatic_decision_groups_claimed_by_paired_shards(self) -> None:
         class AggregateAllPartialAutomaticDecisionConnection(WorkbenchWriteConnection):

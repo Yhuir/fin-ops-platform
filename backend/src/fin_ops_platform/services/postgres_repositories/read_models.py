@@ -3488,6 +3488,41 @@ class PostgresReadModelRepository:
                     having count(distinct gr.zone || ':' || gr.group_id) > 1
                 ) duplicate_rows
                 group by duplicate_rows.generation_id, duplicate_rows.scope_key
+            ),
+            active_relation_open_membership_counts as (
+                select
+                    active_rows.generation_id,
+                    active_rows.scope_key,
+                    count(*)::bigint as active_relation_open_membership_count,
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'case_id', active_rows.case_id,
+                            'pane', active_rows.pane,
+                            'row_id', active_rows.row_id,
+                            'group_id', active_rows.group_id
+                        )
+                        order by active_rows.case_id, active_rows.pane, active_rows.row_id
+                    ) as active_relation_open_membership_samples
+                from (
+                    select distinct
+                        gr.generation_id,
+                        gr.scope_key,
+                        rel.case_id,
+                        gr.pane,
+                        gr.row_id,
+                        gr.group_id
+                    from read_model.workbench_group_rows gr
+                    join target_generations
+                      on target_generations.generation_id = gr.generation_id
+                     and target_generations.scope_key = gr.scope_key
+                    join app.workbench_pair_relations rel
+                      on rel.status = 'active'
+                     and gr.row_id = any(rel.row_ids)
+                    where coalesce(gr.row_role, '') <> 'summary'
+                      and gr.zone = 'open'
+                      and gr.row_id is not null
+                ) active_rows
+                group by active_rows.generation_id, active_rows.scope_key
             )
             select
                 gen.scope_key,
@@ -3509,7 +3544,11 @@ class PostgresReadModelRepository:
                 coalesce(duplicate_row_membership_counts.duplicate_row_membership_count, 0)::bigint
                     as duplicate_row_membership_count,
                 coalesce(duplicate_row_membership_counts.duplicate_row_membership_samples, '[]'::jsonb)
-                    as duplicate_row_membership_samples
+                    as duplicate_row_membership_samples,
+                coalesce(active_relation_open_membership_counts.active_relation_open_membership_count, 0)::bigint
+                    as active_relation_open_membership_count,
+                coalesce(active_relation_open_membership_counts.active_relation_open_membership_samples, '[]'::jsonb)
+                    as active_relation_open_membership_samples
             from target_generations gen
             left join row_counts
               on row_counts.generation_id = gen.generation_id
@@ -3529,6 +3568,9 @@ class PostgresReadModelRepository:
             left join duplicate_row_membership_counts
               on duplicate_row_membership_counts.generation_id = gen.generation_id
              and duplicate_row_membership_counts.scope_key = gen.scope_key
+            left join active_relation_open_membership_counts
+              on active_relation_open_membership_counts.generation_id = gen.generation_id
+             and active_relation_open_membership_counts.scope_key = gen.scope_key
             order by gen.scope_key
             """,
             tuple(params),
@@ -3548,6 +3590,7 @@ class PostgresReadModelRepository:
             duplicate_invoice_identity_count = int_value(row.get("duplicate_invoice_identity_count"), 0)
             duplicate_bank_identity_count = int_value(row.get("duplicate_bank_identity_count"), 0)
             duplicate_row_membership_count = int_value(row.get("duplicate_row_membership_count"), 0)
+            active_relation_open_membership_count = int_value(row.get("active_relation_open_membership_count"), 0)
             reasons: list[str] = []
             if group_count != actual_group_count:
                 reasons.append(f"group_count metadata={group_count} actual={actual_group_count}")
@@ -3561,6 +3604,8 @@ class PostgresReadModelRepository:
                 reasons.append(f"duplicate_bank_identity_cross_zone count={duplicate_bank_identity_count}")
             if duplicate_row_membership_count:
                 reasons.append(f"duplicate_row_membership count={duplicate_row_membership_count}")
+            if active_relation_open_membership_count:
+                reasons.append(f"active_relation_open_membership count={active_relation_open_membership_count}")
             if reasons:
                 failures.append(
                     {
@@ -3581,6 +3626,10 @@ class PostgresReadModelRepository:
                         "duplicate_row_membership_count": duplicate_row_membership_count,
                         "duplicate_row_membership_samples": row.get("duplicate_row_membership_samples")
                         if isinstance(row.get("duplicate_row_membership_samples"), list)
+                        else [],
+                        "active_relation_open_membership_count": active_relation_open_membership_count,
+                        "active_relation_open_membership_samples": row.get("active_relation_open_membership_samples")
+                        if isinstance(row.get("active_relation_open_membership_samples"), list)
                         else [],
                         "reasons": reasons,
                     }
@@ -5654,7 +5703,15 @@ class PostgresReadModelRepository:
         if not groups:
             return False
 
-        aggregate_payload = _aggregate_workbench_all_scope_payload(groups)
+        canonical_paired_row_keys, canonical_paired_identity_keys = _workbench_active_relation_claim_keys_for_groups(
+            connection,
+            groups,
+        )
+        aggregate_payload = _aggregate_workbench_all_scope_payload(
+            groups,
+            paired_row_keys=canonical_paired_row_keys,
+            paired_identity_keys=canonical_paired_identity_keys,
+        )
         aggregate_source_versions = {
             "builder": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
             "source_version": max_source_version or 0,
@@ -8620,7 +8677,48 @@ def _dedupe_workbench_payload_groups(payload: dict[str, Any]) -> None:
         section["groups"] = deduped
 
 
-def _aggregate_workbench_all_scope_payload(groups: list[dict[str, Any]]) -> dict[str, Any]:
+def _workbench_active_relation_claim_keys_for_groups(
+    executor: Any,
+    groups: list[dict[str, Any]],
+) -> tuple[set[tuple[str, str]], set[tuple[str, str, str]]]:
+    row_panes_by_id: dict[str, set[str]] = {}
+    for group in list(groups or []):
+        if not isinstance(group, dict):
+            continue
+        for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
+            if row_role == "summary":
+                continue
+            row_id = _workbench_row_id(row)
+            if row_id is None:
+                continue
+            row_panes_by_id.setdefault(row_id, set()).add(pane)
+    if not row_panes_by_id:
+        return set(), set()
+    rows = executor.fetch_all(
+        """
+        select case_id, row_ids
+        from app.workbench_pair_relations
+        where status = 'active'
+          and row_ids && %s::text[]
+        order by case_id
+        """,
+        (sorted(row_panes_by_id),),
+    )
+
+    paired_row_keys: set[tuple[str, str]] = set()
+    for relation in list(rows or []):
+        for row_id in text_list(relation.get("row_ids")):
+            for pane in row_panes_by_id.get(row_id, set()):
+                paired_row_keys.add((pane, row_id))
+    return paired_row_keys, set()
+
+
+def _aggregate_workbench_all_scope_payload(
+    groups: list[dict[str, Any]],
+    *,
+    paired_row_keys: set[tuple[str, str]] | None = None,
+    paired_identity_keys: set[tuple[str, str, str]] | None = None,
+) -> dict[str, Any]:
     aggregate = {
         "month": "all",
         "scope_key": "all",
@@ -8651,6 +8749,8 @@ def _aggregate_workbench_all_scope_payload(groups: list[dict[str, Any]]) -> dict
     _suppress_all_scope_open_rows_claimed_by_paired(
         finalized_by_zone["paired"],
         finalized_by_zone["open"],
+        extra_paired_row_keys=paired_row_keys,
+        extra_paired_identity_keys=paired_identity_keys,
     )
     _suppress_all_scope_open_rows_claimed_by_other_open_groups(finalized_by_zone["open"])
     for zone in ("paired", "open"):
@@ -8667,9 +8767,12 @@ def _aggregate_workbench_all_scope_payload(groups: list[dict[str, Any]]) -> dict
 def _suppress_all_scope_open_rows_claimed_by_paired(
     paired_groups: list[dict[str, Any]],
     open_groups: list[dict[str, Any]],
+    *,
+    extra_paired_row_keys: set[tuple[str, str]] | None = None,
+    extra_paired_identity_keys: set[tuple[str, str, str]] | None = None,
 ) -> None:
-    paired_row_keys: set[tuple[str, str]] = set()
-    paired_identity_keys: set[tuple[str, str, str]] = set()
+    paired_row_keys: set[tuple[str, str]] = set(extra_paired_row_keys or set())
+    paired_identity_keys: set[tuple[str, str, str]] = set(extra_paired_identity_keys or set())
     for group in paired_groups:
         for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
             if row_role == "summary":

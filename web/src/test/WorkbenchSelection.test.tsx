@@ -340,6 +340,91 @@ describe("Workbench row selection and detail modal", () => {
     });
   });
 
+  test("confirm preview for an already linked selection submits withdraw instead of confirm", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchConfirmPreview: {
+        operation: "withdraw_link",
+        operation_type: "withdraw_relation",
+        preview_id: "withdraw_relation:CASE-202603-101",
+        can_submit: true,
+        requires_note: false,
+        message: "所选记录已确认关联，可在此撤回这组配对关系。",
+        active_relation: {
+          case_id: "CASE-202603-101",
+          row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
+        },
+        submit_expected_versions: {
+          "CASE-202603-101": 1,
+        },
+        before: {
+          groups: [
+            {
+              group_id: "case:CASE-202603-101",
+              group_type: "manual_confirmed",
+              can_withdraw: true,
+              oa_rows: [],
+              bank_rows: [
+                {
+                  id: "bk-o-202603-001",
+                  type: "bank",
+                  trade_time: "2026-03-28 10:18",
+                  debit_amount: "58,000.00",
+                  counterparty_name: "智能工厂设备商",
+                  invoice_relation: { code: "manual_confirmed", label: "完全关联", tone: "success" },
+                },
+              ],
+              invoice_rows: [
+                {
+                  id: "iv-o-202603-001",
+                  type: "invoice",
+                  seller_name: "智能工厂设备商",
+                  buyer_name: "杭州溯源科技有限公司",
+                  issue_date: "2026-03-28",
+                  total_with_tax: "65,540.00",
+                  invoice_bank_relation: { code: "manual_confirmed", label: "完全关联", tone: "success" },
+                },
+              ],
+            },
+          ],
+        },
+        after: {
+          groups: [],
+        },
+        amount_summary: {
+          before: { oa_total: "-", bank_total: "58000.00", invoice_total: "65540.00" },
+          after: { oa_total: "-", bank_total: "-", invoice_total: "-" },
+          status: "matched",
+          direction: "payment",
+          mismatch_fields: [],
+        },
+      },
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(await screen.findByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    expect(within(dialog).getByText("撤回关联预览")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "确认撤回" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/workbench/actions/withdraw-link",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining("\"preview_id\":\"withdraw_relation:CASE-202603-101\""),
+        }),
+      );
+    });
+    expect(
+      fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/workbench/actions/confirm-link")).length,
+    ).toBe(1);
+  });
+
   test("open zone header confirm link uses the whole selected group from one clicked row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

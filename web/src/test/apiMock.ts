@@ -69,6 +69,7 @@ type MockApiOptions = {
   appHealthDashboardErrorBody?: Record<string, unknown>;
   workbenchExceptionPreview?: Record<string, unknown>;
   workbenchExceptionApply?: Record<string, unknown>;
+  workbenchConfirmPreview?: Record<string, unknown>;
   workbenchExceptionPreviewStatus?: number;
   workbenchExceptionApplyStatus?: number;
   workbenchExceptionPreviewDelayMs?: number;
@@ -6512,13 +6513,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const month = String(jsonBody?.month ?? "");
       const caseId = typeof jsonBody?.case_id === "string" ? jsonBody.case_id : "preview:confirm";
       return {
-        body: buildMockRelationPreview({
-          operation: "confirm_link",
-          month,
-          rowIds,
-          caseId,
-          workbenchStateStore,
-        }),
+        body: options.workbenchConfirmPreview
+          ? cloneJson(options.workbenchConfirmPreview)
+          : buildMockRelationPreview({
+              operation: "confirm_link",
+              month,
+              rowIds,
+              caseId,
+              workbenchStateStore,
+            }),
       };
     },
     "/api/workbench/actions/confirm-link": ({ jsonBody }) => {
