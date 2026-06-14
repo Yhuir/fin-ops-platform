@@ -17,6 +17,7 @@
 - `tests/test_etc_backend.py`：ETC 删除、历史修复、existing batch link、summary relation command service 委托、缺 command fail-fast 和 canonical write safety。
 - `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`：进项发票 OA reverse evidence detected 后通过 relation command service 写 `input_invoice_oa_reverse`，缺 command fail-fast，command stale/conflict 返回 409 且不推进本地 batch。
 - `tests/test_workbench_relation_history_replay_tool.py`：PostgreSQL history replay 只读巡检，覆盖 active row 多 case 占用、row shape、未注册 mode severity、display-only relation mode/history 污染、非可恢复 history before_relations、relation/history 差异、readiness 状态和 `--fail-on-issues`。
+- `tests/test_audit_workbench_relation_display_tool.py`：Workbench relation display 只读巡检，覆盖 active relation 成员缺失、active scope 拆组、同 row 多 visible owner、payload case/mode mismatch、`all` generation 旧于成员月份 generation，以及 `--fail-on-issues` 不执行写入。
 
 ## 七类测试要求
 
@@ -79,6 +80,7 @@
 - read facade missing/stale/source mismatch 返回非 fresh，不伪装空关系；但 scope 已 fresh 时，`get_by_row_ids` 中个别请求 row 缺失应由调用方按无 relation/unlinked 处理，不能阻断整页 read model。
 - App Status registry 仍能观测 `workbench_relation`。
 - PostgreSQL history replay 必须报告 readiness missing/not fresh，不能把 read model 状态缺失当成 pass。
+- Workbench relation display audit 必须报告 active relation 与 active Workbench generation 不一致，覆盖缺失、拆组、重复 visible owner、payload mismatch 和 all-scope 滞后；工具只能读库，不能修复或入队。
 
 ### 5. Frontend component and interaction tests
 
@@ -130,6 +132,7 @@
 ```bash
 PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_pair_relation_service.py tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_history_replay_tool.py -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_audit_workbench_relation_display_tool.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py::EtcApiTests::test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service tests/test_etc_backend.py::EtcApiTests::test_submitted_etc_business_batch_delete_uses_canonical_relation_when_read_model_is_stale -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_batch_accounting_api.py tests/test_no_oa_bank_batch_api.py tests/test_turnover_ledger_api.py tests/test_pending_invoice_service.py -q

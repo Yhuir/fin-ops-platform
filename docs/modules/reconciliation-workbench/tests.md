@@ -44,7 +44,7 @@
 | 前端 action 后 emit `workbenchRelationUpdated` | P1 | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/CandidateGroupGrid.test.tsx`、页面事件 listener tests | covered | 保护当前页面/同会话刷新提示。 |
 | 前端 loading/stale/error/permission | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx` | covered for current gates | Workbench stale/loading 不全局禁用无关写；OA dirty/refreshing 仍禁写；提交成功后局部锁刚操作 group；OA 申请人列详情 icon 和第二行时间 chip 受交互测试保护。 |
 | 前端三栏列布局与选择状态 | P1 | `web/src/test/WorkbenchColumns.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchSelectionHook.test.tsx` | covered | 银行详情 icon 移到对方户名、发票详情 icon 移到发票号码、发票金额列合并、seller chip 第三行；打开详情不再让“已选 0”的行呈 selected 高亮。 |
-| 真实生产 active generation 回放 | P2 | 运维 runbook / SQL dry-run | documented-risk | 需要真实历史数据和 worker/staging 环境。 |
+| 真实生产 active generation 回放 | P2 | `fin_ops_platform.tools.audit_workbench_relation_display`、`fin_ops_platform.tools.audit_object_identity`、运维 runbook | covered by production dry-run | 发布前或生产修复后用只读审计验证 active relation 与 active Workbench generation 的同组展示、重复 visible owner 和 all-scope 滞后；发现问题只通过正式 refresh/repair contract 处理。 |
 
 ## 七类测试适用性
 
@@ -105,6 +105,7 @@
 ```bash
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_matching_rules tests.test_workbench_free_matching_engine tests.test_workbench_matching_orchestrator -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_query_facade tests.test_workbench_dirty_queue_wiring tests.test_workbench_matching_dirty_scope_worker -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_audit_workbench_relation_display_tool -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_rebuilds_scope_and_marks_dirty_scope_done tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_status_api_exposes_dirty_scopes_and_worker_lag -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_keeps_oa_bank_exact_sum_candidate_in_one_open_group tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v
 cd web && npm test -- --run src/test/WorkbenchApi.test.ts src/test/WorkbenchApiRuntimePath.test.ts src/test/WorkbenchSelection.test.tsx src/test/CandidateGroupGrid.test.tsx

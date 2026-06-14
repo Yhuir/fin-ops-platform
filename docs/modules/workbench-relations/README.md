@@ -214,6 +214,30 @@ PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
 
 `--fail-on-issues` 只用于 CI/release gate；生产手工巡检建议先不加该参数，确保 JSON 报告完整输出。该工具只执行 `select`，不会修复或写库。`display_only_relation_in_confirm_history` / `summary.display_only_history_before_relation_count` 表示历史 before_relations 曾保存 `existing_case` 显示归属；当前运行时会过滤这类 snapshot，通常不需要 backfill。`display_only_relation_mode_in_write_model` 且 severity 为 error 表示 active relation 本身使用 display-only mode，必须先单独设计 repair plan，再考虑发布。
 
+## Workbench relation display audit
+
+history replay 只证明 canonical relation 写模型自身可回放；它不能证明 active Workbench generation 已经把每条 active relation 的 OA/流水/发票成员发布到同一个展示 group。发布前、生产修复后或排查“已确认但不同行/重复行/联动高亮”时，必须补跑只读 display audit：
+
+```bash
+cd /opt/fin-ops/releases/<release>/src
+set -a
+source /etc/fin-ops/fin-ops.common.env
+source /etc/fin-ops/fin-ops.secrets.env
+set +a
+PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.audit_workbench_relation_display --json --limit 50
+```
+
+审计不修改数据库。它把 `app.workbench_pair_relations` active rows 与当前 active `read_model.workbench_generations` / `read_model.workbench_group_rows` 对齐检查，覆盖：
+
+- active relation 成员是否缺失于 `all` 或成员月份 Workbench generation。
+- 同一 active relation 是否在 active scope 中被拆到多个 group。
+- 同一 relation row 是否在同一 active scope 中有多个 visible owner。
+- group row payload 的 `case_id` / `relation_mode` 是否与 canonical relation 不一致。
+- `all` generation 是否旧于成员月份 generation。
+
+blocking issue 的修复原则是重新触发现有 relation mutation fan-out contract，而不是编辑 read model 行：按成员 row 推导 affected Workbench month scopes，通过 `ReadModelRefreshGateway` 或事务内 repository scope contract 入队刷新，再用 aggregate-only `all` refresh 从 active month shards 收敛。只有 active relation 本身非法时，才进入专用 relation repair；repair 后仍必须重跑 display audit。
+
 ## Affected scope 和 downstream refresh
 
 需要把 `_workbench_relation_dirty_scope_keys` 收敛成统一 affected scope calculator。它应根据 relation 的 `month_scope`、row ids、row types 和 row 来源查询银行、发票、OA、OA 附件月份，生成：

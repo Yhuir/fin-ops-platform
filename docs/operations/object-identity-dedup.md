@@ -45,6 +45,25 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 - `app.oa_applications`：同一 `form_id` 是否映射多个 `row_id`，用于排查 OA alias 风险。
 - `app.workbench_pair_relations`：active relation 中是否存在指向已不存在对象的 row_id。
 
+## Workbench relation 展示归属审计
+
+对象 identity 审计负责发现同一业务对象是否有多个 visible owner；active relation 写入后是否已经在当前 Workbench active generation 中同组展示，由独立的 relation display 审计覆盖。发布前或生产修复后执行：
+
+```bash
+cd /path/to/fin-ops-platform
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_workbench_relation_display --json --limit 50
+```
+
+该工具只执行 `select`，不写 `app.*`、`read_model.*` 或 `job.*`。它检查：
+
+- `app.workbench_pair_relations` 中 active relation 的成员 row 是否存在于 active Workbench `all` generation。
+- 同一 relation 的成员 row 在 `all` 或成员月份 scope 中是否被拆到多个 group。
+- 同一 relation row 在同一个 active scope 中是否有多个 visible owner。
+- row payload 中的 `case_id` / `relation_mode` 是否与 canonical relation 不一致。
+- `all` generation 是否旧于 relation 成员所在月份 generation。
+
+出现 blocking issue 时，不要直接修改 `read_model.workbench_group_rows` 或 `read_model.workbench_generations`。修复必须走现有刷新边界：按 relation 成员月份通过 `ReadModelRefreshGateway` / 事务内 repository scope contract 入队 Workbench month refresh，再用 aggregate-only `all` refresh 收敛全局 active generation。修复后重跑本审计和对象 identity 审计，确认两个报告的 `blocking_issue_count=0`。
+
 `--limit` 只限制明细 examples 数量，不影响 summary count。生产判断以 summary 中的全量 count 和 `blocking_issue_count` 为准。
 
 ## 表状态
@@ -70,6 +89,7 @@ Blocking issue 包含：
 - Workbench active generation 中同一强发票 identity 或稳定银行 identity 同时出现在 `paired` 与 `open`。
 - Workbench active generation 中同一 row id 或同一强发票 identity 同时出现在多个 open group，导致同一事实有多个 visible/operable owner。
 - Active workbench relation 指向已不存在的 row_id。
+- Active workbench relation 的成员 row 在 active Workbench generation 中缺失、拆组、重复 visible owner、payload relation 不一致，或 `all` generation 旧于成员月份 generation。
 
 非 blocking warning：
 
@@ -89,6 +109,7 @@ Blocking issue 包含：
 - canonical duplicate 优先查原始导入批次、附件来源、ETC 批次和税局认证记录。
 - 修复应通过已有业务命令、专用 repair 工具或 migration 脚本完成，并保留审计记录。
 - 修复或发布后必须重建受影响 workbench/workbench_relation scope，再重新执行审计命令，确认 `blocking_issue_count=0`。
+- relation display 不一致的生产修复只能入队刷新或使用专用 repair 工具重新触发 canonical scope contract；禁止手改 read model 投影行。
 
 ## 后续 read model 条件
 
