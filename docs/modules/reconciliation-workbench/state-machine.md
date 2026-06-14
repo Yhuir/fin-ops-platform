@@ -42,7 +42,7 @@
 | stale | `read_model_status=stale`、failed/dirty scope、source mismatch | 页面必须提示陈旧；不能把空 rows 解释成真实业务结论。Workbench active generation stale 不等同于 OA dirty，不应把页面所有写操作全局禁用。 |
 | error | API/action/read model unavailable 或 failed | 展示业务错误；不暴露底层 SQL 细节。 |
 | empty | fresh active generation 中目标 zone/group 为空 | 只有 fresh 后才能认为 open/paired 为空。 |
-| permission disabled/hidden | session 权限、App Health mutation gate、OA sync write gate、局部 pending row lock | 无写权限、全局 blocked 或 OA sync dirty/refreshing 时禁用确认/撤回；提交成功后只锁定刚操作 row/group，仍可浏览和操作无关 group。 |
+| permission disabled/hidden | session 权限、App Health write safety gate、OA sync write gate、局部 pending row lock | 无写权限、`overall.write_safety.blocks_mutations=true` 或 OA sync dirty/refreshing 时禁用确认/撤回；普通 read model blocked/red 只提示读侧故障并交给具体写 API precondition，不全局禁用无关 group。提交成功后只锁定刚操作 row/group，仍可浏览和操作无关 group。 |
 
 前端 domain event：
 

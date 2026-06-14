@@ -89,7 +89,7 @@ class WorkbenchRelationCommandService:
         relation_repository: Any,
         relation_facade: Any | None = None,
         idempotency_store: Any | None = None,
-        require_fresh_relations: bool = True,
+        require_fresh_relations: bool = False,
     ) -> None:
         self._relation_repository = relation_repository
         self._relation_facade = relation_facade

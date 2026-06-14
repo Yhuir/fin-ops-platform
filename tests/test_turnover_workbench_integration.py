@@ -217,7 +217,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 
-    def test_manual_closure_fails_fast_when_workbench_relation_read_model_is_stale(self) -> None:
+    def test_manual_closure_uses_canonical_relation_when_workbench_relation_read_model_is_stale(self) -> None:
         class StaleWorkbenchRelationFacade:
             def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
                 return {
@@ -246,14 +246,14 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             after_turnover_snapshot = app._turnover_relation_service.snapshot()
             after_pair_snapshot = app._workbench_pair_relation_service.snapshot()
 
-        self.assertEqual(response.status_code, 409, response.body)
-        self.assertEqual(payload["error"], "turnover_relation_conflict")
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertEqual(payload["read_model_stale_reasons"], ["source_version_mismatch"])
-        self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
-        self.assertTrue(payload["refresh_enqueued"])
-        self.assertEqual(after_turnover_snapshot, before_turnover_snapshot)
-        self.assertEqual(after_pair_snapshot, before_pair_snapshot)
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(payload["workbench_pair_relation"]["status"], "active")
+        self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(set(payload["workbench_pair_relation"]["row_ids"]), set(transaction_ids))
+        self.assertEqual(payload["affected_months"], ["2026-03"])
+        self.assertNotEqual(after_turnover_snapshot, before_turnover_snapshot)
+        self.assertNotEqual(after_pair_snapshot, before_pair_snapshot)
 
     def test_manual_closure_accepts_source_bank_row_ids_from_grouped_read_model(self) -> None:
         with self._temporary_app() as app:

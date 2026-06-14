@@ -4,15 +4,17 @@
 
 - `tests/test_workbench_pair_relation_service.py`：领域规则、row 去重、row type 对齐、active overlap、cancel、ETC 删除不恢复旧二栏 relation。
 - `tests/test_workbench_relation_command_service.py`：command service confirm/cancel/withdraw 基座、withdraw preview lock、row-id batch cancel、metadata update、freshness precondition、idempotency、mode registry 和 active row conflict。
-- `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service，以及纯候选 `split_candidate` suppress 边界。
+- `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service、withdraw route 复用 request-local OA session actor/tenant，以及纯候选 `split_candidate` suppress 边界。
+- `tests/test_workbench_write_characterization.py`：confirm/withdraw UoW、idempotency、rollback、stale precondition、以及 confirm/withdraw 只刷新目标 scope、不直接触发 global all fan-out。
+- `tests/test_write_operation_slo_audit.py`：Workbench confirm/withdraw canonical UoW 后的 write operation SLO profile，覆盖 `workbench_relation`、下游 read model reason、bank+invoice 非成本 profile、以及 `--since` 过滤生产修复前旧样本。
 - `tests/test_workbench_relation_sql_projection.py`：`workbench_relation` distribution、linked/candidate/unlinked rows、正式发票和 OA 附件发票 identity 去重。
 - `tests/test_workbench_relation_read_facade.py`：freshness-gated facade、missing 入队刷新、unlinked 过滤、candidate relation status 映射不被硬编码为 active。
 - `tests/test_platform_runtime_boundary_guards.py`：下游读模型不得直接 join `app.workbench_pair_relations`，银行明细关系标签必须走 facade，ETC summary 删除、server OA offset auto pair、OA 附件上下文 repair、batch accounting legacy repair 和 no-OA legacy repair/consolidation 不得退回 direct pair relation mutation。
-- `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`：批量账务 relation freshness、submit/withdraw command service 委托、submit 缺 command fail-fast 和前端阻断。
-- `tests/test_no_oa_bank_batch_*`：no-OA submit/withdraw、internal transfer confirm-link、command service 写入委托、relation read model stale fail-fast、Workbench paired/open 收敛。
-- `tests/test_turnover_*`：turnover manual closure/withdraw command service 委托、relation read model stale fail-fast、Application wiring guard 和 workbench pair relation 集成。
-- `tests/test_pending_invoice_service.py`：待找发票 attach/create 幂等、relation detail 读 distribution、manual/attach relation 写入委托 command service、relation read model stale fail-fast。
-- `tests/test_etc_backend.py`：ETC 删除、历史修复、existing batch link、summary relation command service 委托、缺 command fail-fast 和 stale fail-fast。
+- `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`：批量账务 relation freshness 诊断、submit/withdraw command service 委托、submit 缺 command fail-fast 和 canonical write safety。
+- `tests/test_no_oa_bank_batch_*`：no-OA submit/withdraw、internal transfer confirm-link、command service 写入委托、relation read model freshness 诊断、Workbench paired/open 收敛。
+- `tests/test_turnover_*`：turnover manual closure/withdraw command service 委托、relation read model freshness 诊断、Application wiring guard 和 workbench pair relation 集成。
+- `tests/test_pending_invoice_service.py`：待找发票 attach/create 幂等、relation detail 读 distribution、manual/attach relation 写入委托 command service、relation read model freshness 诊断。
+- `tests/test_etc_backend.py`：ETC 删除、历史修复、existing batch link、summary relation command service 委托、缺 command fail-fast 和 canonical write safety。
 - `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`：进项发票 OA reverse evidence detected 后通过 relation command service 写 `input_invoice_oa_reverse`，缺 command fail-fast，command stale/conflict 返回 409 且不推进本地 batch。
 - `tests/test_workbench_relation_history_replay_tool.py`：PostgreSQL history replay 只读巡检，覆盖 active row 多 case 占用、row shape、未注册 mode severity、relation/history 差异、readiness 状态和 `--fail-on-issues`。
 
@@ -47,21 +49,28 @@
 适用。新增或更新：
 
 - workbench confirm/cancel。
-- pending invoice attach/create 已在 Phase 4 覆盖 application service command delegation、stale fail-fast 和 API 旧 shape 回归；后续仍需补 HTTP 层 non-fresh response shape 专项断言。
-- no-OA submit/withdraw 已覆盖 success、rollback、version conflict 和 relation read model stale fail-fast；legacy migration/repair/consolidation 已覆盖 command delegation、active row occupation、single-source case reuse 和 read model worker 不隐式 repair。
-- turnover manual closure/withdraw 已覆盖 command service 委托、缺 command fail-fast、stale fail-fast、API wiring guard 和 Workbench 集成。
+- workbench withdraw 必须和 confirm/cancel 一样解析 request-local OA session actor/tenant，并把 actor/tenant 传入 UoW replay/run command 与 relation command service；不得落到 fallback actor。
+- workbench confirm/withdraw 写入后 lifecycle scope 不得直接包含 `all`；Workbench all 页面由目标月 shard 发布后的 all aggregate 收敛，不能用全量 shard fan-out 阻塞目标写链路。
+- pending invoice attach/create 已覆盖 application service command delegation、canonical write safety 和 API 旧 shape 回归；读侧 non-fresh response shape 仍由 read model/facade 测试保护。
+- no-OA submit/withdraw 已覆盖 success、rollback、version conflict 和 relation freshness 诊断；legacy migration/repair/consolidation 已覆盖 command delegation、active row occupation、single-source case reuse 和 read model worker 不隐式 repair。
+- turnover manual closure/withdraw 已覆盖 command service 委托、缺 command fail-fast、relation freshness 诊断、API wiring guard 和 Workbench 集成。
 - batch accounting submit/withdraw。
 - batch accounting submit 缺 command service 时不得 direct pair fallback。
 - ETC repair/delete 可见入口；已提交业务批次删除必须在本地 reset 前检查 `workbench_relation` fresh，非 fresh 返回 409 且不删除 batch 或 relation。
 - input invoice OA reverse evidence detected 写入：success、command service unavailable、relation read model stale/conflict 409、no half-write。
 
-每个写 API 至少覆盖 success、missing fields、illegal state、permission/actor mapping、version conflict、idempotent repeat、non-fresh relation read model 和 refresh_enqueued response。
+每个写 API 至少覆盖 success、missing fields、illegal state、permission/actor mapping、version conflict、idempotent repeat、canonical write safety failure；显式启用 freshness precondition 的 API 还必须覆盖 non-fresh relation read model 和 refresh_enqueued response。
 
 ### 4. Read model/cache/background job tests
 
 适用。新增或更新：
 
 - relation 写入后 `workbench_relation` dirty/outbox 入队；ETC summary delete command result 必须返回 changed case ids 和 affected months 并驱动 Workbench relation invalidation。
+- relation 写入后 `pending_invoice` dirty/outbox 必须按银行流水月份投递 shard scope（例如 `expense:all:2026-02`），不能投递会扩展到多个月份的基础 scope（例如 `expense:all`）。
+- relation 写入后 downstream dirty/outbox 必须按 row domain 路由：银行明细只刷银行流水月份，发票生命周期/进项使用/销项收款/税抵扣只刷发票或 OA 相关月份，`search` / `workbench_relation` 保留跨域 broad scope；`cost_statistics` 只由未知 row type、bank+OA、no-OA batch 或 turnover 成本关系触发，bank+invoice 不应刷新成本统计。旧数据缺少事实表月份时必须保留 `read_model.workbench_rows` fallback。
+- relation 写入后 downstream dirty/outbox 必须使用 `high` priority，避免用户写操作后的真实同步被普通后台刷新排队拖慢；只有无法从 relation/bank/invoice/OA 事实拿到月份时才允许查 `read_model.workbench_rows` legacy fallback。
+- search read model 保存必须走批量写入路径，避免 relation 写后 `search.read_model.refresh` 因逐行写 `read_model.search_index_rows` 成为 5s SLO 长尾。
+- relation UoW 写入的 workbench refresh outbox 必须保留 downstream metadata、invoice usage scope types 和 pending invoice scope keys，避免 audit/SLO 只能看到 `action_name`。
 - downstream `bank_detail`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`no_oa_bank_batch`、`turnover_ledger`、`search`、`cost_statistics`、`tax_offset` scope 覆盖。
 - worker rebuild 后 relation distribution fresh。
 - open/proposed unmatched candidate decision 必须分发为 `relation_status='candidate'`，并由 `WorkbenchRelationReadFacade` 统一提供给下游页面；paired/active 关系才是 `linked`。
@@ -77,7 +86,7 @@
 - 关联台、待找发票、no-OA、turnover、batch accounting mutation success 后 refetch/invalidate。
 - bank detail、cost statistics 等监听 `workbenchRelationUpdated` 只作为刷新提示。
 - bank detail 必须显示 `候选oa` / `候选发票`，OA 待付款、待找发票、销项发票收款必须显示候选 chip；这些 chip 只能由后端 `relationStatus` / `relation_status` 驱动，不能由金额或页面本地状态推断。
-- relation read model non-fresh 时按钮禁用并展示后端 message/reasons/scopes。
+- relation read model non-fresh 时页面展示 freshness 诊断，不能把非 fresh 空关系当真实空；普通 non-fresh 不应全局禁用具备 canonical write safety 的无关操作。
 - API 失败时不更新本地事实，不把 event 当成功。
 
 ### 6. End-to-end business-flow integration tests
@@ -85,8 +94,9 @@
 适用。至少覆盖：
 
 - 在关联台 confirm 后，bank detail、pending invoice、invoice usage/OA pending 或 batch accounting 通过后端 read model 看到同一 relation。
+- 在关联台 confirm -> withdraw 后，用真实登录态 HTTP 响应、relation audit、durable outbox/readiness 和 `write_operation_slo_audit --since <scenario-start>` 证明不是假同步；旧失败样本不得混入新发布 gate。
 - no-OA submit/withdraw 与关联台 internal transfer confirm-link 对同一组 row 收敛到同一 case，并在 Workbench paired/open 之间恢复。
-- turnover closure submit/withdraw 影响 workbench_relation、cost/search；Phase 6 已覆盖 stale relation read model 下不产生半写入。
+- turnover closure submit/withdraw 影响 workbench_relation、cost/search；必须覆盖 canonical write safety 下不产生半写入。
 - pending invoice attach existing 后，发票页和银行页关系一致。
 - batch accounting submit/withdraw 后，workbench_relation 恢复。
 
@@ -120,7 +130,7 @@
 PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_pair_relation_service.py tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_history_replay_tool.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py -q
-PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py::EtcApiTests::test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service tests/test_etc_backend.py::EtcApiTests::test_submitted_etc_business_batch_delete_fails_fast_when_workbench_relation_read_model_is_stale -q
+PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py::EtcApiTests::test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service tests/test_etc_backend.py::EtcApiTests::test_submitted_etc_business_batch_delete_uses_canonical_relation_when_read_model_is_stale -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_batch_accounting_api.py tests/test_no_oa_bank_batch_api.py tests/test_turnover_ledger_api.py tests/test_pending_invoice_service.py -q
 cd web && npm test -- --run src/test/BatchAccountingPage.test.tsx
 cd web && npm run build

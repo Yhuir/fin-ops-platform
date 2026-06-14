@@ -9,6 +9,7 @@ from typing import Any
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 OA_ATTACHMENT_PREFIX = "oa-att-"
@@ -245,11 +246,7 @@ def _dedupe_entries(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
 
 def _row_type_for_id(row_id: str) -> str:
-    if row_id.startswith("oa-") and not row_id.startswith(OA_ATTACHMENT_PREFIX):
-        return "oa"
-    if row_id.startswith(OA_ATTACHMENT_PREFIX) or row_id.startswith("invoice"):
-        return "invoice"
-    return "bank"
+    return row_type_for_workbench_row_id(row_id, unknown="bank")
 
 
 if __name__ == "__main__":

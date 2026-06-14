@@ -33,6 +33,14 @@ class InvoiceLifecycleReadModelRefreshService:
         scope_key = str(event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "").strip()
         if scope_type != INVOICE_LIFECYCLE_SCOPE_TYPE or not scope_key:
             raise ValueError("Invoice lifecycle refresh requires scope_type='invoice_lifecycle' and scope_key.")
+        source_version = event.source_version or event.payload.get("source_version")
+        if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
+            return {
+                "scope_key": scope_key,
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": source_version,
+            }
         if _invoice_lifecycle_scope_requires_expansion(scope_key):
             shard_result = self._enqueue_scope_shards(event, scope_key=scope_key)
             if shard_result is not None:
@@ -42,7 +50,14 @@ class InvoiceLifecycleReadModelRefreshService:
             raise RuntimeError("Projection builder does not expose rebuild_invoice_lifecycle_read_model_scope.")
         result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
-        self._complete_dirty_scope(event, scope_key=scope_key)
+        if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
+            return {
+                "scope_key": scope_key,
+                "skipped": True,
+                "skip_reason": "stale_source_version_after_rebuild",
+                "source_version": source_version,
+            }
+        self._complete_dirty_scope(event, scope_key=scope_key, source_version=source_version)
         return payload
 
     def _enqueue_scope_shards(self, event: RuntimeQueueEvent, *, scope_key: str) -> dict[str, Any] | None:
@@ -60,18 +75,37 @@ class InvoiceLifecycleReadModelRefreshService:
             shard_keys,
             reason="invoice_lifecycle_month_shard",
         )
-        self._complete_dirty_scope(event, scope_key=scope_key)
+        self._complete_dirty_scope(event, scope_key=scope_key, source_version=event.source_version or event.payload.get("source_version"))
         return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
-    def _complete_dirty_scope(self, event: RuntimeQueueEvent, *, scope_key: str) -> None:
+    def _complete_dirty_scope(self, event: RuntimeQueueEvent, *, scope_key: str, source_version: object) -> None:
         complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
         if callable(complete_dirty_scope):
             complete_dirty_scope(
                 tenant_id=event.tenant_id,
                 scope_type=INVOICE_LIFECYCLE_SCOPE_TYPE,
                 scope_key=scope_key,
-                source_version=event.source_version,
+                source_version=source_version,
             )
+
+    def _event_source_version_is_current(
+        self,
+        event: RuntimeQueueEvent,
+        *,
+        scope_key: str,
+        source_version: object,
+    ) -> bool:
+        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
+        if not callable(is_current):
+            return True
+        return bool(
+            is_current(
+                tenant_id=event.tenant_id,
+                scope_type=INVOICE_LIFECYCLE_SCOPE_TYPE,
+                scope_key=scope_key,
+                source_version=source_version,
+            )
+        )
 
 
 def _invoice_lifecycle_scope_requires_expansion(scope_key: str) -> bool:

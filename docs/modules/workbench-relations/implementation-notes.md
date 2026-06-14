@@ -1,5 +1,61 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-13 - Canonical write safety replaces default distribution freshness gate
+
+目标：修复关联台 confirm 成功后立即 withdraw 时被 `workbench_relation_read_model_not_fresh` 阻断的问题，并让 relation 写路径符合“普通 read model non-fresh 不全局阻断操作”的闭环目标。
+
+结论：
+
+- `WorkbenchRelationCommandService` 默认不再要求 `workbench_relation` distribution fresh；写安全默认来自 canonical relation snapshot/repository、row occupation、preview/expected version、idempotency、owner 状态、权限/session 和 DB 可写性。
+- `require_fresh_relations=True` 与 `assert_write_precondition(...)` 仍保留，用于调用方显式需要 read-model freshness precondition 的场景。
+- `Application._workbench_relation_command_service(...)` 默认按 canonical write safety 创建 command service，避免 Workbench 主写入口在 relation distribution 追赶期间返回 `workbench_relation_read_model_not_fresh`。
+- 当前文档已把 read_freshness 和 write_safety 拆开：普通 read model non-fresh 只作为读侧诊断，不应全局禁用具备 canonical 写安全的操作。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_command_service -v`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency -v`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_write_characterization.py -q`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_v2_api.py -k 'withdraw_link or confirm_link' -q`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_batch_accounting_api.py -q`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_service.py tests/test_no_oa_bank_batch_application_service.py -q`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_pending_invoice_service.py -q`
+
+## 2026-06-13 - Confirm-link closure profile and invoice lifecycle fan-out
+
+目标：让生产 closure gate 能直接验证关联台 `confirm-link`，而不是只用撤回类场景间接证明 relation 写链路；同时补齐 `WorkbenchRelationCommandService`/PostgreSQL relation repository 路径对 `invoice_lifecycle` read model 的刷新。
+
+结论：
+
+- `workbench_relation_confirm` 写操作 SLO profile 覆盖 `workbench:confirm_link`、`workbench_relation:workbench_pair_relation_changed` 以及银行明细、invoice lifecycle、待找发票、进项使用、销项收款、OA 待付款、成本、搜索、税金和免 OA read model 的下游刷新。
+- PostgreSQL relation repository 在保存 active relation 后会把 `invoice_lifecycle` 纳入 downstream fan-out；该路径仍以 PostgreSQL durable queue 为事实源。
+- 当 closure gate 提供已批准的 write scenario 时，`write_operation_audit` 只审计该 scenario 的 operation profile，避免要求 24 小时内所有写操作类型都被真实执行。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_slo_audit tests.test_runtime_sync_closure_gate -v`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py -q`
+
+## 2026-06-13 - Relation fan-out source priority
+
+目标：降低 Workbench relation 写入后 downstream read model 先于 `workbench_relation` 被 claim 的概率，减少 `workbench_relation_read_model_not_fresh` 触发的 retry 长尾。
+
+结论：
+
+- 保持 PostgreSQL durable queue 为事实源，不引入新 scheduler。
+- 同一 relation fan-out 中 `workbench_relation` dirty/outbox 使用 `high` priority，下游 `bank_detail`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`search`、`cost_statistics`、`tax_offset`、`no_oa_bank_batch` 和 pending invoice scopes 继续 `normal` priority。
+- 这是低风险调度优化，只提高 relation source read model 的 claim 顺序；不能替代完整 dependency DAG，也不能把 stale/downstream failure 伪装成 fresh。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py -q`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_increments_and_returns_source_version tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract -v`
+
+剩余风险：
+
+- 真实 enqueue-to-fresh 改善需要生产 runtime baseline 验证。
+- 后续仍需实现 `workbench_relation -> bank_detail -> pending_invoice/no_oa` 的显式 dependency scheduling 或 dependency-not-ready deferral，避免必然失败后按普通 retry 等待。
+
 ## 2026-06-13 - fresh scope partial row 缺失不阻断下游读模型
 
 目标：修复 invoice usage / output collection read model 在读取 `workbench_relation` distribution 时，因为同一 fresh scope 中个别 row 缺失而把整页判为 non-fresh 的问题。
@@ -784,7 +840,7 @@ python3 -m compileall -q backend/src/fin_ops_platform/services/pending_invoice_s
 - `NoOaBankBatchService.submit_batch/withdraw_batch` 不再直接创建或取消 pair relation，只负责批次状态机、audit 和 relation command payload 生成。
 - `submit_selected_rows` 的 active relation 占用输入改为复用 `WorkbenchRelationReadFacade` distribution，不再直接读取 pair service list。
 - `WorkbenchRelationCommandService.confirm_relation` 扩展 `evidence`、`display_tags`、`oa_exemption`、`exception_case_id`、`rule_version` 等 owner metadata，以保留 no-OA 批次展示和审计字段。
-- no-OA API 在 relation read model non-fresh 时 fail fast 返回 409，并透传 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
+- no-OA API 以 canonical relation write safety 为准；relation distribution/read model non-fresh 不阻断 submit，写后继续刷新 no-OA、Workbench 和 downstream read model。
 - `Application._apply_workbench_relation_command_snapshot` 改为原地更新 runtime pair service，避免应用服务持有旧对象引用造成 response/persist/rollback 不一致。
 - 架构守卫移除 no-OA submit/submit-selection 的旧 direct relation read 豁免。
 
@@ -845,7 +901,7 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_gu
 
 - `TurnoverLedgerWorkbenchPairPort` 新增 `relation_command_service_factory` 和 `relation_facade` 依赖；manual closure 通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写 `turnover_manual_closure` relation。
 - turnover withdraw 通过 `WorkbenchRelationCommandService.cancel_relation(...)` 撤回 `turnover:{relation_id}` case，并保留 `turnover_manual_closure_withdraw` history operation。
-- manual closure 写入前调用 command service freshness precondition；`workbench_relation` read model non-fresh 时 fail fast，不先刷新 turnover snapshot，也不产生 Turnover/Workbench 半写入。
+- manual closure 写入使用 canonical relation command/write safety；`workbench_relation` distribution/read model non-fresh 不阻断 Turnover/Workbench relation 写入，写后继续刷新相关 read model。
 - withdraw 前优先通过 `WorkbenchRelationReadFacade` distribution 校验当前 active relation 仍是 bank-only `turnover_manual_closure`；已升级为三栏关系时仍要求去关联台处理完整关系。
 - `Application` 的 turnover closure/withdraw primary facade 和 legacy fallback facade 都注入 `_turnover_workbench_relation_command_service` 与 `_workbench_relation_read_facade()`。
 - `server.py` 只新增依赖组装和 HTTP error payload 映射，不新增 relation 业务流程。
@@ -1149,6 +1205,101 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_gu
 - relation command service 的生产级并发 row occupation 仍未引入 PostgreSQL 锁或唯一占用约束。
 - 前端所有相关页面的即时反馈闭环仍需专门 Phase 验证，domain event 仍只能作为刷新提示。
 
+## 2026-06-13 - Workbench row identity fallback for imported invoice ids
+
+目标：确认关联、待找发票、银行明细 relation tag、批量账务和 relation repair 在 workbench row detail/read model 暂不可用时，仍能把生产 `inv_imported_*` / `inv-*` 发票行识别为 `invoice`，避免写操作过度依赖展示 read model 细节。
+
+改动：
+
+- 新增 `services/workbench_row_identity.py`，统一 `oa` / `bank` / `invoice` workbench row id fallback 识别。
+- `Application._row_type_for_row_id`、`WorkbenchPairRelationService`、pending invoice relation identity、bank detail projection、batch accounting、reconciliation engine 和 relation repair tool 复用该 helper。
+- `WorkbenchWriteFacade` 的 confirm-link UoW generic persistence failure 增加结构化异常日志，继续保留 `WorkbenchRelationCommandError` 的精确错误映射。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_row_identity.py tests/test_pending_invoice_relation_identity.py tests/test_workbench_relation_repository.py -q
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_uow_contract tests.test_workbench_write_characterization -v
+python3 -m py_compile backend/src/fin_ops_platform/services/workbench_row_identity.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_pair_relation_service.py backend/src/fin_ops_platform/services/pending_invoice_service.py backend/src/fin_ops_platform/services/pending_invoice_relation_identity.py backend/src/fin_ops_platform/services/batch_accounting_service.py backend/src/fin_ops_platform/services/workbench_reconciliation_engine.py backend/src/fin_ops_platform/services/bank_detail_sql_projection.py backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/tools/repair_workbench_pair_relation_integrity.py
+```
+
+已观察结果：
+
+- targeted pytest：6 passed。
+- Workbench UoW/write characterization：65 passed。
+- py_compile：passed。
+
+剩余风险：
+
+- 生产 confirm-link 还必须重新部署后用批准的 `txn_imported_1284` + `inv_imported_1643` 场景验证；该阶段只修复 row type fallback 和失败可观测性，不代表全 app 5 秒 SLO 已闭环。
+
+## 2026-06-13 - Relation shape-aware downstream refresh for 5s write SLO
+
+目标：缩短 Workbench confirm/withdraw 后的真实同步长尾，避免普通 bank + input invoice 关系刷新 output collection、OA pending payment、全局 `all` scope 或由旧 workbench read model 反向污染的历史 scope。
+
+改动：
+
+- `WorkbenchWriteFacade.withdraw_link` 调用 `pair_relation_changed` lifecycle 时显式 `include_all=False`，只刷新 command service 返回的 affected months。
+- `WorkbenchWriteFacade` 在 withdraw 后根据 active relation、可解析 live rows、invoice type 和 bank direction 生成 `downstream_scope_types`、`invoice_usage_scope_types`、`pending_invoice_scope_keys` metadata。
+- `Application._execute_derived_data_lifecycle_event` 仅在 `pair_relation_changed` 且带 downstream metadata 时按 relation shape 过滤 downstream domains；未带 metadata 的导入、规则变更、人工清理等生命周期事件保持原有广域刷新。
+- `Application` 的 Workbench executor 支持按 metadata 只刷新 input/output/OA pending 中实际相关的 read model；pending invoice executor 支持指定父 scope 列表。
+- `PostgresWorkbenchRelationRepository` 的事务内 confirm outbox 改为从 canonical `app.invoices.invoice_type` 和 `app.bank_transactions.txn_direction` 推导下游范围；不再查询 `read_model.workbench_rows` 作为写侧 affected scope 来源。
+- `write_operation_slo_audit` 的默认 Workbench relation confirm/withdraw profile 调整为当前受控 expense + input invoice 场景的必要 read model，避免把不相关 output/OA refresh 当作硬性闭环条件。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py -q
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_dirty_queue_wiring tests.test_workbench_relation_command_service -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_slo_audit -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_runtime_worker tests.test_runtime_queue_ops tests.test_runtime_sync_closure_gate tests.test_read_model_slo_smoke -v
+python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py backend/src/fin_ops_platform/tools/write_operation_slo_audit.py
+git diff --check
+bash scripts/verify.sh backend
+```
+
+已观察结果：
+
+- repository targeted：3 passed。
+- lifecycle + command targeted：35 passed。
+- Workbench write characterization：45 passed。
+- write operation SLO audit：9 passed。
+- runtime/read-model SLO targeted：73 passed。
+- `scripts/verify.sh backend`：2901 passed，25 skipped。
+
+剩余风险：
+
+- 本阶段收敛 expense + input invoice 受控场景；output invoice、OA 参与关系和 no-OA/turnover/batch owner 场景仍依赖各自 profile 和真实生产 smoke 证明。
+- pending invoice 页面仍以父 scope 为读取事实；本阶段按方向收敛父 scope，但没有把页面改成直接消费月份 shard。
+- 生产 5 秒闭环仍需部署后用真实登录态执行 confirm -> fresh -> withdraw -> fresh 和 write audit 验证。
+
+## 2026-06-13 - Confirm-link auto case id collision fix
+
+目标：修复生产 confirm-link 未传 `case_id` 时复用已存在 active `CASE-AUTO-0001` 导致 `pair relation case_id already active for different rows`，并被兜底成“工作台关联关系暂时无法保存”的问题。
+
+改动：
+
+- `Application._workbench_write_facade()` 不再直接传 `WorkbenchOverrideService._next_case_id`。
+- 新增 `_next_workbench_relation_case_id()`，分配自动 relation case id 时跳过当前 canonical relation snapshot 已占用的 case id。
+- 保持 `WorkbenchRelationCommandService` / UoW / repository 写边界不变，case id 生成只负责避让已占用 identity，不引入新的 relation 写事实源。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization -v
+python3 -m py_compile backend/src/fin_ops_platform/app/server.py tests/test_workbench_write_characterization.py
+```
+
+已观察结果：
+
+- Workbench write characterization：44 passed。
+- py_compile：passed。
+
+剩余风险：
+
+- 该修复解决单进程启动后已有 active `CASE-AUTO-*` 的避让；跨进程并发下仍需要后续以 PostgreSQL 唯一占用/lock 作为生产级最终防线。
+
 ## 2026-06-12 Phase 7E turnover legacy fallback direct write 删除
 
 目标：删除 `TurnoverLedgerWorkbenchPairPort` 在缺少 relation command service 时的 direct `WorkbenchPairRelationService` 写 fallback，避免 turnover legacy fallback facade 绕过统一 relation command boundary。
@@ -1202,3 +1353,307 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_gu
 - ETC repair/link/migration 仍用 pair service 做 active relation 读校验；后续可迁到 read facade/repair read port。
 - relation command service 的生产级并发 row occupation 仍未引入 PostgreSQL 锁或唯一占用约束。
 - 前端所有相关页面的即时反馈闭环仍需专门 Phase 验证，domain event 仍只能作为刷新提示。
+
+## 2026-06-13 - Withdraw-link UoW response unblock
+
+目标：修复生产受控场景中 `confirm-link` 约 291ms 完成，但随后 `withdraw-link` 在 canonical relation 已取消后仍等待 legacy pair persist/read-model lifecycle，导致客户端 20s timeout 和 BrokenPipe 的问题。
+
+改动：
+
+- `WorkbenchWriteFacade` 新增 `withdraw_link_uow`，生产 `Application` 通过 `_workbench_withdraw_link_unit_of_work()` 注入，与 `confirm-link` / `cancel-link` 使用同一 `WorkbenchWriteUnitOfWork`、repository factory、durable idempotency store 和 `RuntimeQueueReadModelRefreshWriter`。
+- UoW 可用时，`withdraw-link` 在事务内调用 `WorkbenchRelationCommandService.withdraw_relation(...)`，使用 transaction-bound pair relation repository 写 canonical relation/history/downstream dirty/outbox，并由 UoW enqueue Workbench scope refresh。
+- UoW 成功后不再调用 `_schedule_workbench_pair_relation_persist(...)` 或 `_invalidate_and_schedule_read_model(...)`，避免重复 legacy `pair_relation_changed` fan-out 阻塞 HTTP response。
+- 路由层把 `POST /api/workbench/actions/withdraw-link` 纳入 `workbench_action_timing`，补齐 request total 和阶段耗时观测。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_withdraw_link_uses_uow_transaction_when_available -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization tests.test_workbench_auth_context_idempotency tests.test_workbench_dirty_queue_wiring tests.test_workbench_relation_command_service -v
+python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/services/workbench_write_facade.py
+```
+
+已观察结果：
+
+- RED：新增 `test_withdraw_link_uses_uow_transaction_when_available` 初始失败，`pair_relation_persist.call_count == 1`，证明旧路径仍同步调用 legacy scheduler。
+- GREEN：目标单测通过；Workbench 写路径/dirty queue/relation command 组合回归 93 passed；py_compile passed。
+
+七类测试覆盖：
+
+- Business core unit tests：适用；既有 command service tests 继续覆盖 withdraw relation 状态转换、stale preview 和 canonical relation fallback。
+- Service-layer tests：适用；新增 characterization 覆盖 withdraw UoW 事务、transaction-bound repository、durable workbench refresh enqueue、以及 legacy scheduler 不参与。
+- API contract tests：适用；Workbench HTTP characterization 保持 response shape，新增 request timing 属于可观测性，不改变 payload。
+- Read model/cache/background job tests：适用；dirty queue wiring 继续覆盖 lifecycle metadata 和 durable queue 入队。
+- Frontend component and interaction tests：本阶段未改前端，未新增。
+- End-to-end business-flow integration tests：适用但需生产 closure gate 继续验证真实 confirm -> withdraw -> durable outbox freshness。
+- Existing feature regression tests：适用；Workbench write characterization、auth/idempotency、relation command、dirty queue 回归通过。
+
+剩余风险：
+
+- 非 UoW fallback 仍保留 legacy schedule rollback 行为，仅用于非 Postgres/老测试兼容；生产 Postgres 路径必须使用 UoW。
+- relation command service 的生产级并发 row occupation 仍未引入 PostgreSQL 唯一占用/lock，仍是后续硬化项。
+
+## 2026-06-13 - Withdraw-link auth/audit and defer collision closure
+
+目标：补齐生产 closure gate 暴露的两个缺口：`withdraw-link` UoW 路径未从 OA session 传入 actor/tenant，撤回审计可能落到 fallback actor；下游 `dependency_not_fresh` defer 在同 dedupe pending 事件存在时触发唯一冲突，造成 worker 崩溃和 300s processing 长尾。
+
+改动：
+
+- `POST /api/workbench/actions/withdraw-link` 与 confirm/cancel 对齐，先通过 `_workbench_write_auth_context(headers)` 校验写权限并解析 actor/tenant，再传给 `WorkbenchWriteFacade.withdraw_link(...)`。
+- `WorkbenchWriteFacade.withdraw_link(...)` 新增可选 `actor_id` / `tenant_id`，UoW replay/run command 和 relation command service withdraw 都使用同一登录 actor。
+- `RuntimeQueueRepository.defer_event(...)` 增加同 dedupe pending 覆盖处理：当前 processing 事件被覆盖时标记 done 并写 `runtime_defer_superseded`，不再尝试把它改回 pending 触发唯一索引冲突。
+- `write_operation_slo_audit` 的 `workbench_relation_withdraw` profile 更新为 canonical UoW reason：workbench `withdraw_link`、relation `workbench_pair_relation_changed`、下游 `workbench_relation_changed`；并暴露 `--since`，用于生产发布后排除修复前旧失败样本。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_write_operation_slo_audit tests.test_workbench_auth_context_idempotency tests.test_workbench_write_characterization -v
+python3 -m py_compile backend/src/fin_ops_platform/services/runtime_queue.py backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/tools/write_operation_slo_audit.py
+```
+
+已观察结果：
+
+- 106 个相关单元/characterization 测试通过。
+- py_compile 通过。
+- 生产 v7 失败证据：`bank_detail` / `invoice_lifecycle` worker 在 `workbench_relation_read_model_not_fresh` 后 defer 时因 `outbox_events_dedupe_uidx` 唯一冲突退出，事件最终约 313s 后才完成。
+
+剩余风险：
+
+- 这轮修复消除 worker 崩溃/300s lock timeout，不等价于 all-scope fan-out 已经小于 5s；发布后必须重新跑受控 `confirm -> withdraw`，并用 `write_operation_slo_audit --since <scenario-start>` 验证。
+- 不应为了让状态显示 fresh 而删除 `all` scope；如果 all 页面仍超过 5s，需要做 worker replica、DAG dependency scheduler 或 SQL-side all publish。
+
+## 2026-06-13 - Confirm-link targeted Workbench fan-out
+
+目标：修复生产 v9 closure gate 中 `confirm-link -> withdraw-link` 虽然 HTTP 写入在 1s 内完成，但 confirm 仍把 `all` 放进 Workbench changed scopes 且 lifecycle `include_all=True`，触发全量 `workbench_all_shard` fan-out，导致后续 withdraw 的目标月 Workbench refresh 被排到 26s 之后的问题。
+
+改动：
+
+- `confirm-link` changed scopes 改为只包含受影响月份，不直接包含 `all`。
+- `confirm-link` 调用 pair relation lifecycle 时使用 `include_all=False`，与已修复的 `withdraw-link` 对齐。
+- 保留 Workbench 月 shard 发布后的现有 `all` aggregate：目标月 shard fresh 后由 `WorkbenchReadModelRefreshService._enqueue_all_scope_aggregate_after_shard_publish(...)` 触发 `refresh_workbench_all_scope_from_active_shards(...)`，避免伪造 all fresh。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_confirm_link_invalidates_only_affected_scopes_without_global_all tests.test_workbench_write_characterization.WorkbenchWriteCharacterizationTests.test_withdraw_link_invalidates_only_affected_scopes_without_global_all -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_write_operation_slo_audit tests.test_workbench_auth_context_idempotency tests.test_workbench_write_characterization -v
+python3 -m py_compile backend/src/fin_ops_platform/services/runtime_queue.py backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py backend/src/fin_ops_platform/tools/write_operation_slo_audit.py
+```
+
+已观察结果：
+
+- 新增 confirm-link scope 回归与既有 withdraw-link scope 回归通过。
+- 108 个相关 queue/write audit/Workbench 写路径测试通过。
+
+剩余风险：
+
+- 这轮减少 confirm 直接 all fan-out，但下游 `search`、`cost_statistics`、`pending_invoice` 的 relation-change fan-out 仍需生产 gate 重新测量；若仍超过 5s，应继续按 read model 单独做 scope 收敛或 worker 并发。
+
+## 2026-06-14 - Relation write pending-invoice shard fan-out
+
+目标：修复生产 confirm -> withdraw closure gate 中 canonical relation 写后 `pending_invoice` 仍投递基础 scope（如 `expense:all`、`expense:bank_statement_as_invoice`），再由 worker 扩展到多个历史月份，造成下游 enqueue-to-fresh 超过 5s 的问题。
+
+改动：
+
+- `PostgresWorkbenchRelationRepository.save_workbench_pair_relations(...)` 继续作为 relation 事实写入和事务内 dirty/outbox producer；不新增 parallel scheduler。
+- pending invoice 下游刷新改为优先使用关联中银行流水的实际月份，投递 `expense:...:YYYY-MM` / `income:...:YYYY-MM` shard scope；查不到银行月份时才退回 relation `month_scope`，再退回旧基础 scope。
+- `WorkbenchWriteUnitOfWork` 支持 command-level `refresh_metadata`，confirm/withdraw UoW 会把 relation downstream metadata、invoice usage scope types 和 pending invoice shard scope keys 写进 workbench refresh outbox，便于 audit/readiness/SLO 工具观察真实范围。
+- app lifecycle `_read_model_refresh_metadata(...)` 保留 `source`、`case_id`、`downstream_scope_types`、`invoice_usage_scope_types`、`pending_invoice_scope_keys`，不再只保留 `action_name`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_repository tests.test_workbench_uow_contract tests.test_workbench_dirty_queue_wiring tests.test_workbench_write_characterization -v
+python3 -m py_compile backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py backend/src/fin_ops_platform/services/workbench_uow.py backend/src/fin_ops_platform/services/workbench_write_facade.py backend/src/fin_ops_platform/app/server.py
+```
+
+已观察结果：
+
+- 91 个相关 repository/UoW/lifecycle/Workbench 写路径测试通过。
+- py_compile 通过。
+
+剩余风险：
+
+- 本地测试证明 fan-out scope 收敛，不证明生产全部 read model enqueue-to-fresh 均小于 5s；必须发布后重新跑登录态 HTTP SLO、read model SLO、真实 confirm/withdraw 和 `write_operation_slo_audit --since <scenario-start>`。
+- relation 涉及银行月和发票月不同时，`search`、`cost_statistics`、`invoice_lifecycle` 仍会按各自事实月份刷新；这是正确性要求，不能为了少投递而伪同步。
+
+## 2026-06-14 - Relation downstream domain fan-out
+
+目标：修复生产 v12 写操作 SLO 中 canonical relation 写入虽然最终 fresh，但 `bank_detail`、`invoice_lifecycle`、`input_invoice_usage`、`tax_offset` 等下游 read model 被同一组 dirty scope keys 全量套用，导致银行 2026-02 + 发票 2026-01 的关系同时刷新不相关页面月份并把 enqueue-to-done p95 拉到 5s 以上的问题。
+
+改动：
+
+- `PostgresWorkbenchRelationRepository.save_workbench_pair_relations(...)` 继续在 relation 事实写事务内写 durable dirty/outbox，不新增第二套 scheduler。
+- relation scope 拆成 domain scope：`bank` 使用银行流水月份，`invoice` 使用发票月份，`oa` 使用 OA 申请月份，`relation` 使用 relation `month_scope`，`workbench` 保留 `read_model.workbench_rows` 作为旧数据 fallback。
+- downstream fan-out 改为按 domain 路由：
+  - `bank_detail` 只刷 bank scope。
+  - `invoice_lifecycle`、`input_invoice_usage`、`output_invoice_collection`、`tax_offset` 只刷 invoice/OA 相关 scope。
+  - `pending_invoice` 继续只刷银行流水月份的 shard scope。
+  - `search`、`cost_statistics`、`workbench_relation` 保留 broad scope，确保跨月关系仍真实同步。
+- row type 缺失时保持保守 broad fan-out；这是旧数据安全 fallback，不把不确定状态伪装成精准同步。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_repository tests.test_workbench_uow_contract tests.test_workbench_dirty_queue_wiring tests.test_workbench_write_characterization -v
+python3 -m py_compile backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py
+bash scripts/verify.sh backend
+```
+
+已观察结果：
+
+- 93 个相关 repository/UoW/lifecycle/Workbench 写路径测试通过。
+- `bash scripts/verify.sh backend` 复跑通过；首次全量 backend 只出现 `TemporaryDirectory` 清理竞态，目标用例单独复跑通过。
+
+剩余风险：
+
+- 本地测试证明不再把 bank-only/invoice-only 下游刷到错误月份；最终 5s SLO 仍必须以生产 v13 发布后真实 confirm -> withdraw、read model SLO、登录态 HTTP SLO 和 `write_operation_slo_audit --since <scenario-start>` 为准。
+
+## 2026-06-14 - Relation downstream priority and search bulk publish
+
+目标：修复生产 v13 真实 confirm/withdraw closure gate 中 downstream read model 最终 fresh 但部分 scope enqueue-to-done 超过 5s 的问题。生产 outbox 分段显示：
+
+- `invoice_lifecycle`、`input_invoice_usage` 的主要问题是 relation downstream 仍以 `normal` priority 入队，导致 created-to-published 接近 4s。
+- `pending_invoice` handler 约 50-100ms，但会被同队列 search handler 占用 consumer 后排队。
+- `search` handler 本身约 5.1-5.5s；EXPLAIN 显示源 `read_model.workbench_rows` 查询只有约 16-20ms，瓶颈更接近 search index 保存路径。
+- `cost_statistics` 四个 relation scope 在两个 consumer 上排两轮，仍可能成为 5s 长尾，发布后必须继续用 write SLO gate 验证。
+
+改动：
+
+- `PostgresWorkbenchRelationRepository.save_workbench_pair_relations(...)` 对用户 relation 写触发的 downstream dirty/outbox 使用 `high` priority，包括 `bank_detail`、`invoice_lifecycle`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`search`、`cost_statistics`、`tax_offset`、`no_oa_bank_batch` 和 pending invoice shard。
+- relation domain scope 只在 relation/bank/invoice/OA 都无法给出月份时读取 `read_model.workbench_rows` 作为 legacy fallback，避免每次写事务都额外查 workbench read model。
+- `PostgresReadModelRepository.save_search_index_rows(...)` 复用已有 `_execute_many(...)` / `execute_many_values(...)` 批量保存 `read_model.search_index_rows`，替代逐行 execute，降低 search refresh handler 时间；不改变 search read model freshness 事实源。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py tests/test_search_pending_sql_runtime.py -q
+python3 -m py_compile backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py tests/test_search_pending_sql_runtime.py tests/test_workbench_relation_repository.py
+```
+
+已观察结果：
+
+- 51 个 relation repository/search-pending SQL runtime 测试通过。
+- 新增 search index bulk write 回归，证明保存路径使用批量 values。
+- 新增/更新 priority 断言，证明 relation downstream 不再以 normal priority 投递。
+
+剩余风险：
+
+- `cost_statistics` 多 scope 尾部可能仍需要增加专用 worker 副本或进一步聚合 scope；以生产 v14 写操作 SLO gate 为准。
+- search 批量写应降低 handler 时间，但最终必须用生产真实 confirm/withdraw 后 `write_operation_slo_audit --since <scenario-start>` 验证，不以本地测试替代。
+
+## 2026-06-14 - Search bulk upsert duplicate row guard
+
+目标：修复 v14 read model SLO gate 暴露的 `search.read_model.refresh` 失败：批量 `insert ... on conflict do update` 在同一 SQL values 中遇到重复 `row_id` 时 PostgreSQL 会报 `ON CONFLICT DO UPDATE command cannot affect row a second time`。旧逐行 upsert 的语义是后写覆盖先写。
+
+改动：
+
+- `PostgresReadModelRepository.save_search_index_rows(...)` 在批量写入前按 `row_id` 去重，保留最后一条 payload；空 `row_id` 不写入 search index。
+- 保持 `delete scope_month` 后批量 upsert 的发布方式，不回退逐行写。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py tests/test_workbench_relation_repository.py -q
+python3 -m py_compile backend/src/fin_ops_platform/services/postgres_repositories/read_models.py tests/test_search_pending_sql_runtime.py
+```
+
+已观察结果：
+
+- 52 个 search-pending/relation repository 测试通过。
+- 新增 duplicate row id 测试，证明批量写入前会保留最后一条。
+
+## 2026-06-14 - Cost-bearing relation fan-out and search secondary lane
+
+目标：修复 v15 真实 confirm/withdraw gate 仍未闭环的问题。生产证据显示 confirm/withdraw HTTP 本身分别约 400ms / 1.18s，但下游 `write_operation_slo_audit --since 2026-06-13T18:53:55.824150+00:00` 中 `cost_statistics`、`search`、`tax_offset`、`pending_invoice`、`invoice_lifecycle`、`input_invoice_usage` 仍有 5.6-9.8s 长尾。
+
+根因：
+
+- 当前批准场景是 bank+input invoice，没有 OA 成本归因上下文；成本统计主表从含 OA+bank / 受控 no-OA / turnover 成本关系的 workbench group 构建，bank+invoice 不应刷新成本统计。
+- `search` 对 bank 月和 invoice 月各生成一个必要 scope；单纯调大 `FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION` 不会让单 worker 并行处理两个 scope。
+- dependency-not-fresh defer 仍使用偏保守的秒级等待，已知依赖刚刷新中时容易把 invoice/pending/input 尾部推过 5s。
+
+改动：
+
+- `PostgresWorkbenchRelationRepository` 只在 cost-bearing relation 时投递 `cost_statistics`：未知 row type 保守 broad fan-out；bank+OA、no-OA batch、turnover manual closure 使用 bank 月份；bank+invoice 不再污染成本统计链路。
+- 新增 required `search-secondary` worker registration 和 env example，生产部署 helper 会从 registry 自动安装并启动 `fin-ops-worker@search-secondary.service`。
+- worker systemd 模板新增 `FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS` 并显式传给 `app.worker`，缩短已知 read model dependency defer；后续 v21 将生产默认进一步压到 0.25s。
+- `write_operation_slo_audit` 新增 `workbench_relation_confirm_bank_invoice` / `workbench_relation_withdraw_bank_invoice` profile，用于当前受控 bank+input invoice 场景；该 profile 仍验证 canonical relation、银行/发票/待找/进项/search/tax 下游，不把非成本关系的 `cost_statistics` 当成必需闭环。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py tests/test_write_operation_slo_audit.py tests/test_runtime_worker_registry.py tests/test_deploy_oa_script.py -q
+```
+
+剩余风险：
+
+- 该阶段仍需发布后重新执行 read model SLO、登录态 HTTP SLO、批准 confirm/withdraw E2E 和 write operation audit；不能用本地测试替代生产 gate。
+
+## 2026-06-14 - V20 write audit tail closure plan
+
+目标：修复 v20 生产真实 confirm/withdraw 后剩余的 `pending_invoice` 与 `search` 5s SLO 失败。v20 证据显示直接 read model SLO 和登录态 HTTP SLO 已通过，但写操作审计中 `pending_invoice:expense:all:2026-02` 约 6.6s、withdraw 后第二个 `search:2026-02` 约 5.5s。
+
+根因：
+
+- `pending_invoice` handler 本身不是主要慢点，尾部主要来自依赖 read model 尚未 fresh 时按 1s defer 多轮等待。
+- 快速 confirm 后立刻 withdraw 会对同一 `search:2026-02` 产生连续事件，两条 search lane 仍可能让第二个事件排队越过 5s。
+
+改动：
+
+- dependency-not-fresh defer 支持 sub-second delay，生产 worker 模板默认调为 `FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS=0.25`，只影响已知 dependency-not-fresh 竞态。
+- 新增 required `search-tertiary` worker registration 和 env example，生产部署 helper 会从 registry 自动安装并启动 `fin-ops-worker@search-tertiary.service`。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_worker.py tests/test_runtime_queue.py tests/test_runtime_worker_registry.py tests/test_deploy_oa_script.py -q
+```
+
+剩余风险：
+
+- 该阶段必须发布后重新跑 read model SLO、登录态 HTTP SLO、批准 confirm/withdraw E2E 和 write operation audit。只有生产审计通过才能认为本页面/功能闭环完成。
+
+## 2026-06-14 - V21 write audit root-cause fixes
+
+目标：修复 v21 真实 confirm/withdraw audit 仍失败的问题。v21 直接 read model SLO 和登录态 HTTP SLO 通过，但写审计仍显示 `pending_invoice` 约 5.68s、`search` 最高约 9.17s。
+
+根因：
+
+- `search` handler 对 `read_model.workbench_rows` 整月行全量构建；生产 `2026-02` 有 6638 个 workbench rows，builder 生成 5120 个 search rows，但最终 `search_index_rows` 只有约百级唯一 row，绝大多数构建/写入是重复 group row 放大。
+- dependency-not-fresh 时 worker 会补投依赖 read model refresh；若依赖 dirty scope 已经 pending/processing，这会 bump 新 source_version，使当前等待者继续等更新版本。
+
+改动：
+
+- `SearchPendingSqlProjectionBuilder._search_rows_for_month()` 在 SQL 侧使用 `row_number() over (partition by row_id)`，只把每个 row_id 最新行交给 Python 构建。
+- `RuntimeWorker` 补投 dependency refresh 前通过 `RuntimeQueueRepository.read_model_refresh_is_active(...)` 检查依赖 dirty scope；已 active 时只 defer 当前事件，不再 bump 依赖 source_version。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_search_pending_sql_runtime.py tests/test_runtime_worker.py tests/test_runtime_queue.py -q
+```
+
+剩余风险：
+
+- 该阶段必须发布后重新跑 read model SLO、登录态 HTTP SLO、批准 confirm/withdraw E2E 和 write operation audit；生产 write audit 通过前不能认为全 app 5s 写后收敛已闭合。
+
+## 2026-06-14 - Pending invoice page aggregate scope in SLO smoke
+
+目标：修复 v18 closure gate 暴露的验收缺口：direct read model SLO 只刷新了待找发票月度 shard，但登录态 HTTP SLO 的页面首屏使用 `direction=expense`，实际 gate scope 是 `pending_invoice:expense:all`，导致 `/api/pending-invoices/rows` 和 `/api/pending-invoices/filter-options` 返回 `read_model_status=refreshing`。
+
+改动：
+
+- `read_model_slo_smoke` 对 `pending_invoice` 额外计划页面首屏 aggregate scope `expense:all`，与最新 readiness shard 一起验证 enqueue-to-fresh。
+- 页面首屏 aggregate scope 不一定写 `read_model.app_status_readiness`；对这类 scope，smoke 在对应 outbox event `done` 且 dirty scope `done` 时判定 fresh。普通 App Status scope 仍必须等 readiness `fresh`。
+- 保持 durable dirty/outbox/readiness 为事实源，不把 HTTP probe 的 refreshing 当成功。
+
+验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_slo_smoke.py tests/test_http_slo_probe.py tests/test_runtime_sync_closure_gate.py -q
+```
+
+剩余风险：
+
+- 该阶段需要发布后重新执行 direct read model SLO 与登录态 HTTP SLO，证明 `expense:all` 不再在页面首屏才触发刷新。

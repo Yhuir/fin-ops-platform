@@ -12,12 +12,12 @@
 | 方向 | `expense` / `income` query scope | 支出读取进项发票与支出流水；收入读取销项发票与收入流水；`all` direction 组合双方 summary。 |
 | 规则组 | `pending_invoice_tag_groups.version`、`pending_output_invoice_tag_groups.version` | 支出/收入规则版本独立；`requires_invoice` 是 active tag complement，不是可编辑持久事实。 |
 | 银行标签 | bank detail effective category facade/read model | 规则筛选必须使用 effective category；标签归档/重命名刷新规则 drawer 和 pending read model。 |
-| 人工补票 | `PendingInvoiceApplicationService.preview_manual_invoice` / `confirm_manual_invoice`、`WorkbenchRelationCommandService` | preview 不写事实；confirm 创建规范发票后通过 command service 写 relation、audit、command log 和 lifecycle event，且幂等/可恢复；relation read model stale 时必须在创建发票前 fail fast。 |
+| 人工补票 | `PendingInvoiceApplicationService.preview_manual_invoice` / `confirm_manual_invoice`、`WorkbenchRelationCommandService` | preview 不写事实；confirm 创建规范发票后通过 command service 写 relation、audit、command log 和 lifecycle event，且幂等/可恢复；普通 relation read model stale 只影响读侧诊断，mutation 阻断必须来自 canonical write safety、权限/session、DB/目标写模型或 owner 状态。 |
 | 选择已有发票 | attach existing preview/confirm、`WorkbenchRelationCommandService` | 只允许 expense 选择 input invoice；支持多条流水和多张发票批量 preview/confirm；可附加已被其他付款关联的发票并通过 command service 合并到兼容 active relation；必须写 audit/finalizer。 |
 | 收入状态标记 | income status override | `income_no_invoice_required` / `cash_income` 只刷新 pending/search，不误刷税金/成本/银行余额。 |
 | API/read model | `PendingInvoiceReadModelService`、`SearchPendingSqlProjectionBuilder` | rows/filter-options/export 必须先经过 read model fresh gate；非 fresh 不能把空 rows 当真实结果。 |
 | SQL projection | `read_model.pending_invoice_rows`、`read_model.pending_invoice_scopes` | four-zone payload、filter JSON、sort、source versions、bank tag freshness、relation distribution 和 OA identity。 |
-| worker | `search-pending` worker | `pending_invoice.read_model.refresh` 支持方向/规则 filter/month shard 和 legacy scope fan-out。 |
+| worker | `pending-invoice` / `search` workers，旧 `search-pending` 兼容 worker | `pending_invoice.read_model.refresh` 支持方向/规则 filter/month shard 和 legacy scope fan-out；`search.read_model.refresh` 由专用 search consumer drain。 |
 | 前端交互 | `PendingInvoicesPage`、`web/src/features/pendingInvoices/api.ts` | 方向/filter、表头筛选、rules drawer、detail drawers、manual invoice、attach existing、income actions、read model refreshing。 |
 | 跨模块 fan-out | invoice import、pending rules、manual invoice、attach existing、workbench relation、bank tag update | 必须先触发 invoice lifecycle，再刷新 pending invoice、search、税金/成本等下游；无关页面不能被误刷。 |
 
@@ -40,7 +40,7 @@
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py` | covered | pending route/read model/worker 在 domain registry 中可观测。 |
 | 前端交互 | P1 | `web/src/test/PendingInvoicesPage.test.tsx` | covered | four-zone table、filters、状态快捷筛选、rules drawer、conflict、detail drawers、单条/批量 attach existing、manual invoice、refreshing 时操作可用。 |
 | 前端 API mapper | P1 | `web/src/test/PendingInvoicesApi.test.ts` | covered | 不猜缺失状态、filter/sort query、rules/detail/candidates、批量 candidates/attach、export/manual/income mapper。 |
-| 真实生产数据与 worker drain | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres、RabbitMQ/Redis、search-pending/invoice-lifecycle worker 和大数据量样本。 |
+| 真实生产数据与 worker drain | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres、RabbitMQ/Redis、`pending-invoice` / `search` / `invoice-lifecycle` workers 和大数据量样本。 |
 
 ## 七类测试适用性
 
@@ -65,8 +65,9 @@
 | 长期 | 候选 relation case id 被当作真实 OA id 请求详情。 | `tests/test_pending_invoice_service.py::test_rows_keep_candidate_case_id_separate_from_real_oa_id`、`web/src/test/PendingInvoicesPage.test.tsx` | covered |
 | 长期 | API/read model miss 时同步扫描旧 snapshot 并伪装 fresh。 | `tests/test_pending_invoice_api.py::test_read_model_miss_returns_refreshing_without_sync_scan`、`tests/test_search_pending_sql_runtime.py` | covered |
 | 2026-06-13 | filter-options 为生成筛选项读取全量 rows，导致认证态页面 HTTP SLO 长尾。 | `tests/test_pending_invoice_api.py::PendingInvoiceApiTests::test_filter_options_uses_sql_aggregation_after_fresh_gate`、`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_builds_filter_options_in_sql` | covered |
+| 2026-06-14 | direct read model SLO 只刷新月度 shard，未覆盖页面默认 `direction=expense` 使用的 `pending_invoice:expense:all` aggregate scope，导致登录态 HTTP SLO 首屏返回 `refreshing`。 | `tests/test_read_model_slo_smoke.py::ReadModelSloSmokeTests::test_pending_invoice_smoke_includes_page_first_screen_aggregate_scope`、`tests/test_http_slo_probe.py` | covered |
 | 长期 | 人工补票 confirm 中途失败后重复创建发票或关系。 | `tests/test_pending_invoice_service.py::test_retry_recovers_invoice_created_before_relation_created`、`tests/test_pending_invoice_service.py::test_retry_recovers_relation_created_before_finalization` | covered |
-| 2026-06-12 | relation read model stale 时人工补票先创建发票，形成孤儿发票或半写状态。 | `tests/test_pending_invoice_service.py::test_confirm_manual_invoice_fails_fast_when_relation_read_model_is_stale` | covered |
+| 2026-06-12 | relation write safety 不通过时人工补票先创建发票，形成孤儿发票或半写状态。 | `tests/test_pending_invoice_service.py` command service / rollback coverage | covered |
 | 2026-06-12 | 待找发票 relation 写入绕过统一 command service，形成页面私有事实源。 | `tests/test_pending_invoice_service.py::test_confirm_manual_invoice_delegates_relation_write_to_command_service`、`tests/test_pending_invoice_service.py::test_confirm_attach_existing_invoice_delegates_relation_write_to_command_service`、`tests/test_pending_invoice_service.py::test_confirm_attach_existing_invoices_batch_delegates_relation_write_to_command_service`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_downstream_relation_read_models_use_workbench_relation_distribution` | covered |
 | 长期 | attach existing 不允许已关联其他付款的发票，阻断合法多付款场景。 | `tests/test_pending_invoice_service.py::test_attach_existing_allows_invoice_already_linked_to_another_bank_payment` | covered |
 | 2026-06-11 | 多条流水选择已有进项发票只能单选流水/单选发票，且前端不展示已选流水金额、已选发票金额和差额。 | `tests/test_pending_invoice_service.py::test_preview_and_confirm_attach_existing_invoices_batch_are_idempotent`、`tests/test_pending_invoice_api.py::PendingInvoiceApiTests::test_batch_attach_existing_invoice_endpoints`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` | covered |
@@ -74,7 +75,7 @@
 
 ## 关键 smoke flows
 
-1. `发票导入确认 -> invoice_lifecycle refresh -> pending_invoice/read search dirty scope -> search-pending worker -> /pending-invoices rows fresh`
+1. `发票导入确认 -> invoice_lifecycle refresh -> pending_invoice/read search dirty scope -> pending-invoice/search workers -> /pending-invoices rows fresh`
 2. `待找发票规则保存 -> pending_invoice_rules_changed lifecycle -> pending/invoice_lifecycle/workbench/tax/cost/search refresh -> 不刷新 no_oa/bank balance/turnover`
 3. `人工补票 preview -> confirm -> invoice import fact + pair relation -> audit/finalizer -> affected months -> 页面 refetch`
 4. `选择已有发票 candidates -> preview -> confirm -> relation/audit/finalizer -> affected months -> relation/detail/drawer 刷新`
@@ -109,5 +110,5 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 ## 未测风险
 
 - 本地测试不连接真实生产 Postgres 大数据量，不验证真实搜索/待找发票 SQL projection 的 EXPLAIN、锁等待或长尾分页性能。
-- 本地测试不跑真实 RabbitMQ/Redis/systemd search-pending 与 invoice-lifecycle worker drain；dirty/outbox 到 projection 的最终收敛需要 staging 或夜间 CI/生产前 smoke。
+- 本地测试不跑真实 RabbitMQ/Redis/systemd `pending-invoice`、`search` 与 invoice-lifecycle worker drain；dirty/outbox 到 projection 的最终收敛需要 staging 或夜间 CI/生产前 smoke。
 - 前端 Vitest 覆盖交互和 mapper，不覆盖真实浏览器下载、大文件导出和真实网络中断恢复。

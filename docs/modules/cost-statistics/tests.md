@@ -53,7 +53,7 @@
 
 | 日期 | Bug / 风险 | 回归测试 | 状态 |
 | --- | --- | --- | --- |
-| 2026-06-10 | 裸月份/裸 `all` scope 进入 durable queue，导致 cost-tax worker 报 scope contract 错误并污染 App Status。 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered |
+| 2026-06-10 | 裸月份/裸 `all` scope 进入 durable queue，导致成本统计 worker 报 scope contract 错误并污染 App Status。 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered |
 | 2026-06-10 | `active:all` / `all:all` 父 scope 错误读取 Workbench `all` 大 payload。 | `tests/test_cost_statistics_sql_runtime.py` | covered |
 | 2026-06-10 | 父 scope 等待缺失/stale 月份 shard 时被伪造为 fresh。 | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_app_status_overview_service.py` | covered |
 | 2026-06-12 | Workbench open/proposed candidate 被当成 confirmed relation 计入成本金额。 | `tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_open_candidate_groups_are_excluded_from_cost_statistics`、`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts` | covered |
@@ -65,7 +65,7 @@
 
 ## 关键 smoke flows
 
-1. `银行/发票/ETC 导入确认 -> lifecycle domain plan -> cost_statistics dirty scope -> cost-tax worker -> month shard fresh -> parent scope re-enqueue -> all scope fresh -> 页面展示`
+1. `银行/发票/ETC 导入确认 -> lifecycle domain plan -> cost_statistics dirty scope -> cost-statistics worker -> month shard fresh -> parent scope re-enqueue -> all scope fresh -> 页面展示`
 2. `Workbench relation confirm/cancel -> cost statistics invalidation -> affected month shard refresh -> App Status busy -> fresh 后恢复`
 3. `project scope setting change -> active/all scope refresh -> active view 排除已完成项目 -> all view 保留全部项目`
 4. `active:all 父 scope refresh -> 检查 month shard readiness -> 缺失 shard 入队 -> 父 scope refreshing -> shards fresh 后聚合发布`
@@ -100,5 +100,5 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 ## 未测风险
 
 - 本轮不连接真实生产 PostgreSQL 执行 `scripts/check-read-model-scope-contracts.py --apply`；发布前后需先 dry-run JSON 报告，再按 runbook 受控清理。
-- 本地测试不跑真实 RabbitMQ/Redis/cost-tax worker drain；父 scope 与月份 shard 在真实多 worker 环境中的最终收敛需要夜间或 staging smoke。
+- 本地测试不跑真实 RabbitMQ/Redis/cost-statistics worker drain；父 scope 与月份 shard 在真实多 worker 环境中的最终收敛需要生产或 staging smoke。
 - 前端 Vitest 覆盖交互和 mapper，不覆盖真实大数据量导出耗时、浏览器下载和视觉性能。

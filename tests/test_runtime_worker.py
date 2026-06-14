@@ -37,6 +37,10 @@ class FakeQueue:
         self.failed: list[tuple[str, str, str, bool, int]] = []
         self.failed_events: list[tuple[str, str, str, bool, int, int]] = []
         self.released_events: list[tuple[str, str, str]] = []
+        self.deferred_events: list[tuple[str, str, str, int]] = []
+        self.enqueued_read_model_refreshes: list[dict[str, object]] = []
+        self.active_read_model_refreshes: set[tuple[str, str, str]] = set()
+        self.active_read_model_refresh_checks: list[tuple[str, str, str]] = []
         self.heartbeats: list[tuple[str, str, str, object]] = []
         self.statement_timeouts: list[int | None] = []
 
@@ -72,6 +76,40 @@ class FakeQueue:
     def release_event(self, event_id: str, worker_id: str, *, reason: str = "worker_shutdown") -> bool:
         self.released_events.append((event_id, worker_id, reason))
         return True
+
+    def defer_event(
+        self,
+        event_id: str,
+        worker_id: str,
+        *,
+        reason: str = "dependency_not_ready",
+        delay_seconds: int = 2,
+    ) -> bool:
+        self.deferred_events.append((event_id, worker_id, reason, delay_seconds))
+        return True
+
+    def enqueue_read_model_refresh(self, **kwargs: object) -> RuntimeQueueEvent:
+        self.enqueued_read_model_refreshes.append(dict(kwargs))
+        return RuntimeQueueEvent(
+            event_id=f"dep-{len(self.enqueued_read_model_refreshes)}",
+            tenant_id=str(kwargs.get("tenant_id") or "default"),
+            event_type=f"{kwargs.get('scope_type')}.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id=str(kwargs.get("scope_key") or ""),
+            scope_type=str(kwargs.get("scope_type") or ""),
+            scope_key=str(kwargs.get("scope_key") or ""),
+            dedupe_key=None,
+            payload={},
+            attempts=0,
+            status="pending",
+            priority=str(kwargs.get("priority") or "normal"),
+            trace_id=str(kwargs.get("trace_id") or "") or None,
+        )
+
+    def read_model_refresh_is_active(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
+        identity = (tenant_id, scope_type, scope_key)
+        self.active_read_model_refresh_checks.append(identity)
+        return identity in self.active_read_model_refreshes
 
     def record_worker_heartbeat(self, worker_id: str, worker_kind: str, status: str, payload=None) -> None:
         self.heartbeats.append((worker_id, worker_kind, status, payload))
@@ -127,6 +165,127 @@ class RuntimeWorkerTests(unittest.TestCase):
         self.assertEqual(result, RuntimeWorkerResult.FAILED_RETRYABLE)
         self.assertEqual(queue.completed, [])
         self.assertEqual(queue.failed_events, [("event-1", "worker-1", "transient failure", True, 75, 5)])
+
+    def test_run_once_defers_dependency_not_fresh_without_marking_failed(self) -> None:
+        queue = FakeQueue(event())
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError("workbench_relation_read_model_not_fresh: status=refreshing")
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["runtime.test"],
+                dependency_not_fresh_delay_seconds=0.25,
+            ),
+            handlers={"runtime.test": fail_not_fresh},
+        )
+
+        result = worker.run_once()
+
+        self.assertEqual(result, RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(queue.failed_events, [])
+        self.assertEqual(queue.deferred_events, [("event-1", "worker-1", "workbench_relation_read_model_not_fresh: status=refreshing", 0.25)])
+        self.assertEqual(queue.enqueued_read_model_refreshes, [])
+        self.assertTrue(any(status == "deferred" for _worker_id, _kind, status, _payload in queue.heartbeats))
+
+    def test_run_once_enqueues_dependency_refresh_before_deferring_not_fresh_event(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("pending_invoice.read_model.refresh").__dict__,
+                "scope_type": "pending_invoice",
+                "scope_key": "income:all:2026-04",
+                "priority": "normal",
+                "trace_id": "trace-dep-1",
+            }
+        )
+        queue = FakeQueue(claimed)
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["pending_invoice.read_model.refresh"],
+                dependency_not_fresh_delay_seconds=4,
+            ),
+            handlers={"pending_invoice.read_model.refresh": fail_not_fresh},
+        )
+
+        result = worker.run_once()
+
+        self.assertEqual(result, RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(queue.deferred_events, [("event-1", "worker-1", "bank_detail_read_model_not_fresh", 4)])
+        self.assertEqual(len(queue.enqueued_read_model_refreshes), 1)
+        dependency = queue.enqueued_read_model_refreshes[0]
+        self.assertEqual(dependency["scope_type"], "bank_detail")
+        self.assertEqual(dependency["scope_key"], "2026-04")
+        self.assertEqual(dependency["reason"], "dependency_not_fresh")
+        self.assertEqual(dependency["priority"], "high")
+        self.assertEqual(dependency["trace_id"], "trace-dep-1")
+        self.assertEqual(dependency["metadata"]["source_event_type"], "pending_invoice.read_model.refresh")
+        self.assertEqual(dependency["metadata"]["source_scope_key"], "income:all:2026-04")
+        deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
+        self.assertEqual(deferred_payloads[0]["dependency_refreshes"], [{"scope_type": "bank_detail", "scope_key": "2026-04"}])
+
+    def test_run_once_enqueues_bank_detail_all_for_all_scope_dependency(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("turnover_ledger.read_model.refresh").__dict__,
+                "scope_type": "turnover_ledger",
+                "scope_key": "all",
+                "priority": "high",
+            }
+        )
+        queue = FakeQueue(claimed)
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["turnover_ledger.read_model.refresh"]),
+            handlers={"turnover_ledger.read_model.refresh": fail_not_fresh},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(queue.enqueued_read_model_refreshes[0]["scope_type"], "bank_detail")
+        self.assertEqual(queue.enqueued_read_model_refreshes[0]["scope_key"], "all")
+        self.assertEqual(queue.enqueued_read_model_refreshes[0]["priority"], "high")
+
+    def test_run_once_does_not_bump_dependency_refresh_when_scope_already_active(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("pending_invoice.read_model.refresh").__dict__,
+                "tenant_id": "tenant-a",
+                "scope_type": "pending_invoice",
+                "scope_key": "expense:all:2026-04",
+                "priority": "normal",
+            }
+        )
+        queue = FakeQueue(claimed)
+        queue.active_read_model_refreshes.add(("tenant-a", "bank_detail", "2026-04"))
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(worker_id="worker-1", event_types=["pending_invoice.read_model.refresh"]),
+            handlers={"pending_invoice.read_model.refresh": fail_not_fresh},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(queue.active_read_model_refresh_checks, [("tenant-a", "bank_detail", "2026-04")])
+        self.assertEqual(queue.enqueued_read_model_refreshes, [])
+        deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
+        self.assertEqual(
+            deferred_payloads[0]["dependency_refreshes"],
+            [{"scope_type": "bank_detail", "scope_key": "2026-04", "status": "already_active"}],
+        )
 
     def test_run_once_uses_exponential_retry_delay_and_max_attempts(self) -> None:
         claimed = event()

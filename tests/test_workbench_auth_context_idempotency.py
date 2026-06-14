@@ -36,6 +36,19 @@ class _RecordingUoW:
                 "affected_scope_keys": list(getattr(command, "scope_keys")),
                 "message": "已取消关联并回退为待处理。",
             }
+        if action_name == "withdraw_link":
+            return {
+                "success": True,
+                "action": "withdraw_link",
+                "operation": "withdraw_link",
+                "month": getattr(command, "month"),
+                "case_id": getattr(command, "case_id"),
+                "affected_row_ids": list(getattr(command, "row_ids")),
+                "affected_months": list(getattr(command, "scope_keys")),
+                "affected_scope_keys": list(getattr(command, "scope_keys")),
+                "restored_relations": [],
+                "message": "已撤回 1 组关联。",
+            }
         return {
             "success": True,
             "action": "confirm_link",
@@ -61,6 +74,15 @@ class _InProgressUoW:
             idempotency_key=str(getattr(command, "idempotency_key")),
             action_name=str(getattr(command, "action_name")),
         )
+
+
+class _HandlerCallingUoW:
+    def replay_committed(self, command: object) -> None:
+        return None
+
+    def run(self, command: object, handler: object) -> dict[str, object]:
+        ctx = type("UoWContext", (), {"transaction": object(), "pair_relations": object()})()
+        return handler(ctx)
 
 
 class _PairRelationService:
@@ -196,6 +218,20 @@ class _NoActiveRelationCommandService:
         )
 
 
+class _StaleConfirmRelationCommandService:
+    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+        raise WorkbenchRelationCommandError(
+            "workbench_relation_read_model_not_fresh",
+            "Workbench relation read model is refreshing.",
+            payload={
+                "read_model_status": "refreshing",
+                "read_model_stale_reasons": ["dirty_scope_pending"],
+                "read_model_scope_keys": ["2026-05"],
+                "refresh_enqueued": True,
+            },
+        )
+
+
 class _BankInvoiceWithdrawRelationCommandService(_RecordingRelationCommandService):
     def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
         self.preview_withdraw_calls.append(dict(kwargs))
@@ -244,6 +280,7 @@ def _new_facade(
     *,
     confirm_uow: object | None = None,
     cancel_uow: object | None = None,
+    withdraw_uow: object | None = None,
     relation_command_service: object | None = None,
     exception_case_service: object | None = None,
     candidate_match_service: object | None = None,
@@ -298,6 +335,7 @@ def _new_facade(
         emit_action_timing=lambda **_: None,
         confirm_link_uow=confirm_uow,
         cancel_link_uow=cancel_uow,
+        withdraw_link_uow=withdraw_uow,
         persist_pair_relations_in_transaction=lambda **_: None,
         relation_command_service=relation_command_service,
     )
@@ -366,6 +404,31 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
             self.assertEqual(getattr(command, "tenant_id"), "default")
 
+    def test_withdraw_link_replay_and_run_commands_use_explicit_actor_and_tenant_context(self) -> None:
+        uow = _RecordingUoW()
+        facade = _new_facade(
+            withdraw_uow=uow,
+            relation_command_service=_RecordingRelationCommandService(),
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "withdraw:actor-context",
+            },
+            request_id="req-withdraw",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(len(uow.replay_commands), 1)
+        self.assertEqual(len(uow.run_commands), 1)
+        for command in [*uow.replay_commands, *uow.run_commands]:
+            self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
+            self.assertEqual(getattr(command, "tenant_id"), "default")
+
     def test_confirm_and_cancel_link_map_in_progress_idempotency_to_stable_conflict_payload(self) -> None:
         facade = _new_facade(confirm_uow=_InProgressUoW(), cancel_uow=_InProgressUoW())
 
@@ -394,6 +457,29 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(cancel.status_code, HTTPStatus.CONFLICT)
         self.assertEqual(cancel.payload["error"], "idempotency_key_in_progress")
         self.assertTrue(cancel.payload["retryable"])
+
+    def test_confirm_link_uow_preserves_relation_command_freshness_error(self) -> None:
+        facade = _new_facade(
+            confirm_uow=_HandlerCallingUoW(),
+            relation_command_service=_StaleConfirmRelationCommandService(),
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-1", "bank-1"],
+                "case_id": "CASE-STALE",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(result.payload["error"], "workbench_relation_read_model_not_fresh")
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(result.payload["read_model_stale_reasons"], ["dirty_scope_pending"])
+        self.assertEqual(result.payload["read_model_scope_keys"], ["2026-05"])
+        self.assertTrue(result.payload["refresh_enqueued"])
 
     def test_confirm_and_cancel_link_delegate_relation_writes_to_command_service_without_uow(self) -> None:
         relation_command = _RecordingRelationCommandService()
@@ -686,8 +772,15 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             captured["cancel"] = {"actor_id": actor_id, "tenant_id": tenant_id, "request_id": request_id}
             return Response(status_code=200, body="{}")
 
+        class WithdrawFacade:
+            def withdraw_link(self, payload: dict[str, object], *, request_id: str | None = None, actor_id: str | None = None, tenant_id: str | None = None) -> object:
+                captured["withdraw"] = {"actor_id": actor_id, "tenant_id": tenant_id, "request_id": request_id}
+                return object()
+
         app._handle_live_workbench_confirm_link = live_confirm
         app._handle_live_workbench_cancel_link = live_cancel
+        app._workbench_write_facade = lambda: WithdrawFacade()
+        app._workbench_write_response = lambda result: Response(status_code=200, body="{}")
 
         with patch("fin_ops_platform.app.server.resolve_oa_request_session", return_value=session):
             confirm_response = Application._handle_api_workbench_confirm_link(
@@ -702,11 +795,19 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 request_id="req-cancel",
                 headers={"Authorization": "Bearer token"},
             )
+            withdraw_response = Application._handle_api_workbench_withdraw_link(
+                app,
+                "{}",
+                request_id="req-withdraw",
+                headers={"Authorization": "Bearer token"},
+            )
 
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(cancel_response.status_code, 200)
+        self.assertEqual(withdraw_response.status_code, 200)
         self.assertEqual(captured["confirm"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-confirm"})
         self.assertEqual(captured["cancel"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-cancel"})
+        self.assertEqual(captured["withdraw"], {"actor_id": "oa-user-1", "tenant_id": "default", "request_id": "req-withdraw"})
 
 
 if __name__ == "__main__":

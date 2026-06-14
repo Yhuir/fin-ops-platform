@@ -102,6 +102,53 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
         self.assertEqual(report["failed_checks"], [])
         self.assertTrue(report["auth_configured"])
 
+    def test_write_audit_is_limited_to_approved_scenario_operations_when_scenario_is_supplied(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            scenario_path = Path(temp_dir) / "scenario.json"
+            scenario_path.write_text('{"scenarios":[{"name":"confirm","operation":"workbench_relation_confirm","steps":[{"path":"/api/x"}]}]}')
+            audit_calls: list[dict[str, object]] = []
+
+            def audit_stub(_connection, **kwargs):
+                audit_calls.append(dict(kwargs))
+                return {
+                    "status": "pass",
+                    "event_sample_count": 12,
+                    "expectation_count": 12,
+                    "failed_expectation_count": 0,
+                    "missing_expectation_count": 0,
+                    "operations": ["workbench_relation_confirm"],
+                    "results": [],
+                }
+
+            with patch.object(gate, "RuntimeMonitoringRepository", FakeRuntimeMonitoringRepository), patch.object(
+                gate.read_model_slo_smoke,
+                "run_smoke",
+                return_value={"status": "pass", "failed_count": 0, "results": []},
+            ), patch.object(
+                gate.http_slo_probe,
+                "collect_http_slo",
+                return_value={"status": "pass", "auth_configured": True, "summary": {"failed_probe_count": 0}, "probes": []},
+            ), patch.object(
+                gate.write_operation_slo_audit,
+                "audit_write_operation_slo",
+                side_effect=audit_stub,
+            ), patch.object(
+                gate.write_operation_e2e_smoke,
+                "run_write_operation_e2e_smoke",
+                return_value={"status": "pass", "scenario_count": 1, "failed_scenario_count": 0, "results": []},
+            ):
+                report = gate.run_closure_gate(
+                    object(),
+                    base_url="https://example.test",
+                    headers={"Authorization": "Bearer token"},
+                    apply_read_model_smoke=True,
+                    write_scenario=scenario_path,
+                    apply_write_scenarios=True,
+                )
+
+        self.assertEqual(report["status"], gate.PASS)
+        self.assertEqual(audit_calls[0]["operations"], ("workbench_relation_confirm",))
+
     def test_write_scenario_dry_run_does_not_satisfy_closure(self) -> None:
         with TemporaryDirectory() as temp_dir:
             scenario_path = Path(temp_dir) / "scenario.json"

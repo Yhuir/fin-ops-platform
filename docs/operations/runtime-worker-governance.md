@@ -91,6 +91,10 @@ transport/wakeup，不能作为 read model 状态事实源。
 业务 service 不直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。refresh service
 完成 projection 后调用 queue repository 完成 dirty scope；失败或 dead-letter 后由运维 inspect/requeue。
 
+如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
+会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
+重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。
+
 ### Read model scope contract 检查
 
 发布前后或 App Status 出现无法解释的 cost statistics failed/refreshing scope 时，先运行只读检查：
@@ -363,7 +367,17 @@ PostgreSQL done/fresh。
 
 ### Cost Statistics Scope Readiness
 
-`cost-tax` worker 同时处理 `cost_statistics.read_model.refresh` 与 `tax_offset.read_model.refresh`。成本统计是跨银行流水、发票、OA 关系、项目归因和费用分类的派生 read model，因此 App Status 必须展示 scope 级 readiness，而不是只显示一个聚合后的 `cost_statistics=failed`。
+`cost-tax` worker 仍作为兼容 combined consumer 处理 `cost_statistics.read_model.refresh` 与 `tax_offset.read_model.refresh`；生产 SLO lane 还会启动专用 `cost-statistics` 与 `tax-offset` RabbitMQ consumers。成本统计是跨银行流水、发票、OA 关系、项目归因和费用分类的派生 read model，因此 App Status 必须展示 scope 级 readiness，而不是只显示一个聚合后的 `cost_statistics=failed`。
+
+高频 read model 的 5s SLO 依赖专用 consumers：
+
+- `search` / `search-secondary` / `search-tertiary`：只消费 `search.read_model.refresh`，并发处理关系变更中的 bank 月、invoice 月以及快速 confirm/withdraw 连续写入产生的同 scope search 事件。
+- `pending-invoice`：只消费 `pending_invoice.read_model.refresh`。
+- `cost-statistics`：只消费 `cost_statistics.read_model.refresh`。
+- `tax-offset`：只消费 `tax_offset.read_model.refresh`。
+- `invoice-lifecycle-secondary`：作为第二条 `invoice_lifecycle.read_model.refresh` consumer，和 `invoice-lifecycle` 并发 drain 多月份 scope。
+
+这些 worker 不改变 PostgreSQL durable queue / readiness 事实源；它们只是同一 outbox event type 的并发消费者。旧 `search-pending`、`cost-tax` 不应作为唯一性能 lane 依赖，后续清理必须先确认生产 SLO 稳定。
 
 成本统计 scope 分为：
 
@@ -419,6 +433,9 @@ PostgreSQL done/fresh。
 - `stale`：数据已经过期，App Health 会提示 worker 或 read model 未收敛。
 - `failed`：worker 处理失败或任务进入 failed/dead-letter 状态。
 
+运维侧 heartbeat 可能看到 `deferred`：表示 worker 已识别依赖 read model 尚未 fresh，并将事件短延迟回
+`pending`。用户侧仍应表现为 `refreshing`，不能把 deferred 解释为已同步。
+
 当 worker 缺失或 stale 时，App 不直接启动 worker；App Health 负责把问题定位到具体 worker instance，
 运维通过 manifest CLI、systemctl、journalctl 和 deploy helper 处理。
 
@@ -459,6 +476,48 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
   /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops requeue \
     --event-id <uuid> \
     --reason operator_repair
+```
+
+RabbitMQ worker 下如果 PostgreSQL `processing` event 已超过 lock timeout 且没有对应 envelope 被消费，先处理已被更新同
+dedupe event 覆盖的旧 `processing`，再释放仍需真实重跑的 stale `processing`。两步都必须先 dry-run；
+superseded resolution 只清理旧重复事件，release 只会重新 publish/处理，不会伪造 readiness：
+
+```bash
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-superseded-processing \
+    --dry-run \
+    --stale-after-seconds 300 \
+    --event-type bank_detail.read_model.refresh \
+    --limit 100 \
+    --reason rabbitmq_stale_processing_superseded
+
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops resolve-superseded-processing \
+    --execute \
+    --stale-after-seconds 300 \
+    --event-type bank_detail.read_model.refresh \
+    --limit 100 \
+    --reason rabbitmq_stale_processing_superseded
+```
+
+随后释放仍需重跑的 stale processing：
+
+```bash
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops release-stale-processing \
+    --dry-run \
+    --stale-after-seconds 300 \
+    --event-type bank_detail.read_model.refresh \
+    --limit 100 \
+    --reason rabbitmq_stale_processing_repair
+
+PYTHONPATH=/opt/fin-ops/current/backend/src \
+  /opt/fin-ops/venv/bin/python -m fin_ops_platform.tools.runtime_queue_ops release-stale-processing \
+    --execute \
+    --stale-after-seconds 300 \
+    --event-type bank_detail.read_model.refresh \
+    --limit 100 \
+    --reason rabbitmq_stale_processing_repair
 ```
 
 如果 dead-letter 来自历史 invalid-scope cost statistics 事件，优先使用 `scripts/check-read-model-scope-contracts.py`
@@ -527,3 +586,13 @@ PYTHONPATH=/opt/fin-ops/current/backend/src \
    `oa_pending_payment`、`no_oa_bank_batch`、`cost_statistics`、`tax_offset`、`search`。
 6. 页面验证以 facade/read model 状态为准：如果 `workbench_relation` 或 `invoice_lifecycle` stale/missing，
    下游页面不能用旧 SQL、pair relation snapshot 或页面私有 lifecycle 规则同步补数据伪装 fresh。
+
+## Ensure refresh 与真实写入 dirty 的边界
+
+`dependency_not_fresh`、`api_*`、`pending_invoice_sql_projection`、`bank_detail_relation_tags_read`、
+`workbench_relation_write_precondition`、`downstream_bank_tag_read` 属于 ensure/wakeup 类刷新请求。它们只能确保目标
+read model 有 refresh 在跑；当同一 `tenant_id + scope_type + scope_key` 已经 `pending` 或 `processing` 时，
+`ReadModelRefreshGateway` 必须 coalesce，不应 bump `source_version`，否则 downstream projection 会追逐移动目标。
+
+真实写入原因，例如 `workbench_relation_changed`、`confirm_link`、`withdraw_link`、导入/设置/标签变更，仍然必须写
+durable dirty scope 并在 active scope 上提高 `source_version`。这是防止旧 worker 把新事实误发布为 fresh 的一致性边界。

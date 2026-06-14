@@ -160,7 +160,7 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(payload["background_tasks"][0]["percent"], 10)
         self.assertIn("imports_etc_invoices", payload["background_tasks"][0]["affected_domains"])
 
-    def test_failed_critical_read_model_marks_domain_and_overall_red(self) -> None:
+    def test_failed_critical_read_model_marks_domain_and_overall_red_without_blocking_writes(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
 
         payload = service.build_overview(
@@ -180,6 +180,9 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["overall"]["color"], "red")
         self.assertEqual(payload["overall"]["level"], "blocked")
+        self.assertFalse(payload["overall"]["blocks_mutations"])
+        self.assertEqual(payload["overall"]["write_safety"]["status"], "ready")
+        self.assertEqual(payload["overall"]["write_safety"]["blockers"], [])
         bank_domain = next(domain for domain in payload["domains"] if domain["key"] == "bank_details")
         self.assertEqual(bank_domain["status"], "failed")
         self.assertEqual(bank_domain["level"], "blocked")
@@ -492,6 +495,9 @@ class AppStatusOverviewServiceTests(unittest.TestCase):
         self.assertEqual(payload["overall"]["level"], "blocked")
         self.assertEqual(payload["overall"]["color"], "red")
         self.assertIn("state_store", payload["overall"]["reason"])
+        self.assertTrue(payload["overall"]["blocks_mutations"])
+        self.assertEqual(payload["overall"]["write_safety"]["status"], "blocked")
+        self.assertEqual(payload["overall"]["write_safety"]["blockers"], ["dependency"])
 
 
 class FakeRuntimeConnection:
@@ -873,6 +879,9 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["overall"]["color"], "red")
         self.assertEqual(payload["overall"]["level"], "blocked")
         self.assertIn("postgres unavailable", payload["overall"]["reason"])
+        self.assertTrue(payload["overall"]["blocks_mutations"])
+        self.assertEqual(payload["overall"]["write_safety"]["status"], "blocked")
+        self.assertEqual(payload["overall"]["write_safety"]["blockers"], ["runtime"])
 
     def test_required_worker_missing_marks_critical_domain_blocked(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)

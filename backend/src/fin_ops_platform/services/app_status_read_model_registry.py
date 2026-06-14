@@ -42,13 +42,13 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
     "pending_invoice": AppStatusReadModelDefinition(
         key="pending_invoice",
         scope_type="pending_invoice",
-        worker_instance="search-pending",
+        worker_instance="pending-invoice",
         refresh_event_type="pending_invoice.read_model.refresh",
     ),
     "search": AppStatusReadModelDefinition(
         key="search",
         scope_type="search",
-        worker_instance="search-pending",
+        worker_instance="search",
         refresh_event_type="search.read_model.refresh",
     ),
     "invoice_lifecycle": AppStatusReadModelDefinition(
@@ -78,13 +78,13 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
     "cost_statistics": AppStatusReadModelDefinition(
         key="cost_statistics",
         scope_type="cost_statistics",
-        worker_instance="cost-tax",
+        worker_instance="cost-statistics",
         refresh_event_type="cost_statistics.read_model.refresh",
     ),
     "tax_offset": AppStatusReadModelDefinition(
         key="tax_offset",
         scope_type="tax_offset",
-        worker_instance="cost-tax",
+        worker_instance="tax-offset",
         refresh_event_type="tax_offset.read_model.refresh",
     ),
     "no_oa_bank_batch": AppStatusReadModelDefinition(

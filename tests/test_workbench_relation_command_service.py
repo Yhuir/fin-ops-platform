@@ -117,6 +117,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
             relation_facade=facade,
+            require_fresh_relations=True,
         )
 
         preview = service.preview_withdraw_relation(
@@ -133,6 +134,54 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(facade.calls[0]["row_ids"], ["oa-1", "bank-1", "invoice-1"])
         self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
         self.assertEqual(repository.save_calls, [])
+
+    def test_withdraw_relation_uses_canonical_relation_when_distribution_is_stale_by_default(self) -> None:
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "invoice-1"],
+            "row_types": ["bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "created_by": "finance-user",
+            "created_at": "2026-05-02T10:00:00+00:00",
+            "updated_at": "2026-05-02T10:00:00+00:00",
+            "version": 2,
+        }
+        repository = FakeRelationRepository({"pair_relations": {"case-new": active_relation}})
+        facade = FakeRelationFacade(
+            {
+                "status": "stale",
+                "rows": [],
+                "groups": [],
+                "read_model_scope_keys": ["2026-05"],
+                "stale_reasons": ["dirty_scope:2026-05"],
+                "refresh_enqueued": True,
+            }
+        )
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=facade,
+        )
+
+        preview = service.preview_withdraw_relation(
+            row_ids=["invoice-1"],
+            month_scope="2026-05",
+        )
+        result = service.withdraw_relation(
+            case_id="case-new",
+            actor_id="finance-user",
+            reason="controlled withdraw",
+            preview_id=str(preview["preview_id"]),
+            operation_type="withdraw_relation",
+            expected_versions=dict(preview["submit_expected_versions"]),
+        )
+
+        self.assertEqual(result["status"], "withdrawn")
+        self.assertEqual(result["relation"]["status"], "cancelled")
+        self.assertEqual(result["read_model_status"], "fresh")
+        self.assertEqual(facade.calls, [])
+        self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
 
     def test_withdraw_relation_rejects_stale_preview_identity(self) -> None:
         active_relation = {
@@ -171,6 +220,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
             relation_facade=facade,
+            require_fresh_relations=True,
         )
 
         result = service.confirm_relation(
@@ -293,7 +343,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "workbench_relation_active_row_conflict")
         self.assertEqual(repository.save_calls, [])
 
-    def test_confirm_relation_fails_fast_when_read_model_is_not_fresh(self) -> None:
+    def test_confirm_relation_fails_fast_when_freshness_precondition_is_explicit(self) -> None:
         repository = FakeRelationRepository()
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
@@ -307,6 +357,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
                     "refresh_enqueued": True,
                 }
             ),
+            require_fresh_relations=True,
         )
 
         with self.assertRaises(WorkbenchRelationCommandError) as context:
@@ -388,6 +439,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
             relation_facade=facade,
+            require_fresh_relations=True,
         )
 
         result = service.cancel_relations_for_row_ids(
@@ -432,6 +484,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         service = WorkbenchRelationCommandService(
             relation_repository=repository,
             relation_facade=facade,
+            require_fresh_relations=True,
         )
 
         result = service.update_relation_metadata_for_case_id(

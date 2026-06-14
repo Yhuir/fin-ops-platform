@@ -53,7 +53,7 @@
 - ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。
 - 业务批次任意阶段允许本地删除/reset；删除不得撤销真实 OA 草稿或 OA 流程，已提交批次删除必须释放 ETC 发票合并关系，并取消包含 summary row 的 active relation。
-- 已提交业务批次删除/reset 在修改本地批次前必须先通过 Workbench relation command boundary 校验 `workbench_relation` read model fresh；非 fresh 时返回 409 `workbench_relation_read_model_not_fresh`，前端只提示刷新/重试，不得乐观删除本地批次或 relation。
+- 已提交业务批次删除/reset 在修改本地批次前必须先通过 Workbench relation command boundary 的 canonical write safety；权限/session、DB/目标写模型不可用、owner 状态或 relation version/idempotency/row occupation 冲突时 fail fast，不得乐观删除本地批次或 relation。普通 `workbench_relation` distribution non-fresh 只作为读侧诊断，不能作为默认写阻断条件。
 - ETC 历史 repair、historical business batch migration 和 existing batch link 的生产写入路径必须通过 `WorkbenchRelationCommandService` 写入或更新 relation；缺少 command service 时必须 fail fast，不得落回 direct pair relation mutation。domain event 只作为页面刷新提示，不是 relation 事实源。
 - source file 上传必须先落对象存储，再追加 source file 元数据；对象存储失败不得留下半写入 source file、版本号或审计事件。
 - ETC 导入确认、业务批次提交/删除和历史迁移会影响关联台、税金抵扣、成本统计、search、App Health 和 import/Workbench worker 状态。

@@ -397,6 +397,7 @@ from fin_ops_platform.services.workbench_relation_command_service import (
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
@@ -2005,7 +2006,15 @@ class Application:
         if method == "POST" and route_path == "/api/workbench/actions/withdraw-link/preview":
             return self._handle_api_workbench_withdraw_link_preview(body)
         if method == "POST" and route_path == "/api/workbench/actions/withdraw-link":
-            return self._handle_api_workbench_withdraw_link(body, request_id=request_id)
+            response = self._handle_api_workbench_withdraw_link(body, request_id=request_id, headers=headers)
+            self._emit_workbench_action_timing(
+                request_id=request_id or "no-request-id",
+                action_name="withdraw_link",
+                phase="request_total",
+                duration_ms=self._duration_ms(request_started_at),
+                status=response.status_code,
+            )
+            return response
         if method == "POST" and route_path == "/api/workbench/actions/confirm-cash-pass-through":
             return self._handle_api_workbench_confirm_cash_pass_through(body, request_id=request_id)
         if method == "POST" and route_path == "/api/workbench/actions/confirm-cash-ticket-purchase":
@@ -2849,7 +2858,7 @@ class Application:
             exception_case_service=self._workbench_exception_case_service,
             override_service=self._workbench_override_service,
             candidate_match_service=self._workbench_candidate_match_service,
-            next_case_id=self._workbench_override_service._next_case_id,
+            next_case_id=self._next_workbench_relation_case_id,
             normalize_row_ids=self._normalize_row_ids,
             resolved_row_types_for_row_ids=self._resolved_row_types_for_row_ids,
             can_confirm_link_row_types=self._can_confirm_link_row_types,
@@ -2884,6 +2893,7 @@ class Application:
             emit_action_timing=self._emit_workbench_action_timing,
             confirm_link_uow=self._workbench_confirm_link_unit_of_work(),
             cancel_link_uow=self._workbench_cancel_link_unit_of_work(),
+            withdraw_link_uow=self._workbench_withdraw_link_unit_of_work(),
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
             consume_reconciliation_decisions_in_transaction=self._consume_workbench_reconciliation_decisions_in_transaction,
             bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
@@ -2894,6 +2904,20 @@ class Application:
                 repository=repository,
             ),
         )
+
+    def _next_workbench_relation_case_id(self) -> str:
+        snapshot = self._workbench_pair_relation_service.snapshot()
+        relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else {}
+        used_case_ids = {
+            str(case_id).strip()
+            for case_id in (relations.keys() if isinstance(relations, dict) else [])
+            if str(case_id).strip()
+        }
+        for _attempt in range(10000):
+            case_id = self._workbench_override_service._next_case_id()
+            if case_id not in used_case_ids:
+                return case_id
+        raise RuntimeError("Unable to allocate an unused workbench relation case id.")
 
     def _bank_transaction_category_codes_for_workbench_row_ids(self, row_ids: list[str]) -> dict[str, str]:
         no_oa_service = self._no_oa_bank_batch_application_service()
@@ -2939,7 +2963,7 @@ class Application:
         return WorkbenchRelationCommandService(
             relation_repository=self._workbench_relation_command_repository(repository=repository),
             relation_facade=relation_facade,
-            require_fresh_relations=bool(relation_facade is not None) if require_fresh_relations is None else require_fresh_relations,
+            require_fresh_relations=False if require_fresh_relations is None else require_fresh_relations,
         )
 
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
@@ -3052,6 +3076,31 @@ class Application:
             return None
         idempotency_store = self._workbench_write_idempotency_store(
             "_workbench_cancel_link_idempotency_store",
+            connection,
+        )
+        return WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=self._workbench_uow_repository_factory,
+            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
+                queue_repository,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            ),
+            idempotency_store=idempotency_store,
+        )
+
+    def _workbench_withdraw_link_unit_of_work(self) -> WorkbenchWriteUnitOfWork | None:
+        override = getattr(self, "_workbench_withdraw_link_uow_override", None)
+        if override is not None:
+            return override
+        state_store = getattr(self, "_state_store", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
+            return None
+        connection = getattr(state_store, "_connection", None)
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        if connection is None or queue_repository is None:
+            return None
+        idempotency_store = self._workbench_write_idempotency_store(
+            "_workbench_withdraw_link_idempotency_store",
             connection,
         )
         return WorkbenchWriteUnitOfWork(
@@ -7654,6 +7703,8 @@ class Application:
             return "confirm_link"
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
             return "cancel_link"
+        if method == "POST" and route_path == "/api/workbench/actions/withdraw-link":
+            return "withdraw_link"
         return None
 
     def _emit_workbench_action_timing(
@@ -11841,14 +11892,29 @@ class Application:
         result = self._workbench_write_facade().preview_withdraw_link(payload)
         return self._workbench_write_response(result)
 
-    def _handle_api_workbench_withdraw_link(self, body: str | None, *, request_id: str | None = None) -> Response:
+    def _handle_api_workbench_withdraw_link(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         freshness_error = self._workbench_write_freshness_guard()
         if freshness_error is not None:
             return freshness_error
-        result = self._workbench_write_facade().withdraw_link(payload, request_id=request_id)
+        auth_context = self._workbench_write_auth_context(headers)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, tenant_id = auth_context
+        result = self._workbench_write_facade().withdraw_link(
+            payload,
+            request_id=request_id,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
         return self._workbench_write_response(result)
 
     def _handle_api_workbench_confirm_cash_pass_through(
@@ -19210,11 +19276,19 @@ class Application:
         )
         reason = str((metadata or {}).get("reason") or event).strip()
         action_name = str((metadata or {}).get("action_name") or "").strip()
+        if event == "pair_relation_changed":
+            plan["domains"] = self._filter_pair_relation_lifecycle_domains(
+                list(plan.get("domains") or []),
+                metadata=metadata,
+            )
         for domain_plan in list(plan.get("domains") or []):
             if isinstance(domain_plan, dict):
                 domain_plan["reason"] = reason
+                domain_metadata = dict(metadata or {})
                 if action_name:
-                    domain_plan["metadata"] = {"action_name": action_name}
+                    domain_metadata["action_name"] = action_name
+                if domain_metadata:
+                    domain_plan["metadata"] = domain_metadata
         return self._derived_data_lifecycle_service.execute_plan(
             plan,
             executors={
@@ -19273,11 +19347,14 @@ class Application:
                 changed_scope_keys=deleted_scope_keys,
                 operation="derived_lifecycle_workbench_read_model",
             )
-        self._invalidate_invoice_usage_collection_read_model_scopes(
-            scope_keys or deleted_scope_keys or ["all"],
-            reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_read_model"),
-            metadata=refresh_metadata,
-        )
+        invoice_usage_scope_types = self._invoice_usage_scope_types_from_domain_plan(domain_plan)
+        if invoice_usage_scope_types is None or invoice_usage_scope_types:
+            self._invalidate_invoice_usage_collection_read_model_scopes(
+                scope_keys or deleted_scope_keys or ["all"],
+                reason=str(domain_plan.get("reason") or "derived_lifecycle_workbench_read_model"),
+                metadata=refresh_metadata,
+                scope_types=invoice_usage_scope_types,
+            )
         return {
             "deleted_counts": {"workbench_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
@@ -19436,7 +19513,15 @@ class Application:
         }
 
     def _derived_lifecycle_pending_invoice_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
+        metadata = self._domain_plan_metadata(domain_plan)
+        metadata_scope_keys = metadata.get("pending_invoice_scope_keys")
+        pending_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(metadata_scope_keys or [])
+            if str(scope_key).strip()
+        ] if isinstance(metadata_scope_keys, list) else None
         invalidated_scope_keys = self._invalidate_pending_invoice_read_model_scopes(
+            scope_keys=pending_scope_keys,
             reason=str(domain_plan.get("reason") or "derived_lifecycle_pending_invoice"),
             metadata=self._read_model_refresh_metadata(domain_plan),
         )
@@ -19554,12 +19639,84 @@ class Application:
         ]
 
     @staticmethod
+    def _filter_pair_relation_lifecycle_domains(
+        domain_plans: list[object],
+        *,
+        metadata: dict[str, object] | None,
+    ) -> list[dict[str, object]]:
+        downstream_scope_types = {
+            str(scope_type).strip()
+            for scope_type in list((metadata or {}).get("downstream_scope_types") or [])
+            if str(scope_type).strip()
+        }
+        if not downstream_scope_types:
+            return [dict(plan) for plan in domain_plans if isinstance(plan, dict)]
+        always_keep = {
+            "workbench_read_model",
+            "workbench_relation_read_model",
+            "workbench_matching_dirty_scopes",
+        }
+        domain_scope_types = {
+            "bank_detail_read_model": "bank_detail",
+            "invoice_lifecycle_read_model": "invoice_lifecycle",
+            "pending_invoice_read_model": "pending_invoice",
+            "tax_offset_read_model": "tax_offset",
+            "tax_offset_month_cache": "tax_offset",
+            "cost_statistics_read_model": "cost_statistics",
+            "search_cache": "search",
+            "no_oa_bank_batch_read_model": "no_oa_bank_batch",
+            "oa_adapter_records_cache": "oa",
+        }
+        filtered: list[dict[str, object]] = []
+        for plan in domain_plans:
+            if not isinstance(plan, dict):
+                continue
+            domain = str(plan.get("domain") or "").strip()
+            required_scope_type = domain_scope_types.get(domain)
+            if domain in always_keep or required_scope_type is None or required_scope_type in downstream_scope_types:
+                filtered.append(dict(plan))
+        return filtered
+
+    @staticmethod
+    def _domain_plan_metadata(domain_plan: dict[str, object]) -> dict[str, object]:
+        metadata = domain_plan.get("metadata")
+        return dict(metadata) if isinstance(metadata, dict) else {}
+
+    @classmethod
+    def _invoice_usage_scope_types_from_domain_plan(cls, domain_plan: dict[str, object]) -> list[str] | None:
+        metadata = cls._domain_plan_metadata(domain_plan)
+        if "invoice_usage_scope_types" not in metadata:
+            return None
+        allowed = {"input_invoice_usage", "output_invoice_collection", "oa_pending_payment"}
+        return [
+            scope_type
+            for scope_type in (
+                str(item).strip()
+                for item in list(metadata.get("invoice_usage_scope_types") or [])
+            )
+            if scope_type in allowed
+        ]
+
+    @staticmethod
     def _read_model_refresh_metadata(domain_plan: dict[str, object]) -> dict[str, object] | None:
         metadata = domain_plan.get("metadata")
         if not isinstance(metadata, dict):
             return None
+        refresh_metadata: dict[str, object] = {}
+        for key in (
+            "source",
+            "case_id",
+            "action_name",
+            "downstream_scope_types",
+            "invoice_usage_scope_types",
+            "pending_invoice_scope_keys",
+        ):
+            if key in metadata:
+                refresh_metadata[key] = metadata[key]
         action_name = str(metadata.get("action_name") or "").strip()
-        return {"action_name": action_name} if action_name else None
+        if action_name:
+            refresh_metadata["action_name"] = action_name
+        return refresh_metadata or None
 
     @staticmethod
     def _months_from_lifecycle_scope_keys(scope_keys: list[str]) -> list[str]:
@@ -19652,14 +19809,15 @@ class Application:
     def _invalidate_pending_invoice_read_model_scopes(
         self,
         *,
+        scope_keys: list[str] | None = None,
         reason: str,
         metadata: dict[str, object] | None = None,
     ) -> list[str]:
-        scope_keys = self._pending_invoice_read_model_scope_keys()
+        target_scope_keys = list(scope_keys or self._pending_invoice_read_model_scope_keys())
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
             return []
-        return refresh_gateway.enqueue_many("pending_invoice", scope_keys, reason=reason, metadata=metadata)
+        return refresh_gateway.enqueue_many("pending_invoice", target_scope_keys, reason=reason, metadata=metadata)
 
     def _invalidate_invoice_usage_collection_read_model_scopes(
         self,
@@ -19667,16 +19825,18 @@ class Application:
         *,
         reason: str,
         metadata: dict[str, object] | None = None,
+        scope_types: list[str] | None = None,
     ) -> list[str]:
         months = self._months_from_lifecycle_scope_keys(scope_keys)
         target_scope_keys = months or (["all"] if any(str(scope_key).strip() == "all" for scope_key in scope_keys) else ["all"])
+        enabled_scope_types = set(scope_types or ["input_invoice_usage", "output_invoice_collection", "oa_pending_payment"])
         invalidated: list[str] = []
         for scope_key in target_scope_keys:
-            if self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason, metadata=metadata):
+            if "input_invoice_usage" in enabled_scope_types and self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason, metadata=metadata):
                 invalidated.append(f"input_invoice_usage:{scope_key}")
-            if self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason=reason, metadata=metadata):
+            if "output_invoice_collection" in enabled_scope_types and self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason=reason, metadata=metadata):
                 invalidated.append(f"output_invoice_collection:{scope_key}")
-            if self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason=reason, metadata=metadata):
+            if "oa_pending_payment" in enabled_scope_types and self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason=reason, metadata=metadata):
                 invalidated.append(f"oa_pending_payment:{scope_key}")
         return invalidated
 
@@ -20770,23 +20930,7 @@ class Application:
 
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
-        lowered_row_id = str(row_id).strip().lower()
-        if lowered_row_id.startswith("oa-att-inv-"):
-            return "invoice"
-        if lowered_row_id.startswith("oa-"):
-            return "oa"
-        if (
-            lowered_row_id.startswith("bk-")
-            or lowered_row_id.startswith("txn-")
-            or lowered_row_id.startswith("txn_")
-            or lowered_row_id.startswith("bank-")
-        ):
-            return "bank"
-        if lowered_row_id.startswith("iv-") or lowered_row_id.startswith("invoice-"):
-            return "invoice"
-        if lowered_row_id.startswith("etc-summary-"):
-            return "invoice"
-        return "unknown"
+        return row_type_for_workbench_row_id(row_id)
 
     def _row_types_for_row_ids(self, row_ids: list[str]) -> list[str]:
         return [self._row_type_for_row_id(row_id) for row_id in row_ids]

@@ -43,6 +43,7 @@ class SearchPendingConnection:
         *,
         search_rows: list[dict] | None = None,
         pending_rows: list[dict] | None = None,
+        workbench_rows: list[dict] | None = None,
         pending_source_counts: dict[str, int] | None = None,
         pending_filter_option_rows: list[dict] | None = None,
         dirty: bool = False,
@@ -50,6 +51,7 @@ class SearchPendingConnection:
     ) -> None:
         self.search_rows = list(search_rows or [])
         self.pending_rows = list(pending_rows or [])
+        self.workbench_rows = list(workbench_rows or [])
         self.pending_source_counts = dict(pending_source_counts or {"expense": len(self.pending_rows)})
         self.pending_filter_option_rows = list(pending_filter_option_rows or [])
         self.dirty = dirty
@@ -70,6 +72,8 @@ class SearchPendingConnection:
             return self.pending_filter_option_rows
         if "from read_model.search_index_rows" in normalized:
             return self.search_rows
+        if "from read_model.workbench_rows" in normalized:
+            return self.workbench_rows
         if "from read_model.pending_invoice_scopes" in normalized:
             return [
                 {
@@ -94,6 +98,26 @@ class SearchPendingConnection:
         if "count(*)" in normalized and "from read_model.pending_invoice_rows" in normalized:
             return {"count": len(self.pending_rows)}
         return None
+
+
+class SearchIndexBulkWriteConnection:
+    def __init__(self) -> None:
+        self.execute_calls: list[tuple[str, tuple]] = []
+        self.execute_many_values_calls: list[tuple[str, list[tuple]]] = []
+        self.transaction_count = 0
+
+    @contextmanager
+    def transaction(self):
+        self.transaction_count += 1
+        yield self
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.execute_calls.append((" ".join(sql.lower().split()), params))
+        return 1
+
+    def execute_many_values(self, sql: str, params_seq: list[tuple], *, chunk_size: int = 200) -> int:
+        self.execute_many_values_calls.append((" ".join(sql.lower().split()), list(params_seq)))
+        return len(params_seq)
 
 
 class PendingProjectionConnection:
@@ -685,6 +709,104 @@ class PendingIncomeProjectionConnection:
 
 
 class SearchPendingSqlRuntimeTests(unittest.TestCase):
+    def test_search_projection_reads_unique_workbench_rows_before_python_build(self) -> None:
+        connection = SearchPendingConnection(
+            workbench_rows=[
+                {
+                    "row_id": "txn-1",
+                    "source_kind": "bank",
+                    "status": "paired",
+                    "scope_month": "2026-05-01",
+                    "project_name": "项目A",
+                    "counterparty_name": "昆明供应商",
+                    "amount": "10.00",
+                    "generated_at": "2026-05-21T10:00:00+00:00",
+                    "payload": {"id": "txn-1", "counterparty_name": "昆明供应商"},
+                }
+            ]
+        )
+        builder = SearchPendingSqlProjectionBuilder(connection=connection)
+
+        rows = builder._search_rows_for_month("2026-05")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["row_id"], "txn-1")
+        sql, params = connection.fetch_all_calls[0]
+        self.assertIn("row_number() over", sql)
+        self.assertIn("partition by row_id", sql)
+        self.assertIn("where row_rank = 1", sql)
+        self.assertEqual(params, ("2026-05-01", "2026-05"))
+
+    def test_search_index_rows_are_saved_with_bulk_values(self) -> None:
+        connection = SearchIndexBulkWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_search_index_rows(
+            scope_key="2026-05",
+            source_versions={"search": "v1"},
+            rows=[
+                {
+                    "row_id": "txn-1",
+                    "source_kind": "bank",
+                    "status": "open",
+                    "title": "昆明供应商",
+                    "subtitle": "工行",
+                    "searchable_text": "昆明 10.00",
+                    "project_name": "项目A",
+                    "counterparty_name": "昆明供应商",
+                    "amount": "10.00",
+                    "payload": {"row_id": "txn-1", "record_type": "bank", "month": "2026-05"},
+                },
+                {
+                    "row_id": "inv-1",
+                    "source_kind": "invoice",
+                    "status": "open",
+                    "title": "发票",
+                    "searchable_text": "发票 10.00",
+                    "payload": {"row_id": "inv-1", "record_type": "invoice", "month": "2026-05"},
+                },
+            ],
+        )
+
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(len(connection.execute_calls), 1)
+        self.assertIn("delete from read_model.search_index_rows", connection.execute_calls[0][0])
+        self.assertEqual(len(connection.execute_many_values_calls), 1)
+        sql, params_seq = connection.execute_many_values_calls[0]
+        self.assertIn("insert into read_model.search_index_rows", sql)
+        self.assertEqual(len(params_seq), 2)
+        self.assertEqual(params_seq[0][0], "txn-1")
+        self.assertEqual(params_seq[1][0], "inv-1")
+
+    def test_search_index_bulk_save_dedupes_duplicate_row_ids(self) -> None:
+        connection = SearchIndexBulkWriteConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.save_search_index_rows(
+            scope_key="2026-05",
+            rows=[
+                {
+                    "row_id": "txn-1",
+                    "source_kind": "bank",
+                    "title": "旧标题",
+                    "searchable_text": "旧",
+                    "payload": {"row_id": "txn-1", "record_type": "bank", "month": "2026-05", "title": "旧标题"},
+                },
+                {
+                    "row_id": "txn-1",
+                    "source_kind": "bank",
+                    "title": "新标题",
+                    "searchable_text": "新",
+                    "payload": {"row_id": "txn-1", "record_type": "bank", "month": "2026-05", "title": "新标题"},
+                },
+            ],
+        )
+
+        _sql, params_seq = connection.execute_many_values_calls[0]
+        self.assertEqual(len(params_seq), 1)
+        self.assertEqual(params_seq[0][0], "txn-1")
+        self.assertEqual(params_seq[0][4], "新标题")
+
     def test_search_repository_reads_index_rows_without_state_fallback(self) -> None:
         connection = SearchPendingConnection(
             search_rows=[

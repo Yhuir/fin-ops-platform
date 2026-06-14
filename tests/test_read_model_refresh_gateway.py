@@ -5,9 +5,16 @@ from types import SimpleNamespace
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[dict[str, object]] = []
+        self.active_refreshes: set[tuple[str, str, str]] = set()
+        self.active_checks: list[tuple[str, str, str]] = []
 
     def enqueue_read_model_refresh(self, **kwargs: object) -> None:
         self.refreshes.append(dict(kwargs))
+
+    def read_model_refresh_is_active(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
+        key = (tenant_id, scope_type, scope_key)
+        self.active_checks.append(key)
+        return key in self.active_refreshes
 
 
 class ReadModelRefreshGatewayTests(unittest.TestCase):
@@ -87,6 +94,43 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                     "metadata": {"action_name": "withdraw_link"},
                 }
             ],
+        )
+
+    def test_ensure_refresh_reason_does_not_bump_active_scope(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = QueueRecorder()
+        queue.active_refreshes.add(("default", "bank_detail", "2026-02"))
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "bank_detail",
+            ["2026-02"],
+            reason="pending_invoice_sql_projection",
+        )
+
+        self.assertEqual(enqueued, ["2026-02"])
+        self.assertEqual(queue.active_checks, [("default", "bank_detail", "2026-02")])
+        self.assertEqual(queue.refreshes, [])
+
+    def test_mutating_refresh_reason_still_bumps_active_scope(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = QueueRecorder()
+        queue.active_refreshes.add(("default", "bank_detail", "2026-02"))
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "bank_detail",
+            ["2026-02"],
+            reason="workbench_relation_changed",
+        )
+
+        self.assertEqual(enqueued, ["2026-02"])
+        self.assertEqual(queue.active_checks, [])
+        self.assertEqual(
+            queue.refreshes,
+            [{"scope_type": "bank_detail", "scope_key": "2026-02", "reason": "workbench_relation_changed"}],
         )
 
     def test_rejects_cost_statistics_scope_that_cannot_be_normalized(self) -> None:

@@ -20,6 +20,13 @@ class BankDetailReadModelRefreshService:
         if scope_type != "bank_detail" or not scope_key:
             raise ValueError("Bank detail refresh requires scope_type='bank_detail' and scope_key.")
         source_version = event.source_version or event.payload.get("source_version")
+        if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
+            return {
+                "scope_key": scope_key,
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": source_version,
+            }
 
         if scope_key == "all":
             shard_result = self._enqueue_all_scope_shards(event, source_version=source_version)
@@ -34,6 +41,13 @@ class BankDetailReadModelRefreshService:
         else:
             result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+        if not self._event_source_version_is_current(event, scope_key=scope_key, source_version=source_version):
+            return {
+                "scope_key": scope_key,
+                "skipped": True,
+                "skip_reason": "stale_source_version_after_rebuild",
+                "source_version": source_version,
+            }
         self._complete_dirty_scope(event, scope_key=scope_key, source_version=source_version)
         return payload
 
@@ -56,3 +70,22 @@ class BankDetailReadModelRefreshService:
                 scope_key=scope_key,
                 source_version=source_version,
             )
+
+    def _event_source_version_is_current(
+        self,
+        event: RuntimeQueueEvent,
+        *,
+        scope_key: str,
+        source_version: Any,
+    ) -> bool:
+        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
+        if not callable(is_current):
+            return True
+        return bool(
+            is_current(
+                tenant_id=event.tenant_id,
+                scope_type="bank_detail",
+                scope_key=scope_key,
+                source_version=source_version,
+            )
+        )

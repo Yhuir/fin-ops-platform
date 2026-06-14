@@ -14,9 +14,9 @@
 | 已认证结果 | `TaxCertifiedImportService`、`TaxCertifiedImportApplicationService` | preview、confirm、重复导入去重、行级识别状态、计划内/计划外拆分。 |
 | 计划保存 | `TaxOffsetPlanService` | 写权限、idempotency key、read model scope/source version 乐观锁、summary snapshot。 |
 | API/read cache | `/api/tax-offset*`、`TaxOffsetQueryService`、Redis hot cache、SQL read model | fresh gate 后才能缓存；miss/stale 返回 refreshing 并入队，不同步重建伪 fresh。 |
-| read model refresh | `TaxOffsetReadModelRefreshService`、`cost-tax` worker、`ReadModelRefreshGateway` | 月份 shard 为 `YYYY-MM`；`all` 只 fan-out 到月份 shard，不作为普通月份 payload。 |
+| read model refresh | `TaxOffsetReadModelRefreshService`、`tax-offset` worker、旧 `cost-tax` 兼容 worker、`ReadModelRefreshGateway` | 月份 shard 为 `YYYY-MM`；`all` 只 fan-out 到月份 shard，不作为普通月份 payload。 |
 | 导入 job | import job repository / polling API | confirm 可转后台任务；前端 modal 必须保持 processing，直到 job 结果完成。 |
-| App Status readiness | `tax_offset` read model、cost-tax worker、runtime snapshot | missing/refreshing/stale/failed/unavailable 必须从后端 runtime facts 解释，不能由页面本地状态推断。 |
+| App Status readiness | `tax_offset` read model、`tax-offset` worker、runtime snapshot | missing/refreshing/stale/failed/unavailable 必须从后端 runtime facts 解释，不能由页面本地状态推断。 |
 | 前端交互 | `TaxOffsetPage`、`web/src/features/tax/api.ts`、`web/src/components/tax/*` | loading/abort/remount、权限、导入 modal、drag/drop、搜索、排序、筛选、drawer、高亮、空状态、计划保存。 |
 | 跨模块 fan-out | invoice import、ETC import、tax certified import、pending invoice rules、workbench relation、invoice lifecycle | 下游 dirty scope/outbox 必须覆盖税金抵扣，同时不能误刷新无关 read model。 |
 
@@ -35,10 +35,10 @@
 | SQL read model / Redis cache | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_postgres_state_store.py` | covered | SQL rows 优先、Redis hit/miss/timeout、summary 小 payload、Postgres 不回退 runtime snapshot。 |
 | refresh worker / all fan-out | P0 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | covered | `all` 展开月份 shard，refresh 完成 dirty scope，gateway 去重，worker lifecycle 归属。 |
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_tax_offset_api.py` | covered | 发票导入、认证导入、规则变更、OA rebuild 等事件刷新 tax offset，不误刷银行导入。 |
-| App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_worker_registry.py` | covered | route/domain registry、read model readiness、cost-tax worker 注册与回填。 |
+| App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_worker_registry.py` | covered | route/domain registry、read model readiness、`tax-offset` worker 注册与回填。 |
 | migration/schema | P1 | `tests/test_postgres_migrations.py`、`tests/test_postgres_state_store.py` | covered | certified import、tax offset plans、read model 表结构和状态存取。 |
 | 前端页面交互 | P1 | `web/src/test/TaxOffsetPage.test.tsx` | covered | loading abort、remount reload、只读权限、导入 modal、drag/drop、非 Excel 拒绝、recalculate、save、搜索/排序/筛选、drawer、高亮、empty。 |
-| 真实外部环境 worker drain | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres/Redis/RabbitMQ/systemd cost-tax worker。 |
+| 真实外部环境 worker drain | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres/Redis/RabbitMQ/systemd `tax-offset` worker。 |
 
 ## 七类测试适用性
 
@@ -68,7 +68,7 @@
 
 ## 关键 smoke flows
 
-1. `发票导入确认 -> invoice_lifecycle refresh -> tax_offset dirty scope -> cost-tax worker -> tax_offset month fresh -> /tax-offset 页面展示`
+1. `发票导入确认 -> invoice_lifecycle refresh -> tax_offset dirty scope -> tax-offset worker -> tax_offset month fresh -> /tax-offset 页面展示`
 2. `已认证导入 preview -> 行级状态/计划内外拆分 -> confirm/job queued -> tax_certified_import_confirmed lifecycle -> tax_offset refresh -> 页面 summary 更新`
 3. `用户调整计划勾选 -> calculate -> summary 更新 -> save plan with scope/source versions -> stale version conflict 或幂等成功`
 4. `ETC 发票导入/业务批次变化 -> invoiceFactUpdated / lifecycle -> tax_offset refresh -> 页面重新读取`
@@ -103,5 +103,5 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 ## 未测风险
 
 - 本地测试不连接真实税局认证 XLSX 大样本、真实 OA 附件发票缓存或真实 ETC 生产数据；真实数据格式变化需要发布前样本 smoke。
-- 本地测试不跑真实 RabbitMQ/Redis/systemd cost-tax worker drain；dirty/outbox 到 projection 的真实收敛需要 staging 或夜间 CI/生产前 smoke。
+- 本地测试不跑真实 RabbitMQ/Redis/systemd `tax-offset` worker drain；dirty/outbox 到 projection 的真实收敛需要 staging 或夜间 CI/生产前 smoke。
 - 前端 Vitest 覆盖交互和 job polling，不覆盖真实浏览器下载、超大表格性能和真实网络中断恢复。

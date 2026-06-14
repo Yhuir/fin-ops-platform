@@ -117,6 +117,7 @@ def run_closure_gate(
     limit: int = 2_000,
 ) -> dict[str, Any]:
     normalized_headers = {str(key): str(value) for key, value in dict(headers or {}).items() if str(value).strip()}
+    write_audit_operations = _write_scenario_operations(write_scenario)
     checks = [
         _runtime_health_check(connection),
         _read_model_smoke_check(
@@ -141,6 +142,7 @@ def run_closure_gate(
             target_ms=write_target_ms,
             lookback_hours=write_audit_lookback_hours,
             limit=limit,
+            operations=write_audit_operations,
         ),
         _write_operation_e2e_check(
             connection,
@@ -297,6 +299,7 @@ def _write_operation_audit_check(
     target_ms: float,
     lookback_hours: float,
     limit: int,
+    operations: Sequence[str] | None = None,
 ) -> ClosureCheck:
     report = write_operation_slo_audit.audit_write_operation_slo(
         connection,
@@ -304,11 +307,21 @@ def _write_operation_audit_check(
         lookback_hours=lookback_hours,
         target_ms=target_ms,
         limit=limit,
+        operations=operations,
     )
+    targeted = bool(operations)
     return ClosureCheck(
         "write_operation_audit",
         PASS if report.get("status") == PASS else FAIL,
-        "Recent real write-operation outbox samples satisfy the SLO." if report.get("status") == PASS else "Recent real write-operation outbox samples are missing or outside SLO.",
+        (
+            "Recent approved scenario write-operation outbox samples satisfy the SLO."
+            if targeted and report.get("status") == PASS
+            else "Recent real write-operation outbox samples satisfy the SLO."
+            if report.get("status") == PASS
+            else "Recent approved scenario write-operation outbox samples are missing or outside SLO."
+            if targeted
+            else "Recent real write-operation outbox samples are missing or outside SLO."
+        ),
         _compact_report(report),
     )
 
@@ -403,6 +416,22 @@ def _overall_status(checks: Sequence[ClosureCheck]) -> str:
 
 def _auth_configured(headers: Mapping[str, str]) -> bool:
     return any(str(key).lower() in {"authorization", "cookie"} for key in headers)
+
+
+def _write_scenario_operations(scenario_path: Path | None) -> tuple[str, ...] | None:
+    if scenario_path is None:
+        return None
+    scenarios = write_operation_e2e_smoke.load_scenarios(scenario_path, http_target_ms=1_000.0)
+    operations: list[str] = []
+    seen: set[str] = set()
+    for scenario in scenarios:
+        for operation in getattr(scenario, "operations", ()):
+            normalized = str(operation or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            operations.append(normalized)
+    return tuple(operations) or None
 
 
 def _compact_report(report: Mapping[str, Any]) -> dict[str, Any]:

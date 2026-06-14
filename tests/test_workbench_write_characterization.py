@@ -134,6 +134,23 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         )
         return connection, writer, persisted
 
+    def _install_withdraw_link_uow(
+        self,
+        app: Application,
+        *,
+        fail_outbox: bool = False,
+    ) -> tuple[_RecordingConnection, _RecordingDirtyOutboxWriter, list[dict[str, object]]]:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter(fail=fail_outbox)
+        persisted: list[dict[str, object]] = []
+        app._workbench_withdraw_link_uow_override = WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=_RelationCommandRepositoryFactory(persisted),
+            read_model_refresh_writer=writer,
+            idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
+        )
+        return connection, writer, persisted
+
     def _create_cash_special_relation(
         self,
         app: Application,
@@ -438,6 +455,31 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             [entry["operation_type"] for entry in app._workbench_pair_relation_service.list_history()],
             ["confirm_link", "confirm_link"],
         )
+
+    def test_confirm_link_without_case_id_skips_existing_active_auto_relation_case_id(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-AUTO-0001",
+            row_ids=["txn-existing-auto", "inv_existing_auto"],
+            row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="test",
+            month_scope="2026-03",
+        )
+
+        with self._suppress_background_persistence(app):
+            response = self._post(app, "/api/workbench/actions/confirm-link", {"month": "2026-03", "row_ids": row_ids})
+
+        self.assertEqual(response.status_code, 200, response.body)
+        payload = _json_response(response)
+        self.assertEqual(payload["case_id"], "CASE-AUTO-0002")
+        existing_relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-AUTO-0001")
+        self.assertIsNotNone(existing_relation)
+        active_relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_ids[0])
+        self.assertIsNotNone(active_relation)
+        assert active_relation is not None
+        self.assertEqual(active_relation["case_id"], "CASE-AUTO-0002")
 
     def test_duplicate_cancel_link_returns_not_found_after_first_cancel(self) -> None:
         app = self._build_app()
@@ -994,6 +1036,136 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         )
         self.assertEqual(pair_relation_persist.call_count, 3)
         self.assertEqual(read_model_persist.call_count, 3)
+
+    def test_withdraw_link_invalidates_only_affected_scopes_without_global_all(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        lifecycle_calls: list[dict[str, object]] = []
+
+        def record_lifecycle_event(event: str, **kwargs: object) -> dict[str, object]:
+            lifecycle_calls.append({"event": event, **kwargs})
+            return {}
+
+        with (
+            patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle_event),
+            patch.object(app, "_schedule_workbench_pair_relation_persist"),
+            patch.object(app, "_schedule_workbench_read_model_persist"),
+        ):
+            confirm_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-WITHDRAW-SCOPE"},
+            )
+            lifecycle_calls.clear()
+            withdraw_response = self._post(
+                app,
+                "/api/workbench/actions/withdraw-link",
+                {"month": "2026-03", "row_ids": row_ids},
+            )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
+        pair_relation_calls = [
+            call
+            for call in lifecycle_calls
+            if call.get("event") == "pair_relation_changed"
+        ]
+        self.assertEqual(len(pair_relation_calls), 1)
+        self.assertEqual(pair_relation_calls[0].get("include_all"), False)
+        self.assertNotIn("all", pair_relation_calls[0].get("scope_keys") or [])
+        metadata = pair_relation_calls[0].get("metadata")
+        self.assertIsInstance(metadata, dict)
+        assert isinstance(metadata, dict)
+        self.assertIn("downstream_scope_types", metadata)
+        self.assertIn("invoice_usage_scope_types", metadata)
+        pending_invoice_scope_keys = metadata.get("pending_invoice_scope_keys")
+        self.assertIsInstance(pending_invoice_scope_keys, list)
+        assert isinstance(pending_invoice_scope_keys, list)
+        self.assertTrue(any(str(scope_key).endswith(":2026-03") for scope_key in pending_invoice_scope_keys))
+        self.assertNotIn("expense:all", pending_invoice_scope_keys)
+        self.assertNotIn("income:all", pending_invoice_scope_keys)
+
+    def test_confirm_link_invalidates_only_affected_scopes_without_global_all(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        lifecycle_calls: list[dict[str, object]] = []
+
+        def record_lifecycle_event(event: str, **kwargs: object) -> dict[str, object]:
+            lifecycle_calls.append({"event": event, **kwargs})
+            return {}
+
+        with (
+            patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle_event),
+            patch.object(app, "_schedule_workbench_pair_relation_persist"),
+            patch.object(app, "_schedule_workbench_read_model_persist"),
+        ):
+            confirm_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-CONFIRM-SCOPE"},
+            )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        pair_relation_calls = [
+            call
+            for call in lifecycle_calls
+            if call.get("event") == "pair_relation_changed"
+        ]
+        self.assertEqual(len(pair_relation_calls), 1)
+        self.assertEqual(pair_relation_calls[0].get("include_all"), False)
+        self.assertNotIn("all", pair_relation_calls[0].get("scope_keys") or [])
+        metadata = pair_relation_calls[0].get("metadata")
+        self.assertIsInstance(metadata, dict)
+        assert isinstance(metadata, dict)
+        self.assertEqual(metadata.get("source"), "confirm_link")
+        self.assertEqual(metadata.get("action_name"), "confirm_link")
+        pending_invoice_scope_keys = metadata.get("pending_invoice_scope_keys")
+        if pending_invoice_scope_keys is not None:
+            self.assertIsInstance(pending_invoice_scope_keys, list)
+            assert isinstance(pending_invoice_scope_keys, list)
+            self.assertTrue(any(str(scope_key).endswith(":2026-03") for scope_key in pending_invoice_scope_keys))
+            self.assertNotIn("expense:all", pending_invoice_scope_keys)
+            self.assertNotIn("income:all", pending_invoice_scope_keys)
+
+    def test_withdraw_link_uses_uow_transaction_when_available(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        with self._suppress_background_persistence(app):
+            confirm_response = self._post(
+                app,
+                "/api/workbench/actions/confirm-link",
+                {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-WITHDRAW-UOW"},
+            )
+        connection, writer, persisted = self._install_withdraw_link_uow(app)
+
+        with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
+            withdraw_response = self._post(
+                app,
+                "/api/workbench/actions/withdraw-link",
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "idempotency_key": "withdraw:uow-withdraw-1",
+                },
+            )
+
+        self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
+        self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
+        payload = _json_response(withdraw_response)
+        self.assertEqual(payload["operation"], "withdraw_link")
+        self.assertEqual(payload["affected_months"], ["2026-03"])
+        self.assertCountEqual(payload["affected_row_ids"], row_ids)
+        self.assertEqual(pair_relation_persist.call_count, 0)
+        self.assertEqual(read_model_persist.call_count, 0)
+        self.assertEqual(connection.opened, 1)
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 0)
+        self.assertEqual(len(persisted), 1)
+        self.assertIs(persisted[0]["transaction"], connection.transaction_obj)
+        self.assertIn("CASE-WITHDRAW-UOW", persisted[0]["changed_case_ids"])
+        self.assertTrue(writer.calls)
+        self.assertIs(writer.calls[0]["transaction"], connection.transaction_obj)
+        self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-WITHDRAW-UOW"))
 
     def test_stale_withdraw_preview_withdraws_current_relation_and_restores_previous_relation(self) -> None:
         app = self._build_app()

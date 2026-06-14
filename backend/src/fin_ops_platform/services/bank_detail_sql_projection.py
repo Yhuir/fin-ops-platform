@@ -17,6 +17,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 from fin_ops_platform.services.postgres_repositories.common import decimal_text, int_value, text, text_list
 from fin_ops_platform.services.postgres_repositories.read_models import BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, PostgresReadModelRepository
 from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
+from fin_ops_platform.services.workbench_row_identity import looks_like_invoice_workbench_row_id
 
 PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 SUMMARY_TEXT_LABELS = ("摘要",)
@@ -668,7 +669,7 @@ def _looks_like_oa_row(row_id: str) -> bool:
 
 
 def _looks_like_invoice_row(row_id: str) -> bool:
-    return str(row_id).startswith(("iv-", "iv_", "invoice-", "invoice_"))
+    return looks_like_invoice_workbench_row_id(row_id)
 
 
 def _relation_has_row_type(row_types: list[str], expected: str) -> bool:

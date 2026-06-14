@@ -51,7 +51,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="税金抵扣",
         route="/tax-offset",
         read_model_keys=("tax_offset", "invoice_lifecycle"),
-        worker_instances=("cost-tax", "invoice-lifecycle"),
+        worker_instances=("tax-offset", "invoice-lifecycle", "invoice-lifecycle-secondary"),
         job_types=("tax_offset.read_model.refresh", "invoice_lifecycle.read_model.refresh", "tax_certified_import"),
     ),
     AppStatusDomainDefinition(
@@ -59,7 +59,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="成本统计",
         route="/cost-statistics",
         read_model_keys=("cost_statistics",),
-        worker_instances=("cost-tax",),
+        worker_instances=("cost-statistics",),
         job_types=("cost_statistics.read_model.refresh", "cost_statistics_cache_warmup"),
     ),
     AppStatusDomainDefinition(
@@ -75,7 +75,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="待找发票",
         route="/pending-invoices",
         read_model_keys=("pending_invoice", "search", "invoice_lifecycle"),
-        worker_instances=("search-pending", "invoice-lifecycle"),
+        worker_instances=("pending-invoice", "search", "invoice-lifecycle", "invoice-lifecycle-secondary"),
         job_types=("pending_invoice.read_model.refresh", "search.read_model.refresh", "invoice_lifecycle.read_model.refresh"),
     ),
     AppStatusDomainDefinition(
@@ -83,7 +83,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="进项发票使用",
         route="/input-invoice-usage",
         read_model_keys=("input_invoice_usage", "invoice_lifecycle"),
-        worker_instances=("invoice-usage-collection", "invoice-lifecycle"),
+        worker_instances=("invoice-usage-collection", "invoice-lifecycle", "invoice-lifecycle-secondary"),
         job_types=("input_invoice_usage.read_model.refresh", "invoice_lifecycle.read_model.refresh"),
     ),
     AppStatusDomainDefinition(
@@ -91,7 +91,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="OA待付款核对",
         route="/oa-pending-payments",
         read_model_keys=("oa_pending_payment", "invoice_lifecycle"),
-        worker_instances=("invoice-usage-collection", "invoice-lifecycle", "oa-sync"),
+        worker_instances=("invoice-usage-collection", "invoice-lifecycle", "invoice-lifecycle-secondary", "oa-sync"),
         job_types=("oa_pending_payment.read_model.refresh", "invoice_lifecycle.read_model.refresh", "oa.sync"),
         dependencies=("oa_sync",),
     ),
@@ -100,7 +100,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="销项收款",
         route="/output-invoice-collections",
         read_model_keys=("output_invoice_collection", "invoice_lifecycle"),
-        worker_instances=("invoice-usage-collection", "invoice-lifecycle"),
+        worker_instances=("invoice-usage-collection", "invoice-lifecycle", "invoice-lifecycle-secondary"),
         job_types=("output_invoice_collection.read_model.refresh", "invoice_lifecycle.read_model.refresh"),
     ),
     AppStatusDomainDefinition(

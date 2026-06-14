@@ -6,6 +6,14 @@ export type AppStatusOverall = {
   color: AppStatusColor;
   reason: string;
   blocksMutations: boolean;
+  writeSafety: AppStatusWriteSafety;
+};
+
+export type AppStatusWriteSafety = {
+  status: string;
+  reason: string;
+  blocksMutations: boolean;
+  blockers: string[];
 };
 
 export type AppStatusDomain = {

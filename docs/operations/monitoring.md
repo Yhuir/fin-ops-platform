@@ -25,7 +25,7 @@
 - `job.outbox_events` failed/dead_lettered 数量非零且持续增加。
 - `job.read_model_dirty_scopes` 长时间处于 pending、processing 或 failed。
 - `worker_heartbeat_lag_seconds` 持续超过 worker poll interval 与任务超时阈值。
-- `missing_required_worker_count > 0` 或 `stale_required_worker_count > 0`。required worker 清单来自 `runtime_worker_registry`；例如 `search-pending-read-model` 缺失会导致搜索/待找发票 read model 长时间 refreshing。
+- `missing_required_worker_count > 0` 或 `stale_required_worker_count > 0`。required worker 清单来自 `runtime_worker_registry`；例如 `search` / `pending-invoice` worker 缺失会导致搜索或待找发票 read model 长时间 refreshing。
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
 - `read_model_refresh_enqueue_to_fresh_ms.p95/p99` 持续升高。该指标从 durable outbox `created_at -> processed_at` 计算，表示真实 enqueue-to-fresh latency，不等同于单次 worker handler duration。
 - `/api/workbench/summary` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
@@ -443,7 +443,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 - `/api/workbench/groups/detail?...&group_id=...`：单个 group 的完整详情，按用户动作懒加载。
 - Redis page cache key 必须包含 `detail_level`，避免 summary 和 full payload 互相污染。
 - Redis page cache key 必须随 active generation 变化而失效；如果页面显示旧数据，先看 `active_generation_id/read_model_version/generated_at` 是否变化，再看 Redis hit/miss 和版本 key。
-- `worker-workbench` 发布 active generation 后会预热首屏 `paired/open` page 1 summary 和 Redis version key；如果首个用户仍承担冷启动，按顺序检查 worker 结果中的 `cache_warmup`、Redis `set_text/set_json` 错误、`FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS`、`redis_miss_count` 和 page cache key 的 generation version。
+- `worker-workbench` 默认不把 Redis page-cache warmup 放进 refresh ack 前热路径；页面仍从 fresh SQL read model 读取，API 读路径只在 fresh gate 后写 Redis payload。只有显式设置 `FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED=1` 时才同步预热首屏 `paired/open` page 1 summary 和 Redis version key。若首个用户承担冷启动，按顺序检查 Redis `set_text/set_json` 错误、`FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS`、`redis_miss_count` 和 page cache key 的 generation version。
 - 普通 read model 的 Redis fresh-cache 必须使用 `ReadModelQueryGateway` 的 fresh-gate envelope：`payload` 之外必须有 `fresh_gate.scope_key`、`fresh_gate.read_model_status=fresh`、`fresh_gate.schema_version` 和 `fresh_gate.source_versions`。命中时 gateway 会按当前 expected source versions 校验；旧格式或 source version 不匹配的 payload 只能 fail closed 回 SQL read model，不能被当作 fresh 返回。
 - `/api/workbench/summary` 不应在热路径查询 `app.bank_transactions` 或全量扫描 `read_model.workbench_group_rows` 来修复 counts/diagnostics；summary p95 变慢时先查 `read_model.workbench_summary` active generation 是否缺失，再查 refresh worker 发布失败原因。
 - `read_model.workbench_generations` 中同一 `scope_key` 只能有一个 `status='active'`。如果存在 `building_generation_id` 但页面仍显示旧数据，这是正常刷新中；如果存在 `failed_generation_id`，页面仍读取 active generation，同时运维需要处理 `last_error`。

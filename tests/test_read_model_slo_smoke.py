@@ -69,6 +69,14 @@ class FakeConnection:
                 "row_count": 2,
                 "updated_at": "2026-06-13 10:04:00+08",
             },
+            {
+                "read_model_key": "pending_invoice",
+                "scope_type": "pending_invoice",
+                "scope_key": "expense:all:2026-01",
+                "status": "fresh",
+                "row_count": 8,
+                "updated_at": "2026-06-13 10:05:00+08",
+            },
         ]
         self.workbench_generations = [
             {"scope_key": "all", "row_count": 100, "updated_at": "2026-06-13 10:05:00+08"},
@@ -124,6 +132,105 @@ class FakeQueueRepository:
         )
 
 
+class MissingTurnoverReadinessConnection(FakeConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.readiness_rows = [
+            row
+            for row in self.readiness_rows
+            if str(row.get("read_model_key") or "") != "turnover_ledger"
+        ]
+
+
+class PendingThenFreshConnection(FakeConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.event_fetch_count = 0
+        self.event_processed_at = self.event_created_at + timedelta(milliseconds=850)
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+        self.fetch_one_calls.append((sql, params))
+        normalized = " ".join(sql.lower().split())
+        if "from job.outbox_events" in normalized:
+            self.event_fetch_count += 1
+            if self.event_fetch_count == 1:
+                return {
+                    "event_id": params[0],
+                    "tenant_id": "default",
+                    "event_type": "turnover_ledger.read_model.refresh",
+                    "scope_type": "turnover_ledger",
+                    "scope_key": "all",
+                    "status": "pending",
+                    "source_version": 8,
+                    "created_at": self.event_created_at,
+                    "processed_at": None,
+                    "raw_payload": {},
+                    "last_error": None,
+                }
+            return {
+                "event_id": params[0],
+                "tenant_id": "default",
+                "event_type": "turnover_ledger.read_model.refresh",
+                "scope_type": "turnover_ledger",
+                "scope_key": "all",
+                "status": "done",
+                "source_version": 8,
+                "created_at": self.event_created_at,
+                "processed_at": self.event_processed_at,
+                "raw_payload": {"runtime_result": {"duration_ms": 620}},
+                "last_error": None,
+            }
+        if "from read_model.app_status_readiness" in normalized:
+            if self.event_fetch_count == 1:
+                return {
+                    "status": "failed",
+                    "updated_at": self.event_created_at - timedelta(minutes=1),
+                    "row_count": 0,
+                    "source_versions": {},
+                    "last_error": "bank_detail_read_model_not_fresh",
+                }
+            return {
+                "status": "fresh",
+                "updated_at": self.event_processed_at,
+                "row_count": 16,
+                "source_versions": {"turnover_ledger": 8},
+                "last_error": None,
+            }
+        if "from job.read_model_dirty_scopes" in normalized:
+            return {
+                "status": "pending" if self.event_fetch_count == 1 else "done",
+                "source_version": 8,
+                "updated_at": self.event_processed_at,
+                "last_error": None,
+            }
+        raise AssertionError(sql)
+
+
+class DirtyDoneWithoutReadinessConnection(FakeConnection):
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+        self.fetch_one_calls.append((sql, params))
+        normalized = " ".join(sql.lower().split())
+        if "from job.outbox_events" in normalized:
+            return {
+                "event_id": params[0],
+                "tenant_id": "default",
+                "event_type": "pending_invoice.read_model.refresh",
+                "scope_type": "pending_invoice",
+                "scope_key": "expense:all",
+                "status": "done",
+                "source_version": 9,
+                "created_at": self.event_created_at,
+                "processed_at": self.event_processed_at,
+                "raw_payload": {"runtime_result": {"duration_ms": 27}},
+                "last_error": None,
+            }
+        if "from read_model.app_status_readiness" in normalized:
+            return None
+        if "from job.read_model_dirty_scopes" in normalized:
+            return {"status": "done", "source_version": 9, "updated_at": self.event_processed_at}
+        raise AssertionError(sql)
+
+
 class ReadModelSloSmokeTests(unittest.TestCase):
     def test_dry_run_discovers_direct_scopes_without_enqueueing(self) -> None:
         report = read_model_slo_smoke.run_smoke(
@@ -152,6 +259,32 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertIn("workbench", planned_keys)
         self.assertIn("turnover_ledger", planned_keys)
         self.assertIn("bank_account_balance", planned_keys)
+
+    def test_pending_invoice_smoke_includes_page_first_screen_aggregate_scope(self) -> None:
+        report = read_model_slo_smoke.run_smoke(
+            FakeConnection(),
+            apply=False,
+            read_model_keys=["pending_invoice"],
+        )
+
+        self.assertEqual(report["status"], "dry_run")
+        scopes = {item["scope_key"]: item["source"] for item in report["planned_scopes"]}
+        self.assertEqual(scopes["expense:all:2026-01"], "readiness")
+        self.assertEqual(scopes["expense:all"], "page_first_screen_scope")
+
+    def test_missing_fresh_readiness_still_plans_default_scope_for_selected_read_model(self) -> None:
+        report = read_model_slo_smoke.run_smoke(
+            MissingTurnoverReadinessConnection(),
+            apply=False,
+            read_model_keys=["turnover_ledger"],
+        )
+
+        self.assertEqual(report["status"], "dry_run")
+        self.assertEqual(report["missing_read_model_keys"], [])
+        self.assertEqual(report["planned_scope_count"], 1)
+        self.assertEqual(report["planned_scopes"][0]["read_model_key"], "turnover_ledger")
+        self.assertEqual(report["planned_scopes"][0]["scope_key"], "all")
+        self.assertEqual(report["planned_scopes"][0]["source"], "default_scope")
 
     def test_explicit_key_still_limits_critical_only_selection(self) -> None:
         report = read_model_slo_smoke.run_smoke(
@@ -185,6 +318,48 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(result["readiness_status"], "fresh")
         self.assertEqual(result["enqueue_to_fresh_ms"], 3000.0)
         self.assertEqual(result["handler_duration_ms"], 500.0)
+
+    def test_wait_does_not_fail_on_stale_failed_readiness_while_event_is_pending(self) -> None:
+        connection = PendingThenFreshConnection()
+        with patch.object(read_model_slo_smoke, "sleep", lambda _seconds: None):
+            result = read_model_slo_smoke.wait_for_event_fresh(
+                connection,
+                event_id="event-1",
+                read_model_key="turnover_ledger",
+                scope_type="turnover_ledger",
+                scope_key="all",
+                tenant_id="default",
+                target_ms=5_000,
+                timeout_seconds=5,
+                poll_interval_seconds=0.1,
+            )
+
+        self.assertEqual(result.status, "pass")
+        self.assertEqual(result.event_status, "done")
+        self.assertEqual(result.readiness_status, "fresh")
+        self.assertEqual(result.enqueue_to_fresh_ms, 850.0)
+        self.assertEqual(result.handler_duration_ms, 620.0)
+        self.assertIsNone(result.error)
+
+    def test_page_first_scope_can_pass_when_dirty_done_but_app_status_readiness_is_absent(self) -> None:
+        result = read_model_slo_smoke.wait_for_event_fresh(
+            DirtyDoneWithoutReadinessConnection(),
+            event_id="event-1",
+            read_model_key="pending_invoice",
+            scope_type="pending_invoice",
+            scope_key="expense:all",
+            tenant_id="default",
+            target_ms=5_000,
+            timeout_seconds=5,
+            poll_interval_seconds=0.1,
+            allow_dirty_done_without_readiness=True,
+        )
+
+        self.assertEqual(result.status, "pass")
+        self.assertEqual(result.event_status, "done")
+        self.assertEqual(result.dirty_status, "done")
+        self.assertEqual(result.readiness_status, "dirty_done")
+        self.assertEqual(result.handler_duration_ms, 27.0)
 
     def test_apply_fails_when_enqueue_to_fresh_exceeds_target(self) -> None:
         connection = FakeConnection()

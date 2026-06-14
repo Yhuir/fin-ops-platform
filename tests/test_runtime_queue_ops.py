@@ -48,10 +48,60 @@ class FakeRuntimeQueueRepository:
     def __init__(self, resolved: bool = True) -> None:
         self.resolved = resolved
         self.resolve_calls: list[tuple[str, str]] = []
+        self.release_stale_calls: list[dict[str, object]] = []
+        self.resolve_superseded_calls: list[dict[str, object]] = []
 
     def resolve_dead_letter_event(self, event_id: str, *, reason: str = "operator_resolved") -> bool:
         self.resolve_calls.append((event_id, reason))
         return self.resolved
+
+    def release_stale_processing_events(
+        self,
+        *,
+        stale_after_seconds: int,
+        limit: int = 100,
+        reason: str = "operator_stale_processing_release",
+        event_types=(),
+    ):
+        self.release_stale_calls.append(
+            {
+                "stale_after_seconds": stale_after_seconds,
+                "limit": limit,
+                "reason": reason,
+                "event_types": tuple(event_types),
+            }
+        )
+        return [
+            {
+                "event_id": "00000000-0000-0000-0000-000000000001",
+                "event_type": "bank_detail.read_model.refresh",
+                "status": "pending",
+            }
+        ]
+
+    def resolve_superseded_processing_events(
+        self,
+        *,
+        stale_after_seconds: int,
+        limit: int = 100,
+        reason: str = "operator_superseded_processing_resolution",
+        event_types=(),
+    ):
+        self.resolve_superseded_calls.append(
+            {
+                "stale_after_seconds": stale_after_seconds,
+                "limit": limit,
+                "reason": reason,
+                "event_types": tuple(event_types),
+            }
+        )
+        return [
+            {
+                "event_id": "00000000-0000-0000-0000-000000000001",
+                "event_type": "bank_detail.read_model.refresh",
+                "status": "done",
+            }
+        ]
 
 
 class RuntimeQueueOpsTests(unittest.TestCase):
@@ -106,6 +156,155 @@ class RuntimeQueueOpsTests(unittest.TestCase):
         self.assertIn("publish_status = 'unpublished'", normalized_sql)
         self.assertIn("next_publish_at = now()", normalized_sql)
         self.assertEqual(params, (["00000000-0000-0000-0000-000000000001"],))
+
+    def test_release_stale_processing_dry_run_lists_candidates_without_update(self) -> None:
+        connection = FakeConnection(
+            fetch_all_rows=[
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000001",
+                    "event_type": "bank_detail.read_model.refresh",
+                    "status": "processing",
+                    "locked_age_seconds": 600,
+                }
+            ]
+        )
+        repository = FakeRuntimeQueueRepository()
+
+        result = runtime_queue_ops._release_stale_processing(
+            connection,
+            repository,  # type: ignore[arg-type]
+            stale_after_seconds=300,
+            limit=25,
+            event_types=["bank_detail.read_model.refresh"],
+            reason="rabbitmq_stale_processing_repair",
+            execute=False,
+        )
+
+        self.assertEqual(result["mode"], "dry-run")
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["released_count"], 0)
+        self.assertEqual(repository.release_stale_calls, [])
+        sql, params = connection.fetch_all_calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("status = 'processing'", normalized_sql)
+        self.assertIn("locked_at < now() - (%s * interval '1 second')", normalized_sql)
+        self.assertIn("stale.event_type = any(%s)", normalized_sql)
+        self.assertIn("dedupe_rank = 1", normalized_sql)
+        self.assertEqual(params, (300, ["bank_detail.read_model.refresh"], 25))
+
+    def test_release_stale_processing_execute_uses_repository_boundary(self) -> None:
+        connection = FakeConnection(
+            fetch_all_rows=[
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000001",
+                    "event_type": "bank_detail.read_model.refresh",
+                    "status": "processing",
+                    "locked_age_seconds": 600,
+                }
+            ]
+        )
+        repository = FakeRuntimeQueueRepository()
+
+        result = runtime_queue_ops._release_stale_processing(
+            connection,
+            repository,  # type: ignore[arg-type]
+            stale_after_seconds=300,
+            limit=25,
+            event_types=["bank_detail.read_model.refresh"],
+            reason="rabbitmq_stale_processing_repair",
+            execute=True,
+        )
+
+        self.assertEqual(result["mode"], "execute")
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["released_count"], 1)
+        self.assertEqual(
+            repository.release_stale_calls,
+            [
+                {
+                    "stale_after_seconds": 300,
+                    "limit": 25,
+                    "reason": "rabbitmq_stale_processing_repair",
+                    "event_types": ("bank_detail.read_model.refresh",),
+                }
+            ],
+        )
+
+    def test_resolve_superseded_processing_dry_run_lists_candidates_without_update(self) -> None:
+        connection = FakeConnection(
+            fetch_all_rows=[
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000001",
+                    "event_type": "bank_detail.read_model.refresh",
+                    "status": "processing",
+                    "locked_age_seconds": 600,
+                    "covered_by_event_id": "00000000-0000-0000-0000-000000000002",
+                    "covered_by_status": "pending",
+                }
+            ]
+        )
+        repository = FakeRuntimeQueueRepository()
+
+        result = runtime_queue_ops._resolve_superseded_processing(
+            connection,
+            repository,  # type: ignore[arg-type]
+            stale_after_seconds=300,
+            limit=25,
+            event_types=["bank_detail.read_model.refresh"],
+            reason="rabbitmq_stale_processing_superseded",
+            execute=False,
+        )
+
+        self.assertEqual(result["mode"], "dry-run")
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["resolved_count"], 0)
+        self.assertEqual(repository.resolve_superseded_calls, [])
+        sql, params = connection.fetch_all_calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("join lateral", normalized_sql)
+        self.assertIn("newer.status in ('pending', 'processing', 'done')", normalized_sql)
+        self.assertIn("stale.event_type = any(%s)", normalized_sql)
+        self.assertEqual(params, (300, ["bank_detail.read_model.refresh"], 25))
+
+    def test_resolve_superseded_processing_execute_uses_repository_boundary(self) -> None:
+        connection = FakeConnection(
+            fetch_all_rows=[
+                {
+                    "event_id": "00000000-0000-0000-0000-000000000001",
+                    "event_type": "bank_detail.read_model.refresh",
+                    "status": "processing",
+                    "locked_age_seconds": 600,
+                    "covered_by_event_id": "00000000-0000-0000-0000-000000000002",
+                    "covered_by_status": "pending",
+                }
+            ]
+        )
+        repository = FakeRuntimeQueueRepository()
+
+        result = runtime_queue_ops._resolve_superseded_processing(
+            connection,
+            repository,  # type: ignore[arg-type]
+            stale_after_seconds=300,
+            limit=25,
+            event_types=["bank_detail.read_model.refresh"],
+            reason="rabbitmq_stale_processing_superseded",
+            execute=True,
+        )
+
+        self.assertEqual(result["mode"], "execute")
+        self.assertEqual(result["candidate_count"], 1)
+        self.assertEqual(result["resolved_count"], 1)
+        self.assertEqual(
+            repository.resolve_superseded_calls,
+            [
+                {
+                    "stale_after_seconds": 300,
+                    "limit": 25,
+                    "reason": "rabbitmq_stale_processing_superseded",
+                    "event_types": ("bank_detail.read_model.refresh",),
+                }
+            ],
+        )
 
     def test_set_control_flag_writes_app_settings_control_key(self) -> None:
         connection = FakeConnection()

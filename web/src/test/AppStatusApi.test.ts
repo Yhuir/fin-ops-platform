@@ -81,6 +81,37 @@ describe("app status API mapper", () => {
     })).toBeNull();
   });
 
+  test("maps write safety as the mutation gate separately from overall level", () => {
+    const mapped = mapAppStatusOverview({
+      version: 1,
+      generated_at: "2026-06-04T10:00:00+08:00",
+      overall: {
+        level: "blocked",
+        color: "red",
+        reason: "银行明细不可用",
+        blocks_mutations: true,
+        write_safety: {
+          status: "ready",
+          reason: "写操作可用",
+          blocks_mutations: false,
+          blockers: [],
+        },
+      },
+      domains: [],
+      background_tasks: [],
+      alerts: [],
+    });
+
+    expect(mapped?.overall.level).toBe("blocked");
+    expect(mapped?.overall.blocksMutations).toBe(false);
+    expect(mapped?.overall.writeSafety).toEqual({
+      status: "ready",
+      reason: "写操作可用",
+      blocksMutations: false,
+      blockers: [],
+    });
+  });
+
   test("maps read model scope diagnostics for app status domains", () => {
     const mapped = mapAppStatusOverview({
       version: 1,

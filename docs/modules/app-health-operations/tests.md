@@ -47,7 +47,7 @@
 ## 关键 smoke flows
 
 - dirty scope/outbox pending -> `/api/app-health` busy/yellow -> App Status popover 显示受影响 domain。
-- critical read model failed/unavailable -> App Status blocked/red -> 页面不能把旧数据当 fresh。
+- critical read model failed/unavailable -> App Status blocked/red -> 页面不能把旧数据当 fresh，但普通 read model failure 不应让 `overall.write_safety.blocks_mutations=true`。
 - legacy cost statistics scope 或已被后续真实完成事实覆盖的 outbox failure -> App Status 保持当前 canonical 状态，同时通过历史诊断暴露 repair/audit 信息。
 - required worker missing/stale/mismatch -> runtime infrastructure warning -> App Health dashboard 和 App Status domain 可定位。
 - import/data reset/background job running -> active background task -> App Status 显示任务进度和 affected domains。

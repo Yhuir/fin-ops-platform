@@ -315,6 +315,10 @@ def build_deploy_control_contract_check() -> str:
             "      printf '%s\\n' 'deploy-control helper does not tolerate non-ready worker readiness polls under set -e; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
             "      exit 68",
             "    fi",
+            "    if ! grep -q -- '--dependency-not-fresh-delay-seconds' \"$DEPLOY_CONTROL\"; then",
+            "      printf '%s\\n' 'deploy-control helper does not preserve worker dependency-not-fresh delay in release drop-ins; install deploy/oa/bin/finops-deploy-control.sh before activating releases' >&2",
+            "      exit 68",
+            "    fi",
             "  fi",
             "}",
             "verify_finops_deploy_control_contract",
@@ -490,11 +494,7 @@ def build_ssh_base_command(config: DeploymentConfig) -> list[str]:
         "-o",
         "StrictHostKeyChecking=accept-new",
         "-o",
-        "ControlMaster=auto",
-        "-o",
-        "ControlPersist=600",
-        "-o",
-        "ControlPath=~/.ssh/fin_ops_mux_%r_%h_%p",
+        "ControlMaster=no",
         f"{config.user}@{config.host}",
     ]
 

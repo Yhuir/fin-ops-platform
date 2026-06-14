@@ -98,7 +98,7 @@ Refresh 触发来源：
 
 失败恢复：
 
-1. 先看 `/api/app-health.app_status` 中 `pending_invoice` 和 `search` read model scopes、dirty scopes、outbox 和 `search-pending` worker。
+1. 先看 `/api/app-health.app_status` 中 `pending_invoice` 和 `search` read model scopes、dirty scopes、outbox，以及 `pending-invoice` / `search` worker；旧 `search-pending` 只是兼容消费者。
 2. 对 rule version conflict，让页面重新读取规则 payload，再基于新 version 保存。
 3. 对 manual/attach command 中断，优先用 command log 重试恢复，不手工删除已创建发票或 relation。
 4. 对 bank tag source mismatch，先确认 bank detail read model freshness，再重跑 pending scope。

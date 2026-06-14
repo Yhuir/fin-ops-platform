@@ -223,6 +223,44 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertTrue(workbench_relation_calls)
         self.assertEqual(workbench_relation_calls[0].get("metadata"), {"action_name": "withdraw_link"})
 
+    def test_pair_relation_lifecycle_metadata_limits_downstream_refreshes(self) -> None:
+        app = build_application()
+        queue = RecordingReadModelQueue()
+        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
+        app._workbench_reconciliation_dirty_queue = RecordingDirtyQueue()
+
+        app._execute_derived_data_lifecycle_event(
+            "pair_relation_changed",
+            scope_keys=["2026-05"],
+            include_all=False,
+            metadata={
+                "action_name": "withdraw_link",
+                "downstream_scope_types": [
+                    "bank_detail",
+                    "workbench_relation",
+                    "invoice_lifecycle",
+                    "pending_invoice",
+                    "input_invoice_usage",
+                    "search",
+                ],
+                "invoice_usage_scope_types": ["input_invoice_usage"],
+                "pending_invoice_scope_keys": ["expense:all:2026-05"],
+            },
+            schedule_cost_warmup=False,
+        )
+
+        refreshes = [(call.get("scope_type"), call.get("scope_key")) for call in queue.calls]
+        self.assertIn(("bank_detail", "2026-05"), refreshes)
+        self.assertIn(("workbench_relation", "2026-05"), refreshes)
+        self.assertIn(("invoice_lifecycle", "2026-05"), refreshes)
+        self.assertIn(("pending_invoice", "expense:all:2026-05"), refreshes)
+        self.assertIn(("input_invoice_usage", "2026-05"), refreshes)
+        self.assertIn(("search", "2026-05"), refreshes)
+        self.assertNotIn(("output_invoice_collection", "2026-05"), refreshes)
+        self.assertNotIn(("oa_pending_payment", "2026-05"), refreshes)
+        self.assertFalse(any(scope_type == "cost_statistics" for scope_type, _scope_key in refreshes))
+        self.assertFalse(any(scope_type == "tax_offset" for scope_type, _scope_key in refreshes))
+
     def test_dirty_scope_worker_claims_db_queue_and_completes_with_lease_identity(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue(claim_months=["2026-05"])

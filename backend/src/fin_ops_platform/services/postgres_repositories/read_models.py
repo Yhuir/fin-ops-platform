@@ -72,7 +72,10 @@ def _execute_many(connection: Any, sql: str, params_seq: list[tuple[Any, ...]]) 
 
 def _should_execute_many_values(sql: str) -> bool:
     normalized = " ".join(str(sql or "").lower().split())
-    return "insert into read_model.workbench_group_rows" in normalized
+    return (
+        "insert into read_model.workbench_group_rows" in normalized
+        or "insert into read_model.search_index_rows" in normalized
+    )
 
 
 WORKBENCH_ALLOWED_FILTER_COLUMNS = {
@@ -286,50 +289,57 @@ class PostgresReadModelRepository:
         def write(connection: Any) -> None:
             if scope_month is not None:
                 connection.execute("delete from read_model.search_index_rows where scope_month = %s::date", (scope_month,))
+            params_by_row_id: dict[str, tuple[Any, ...]] = {}
             for row in list(rows or []):
                 row_payload = dict(row) if isinstance(row, dict) else {}
                 row_payload["source_versions"] = normalized_source_versions
                 payload = serialize_value(row_payload.get("payload") if isinstance(row_payload.get("payload"), dict) else row_payload)
-                connection.execute(
-                    """
-                    insert into read_model.search_index_rows(
-                        row_id, source_kind, scope_month, status, title, subtitle, searchable_text,
-                        project_name, counterparty_name, amount, source_versions, generated_at, payload, raw_payload
-                    )
-                    values (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
-                    on conflict (row_id) do update set
-                        source_kind = excluded.source_kind,
-                        scope_month = excluded.scope_month,
-                        status = excluded.status,
-                        title = excluded.title,
-                        subtitle = excluded.subtitle,
-                        searchable_text = excluded.searchable_text,
-                        project_name = excluded.project_name,
-                        counterparty_name = excluded.counterparty_name,
-                        amount = excluded.amount,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        text(row_payload.get("row_id") or payload.get("row_id")),
-                        text(row_payload.get("source_kind") or payload.get("record_type")),
-                        scope_month or month_start(payload.get("month")),
-                        text(row_payload.get("status") or payload.get("zone_hint")),
-                        text(row_payload.get("title") or payload.get("title")),
-                        text(row_payload.get("subtitle") or payload.get("secondary_meta")),
-                        text(row_payload.get("searchable_text")),
-                        text(row_payload.get("project_name")),
-                        text(row_payload.get("counterparty_name")),
-                        decimal_text(row_payload.get("amount")),
-                        jsonb(normalized_source_versions),
-                        text(row_payload.get("generated_at")),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
-                    ),
+                row_id = text(row_payload.get("row_id") or payload.get("row_id"))
+                if not row_id:
+                    continue
+                params_by_row_id[row_id] = (
+                    row_id,
+                    text(row_payload.get("source_kind") or payload.get("record_type")),
+                    scope_month or month_start(payload.get("month")),
+                    text(row_payload.get("status") or payload.get("zone_hint")),
+                    text(row_payload.get("title") or payload.get("title")),
+                    text(row_payload.get("subtitle") or payload.get("secondary_meta")),
+                    text(row_payload.get("searchable_text")),
+                    text(row_payload.get("project_name")),
+                    text(row_payload.get("counterparty_name")),
+                    decimal_text(row_payload.get("amount")),
+                    jsonb(normalized_source_versions),
+                    text(row_payload.get("generated_at")),
+                    jsonb(payload),
+                    jsonb({"normalized_payload": payload}),
                 )
+            params_seq = list(params_by_row_id.values())
+            _execute_many(
+                connection,
+                """
+                insert into read_model.search_index_rows(
+                    row_id, source_kind, scope_month, status, title, subtitle, searchable_text,
+                    project_name, counterparty_name, amount, source_versions, generated_at, payload, raw_payload
+                )
+                values (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s)
+                on conflict (row_id) do update set
+                    source_kind = excluded.source_kind,
+                    scope_month = excluded.scope_month,
+                    status = excluded.status,
+                    title = excluded.title,
+                    subtitle = excluded.subtitle,
+                    searchable_text = excluded.searchable_text,
+                    project_name = excluded.project_name,
+                    counterparty_name = excluded.counterparty_name,
+                    amount = excluded.amount,
+                    source_versions = excluded.source_versions,
+                    generated_at = excluded.generated_at,
+                    payload = excluded.payload,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                """,
+                params_seq,
+            )
 
         run_in_transaction(self._connection, write)
 

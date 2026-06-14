@@ -5,6 +5,7 @@ import json
 import unittest
 
 from fin_ops_platform.tools import run_rabbitmq_staging_preflight as preflight
+from fin_ops_platform.services.runtime_worker_registry import worker_registrations
 
 
 class FakeRunner(preflight.CommandRunner):
@@ -44,27 +45,20 @@ class RabbitMqStagingPreflightTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         report = json.loads(stdout.getvalue())
         self.assertEqual(report["status"], "pass")
+        worker_check_names = [
+            f"rabbitmq.consumer_worker_check.{registration.instance_name.replace('-', '_')}"
+            for registration in worker_registrations(required_only=True, rabbitmq_eligible_only=True)
+        ]
         self.assertEqual([check["name"] for check in report["checks"]], [
             "env.required",
             "postgres.integration",
             "rabbitmq.integration",
             "rabbitmq.topology_check",
             "rabbitmq.dispatcher_shadow_check",
-            "rabbitmq.consumer_worker_check.oa_sync",
-            "rabbitmq.consumer_worker_check.workbench",
-            "rabbitmq.consumer_worker_check.workbench_relation",
-            "rabbitmq.consumer_worker_check.bank_detail",
-            "rabbitmq.consumer_worker_check.turnover_ledger",
-            "rabbitmq.consumer_worker_check.search_pending",
-            "rabbitmq.consumer_worker_check.invoice_lifecycle",
-            "rabbitmq.consumer_worker_check.invoice_usage_collection",
-            "rabbitmq.consumer_worker_check.cost_tax",
-            "rabbitmq.consumer_worker_check.import",
-            "rabbitmq.consumer_worker_check.no_oa_bank_batch",
-            "rabbitmq.consumer_worker_check.bank_account_balance",
+            *worker_check_names,
         ])
         self.assertEqual(report["include_optional_workers"], False)
-        self.assertEqual(len(runner.calls), 16)
+        self.assertEqual(len(runner.calls), 4 + len(worker_check_names))
         dispatcher_env = runner.calls[3][1]
         self.assertEqual(dispatcher_env["FIN_OPS_QUEUE_BACKEND"], "postgres")
         self.assertEqual(dispatcher_env["RABBITMQ_SHADOW_PUBLISH"], "true")

@@ -90,14 +90,15 @@ class WorkbenchWriteUnitOfWork:
             result = dict(handler_result)
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
+            action_name = str(getattr(command, "action_name", "") or "")
+            metadata = _refresh_metadata_for(command, action_name)
             for scope_key in _scope_keys_for(command, result):
-                action_name = str(getattr(command, "action_name", "") or "")
                 event = self._read_model_refresh_writer.enqueue_refresh(
                     transaction=transaction,
                     scope_type="workbench",
                     scope_key=scope_key,
                     reason=action_name,
-                    metadata={"action_name": action_name} if action_name else None,
+                    metadata=dict(metadata) if metadata is not None else None,
                 )
                 source_versions[scope_key] = _event_value(event, "source_version")
                 outbox_event_ids.append(_event_value(event, "event_id"))
@@ -177,6 +178,14 @@ def _scope_keys_for(command: Any, handler_result: dict[str, Any]) -> list[str]:
         seen.add(scope_key)
         scope_keys.append(scope_key)
     return scope_keys
+
+
+def _refresh_metadata_for(command: Any, action_name: str) -> dict[str, object] | None:
+    raw_metadata = getattr(command, "refresh_metadata", None)
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    if action_name:
+        metadata["action_name"] = action_name
+    return metadata or None
 
 
 def _event_value(event: Any, name: str) -> Any:

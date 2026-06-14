@@ -33,6 +33,7 @@ from fin_ops_platform.services.pending_invoice_relation_identity import (
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 PENDING_INVOICE_RELATION_MODE = "pending_invoice_manual_invoice"
@@ -3288,23 +3289,7 @@ def _relation_dict_is_linked(relation: dict[str, Any] | None) -> bool:
 
 
 def _row_type_for_relation_row_id(row_id: str) -> str:
-    lowered_row_id = str(row_id).strip().lower()
-    if lowered_row_id.startswith("oa-att-inv-"):
-        return "invoice"
-    if lowered_row_id.startswith("oa-"):
-        return "oa"
-    if (
-        lowered_row_id.startswith("bk-")
-        or lowered_row_id.startswith("txn-")
-        or lowered_row_id.startswith("txn_")
-        or lowered_row_id.startswith("bank-")
-    ):
-        return "bank"
-    if lowered_row_id.startswith("iv-") or lowered_row_id.startswith("invoice-"):
-        return "invoice"
-    if lowered_row_id.startswith("etc-summary-"):
-        return "invoice"
-    return "unknown"
+    return row_type_for_workbench_row_id(row_id)
 
 
 def _decimal_to_str(value: Decimal | None) -> str:

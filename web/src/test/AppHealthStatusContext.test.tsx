@@ -116,14 +116,16 @@ function emitSseError() {
 }
 
 const { fetchAppHealth } = await import("../features/appHealth/api");
-const { AppHealthStatusProvider, useAppHealthStatus } = await import("../contexts/AppHealthStatusContext");
+const { AppHealthStatusProvider, useAppHealthStatus, useCanMutateWithHealth } = await import("../contexts/AppHealthStatusContext");
 
 function StatusProbe() {
   const healthStatus = useAppHealthStatus();
+  const canMutateWithHealth = useCanMutateWithHealth();
   return (
     <output
       aria-label="health"
       data-blocks={String(healthStatus.blocksMutations)}
+      data-can-mutate={String(canMutateWithHealth)}
       data-level={healthStatus.level}
       data-reason={healthStatus.reason}
     >
@@ -226,6 +228,59 @@ describe("AppHealthStatusProvider", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
       expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "有 1 个失败导入任务需要确认");
+    });
+  });
+
+  it("does not block mutations when app status is blocked only by read freshness", async () => {
+    mocked.appHealth = {
+      status: "blocked",
+      session: { status: "authenticated" },
+      oa_sync: { status: "synced", message: "OA 已同步", dirty_scopes: [] },
+      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
+      app_status: {
+        version: 1,
+        generated_at: "2026-06-13T17:30:00+08:00",
+        overall: {
+          level: "blocked",
+          color: "red",
+          reason: "银行明细不可用",
+          blocks_mutations: false,
+          write_safety: {
+            status: "ready",
+            reason: "写操作可用",
+            blocks_mutations: false,
+            blockers: [],
+          },
+        },
+        domains: [
+          {
+            key: "bank_details",
+            label: "银行明细",
+            route: "/bank-details",
+            level: "blocked",
+            status: "failed",
+            reason: "银行明细不可用",
+            details: ["projection failed"],
+            read_models: ["bank_detail"],
+            read_model_scopes: [],
+            workers: ["bank-detail"],
+            job_ids: [],
+            updated_at: "2026-06-13T17:30:00+08:00",
+          },
+        ],
+        background_tasks: [],
+        alerts: [],
+      },
+    };
+
+    renderProbe();
+
+    await waitFor(() => {
+      const status = screen.getByLabelText("health");
+      expect(status).toHaveAttribute("data-level", "blocked");
+      expect(status).toHaveAttribute("data-blocks", "false");
+      expect(status).toHaveAttribute("data-can-mutate", "true");
     });
   });
 

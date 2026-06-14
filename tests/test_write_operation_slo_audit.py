@@ -187,17 +187,15 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
     def test_workbench_relation_withdraw_profile_requires_cross_page_refresh_scopes(self) -> None:
         rows = [
-            _event(scope_type="workbench", reason="workbench_scope_invalidated", action_name="withdraw_link"),
-            _event(scope_type="bank_detail", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="workbench_relation", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="invoice_lifecycle", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="pending_invoice", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="input_invoice_usage", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="output_invoice_collection", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="oa_pending_payment", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="cost_statistics", reason="pair_relation_changed"),
-            _event(scope_type="search", reason="pair_relation_changed", action_name="withdraw_link"),
-            _event(scope_type="tax_offset", reason="pair_relation_changed"),
+            _event(scope_type="workbench", reason="withdraw_link", action_name="withdraw_link"),
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+            _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
+            _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+            _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
+            _event(scope_type="search", reason="workbench_relation_changed"),
+            _event(scope_type="tax_offset", reason="workbench_relation_changed"),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -207,7 +205,79 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 11)
+        self.assertEqual(report["expectation_count"], 9)
+
+    def test_workbench_relation_confirm_profile_requires_canonical_relation_and_downstream_scopes(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="confirm_link", action_name="confirm_link"),
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+            _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
+            _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+            _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
+            _event(scope_type="search", reason="workbench_relation_changed"),
+            _event(scope_type="tax_offset", reason="workbench_relation_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["workbench_relation_confirm"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 9)
+
+    def test_workbench_relation_bank_invoice_profile_excludes_cost_statistics(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="confirm_link", action_name="confirm_link"),
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+            _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
+            _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+            _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="search", reason="workbench_relation_changed"),
+            _event(scope_type="tax_offset", reason="workbench_relation_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["workbench_relation_confirm_bank_invoice"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 8)
+        self.assertNotIn(
+            "cost_statistics",
+            {result["scope_type"] for result in report["results"]},
+        )
+
+    def test_workbench_relation_bank_invoice_withdraw_profile_excludes_cost_statistics(self) -> None:
+        rows = [
+            _event(scope_type="workbench", reason="withdraw_link", action_name="withdraw_link"),
+            _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+            _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+            _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
+            _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+            _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="search", reason="workbench_relation_changed"),
+            _event(scope_type="tax_offset", reason="workbench_relation_changed"),
+        ]
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["workbench_relation_withdraw_bank_invoice"],
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["expectation_count"], 8)
+        self.assertNotIn(
+            "cost_statistics",
+            {result["scope_type"] for result in report["results"]},
+        )
 
     def test_no_oa_withdraw_profile_requires_no_oa_and_cross_page_refresh_scopes(self) -> None:
         rows = [
@@ -253,6 +323,35 @@ class WriteOperationSloAuditTests(unittest.TestCase):
                 FakeConnection([]),
                 operations=["does_not_exist"],
             )
+
+    def test_since_filter_uses_explicit_event_created_lower_bound(self) -> None:
+        since = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
+        connection = FakeConnection(
+            [
+                _event(scope_type="workbench", reason="confirm_link", action_name="confirm_link"),
+                _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
+                _event(scope_type="bank_detail", reason="workbench_relation_changed"),
+                _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
+                _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
+                _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+                _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
+                _event(scope_type="search", reason="workbench_relation_changed"),
+                _event(scope_type="tax_offset", reason="workbench_relation_changed"),
+            ]
+        )
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            connection,
+            operations=["workbench_relation_confirm"],
+            since=since,
+            target_ms=5_000,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["since"], since.isoformat())
+        sql, params = connection.fetch_all_calls[0]
+        self.assertIn("e.created_at >= %s", sql)
+        self.assertEqual(params, ("default", since, 2000))
 
 
 if __name__ == "__main__":

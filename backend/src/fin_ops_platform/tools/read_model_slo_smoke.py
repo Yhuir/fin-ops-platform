@@ -24,6 +24,9 @@ DEFAULT_TARGET_MS = 5_000.0
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
+PAGE_FIRST_SCREEN_SCOPE_KEYS: dict[str, tuple[str, ...]] = {
+    "pending_invoice": ("expense:all",),
+}
 
 
 @dataclass(frozen=True)
@@ -195,6 +198,7 @@ def run_smoke(
                         target_ms=target_ms,
                         timeout_seconds=timeout_seconds,
                         poll_interval_seconds=poll_interval_seconds,
+                        allow_dirty_done_without_readiness=scope.source == "page_first_screen_scope",
                     )
                 )
         except Exception as exc:
@@ -261,18 +265,35 @@ def discover_smoke_scopes(
             chosen = _choose_direct_scope(workbench_generations) or _choose_direct_scope(readiness.get(key, []))
         else:
             chosen = _choose_direct_scope(readiness.get(key, []))
+        planned_for_key: list[dict[str, Any]] = []
         if chosen is None:
-            continue
-        scopes.append(
-            SmokeScope(
-                read_model_key=key,
-                scope_type=definition.scope_type,
-                scope_key=str(chosen.get("scope_key") or ""),
-                source=str(chosen.get("_source") or "readiness"),
-                row_count=_optional_int(chosen.get("row_count")),
-                updated_at=str(chosen.get("updated_at") or "") or None,
-            )
+            chosen = _default_smoke_scope()
+        planned_for_key.append(chosen)
+        planned_for_key.extend(
+            {
+                "scope_key": scope_key,
+                "_source": "page_first_screen_scope",
+                "row_count": None,
+                "updated_at": None,
+            }
+            for scope_key in PAGE_FIRST_SCREEN_SCOPE_KEYS.get(key, ())
         )
+        seen_scope_keys: set[str] = set()
+        for planned in planned_for_key:
+            scope_key = str(planned.get("scope_key") or "")
+            if scope_key in seen_scope_keys:
+                continue
+            seen_scope_keys.add(scope_key)
+            scopes.append(
+                SmokeScope(
+                    read_model_key=key,
+                    scope_type=definition.scope_type,
+                    scope_key=scope_key,
+                    source=str(planned.get("_source") or "readiness"),
+                    row_count=_optional_int(planned.get("row_count")),
+                    updated_at=str(planned.get("updated_at") or "") or None,
+                )
+            )
     return scopes
 
 
@@ -287,6 +308,7 @@ def wait_for_event_fresh(
     target_ms: float,
     timeout_seconds: float,
     poll_interval_seconds: float,
+    allow_dirty_done_without_readiness: bool = False,
 ) -> SmokeEventResult:
     deadline = monotonic() + max(1.0, timeout_seconds)
     last_error = None
@@ -306,7 +328,14 @@ def wait_for_event_fresh(
         source_version = _optional_int((event or {}).get("source_version"))
         enqueue_ms = _duration_ms((event or {}).get("created_at"), (event or {}).get("processed_at"))
         handler_ms = _runtime_handler_duration_ms(event)
-        if event_status == "done" and readiness_status == "fresh":
+        dirty_done_without_readiness = (
+            allow_dirty_done_without_readiness
+            and event_status == "done"
+            and readiness_status is None
+            and dirty_status == "done"
+        )
+        if event_status == "done" and (readiness_status == "fresh" or dirty_done_without_readiness):
+            effective_readiness_status = readiness_status or "dirty_done"
             status = "pass" if enqueue_ms is not None and enqueue_ms <= target_ms else "fail"
             return SmokeEventResult(
                 read_model_key=read_model_key,
@@ -319,12 +348,14 @@ def wait_for_event_fresh(
                 handler_duration_ms=handler_ms,
                 event_status=event_status,
                 dirty_status=dirty_status,
-                readiness_status=readiness_status,
+                readiness_status=effective_readiness_status,
                 source_version=source_version,
                 error=None if status == "pass" else f"enqueue_to_fresh_ms_exceeded_target:{enqueue_ms}>{target_ms}",
             )
-        if event_status in {"failed", "dead_lettered"} or readiness_status in {"failed", "unavailable", "schema_mismatch", "source_mismatch"}:
-            last_error = str((event or {}).get("last_error") or (readiness or {}).get("last_error") or event_status or readiness_status)
+        if readiness_status in {"failed", "unavailable", "schema_mismatch", "source_mismatch"}:
+            last_error = str((readiness or {}).get("last_error") or readiness_status)
+        if event_status in {"failed", "dead_lettered"}:
+            last_error = str((event or {}).get("last_error") or last_error or event_status)
             return SmokeEventResult(
                 read_model_key=read_model_key,
                 scope_type=scope_type,
@@ -378,6 +409,15 @@ def _fresh_readiness_by_key(connection: Any, *, tenant_id: str) -> dict[str, lis
         if key:
             grouped.setdefault(key, []).append(payload)
     return grouped
+
+
+def _default_smoke_scope() -> dict[str, Any]:
+    return {
+        "scope_key": "all",
+        "_source": "default_scope",
+        "row_count": None,
+        "updated_at": None,
+    }
 
 
 def _active_workbench_generations(connection: Any, *, tenant_id: str) -> list[dict[str, Any]]:

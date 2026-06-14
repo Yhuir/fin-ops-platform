@@ -5423,7 +5423,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         schedule_read_model_persist.assert_called_once()
         self.assertCountEqual(
             schedule_read_model_persist.call_args.kwargs["changed_scope_keys"],
-            ["2026-03", "all"],
+            ["2026-03"],
         )
         self.assertIsNone(schedule_read_model_persist.call_args.kwargs["request_id"])
         self.assertEqual(schedule_read_model_persist.call_args.kwargs["action_name"], "confirm_link")

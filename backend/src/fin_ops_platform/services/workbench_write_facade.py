@@ -5,6 +5,7 @@ from decimal import Decimal
 from hashlib import sha256
 from http import HTTPStatus
 import json
+import logging
 from time import monotonic
 from typing import Any, Callable
 
@@ -17,8 +18,25 @@ from fin_ops_platform.services.workbench_idempotency import (
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
+
+
+LOGGER = logging.getLogger(__name__)
+_IDEMPOTENCY_FROM_PAYLOAD = object()
+_EXPENSE_PENDING_INVOICE_SCOPE_KEYS = (
+    "expense:all",
+    "expense:requires_invoice",
+    "expense:bank_statement_as_invoice",
+    "expense:no_invoice_required",
+)
+_INCOME_PENDING_INVOICE_SCOPE_KEYS = (
+    "income:all",
+    "income:requires_invoice",
+    "income:no_invoice_required",
+    "income:cash_income",
+)
 
 
 class _WorkbenchWritePersistenceError(RuntimeError):
@@ -61,6 +79,7 @@ class _WorkbenchConfirmLinkCommand:
     expected_versions: dict[str, object] | None = None
     tenant_id: str = "default"
     actor_id: str = "system"
+    refresh_metadata: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +96,22 @@ class _WorkbenchCancelLinkCommand:
     expected_versions: dict[str, object] | None = None
     tenant_id: str = "default"
     actor_id: str = "system"
+
+
+@dataclass(frozen=True)
+class _WorkbenchWithdrawLinkCommand:
+    action_name: str
+    month: str
+    row_ids: list[str]
+    case_id: str
+    scope_keys: list[str]
+    payload: dict[str, object]
+    idempotency_key: str | None = None
+    request_fingerprint: str | None = None
+    expected_versions: dict[str, object] | None = None
+    tenant_id: str = "default"
+    actor_id: str = "system"
+    refresh_metadata: dict[str, object] | None = None
 
 
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
@@ -128,6 +163,7 @@ class WorkbenchWriteFacade:
         emit_action_timing: Callable[..., None],
         confirm_link_uow: Any | None = None,
         cancel_link_uow: Any | None = None,
+        withdraw_link_uow: Any | None = None,
         persist_pair_relations_in_transaction: Callable[..., None] | None = None,
         consume_reconciliation_decisions_in_transaction: Callable[..., int] | None = None,
         bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
@@ -175,6 +211,7 @@ class WorkbenchWriteFacade:
         self._emit_action_timing = emit_action_timing
         self._confirm_link_uow = confirm_link_uow
         self._cancel_link_uow = cancel_link_uow
+        self._withdraw_link_uow = withdraw_link_uow
         self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
         self._consume_reconciliation_decisions_in_transaction = consume_reconciliation_decisions_in_transaction
         self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
@@ -266,7 +303,11 @@ class WorkbenchWriteFacade:
             ),
         )
         previous_pair_snapshot = self._pair_relation_service.snapshot()
-        changed_scope_keys = list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids))
+        changed_scope_keys = [
+            scope_key
+            for scope_key in list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids, month_scope=month))
+            if scope_key != "all"
+        ]
         changed_case_ids = [
             *[str(relation.get("case_id", "")) for relation in before_relations if str(relation.get("case_id", "")).strip()],
             resolved_case_id,
@@ -336,6 +377,7 @@ class WorkbenchWriteFacade:
                 action_name=action_name,
                 changed_scope_keys=changed_scope_keys,
                 metadata={"source": action_name, "case_id": resolved_case_id},
+                include_all=False,
                 request_id=request_id,
                 schedule_started_at=schedule_started_at,
             )
@@ -380,6 +422,16 @@ class WorkbenchWriteFacade:
             payload.get("idempotency_key") or payload.get("request_idempotency_key") or ""
         ).strip() or None
         expected_versions = payload.get("expected_versions") if isinstance(payload.get("expected_versions"), dict) else {}
+        relation_refresh_metadata = self._relation_refresh_metadata(
+            relation={
+                "case_id": resolved_case_id,
+                "row_ids": list(row_ids),
+                "row_types": list(row_types),
+                "month_scope": month,
+            },
+            row_ids=row_ids,
+            month=month,
+        )
         command = _WorkbenchConfirmLinkCommand(
             action_name=action_name,
             month=month,
@@ -391,6 +443,11 @@ class WorkbenchWriteFacade:
             expected_versions=dict(expected_versions),
             tenant_id=_normalize_tenant_id(tenant_id),
             actor_id=_normalize_actor_id(actor_id),
+            refresh_metadata={
+                "source": action_name,
+                "case_id": resolved_case_id,
+                **relation_refresh_metadata,
+            },
         )
 
         def handler(ctx: object) -> dict[str, object]:
@@ -457,7 +514,21 @@ class WorkbenchWriteFacade:
         except WorkbenchWriteConflict as exc:
             conflict_payload = exc.to_response_payload()
             return WorkbenchWriteResult(HTTPStatus(exc.status_code), dict(conflict_payload["payload"]))
+        except WorkbenchRelationCommandError as exc:
+            return self._relation_command_error_result(exc)
         except Exception:
+            LOGGER.exception(
+                "Workbench confirm-link UoW failed.",
+                extra={
+                    "workbench_write": {
+                        "action": action_name,
+                        "case_id": resolved_case_id,
+                        "row_count": len(row_ids),
+                        "scope_count": len(changed_scope_keys),
+                        "request_id": request_id,
+                    }
+                },
+            )
             self._restore_pair_relation_snapshot(
                 previous_pair_snapshot,
                 changed_case_ids=changed_case_ids,
@@ -1080,7 +1151,14 @@ class WorkbenchWriteFacade:
             )
         return WorkbenchWriteResult(HTTPStatus.OK, self._withdraw_relation_preview_payload(preview_relation, month=month))
 
-    def withdraw_link(self, payload: dict[str, object], *, request_id: str | None = None) -> WorkbenchWriteResult:
+    def withdraw_link(
+        self,
+        payload: dict[str, object],
+        *,
+        request_id: str | None = None,
+        actor_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> WorkbenchWriteResult:
         action_name = "withdraw_link"
         try:
             month = str(payload["month"])
@@ -1109,6 +1187,16 @@ class WorkbenchWriteFacade:
                 },
             )
 
+        replayed = self._withdraw_link_replay_if_committed(
+            payload=payload,
+            month=month,
+            row_ids=row_ids,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+        )
+        if replayed is not None:
+            return replayed
+
         relation_command = self._relation_command_service_for()
         if relation_command is None:
             return self._relation_command_unavailable_result()
@@ -1122,12 +1210,25 @@ class WorkbenchWriteFacade:
             case_id = str(active_relation.get("case_id") or "").strip()
             if not case_id:
                 raise ValueError("active relation case_id is required.")
+            if self._withdraw_link_uow is not None:
+                return self._withdraw_link_with_uow(
+                    payload=payload,
+                    request_id=request_id,
+                    actor_id=actor_id,
+                    tenant_id=tenant_id,
+                    month=month,
+                    row_ids=row_ids,
+                    active_relation=active_relation,
+                    case_id=case_id,
+                    preview=preview,
+                    note=note,
+                )
             previous_pair_snapshot = self._pair_relation_service.snapshot()
             result = self._withdraw_relation_via_command_service(
                 relation_command,
                 payload=payload,
                 case_id=case_id,
-                actor_id=None,
+                actor_id=actor_id,
                 reason=note,
             )
         except WorkbenchRelationCommandError as exc:
@@ -1152,7 +1253,16 @@ class WorkbenchWriteFacade:
             self._invalidate_and_schedule_read_model(
                 action_name=action_name,
                 changed_scope_keys=changed_scope_keys,
-                metadata={"source": action_name, "case_id": case_id},
+                metadata={
+                    "source": action_name,
+                    "case_id": case_id,
+                    **self._relation_refresh_metadata(
+                        relation=active_relation,
+                        row_ids=affected_row_ids,
+                        month=month,
+                    ),
+                },
+                include_all=False,
                 request_id=request_id,
                 schedule_started_at=schedule_started_at,
             )
@@ -1176,6 +1286,168 @@ class WorkbenchWriteFacade:
                 "message": "已撤回 1 组关联。",
             },
         )
+
+    def _withdraw_link_replay_if_committed(
+        self,
+        *,
+        payload: dict[str, object],
+        month: str,
+        row_ids: list[str],
+        actor_id: str | None,
+        tenant_id: str | None,
+    ) -> WorkbenchWriteResult | None:
+        if self._withdraw_link_uow is None:
+            return None
+        command = _WorkbenchWithdrawLinkCommand(
+            action_name="withdraw_link",
+            month=month,
+            row_ids=list(row_ids),
+            case_id="",
+            scope_keys=[],
+            payload=dict(payload),
+            idempotency_key=self._idempotency_key_from_payload(payload),
+            expected_versions=dict(payload.get("expected_versions") or {})
+            if isinstance(payload.get("expected_versions"), dict)
+            else {},
+            tenant_id=_normalize_tenant_id(tenant_id),
+            actor_id=_normalize_actor_id(actor_id),
+        )
+        replay_committed = getattr(self._withdraw_link_uow, "replay_committed", None)
+        if not callable(replay_committed):
+            return None
+        try:
+            result = replay_committed(command)
+        except WorkbenchIdempotencyKeyConflict as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyInProgress as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyFailed as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        if result is None:
+            return None
+        return WorkbenchWriteResult(HTTPStatus.OK, self._withdraw_link_response_payload(result))
+
+    def _withdraw_link_with_uow(
+        self,
+        *,
+        payload: dict[str, object],
+        request_id: str | None,
+        actor_id: str | None,
+        tenant_id: str | None,
+        month: str,
+        row_ids: list[str],
+        active_relation: dict[str, object],
+        case_id: str,
+        preview: dict[str, object],
+        note: str,
+    ) -> WorkbenchWriteResult:
+        action_name = "withdraw_link"
+        changed_scope_keys = list(preview.get("affected_months") or preview.get("read_model_scope_keys") or [])
+        if not changed_scope_keys:
+            changed_scope_keys = list(
+                self._scope_keys_for_row_ids(
+                    month=month,
+                    row_ids=list(active_relation.get("row_ids") or row_ids),
+                    month_scope=str(active_relation.get("month_scope") or ""),
+                )
+            )
+        affected_row_ids = list(preview.get("affected_row_ids") or active_relation.get("row_ids") or row_ids)
+        previous_pair_snapshot = self._pair_relation_service.snapshot()
+        relation_refresh_metadata = self._relation_refresh_metadata(
+            relation=active_relation,
+            row_ids=affected_row_ids,
+            month=month,
+        )
+        command = _WorkbenchWithdrawLinkCommand(
+            action_name=action_name,
+            month=month,
+            row_ids=list(row_ids),
+            case_id=case_id,
+            scope_keys=list(changed_scope_keys),
+            payload=dict(payload),
+            idempotency_key=self._idempotency_key_from_payload(payload),
+            expected_versions=dict(payload.get("expected_versions") or {})
+            if isinstance(payload.get("expected_versions"), dict)
+            else {},
+            tenant_id=_normalize_tenant_id(tenant_id),
+            actor_id=_normalize_actor_id(actor_id),
+            refresh_metadata={
+                "source": action_name,
+                "case_id": case_id,
+                **relation_refresh_metadata,
+            },
+        )
+
+        def handler(ctx: object) -> dict[str, object]:
+            transaction = getattr(ctx, "transaction", None)
+            if transaction is None:
+                raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
+            relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
+            if relation_command is None:
+                raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
+            pair_relation_started_at = monotonic()
+            result = self._withdraw_relation_via_command_service(
+                relation_command,
+                payload=payload,
+                case_id=case_id,
+                actor_id=actor_id,
+                reason=note,
+                idempotency_key=None,
+            )
+            self._emit_timing_if_requested(
+                request_id=request_id,
+                action_name=action_name,
+                phase="pair_relation_update",
+                started_at=pair_relation_started_at,
+                detail=f"case_id={case_id}",
+            )
+            return {
+                "success": True,
+                "operation": action_name,
+                "action": action_name,
+                "month": month,
+                "changed_scopes": list(result.get("affected_months") or changed_scope_keys),
+                "affected_months": list(result.get("affected_months") or changed_scope_keys),
+                "affected_scope_keys": list(result.get("affected_months") or changed_scope_keys),
+                "affected_row_ids": list(result.get("affected_row_ids") or affected_row_ids),
+                "restored_relations": list(result.get("restored_relations") or []),
+                "message": "已撤回 1 组关联。",
+            }
+
+        try:
+            result = self._withdraw_link_uow.run(command, handler)
+        except WorkbenchIdempotencyKeyConflict as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyInProgress as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchIdempotencyFailed as exc:
+            return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
+        except WorkbenchWriteConflict as exc:
+            conflict_payload = exc.to_response_payload()
+            return WorkbenchWriteResult(HTTPStatus(exc.status_code), dict(conflict_payload["payload"]))
+        except WorkbenchRelationCommandError as exc:
+            return self._relation_command_error_result(exc)
+        except Exception:
+            self._restore_pair_relation_snapshot(
+                previous_pair_snapshot,
+                changed_case_ids=[case_id],
+            )
+            return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
+        return WorkbenchWriteResult(HTTPStatus.OK, self._withdraw_link_response_payload(result))
+
+    @staticmethod
+    def _withdraw_link_response_payload(result: dict[str, object]) -> dict[str, object]:
+        return {
+            "success": bool(result.get("success")),
+            "operation": "withdraw_link",
+            "action": "withdraw_link",
+            "month": str(result.get("month") or ""),
+            "changed_scopes": list(result.get("changed_scopes") or result.get("affected_months") or []),
+            "affected_months": list(result.get("affected_months") or result.get("changed_scopes") or []),
+            "affected_row_ids": list(result.get("affected_row_ids") or []),
+            "restored_relations": list(result.get("restored_relations") or []),
+            "message": str(result.get("message") or "已撤回 1 组关联。"),
+        }
 
     def _preview_withdraw_relation_via_command_service(
         self,
@@ -1203,16 +1475,22 @@ class WorkbenchWriteFacade:
         case_id: str,
         actor_id: str | None,
         reason: str | None,
+        idempotency_key: str | None | object = _IDEMPOTENCY_FROM_PAYLOAD,
     ) -> dict[str, object]:
         withdraw_relation = getattr(relation_command, "withdraw_relation", None)
         if not callable(withdraw_relation):
             raise _WorkbenchWritePersistenceError("relation command service must expose withdraw_relation.")
+        resolved_idempotency_key = (
+            self._idempotency_key_from_payload(payload)
+            if idempotency_key is _IDEMPOTENCY_FROM_PAYLOAD
+            else idempotency_key
+        )
         return dict(
             withdraw_relation(
                 case_id=case_id,
                 actor_id=_normalize_actor_id(actor_id),
                 reason=reason,
-                idempotency_key=self._idempotency_key_from_payload(payload),
+                idempotency_key=resolved_idempotency_key,
                 history_operation_type="withdraw_link",
                 preview_id=str(payload.get("preview_id") or "").strip() or None,
                 operation_type=str(payload.get("operation_type") or "withdraw_relation").strip(),
@@ -2555,12 +2833,144 @@ class WorkbenchWriteFacade:
             )
         return result
 
+    def _relation_refresh_metadata(
+        self,
+        *,
+        relation: dict[str, object],
+        row_ids: list[str],
+        month: str,
+    ) -> dict[str, object]:
+        rows: list[dict[str, object]] = []
+        try:
+            resolved_row_ids = [str(row_id) for row_id in list(row_ids or []) if str(row_id).strip()]
+            rows = self._resolve_live_rows_direct(resolved_row_ids, month_hint=month) if resolved_row_ids else []
+        except Exception:
+            rows = []
+        downstream_scope_types = self._relation_downstream_scope_types(relation=relation, rows=rows)
+        invoice_usage_scope_types = sorted(
+            downstream_scope_types & {"input_invoice_usage", "output_invoice_collection", "oa_pending_payment"}
+        )
+        pending_invoice_scope_keys = self._relation_pending_invoice_scope_keys(relation=relation, rows=rows, month=month)
+        metadata: dict[str, object] = {
+            "downstream_scope_types": sorted(downstream_scope_types),
+            "invoice_usage_scope_types": invoice_usage_scope_types,
+        }
+        if pending_invoice_scope_keys:
+            metadata["pending_invoice_scope_keys"] = pending_invoice_scope_keys
+        return metadata
+
+    def _relation_downstream_scope_types(
+        self,
+        *,
+        relation: dict[str, object],
+        rows: list[dict[str, object]],
+    ) -> set[str]:
+        row_types = self._relation_row_types(relation=relation, rows=rows)
+        unknown_row_types = not row_types
+        has_bank = "bank" in row_types or unknown_row_types
+        has_invoice = "invoice" in row_types or unknown_row_types
+        has_oa = "oa" in row_types
+        invoice_directions = self._invoice_directions(rows)
+        unknown_invoice_direction = has_invoice and not invoice_directions
+
+        scope_types: set[str] = {"search", "workbench_relation"}
+        if has_bank:
+            scope_types.update({"bank_detail", "pending_invoice"})
+        if has_invoice or has_oa or unknown_row_types:
+            scope_types.add("invoice_lifecycle")
+        if has_invoice:
+            if "input" in invoice_directions or unknown_invoice_direction:
+                scope_types.add("input_invoice_usage")
+            if "output" in invoice_directions or unknown_invoice_direction:
+                scope_types.add("output_invoice_collection")
+            scope_types.add("tax_offset")
+        if has_oa:
+            scope_types.add("oa_pending_payment")
+        if has_bank or has_invoice or has_oa or unknown_row_types:
+            scope_types.add("cost_statistics")
+        return scope_types
+
+    def _relation_pending_invoice_scope_keys(
+        self,
+        *,
+        relation: dict[str, object],
+        rows: list[dict[str, object]],
+        month: str | None = None,
+    ) -> list[str]:
+        row_types = self._relation_row_types(relation=relation, rows=rows)
+        if row_types and "bank" not in row_types:
+            return []
+        directions = self._bank_directions(rows)
+        if not directions:
+            directions = {"expense", "income"}
+        scope_keys: list[str] = []
+        month_suffix = f":{month}" if month and SEARCH_MONTH_RE.match(str(month)) else ""
+        if "expense" in directions:
+            scope_keys.extend(f"{scope_key}{month_suffix}" for scope_key in _EXPENSE_PENDING_INVOICE_SCOPE_KEYS)
+        if "income" in directions:
+            scope_keys.extend(f"{scope_key}{month_suffix}" for scope_key in _INCOME_PENDING_INVOICE_SCOPE_KEYS)
+        return list(dict.fromkeys(scope_keys))
+
+    @staticmethod
+    def _relation_row_types(*, relation: dict[str, object], rows: list[dict[str, object]]) -> set[str]:
+        row_types = {
+            str(row_type).strip()
+            for row_type in list(relation.get("row_types") or [])
+            if str(row_type).strip()
+        }
+        if row_types:
+            return row_types
+        row_types.update(
+            str(row.get("type") or "").strip()
+            for row in list(rows or [])
+            if str(row.get("type") or "").strip()
+        )
+        if row_types:
+            return row_types
+        return {
+            row_type_for_workbench_row_id(row_id, unknown="")
+            for row_id in list(relation.get("row_ids") or [])
+            if row_type_for_workbench_row_id(row_id, unknown="")
+        }
+
+    @staticmethod
+    def _invoice_directions(rows: list[dict[str, object]]) -> set[str]:
+        directions: set[str] = set()
+        for row in list(rows or []):
+            if str(row.get("type") or "") != "invoice":
+                continue
+            invoice_type = str(row.get("invoice_type") or row.get("invoiceType") or "").strip().lower()
+            if "input" in invoice_type or "进" in invoice_type:
+                directions.add("input")
+            if "output" in invoice_type or "销" in invoice_type:
+                directions.add("output")
+        return directions
+
+    def _bank_directions(self, rows: list[dict[str, object]]) -> set[str]:
+        directions: set[str] = set()
+        for row in list(rows or []):
+            if str(row.get("type") or "") != "bank":
+                continue
+            raw_direction = str(row.get("txn_direction") or row.get("direction") or "").strip().lower()
+            if raw_direction in {"outflow", "debit", "expense"} or "支" in raw_direction or "付" in raw_direction:
+                directions.add("expense")
+            if raw_direction in {"inflow", "credit", "income"} or "收" in raw_direction or "入" in raw_direction:
+                directions.add("income")
+            debit_amount = self._decimal_from_value(row.get("debit_amount"))
+            credit_amount = self._decimal_from_value(row.get("credit_amount"))
+            if debit_amount is not None and debit_amount > 0:
+                directions.add("expense")
+            if credit_amount is not None and credit_amount > 0:
+                directions.add("income")
+        return directions
+
     def _invalidate_and_schedule_read_model(
         self,
         *,
         action_name: str,
         changed_scope_keys: list[str],
         metadata: dict[str, object],
+        include_all: bool = True,
         request_id: str | None,
         schedule_started_at: float,
     ) -> None:
@@ -2568,6 +2978,7 @@ class WorkbenchWriteFacade:
         self._execute_derived_data_lifecycle_event(
             "pair_relation_changed",
             scope_keys=changed_scope_keys,
+            include_all=include_all,
             metadata={**dict(metadata), "action_name": action_name},
         )
         self._emit_timing_if_requested(

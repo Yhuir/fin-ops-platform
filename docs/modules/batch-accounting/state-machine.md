@@ -22,7 +22,7 @@
 
 ### 禁止流转
 
-- `read_model_status !== "fresh"` 时禁止提交和撤回；前端禁用按钮只是体验层保护，submit/withdraw 后端必须再次执行 relation read model fresh gate。
+- `read_model_status !== "fresh"` 时不能把空关系显示为真实未提交，但不得仅因普通 relation distribution non-fresh 禁止提交和撤回；submit/withdraw 后端必须执行 canonical relation write safety、owner 状态、权限/session、idempotency 和 DB 可写性校验。
 - 已有关联关系占用的银行流水不能再次作为 `unsubmitted` 提交。
 - 非日常报销 OA 行、已有关联关系的 OA 行、空 OA 列表、空银行流水 ID、非法年份或非法 bucket 必须拒绝。
 - 金额不一致但差额说明为空或仅空白字符时必须拒绝。
@@ -50,12 +50,12 @@
 
 | 状态 | 含义 | 批量账务处理 |
 | --- | --- | --- |
-| `fresh` | `workbench_relation` read model 与 source version 一致。 | 可以提交/撤回。 |
-| `refreshing` | refresh 已入队或正在运行。 | API 可返回当前 payload，但页面禁用 mutation。 |
-| `stale` | projection source version 落后。 | API 透出 stale reason/scope key，页面禁用 mutation并提示刷新。 |
-| `missing` | 目标 scope 尚无 relation read model。 | facade/gateway enqueue refresh，页面禁用 mutation；mutation 后端 fresh gate 返回 `batch_accounting_read_model_not_fresh`。 |
-| `failed` | 最近 refresh 失败。 | App Status 应标记阻塞或忙碌；页面禁用 mutation。 |
-| `schema_mismatch` | read model schema 版本不匹配。 | 必须重建后再允许 mutation。 |
+| `fresh` | `workbench_relation` read model 与 source version 一致。 | 读侧可直接展示；提交/撤回仍按 canonical write safety 校验。 |
+| `refreshing` | refresh 已入队或正在运行。 | API 可返回当前 payload 和 freshness 诊断；普通 refreshing 不应全局禁用具备 canonical write safety 的 mutation。 |
+| `stale` | projection source version 落后。 | API 透出 stale reason/scope key；不能把空关系当真实空，mutation 阻断由 canonical write safety 决定。 |
+| `missing` | 目标 scope 尚无 relation read model。 | facade/gateway enqueue refresh；mutation 默认不因普通 distribution missing 被 fresh gate 拒绝。 |
+| `failed` | 最近 refresh 失败。 | App Status 标记读侧失败；只有目标写模型不可用或 write safety 不可确认时才阻断 mutation。 |
+| `schema_mismatch` | read model schema 版本不匹配。 | 读侧必须重建后才能声明 fresh；写侧仍看 canonical write safety。 |
 | `unavailable` | SQL runtime 或 repository 不可用。 | 不能展示为 green/fresh；需要 App Health/App Status 暴露。 |
 
 Refresh 触发来源：
@@ -72,11 +72,12 @@ Refresh 触发来源：
 1. 先检查 App Status 中 `workbench_relation` read model readiness、dirty backlog、worker heartbeat。
 2. 确认 `workbench-relation` worker 注册和 `workbench_relation.read_model.refresh` event 存在。
 3. 对缺失或 stale scope 重新入队；不要通过页面 GET 同步 rebuild。
-4. 修复 source/schema 后重新刷新，页面只在 API 返回 fresh 后恢复 mutation。
+4. 修复 source/schema 后重新刷新；页面不能把 non-fresh 空关系当真实空，但 ordinary non-fresh 不应全局阻断具备 canonical write safety 的 mutation。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确业务、UI、relation read model、worker 状态和禁止流转 | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、relation facade/projection tests |
-| 2026-06-11 | relation read model missing/stale 闭环 | 列表读取走 require_fresh 入队；submit/withdraw 后端 fresh gate 拒绝 non-fresh；页面展示 reason/scope 和未入队提示 | `test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh`、`test_submit_rejects_when_relation_read_model_is_not_fresh`、`test_withdraw_rejects_when_relation_read_model_is_not_fresh`、`shows operation guidance when relation read model refresh is not enqueued`、`shows backend read model status and scope when mutation is rejected as non-fresh` |
+| 2026-06-11 | relation read model missing/stale 闭环 | 列表读取走 require_fresh 入队；页面展示 reason/scope 和未入队提示。写阻断口径已由 2026-06-13 canonical write safety 更新替代。 | `test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh` |
+| 2026-06-13 | 写安全改为默认 canonical relation gate | 普通 relation distribution non-fresh 只作为读侧诊断；submit/withdraw 默认由 relation command service、owner 状态、权限/session、DB 可写性、version/idempotency 决定 | `tests/test_workbench_relation_command_service.py`、`tests/test_batch_accounting_api.py` |

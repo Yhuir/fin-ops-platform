@@ -2009,6 +2009,9 @@ class FakeQueue:
     def __init__(self) -> None:
         self.enqueued: list[tuple[str, str, str]] = []
         self.completed: list[tuple[str, str, object]] = []
+        self.current_checks: list[tuple[str, str, str, object]] = []
+        self.current = True
+        self.current_results: list[bool] = []
 
     def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
         self.enqueued.append((scope_type, scope_key, reason))
@@ -2016,6 +2019,19 @@ class FakeQueue:
     def complete_read_model_refresh(self, *, tenant_id: str, scope_type: str, scope_key: str, source_version: object = None) -> bool:
         self.completed.append((scope_type, scope_key, source_version))
         return True
+
+    def read_model_refresh_is_current(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_key: str,
+        source_version: object,
+    ) -> bool:
+        self.current_checks.append((tenant_id, scope_type, scope_key, source_version))
+        if self.current_results:
+            return self.current_results.pop(0)
+        return self.current
 
 
 class BankDetailReadModelRefreshServiceTests(unittest.TestCase):
@@ -2053,6 +2069,60 @@ class BankDetailReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(payload["scope_key"], "2026-05")
         self.assertEqual(builder.rebuilt, ["rebuild:2026-05:7"])
         self.assertEqual(queue.completed, [("bank_detail", "2026-05", 7)])
+
+    def test_stale_source_version_does_not_rebuild_or_complete(self) -> None:
+        builder = FakeProjectionBuilder()
+        queue = FakeQueue()
+        queue.current = False
+        service = BankDetailReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=queue,
+        )
+
+        payload = service.handle_runtime_event(runtime_event("2026-05"))
+
+        self.assertEqual(
+            payload,
+            {
+                "scope_key": "2026-05",
+                "skipped": True,
+                "skip_reason": "stale_source_version",
+                "source_version": 7,
+            },
+        )
+        self.assertEqual(builder.rebuilt, [])
+        self.assertEqual(queue.completed, [])
+        self.assertEqual(queue.current_checks, [("default", "bank_detail", "2026-05", 7)])
+
+    def test_source_version_that_becomes_stale_after_rebuild_does_not_complete(self) -> None:
+        builder = FakeProjectionBuilder()
+        queue = FakeQueue()
+        queue.current_results = [True, False]
+        service = BankDetailReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=queue,
+        )
+
+        payload = service.handle_runtime_event(runtime_event("2026-05"))
+
+        self.assertEqual(
+            payload,
+            {
+                "scope_key": "2026-05",
+                "skipped": True,
+                "skip_reason": "stale_source_version_after_rebuild",
+                "source_version": 7,
+            },
+        )
+        self.assertEqual(builder.rebuilt, ["rebuild:2026-05:7"])
+        self.assertEqual(queue.completed, [])
+        self.assertEqual(
+            queue.current_checks,
+            [
+                ("default", "bank_detail", "2026-05", 7),
+                ("default", "bank_detail", "2026-05", 7),
+            ],
+        )
 
 
 if __name__ == "__main__":

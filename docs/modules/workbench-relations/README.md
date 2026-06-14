@@ -87,7 +87,7 @@ distribution payload 必须保留关系展示语义：`relation_status='linked'`
 
 - 加载当前 canonical relation snapshot 或 SQL rows。
 - 调用 `WorkbenchPairRelationService` 执行业务规则和状态转换。
-- 校验 read model fresh、expected version、idempotency key、active row occupation 和合法 relation mode/state transition。
+- 默认按 canonical relation 写模型校验 expected version、idempotency key、active row occupation 和合法 relation mode/state transition；只有调用方显式要求 freshness precondition 时才校验 `workbench_relation` read model fresh。
 - 记录 before/after、actor、reason、affected months、request id、source versions。
 - 通过 repository 同事务写入 relation 和 history。
 - 通过统一 affected scope calculator 入队 `workbench_relation` 以及 downstream read model refresh。
@@ -164,15 +164,15 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 
 写入口必须迁移到 command service：
 
-- `POST /api/workbench/actions/confirm-link`、`cancel-link` 和 `withdraw-link` 已迁入 command service；缺 command service 时 fail fast，不再回退到 direct pair snapshot 写入。`withdraw-link` preview/submit 由 command service 锁定 relation identity；无 history 时撤到无关联，不再由 facade 合成恢复关系。个人暂借款还清 `confirm_personal_advance_repayment` 已迁入 command service。Workbench exception closed apply 已通过 command service 写入 `normal_match` / `oa_exempt`，并在创建本地 exception case 前执行 relation write precondition。`server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 已通过 command service 写入；其他 server 读/展示/persist helper 仍待后续抽离。
+- `POST /api/workbench/actions/confirm-link`、`cancel-link` 和 `withdraw-link` 已迁入 command service；缺 command service 时 fail fast，不再回退到 direct pair snapshot 写入。`withdraw-link` preview/submit 由 command service 锁定 relation identity；无 history 时撤到无关联，不再由 facade 合成恢复关系。个人暂借款还清 `confirm_personal_advance_repayment` 已迁入 command service。Workbench exception closed apply 已通过 command service 写入 `normal_match` / `oa_exempt`，并在创建本地 exception case 前执行 canonical relation write safety。`server.py` 中 OA invoice offset auto pair 和 OA 附件上下文 repair 已通过 command service 写入；其他 server 读/展示/persist helper 仍待后续抽离。
 
 `split_candidate` 不属于 relation lifecycle，不写入 `app.workbench_pair_relations` 或 relation history。关联台未配对区统一按钮在没有 active relation 但命中自动候选时，由 `WorkbenchWriteFacade` 复用 `WorkbenchCandidateMatchService.mark_candidates_suppressed(..., suppressed_reason="manual_override")` suppress 候选，并触发 Workbench read model refresh。
-- pending invoice manual invoice confirm、attach existing 单条和批量已迁入 command service；写前 active relation 读取走 `WorkbenchRelationReadFacade` distribution，stale/fresh 由 command service precondition 负责。
+- pending invoice manual invoice confirm、attach existing 单条和批量已迁入 command service；读侧 active/candidate relation 仍走 `WorkbenchRelationReadFacade` distribution，写侧 row occupation、version、idempotency 和状态转换由 canonical relation command 负责。
 - no-OA `submit-selection`、`submit-batch`、`withdraw` 已迁入 command service；`no_oa_bank_batch.read_model.refresh` 不再执行 relation repair；legacy relation migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 已通过 command service 写入或取消 relation。已有 submitted batch 与 legacy active relation 命中同一 row set 时，迁移复用 existing submitted batch 的 relation case，避免创建第二条 active relation。
 - turnover manual zero-difference closure、withdraw 已迁入 command service；legacy fallback 缺少 command service 时的 direct pair write fallback 已删除，缺 command 会 fail fast。
 - batch accounting submit、withdraw 已迁入 command service；submit 缺 command 时的 direct pair fallback 已删除；legacy case id collision repair 已通过 command service 写入。
-- ETC 业务批次删除、历史 repair、historical business batch migration、existing batch link。Phase 7A 已完成生产 wiring：已提交业务批次删除前会先检查 relation read model fresh，删除后通过 command service 取消包含 summary row 的 active relation；历史 repair 通过 command service confirm `etc_batch_invoice_link`；历史业务批次迁移和 existing link 通过 command service 更新 relation metadata。Phase 7B 已删除这些 ETC service 的 direct pair mutation fallback；缺少 command service 时 fail fast，不先写本地 ETC 批次或 relation。
-- input invoice OA reverse evidence detected 本地确认已迁入 command service；写入 `input_invoice_oa_reverse`，read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
+- ETC 业务批次删除、历史 repair、historical business batch migration、existing batch link。Phase 7A 已完成生产 wiring：删除/reset 通过 command service 取消包含 summary row 的 active relation；历史 repair 通过 command service confirm `etc_batch_invoice_link`；历史业务批次迁移和 existing link 通过 command service 更新 relation metadata。Phase 7B 已删除这些 ETC service 的 direct pair mutation fallback；缺少 command service 或 canonical write safety 不通过时 fail fast，不先写本地 ETC 批次或 relation。
+- input invoice OA reverse evidence detected 本地确认已迁入 command service；写入 `input_invoice_oa_reverse`，command service 缺失、权限/session 不满足、DB/目标写模型不可用或 canonical write safety 不通过时 fail fast，不先推进本地 batch。
 - 数据重置、repair 和 migration 工具涉及 relation 的写入。
 
 读入口必须保持通过 read facade/read model：
@@ -191,7 +191,7 @@ repository 可以知道 `app.workbench_pair_relations`、`app.workbench_pair_rel
 
 ## Freshness、并发和幂等
 
-- 所有写 API 在持久化前必须检查 relation read model fresh 或基于 write model version 做等价强一致检查。非 fresh 返回业务错误，携带 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
+- 所有写 API 在持久化前必须基于 canonical write model version、preview lock、idempotency、row occupation、owner 状态、权限/session 和 DB 可写性做强一致检查。`workbench_relation` read model freshness 是读侧状态；只有调用方显式启用 freshness precondition 时，非 fresh 才返回携带 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued` 的业务错误。
 - 同一个 row 不能同时属于两个不同 active case。当前领域服务已在内存层检查，生产级还需要 command service 在事务中使用 row occupation lock、case lock、advisory lock 或 relation-row occupancy table 做并发保护。
 - 重复 request 必须返回同一 relation 或同一业务错误，不能创建第二条 active relation。pending invoice、turnover 和 receipt 类似场景已有 idempotency contract，可复用其 store 模式。
 - `version` 应作为 write model 乐观锁，不应用 read model version 替代。写成功后返回 relation version、affected months、changed case ids 和 refresh enqueue 结果。
@@ -229,6 +229,15 @@ PYTHONPATH=/opt/fin-ops/releases/<release>/src/backend/src \
 
 所有非事务入队走 `ReadModelRefreshGateway`；事务内 writer 保持同一业务事务并满足等价 scope contract。
 
+2026-06-13 起，普通 `manual_confirmed` relation 的 downstream refresh 必须按 relation shape 收敛：
+
+- 事务内 confirm 由 `PostgresWorkbenchRelationRepository` 基于 canonical row 表推导 scope，不得从 `read_model.workbench_rows` 反推写侧 affected scope。
+- `app.invoices.invoice_type` 为进项时只刷新 `input_invoice_usage` 与税金相关 scope；销项时只刷新 `output_invoice_collection` 与税金相关 scope；方向未知时才保守刷新两侧。
+- `app.bank_transactions.txn_direction` 为支出时只刷新 expense pending invoice 父 scopes；收入时只刷新 income pending invoice 父 scopes；方向未知时才保守刷新两侧。
+- 生产 `withdraw-link` 必须和 `confirm-link` / `cancel-link` 一样走 transaction-bound Workbench UoW 与 `PostgresWorkbenchRelationRepository`，由同一事务写 canonical relation、history 和 durable dirty/outbox；不得在成功写入后再同步调用 legacy pair persist/read-model lifecycle 作为响应前置条件。
+- 非 UoW legacy `withdraw-link` 兼容路径的 service 层 lifecycle 必须传 `include_all=False`，并携带 `downstream_scope_types`、`invoice_usage_scope_types`、`pending_invoice_scope_keys` metadata，让普通 read model 非相关失败不拖慢或污染本次操作链路。
+- 以上收敛只减少不相关 read model refresh；页面 `已同步` 仍必须来自 durable queue/readiness 的真实 fresh gate。
+
 ## 旧逻辑删除清单
 
 Phase 迁移完成后必须删除或降级：
@@ -247,8 +256,8 @@ Phase 迁移完成后必须删除或降级：
 3. 先迁移 workbench confirm/cancel 与 batch accounting，因为它们已经显式依赖 `workbench_relation` freshness。
 4. 迁移 pending invoice attach/create，并复用现有 request id/idempotency command store。Phase 4 已完成：manual invoice、attach existing 单条和批量写入口均委托 command service，缺少 command service 时 fail fast。
 5. 迁移 no-OA submit/withdraw/internal transfer confirm-link，保证 no-OA batch 与 active relation 收敛到同一个 case。Phase 5 已完成常规写入口迁移和 stale/fresh API fail-fast；Phase 7L 已完成 legacy migration/repair/consolidation 写入口收敛。
-6. 迁移 turnover closure/withdraw，与现有 UoW 对接。Phase 6 已完成常规 manual closure/withdraw command service 委托、read model stale fail-fast 和 Application wiring guard；Phase 7E 已删除 legacy fallback 直连 pair service 写入。
-7. 迁移 ETC 删除/历史修复/input invoice OA reverse 等 repair 工具路径。Phase 7A 已完成 ETC 业务批次删除、历史 repair、historical business batch migration 和 existing link 的 command service 生产 wiring 与 stale fail-fast；Phase 7B 已删除这些 ETC repair/link/migration service 的 direct pair mutation fallback；Phase 7C 已完成 input invoice OA reverse command service 写入和 stale/no-half-write；Phase 7D 已删除 batch accounting submit 缺 command direct fallback；Phase 7E 已删除 turnover legacy fallback direct pair write；Phase 7F 已剥离 no-OA read model worker 隐式 repair；Phase 7G 已删除 Workbench confirm/cancel direct fallback；Phase 7H 已迁移个人暂借款 relation；Phase 7I 已迁移 Workbench exception closed apply relation；Phase 7J 已迁移 server OA offset auto pair 和 OA 附件上下文 repair direct mutation；Phase 7K 已迁移 batch accounting legacy case id collision repair；Phase 7L 已迁移 no-OA legacy repair/consolidation。
+6. 迁移 turnover closure/withdraw，与现有 UoW 对接。Phase 6 已完成常规 manual closure/withdraw command service 委托和 Application wiring guard；Phase 7E 已删除 legacy fallback 直连 pair service 写入。
+7. 迁移 ETC 删除/历史修复/input invoice OA reverse 等 repair 工具路径。Phase 7A 已完成 ETC 业务批次删除、历史 repair、historical business batch migration 和 existing link 的 command service 生产 wiring；Phase 7B 已删除这些 ETC repair/link/migration service 的 direct pair mutation fallback；Phase 7C 已完成 input invoice OA reverse command service 写入和 no-half-write；Phase 7D 已删除 batch accounting submit 缺 command direct fallback；Phase 7E 已删除 turnover legacy fallback direct pair write；Phase 7F 已剥离 no-OA read model worker 隐式 repair；Phase 7G 已删除 Workbench confirm/cancel direct fallback；Phase 7H 已迁移个人暂借款 relation；Phase 7I 已迁移 Workbench exception closed apply relation；Phase 7J 已迁移 server OA offset auto pair 和 OA 附件上下文 repair direct mutation；Phase 7K 已迁移 batch accounting legacy case id collision repair；Phase 7L 已迁移 no-OA legacy repair/consolidation。
 8. 删除 `server.py` 旧 helper 和 service 旧注入，扩展架构守卫测试。
 9. 执行全量 read model/e2e/staging smoke，确认跨页面一致性。
 

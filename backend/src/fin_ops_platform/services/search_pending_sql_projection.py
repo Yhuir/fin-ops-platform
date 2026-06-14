@@ -136,11 +136,31 @@ class SearchPendingSqlProjectionBuilder:
     def _search_rows_for_month(self, month: str) -> list[dict[str, object]]:
         rows = self._connection.fetch_all(
             """
+            with ranked_rows as (
+                select
+                    row_id,
+                    source_kind,
+                    status,
+                    scope_month,
+                    project_name,
+                    counterparty_name,
+                    amount,
+                    generated_at,
+                    payload,
+                    raw_payload,
+                    row_number() over (
+                        partition by row_id
+                        order by generated_at desc nulls last, source_kind, status
+                    ) as row_rank
+                from read_model.workbench_rows
+                where scope_month = %s::date
+                  and (scope_key = %s or scope_key is null)
+                  and row_id is not null
+            )
             select row_id, source_kind, status, scope_month, project_name, counterparty_name,
                    amount, generated_at, payload, raw_payload
-            from read_model.workbench_rows
-            where scope_month = %s::date
-              and (scope_key = %s or scope_key is null)
+            from ranked_rows
+            where row_rank = 1
             order by source_kind, row_id
             """,
             (month_start(month), month),

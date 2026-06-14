@@ -82,8 +82,15 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 | `worker-no-oa-bank-batch` | `no_oa_bank_batch.read_model.refresh` | `--enable-no-oa-bank-batch-read-model-refresh --event-type no_oa_bank_batch.read_model.refresh --max-events-per-iteration 24` |
 | `worker-turnover-ledger` | `turnover_ledger.read_model.refresh` | `--enable-turnover-ledger-read-model-refresh --event-type turnover_ledger.read_model.refresh --max-events-per-iteration 12` |
 | `worker-search-pending` | `search.read_model.refresh`, `pending_invoice.read_model.refresh` | `--enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh --event-type search.read_model.refresh --event-type pending_invoice.read_model.refresh` |
+| `worker-search` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
+| `worker-search-secondary` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
+| `worker-search-tertiary` | `search.read_model.refresh` | `--enable-search-read-model-refresh --event-type search.read_model.refresh` |
+| `worker-pending-invoice` | `pending_invoice.read_model.refresh` | `--enable-pending-invoice-read-model-refresh --event-type pending_invoice.read_model.refresh` |
 | `worker-invoice-usage-collection` | `input_invoice_usage.read_model.refresh`, `output_invoice_collection.read_model.refresh` | `--enable-input-invoice-usage-read-model-refresh --enable-output-invoice-collection-read-model-refresh --event-type input_invoice_usage.read_model.refresh --event-type output_invoice_collection.read_model.refresh` |
+| `worker-invoice-lifecycle-secondary` | `invoice_lifecycle.read_model.refresh` | `--enable-invoice-lifecycle-read-model-refresh --event-type invoice_lifecycle.read_model.refresh` |
 | `worker-cost-tax` | `cost_statistics.read_model.refresh`, `tax_offset.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --enable-tax-offset-read-model-refresh --event-type cost_statistics.read_model.refresh --event-type tax_offset.read_model.refresh` |
+| `worker-cost-statistics` | `cost_statistics.read_model.refresh` | `--enable-cost-statistics-read-model-refresh --event-type cost_statistics.read_model.refresh` |
+| `worker-tax-offset` | `tax_offset.read_model.refresh` | `--enable-tax-offset-read-model-refresh --event-type tax_offset.read_model.refresh` |
 | `worker-import` | `import.process.requested` | `--enable-import-job-processing --event-type import.process.requested` |
 | `worker-workbench-matching` | `job.workbench_matching_dirty_scopes` | `--enable-workbench-matching` |
 | `worker-file-migration` | `file_object.gridfs_migration` | 可选迁移 worker；只有 legacy GridFS 与对象存储 secret 已配置时才启用 |
@@ -108,8 +115,15 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.worker.no-oa-bank-batch.env.example`
 - `deploy/oa/env/fin-ops.worker.turnover-ledger.env.example`
 - `deploy/oa/env/fin-ops.worker.search-pending.env.example`
+- `deploy/oa/env/fin-ops.worker.search.env.example`
+- `deploy/oa/env/fin-ops.worker.search-secondary.env.example`
+- `deploy/oa/env/fin-ops.worker.search-tertiary.env.example`
+- `deploy/oa/env/fin-ops.worker.pending-invoice.env.example`
 - `deploy/oa/env/fin-ops.worker.invoice-usage-collection.env.example`
+- `deploy/oa/env/fin-ops.worker.invoice-lifecycle-secondary.env.example`
 - `deploy/oa/env/fin-ops.worker.cost-tax.env.example`
+- `deploy/oa/env/fin-ops.worker.cost-statistics.env.example`
+- `deploy/oa/env/fin-ops.worker.tax-offset.env.example`
 - `deploy/oa/env/fin-ops.worker.import.env.example`
 - `deploy/oa/env/fin-ops.worker.file-migration.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
@@ -149,8 +163,15 @@ fin-ops-worker@bank-account-balance.service
 fin-ops-worker@no-oa-bank-batch.service
 fin-ops-worker@turnover-ledger.service
 fin-ops-worker@search-pending.service
+fin-ops-worker@search.service
+fin-ops-worker@search-secondary.service
+fin-ops-worker@search-tertiary.service
+fin-ops-worker@pending-invoice.service
 fin-ops-worker@invoice-usage-collection.service
+fin-ops-worker@invoice-lifecycle-secondary.service
 fin-ops-worker@cost-tax.service
+fin-ops-worker@cost-statistics.service
+fin-ops-worker@tax-offset.service
 fin-ops-worker@import.service
 ```
 

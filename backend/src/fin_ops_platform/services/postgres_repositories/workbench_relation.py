@@ -17,6 +17,33 @@ from fin_ops_platform.services.postgres_repositories.common import (
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_workbench_pair_relations
 
 
+WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES = (
+    "bank_detail",
+    "invoice_lifecycle",
+    "input_invoice_usage",
+    "output_invoice_collection",
+    "oa_pending_payment",
+    "search",
+    "cost_statistics",
+    "tax_offset",
+    "no_oa_bank_batch",
+)
+
+_NO_OA_RELATION_MODES = frozenset({"no_oa_bank_batch"})
+_EXPENSE_PENDING_INVOICE_SCOPE_KEYS = (
+    "expense:all",
+    "expense:requires_invoice",
+    "expense:bank_statement_as_invoice",
+    "expense:no_invoice_required",
+)
+_INCOME_PENDING_INVOICE_SCOPE_KEYS = (
+    "income:all",
+    "income:requires_invoice",
+    "income:no_invoice_required",
+    "income:cash_income",
+)
+
+
 class PostgresWorkbenchRelationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -50,10 +77,28 @@ class PostgresWorkbenchRelationRepository:
             relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
             changed_ids = {str(item) for item in changed_case_ids} if changed_case_ids is not None else None
             dirty_scope_keys: set[str] = set()
+            downstream_by_scope_key: dict[str, set[str]] = {}
+            pending_invoice_scope_keys: set[str] = set()
             for case_id, payload in iter_mapping(relations):
                 if changed_ids is not None and case_id not in changed_ids:
                     continue
-                dirty_scope_keys.update(_workbench_relation_dirty_scope_keys(connection, payload))
+                domain_scope_keys = _workbench_relation_domain_scope_keys(connection, payload)
+                relation_scope_keys = _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_keys)
+                dirty_scope_keys.update(relation_scope_keys)
+                for scope_key, downstream_scope_types in _workbench_relation_downstream_scope_map(
+                    connection,
+                    payload,
+                    domain_scope_keys=domain_scope_keys,
+                    dirty_scope_keys=relation_scope_keys,
+                ).items():
+                    downstream_by_scope_key.setdefault(scope_key, set()).update(downstream_scope_types)
+                pending_invoice_scope_keys.update(
+                    _workbench_relation_pending_invoice_scope_keys(
+                        connection,
+                        payload,
+                        domain_scope_keys=domain_scope_keys,
+                    )
+                )
                 connection.execute(
                     """
                     insert into app.workbench_pair_relations(
@@ -98,39 +143,27 @@ class PostgresWorkbenchRelationRepository:
                     scope_type="workbench_relation",
                     scope_key=scope_key,
                     reason="workbench_pair_relation_changed",
+                    priority="high",
                 )
-                for downstream_scope_type in (
-                    "bank_detail",
-                    "input_invoice_usage",
-                    "output_invoice_collection",
-                    "oa_pending_payment",
-                    "search",
-                    "cost_statistics",
-                    "tax_offset",
-                    "no_oa_bank_batch",
-                ):
+                downstream_scope_types = downstream_by_scope_key.get(scope_key, set())
+                for downstream_scope_type in WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES:
+                    if downstream_scope_type not in downstream_scope_types:
+                        continue
                     _enqueue_read_model_refresh_in_transaction(
                         connection,
                         scope_type=downstream_scope_type,
                         scope_key=scope_key,
                         reason="workbench_relation_changed",
+                        priority="high",
                     )
-            if dirty_scope_keys:
-                for pending_scope_key in (
-                    "expense:all",
-                    "expense:requires_invoice",
-                    "expense:bank_statement_as_invoice",
-                    "expense:no_invoice_required",
-                    "income:all",
-                    "income:requires_invoice",
-                    "income:no_invoice_required",
-                    "income:cash_income",
-                ):
+            if dirty_scope_keys and pending_invoice_scope_keys:
+                for pending_scope_key in sorted(pending_invoice_scope_keys):
                     _enqueue_read_model_refresh_in_transaction(
                         connection,
                         scope_type="pending_invoice",
                         scope_key=pending_scope_key,
                         reason="workbench_relation_changed",
+                        priority="high",
                     )
 
         run_in_transaction(self._connection, write)
@@ -200,43 +233,274 @@ class PostgresWorkbenchRelationRepository:
 
 
 def _workbench_relation_dirty_scope_keys(connection: Any, relation: dict[str, Any]) -> set[str]:
-    scope_keys: set[str] = set()
-    scope_month = month_start(relation.get("month_scope") or relation.get("scope_month") or relation.get("month"))
-    if scope_month is not None:
-        scope_keys.add(str(scope_month)[:7])
+    return _workbench_relation_dirty_scope_keys_from_domain_scope_keys(
+        _workbench_relation_domain_scope_keys(connection, relation)
+    )
+
+
+def _workbench_relation_downstream_scope_types(connection: Any, relation: dict[str, Any]) -> set[str]:
+    downstream_scope_types: set[str] = set()
+    for scope_types in _workbench_relation_downstream_scope_map(connection, relation).values():
+        downstream_scope_types.update(scope_types)
+    return downstream_scope_types
+
+
+def _workbench_relation_downstream_scope_map(
+    connection: Any,
+    relation: dict[str, Any],
+    *,
+    domain_scope_keys: dict[str, set[str]] | None = None,
+    dirty_scope_keys: set[str] | None = None,
+) -> dict[str, set[str]]:
     row_ids = text_list(relation.get("row_ids"))
-    if row_ids:
-        rows = connection.fetch_all(
-            """
-            select distinct scope_key
-            from (
-                select to_char(txn_month, 'YYYY-MM') as scope_key
-                from app.bank_transactions
-                where txn_month is not null
-                  and coalesce(legacy_mongo_id, id::text) = any(%s)
-                union
-                select to_char(invoice_month, 'YYYY-MM') as scope_key
-                from app.invoices
-                where invoice_month is not null
-                  and coalesce(legacy_mongo_id, id::text) = any(%s)
-                union
-                select to_char(date_trunc('month', application_date)::date, 'YYYY-MM') as scope_key
-                from app.oa_applications
-                where application_date is not null
-                  and row_id = any(%s)
-                union
-                select to_char(scope_month, 'YYYY-MM') as scope_key
-                from read_model.workbench_rows
-                where scope_month is not null
-                  and row_id = any(%s)
-            ) scopes
-            where scope_key is not null
-            order by scope_key
-            """,
-            (row_ids, row_ids, row_ids, row_ids),
-        )
-        scope_keys.update(text(row.get("scope_key")) for row in rows if text(row.get("scope_key")))
+    row_types = {item for item in text_list(relation.get("row_types")) if item}
+    relation_mode = text(relation.get("relation_mode") or relation.get("mode"))
+    domain_scope_keys = domain_scope_keys or _workbench_relation_domain_scope_keys(connection, relation)
+    dirty_scope_keys = dirty_scope_keys or _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_keys)
+
+    unknown_row_types = not row_types
+    has_bank = "bank" in row_types or unknown_row_types
+    has_invoice = "invoice" in row_types or unknown_row_types
+    has_oa = "oa" in row_types
+    is_no_oa_batch = relation_mode in _NO_OA_RELATION_MODES
+    invoice_directions = _workbench_relation_invoice_directions(connection, row_ids) if has_invoice else set()
+    unknown_invoice_direction = has_invoice and not invoice_directions
+
+    bank_scope_keys = _domain_scope_keys(domain_scope_keys, "bank", dirty_scope_keys)
+    invoice_scope_keys = _domain_scope_keys(domain_scope_keys, "invoice", dirty_scope_keys)
+    oa_scope_keys = _domain_scope_keys(domain_scope_keys, "oa", dirty_scope_keys)
+    broad_scope_keys = set(dirty_scope_keys or {"all"})
+    scope_map: dict[str, set[str]] = {}
+
+    def add(scope_type: str, scope_keys: set[str]) -> None:
+        for scope_key in sorted(scope_keys or {"all"}):
+            scope_map.setdefault(scope_key, set()).add(scope_type)
+
+    add("search", broad_scope_keys)
+    if has_bank:
+        add("bank_detail", broad_scope_keys if unknown_row_types else bank_scope_keys)
+    if has_invoice or has_oa or unknown_row_types:
+        lifecycle_scope_keys: set[str] = set()
+        if has_invoice:
+            lifecycle_scope_keys.update(broad_scope_keys if unknown_row_types else invoice_scope_keys)
+        if has_oa:
+            lifecycle_scope_keys.update(oa_scope_keys)
+        add("invoice_lifecycle", lifecycle_scope_keys or broad_scope_keys)
+    if has_invoice or unknown_row_types:
+        invoice_downstream_scope_keys = broad_scope_keys if unknown_row_types else invoice_scope_keys
+        if "input" in invoice_directions or unknown_invoice_direction or unknown_row_types:
+            add("input_invoice_usage", invoice_downstream_scope_keys)
+        if "output" in invoice_directions or unknown_invoice_direction or unknown_row_types:
+            add("output_invoice_collection", invoice_downstream_scope_keys)
+        add("tax_offset", invoice_downstream_scope_keys)
+    if has_oa:
+        add("oa_pending_payment", oa_scope_keys)
+    cost_scope_keys: set[str] = set()
+    if unknown_row_types:
+        cost_scope_keys = broad_scope_keys
+    elif has_bank and (has_oa or is_no_oa_batch or relation_mode == "turnover_manual_closure"):
+        cost_scope_keys = bank_scope_keys
+    if cost_scope_keys:
+        add("cost_statistics", cost_scope_keys)
+    if is_no_oa_batch:
+        add("no_oa_bank_batch", bank_scope_keys)
+    return scope_map
+
+
+def _workbench_relation_pending_invoice_scope_keys(
+    connection: Any,
+    relation: dict[str, Any],
+    *,
+    domain_scope_keys: dict[str, set[str]] | None = None,
+) -> set[str]:
+    row_types = {item for item in text_list(relation.get("row_types")) if item}
+    if row_types and "bank" not in row_types:
+        return set()
+    domain_scope_keys = domain_scope_keys or _workbench_relation_domain_scope_keys(connection, relation)
+    directions = _workbench_relation_bank_directions(connection, text_list(relation.get("row_ids")))
+    if not directions:
+        directions = {"expense", "income"}
+    base_scope_keys: set[str] = set()
+    if "expense" in directions:
+        base_scope_keys.update(_EXPENSE_PENDING_INVOICE_SCOPE_KEYS)
+    if "income" in directions:
+        base_scope_keys.update(_INCOME_PENDING_INVOICE_SCOPE_KEYS)
+    return _month_scoped_pending_invoice_scope_keys(
+        base_scope_keys,
+        domain_scope_keys.get("bank", set())
+        or domain_scope_keys.get("relation", set())
+        or domain_scope_keys.get("workbench", set()),
+    )
+
+
+def _workbench_relation_domain_scope_keys(connection: Any, relation: dict[str, Any]) -> dict[str, set[str]]:
+    relation_scope_keys = _relation_month_scope_keys(relation)
+    bank_scope_keys = _workbench_relation_bank_scope_keys(connection, relation)
+    invoice_scope_keys = _workbench_relation_invoice_scope_keys(connection, relation)
+    oa_scope_keys = _workbench_relation_oa_scope_keys(connection, relation)
+    workbench_scope_keys = (
+        set()
+        if relation_scope_keys or bank_scope_keys or invoice_scope_keys or oa_scope_keys
+        else _workbench_relation_workbench_scope_keys(connection, relation)
+    )
+    return {
+        "relation": relation_scope_keys,
+        "bank": bank_scope_keys,
+        "invoice": invoice_scope_keys,
+        "oa": oa_scope_keys,
+        "workbench": workbench_scope_keys,
+    }
+
+
+def _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_keys: dict[str, set[str]]) -> set[str]:
+    scope_keys: set[str] = set()
+    for key in ("relation", "bank", "invoice", "oa", "workbench"):
+        scope_keys.update(domain_scope_keys.get(key, set()))
     return scope_keys or {"all"}
+
+
+def _domain_scope_keys(domain_scope_keys: dict[str, set[str]], key: str, dirty_scope_keys: set[str]) -> set[str]:
+    scope_keys = set(domain_scope_keys.get(key, set()))
+    if scope_keys:
+        return scope_keys
+    relation_scope_keys = set(domain_scope_keys.get("relation", set()))
+    if relation_scope_keys:
+        return relation_scope_keys
+    return set(dirty_scope_keys or {"all"})
+
+
+def _relation_month_scope_keys(relation: dict[str, Any]) -> set[str]:
+    scope_month = month_start(relation.get("month_scope") or relation.get("scope_month") or relation.get("month"))
+    return {str(scope_month)[:7]} if scope_month is not None else set()
+
+
+def _month_scoped_pending_invoice_scope_keys(base_scope_keys: set[str], month_scope_keys: set[str]) -> set[str]:
+    months = sorted(
+        {
+            str(scope_key).strip()[:7]
+            for scope_key in month_scope_keys
+            if len(str(scope_key).strip()) >= 7
+            and str(scope_key).strip()[4] == "-"
+            and str(scope_key).strip()[5:7].isdigit()
+        }
+    )
+    if not months:
+        return set(base_scope_keys)
+    return {f"{scope_key}:{month}" for scope_key in base_scope_keys for month in months}
+
+
+def _workbench_relation_bank_scope_keys(connection: Any, relation: dict[str, Any]) -> set[str]:
+    row_ids = text_list(relation.get("row_ids"))
+    if not row_ids:
+        return set()
+    rows = connection.fetch_all(
+        """
+        select distinct to_char(txn_month, 'YYYY-MM') as scope_key
+        from app.bank_transactions
+        where status <> 'deleted'
+          and txn_month is not null
+          and coalesce(legacy_mongo_id, id::text) = any(%s)
+        order by scope_key
+        """,
+        (row_ids,),
+    )
+    return {text(row.get("scope_key")) for row in rows if text(row.get("scope_key"))}
+
+
+def _workbench_relation_invoice_scope_keys(connection: Any, relation: dict[str, Any]) -> set[str]:
+    row_ids = text_list(relation.get("row_ids"))
+    if not row_ids:
+        return set()
+    rows = connection.fetch_all(
+        """
+        select distinct to_char(invoice_month, 'YYYY-MM') as scope_key
+        from app.invoices
+        where status <> 'deleted'
+          and invoice_month is not null
+          and coalesce(legacy_mongo_id, id::text) = any(%s)
+        order by scope_key
+        """,
+        (row_ids,),
+    )
+    return {text(row.get("scope_key")) for row in rows if text(row.get("scope_key"))}
+
+
+def _workbench_relation_oa_scope_keys(connection: Any, relation: dict[str, Any]) -> set[str]:
+    row_ids = text_list(relation.get("row_ids"))
+    if not row_ids:
+        return set()
+    rows = connection.fetch_all(
+        """
+        select distinct to_char(date_trunc('month', application_date)::date, 'YYYY-MM') as scope_key
+        from app.oa_applications
+        where application_date is not null
+          and row_id = any(%s)
+        order by scope_key
+        """,
+        (row_ids,),
+    )
+    return {text(row.get("scope_key")) for row in rows if text(row.get("scope_key"))}
+
+
+def _workbench_relation_workbench_scope_keys(connection: Any, relation: dict[str, Any]) -> set[str]:
+    row_ids = text_list(relation.get("row_ids"))
+    if not row_ids:
+        return set()
+    rows = connection.fetch_all(
+        """
+        select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+        from read_model.workbench_rows
+        where scope_month is not null
+          and row_id = any(%s)
+        order by scope_key
+        """,
+        (row_ids,),
+    )
+    return {text(row.get("scope_key")) for row in rows if text(row.get("scope_key"))}
+
+
+def _workbench_relation_invoice_directions(connection: Any, row_ids: list[str]) -> set[str]:
+    if not row_ids:
+        return set()
+    rows = connection.fetch_all(
+        """
+        select distinct invoice_type
+        from app.invoices
+        where status <> 'deleted'
+          and coalesce(legacy_mongo_id, id::text) = any(%s)
+        """,
+        (row_ids,),
+    )
+    directions: set[str] = set()
+    for row in rows:
+        invoice_type = (text(row.get("invoice_type")) or "").lower()
+        if "input" in invoice_type or "进" in invoice_type:
+            directions.add("input")
+        if "output" in invoice_type or "销" in invoice_type:
+            directions.add("output")
+    return directions
+
+
+def _workbench_relation_bank_directions(connection: Any, row_ids: list[str]) -> set[str]:
+    if not row_ids:
+        return set()
+    rows = connection.fetch_all(
+        """
+        select distinct txn_direction
+        from app.bank_transactions
+        where status <> 'deleted'
+          and coalesce(legacy_mongo_id, id::text) = any(%s)
+        """,
+        (row_ids,),
+    )
+    directions: set[str] = set()
+    for row in rows:
+        txn_direction = (text(row.get("txn_direction")) or "").lower()
+        if txn_direction in {"outflow", "debit", "expense"} or "支" in txn_direction or "付" in txn_direction:
+            directions.add("expense")
+        if txn_direction in {"inflow", "credit", "income"} or "收" in txn_direction or "入" in txn_direction:
+            directions.add("income")
+    return directions
 
 
 def _enqueue_read_model_refresh_in_transaction(
@@ -246,6 +510,7 @@ def _enqueue_read_model_refresh_in_transaction(
     scope_key: str,
     reason: str,
     tenant_id: str = "default",
+    priority: str = "normal",
 ) -> None:
     if scope_type == "cost_statistics":
         for target_scope_key in CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys([scope_key]):
@@ -255,6 +520,7 @@ def _enqueue_read_model_refresh_in_transaction(
                 scope_key=target_scope_key,
                 reason=reason,
                 tenant_id=tenant_id,
+                priority=priority,
             )
         return
     _enqueue_single_read_model_refresh_in_transaction(
@@ -263,6 +529,7 @@ def _enqueue_read_model_refresh_in_transaction(
         scope_key=scope_key,
         reason=reason,
         tenant_id=tenant_id,
+        priority=priority,
     )
 
 
@@ -273,6 +540,7 @@ def _enqueue_single_read_model_refresh_in_transaction(
     scope_key: str,
     reason: str,
     tenant_id: str = "default",
+    priority: str = "normal",
 ) -> None:
     payload = {
         "scope_type": scope_type,
@@ -296,7 +564,7 @@ def _enqueue_single_read_model_refresh_in_transaction(
             ), 0),
             'pending',
             now(),
-            'normal'
+            %s
         )
         on conflict (tenant_id, scope_type, scope_key)
         where status in ('pending', 'processing')
@@ -321,6 +589,7 @@ def _enqueue_single_read_model_refresh_in_transaction(
             tenant_id,
             scope_type,
             scope_key,
+            priority,
         ),
     )
     source_version = int_value((dirty_row or {}).get("source_version"), 0)
@@ -333,7 +602,7 @@ def _enqueue_single_read_model_refresh_in_transaction(
             scope_type, scope_key, dedupe_key, schema_version,
             source_version, priority, payload, raw_payload
         )
-        values (%s, %s, 'read_model', %s, %s, %s, %s, 1, %s, 'normal', %s, %s)
+        values (%s, %s, 'read_model', %s, %s, %s, %s, 1, %s, %s, %s, %s)
         on conflict (tenant_id, dedupe_key)
         where dedupe_key is not null and status = 'pending'
         do update set
@@ -358,6 +627,7 @@ def _enqueue_single_read_model_refresh_in_transaction(
             scope_key,
             f"{event_type}:{scope_type}:{scope_key}",
             source_version,
+            priority,
             jsonb(event_payload),
             jsonb(event_payload),
         ),

@@ -11504,6 +11504,17 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   min-width: 568px;
 }
 
+.candidate-pane-columnheaders-invoice.pane-layout-with-action,
+.record-card-invoice.record-card-has-action {
+  grid-template-columns:
+    minmax(156px, 1.06fr)
+    minmax(156px, 1.06fr)
+    minmax(124px, 0.88fr)
+    minmax(132px, 0.9fr)
+    168px;
+  min-width: 736px;
+}
+
 .candidate-pane-columnheaders-invoice.pane-layout-no-action {
   height: 56px;
 }

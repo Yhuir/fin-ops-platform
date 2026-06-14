@@ -95,6 +95,15 @@ def workbench_groups_redis_ttl_seconds_from_env() -> int:
         return 600
 
 
+def workbench_groups_sync_cache_warmup_enabled_from_env() -> bool:
+    return str(os.getenv("FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED", "") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 class WorkbenchGroupsPageCacheWarmer:
     def __init__(
         self,

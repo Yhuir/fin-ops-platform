@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
+
 
 ACTIVE_PAIR_RELATION_STATUS = "active"
 CANCELLED_PAIR_RELATION_STATUS = "cancelled"
@@ -622,23 +624,7 @@ class WorkbenchPairRelationService:
 
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
-        lowered_row_id = str(row_id).strip().lower()
-        if lowered_row_id.startswith("oa-att-inv-"):
-            return "invoice"
-        if lowered_row_id.startswith("oa-"):
-            return "oa"
-        if (
-            lowered_row_id.startswith("bk-")
-            or lowered_row_id.startswith("txn-")
-            or lowered_row_id.startswith("txn_")
-            or lowered_row_id.startswith("bank-")
-        ):
-            return "bank"
-        if lowered_row_id.startswith("iv-") or lowered_row_id.startswith("invoice-"):
-            return "invoice"
-        if lowered_row_id.startswith("etc-summary-"):
-            return "invoice"
-        return "unknown"
+        return row_type_for_workbench_row_id(row_id)
 
     @classmethod
     def _normalize_history(cls, history: list[dict[str, Any]]) -> list[dict[str, Any]]:

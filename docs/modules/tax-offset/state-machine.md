@@ -87,9 +87,9 @@ Refresh 触发来源：
 
 失败恢复：
 
-1. 先看 `/api/app-health.app_status` 中 `tax_offset` domain、readiness scope、dirty scope、outbox 和 cost-tax worker。
+1. 先看 `/api/app-health.app_status` 中 `tax_offset` domain、readiness scope、dirty scope、outbox 和 `tax-offset` worker；旧 `cost-tax` 只是兼容消费者。
 2. 对 `missing/refreshing`，确认 durable queue 是否已有 `tax_offset.read_model.refresh`；不要手工写 fresh。
-3. 对 `failed/unavailable`，检查 cost-tax worker 日志、SQL projection、tax certified import job 和 Redis 错误。
+3. 对 `failed/unavailable`，检查 `tax-offset` worker 日志、SQL projection、tax certified import job 和 Redis 错误。
 4. 对计划保存 conflict，让页面重新拉取月份 payload，再基于新 `source_versions` 保存。
 5. 对认证导入失败，优先保留 session/job payload，重新 preview/confirm 或按 import job runbook 重试。
 

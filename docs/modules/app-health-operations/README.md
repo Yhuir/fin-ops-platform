@@ -60,7 +60,7 @@
 | 来源 | App Health / Status 影响 | 受影响体验 |
 | --- | --- | --- |
 | read model missing/stale/refreshing | domain busy/yellow，暴露 scope diagnostics | 对应页面显示刷新中，App Status hover 可定位 |
-| critical read model failed/unavailable | domain blocked/red | 写入禁用或提示不可用，运维进入 AppHealth dashboard |
+| critical read model failed/unavailable | domain blocked/red，暴露 current-effective scope diagnostics | 对应页面不能假装 fresh；普通 read model failure 不进入全局写闸门，写入是否禁用由 `overall.write_safety` 和具体写 API precondition 决定 |
 | required worker missing/stale/mismatch | domain blocked/red 或 busy/yellow | 所有依赖该 worker 的页面不能假设会收敛 |
 | dirty scope/outbox backlog | domain busy/yellow | 用户看到后台刷新，而不是旧数据 fresh |
 | background job queued/running/attention | overall/domain busy 或 attention | 导入、数据重置、ETC、worker rebuild 状态可见 |

@@ -397,41 +397,62 @@ class AppStatusOverviewService:
         runtime_unavailable_reason: str,
     ) -> dict[str, Any]:
         if not bool(getattr(session, "allowed", False)) or not bool(getattr(session, "can_access_app", False)):
+            write_safety = self._write_safety_payload(
+                status="blocked",
+                reason="当前账号不可用",
+                blockers=["session"],
+            )
             return {
                 "level": "blocked",
                 "color": "red",
                 "reason": "当前账号不可用",
-                "blocks_mutations": True,
+                "blocks_mutations": bool(write_safety["blocks_mutations"]),
+                "write_safety": write_safety,
             }
         if runtime_unavailable_reason:
+            write_safety = self._write_safety_payload(
+                status="blocked",
+                reason=runtime_unavailable_reason,
+                blockers=["runtime"],
+            )
             return {
                 "level": "blocked",
                 "color": "red",
                 "reason": runtime_unavailable_reason,
-                "blocks_mutations": True,
+                "blocks_mutations": bool(write_safety["blocks_mutations"]),
+                "write_safety": write_safety,
             }
         unavailable_dependency = self._first_unavailable_dependency(dependencies)
         if unavailable_dependency:
+            write_safety = self._write_safety_payload(
+                status="blocked",
+                reason=unavailable_dependency,
+                blockers=["dependency"],
+            )
             return {
                 "level": "blocked",
                 "color": "red",
                 "reason": unavailable_dependency,
-                "blocks_mutations": True,
+                "blocks_mutations": bool(write_safety["blocks_mutations"]),
+                "write_safety": write_safety,
             }
+        write_safety = self._write_safety_payload(status="ready", reason="写操作可用", blockers=[])
         blocked_domain = next((domain for domain in domains if domain.get("level") == "blocked"), None)
         if blocked_domain:
             return {
                 "level": "blocked",
                 "color": "red",
                 "reason": str(blocked_domain.get("reason") or "系统状态异常"),
-                "blocks_mutations": True,
+                "blocks_mutations": bool(write_safety["blocks_mutations"]),
+                "write_safety": write_safety,
             }
         if any(str(task.get("status") or "") in ACTIVE_JOB_STATUSES.union(ATTENTION_JOB_STATUSES) for task in tasks):
             return {
                 "level": "busy",
                 "color": "yellow",
                 "reason": "后台任务处理中",
-                "blocks_mutations": False,
+                "blocks_mutations": bool(write_safety["blocks_mutations"]),
+                "write_safety": write_safety,
             }
         busy_domain = next((domain for domain in domains if domain.get("level") == "busy"), None)
         if busy_domain:
@@ -439,20 +460,33 @@ class AppStatusOverviewService:
                 "level": "busy",
                 "color": "yellow",
                 "reason": str(busy_domain.get("reason") or "数据正在同步"),
-                "blocks_mutations": False,
+                "blocks_mutations": bool(write_safety["blocks_mutations"]),
+                "write_safety": write_safety,
             }
         if self._active_alerts(alerts):
             return {
                 "level": "busy",
                 "color": "yellow",
                 "reason": "存在运行告警",
-                "blocks_mutations": False,
+                "blocks_mutations": bool(write_safety["blocks_mutations"]),
+                "write_safety": write_safety,
             }
         return {
             "level": "ok",
             "color": "green",
             "reason": "系统状态正常",
-            "blocks_mutations": False,
+            "blocks_mutations": bool(write_safety["blocks_mutations"]),
+            "write_safety": write_safety,
+        }
+
+    @staticmethod
+    def _write_safety_payload(*, status: str, reason: str, blockers: list[str]) -> dict[str, Any]:
+        normalized_blockers = [str(blocker).strip() for blocker in blockers if str(blocker).strip()]
+        return {
+            "status": status,
+            "reason": reason,
+            "blocks_mutations": bool(normalized_blockers),
+            "blockers": normalized_blockers,
         }
 
     @staticmethod

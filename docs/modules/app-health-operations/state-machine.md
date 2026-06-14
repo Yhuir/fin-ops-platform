@@ -9,6 +9,7 @@
 - `ok/green`：所有关键 domain ready/fresh，无 queued/running/attention job，无 critical dependency/worker/read model 问题。
 - `busy/yellow`：存在 loading/refreshing/stale/missing readiness、queued/running job、dirty scope、outbox backlog、非阻断 dependency warning。
 - `blocked/red`：session 不可用、critical read model failed/unavailable、required worker missing/mismatch/stale、critical dependency unavailable、runtime snapshot unavailable。
+- `write_safety`：独立于 `overall.level` 的写操作安全闸门。`overall.level=blocked` 可以只表示读侧 freshness/domain 失败；只有 session/auth、runtime/DB、关键依赖或目标写模型不可用等写安全 blocker 才设置 `write_safety.blocks_mutations=true` 并派生 `overall.blocks_mutations=true`。
 
 ### Domain
 
@@ -65,3 +66,4 @@
 | - | 初始骨架 | 待补充 | - |
 | 2026-06-11 | 补齐 App Health / App Status 测试闭环状态机 | 将 overall/domain/job/runtime/dashboard/readiness 状态纳入统一维护边界 | `tests.test_app_health_api`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-12 | 引入 current-effective blocker 语义 | legacy 成本 scope 与已被后续成功覆盖的 outbox 失败不再污染当前 App Status；历史 scope 通过 `historical_read_model_scopes[]` 暴露 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service tests.test_runtime_monitoring -v` |
+| 2026-06-13 | 拆分 read freshness 与 write safety | critical read model failed/unavailable 仍让 domain/overall blocked/red，但不再自动全局禁写；mutation gate 使用 `overall.write_safety.blocks_mutations`，runtime/dependency/session blocker 仍禁写 | `PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v`；`cd web && npm test -- --run src/test/AppStatusApi.test.ts src/test/AppHealthStatusContext.test.tsx` |

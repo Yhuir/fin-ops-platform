@@ -66,13 +66,13 @@
   - Turnover manual relation 仍归 turnover 模块；跨页面 OA/银行/发票配对关系归 `workbench_relations` 模块。
   - closure 写 Workbench relation 使用 `confirm_relation(case_id="turnover:{relation_id}", relation_mode="turnover_manual_closure")`。
   - withdraw 撤回 Workbench relation 使用 `cancel_relation(case_id="turnover:{relation_id}")`，history operation 为 `turnover_manual_closure_withdraw`。
-  - 写入前必须通过 relation read model freshness precondition；non-fresh 时返回 409，并且不能先改 turnover snapshot。
+  - 手动闭环写入使用 canonical relation command/write safety；`workbench_relation` distribution/read model non-fresh 不阻断写入，写后继续刷新 Workbench 和 downstream read model。
   - 已补齐成三栏 relation 的 bank row 不能从 turnover 页面撤回，仍要求到关联台撤回完整关系。
 - 影响范围：`TurnoverLedgerWorkbenchPairPort`、`TurnoverLedgerWriteFacade`、Application turnover facade wiring、turnover API error payload、workbench-relations 模块文档。
 - 测试覆盖：
   - `test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service`
   - `test_turnover_workbench_pair_port_delegates_manual_closure_withdraw_to_relation_command_service`
-  - `test_manual_closure_fails_fast_when_workbench_relation_read_model_is_stale`
+  - `test_manual_closure_uses_canonical_relation_when_workbench_relation_read_model_is_stale`
   - `test_turnover_closure_and_withdraw_wiring_use_workbench_relation_command_service`
 - 验证命令：
 

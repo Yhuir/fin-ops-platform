@@ -13,7 +13,7 @@ from fin_ops_platform.services.runtime_queue import (
 
 
 class FakeTransaction:
-    def __init__(self, rows: list[dict[str, object] | None] | None = None, counts: list[int] | None = None) -> None:
+    def __init__(self, rows: list[dict[str, object] | Exception | None] | None = None, counts: list[int] | None = None) -> None:
         self.rows = list(rows or [])
         self.counts = list(counts or [])
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
@@ -21,7 +21,10 @@ class FakeTransaction:
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
         self.calls.append(("fetch_one", sql, params))
-        return self.rows.pop(0) if self.rows else None
+        row = self.rows.pop(0) if self.rows else None
+        if isinstance(row, Exception):
+            raise row
+        return row
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.calls.append(("fetch_all", sql, params))
@@ -876,6 +879,323 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("status = 'processing'", normalized_sql)
         self.assertIn("locked_by = %s", normalized_sql)
         self.assertEqual(params, ("shutdown_signal_15", "event-1", "worker-1"))
+
+    def test_release_stale_processing_events_requeues_with_operator_audit(self) -> None:
+        transaction = FakeTransaction(rows=[[event_row(status="pending")]])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        rows = repository.release_stale_processing_events(
+            stale_after_seconds=300,
+            limit=25,
+            reason="rabbitmq_stale_processing_repair",
+            event_types=["bank_detail.read_model.refresh"],
+        )
+
+        self.assertEqual(len(rows), 1)
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("status = 'processing'", normalized_sql)
+        self.assertIn("locked_at < now() - (%s * interval '1 second')", normalized_sql)
+        self.assertIn("stale.event_type = any(%s)", normalized_sql)
+        self.assertIn("row_number() over", normalized_sql)
+        self.assertIn("dedupe_rank = 1", normalized_sql)
+        self.assertIn("pending.status = 'pending'", normalized_sql)
+        self.assertIn("for update skip locked", normalized_sql)
+        self.assertIn("status = 'pending'", normalized_sql)
+        self.assertIn("publish_status = 'unpublished'", normalized_sql)
+        self.assertIn("next_publish_at = now()", normalized_sql)
+        self.assertIn("attempts = greatest(coalesce(event.attempts, 0) - 1, 0)", normalized_sql)
+        self.assertIn("operator_stale_processing_release", normalized_sql)
+        self.assertIn("previous_locked_by", normalized_sql)
+        self.assertIn("previous_locked_at", normalized_sql)
+        self.assertEqual(
+            params,
+            (
+                300,
+                ["bank_detail.read_model.refresh"],
+                25,
+                "rabbitmq_stale_processing_repair",
+                300,
+            ),
+        )
+
+    def test_resolve_superseded_processing_events_marks_obsolete_processing_done(self) -> None:
+        transaction = FakeTransaction(rows=[[event_row(status="done")]])
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        rows = repository.resolve_superseded_processing_events(
+            stale_after_seconds=300,
+            limit=25,
+            reason="rabbitmq_stale_processing_superseded",
+            event_types=["bank_detail.read_model.refresh"],
+        )
+
+        self.assertEqual(len(rows), 1)
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("join lateral", normalized_sql)
+        self.assertIn("newer.status in ('pending', 'processing', 'done')", normalized_sql)
+        self.assertIn("coalesce(newer.source_version, 0) >= coalesce(stale.source_version, 0)", normalized_sql)
+        self.assertIn("stale.event_type = any(%s)", normalized_sql)
+        self.assertIn("status = 'done'", normalized_sql)
+        self.assertIn("operator_superseded_processing_resolution", normalized_sql)
+        self.assertIn("covered_by_event_id", normalized_sql)
+        self.assertEqual(
+            params,
+            (
+                300,
+                ["bank_detail.read_model.refresh"],
+                25,
+                "rabbitmq_stale_processing_superseded",
+                300,
+            ),
+        )
+
+    def test_defer_event_delays_dependency_retry_without_failure_or_dead_letter(self) -> None:
+        locked_at = datetime(2026, 6, 14, 5, 6, tzinfo=timezone.utc)
+        transaction = FakeTransaction(
+            rows=[
+                {
+                    "event_id": "event-1",
+                    "tenant_id": "tenant-a",
+                    "dedupe_key": "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                    "source_version": 197,
+                    "locked_by": "worker-1",
+                    "locked_at": locked_at,
+                },
+                None,
+                {"event_id": "event-1"},
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        self.assertTrue(
+            repository.defer_event(
+                "event-1",
+                "worker-1",
+                reason="workbench_relation_read_model_not_fresh",
+                delay_seconds=0.25,
+            )
+        )
+
+        self.assertEqual(len(transaction.calls), 3)
+        _, lock_sql, lock_params = transaction.calls[0]
+        _, cover_sql, cover_params = transaction.calls[1]
+        _, defer_sql, defer_params = transaction.calls[2]
+        normalized_lock_sql = " ".join(lock_sql.lower().split())
+        normalized_cover_sql = " ".join(cover_sql.lower().split())
+        normalized_sql = " ".join(defer_sql.lower().split())
+        self.assertIn("status = 'processing'", normalized_lock_sql)
+        self.assertIn("locked_by = %s", normalized_lock_sql)
+        self.assertIn("for update", normalized_lock_sql)
+        self.assertIn("status in ('pending', 'processing', 'done')", normalized_cover_sql)
+        self.assertIn("coalesce(source_version, 0) >= coalesce(%s, 0)", normalized_cover_sql)
+        self.assertIn("order by coalesce(source_version, 0) desc", normalized_cover_sql)
+        self.assertIn("status = 'pending'", normalized_sql)
+        self.assertIn("available_at = now() + (%s::double precision * interval '1 second')", normalized_sql)
+        self.assertIn("next_publish_at = now() + (%s::double precision * interval '1 second')", normalized_sql)
+        self.assertIn("attempts = greatest(coalesce(attempts, 0) - 1, 0)", normalized_sql)
+        self.assertIn("runtime_defer", normalized_sql)
+        self.assertIn("'delay_seconds', %s::double precision", normalized_sql)
+        self.assertIn("status = 'processing'", normalized_sql)
+        self.assertIn("locked_by = %s", normalized_sql)
+        self.assertIn("not exists", normalized_sql)
+        self.assertNotIn("dead_lettered", normalized_sql)
+        self.assertEqual(lock_params, ("event-1", "worker-1"))
+        self.assertEqual(
+            cover_params,
+            (
+                "tenant-a",
+                "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                "event-1",
+                197,
+            ),
+        )
+        self.assertEqual(
+            defer_params,
+            (
+                0.25,
+                0.25,
+                "workbench_relation_read_model_not_fresh",
+                0.25,
+                "event-1",
+                "worker-1",
+            ),
+        )
+
+    def test_defer_event_resolves_current_processing_when_pending_same_dedupe_exists(self) -> None:
+        locked_at = datetime(2026, 6, 14, 5, 6, tzinfo=timezone.utc)
+        transaction = FakeTransaction(
+            rows=[
+                {
+                    "event_id": "event-1",
+                    "tenant_id": "tenant-a",
+                    "dedupe_key": "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                    "source_version": 197,
+                    "locked_by": "worker-1",
+                    "locked_at": locked_at,
+                },
+                {
+                    "event_id": "event-2",
+                    "status": "pending",
+                    "source_version": 198,
+                },
+                {"event_id": "event-1"},
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        self.assertTrue(
+            repository.defer_event(
+                "event-1",
+                "worker-1",
+                reason="workbench_relation_read_model_not_fresh",
+                delay_seconds=3,
+            )
+        )
+
+        self.assertEqual(len(transaction.calls), 3)
+        _, lock_sql, lock_params = transaction.calls[0]
+        _, cover_sql, cover_params = transaction.calls[1]
+        _, resolve_sql, resolve_params = transaction.calls[2]
+        normalized_lock_sql = " ".join(lock_sql.lower().split())
+        normalized_cover_sql = " ".join(cover_sql.lower().split())
+        normalized_resolve_sql = " ".join(resolve_sql.lower().split())
+        self.assertIn("status = 'processing'", normalized_lock_sql)
+        self.assertIn("for update", normalized_lock_sql)
+        self.assertIn("status in ('pending', 'processing', 'done')", normalized_cover_sql)
+        self.assertIn("coalesce(source_version, 0) >= coalesce(%s, 0)", normalized_cover_sql)
+        self.assertIn("status = 'done'", normalized_resolve_sql)
+        self.assertIn("runtime_defer_superseded", normalized_resolve_sql)
+        self.assertIn("covered_by_event_id", normalized_resolve_sql)
+        self.assertNotIn("status = 'pending'", normalized_resolve_sql)
+        self.assertEqual(lock_params, ("event-1", "worker-1"))
+        self.assertEqual(
+            cover_params,
+            (
+                "tenant-a",
+                "pending_invoice.read_model.refresh:pending_invoice:expense:requires_invoice:2026-02",
+                "event-1",
+                197,
+            ),
+        )
+        self.assertEqual(
+            resolve_params,
+            (
+                "workbench_relation_read_model_not_fresh",
+                3.0,
+                "worker-1",
+                locked_at,
+                "event-2",
+                "pending",
+                198,
+                "event-1",
+                "worker-1",
+            ),
+        )
+
+    def test_defer_event_resolves_unique_collision_from_concurrent_pending_cover(self) -> None:
+        class UniqueViolation(RuntimeError):
+            sqlstate = "23505"
+
+        locked_at = datetime(2026, 6, 14, 5, 26, tzinfo=timezone.utc)
+        target = {
+            "event_id": "event-1",
+            "tenant_id": "tenant-a",
+            "dedupe_key": "bank_detail.read_model.refresh:bank_detail:2026-02",
+            "source_version": 13357,
+            "locked_by": "worker-1",
+            "locked_at": locked_at,
+        }
+        transaction = FakeTransaction(
+            rows=[
+                target,
+                None,
+                UniqueViolation("duplicate key value violates unique constraint"),
+                target,
+                {
+                    "event_id": "event-2",
+                    "status": "pending",
+                    "source_version": 13358,
+                },
+                {"event_id": "event-1"},
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        self.assertTrue(
+            repository.defer_event(
+                "event-1",
+                "worker-1",
+                reason="workbench_relation_read_model_not_fresh",
+                delay_seconds=0.25,
+            )
+        )
+
+        self.assertEqual(transaction.outcomes, ["rollback", "commit"])
+        self.assertEqual(len(transaction.calls), 6)
+        _, first_cover_sql, first_cover_params = transaction.calls[1]
+        _, pending_update_sql, _ = transaction.calls[2]
+        _, second_cover_sql, second_cover_params = transaction.calls[4]
+        _, resolve_sql, resolve_params = transaction.calls[5]
+        normalized_first_cover_sql = " ".join(first_cover_sql.lower().split())
+        normalized_second_cover_sql = " ".join(second_cover_sql.lower().split())
+        normalized_pending_update_sql = " ".join(pending_update_sql.lower().split())
+        normalized_resolve_sql = " ".join(resolve_sql.lower().split())
+        self.assertIn("status in ('pending', 'processing', 'done')", normalized_first_cover_sql)
+        self.assertIn("coalesce(source_version, 0) >= coalesce(%s, 0)", normalized_first_cover_sql)
+        self.assertIn("status = 'pending'", normalized_pending_update_sql)
+        self.assertIn("status in ('pending', 'processing', 'done')", normalized_second_cover_sql)
+        self.assertIn("status = 'done'", normalized_resolve_sql)
+        self.assertIn("'collision', true", normalized_resolve_sql)
+        self.assertEqual(
+            first_cover_params,
+            ("tenant-a", "bank_detail.read_model.refresh:bank_detail:2026-02", "event-1", 13357),
+        )
+        self.assertEqual(
+            second_cover_params,
+            ("tenant-a", "bank_detail.read_model.refresh:bank_detail:2026-02", "event-1", 13357),
+        )
+        self.assertEqual(
+            resolve_params,
+            (
+                "workbench_relation_read_model_not_fresh",
+                0.25,
+                "worker-1",
+                locked_at,
+                "event-2",
+                "pending",
+                13358,
+                "event-1",
+                "worker-1",
+            ),
+        )
+
+    def test_read_model_refresh_is_active_checks_pending_or_processing_dirty_scope(self) -> None:
+        class DirectFetchConnection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+                self.calls.append((sql, params))
+                return {"exists": 1}
+
+        connection = DirectFetchConnection()
+        repository = RuntimeQueueRepository(connection)
+
+        self.assertTrue(
+            repository.read_model_refresh_is_active(
+                tenant_id="tenant-a",
+                scope_type="bank_detail",
+                scope_key="2026-04",
+            )
+        )
+
+        sql, params = connection.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("from job.read_model_dirty_scopes", normalized_sql)
+        self.assertIn("status in ('pending', 'processing')", normalized_sql)
+        self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04"))
 
     def test_resolve_dead_letter_event_marks_done_with_operator_resolution(self) -> None:
         transaction = FakeTransaction(rows=[{"id": "event-1"}])

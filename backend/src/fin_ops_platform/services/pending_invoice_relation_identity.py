@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
+
 
 @dataclass(frozen=True)
 class PendingInvoiceRelationIdentity:
@@ -63,17 +65,7 @@ def infer_pending_invoice_relation_row_type(row_id: str) -> str:
     normalized = _clean_text(row_id).lower()
     if is_reserved_relation_identifier(normalized):
         return "unknown"
-    if normalized.startswith("oa-att-inv-"):
-        return "invoice"
-    if normalized.startswith("oa-"):
-        return "oa"
-    if normalized.startswith(("bk-", "txn-", "txn_", "bank-")):
-        return "bank"
-    if normalized.startswith(("iv-", "inv-", "invoice-")):
-        return "invoice"
-    if normalized.startswith("etc-summary-"):
-        return "invoice"
-    return "unknown"
+    return row_type_for_workbench_row_id(normalized)
 
 
 def is_valid_pending_invoice_oa_row_id(value: object) -> bool:

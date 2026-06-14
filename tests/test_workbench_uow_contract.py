@@ -30,6 +30,7 @@ class _Command:
     tenant_id: str = "default"
     actor_id: str = "system"
     payload: dict[str, object] = field(default_factory=dict)
+    refresh_metadata: dict[str, object] | None = None
 
 
 class _RecordingTransaction:
@@ -485,6 +486,44 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(writer.calls[0]["metadata"], {"action_name": "confirm_link"})
         self.assertEqual(result["source_versions"]["2026-05"], 1)
         self.assertEqual(result["outbox_event_ids"], ["event-1"])
+
+    def test_confirm_link_preserves_relation_refresh_metadata_in_transactional_outbox(self) -> None:
+        connection = _RecordingConnection()
+        writer = _RecordingDirtyOutboxWriter()
+        uow = self._new_uow(connection=connection, read_model_writer=writer)
+
+        def handler(ctx: object) -> dict[str, object]:
+            ctx.pair_relations.record("save_relation", case_id="CASE-1")
+            return {"case_id": "CASE-1", "affected_scope_keys": ["2026-05"]}
+
+        result = self._run_uow(
+            uow,
+            _Command(
+                action_name="confirm_link",
+                scope_keys=["2026-05"],
+                refresh_metadata={
+                    "source": "confirm_link",
+                    "case_id": "CASE-1",
+                    "downstream_scope_types": ["bank_detail", "pending_invoice", "search"],
+                    "invoice_usage_scope_types": ["input_invoice_usage"],
+                    "pending_invoice_scope_keys": ["expense:all:2026-05"],
+                },
+            ),
+            handler,
+        )
+
+        self.assertEqual(result["outbox_event_ids"], ["event-1"])
+        self.assertEqual(
+            writer.calls[0]["metadata"],
+            {
+                "source": "confirm_link",
+                "case_id": "CASE-1",
+                "action_name": "confirm_link",
+                "downstream_scope_types": ["bank_detail", "pending_invoice", "search"],
+                "invoice_usage_scope_types": ["input_invoice_usage"],
+                "pending_invoice_scope_keys": ["expense:all:2026-05"],
+            },
+        )
 
     def test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history(self) -> None:
         connection = _RecordingConnection()

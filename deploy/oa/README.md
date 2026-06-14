@@ -219,7 +219,7 @@ RabbitMQ 生产 env 拆分：
 
 最小生产正确性不依赖 RabbitMQ。标准 release 发布会通过服务器 root-owned helper
 `/usr/local/sbin/finops-ensure-runtime-workers`，安装/更新 worker systemd 模板，补齐缺失的
-worker env，并启用、重启以下 PostgreSQL polling worker。仓库内的
+worker env，并启用、重启以下 required worker。仓库内的
 `deploy/oa/bin/finops-ensure-runtime-workers.sh` 是该 helper 的源文件，不能由 `finops-deploy`
 从 release 目录直接 `sudo /bin/bash` 执行：
 
@@ -237,8 +237,15 @@ sudo systemctl enable --now fin-ops-worker@bank-account-balance.service
 sudo systemctl enable --now fin-ops-worker@no-oa-bank-batch.service
 sudo systemctl enable --now fin-ops-worker@turnover-ledger.service
 sudo systemctl enable --now fin-ops-worker@search-pending.service
+sudo systemctl enable --now fin-ops-worker@search.service
+sudo systemctl enable --now fin-ops-worker@search-secondary.service
+sudo systemctl enable --now fin-ops-worker@search-tertiary.service
+sudo systemctl enable --now fin-ops-worker@pending-invoice.service
 sudo systemctl enable --now fin-ops-worker@invoice-usage-collection.service
+sudo systemctl enable --now fin-ops-worker@invoice-lifecycle-secondary.service
 sudo systemctl enable --now fin-ops-worker@cost-tax.service
+sudo systemctl enable --now fin-ops-worker@cost-statistics.service
+sudo systemctl enable --now fin-ops-worker@tax-offset.service
 sudo systemctl enable --now fin-ops-worker@import.service
 ```
 

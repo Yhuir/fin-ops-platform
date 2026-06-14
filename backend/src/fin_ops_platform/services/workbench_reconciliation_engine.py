@@ -17,6 +17,7 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
 from fin_ops_platform.services.workbench_special_reconciliation_adapter import (
     WorkbenchSpecialReconciliationAdapter,
 )
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 ACTIVE_RELATION_STATUS = "active"
@@ -141,14 +142,7 @@ class WorkbenchReconciliationEngine:
 
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
-        normalized = str(row_id or "").strip().lower()
-        if normalized.startswith("oa-att-inv-") or normalized.startswith("inv") or normalized.startswith("invoice"):
-            return "invoice"
-        if normalized.startswith("txn") or normalized.startswith("bank"):
-            return "bank"
-        if normalized.startswith("oa-"):
-            return "oa"
-        return ""
+        return row_type_for_workbench_row_id(row_id, unknown="")
 
     @classmethod
     def _exclude_row_ids(cls, rows: list[dict[str, Any]], row_ids: set[str]) -> list[dict[str, Any]]:

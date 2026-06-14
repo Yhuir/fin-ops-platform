@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterable
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 BATCH_ACCOUNTING_SOURCE = "batch_accounting"
@@ -1241,16 +1242,7 @@ class BatchAccountingService:
 
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
-        lowered = str(row_id or "").strip().lower()
-        if lowered.startswith("oa-att-inv-"):
-            return "invoice"
-        if lowered.startswith("oa-"):
-            return "oa"
-        if lowered.startswith(("bk-", "txn-", "txn_", "bank-")):
-            return "bank"
-        if lowered.startswith(("iv-", "invoice-", "etc-summary-")):
-            return "invoice"
-        return "unknown"
+        return row_type_for_workbench_row_id(row_id)
 
     @classmethod
     def _month_scope(cls, rows: Iterable[dict[str, Any]]) -> str:

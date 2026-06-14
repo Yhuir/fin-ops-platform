@@ -110,17 +110,40 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("bank_auto_tag_rules", "bank_detail", "bank_auto_tag_rules_changed_priority"),
     OperationExpectation("bank_category_confirmation", "bank_detail", "bank_detail_category_confirmation_changed"),
     OperationExpectation("no_oa_tag_selection", "no_oa_bank_batch", "no_oa_bank_batch_tag_selection_changed"),
-    OperationExpectation("workbench_relation_withdraw", "workbench", "workbench_scope_invalidated", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "bank_detail", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "workbench_relation", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "invoice_lifecycle", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "pending_invoice", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "input_invoice_usage", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "output_invoice_collection", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "oa_pending_payment", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "cost_statistics", "pair_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw", "search", "pair_relation_changed", ("withdraw_link",)),
-    OperationExpectation("workbench_relation_withdraw", "tax_offset", "pair_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "workbench", "confirm_link", ("confirm_link",)),
+    OperationExpectation("workbench_relation_confirm", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "bank_detail", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "invoice_lifecycle", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "pending_invoice", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "cost_statistics", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "search", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm", "tax_offset", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "workbench", "withdraw_link", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "bank_detail", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "invoice_lifecycle", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "pending_invoice", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "cost_statistics", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "search", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw", "tax_offset", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "workbench", "confirm_link", ("confirm_link",)),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "bank_detail", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "invoice_lifecycle", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "pending_invoice", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "search", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_bank_invoice", "tax_offset", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "workbench", "withdraw_link", ("withdraw_link",)),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "workbench_relation", "workbench_pair_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "bank_detail", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "invoice_lifecycle", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "pending_invoice", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "search", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_bank_invoice", "tax_offset", "workbench_relation_changed"),
     OperationExpectation("no_oa_bank_batch_withdraw", "no_oa_bank_batch", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
     OperationExpectation("no_oa_bank_batch_withdraw", "workbench", "workbench_scope_invalidated", ("no_oa_bank_batch_withdraw",)),
     OperationExpectation("no_oa_bank_batch_withdraw", "workbench_relation", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)),
@@ -137,6 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, help="Optional path to write the JSON report.")
     parser.add_argument("--tenant-id", default="default")
     parser.add_argument("--lookback-hours", type=float, default=DEFAULT_LOOKBACK_HOURS)
+    parser.add_argument(
+        "--since",
+        help="Optional ISO timestamp lower bound for event created_at. When set, it overrides --lookback-hours.",
+    )
     parser.add_argument("--target-ms", type=float, default=DEFAULT_TARGET_MS)
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument(
@@ -156,6 +183,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         connection,
         tenant_id=str(args.tenant_id or "default"),
         lookback_hours=max(0.1, float(args.lookback_hours)),
+        since=_parse_since(args.since),
         target_ms=max(1.0, float(args.target_ms)),
         limit=max(1, int(args.limit)),
         operations=args.operation,
@@ -173,16 +201,26 @@ def audit_write_operation_slo(
     *,
     tenant_id: str = "default",
     lookback_hours: float = DEFAULT_LOOKBACK_HOURS,
+    since: datetime | None = None,
     target_ms: float = DEFAULT_TARGET_MS,
     limit: int = DEFAULT_LIMIT,
     operations: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     expectations = _selected_expectations(operations)
-    rows = _recent_read_model_refresh_events(
-        connection,
-        tenant_id=tenant_id,
-        lookback_hours=lookback_hours,
-        limit=limit,
+    rows = (
+        recent_read_model_refresh_events_since(
+            connection,
+            tenant_id=tenant_id,
+            started_at=since,
+            limit=limit,
+        )
+        if since is not None
+        else _recent_read_model_refresh_events(
+            connection,
+            tenant_id=tenant_id,
+            lookback_hours=lookback_hours,
+            limit=limit,
+        )
     )
     results = evaluate_operation_expectations(rows, expectations=expectations, target_ms=target_ms)
     failures = [result for result in results if result.status != "pass"]
@@ -193,6 +231,7 @@ def audit_write_operation_slo(
         "generated_at": datetime.now(UTC).isoformat(),
         "tenant_id": tenant_id,
         "lookback_hours": lookback_hours,
+        "since": since.isoformat() if since is not None else None,
         "target_ms": target_ms,
         "event_sample_count": len(rows),
         "expectation_count": len(expectations),
@@ -432,6 +471,15 @@ def _coerce_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(text)
     except ValueError:
         return None
+
+
+def _parse_since(value: str | None) -> datetime | None:
+    if value in (None, ""):
+        return None
+    parsed = _coerce_datetime(str(value).strip())
+    if parsed is None:
+        raise ValueError(f"Invalid --since timestamp: {value}")
+    return parsed
 
 
 def _percentile(values: Sequence[float], percentile: float) -> float | None:

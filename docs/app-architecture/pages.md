@@ -44,12 +44,12 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | `imports_invoices` | `/imports/invoices` | import worker、发票导入任务 |
 | `imports_etc_invoices` | `/imports/etc-invoices` | import worker、ETC 发票导入任务 |
 | `bank_details` | `/bank-details` | `bank_detail`、`bank_account_balance`、bank detail workers |
-| `pending_invoices` | `/pending-invoices` | `pending_invoice`、`search`、search-pending worker |
+| `pending_invoices` | `/pending-invoices` | `pending_invoice`、`search`、`pending-invoice` / `search` workers，旧 `search-pending` 兼容 worker |
 | `oa_pending_payments` | `/oa-pending-payments` | `oa_pending_payment`、invoice usage collection worker、OA sync |
 | `input_invoice_usage` | `/input-invoice-usage` | `input_invoice_usage`、invoice usage collection worker |
 | `output_invoice_collections` | `/output-invoice-collections` | `output_invoice_collection`、invoice usage collection worker |
-| `tax_offset` | `/tax-offset` | `tax_offset`、cost-tax worker |
-| `cost_statistics` | `/cost-statistics` | `cost_statistics`、cost-tax worker、cache warmup jobs |
+| `tax_offset` | `/tax-offset` | `tax_offset`、`tax-offset` worker，旧 `cost-tax` 兼容 worker |
+| `cost_statistics` | `/cost-statistics` | `cost_statistics`、`cost-statistics` worker、cache warmup jobs，旧 `cost-tax` 兼容 worker |
 | `no_oa_bank_batches` | `/no-oa-bank-batches` | `no_oa_bank_batch`、no-OA worker |
 | `batch_accounting` | `/batch-accounting` | workbench relation read model |
 | `turnover_ledger` | `/turnover-ledger` | `turnover_ledger`、turnover ledger worker |

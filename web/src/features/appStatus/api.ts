@@ -5,6 +5,7 @@ import type {
   AppStatusOverview,
   AppStatusReadModelScope,
   AppStatusTask,
+  AppStatusWriteSafety,
 } from "./types";
 
 type RawRecord = Record<string, unknown>;
@@ -163,6 +164,20 @@ function mapTask(rawValue: unknown): AppStatusTask | null {
   };
 }
 
+function mapWriteSafety(value: unknown, fallbackBlocksMutations: boolean): AppStatusWriteSafety {
+  const raw = record(value);
+  const hasExplicitBlockField = "blocks_mutations" in raw || "blocksMutations" in raw;
+  const blocksMutations = hasExplicitBlockField
+    ? raw.blocks_mutations === true || raw.blocksMutations === true
+    : fallbackBlocksMutations;
+  return {
+    status: stringValue(raw.status, blocksMutations ? "blocked" : "ready"),
+    reason: stringValue(raw.reason),
+    blocksMutations,
+    blockers: stringList(raw.blockers),
+  };
+}
+
 export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -185,6 +200,8 @@ export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
   if (backgroundTasks.some((task) => task === null)) {
     return null;
   }
+  const fallbackBlocksMutations = overall.blocks_mutations === true || overall.blocksMutations === true;
+  const writeSafety = mapWriteSafety(overall.write_safety ?? overall.writeSafety, fallbackBlocksMutations);
   return {
     version: numberValue(raw.version, 1),
     generatedAt: stringValue(raw.generated_at ?? raw.generatedAt),
@@ -192,7 +209,8 @@ export function mapAppStatusOverview(value: unknown): AppStatusOverview | null {
       level: overallLevel,
       color: overallColor,
       reason: overallReason,
-      blocksMutations: overall.blocks_mutations === true || overall.blocksMutations === true,
+      blocksMutations: writeSafety.blocksMutations,
+      writeSafety,
     },
     domains: domains as AppStatusDomain[],
     backgroundTasks: backgroundTasks as AppStatusTask[],

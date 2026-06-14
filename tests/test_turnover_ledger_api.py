@@ -26,7 +26,7 @@ class _QueueRecorder:
     def __init__(self) -> None:
         self.enqueued: list[tuple[str, str, str]] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
         self.enqueued.append((scope_type, scope_key, reason))
 
 
@@ -34,7 +34,7 @@ class _FailingQueueRecorder:
     def __init__(self) -> None:
         self.attempts: list[tuple[str, str, str]] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
         self.attempts.append((scope_type, scope_key, reason))
         raise RuntimeError("queue unavailable")
 
@@ -80,7 +80,7 @@ class _PostgresQueueRecorder:
         self.enqueued: list[tuple[str, str, str]] = []
         self.transactional: list[tuple[str, str, str, object]] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
         self.enqueued.append((scope_type, scope_key, reason))
 
     def enqueue_read_model_refresh_in_transaction(

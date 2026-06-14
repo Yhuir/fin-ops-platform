@@ -57,6 +57,14 @@ class RuntimeQueueDataError(ValueError):
     pass
 
 
+class _DeferEventDedupeCollision(RuntimeError):
+    pass
+
+
+def _is_unique_violation_error(exc: Exception) -> bool:
+    return getattr(exc, "sqlstate", None) == "23505" or exc.__class__.__name__ == "UniqueViolation"
+
+
 @dataclass(frozen=True)
 class RuntimeQueueSettings:
     backend: str = "postgres"
@@ -71,6 +79,7 @@ class RuntimeQueueSettings:
     rabbitmq_prefetch: int = 10
     rabbitmq_publish_confirm: bool = True
     rabbitmq_heartbeat_seconds: int = 60
+    rabbitmq_consumer_postgres_drain_interval_seconds: float = 1.0
     rabbitmq_blocked_connection_timeout_seconds: int = 300
     rabbitmq_management_url: str | None = None
     rabbitmq_management_username: str | None = None
@@ -104,6 +113,11 @@ class RuntimeQueueSettings:
             rabbitmq_prefetch=_positive_int(source.get("RABBITMQ_PREFETCH"), default=10, name="RABBITMQ_PREFETCH"),
             rabbitmq_publish_confirm=_bool(source.get("RABBITMQ_PUBLISH_CONFIRM"), default=True),
             rabbitmq_heartbeat_seconds=_positive_int(source.get("RABBITMQ_HEARTBEAT_SECONDS"), default=60, name="RABBITMQ_HEARTBEAT_SECONDS"),
+            rabbitmq_consumer_postgres_drain_interval_seconds=_positive_float(
+                source.get("RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS"),
+                default=1.0,
+                name="RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS",
+            ),
             rabbitmq_blocked_connection_timeout_seconds=_positive_int(
                 source.get("RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS"),
                 default=300,
@@ -139,6 +153,7 @@ class RuntimeQueueSettings:
             "rabbitmq_prefetch": self.rabbitmq_prefetch,
             "rabbitmq_publish_confirm": self.rabbitmq_publish_confirm,
             "rabbitmq_heartbeat_seconds": self.rabbitmq_heartbeat_seconds,
+            "rabbitmq_consumer_postgres_drain_interval_seconds": self.rabbitmq_consumer_postgres_drain_interval_seconds,
             "rabbitmq_blocked_connection_timeout_seconds": self.rabbitmq_blocked_connection_timeout_seconds,
             "rabbitmq_management_configured": bool(self.rabbitmq_management_url),
             "rabbitmq_shadow_publish": self.rabbitmq_shadow_publish,
@@ -1038,6 +1053,566 @@ class RuntimeQueueRepository:
             )
         return row is not None
 
+    def release_stale_processing_events(
+        self,
+        *,
+        stale_after_seconds: int,
+        limit: int = 100,
+        reason: str = "operator_stale_processing_release",
+        event_types: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_reason = str(reason or "").strip() or "operator_stale_processing_release"
+        normalized_stale_after_seconds = max(1, int(stale_after_seconds))
+        normalized_limit = max(1, int(limit))
+        normalized_event_types = [str(event_type).strip() for event_type in event_types or () if str(event_type).strip()]
+        event_type_filter = ""
+        params: tuple[Any, ...]
+        if normalized_event_types:
+            event_type_filter = "and stale.event_type = any(%s)"
+            params = (
+                normalized_stale_after_seconds,
+                normalized_event_types,
+                normalized_limit,
+                normalized_reason,
+                normalized_stale_after_seconds,
+            )
+        else:
+            params = (
+                normalized_stale_after_seconds,
+                normalized_limit,
+                normalized_reason,
+                normalized_stale_after_seconds,
+            )
+
+        with self._connection.transaction() as transaction:
+            rows = transaction.fetch_all(
+                f"""
+                with ranked as (
+                    select
+                        stale.id,
+                        row_number() over (
+                            partition by stale.tenant_id, coalesce(stale.dedupe_key, stale.id::text)
+                            order by coalesce(stale.source_version, 0) desc, stale.created_at desc, stale.id desc
+                        ) as dedupe_rank,
+                        stale.locked_at,
+                        stale.created_at
+                    from job.outbox_events stale
+                    where stale.status = 'processing'
+                      and stale.locked_at < now() - (%s * interval '1 second')
+                      {event_type_filter}
+                      and not exists (
+                          select 1
+                          from job.outbox_events pending
+                          where pending.tenant_id = stale.tenant_id
+                            and pending.dedupe_key = stale.dedupe_key
+                            and pending.status = 'pending'
+                            and stale.dedupe_key is not null
+                      )
+                ),
+                candidate_ids as (
+                    select id
+                    from ranked
+                    where dedupe_rank = 1
+                    order by locked_at nulls first, created_at, id
+                    limit %s
+                ),
+                candidates as (
+                    select stale.id, stale.locked_by, stale.locked_at
+                    from job.outbox_events stale
+                    join candidate_ids on candidate_ids.id = stale.id
+                    for update skip locked
+                )
+                update job.outbox_events event
+                set
+                    status = 'pending',
+                    available_at = now(),
+                    publish_status = 'unpublished',
+                    published_at = null,
+                    publish_last_error = null,
+                    next_publish_at = now(),
+                    publish_locked_by = null,
+                    publish_locked_at = null,
+                    rabbitmq_exchange = null,
+                    rabbitmq_routing_key = null,
+                    rabbitmq_message_id = null,
+                    publish_confirmed_at = null,
+                    locked_by = null,
+                    locked_at = null,
+                    attempts = greatest(coalesce(event.attempts, 0) - 1, 0),
+                    updated_at = now(),
+                    raw_payload = jsonb_set(
+                        coalesce(event.raw_payload, '{{}}'::jsonb),
+                        '{{operator_stale_processing_release}}',
+                        jsonb_build_object(
+                            'reason', %s::text,
+                            'released_at', now(),
+                            'stale_after_seconds', %s::integer,
+                            'previous_locked_by', candidates.locked_by,
+                            'previous_locked_at', candidates.locked_at
+                        ),
+                        true
+                    )
+                from candidates
+                where event.id = candidates.id
+                returning
+                    event.id::text as event_id,
+                    event.event_type,
+                    event.scope_type,
+                    event.scope_key,
+                    event.dedupe_key,
+                    event.status,
+                    event.attempts,
+                    event.priority,
+                    event.source_version
+                """,
+                params,
+            )
+        return list(rows)
+
+    def resolve_superseded_processing_events(
+        self,
+        *,
+        stale_after_seconds: int,
+        limit: int = 100,
+        reason: str = "operator_superseded_processing_resolution",
+        event_types: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_reason = str(reason or "").strip() or "operator_superseded_processing_resolution"
+        normalized_stale_after_seconds = max(1, int(stale_after_seconds))
+        normalized_limit = max(1, int(limit))
+        normalized_event_types = [str(event_type).strip() for event_type in event_types or () if str(event_type).strip()]
+        event_type_filter = ""
+        params: tuple[Any, ...]
+        if normalized_event_types:
+            event_type_filter = "and stale.event_type = any(%s)"
+            params = (
+                normalized_stale_after_seconds,
+                normalized_event_types,
+                normalized_limit,
+                normalized_reason,
+                normalized_stale_after_seconds,
+            )
+        else:
+            params = (
+                normalized_stale_after_seconds,
+                normalized_limit,
+                normalized_reason,
+                normalized_stale_after_seconds,
+            )
+
+        with self._connection.transaction() as transaction:
+            rows = transaction.fetch_all(
+                f"""
+                with candidates as (
+                    select
+                        stale.id,
+                        stale.locked_by,
+                        stale.locked_at,
+                        cover.id as covered_by_event_id,
+                        cover.status as covered_by_status,
+                        cover.source_version as covered_by_source_version
+                    from job.outbox_events stale
+                    join lateral (
+                        select newer.id, newer.status, newer.source_version
+                        from job.outbox_events newer
+                        where newer.tenant_id = stale.tenant_id
+                          and newer.dedupe_key = stale.dedupe_key
+                          and newer.id <> stale.id
+                          and newer.status in ('pending', 'processing', 'done')
+                          and stale.dedupe_key is not null
+                          and coalesce(newer.source_version, 0) >= coalesce(stale.source_version, 0)
+                          and (
+                              newer.created_at > stale.created_at
+                              or (newer.created_at = stale.created_at and newer.id > stale.id)
+                          )
+                        order by coalesce(newer.source_version, 0) desc, newer.created_at desc, newer.id desc
+                        limit 1
+                    ) cover on true
+                    where stale.status = 'processing'
+                      and stale.locked_at < now() - (%s * interval '1 second')
+                      {event_type_filter}
+                    order by stale.locked_at nulls first, stale.created_at, stale.id
+                    limit %s
+                    for update of stale skip locked
+                )
+                update job.outbox_events event
+                set
+                    status = 'done',
+                    processed_at = coalesce(event.processed_at, now()),
+                    locked_by = null,
+                    locked_at = null,
+                    updated_at = now(),
+                    raw_payload = jsonb_set(
+                        coalesce(event.raw_payload, '{{}}'::jsonb),
+                        '{{operator_superseded_processing_resolution}}',
+                        jsonb_build_object(
+                            'reason', %s::text,
+                            'resolved_at', now(),
+                            'stale_after_seconds', %s::integer,
+                            'previous_locked_by', candidates.locked_by,
+                            'previous_locked_at', candidates.locked_at,
+                            'covered_by_event_id', candidates.covered_by_event_id,
+                            'covered_by_status', candidates.covered_by_status,
+                            'covered_by_source_version', candidates.covered_by_source_version
+                        ),
+                        true
+                    )
+                from candidates
+                where event.id = candidates.id
+                returning
+                    event.id::text as event_id,
+                    event.event_type,
+                    event.scope_type,
+                    event.scope_key,
+                    event.dedupe_key,
+                    event.status,
+                    event.attempts,
+                    event.priority,
+                    event.source_version,
+                    candidates.covered_by_event_id::text as covered_by_event_id,
+                    candidates.covered_by_status,
+                    candidates.covered_by_source_version
+                """,
+                params,
+            )
+        return list(rows)
+
+    def defer_event(
+        self,
+        event_id: str,
+        worker_id: str,
+        *,
+        reason: str = "dependency_not_ready",
+        delay_seconds: float = 2.0,
+    ) -> bool:
+        normalized_reason = str(reason or "").strip() or "dependency_not_ready"
+        normalized_delay_seconds = max(0.1, float(delay_seconds or 1.0))
+        try:
+            with self._connection.transaction() as transaction:
+                return self._defer_event_in_transaction(
+                    transaction,
+                    event_id=event_id,
+                    worker_id=worker_id,
+                    normalized_reason=normalized_reason,
+                    normalized_delay_seconds=normalized_delay_seconds,
+                )
+        except _DeferEventDedupeCollision:
+            return self._resolve_defer_event_dedupe_collision(
+                event_id=event_id,
+                worker_id=worker_id,
+                normalized_reason=normalized_reason,
+                normalized_delay_seconds=normalized_delay_seconds,
+            )
+
+    def _defer_event_in_transaction(
+        self,
+        transaction: Any,
+        *,
+        event_id: str,
+        worker_id: str,
+        normalized_reason: str,
+        normalized_delay_seconds: float,
+    ) -> bool:
+            target = transaction.fetch_one(
+                """
+                select
+                    id::text as event_id,
+                    tenant_id,
+                    dedupe_key,
+                    source_version,
+                    locked_by,
+                    locked_at
+                from job.outbox_events
+                where id = %s
+                  and status = 'processing'
+                  and locked_by = %s
+                for update
+                """,
+                (event_id, worker_id),
+            )
+            if target is None:
+                return False
+
+            cover = None
+            dedupe_key = target.get("dedupe_key")
+            if dedupe_key:
+                cover = transaction.fetch_one(
+                    """
+                    select
+                        id::text as event_id,
+                        status,
+                        source_version
+                    from job.outbox_events
+                    where tenant_id = %s
+                      and dedupe_key = %s
+                      and id <> %s
+                      and status in ('pending', 'processing', 'done')
+                      and coalesce(source_version, 0) >= coalesce(%s, 0)
+                    order by coalesce(source_version, 0) desc, created_at desc, id desc
+                    limit 1
+                    """,
+                    (target["tenant_id"], dedupe_key, target["event_id"], target.get("source_version")),
+                )
+
+            if cover is not None:
+                row = transaction.fetch_one(
+                    """
+                    update job.outbox_events
+                    set
+                        status = 'done',
+                        processed_at = coalesce(processed_at, now()),
+                        locked_by = null,
+                        locked_at = null,
+                        attempts = greatest(coalesce(attempts, 0) - 1, 0),
+                        updated_at = now(),
+                        raw_payload = jsonb_set(
+                            coalesce(raw_payload, '{}'::jsonb),
+                            '{runtime_defer_superseded}',
+                            jsonb_build_object(
+                                'reason', %s::text,
+                                'delay_seconds', %s::double precision,
+                                'resolved_at', now(),
+                                'previous_locked_by', %s::text,
+                                'previous_locked_at', %s,
+                                'covered_by_event_id', %s::text,
+                                'covered_by_status', %s::text,
+                                'covered_by_source_version', %s
+                            ),
+                            true
+                        )
+                    where id = %s
+                      and status = 'processing'
+                      and locked_by = %s
+                    returning id::text as event_id
+                    """,
+                    (
+                        normalized_reason,
+                        normalized_delay_seconds,
+                        target.get("locked_by"),
+                        target.get("locked_at"),
+                        cover.get("event_id"),
+                        cover.get("status"),
+                        cover.get("source_version"),
+                        target["event_id"],
+                        worker_id,
+                    ),
+                )
+                return row is not None
+
+            try:
+                row = transaction.fetch_one(
+                    """
+                    update job.outbox_events
+                    set
+                        status = 'pending',
+                        available_at = now() + (%s::double precision * interval '1 second'),
+                        publish_status = 'unpublished',
+                        publish_last_error = null,
+                        next_publish_at = now() + (%s::double precision * interval '1 second'),
+                        publish_locked_by = null,
+                        publish_locked_at = null,
+                        locked_by = null,
+                        locked_at = null,
+                        attempts = greatest(coalesce(attempts, 0) - 1, 0),
+                        updated_at = now(),
+                        raw_payload = jsonb_set(
+                            coalesce(raw_payload, '{}'::jsonb),
+                            '{runtime_defer}',
+                            jsonb_build_object(
+                                'reason', %s::text,
+                                'delay_seconds', %s::double precision,
+                                'deferred_at', now()
+                            ),
+                            true
+                        )
+                    where id = %s
+                      and status = 'processing'
+                      and locked_by = %s
+                      and (
+                          dedupe_key is null
+                          or not exists (
+                              select 1
+                              from job.outbox_events newer
+                              where newer.tenant_id = job.outbox_events.tenant_id
+                                and newer.dedupe_key = job.outbox_events.dedupe_key
+                                and newer.id <> job.outbox_events.id
+                                and newer.status = 'pending'
+                          )
+                      )
+                    returning id::text as event_id
+                    """,
+                    (
+                        normalized_delay_seconds,
+                        normalized_delay_seconds,
+                        normalized_reason,
+                        normalized_delay_seconds,
+                        target["event_id"],
+                        worker_id,
+                    ),
+                )
+            except Exception as exc:
+                if _is_unique_violation_error(exc):
+                    raise _DeferEventDedupeCollision() from exc
+                raise
+            if row is not None:
+                return True
+
+            cover = transaction.fetch_one(
+                """
+                select
+                    id::text as event_id,
+                    status,
+                    source_version
+                from job.outbox_events
+                where tenant_id = %s
+                  and dedupe_key = %s
+                  and id <> %s
+                  and status in ('pending', 'processing', 'done')
+                  and coalesce(source_version, 0) >= coalesce(%s, 0)
+                order by coalesce(source_version, 0) desc, created_at desc, id desc
+                limit 1
+                """,
+                (target["tenant_id"], dedupe_key, target["event_id"], target.get("source_version")),
+            )
+            if cover is None:
+                return False
+
+            row = transaction.fetch_one(
+                """
+                update job.outbox_events
+                set
+                    status = 'done',
+                    processed_at = coalesce(processed_at, now()),
+                    locked_by = null,
+                    locked_at = null,
+                    attempts = greatest(coalesce(attempts, 0) - 1, 0),
+                    updated_at = now(),
+                    raw_payload = jsonb_set(
+                        coalesce(raw_payload, '{}'::jsonb),
+                        '{runtime_defer_superseded}',
+                        jsonb_build_object(
+                            'reason', %s::text,
+                            'delay_seconds', %s::double precision,
+                            'resolved_at', now(),
+                            'previous_locked_by', %s::text,
+                            'previous_locked_at', %s,
+                            'covered_by_event_id', %s::text,
+                            'covered_by_status', %s::text,
+                            'covered_by_source_version', %s
+                        ),
+                        true
+                    )
+                where id = %s
+                  and status = 'processing'
+                  and locked_by = %s
+                returning id::text as event_id
+                """,
+                (
+                    normalized_reason,
+                    normalized_delay_seconds,
+                    target.get("locked_by"),
+                    target.get("locked_at"),
+                    cover.get("event_id"),
+                    cover.get("status"),
+                    cover.get("source_version"),
+                    target["event_id"],
+                    worker_id,
+                ),
+            )
+            return row is not None
+
+    def _resolve_defer_event_dedupe_collision(
+        self,
+        *,
+        event_id: str,
+        worker_id: str,
+        normalized_reason: str,
+        normalized_delay_seconds: float,
+    ) -> bool:
+        with self._connection.transaction() as transaction:
+            target = transaction.fetch_one(
+                """
+                select
+                    id::text as event_id,
+                    tenant_id,
+                    dedupe_key,
+                    source_version,
+                    locked_by,
+                    locked_at
+                from job.outbox_events
+                where id = %s
+                  and status = 'processing'
+                  and locked_by = %s
+                for update
+                """,
+                (event_id, worker_id),
+            )
+            if target is None or not target.get("dedupe_key"):
+                return False
+            cover = transaction.fetch_one(
+                """
+                select
+                    id::text as event_id,
+                    status,
+                    source_version
+                from job.outbox_events
+                where tenant_id = %s
+                  and dedupe_key = %s
+                  and id <> %s
+                  and status in ('pending', 'processing', 'done')
+                  and coalesce(source_version, 0) >= coalesce(%s, 0)
+                order by coalesce(source_version, 0) desc, created_at desc, id desc
+                limit 1
+                """,
+                (target["tenant_id"], target["dedupe_key"], target["event_id"], target.get("source_version")),
+            )
+            if cover is None:
+                return False
+            row = transaction.fetch_one(
+                """
+                update job.outbox_events
+                set
+                    status = 'done',
+                    processed_at = coalesce(processed_at, now()),
+                    locked_by = null,
+                    locked_at = null,
+                    attempts = greatest(coalesce(attempts, 0) - 1, 0),
+                    updated_at = now(),
+                    raw_payload = jsonb_set(
+                        coalesce(raw_payload, '{}'::jsonb),
+                        '{runtime_defer_superseded}',
+                        jsonb_build_object(
+                            'reason', %s::text,
+                            'delay_seconds', %s::double precision,
+                            'resolved_at', now(),
+                            'collision', true,
+                            'previous_locked_by', %s::text,
+                            'previous_locked_at', %s,
+                            'covered_by_event_id', %s::text,
+                            'covered_by_status', %s::text,
+                            'covered_by_source_version', %s
+                        ),
+                        true
+                    )
+                where id = %s
+                  and status = 'processing'
+                  and locked_by = %s
+                returning id::text as event_id
+                """,
+                (
+                    normalized_reason,
+                    normalized_delay_seconds,
+                    target.get("locked_by"),
+                    target.get("locked_at"),
+                    cover.get("event_id"),
+                    cover.get("status"),
+                    cover.get("source_version"),
+                    target["event_id"],
+                    worker_id,
+                ),
+            )
+            return row is not None
+
     def resolve_dead_letter_event(self, event_id: str, *, reason: str = "operator_resolved") -> bool:
         normalized_reason = str(reason or "").strip() or "operator_resolved"
         with self._connection.transaction() as transaction:
@@ -1132,6 +1707,27 @@ class RuntimeQueueRepository:
         current_source_version = _optional_int(row.get("source_version"))
         event_source_version = _optional_int(source_version)
         return current_source_version is None or event_source_version is None or current_source_version <= event_source_version
+
+    def read_model_refresh_is_active(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_key: str,
+    ) -> bool:
+        row = self._connection.fetch_one(
+            """
+            select 1
+            from job.read_model_dirty_scopes
+            where tenant_id = %s
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing')
+            limit 1
+            """,
+            (tenant_id, scope_type, scope_key),
+        )
+        return row is not None
 
     def record_worker_heartbeat(
         self,
@@ -1260,6 +1856,18 @@ def _positive_int(raw: Any, *, default: int, name: str) -> int:
         value = int(str(raw).strip())
     except ValueError as exc:
         raise RuntimeQueueDataError(f"{name} must be an integer.") from exc
+    if value <= 0:
+        raise RuntimeQueueDataError(f"{name} must be positive.")
+    return value
+
+
+def _positive_float(raw: Any, *, default: float, name: str) -> float:
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = float(str(raw).strip())
+    except ValueError as exc:
+        raise RuntimeQueueDataError(f"{name} must be a number.") from exc
     if value <= 0:
         raise RuntimeQueueDataError(f"{name} must be positive.")
     return value

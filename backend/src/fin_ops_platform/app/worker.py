@@ -96,6 +96,7 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
     WorkbenchGroupsPageCacheWarmer,
+    workbench_groups_sync_cache_warmup_enabled_from_env,
     workbench_groups_redis_ttl_seconds_from_env,
 )
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
@@ -115,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-interval-seconds", type=float, default=5.0)
     parser.add_argument("--lock-timeout-seconds", type=int, default=300)
     parser.add_argument("--retry-delay-seconds", type=int, default=60)
+    parser.add_argument("--dependency-not-fresh-delay-seconds", type=float, default=2.0)
     parser.add_argument("--max-attempts", type=int, default=5)
     parser.add_argument("--task-timeout-seconds", type=int, default=None)
     parser.add_argument("--statement-timeout-seconds", type=int, default=None)
@@ -184,6 +186,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         poll_interval_seconds=args.poll_interval_seconds,
         lock_timeout_seconds=args.lock_timeout_seconds,
         retry_delay_seconds=args.retry_delay_seconds,
+        dependency_not_fresh_delay_seconds=args.dependency_not_fresh_delay_seconds,
         task_timeout_seconds=args.task_timeout_seconds,
         statement_timeout_seconds=args.statement_timeout_seconds,
         max_iterations=args.max_iterations,
@@ -240,16 +243,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             config.event_types.append("oa.sync")
     if args.enable_workbench_read_model_refresh:
         projection_builder = WorkbenchSqlProjectionBuilder(connection=connection)
-        page_cache_warmer = WorkbenchGroupsPageCacheWarmer(
-            repository=read_model_repository,
-            redis_helper=redis_helper,
-            schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-            ttl_seconds=workbench_groups_redis_ttl_seconds_from_env(),
+        page_cache_warmer = (
+            WorkbenchGroupsPageCacheWarmer(
+                repository=read_model_repository,
+                redis_helper=redis_helper,
+                schema_version=WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
+                ttl_seconds=workbench_groups_redis_ttl_seconds_from_env(),
+            )
+            if workbench_groups_sync_cache_warmup_enabled_from_env()
+            else None
         )
         refresh_service = WorkbenchReadModelRefreshService(
             projection_builder=projection_builder,
             queue_repository=queue,
-            post_refresh_warmer=page_cache_warmer.warm_scope,
+            post_refresh_warmer=page_cache_warmer.warm_scope if page_cache_warmer is not None else None,
         )
         handlers["workbench.read_model.refresh"] = _read_model_handler(refresh_service.handle_runtime_event)
         if "workbench.read_model.refresh" not in config.event_types:

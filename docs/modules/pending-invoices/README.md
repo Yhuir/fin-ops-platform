@@ -31,7 +31,9 @@
 
 关注支出/收入流水、进项/销项发票、规则建议、人工补票、选择已有发票、收入状态标记、搜索/read model 状态和 invoice lifecycle 分发。发票获取状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 与 pending invoice read model 共同表达，页面不私有定义状态。
 
-OA/流水/发票配对关系不属于待找发票页面私有状态。读关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution；manual invoice confirm、attach existing 单条和批量写关系必须委托 `WorkbenchRelationCommandService`。relation read model 非 fresh 时，写 API 要 fail fast 并返回 read model status/reasons/scopes，不能先写本模块事实再等待后续补偿。
+生产刷新由专用 `pending-invoice` 与 `search` RabbitMQ consumers 承担 5s SLO drain；旧 `search-pending` combined worker 保留为兼容消费者，不再是唯一性能 lane。`invoice_lifecycle` 另有 `invoice-lifecycle-secondary` 并发消费者用于多月份 scope 收敛。
+
+OA/流水/发票配对关系不属于待找发票页面私有状态。读关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution；manual invoice confirm、attach existing 单条和批量写关系必须委托 `WorkbenchRelationCommandService`。普通 relation read model 非 fresh 只影响读侧 freshness 和候选展示；写 API 的阻断条件必须来自权限/session、DB/目标写模型不可用、canonical relation version/idempotency/row occupation 冲突，不能因为 distribution 追赶中先写本模块半事实。
 
 选择已有进项发票支持单条或多条支出流水一起处理：页面可以选择多条 eligible 流水，右侧抽屉通过批量 candidates/preview/confirm API 选择多张进项发票，并展示已选流水金额、已选发票金额和差额。单条流水入口复用同一批量抽屉和后端 relation command 写入逻辑。
 

@@ -9,7 +9,7 @@ Runtime worker 本身不拥有业务实体；它维护后台执行事实和派�
 | 状态域 | 状态 | 事实源 | 允许流转 |
 | --- | --- | --- | --- |
 | Outbox event | `pending` | `job.outbox_events.status` | 新建、重试、requeue 后进入；可被 worker claim 为 `processing`。 |
-| Outbox event | `processing` | `job.outbox_events.status`、`locked_by`、`locked_at`、`attempts` | worker claim 后进入；handler 成功变 `done`，失败变 `pending` / `failed` / `dead_lettered`；超过 lock timeout 可被 reclaim。 |
+| Outbox event | `processing` | `job.outbox_events.status`、`locked_by`、`locked_at`、`attempts` | worker claim 后进入；handler 成功变 `done`，普通失败变 `pending` / `failed` / `dead_lettered`；依赖 read model 未 fresh 时短延迟 defer 回 `pending`；超过 lock timeout 可被 reclaim。 |
 | Outbox event | `done` | `job.outbox_events.status`、`processed_at` | worker complete 后进入；终态，除运维审计外不重放。 |
 | Outbox event | `failed` | `job.outbox_events.status`、`last_error` | 非 retryable 或 retry 次数受限时进入；可由受控 requeue 回到 `pending`。 |
 | Outbox event | `dead_lettered` | `job.outbox_events.status`、`dead_lettered_at`、`last_error` | 达到 max attempts 后进入；只能通过受控 requeue 或 guarded resolve 处理。 |
@@ -18,7 +18,7 @@ Runtime worker 本身不拥有业务实体；它维护后台执行事实和派�
 | Dirty scope | `processing` | `job.read_model_dirty_scopes.status` | refresh handler 执行中；成功变 `done`，失败变 `failed`，超时由 queue/worker 恢复。 |
 | Dirty scope | `done` | `job.read_model_dirty_scopes.status`、source version | projection 完成且 source version guard 通过后进入。 |
 | Dirty scope | `failed` | `job.read_model_dirty_scopes.status`、`last_error` | refresh 失败进入；必须修复后 requeue，不得直接改 fresh。 |
-| Worker heartbeat | `polling` / `processing` / `idle` / `failed` | `job.runtime_worker_heartbeats` | worker loop 上报；App Health 用 heartbeat lag、kind、event types 判定 missing/stale/mismatch。 |
+| Worker heartbeat | `polling` / `processing` / `idle` / `deferred` / `failed` | `job.runtime_worker_heartbeats` | worker loop 上报；App Health 用 heartbeat lag、kind、event types 判定 missing/stale/mismatch。`deferred` 表示依赖 read model 尚未 fresh，事件已短延迟回到 pending，不计为业务成功或普通失败。 |
 
 禁止流转：
 
@@ -50,6 +50,12 @@ Runtime worker 本身不拥有业务实体；它维护后台执行事实和派�
 | `failed` | handler/rebuild 失败，或 dirty scope/outbox failed/dead-letter | 运维 inspect/requeue；必要时修复 scope contract 或代码。 |
 | `unavailable` | DB、worker、projection、runtime monitoring 不可用 | route 映射错误状态，App Health 定位 dependency。 |
 
+依赖未 fresh 的特殊恢复：
+
+- 如果 handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，`RuntimeWorker` 使用 `RuntimeQueueRepository.defer_event(...)` 将 outbox event 放回 `pending`，默认 `available_at=now()+2s`。
+- defer 会回滚本次 claim 增加的 `attempts`，不会走 `runtime_failure`、`failed` 或 `dead_lettered`。
+- defer 不会把任何 projection/readiness 标为 fresh；它只缩短已知依赖顺序竞态的等待时间。
+
 Refresh 触发来源：
 
 - 页面 query gateway 在 missing/stale/mismatch 时触发。
@@ -69,4 +75,6 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-13 | 依赖 read model 未 fresh 使用短延迟 defer | `*_read_model_not_fresh` 不再走 60s 普通 retry/dead-letter，减少跨 read model fan-out 长尾 | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_defer_event_delays_dependency_retry_without_failure_or_dead_letter -v` |
+| 2026-06-13 | 补齐 RabbitMQ transport 下 stale/superseded processing 运维恢复 | RabbitMQ 只负责 wakeup，PostgreSQL `processing` 超过 lock timeout 且没有 envelope 时，可先用 `resolve-superseded-processing` 清理已被更新同 dedupe event 覆盖的旧 processing，再用 `release-stale-processing` 释放仍需重跑的事件；不伪造 readiness/fresh | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_runtime_queue_ops -v` |
 | 2026-06-11 | 补齐 runtime worker 状态机 | 明确 outbox、dirty scope、heartbeat、readiness、RabbitMQ transport 和 UI 消费语义 | 待本轮 runtime-workers 验证 |

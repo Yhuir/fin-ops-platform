@@ -10,7 +10,7 @@
 | 项目范围 | `all` | app settings project status / cost statistics API query | 用户选择 all project scope 后展示所有项目。 |
 | 成本行 | `included` | `CostStatisticsService`、SQL projection payload | 支出流水或可计入成本关系满足项目/费用字段要求后进入统计。 |
 | 成本行 | `excluded` | cost attribution policy / relation context | OA 发票抵扣、现金代收代付确认组等不应计入成本的关系被排除。 |
-| 月份 shard | `active:YYYY-MM` / `all:YYYY-MM` | `read_model.cost_statistics_rows`、readiness | 由 cost-tax worker 从对应 Workbench 月份 read model 构建。 |
+| 月份 shard | `active:YYYY-MM` / `all:YYYY-MM` | `read_model.cost_statistics_rows`、readiness | 由 `cost-statistics` 专用 worker 从对应 Workbench 月份 read model 构建；旧 `cost-tax` 仅作为兼容消费者。 |
 | 全期间父 scope | `active:all` / `all:all` | `read_model.cost_statistics_read_models`、readiness | 从已物化月份 shard rows 聚合生成；不读取 Workbench `all` 全量 payload。 |
 
 关键规则：
@@ -89,6 +89,6 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-12 | Workbench candidate 关系不再计入成本统计 | live 成本查询、cost-tax SQL projection、月份 shard rows | `tests.test_cost_statistics_service`、`tests.test_cost_statistics_sql_runtime` |
+| 2026-06-12 | Workbench candidate 关系不再计入成本统计 | live 成本查询、cost statistics SQL projection、月份 shard rows | `tests.test_cost_statistics_service`、`tests.test_cost_statistics_sql_runtime` |
 | 2026-06-11 | 补齐测试闭环状态机 | 业务归因、UI、父 scope、月份 shard、App Status 和 worker 状态边界 | `tests.test_cost_statistics_service`、`tests.test_project_costing_service`、`tests.test_project_costing_api`、`tests.test_cost_statistics_api`、`tests.test_cost_statistics_read_model_service`、`tests.test_cost_statistics_runtime_service`、`tests.test_cost_statistics_sql_runtime`、`tests.test_read_model_refresh_gateway`、`tests.test_runtime_worker_read_model_refresh_scopes`、`tests.test_read_model_scope_contract`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx` |
 | 2026-06-10 | 成本统计 scope contract 修复 | 裸月份/裸 `all` 只能经 gateway 归一化，非法 scope 拒绝 | `tests.test_read_model_refresh_gateway`、`tests.test_runtime_worker_read_model_refresh_scopes`、`tests.test_read_model_scope_contract` |

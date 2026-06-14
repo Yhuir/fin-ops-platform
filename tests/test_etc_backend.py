@@ -3487,7 +3487,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(command_service.cancel_calls[0]["history_operation_type"], "etc_summary_unmerged")
         self.assertEqual(persisted_case_ids, [["CASE-ETC-COMMAND"]])
 
-    def test_submitted_etc_business_batch_delete_fails_fast_when_workbench_relation_read_model_is_stale(self) -> None:
+    def test_submitted_etc_business_batch_delete_uses_canonical_relation_when_read_model_is_stale(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             batch = app._etc_service.create_business_batch(task_id="ETC-STALE-TASK")
@@ -3530,16 +3530,13 @@ class EtcApiTests(unittest.TestCase):
                 }),
             )
             response_payload = json.loads(delete_response.body)
-            batch_after = app._etc_service.get_business_batch(batch.business_batch_id)
             relation_after = app._workbench_pair_relation_service.get_active_relation_by_row_id(summary_row_id)
+            with self.assertRaises(EtcBusinessBatchNotFoundError):
+                app._etc_service.get_business_batch(batch.business_batch_id)
 
-        self.assertEqual(delete_response.status_code, 409)
-        self.assertEqual(response_payload["error"]["code"], "workbench_relation_read_model_not_fresh")
-        self.assertEqual(response_payload["error"]["details"]["read_model_status"], "stale")
-        self.assertEqual(response_payload["error"]["details"]["read_model_stale_reasons"], ["test_stale_relation_projection"])
-        self.assertEqual(batch_after.status, EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value)
-        self.assertEqual(batch_after.version, 1)
-        self.assertIsNotNone(relation_after)
+        self.assertEqual(delete_response.status_code, 200, delete_response.body)
+        self.assertEqual(response_payload["data"]["deleted"], True)
+        self.assertIsNone(relation_after)
 
     def test_reconciliation_task_delete_cancels_submitted_business_summary_relation(self) -> None:
         with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:

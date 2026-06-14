@@ -112,6 +112,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["pagination"]["total"], 5)
         self.assertEqual(repository.invoice_page_calls[0]["invoice_type"], InvoiceType.INPUT.value)
+        self.assertEqual(len(repository.invoice_page_calls), 1)
         self.assertEqual(len(repository.transaction_page_calls), 1)
 
     def test_filter_options_are_built_from_all_matching_rows_not_first_page_only(self) -> None:

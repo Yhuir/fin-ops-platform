@@ -61,6 +61,13 @@ class ReadModelRefreshGateway:
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh", None)
         for scope_key in normalized_scope_keys:
             if callable(enqueue):
+                if self._should_coalesce_active_refresh(
+                    tenant_id=tenant_id,
+                    scope_type=normalized_scope_type,
+                    scope_key=scope_key,
+                    reason=reason,
+                ):
+                    continue
                 enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata))
         return normalized_scope_keys
 
@@ -85,8 +92,30 @@ class ReadModelRefreshGateway:
             return []
         events: list[Any] = []
         for scope_key in normalized_scope_keys:
+            if self._should_coalesce_active_refresh(
+                tenant_id=tenant_id,
+                scope_type=normalized_scope_type,
+                scope_key=scope_key,
+                reason=reason,
+            ):
+                continue
             events.append(enqueue(**self._enqueue_kwargs(normalized_scope_type, scope_key, reason, tenant_id, priority, trace_id, metadata)))
         return events
+
+    def _should_coalesce_active_refresh(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+    ) -> bool:
+        if not _reason_is_active_coalescible(reason):
+            return False
+        checker = getattr(self._queue_repository, "read_model_refresh_is_active", None)
+        if not callable(checker):
+            return False
+        return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))
 
     @staticmethod
     def _enqueue_kwargs(
@@ -108,3 +137,19 @@ class ReadModelRefreshGateway:
         if isinstance(metadata, dict) and metadata:
             kwargs["metadata"] = dict(metadata)
         return kwargs
+
+
+_ACTIVE_COALESCED_REFRESH_REASONS = {
+    "dependency_not_fresh",
+    "downstream_bank_tag_read",
+    "pending_invoice_sql_projection",
+    "bank_detail_relation_tags_read",
+    "workbench_relation_write_precondition",
+}
+
+
+def _reason_is_active_coalescible(reason: str) -> bool:
+    normalized = str(reason or "").strip()
+    if not normalized:
+        return False
+    return normalized.startswith("api_") or normalized in _ACTIVE_COALESCED_REFRESH_REASONS

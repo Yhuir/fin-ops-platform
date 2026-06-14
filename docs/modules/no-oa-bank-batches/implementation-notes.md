@@ -66,15 +66,15 @@
 - 决策：
   - `NoOaBankBatchService` 保留为批次领域状态机，只产出 `relation_command_payload_for_batch(...)`，不再直接调用 `create_active_relation` 或 `cancel_relation`。
   - `NoOaBankBatchApplicationService` 负责调用 relation command service，并在失败时回滚 no-OA batch snapshot 与 relation snapshot。
-  - 写前 relation 占用读取复用 `WorkbenchRelationReadFacade` distribution；`submit_selected_rows` 不再读取 pair service list。
-  - relation read model non-fresh 时返回 409，保留 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`，不写入 batch/relation。
+  - relation 占用和写入使用 canonical relation command/write safety；`submit_selected_rows` 不再读取 pair service list。
+  - relation distribution/read model non-fresh 不阻断 batch submit；提交后继续刷新 no-OA、Workbench 和 downstream read model。
   - no-OA legacy migration、submitted repair、category drift cleanup 后续已在 Phase 7L 迁入 relation command service。
 - 验收测试：
   - `test_submit_batch_delegates_relation_write_to_command_service`
   - `test_withdraw_batch_delegates_relation_cancel_to_command_service`
   - `test_internal_transfer_from_workbench_delegates_relation_write_to_command_service`
   - `test_submit_batch_marks_submitted_and_exposes_relation_command_payload_idempotently`
-  - `test_submit_fails_fast_when_relation_read_model_is_not_fresh`
+  - `test_submit_uses_canonical_relation_when_relation_read_model_is_not_fresh`
   - `test_no_oa_salary_batch_relation_pairs_then_cancel_returns_to_open`
   - `test_no_oa_internal_transfer_relation_groups_bank_rows_until_cancelled`
 

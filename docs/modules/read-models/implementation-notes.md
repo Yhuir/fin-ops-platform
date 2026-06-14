@@ -27,6 +27,28 @@
 
 ## 历史记录
 
+## 2026-06-13 - Dependency-not-fresh runtime defer
+
+- 目标：避免 downstream read model 在 source read model 尚未 fresh 时走普通 60s retry/dead-letter，缩短页面从失败恢复到同步的尾延迟。
+- 影响范围：`RuntimeWorker`、`RuntimeQueueRepository.defer_event(...)`、worker CLI `--dependency-not-fresh-delay-seconds`；所有抛出 `*_read_model_not_fresh` 的 read model refresh handler 共享受益。
+- 关键决策：defer 只延后 outbox event 再 claim，不写 fresh readiness，不缓存 payload；普通异常和真实 handler bug 仍保留原 failure/dead-letter 语义。
+- 文档影响：同步更新 read-models 状态机、runtime-workers 状态机/测试矩阵/实施记录。
+- 测试覆盖：`tests/test_runtime_worker.py`、`tests/test_runtime_queue.py`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_defer_event_delays_dependency_retry_without_failure_or_dead_letter -v`。
+- 未测风险：未在真实生产库重新采集全 app enqueue-to-fresh p95；如果 source projection 本身慢，defer 只能避免长 retry，不能替代 SQL/projection 优化。
+- 后续事项：用 closure gate 观察 `runtime_worker.event_deferred` 与各 read model pending age，把持续高频 defer 的 source projection 纳入下一轮优化。
+
+## 2026-06-13 - Workbench relation fan-out priority
+
+- 目标：在 relation 写入 fan-out 中优先刷新 `workbench_relation` source read model，降低 downstream projection 因 relation distribution 未 fresh 而失败重试的概率。
+- 影响范围：事务内 relation producer 写入 `job.read_model_dirty_scopes` 与 `job.outbox_events` 的 priority 字段。
+- 关键决策：不改变 freshness 事实源，不新增缓存或队列；`workbench_relation` 使用 `high` priority，下游 read model 保持 `normal`。
+- 文档影响：同步记录到 workbench-relations 和 runtime-workers；完整 dependency DAG 仍未完成。
+- 测试覆盖：`tests/test_workbench_relation_repository.py` 和 runtime queue priority contract tests。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_increments_and_returns_source_version tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_enqueue_read_model_refresh_in_transaction_preserves_source_version_payload_and_outbox_contract -v`。
+- 未测风险：未连接真实生产 PostgreSQL 重新采集 enqueue-to-fresh p95；priority 不能保证跨 lane 的完整依赖顺序。
+- 后续事项：补 dependency-aware scheduler/deferral，并运行 `sync_slo_baseline` / `runtime_sync_closure_gate` 对比优化前后指标。
+
 ## 2026-06-13 - authenticated HTTP SLO fresh gate 收紧
 
 - 目标：让全 app 页面“5 秒内已同步”的验收不再只看 HTTP 200/202 和耗时，而是检查真实 read model freshness。

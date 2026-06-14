@@ -362,19 +362,24 @@ class RabbitMqConsumer:
             for queue_name in self._queue_names_for_event_types():
                 channel.basic_consume(queue=queue_name, on_message_callback=on_message)
             heartbeat_interval_seconds = min(30.0, max(5.0, float(self._settings.rabbitmq_heartbeat_seconds) / 2.0))
+            postgres_drain_interval_seconds = max(
+                0.1,
+                float(self._settings.rabbitmq_consumer_postgres_drain_interval_seconds),
+            )
             next_heartbeat_at = 0.0
+            next_postgres_drain_at = 0.0
             while True:
                 try:
                     connection.process_data_events(time_limit=1.0)
                     now = monotonic()
-                    if now >= next_heartbeat_at:
+                    if now >= next_postgres_drain_at:
                         drain_result = self.drain_postgres_queue_once()
-                        heartbeat_status = (
-                            "postgres_queue_processed"
-                            if drain_result == RuntimeWorkerResult.PROCESSED
-                            else "idle"
-                        )
-                        self._record_consumer_heartbeat(heartbeat_status)
+                        if drain_result == RuntimeWorkerResult.PROCESSED:
+                            self._record_consumer_heartbeat("postgres_queue_processed")
+                            next_heartbeat_at = now + heartbeat_interval_seconds
+                        next_postgres_drain_at = now + postgres_drain_interval_seconds
+                    if now >= next_heartbeat_at:
+                        self._record_consumer_heartbeat("idle")
                         next_heartbeat_at = now + heartbeat_interval_seconds
                 except KeyboardInterrupt:
                     self._record_consumer_heartbeat("stopped")

@@ -9,6 +9,7 @@ import unittest
 from fin_ops_platform.app import worker as worker_app
 from fin_ops_platform.tools import runtime_worker_manifest
 from fin_ops_platform.services.rabbitmq_runtime import SUPPORTED_EVENT_TYPES
+from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.runtime_monitoring import READ_MODEL_EVENT_TYPES
 from fin_ops_platform.services.runtime_queue import DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES
 from fin_ops_platform.services.runtime_worker_registry import (
@@ -80,6 +81,34 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 "--check",
             ),
         )
+
+    def test_hot_read_model_workers_have_dedicated_parallel_consumers(self) -> None:
+        registrations = registration_by_instance_name()
+
+        expectations = {
+            "search": ("search-read-model", ("search.read_model.refresh",)),
+            "search-secondary": ("search-secondary-read-model", ("search.read_model.refresh",)),
+            "search-tertiary": ("search-tertiary-read-model", ("search.read_model.refresh",)),
+            "pending-invoice": ("pending-invoice-read-model", ("pending_invoice.read_model.refresh",)),
+            "cost-statistics": ("cost-statistics-read-model", ("cost_statistics.read_model.refresh",)),
+            "tax-offset": ("tax-offset-read-model", ("tax_offset.read_model.refresh",)),
+            "invoice-lifecycle-secondary": (
+                "invoice-lifecycle-secondary-read-model",
+                ("invoice_lifecycle.read_model.refresh",),
+            ),
+        }
+        for instance_name, (worker_kind, event_types) in expectations.items():
+            with self.subTest(instance_name=instance_name):
+                registration = registrations[instance_name]
+                self.assertTrue(registration.required)
+                self.assertTrue(registration.rabbitmq_eligible)
+                self.assertEqual(registration.worker_kind, worker_kind)
+                self.assertEqual(registration.event_types, event_types)
+
+        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["search"].worker_instance, "search")
+        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["pending_invoice"].worker_instance, "pending-invoice")
+        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["cost_statistics"].worker_instance, "cost-statistics")
+        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
 
     def test_import_claim_events_include_postgres_local_ack_event_but_rabbitmq_dispatch_does_not(self) -> None:
         registration = registration_by_instance_name()["import"]

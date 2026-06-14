@@ -73,21 +73,23 @@ stateDiagram-v2
 - owner withdraw 不能绕过 owner 状态。例如 no-OA submitted batch 必须从 no-OA API 撤回，不能从关联台普通取消绕过业务 batch。
 - turnover bank-only relation 如果已升级为完整三栏关系，turnover withdraw 必须返回冲突并要求到关联台处理完整关系。
 
-## Freshness 状态
+## Freshness 与写安全
 
-写 API 在执行前需要 relation read model fresh 或等价 write model version precondition：
+`workbench_relation` distribution freshness 是读侧状态，不是默认写安全事实源。relation 写 API 默认按 canonical write model 执行：
 
-- `fresh`：允许继续业务校验。
-- `refreshing` / `stale` / `missing` / `source_mismatch` / `schema_mismatch` / `failed` / `unavailable`：阻断写入，返回业务错误和 refresh 信息。
+- `app.workbench_pair_relations` / transaction-bound relation repository：判断 active relation、row occupation 和状态转换。
+- `submit_expected_versions` / preview id / expected versions：判断撤回 preview 是否过期。
+- idempotency key：判断重复请求或冲突请求。
+- 权限、session、DB 可写性和目标 owner 状态：判断是否允许 mutation。
+
+只有调用方显式要求 read-model freshness precondition 时，`refreshing` / `stale` / `missing` / `source_mismatch` / `schema_mismatch` / `failed` / `unavailable` 才阻断该写入。普通页面 read model non-fresh 只影响读侧诊断和 payload freshness，不应让已具备 canonical 写安全的 relation mutation 等待 distribution 追赶。
 
 错误响应至少包含：
 
 - `error`
 - `message`
-- `read_model_status`
-- `read_model_stale_reasons`
-- `read_model_scope_keys`
-- `refresh_enqueued`
+- version/idempotency/permission/write safety 冲突字段。
+- 如果错误来自显式 freshness precondition，则包含 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。
 
 ## Audit history
 

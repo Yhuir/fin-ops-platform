@@ -34,6 +34,8 @@
 
 关注发票认证、可抵扣试算、已认证导入、计划保存、read model freshness 和认证导入结果。发票生命周期状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 分发，税金抵扣页面不私有定义认证状态。
 
+生产刷新由专用 `tax-offset` RabbitMQ consumer 承担 5s SLO drain；旧 `cost-tax` combined worker 保留为兼容消费者，不再是唯一性能 lane。`invoice_lifecycle` 另有 `invoice-lifecycle-secondary` 并发消费者用于多月份 scope 收敛。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

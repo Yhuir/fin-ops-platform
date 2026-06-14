@@ -42,7 +42,7 @@ class PendingInvoiceRelationIdentityTests(unittest.TestCase):
             [
                 {
                     "case_id": "candidate:prefix-fallback",
-                    "row_ids": ["oa-pay-1", "txn-expense", "invoice-input-1", "candidate:not-a-row"],
+                    "row_ids": ["oa-pay-1", "txn-expense", "invoice-input-1", "inv_imported_1643", "candidate:not-a-row"],
                     "row_types": [],
                 }
             ]
@@ -50,7 +50,7 @@ class PendingInvoiceRelationIdentityTests(unittest.TestCase):
 
         self.assertEqual(identity.oa_row_ids, ["oa-pay-1"])
         self.assertEqual(identity.bank_transaction_ids, ["txn-expense"])
-        self.assertEqual(identity.invoice_ids, ["invoice-input-1"])
+        self.assertEqual(identity.invoice_ids, ["invoice-input-1", "inv_imported_1643"])
         self.assertNotIn("candidate:not-a-row", identity.oa_row_ids)
 
 

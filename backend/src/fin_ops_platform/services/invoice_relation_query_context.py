@@ -37,6 +37,7 @@ class DistributedInvoiceRelationContext:
         self._oa_projection = oa_projection
         self._month_hint = str(month_hint or "").strip() or None
         self._require_fresh_relations = require_fresh_relations
+        self._invoices_by_scope: dict[tuple[str, str], list[Invoice]] = {}
         self._bank_transactions_by_id: dict[str, BankTransaction] | None = None
         self._distributed_relations_by_row_id: dict[str, list[dict[str, Any]]] = {}
         self._distributed_loaded_all_for_month = False
@@ -44,7 +45,15 @@ class DistributedInvoiceRelationContext:
         self._oa_loaded_all = False
 
     def list_invoices(self, *, month: str | None, invoice_type: InvoiceType) -> list[Invoice]:
-        return self._import_service.list_invoices(month=month, invoice_type=invoice_type)
+        cache_key = (
+            str(month).strip() if month not in (None, "") else "",
+            str(invoice_type.value if isinstance(invoice_type, InvoiceType) else invoice_type),
+        )
+        if cache_key not in self._invoices_by_scope:
+            self._invoices_by_scope[cache_key] = list(
+                self._import_service.list_invoices(month=month, invoice_type=invoice_type)
+            )
+        return list(self._invoices_by_scope[cache_key])
 
     def bank_transactions_by_id(self) -> dict[str, BankTransaction]:
         if self._bank_transactions_by_id is None:

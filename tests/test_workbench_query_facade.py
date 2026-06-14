@@ -6,6 +6,7 @@ import unittest
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WorkbenchGroupsPageCacheWarmer,
     build_workbench_groups_redis_cache_key_from_version,
+    workbench_groups_sync_cache_warmup_enabled_from_env,
 )
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
 
@@ -303,6 +304,14 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
 
 
 class WorkbenchGroupsPageCacheWarmerTests(unittest.TestCase):
+    def test_sync_cache_warmup_is_disabled_by_default_and_explicitly_enabled(self) -> None:
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(workbench_groups_sync_cache_warmup_enabled_from_env())
+        with patch.dict("os.environ", {"FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED": "1"}):
+            self.assertTrue(workbench_groups_sync_cache_warmup_enabled_from_env())
+
     def test_warmer_sets_version_key_and_homepage_summary_pages(self) -> None:
         class Repository:
             def __init__(self) -> None:

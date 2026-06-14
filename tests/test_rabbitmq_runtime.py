@@ -105,12 +105,18 @@ class FakeConnection:
         self.is_open = True
         self.process_data_events_calls = 0
         self.raise_on_process_data_events: BaseException | None = None
+        self.raise_after_process_data_events_calls: int | None = None
 
     def channel(self) -> FakeChannel:
         return self.channel_obj
 
     def process_data_events(self, *, time_limit):
         self.process_data_events_calls += 1
+        if (
+            self.raise_after_process_data_events_calls is not None
+            and self.process_data_events_calls >= self.raise_after_process_data_events_calls
+        ):
+            raise KeyboardInterrupt()
         if self.raise_on_process_data_events is not None:
             raise self.raise_on_process_data_events
 
@@ -160,10 +166,11 @@ class FakeWorker:
         self.heartbeats: list[tuple[str, dict[str, object]]] = []
         self.run_once_calls = 0
         self.run_once_result = RuntimeWorkerResult.IDLE
+        self.process_claimed_event_result = RuntimeWorkerResult.PROCESSED
 
     def process_claimed_event(self, claimed):
         self.processed.append(claimed.event_id)
-        return RuntimeWorkerResult.PROCESSED
+        return self.process_claimed_event_result
 
     def record_heartbeat(self, status, payload):
         self.heartbeats.append((status, payload))
@@ -337,6 +344,28 @@ class RabbitMqRuntimeTests(unittest.TestCase):
         self.assertEqual(channel.nacked, [])
         self.assertEqual(queue.claim_by_id_calls[0]["lock_timeout_seconds"], 300)
 
+    def test_consumer_acks_rabbitmq_envelope_after_postgres_event_is_deferred(self) -> None:
+        queue = FakeQueue()
+        worker = FakeWorker()
+        worker.process_claimed_event_result = RuntimeWorkerResult.DEFERRED
+        channel = FakeChannel()
+        settings = RuntimeQueueSettings.from_env({"RABBITMQ_URL": "amqp://rabbitmq.internal"})
+        consumer = RabbitMqConsumer(
+            settings=settings,
+            queue_repository=queue,
+            worker=worker,
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            lock_timeout_seconds=300,
+        )
+
+        result = consumer.process_envelope(event().to_envelope(), channel=channel, delivery_tag=456)
+
+        self.assertEqual(result, RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(worker.processed, ["event-1"])
+        self.assertEqual(channel.acked, [456])
+        self.assertEqual(channel.nacked, [])
+
     def test_consumer_passes_lock_timeout_for_stale_processing_reclaim(self) -> None:
         queue = FakeQueue()
         channel = FakeChannel()
@@ -371,6 +400,55 @@ class RabbitMqRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result, RuntimeWorkerResult.PROCESSED)
         self.assertEqual(worker.run_once_calls, 1)
+
+    def test_consumer_drains_postgres_queue_on_short_interval_independent_of_heartbeat(self) -> None:
+        worker = FakeWorker()
+        worker.run_once_result = RuntimeWorkerResult.IDLE
+        channel = FakeChannel()
+        connection = FakeConnection(channel)
+        connection.raise_after_process_data_events_calls = 4
+        settings = RuntimeQueueSettings.from_env(
+            {
+                "RABBITMQ_URL": "amqp://rabbitmq.internal",
+                "RABBITMQ_HEARTBEAT_SECONDS": "60",
+                "RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS": "1",
+            }
+        )
+        consumer = RabbitMqConsumer(
+            settings=settings,
+            queue_repository=FakeQueue(),
+            worker=worker,
+            worker_id="worker-1",
+            event_types=["workbench.read_model.refresh"],
+            lock_timeout_seconds=45,
+        )
+
+        with patch(
+            "fin_ops_platform.services.rabbitmq_runtime._open_blocking_connection",
+            return_value=connection,
+        ), patch(
+            "fin_ops_platform.services.rabbitmq_runtime.monotonic",
+            side_effect=[0.0, 0.5, 1.0, 1.5],
+        ):
+            consumer.consume_forever()
+
+        self.assertEqual(worker.run_once_calls, 2)
+        idle_heartbeats = [status for status, _payload in worker.heartbeats if status == "idle"]
+        self.assertEqual(idle_heartbeats, ["idle"])
+
+    def test_runtime_queue_settings_parses_consumer_postgres_drain_interval(self) -> None:
+        settings = RuntimeQueueSettings.from_env(
+            {
+                "RABBITMQ_URL": "amqp://rabbitmq.internal",
+                "RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS": "0.25",
+            }
+        )
+
+        self.assertEqual(settings.rabbitmq_consumer_postgres_drain_interval_seconds, 0.25)
+        self.assertEqual(
+            settings.summary()["rabbitmq_consumer_postgres_drain_interval_seconds"],
+            0.25,
+        )
 
     def test_consumer_records_idle_heartbeat_for_rabbitmq_transport(self) -> None:
         worker = FakeWorker()

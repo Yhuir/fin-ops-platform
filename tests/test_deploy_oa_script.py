@@ -99,6 +99,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("deploy-control helper does not archive legacy /opt/fin-ops/current", remote_script)
         self.assertIn("deploy-control helper does not enforce OA session env", remote_script)
         self.assertIn("deploy-control helper does not tolerate non-ready worker readiness polls under set -e", remote_script)
+        self.assertIn("deploy-control helper does not preserve worker dependency-not-fresh delay in release drop-ins", remote_script)
         self.assertIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
         self.assertIn("wait_finops_backend_ready", remote_script)
         self.assertIn("check_finops_session_route /fin-ops-api/api/session/me", remote_script)
@@ -228,6 +229,10 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertEqual(command[-1], "bash -lc 'set -euo pipefail\necho ok\n'")
         self.assertNotIn("bash", command[-3:-1])
+        self.assertIn("ControlMaster=no", command)
+        self.assertNotIn("ControlMaster=auto", command)
+        self.assertNotIn("ControlPersist=600", command)
+        self.assertFalse(any("fin_ops_mux" in part for part in command))
 
     def test_legacy_remote_script_keeps_previous_current_deploy_behavior(self) -> None:
         config = self.module.DeploymentConfig(
@@ -277,8 +282,13 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertIn("Environment=FIN_OPS_WORKER_INSTANCE=%i", template)
         self.assertIn("EnvironmentFile=-/etc/fin-ops/fin-ops.rabbitmq-worker.env", template)
+        self.assertIn("FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS=0.25", template)
         self.assertIn("--registration ${FIN_OPS_WORKER_INSTANCE}", template)
         self.assertIn("--worker-instance ${FIN_OPS_WORKER_INSTANCE}", template)
+        self.assertIn(
+            "--dependency-not-fresh-delay-seconds ${FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS}",
+            template,
+        )
 
     def test_deploy_control_script_uses_canonical_etc_finops_secret_contract(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
@@ -309,6 +319,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("FINOPS_WORKER_READY_TIMEOUT_SECONDS", script)
         self.assertIn("missing_required_worker_count", script)
         self.assertIn("stale_required_worker_count", script)
+        self.assertIn("--dependency-not-fresh-delay-seconds \\${FIN_OPS_WORKER_DEPENDENCY_NOT_FRESH_DELAY_SECONDS}", script)
         self.assertIn("worker_kind_mismatch", script)
         self.assertIn("worker_event_type_mismatch", script)
         self.assertIn("readiness_status=0", script)
