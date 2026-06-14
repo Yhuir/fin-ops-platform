@@ -928,9 +928,8 @@ class WorkbenchWriteFacade:
     @staticmethod
     def _operation_freshness_targets(scope_keys: list[str]) -> list[dict[str, str]]:
         return [
-            {"read_model_key": read_model_key, "scope_key": scope_key}
+            {"read_model_key": "workbench_relation", "scope_key": scope_key}
             for scope_key in scope_keys
-            for read_model_key in ("workbench_relation", "workbench")
         ]
 
     def _relation_command_service_for(self, *, repository: Any | None = None) -> Any | None:

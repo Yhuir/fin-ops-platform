@@ -281,10 +281,16 @@ function actionFreshnessTargets(result: WorkbenchActionResult | null): Operation
     return result.freshnessTargets;
   }
   if (result.affectedScopeKeys.length > 0) {
+    if (hasOperationProjection(result.operationProjection)) {
+      return operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
+    }
     return [
       ...operationBarrierTargets("workbench_relation", result.affectedScopeKeys),
       ...operationBarrierTargets("workbench", result.affectedScopeKeys),
     ];
+  }
+  if (hasOperationProjection(result.operationProjection)) {
+    return operationBarrierTargets("workbench_relation", actionAffectedMonths(result));
   }
   return [
     ...operationBarrierTargets("workbench_relation", actionAffectedMonths(result)),

@@ -30,7 +30,7 @@
 
 写操作后的用户体验闭环由 operation freshness barrier 负责。前端写操作成功后可以调用 `/api/operation-barrier/status` 轮询受影响 read model/scope；后端只读取 `RuntimeMonitoringRepository.app_status_runtime_snapshot()` 中的 current-effective readiness、dirty/outbox 和 worker facts，不写 readiness、不重建 read model、不把 RabbitMQ/Redis 当事实源。barrier 返回 `fresh` 才允许页面关闭全屏操作 overlay；`refreshing` 继续等待；`blocked` 必须暴露具体 read model/scope 和原因，不能伪装成已同步。
 
-operation barrier 不替代各页面自己的 fresh gate。Workbench 仍以 active generation 原子发布为最终展示事实；`workbench_relation` barrier 只证明 relation distribution 已收敛，关联台还必须等待 `/api/workbench*` 返回 fresh 的 active generation 后再释放操作。
+operation barrier 不替代各页面自己的 fresh gate。Workbench 仍以 active generation 原子发布为最终展示事实；但确认/撤回这类写 API 如果返回后端 `operation_projection`，该 projection 是写后真实状态，前端只需等待操作级 `workbench_relation` barrier fresh 即可释放 overlay 并应用 projection。`workbench` month shard、`workbench:all` 和跨页面下游 read model 必须继续后台追赶并最终 fresh，由 cross-page SLO/监控单独验收；没有 operation projection 的写动作仍要等待目标 read model/scope fresh 或页面 fresh reload 后释放。
 
 生产旧 runtime 状态通过 `scripts/check-read-model-scope-contracts.py` 检查和修复。默认只读检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness` 中不符合当前 registry 的成本统计 scope，同时生成 repair manifest，区分 legacy/invalid cost statistics runtime 行、已被 later done/fresh readiness 覆盖的历史 outbox failure，以及仍然 current-effective 的未覆盖 failure。`--apply` 只会删除旧非规范 cost statistics runtime 行，并通过 gateway 补投规范 `cost_statistics` replacement scope；当前未覆盖 failure 必须保留为真实 blocker，不能为了 App Status 变绿而删除。apply 报告必须包含 cleanup、rollback 和 audit event 信息。
 

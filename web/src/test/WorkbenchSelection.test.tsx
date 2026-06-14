@@ -770,7 +770,6 @@ describe("Workbench row selection and detail modal", () => {
     const barrierBody = JSON.parse(String((barrierCall?.[1]?.body ?? "{}")));
     expect(barrierBody.targets).toEqual([
       { read_model_key: "workbench_relation", scope_key: "2026-03" },
-      { read_model_key: "workbench", scope_key: "2026-03" },
     ]);
   });
 

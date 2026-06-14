@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-15 - 确认/撤回操作级 2 秒 SLO 与后台 cross-page SLO 拆分
+
+- 目标：生产写操作验证显示 withdraw HTTP 成功且最终 fresh，但 `workbench` month shard 和下游 read model 仍有 2.7-11s 长尾，导致全屏 overlay 暴露给用户。将“当前关联台可见状态 2 秒内可用”的阻塞目标收敛为 canonical relation/operation projection + `workbench_relation` fresh，把 Workbench generation 和跨页面 fan-out 改为后台追赶与单独 SLO 监控。
+- 影响范围：`WorkbenchWriteFacade` confirm/withdraw response contract、`ReconciliationWorkbenchPage` operation barrier fallback、Workbench 前端 mock、`write_operation_slo_audit` operation profile。
+- 关键决策：确认/撤回写 API 返回的 `freshness_targets` 只包含受影响月份的 `workbench_relation`；同一写 API 返回的 `operation_projection` 是后端事务后真实 after-state，前端应用它更新受影响 group 后释放 overlay。`workbench_relation_confirm/withdraw` SLO profile 只代表操作级阻塞目标；新增 `*_cross_page` profile 保留 `workbench`、bank detail、invoice lifecycle、pending invoice、input usage、cost/search/tax 等后台追赶监控。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 和本实施记录，并同步 read-models 模块说明。
+- 测试覆盖：`tests/test_workbench_auth_context_idempotency.py` 覆盖 response blocking targets；`tests/test_write_operation_slo_audit.py` 覆盖操作级与 cross-page profile 分离；`web/src/test/WorkbenchSelection.test.tsx` 覆盖 overlay barrier 只提交 `workbench_relation` target 且用后端 projection 更新 UI。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：本地自动化证明 contract；生产 2 秒证明必须发布后用真实登录态再次执行受控 confirm/withdraw scenario。
+
 ## 2026-06-14 - 写操作全屏 overlay 与真实 freshness barrier
 
 - 目标：把关联台确认、撤回、异常、忽略等写操作从前端本地 optimistic 重排切换为“写 API 成功后等待真实后端 freshness”的闭环，避免几秒内暴露旧关系或假同步。

@@ -403,7 +403,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             result.payload["freshness_targets"],
             [
                 {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
             ],
         )
 
@@ -477,7 +476,6 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             result.payload["freshness_targets"],
             [
                 {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
             ],
         )
 
