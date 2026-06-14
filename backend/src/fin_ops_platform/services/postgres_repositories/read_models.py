@@ -6439,12 +6439,12 @@ class PostgresReadModelRepository:
                     update read_model.workbench_reconciliation_decisions
                     set decision_status = 'expired',
                         raw_payload = raw_payload || jsonb_build_object(
-                            'expired_reason', %s,
-                            'expired_by', %s
+                            'expired_reason', %s::text,
+                            'expired_by', %s::text
                         ),
                         updated_at = now()
-                    where tenant_id = %s
-                      and decision_key = any(%s)
+                    where tenant_id = %s::text
+                      and decision_key = any(%s::text[])
                       and decision_status in ('proposed', 'paired', 'open')
                     returning to_char(scope_month, 'YYYY-MM') as scope_key
                 )

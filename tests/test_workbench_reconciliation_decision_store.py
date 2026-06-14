@@ -219,6 +219,10 @@ class WorkbenchReconciliationDecisionStoreTests(unittest.TestCase):
         expire_sql, expire_params = connection.fetch_all_calls[0]
         self.assertIn("update read_model.workbench_reconciliation_decisions", expire_sql)
         self.assertIn("decision_status = 'expired'", expire_sql)
+        self.assertIn("'expired_reason', %s::text", expire_sql)
+        self.assertIn("'expired_by', %s::text", expire_sql)
+        self.assertIn("tenant_id = %s::text", expire_sql)
+        self.assertIn("decision_key = any(%s::text[])", expire_sql)
         self.assertEqual(expire_params[0], "unit-test")
         self.assertEqual(expire_params[2], "tenant-a")
         self.assertEqual(expire_params[3], ["decision-bad"])
