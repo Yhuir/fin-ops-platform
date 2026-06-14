@@ -382,6 +382,31 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
         self.assertEqual(getattr(command, "tenant_id"), "default")
 
+    def test_confirm_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
+        facade = _new_facade(confirm_uow=_RecordingUoW())
+
+        result = facade.confirm_link(
+            {
+                "month": "all",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "confirm:freshness-targets",
+            },
+            request_id="req-confirm-targets",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
+        self.assertNotIn({"read_model_key": "workbench_relation", "scope_key": "all"}, result.payload["freshness_targets"])
+        self.assertEqual(
+            result.payload["freshness_targets"],
+            [
+                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
+            ],
+        )
+
     def test_cancel_link_replay_and_run_commands_use_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
         facade = _new_facade(cancel_uow=uow)
@@ -428,6 +453,33 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         for command in [*uow.replay_commands, *uow.run_commands]:
             self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
             self.assertEqual(getattr(command, "tenant_id"), "default")
+
+    def test_withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
+        facade = _new_facade(
+            withdraw_uow=_RecordingUoW(),
+            relation_command_service=_RecordingRelationCommandService(),
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "all",
+                "row_ids": ["oa-1", "bank-1"],
+                "idempotency_key": "withdraw:freshness-targets",
+            },
+            request_id="req-withdraw-targets",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
+        self.assertEqual(
+            result.payload["freshness_targets"],
+            [
+                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+                {"read_model_key": "workbench", "scope_key": "2026-05"},
+            ],
+        )
 
     def test_confirm_and_cancel_link_map_in_progress_idempotency_to_stable_conflict_payload(self) -> None:
         facade = _new_facade(confirm_uow=_InProgressUoW(), cancel_uow=_InProgressUoW())

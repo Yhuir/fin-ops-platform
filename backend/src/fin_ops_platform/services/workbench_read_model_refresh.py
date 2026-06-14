@@ -183,6 +183,8 @@ def _truthy(value: Any) -> bool:
 
 
 def _all_scope_aggregate_published(payload: dict[str, Any]) -> bool:
+    if _truthy(payload.get("aggregate_published")):
+        return True
     active_generation_id = str(payload.get("active_generation_id") or "").strip()
     if not active_generation_id:
         return False

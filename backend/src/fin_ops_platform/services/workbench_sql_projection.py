@@ -210,6 +210,7 @@ class WorkbenchSqlProjectionBuilder:
             "source_version": source_version,
             "read_model_status": status.get("read_model_status") or "fresh",
             "active_generation_id": status.get("active_generation_id"),
+            "aggregate_published": bool(str(status.get("active_generation_id") or "").strip()),
             "row_count": 0,
             "ignored_row_count": 0,
         }

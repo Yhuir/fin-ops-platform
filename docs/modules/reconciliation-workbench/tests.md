@@ -99,7 +99,8 @@
 4. `open automatic candidate -> group selection -> split_candidate preview -> submit suppresses candidate -> workbench refresh no longer groups the same candidate`
 5. `ETC business batch submitted -> etc_invoice_summary open row -> OA/bank/invoice 三项确认 -> paired 区展开明细`
 6. `Workbench query refreshing/stale -> 页面展示刷新/陈旧状态 -> Redis 不缓存 stale payload -> 后续 fresh 后更新`
-7. `confirm/withdraw/exception/ignore 写操作 -> 写 API 成功 -> operation barrier 等待目标 read model/scope fresh -> Workbench active generation 重新读取 fresh -> 全屏 overlay 释放`
+7. `confirm/withdraw 写操作 -> 写 API 成功 -> operation barrier 等待后端返回的目标 read model/scope fresh -> 应用后端 operation projection 更新受影响 group -> 全屏 overlay 释放；workbench:all 后台追赶并最终 fresh`
+8. `exception/ignore 等未返回 operation projection 的写操作 -> 写 API 成功 -> operation barrier 等待目标 read model/scope fresh -> Workbench active generation 重新读取 fresh -> 全屏 overlay 释放`
 
 ## 本模块验证命令
 

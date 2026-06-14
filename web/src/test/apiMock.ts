@@ -6539,6 +6539,19 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           moveWorkbenchGroup(payload, "open", "paired", rowId);
         }
       }
+      const operationProjection = {
+        after: {
+          paired_groups: Array.from(touchedMonths).flatMap((resolvedMonth) =>
+            buildRelationPreviewGroups(
+              findWorkbenchRowsByIds(workbenchStateStore, resolvedMonth, rowIds),
+              typeof jsonBody?.case_id === "string" ? jsonBody.case_id : "CASE-MOCK-CONFIRM",
+              "paired",
+              "together",
+            ),
+          ),
+          open_groups: [],
+        },
+      };
       return {
         body: {
           success: true,
@@ -6547,6 +6560,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           affected_row_ids: rowIds,
           case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
           affected_months: Array.from(touchedMonths),
+          affected_scope_keys: Array.from(touchedMonths),
+          freshness_targets: Array.from(touchedMonths).flatMap((scopeKey) => [
+            { read_model_key: "workbench_relation", scope_key: scopeKey },
+            { read_model_key: "workbench", scope_key: scopeKey },
+          ]),
+          operation_projection: operationProjection,
           message: `已确认 ${rowIds.length} 条记录关联。`,
         },
       };
@@ -6579,6 +6598,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           withdrawWorkbenchGroup(payload, rowId);
         }
       }
+      const operationProjection = {
+        after: {
+          paired_groups: [],
+          open_groups: Array.from(touchedMonths).flatMap((resolvedMonth) =>
+            buildWithdrawAfterPreviewGroups(findWorkbenchRowsByIds(workbenchStateStore, resolvedMonth, rowIds)),
+          ),
+        },
+      };
       return {
         body: {
           success: true,
@@ -6587,6 +6614,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           affected_row_ids: rowIds,
           restored_relations: [],
           changed_scopes: Array.from(touchedMonths),
+          affected_scope_keys: Array.from(touchedMonths),
+          freshness_targets: Array.from(touchedMonths).flatMap((scopeKey) => [
+            { read_model_key: "workbench_relation", scope_key: scopeKey },
+            { read_model_key: "workbench", scope_key: scopeKey },
+          ]),
+          operation_projection: operationProjection,
           message: "已撤回 1 组关联。",
         },
       };

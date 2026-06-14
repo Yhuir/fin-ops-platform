@@ -721,9 +721,9 @@ describe("Workbench row selection and detail modal", () => {
     );
   });
 
-  test("workbench action shows a global operation overlay until the fresh refetch completes", async () => {
+  test("workbench action uses operation-scoped freshness targets and backend projection", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
+    const fetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 3000 });
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -746,7 +746,6 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.getByText("正在确认关联...")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "确定" })).not.toBeInTheDocument();
 
-    expect(await screen.findByText("正在同步关联台最新数据...")).toBeInTheDocument();
     expect(
       within(openZone).getByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,
@@ -766,6 +765,13 @@ describe("Workbench row selection and detail modal", () => {
         name: /2026-03-28.*智能工厂设备商/,
       }),
     ).toBeInTheDocument();
+    const barrierCall = fetchMock.mock.calls.find(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"));
+    expect(barrierCall).toBeDefined();
+    const barrierBody = JSON.parse(String((barrierCall?.[1]?.body ?? "{}")));
+    expect(barrierBody.targets).toEqual([
+      { read_model_key: "workbench_relation", scope_key: "2026-03" },
+      { read_model_key: "workbench", scope_key: "2026-03" },
+    ]);
   });
 
   test("confirm link does not expose local optimistic row movement before the fresh refetch", async () => {
@@ -787,7 +793,7 @@ describe("Workbench row selection and detail modal", () => {
     const preview = await screen.findByRole("dialog", { name: "关联预览" });
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByText("正在同步关联台最新数据...")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "全局操作进度" })).toBeInTheDocument();
     expect(
       within(openZone).getByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,
@@ -857,7 +863,6 @@ describe("Workbench row selection and detail modal", () => {
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
     expect(await screen.findByRole("dialog", { name: "全局操作进度" })).toBeInTheDocument();
-    expect(await screen.findByText("正在同步关联台最新数据...")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
     });

@@ -5416,6 +5416,57 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(queue.completed, [])
 
+    def test_workbench_refresh_handler_completes_all_when_aggregate_publish_is_confirmed_despite_self_dirty_status(self) -> None:
+        class FakeBuilder:
+            def refresh_workbench_all_scope_from_active_shards(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "aggregate_only": True,
+                    "aggregate_published": True,
+                    "read_model_status": "refreshing",
+                    "active_generation_id": "workbench:all:published",
+                }
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.completed: list[tuple[str, str, str, object]] = []
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all-aggregate-self-dirty",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="workbench",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all", "aggregate_only": True, "source_version": 9},
+            attempts=1,
+            status="processing",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result["active_generation_id"], "workbench:all:published")
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 9)])
+
     def test_workbench_refresh_handler_warms_homepage_pages_after_publish(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(

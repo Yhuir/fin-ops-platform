@@ -475,6 +475,7 @@ class WorkbenchWriteFacade:
                 resolved_case_id=resolved_case_id,
                 note=note,
                 amount_check=amount_check,
+                selected_rows=selected_rows,
                 history_before_relations=history_before_relations,
                 previous_pair_snapshot=previous_pair_snapshot,
                 changed_scope_keys=changed_scope_keys,
@@ -535,16 +536,29 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteResult(
                 HTTPStatus.OK,
                 self._confirm_link_response_payload(
-                    {
-                        "success": True,
-                        "action": action_name,
-                        "month": month,
-                        "case_id": resolved_case_id,
-                        "affected_row_ids": list(row_ids),
-                        "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
-                        "amount_check": amount_check,
-                        "message": f"已确认 {len(row_ids)} 条记录关联。",
-                    }
+                    self._confirm_link_result_with_operation_projection(
+                        {
+                            "success": True,
+                            "action": action_name,
+                            "month": month,
+                            "case_id": resolved_case_id,
+                            "affected_row_ids": list(row_ids),
+                            "affected_months": list(command_result.get("affected_months") or changed_scope_keys),
+                            "affected_scope_keys": list(
+                                command_result.get("read_model_scope_keys")
+                                or command_result.get("affected_months")
+                                or changed_scope_keys
+                            ),
+                            "amount_check": amount_check,
+                            "message": f"已确认 {len(row_ids)} 条记录关联。",
+                        },
+                        case_id=resolved_case_id,
+                        row_ids=row_ids,
+                        row_types=row_types,
+                        selected_rows=selected_rows,
+                        month=month,
+                        amount_check=amount_check,
+                    )
                 ),
             )
 
@@ -563,6 +577,7 @@ class WorkbenchWriteFacade:
         resolved_case_id: str,
         note: str,
         amount_check: dict[str, object],
+        selected_rows: list[dict[str, object]],
         history_before_relations: list[dict[str, object]],
         previous_pair_snapshot: dict[str, object],
         changed_scope_keys: list[str],
@@ -685,7 +700,20 @@ class WorkbenchWriteFacade:
                 changed_case_ids=changed_case_ids,
             )
             return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
-        return WorkbenchWriteResult(HTTPStatus.OK, self._confirm_link_response_payload(result))
+        return WorkbenchWriteResult(
+            HTTPStatus.OK,
+            self._confirm_link_response_payload(
+                self._confirm_link_result_with_operation_projection(
+                    result,
+                    case_id=resolved_case_id,
+                    row_ids=row_ids,
+                    row_types=row_types,
+                    selected_rows=selected_rows,
+                    month=month,
+                    amount_check=amount_check,
+                )
+            ),
+        )
 
     def _confirm_relation_via_command_service(
         self,
@@ -807,6 +835,7 @@ class WorkbenchWriteFacade:
                 "case_id": case_id,
                 "affected_row_ids": affected_row_ids,
                 "affected_months": affected_months,
+                "affected_scope_keys": affected_months,
                 "amount_check": amount_check,
                 "message": f"已确认 {len(affected_row_ids)} 条记录关联。",
             },
@@ -814,6 +843,7 @@ class WorkbenchWriteFacade:
 
     @staticmethod
     def _confirm_link_response_payload(result: dict[str, object]) -> dict[str, object]:
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(result)
         return {
             "success": bool(result.get("success")),
             "action": "confirm_link",
@@ -821,9 +851,87 @@ class WorkbenchWriteFacade:
             "case_id": str(result.get("case_id") or ""),
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "affected_months": list(result.get("affected_months") or []),
+            "affected_scope_keys": affected_scope_keys,
+            "freshness_targets": WorkbenchWriteFacade._operation_freshness_targets(affected_scope_keys),
             "amount_check": dict(result.get("amount_check") or {}),
+            "operation_projection": dict(result.get("operation_projection") or {}),
             "message": str(result.get("message") or ""),
         }
+
+    def _confirm_link_result_with_operation_projection(
+        self,
+        result: dict[str, object],
+        *,
+        case_id: str,
+        row_ids: list[str],
+        row_types: list[str],
+        selected_rows: list[dict[str, object]],
+        month: str,
+        amount_check: dict[str, object],
+    ) -> dict[str, object]:
+        payload = dict(result)
+        if isinstance(payload.get("operation_projection"), dict) and payload.get("operation_projection"):
+            return payload
+        payload["operation_projection"] = self._confirm_link_operation_projection(
+            case_id=case_id,
+            row_ids=row_ids,
+            row_types=row_types,
+            selected_rows=selected_rows,
+            month=month,
+            amount_check=amount_check,
+        )
+        return payload
+
+    def _confirm_link_operation_projection(
+        self,
+        *,
+        case_id: str,
+        row_ids: list[str],
+        row_types: list[str],
+        selected_rows: list[dict[str, object]],
+        month: str,
+        amount_check: dict[str, object],
+    ) -> dict[str, object]:
+        after_relation = {
+            "case_id": case_id,
+            "row_ids": list(row_ids),
+            "row_types": list(row_types),
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            "amount_check": dict(amount_check or {}),
+        }
+        return {
+            "after": {
+                "paired_groups": self._relation_groups([after_relation], selected_rows=selected_rows),
+                "open_groups": [],
+            }
+        }
+
+    @staticmethod
+    def _operation_affected_scope_keys(result: dict[str, object]) -> list[str]:
+        raw_scope_keys = (
+            result.get("affected_scope_keys")
+            or result.get("read_model_scope_keys")
+            or result.get("affected_months")
+            or result.get("changed_scopes")
+            or []
+        )
+        normalized: list[str] = []
+        for scope_key in list(raw_scope_keys):
+            value = str(scope_key or "").strip()
+            if not value or value == "all" or value in normalized:
+                continue
+            normalized.append(value)
+        return normalized
+
+    @staticmethod
+    def _operation_freshness_targets(scope_keys: list[str]) -> list[dict[str, str]]:
+        return [
+            {"read_model_key": read_model_key, "scope_key": scope_key}
+            for scope_key in scope_keys
+            for read_model_key in ("workbench_relation", "workbench")
+        ]
 
     def _relation_command_service_for(self, *, repository: Any | None = None) -> Any | None:
         if self._relation_command_service_factory is not None:
@@ -1430,10 +1538,13 @@ class WorkbenchWriteFacade:
                 "operation": "withdraw_link",
                 "action": "withdraw_link",
                 "month": month,
+                "case_id": case_id,
                 "changed_scopes": changed_scope_keys,
                 "affected_months": changed_scope_keys,
+                "affected_scope_keys": changed_scope_keys,
                 "affected_row_ids": affected_row_ids,
                 "restored_relations": list(result.get("restored_relations") or []),
+                "operation_projection": self._withdraw_link_operation_projection(preview=preview, month=month),
                 "message": "已撤回 1 组关联。",
             },
         )
@@ -1557,11 +1668,13 @@ class WorkbenchWriteFacade:
                 "operation": action_name,
                 "action": action_name,
                 "month": month,
+                "case_id": case_id,
                 "changed_scopes": list(result.get("affected_months") or changed_scope_keys),
                 "affected_months": list(result.get("affected_months") or changed_scope_keys),
                 "affected_scope_keys": list(result.get("affected_months") or changed_scope_keys),
                 "affected_row_ids": list(result.get("affected_row_ids") or affected_row_ids),
                 "restored_relations": list(result.get("restored_relations") or []),
+                "operation_projection": self._withdraw_link_operation_projection(preview=preview, month=month),
                 "message": "已撤回 1 组关联。",
             }
 
@@ -1588,16 +1701,31 @@ class WorkbenchWriteFacade:
 
     @staticmethod
     def _withdraw_link_response_payload(result: dict[str, object]) -> dict[str, object]:
+        affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(result)
         return {
             "success": bool(result.get("success")),
             "operation": "withdraw_link",
             "action": "withdraw_link",
             "month": str(result.get("month") or ""),
+            "case_id": str(result.get("case_id") or ""),
             "changed_scopes": list(result.get("changed_scopes") or result.get("affected_months") or []),
             "affected_months": list(result.get("affected_months") or result.get("changed_scopes") or []),
+            "affected_scope_keys": affected_scope_keys,
+            "freshness_targets": WorkbenchWriteFacade._operation_freshness_targets(affected_scope_keys),
             "affected_row_ids": list(result.get("affected_row_ids") or []),
             "restored_relations": list(result.get("restored_relations") or []),
+            "operation_projection": dict(result.get("operation_projection") or {}),
             "message": str(result.get("message") or "已撤回 1 组关联。"),
+        }
+
+    def _withdraw_link_operation_projection(self, *, preview: dict[str, object], month: str) -> dict[str, object]:
+        preview_payload = self._withdraw_relation_preview_payload(preview, month=month)
+        after = dict(preview_payload.get("after") or {})
+        return {
+            "after": {
+                "paired_groups": [],
+                "open_groups": list(after.get("groups") or []),
+            }
         }
 
     def _preview_withdraw_relation_via_command_service(

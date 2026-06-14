@@ -76,12 +76,13 @@ Refresh 触发来源：
 1. 查 `/api/workbench/refresh-status`、App Health、dirty scopes、outbox 和 worker heartbeat。
 2. 如果是 matching dirty scope，重试 `workbench-matching` worker；不要回退 legacy dirty scope。
 3. 如果是 active generation inconsistency，修复 generation 或重建 scope；不得手工把 failed 改 fresh。
-4. 如果是页面交互问题，先确认写 API response 的 affected months、operation barrier target、`/api/workbench*` 的 `read_model_status` 和 active generation freshness，再看 domain event/selection 状态。
+4. 如果是页面交互问题，先确认写 API response 的 affected months、operation freshness targets、operation projection、`/api/workbench*` 的 `read_model_status` 和 active generation freshness，再看 domain event/selection 状态。确认/撤回 overlay 不应等待 `workbench:all` 才释放；`all` 失败或 pending 仍是后台一致性问题，必须单独修复。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-15 | 确认/撤回提交响应增加 operation freshness targets 与后端 operation projection；前端 overlay 等目标 shard fresh 后应用投影，`workbench:all` 后台追赶；修复 all aggregate active generation 已发布但被自身 dirty scope 误判 refreshing 的 dead-letter 循环 | `WorkbenchWriteFacade` confirm/withdraw response contract、`WorkbenchReadModelRefreshService` aggregate-only publish gate、`ReconciliationWorkbenchPage` operation overlay | `tests/test_workbench_auth_context_idempotency.py`；`tests/test_workbench_sql_runtime.py`；`web/src/test/WorkbenchSelection.test.tsx`；`npm run build` |
 | 2026-06-15 | all-scope 聚合接入 canonical active relation occupancy gate：保留合法 `case:<case_id>` open/display owner，抑制 `scope:*:temp:*` 等旧 open owner；确认预览遇到已 active row-set 时返回撤回预览，防止 all scope 旧 open owner 继续误导用户确认 | `PostgresReadModelRepository` all-scope aggregate/generation consistency、`WorkbenchReadModelRefreshService` aggregate-only event、`WorkbenchWriteFacade.preview_confirm_link`、`RelationPreviewDialog` existing operation flow | `tests/test_workbench_sql_runtime.py`；`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`；`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-14 | 关联台写操作从本地 optimistic 重排改为全屏 operation overlay，等待 `workbench_relation` barrier 与 Workbench active generation fresh 后释放 | `ReconciliationWorkbenchPage` 写操作 gate、`GlobalOperationOverlayProvider`、`/api/operation-barrier/status` | `web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/GlobalOperationOverlayContext.test.tsx`；`web/src/test/OperationBarrierApi.test.ts`；`tests/test_operation_freshness_barrier.py` |
 | 2026-06-12 | 关联台撤回 preview 操作后未恢复 row 逐行独立展示，并拆分 Workbench stale 与 OA dirty 写阻断 | `Application._relation_groups`、`WorkbenchWriteFacade` withdraw preview、App Health source mapping、前端 optimistic update/pending row lock | `tests/test_workbench_auth_context_idempotency.py`；`web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/AppHealthStatusContext.test.tsx` |

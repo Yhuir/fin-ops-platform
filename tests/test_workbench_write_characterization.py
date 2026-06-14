@@ -307,6 +307,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         payload = _json_response(response)
         self.assertEqual(payload["case_id"], "CASE-UOW-CONFIRM")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
+        self.assertTrue(payload["operation_projection"]["after"]["paired_groups"])
         self.assertEqual(pair_relation_persist.call_count, 0)
         self.assertEqual(read_model_persist.call_count, 0)
         self.assertEqual(connection.opened, 1)

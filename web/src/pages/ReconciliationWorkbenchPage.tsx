@@ -37,6 +37,8 @@ import {
   unignoreWorkbenchRow,
   withdrawWorkbenchLink,
   WORKBENCH_GROUP_PAGE_SIZE,
+  type WorkbenchActionResult,
+  type WorkbenchOperationProjection,
 } from "../features/workbench/api";
 import { fetchNoOaBankBatchDetail, withdrawNoOaBankBatch } from "../features/noOaBankBatches/api";
 import {
@@ -45,7 +47,7 @@ import {
   eventAffectedMonths,
 } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { operationBarrierTargets, waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
@@ -190,7 +192,7 @@ const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
 const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
 const WORKBENCH_OPERATION_FRESH_POLL_MS = 300;
-const WORKBENCH_OPERATION_FRESH_TIMEOUT_MS = 15_000;
+const WORKBENCH_OPERATION_FRESH_TIMEOUT_MS = 2_000;
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
   return JSON.stringify(query);
@@ -269,6 +271,29 @@ function actionAffectedMonths(result: {
     return changedSnakeScopes;
   }
   return [WORKBENCH_VIEW_MONTH];
+}
+
+function actionFreshnessTargets(result: WorkbenchActionResult | null): OperationBarrierTarget[] {
+  if (!result) {
+    return operationBarrierTargets("workbench_relation", [WORKBENCH_VIEW_MONTH]);
+  }
+  if (result.freshnessTargets.length > 0) {
+    return result.freshnessTargets;
+  }
+  if (result.affectedScopeKeys.length > 0) {
+    return [
+      ...operationBarrierTargets("workbench_relation", result.affectedScopeKeys),
+      ...operationBarrierTargets("workbench", result.affectedScopeKeys),
+    ];
+  }
+  return [
+    ...operationBarrierTargets("workbench_relation", actionAffectedMonths(result)),
+    ...operationBarrierTargets("workbench", actionAffectedMonths(result)),
+  ].filter((target) => target.scopeKey !== "all");
+}
+
+function actionResultMessage(result: string | WorkbenchActionResult) {
+  return typeof result === "string" ? result : result.message;
 }
 
 function workbenchInitialPageIsFresh(result: WorkbenchInitialPageResult | null) {
@@ -1395,33 +1420,83 @@ export default function ReconciliationWorkbenchPage() {
     setWorkbenchExceptionDialog(null);
   };
 
+  const applyWorkbenchOperationProjection = useCallback((result: WorkbenchActionResult) => {
+    const projection = result.operationProjection;
+    if (!hasOperationProjection(projection)) {
+      return false;
+    }
+    const affectedRowIds = operationProjectionAffectedRowIds(result);
+    setWorkbenchData((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        paired: {
+          groups: applyOperationProjectionToGroups(
+            current.paired.groups,
+            projection?.after.pairedGroups ?? [],
+            affectedRowIds,
+          ),
+        },
+        open: {
+          groups: applyOperationProjectionToGroups(
+            current.open.groups,
+            projection?.after.openGroups ?? [],
+            affectedRowIds,
+          ),
+        },
+      };
+    });
+    setSelectionSourceGroups((current) => ({
+      paired: applyOperationProjectionToGroups(
+        current.paired,
+        projection?.after.pairedGroups ?? [],
+        affectedRowIds,
+      ),
+      open: applyOperationProjectionToGroups(
+        current.open,
+        projection?.after.openGroups ?? [],
+        affectedRowIds,
+      ),
+    }));
+    return true;
+  }, []);
+
   const runBlockingAction = useCallback(async ({
     loadingMessage,
     action,
   }: {
     loadingMessage: string;
-    action: () => Promise<string>;
+    action: () => Promise<string | WorkbenchActionResult>;
   }) => {
     handleCloseDetail();
     const outcome = await runOperation({
       loadingMessage,
       action: async ({ setMessage }) => {
-        const message = await action();
-        setMessage("正在等待关联关系读模型同步...");
-        await waitForOperationFreshness(
-          operationBarrierTargets("workbench_relation", [WORKBENCH_VIEW_MONTH]),
-          { timeoutMs: WORKBENCH_OPERATION_FRESH_TIMEOUT_MS },
-        );
-        setMessage("正在同步关联台最新数据...");
-        await waitForWorkbenchFreshAfterOperation();
-        return message;
+        const result = await action();
+        const actionResult = typeof result === "string" ? null : result;
+        const targets = actionFreshnessTargets(actionResult);
+        if (targets.length > 0) {
+          setMessage("正在同步关联台最新数据...");
+          await waitForOperationFreshness(
+            targets,
+            { timeoutMs: WORKBENCH_OPERATION_FRESH_TIMEOUT_MS },
+          );
+        }
+        if (actionResult && applyWorkbenchOperationProjection(actionResult)) {
+          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+        } else {
+          await waitForWorkbenchFreshAfterOperation();
+        }
+        return actionResultMessage(result);
       },
       errorMessage: actionErrorMessage,
     });
     if (outcome.status === "success") {
       setLastActionMessage(outcome.value);
     }
-  }, [handleCloseDetail, runOperation, waitForWorkbenchFreshAfterOperation]);
+  }, [applyWorkbenchOperationProjection, handleCloseDetail, refreshWorkbenchDataInBackground, runOperation, waitForWorkbenchFreshAfterOperation]);
 
   const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
     openActionResultDialog(actionErrorMessage(error), "操作失败");
@@ -1470,7 +1545,7 @@ export default function ReconciliationWorkbenchPage() {
             rowId: row.id,
             comment: `由关联台忽略发票：${row.id}`,
           });
-          return result.message;
+          return result;
         },
       });
       return;
@@ -1486,7 +1561,7 @@ export default function ReconciliationWorkbenchPage() {
             rowIds,
             note: "由关联台确认现金往来过账",
           });
-          return result.message || "已确认为过账。";
+          return result;
         },
       });
       return;
@@ -1510,7 +1585,7 @@ export default function ReconciliationWorkbenchPage() {
             rowIds,
             note: "由关联台取消现金往来特殊处理",
           });
-          return result.message || "已取消现金往来特殊处理。";
+          return result;
         },
       });
       return;
@@ -1593,7 +1668,7 @@ export default function ReconciliationWorkbenchPage() {
           expenseContent,
           note,
         });
-        return result.message || "已确认为买票情况。";
+        return result;
       },
     });
   }, [cashTicketPurchaseDialog, ensureCanWriteWorkbench, runBlockingAction]);
@@ -1655,7 +1730,7 @@ export default function ReconciliationWorkbenchPage() {
             affectedMonths: actionAffectedMonths(result),
             source: "workbench_confirm_link",
           });
-          return result.message;
+          return result;
         },
       });
       return;
@@ -1678,7 +1753,7 @@ export default function ReconciliationWorkbenchPage() {
           affectedMonths: actionAffectedMonths(result),
           source: preview.operation === "split_candidate" ? "workbench_split_candidate" : "workbench_withdraw_link",
         });
-        return result.message;
+        return result;
       },
     });
   };
@@ -1803,7 +1878,7 @@ export default function ReconciliationWorkbenchPage() {
           month: WORKBENCH_VIEW_MONTH,
           rowId: row.id,
         });
-        return result.message;
+        return result;
       },
     });
   };
@@ -1829,7 +1904,7 @@ export default function ReconciliationWorkbenchPage() {
           rowIds: rows.map((row) => row.id),
           comment: "由已处理异常弹窗撤回异常处理",
         });
-        return result.message;
+        return result;
       },
     });
   };
@@ -2300,6 +2375,46 @@ function mergeWorkbenchGroupsByIdReplacingExisting(
   const byId = new Map(existingGroups.map((group) => [group.id, group]));
   incomingGroups.forEach((group) => byId.set(group.id, group));
   return Array.from(byId.values());
+}
+
+function applyOperationProjectionToGroups(
+  existingGroups: WorkbenchCandidateGroup[],
+  incomingGroups: WorkbenchCandidateGroup[],
+  affectedRowIds: Set<string>,
+) {
+  const filteredGroups = existingGroups.flatMap((group) => {
+    const nextGroup: WorkbenchCandidateGroup = {
+      ...group,
+      rows: {
+        oa: group.rows.oa.filter((row) => !affectedRowIds.has(row.id)),
+        bank: group.rows.bank.filter((row) => !affectedRowIds.has(row.id)),
+        invoice: group.rows.invoice.filter((row) => !affectedRowIds.has(row.id)),
+      },
+    };
+    return flattenGroups([nextGroup]).length > 0 ? [nextGroup] : [];
+  });
+  return mergeWorkbenchGroupsByIdReplacingExisting(filteredGroups, incomingGroups);
+}
+
+function operationProjectionAffectedRowIds(result: WorkbenchActionResult) {
+  return new Set(
+    [
+      ...cleanWorkbenchScopeList(result.affected_row_ids),
+      ...(result.operationProjection
+        ? flattenGroups([
+          ...result.operationProjection.after.pairedGroups,
+          ...result.operationProjection.after.openGroups,
+        ]).map((row) => row.id)
+        : []),
+    ].filter(Boolean),
+  );
+}
+
+function hasOperationProjection(projection: WorkbenchOperationProjection | undefined) {
+  return Boolean(projection && (
+    projection.after.pairedGroups.length > 0
+    || projection.after.openGroups.length > 0
+  ));
 }
 
 const LEGACY_HANDLED_EXCEPTION_CODES = new Set([

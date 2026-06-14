@@ -507,9 +507,57 @@ type ApiWorkbenchActionResult = {
   updated_rows?: Array<{ id: string }>;
   affectedMonths?: unknown[];
   affected_months?: unknown[];
+  affectedScopeKeys?: unknown[];
+  affected_scope_keys?: unknown[];
   changedScopes?: unknown[];
   changed_scopes?: unknown[];
+  freshnessTargets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  freshness_targets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  operationProjection?: ApiWorkbenchOperationProjection;
+  operation_projection?: ApiWorkbenchOperationProjection;
   message: string;
+};
+
+type ApiWorkbenchOperationProjection = {
+  after?: {
+    pairedGroups?: ApiWorkbenchGroup[];
+    paired_groups?: ApiWorkbenchGroup[];
+    openGroups?: ApiWorkbenchGroup[];
+    open_groups?: ApiWorkbenchGroup[];
+  };
+};
+
+export type WorkbenchActionFreshnessTarget = {
+  readModelKey: string;
+  scopeKey: string;
+  scopeType?: string;
+};
+
+export type WorkbenchOperationProjection = {
+  after: {
+    pairedGroups: WorkbenchCandidateGroup[];
+    openGroups: WorkbenchCandidateGroup[];
+  };
+};
+
+export type WorkbenchActionResult = Omit<ApiWorkbenchActionResult, "operationProjection" | "freshnessTargets" | "affectedScopeKeys"> & {
+  affectedScopeKeys: string[];
+  freshnessTargets: WorkbenchActionFreshnessTarget[];
+  operationProjection?: WorkbenchOperationProjection;
 };
 
 type ApiWorkbenchExceptionScenario = {
@@ -2963,6 +3011,89 @@ export async function syncWorkbenchSettingsProjects(actorId: string): Promise<Wo
   return mapWorkbenchSettings(payload.settings);
 }
 
+function mapWorkbenchActionResult(payload: ApiWorkbenchActionResult): WorkbenchActionResult {
+  const affectedScopeKeys = cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
+    .filter((scopeKey) => scopeKey !== "all");
+  const freshnessTargets = cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets);
+  const operationProjection = mapWorkbenchOperationProjection(payload.operationProjection ?? payload.operation_projection);
+  const {
+    operationProjection: _rawOperationProjection,
+    freshnessTargets: _rawFreshnessTargets,
+    affectedScopeKeys: _rawAffectedScopeKeys,
+    ...rest
+  } = payload;
+  return {
+    ...rest,
+    affectedScopeKeys,
+    freshnessTargets,
+    ...(operationProjection ? { operationProjection } : {}),
+  };
+}
+
+function cleanFreshnessTargets(value: unknown): WorkbenchActionFreshnessTarget[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: WorkbenchActionFreshnessTarget[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const readModelKey = String(record.readModelKey ?? record.read_model_key ?? "").trim();
+    const scopeKey = String(record.scopeKey ?? record.scope_key ?? "").trim();
+    const scopeType = String(record.scopeType ?? record.scope_type ?? "").trim();
+    if (!readModelKey || !scopeKey || scopeKey === "all") {
+      continue;
+    }
+    const target = {
+      readModelKey,
+      scopeKey,
+      ...(scopeType ? { scopeType } : {}),
+    };
+    if (!normalized.some((candidate) =>
+      candidate.readModelKey === target.readModelKey
+      && candidate.scopeKey === target.scopeKey
+      && candidate.scopeType === target.scopeType
+    )) {
+      normalized.push(target);
+    }
+  }
+  return normalized;
+}
+
+function mapWorkbenchOperationProjection(value: unknown): WorkbenchOperationProjection | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const after = (value as ApiWorkbenchOperationProjection).after;
+  if (!after || typeof after !== "object") {
+    return undefined;
+  }
+  const pairedGroups = Array.isArray(after.pairedGroups)
+    ? after.pairedGroups
+    : Array.isArray(after.paired_groups)
+      ? after.paired_groups
+      : [];
+  const openGroups = Array.isArray(after.openGroups)
+    ? after.openGroups
+    : Array.isArray(after.open_groups)
+      ? after.open_groups
+      : [];
+  return {
+    after: {
+      pairedGroups: pairedGroups.map((group) => mapGroup(group, "paired")),
+      openGroups: openGroups.map((group) => mapGroup(group, "open")),
+    },
+  };
+}
+
+function cleanScopeList(value: unknown) {
+  return Array.isArray(value)
+    ? Array.from(new Set(value.map((scope) => String(scope).trim()).filter(Boolean)))
+    : [];
+}
+
 export async function createWorkbenchSettingsProject(
   payload: WorkbenchSettingsProjectCreatePayload,
 ): Promise<WorkbenchSettings> {
@@ -3011,7 +3142,7 @@ export async function fetchWorkbenchRowDetail(
   return mapRow(payload.row);
 }
 
-export async function confirmWorkbenchLink(payload: ConfirmLinkPayload) {
+export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise<WorkbenchActionResult> {
   const requestBody: {
     month: string;
     row_ids: string[];
@@ -3025,11 +3156,12 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload) {
   if (payload.note?.trim()) {
     requestBody.note = payload.note.trim();
   }
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-link", {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
   });
+  return mapWorkbenchActionResult(result);
 }
 
 export async function previewWorkbenchConfirmLink(payload: ConfirmLinkPayload): Promise<WorkbenchRelationPreview> {
@@ -3092,7 +3224,7 @@ export async function applyWorkbenchException(
   return mapWorkbenchExceptionApplyResult(result);
 }
 
-export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload) {
+export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promise<WorkbenchActionResult> {
   const requestBody: {
     month: string;
     row_ids: string[];
@@ -3116,15 +3248,16 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload) {
   if (payload.expectedVersions && Object.keys(payload.expectedVersions).length > 0) {
     requestBody.expected_versions = payload.expectedVersions;
   }
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/withdraw-link", {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/withdraw-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function markWorkbenchException(payload: MarkExceptionPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/mark-exception", {
+export async function markWorkbenchException(payload: MarkExceptionPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/mark-exception", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3134,10 +3267,11 @@ export async function markWorkbenchException(payload: MarkExceptionPayload) {
       comment: payload.comment,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function cancelWorkbenchLink(payload: CancelLinkPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-link", {
+export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3146,10 +3280,11 @@ export async function cancelWorkbenchLink(payload: CancelLinkPayload) {
       comment: payload.comment,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function updateWorkbenchBankException(payload: UpdateBankExceptionPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/update-bank-exception", {
+export async function updateWorkbenchBankException(payload: UpdateBankExceptionPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/update-bank-exception", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3160,10 +3295,11 @@ export async function updateWorkbenchBankException(payload: UpdateBankExceptionP
       comment: payload.comment,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function submitOaBankException(payload: OaBankExceptionPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/oa-bank-exception", {
+export async function submitOaBankException(payload: OaBankExceptionPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/oa-bank-exception", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3174,10 +3310,11 @@ export async function submitOaBankException(payload: OaBankExceptionPayload) {
       comment: payload.comment,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmPersonalAdvanceRepaymentPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-personal-advance-repayment", {
+export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmPersonalAdvanceRepaymentPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-personal-advance-repayment", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3186,10 +3323,11 @@ export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmP
       note: payload.note,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function ignoreWorkbenchRow(payload: IgnoreRowPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/ignore-row", {
+export async function ignoreWorkbenchRow(payload: IgnoreRowPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/ignore-row", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3198,10 +3336,11 @@ export async function ignoreWorkbenchRow(payload: IgnoreRowPayload) {
       comment: payload.comment,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function unignoreWorkbenchRow(payload: UnignoreRowPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/unignore-row", {
+export async function unignoreWorkbenchRow(payload: UnignoreRowPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/unignore-row", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3209,10 +3348,11 @@ export async function unignoreWorkbenchRow(payload: UnignoreRowPayload) {
       row_id: payload.rowId,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function cancelWorkbenchException(payload: CancelExceptionPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-exception", {
+export async function cancelWorkbenchException(payload: CancelExceptionPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-exception", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3221,10 +3361,11 @@ export async function cancelWorkbenchException(payload: CancelExceptionPayload) 
       comment: payload.comment,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function confirmWorkbenchCashPassThrough(payload: ConfirmCashPassThroughPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-cash-pass-through", {
+export async function confirmWorkbenchCashPassThrough(payload: ConfirmCashPassThroughPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-cash-pass-through", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3234,10 +3375,11 @@ export async function confirmWorkbenchCashPassThrough(payload: ConfirmCashPassTh
       note: payload.note,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function confirmWorkbenchCashTicketPurchase(payload: ConfirmCashTicketPurchasePayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-cash-ticket-purchase", {
+export async function confirmWorkbenchCashTicketPurchase(payload: ConfirmCashTicketPurchasePayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/confirm-cash-ticket-purchase", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3252,10 +3394,11 @@ export async function confirmWorkbenchCashTicketPurchase(payload: ConfirmCashTic
       note: payload.note,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }
 
-export async function cancelWorkbenchCashSpecial(payload: CancelCashSpecialPayload) {
-  return requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-cash-special", {
+export async function cancelWorkbenchCashSpecial(payload: CancelCashSpecialPayload): Promise<WorkbenchActionResult> {
+  const result = await requestJson<ApiWorkbenchActionResult>("/api/workbench/actions/cancel-cash-special", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -3264,4 +3407,5 @@ export async function cancelWorkbenchCashSpecial(payload: CancelCashSpecialPaylo
       note: payload.note,
     }),
   });
+  return mapWorkbenchActionResult(result);
 }

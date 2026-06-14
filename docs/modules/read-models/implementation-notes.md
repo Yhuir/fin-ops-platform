@@ -93,6 +93,14 @@
 - 未测风险：`/api/app-health` 认证态 UI 未用浏览器登录态直接截图验证；`/health/ready.read_model_refresh_duration_ms.p95` 仍是历史滚动窗口约 17.7s，不能证明 SLO 已达成。
 - 后续事项：发布过程定位到 worker 被 systemd 重启后会留下 `processing` outbox，依赖 300s lock timeout 回收，必须优先做 worker graceful shutdown、lease release/reclaim 或 deploy restart 顺序修复。
 
+## 2026-06-15 - Workbench all aggregate 自等待修复与操作级 projection
+
+- 目标：修复 `workbench:all` aggregate-only event 已经发布 active generation 后，又因 `job.read_model_dirty_scopes` 中自身 pending 被 `get_workbench_refresh_status("all")` 判为 `refreshing`，导致 `workbench_all_scope_aggregate_not_published` 重试直至 dead-letter 的循环；同时缩短确认/撤回 overlay 的用户可见阻塞时间。
+- 影响范围：`WorkbenchSqlProjectionBuilder.refresh_workbench_all_scope_from_active_shards()`、`WorkbenchReadModelRefreshService` aggregate publish gate、`WorkbenchWriteFacade` confirm/withdraw response contract、`ReconciliationWorkbenchPage` operation overlay。
+- 关键决策：all aggregate 发布结果新增 `aggregate_published=true` 明确表达 active generation 已成功写出；handler 用该信号完成 dirty scope，再由完成动作让 readiness 收敛。确认/撤回写 API 返回受影响月份的 `workbench_relation`/`workbench` freshness targets 与后端 operation projection，前端等目标 shard fresh 后应用 projection，`workbench:all` 后台追赶但不阻塞用户操作。
+- 运维闭环：生产中已由旧版本产生的 `workbench/all` pending dirty scope 与 `workbench/all` dead-letter outbox 不能直接 SQL 改 green；发布修复后先让 worker 重新处理当前 pending/aggregate，已被后续 done/fresh 覆盖的 dead-letter 使用 `runtime_queue_ops resolve-covered-dead-letters --dry-run/--execute` 归档，并复查 `/health/ready`、dirty/outbox、active generation consistency。
+- 验证命令：`python3 -m pytest tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_completes_all_when_aggregate_publish_is_confirmed_despite_self_dirty_status tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_confirm_link_response_returns_operation_freshness_targets_for_affected_scopes tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes -q`；`npm test -- --run src/test/WorkbenchSelection.test.tsx`；`npm run build`。
+
 ## 2026-06-12 - 生产 legacy scope repair apply 与收敛验证
 
 - 目标：发布包含 current-effective App Status、repair manifest 和 production dry-run SQL 修复的 release，并执行受控生产 repair apply，清理旧 `cost_statistics` legacy scope 对 App Status 的污染。
