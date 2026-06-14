@@ -187,7 +187,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
     def test_workbench_relation_withdraw_profile_requires_cross_page_refresh_scopes(self) -> None:
         rows = [
-            _event(scope_type="workbench", reason="withdraw_link", action_name="withdraw_link"),
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
             _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
             _event(scope_type="bank_detail", reason="workbench_relation_changed"),
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
@@ -209,7 +209,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
     def test_workbench_relation_confirm_profile_requires_canonical_relation_and_downstream_scopes(self) -> None:
         rows = [
-            _event(scope_type="workbench", reason="confirm_link", action_name="confirm_link"),
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
             _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
             _event(scope_type="bank_detail", reason="workbench_relation_changed"),
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
@@ -231,7 +231,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
     def test_workbench_relation_bank_invoice_profile_excludes_cost_statistics(self) -> None:
         rows = [
-            _event(scope_type="workbench", reason="confirm_link", action_name="confirm_link"),
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
             _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
             _event(scope_type="bank_detail", reason="workbench_relation_changed"),
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
@@ -256,7 +256,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
     def test_workbench_relation_bank_invoice_withdraw_profile_excludes_cost_statistics(self) -> None:
         rows = [
-            _event(scope_type="workbench", reason="withdraw_link", action_name="withdraw_link"),
+            _event(scope_type="workbench", reason="workbench_relation_changed"),
             _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
             _event(scope_type="bank_detail", reason="workbench_relation_changed"),
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
@@ -328,7 +328,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         since = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
         connection = FakeConnection(
             [
-                _event(scope_type="workbench", reason="confirm_link", action_name="confirm_link"),
+                _event(scope_type="workbench", reason="workbench_relation_changed"),
                 _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
                 _event(scope_type="bank_detail", reason="workbench_relation_changed"),
                 _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),

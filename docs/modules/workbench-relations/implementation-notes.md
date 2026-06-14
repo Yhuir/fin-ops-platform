@@ -1,5 +1,21 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-14 - Relation mutation fan-out drives Workbench active generation
+
+目标：修复 canonical relation 已写入、`workbench_relation` 已 linked，但关联台仍读取旧 active generation 导致已确认银行流水和发票不在同一行的问题。
+
+结论：
+
+- PostgreSQL relation repository 在同一 relation save 事务中，除 `workbench_relation` 和下游 read model 外，必须同时 enqueue `workbench` read model refresh。
+- `workbench` refresh scope 使用 relation affected month scopes；当 affected month 已知时额外 enqueue aggregate-only `all`，覆盖跨月关系下 all-scope active generation 聚合不刷新的生产问题，同时不恢复普通 `all` refresh 的 full shard fan-out。只有完全无法推导 affected month 时才保留普通 `all` fallback，由现有 worker 扩展 month shards。
+- `workbench_relation_confirm` / `workbench_relation_withdraw` SLO profile 的 `workbench` 证明事件改为 `workbench_relation_changed`，不再只依赖 Workbench 页面外层 `confirm_link` / `withdraw_link` UoW 事件。
+- 其他页面仍读取自己的 read model 或 `WorkbenchRelationReadFacade`；本次没有让其他页面读取 Workbench active generation。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_repository.py tests/test_write_operation_slo_audit.py -q`
+- 生产只读 dry-run（2026-06-14）：`CASE-AUTO-0011` 于 `2026-06-14T17:15:53+08:00` 写入 active relation，`workbench_relation_rows` 于 `17:15:55` 已将 `inv_imported_1643` / `txn_imported_1284` 标记为 `linked`；但 active Workbench generation 仍停在 `17:14:50-17:14:53`，且 relation 写入后没有 `scope_type='workbench'` dirty/outbox。当前 `all` active generation 仍把 invoice 放在 `scope:2026-01:temp:0076`、bank 放在 `scope:2026-02:temp:0070` 两个 open group。发布后需要通过现有 read model refresh/enqueue 机制回填 affected month scopes 和 aggregate-only `all`，不得手工改 `read_model.*` 表。
+
 ## 2026-06-14 - Withdraw restorable relation 策略收敛
 
 目标：把 Workbench relation mode registry、display ownership 和 withdraw 可恢复判断收敛到统一策略，防止未标记 history/自动候选/同 row-set snapshot 在撤回后继续把行显示到同一组。
@@ -61,7 +77,7 @@
 
 结论：
 
-- `workbench_relation_confirm` 写操作 SLO profile 覆盖 `workbench:confirm_link`、`workbench_relation:workbench_pair_relation_changed` 以及银行明细、invoice lifecycle、待找发票、进项使用、销项收款、OA 待付款、成本、搜索、税金和免 OA read model 的下游刷新。
+- `workbench_relation_confirm` 写操作 SLO profile 覆盖 `workbench:workbench_relation_changed`、`workbench_relation:workbench_pair_relation_changed` 以及银行明细、invoice lifecycle、待找发票、进项使用、销项收款、OA 待付款、成本、搜索、税金和免 OA read model 的下游刷新。
 - PostgreSQL relation repository 在保存 active relation 后会把 `invoice_lifecycle` 纳入 downstream fan-out；该路径仍以 PostgreSQL durable queue 为事实源。
 - 当 closure gate 提供已批准的 write scenario 时，`write_operation_audit` 只审计该 scenario 的 operation profile，避免要求 24 小时内所有写操作类型都被真实执行。
 
@@ -1436,7 +1452,7 @@ python3 -m py_compile backend/src/fin_ops_platform/app/server.py backend/src/fin
 - `POST /api/workbench/actions/withdraw-link` 与 confirm/cancel 对齐，先通过 `_workbench_write_auth_context(headers)` 校验写权限并解析 actor/tenant，再传给 `WorkbenchWriteFacade.withdraw_link(...)`。
 - `WorkbenchWriteFacade.withdraw_link(...)` 新增可选 `actor_id` / `tenant_id`，UoW replay/run command 和 relation command service withdraw 都使用同一登录 actor。
 - `RuntimeQueueRepository.defer_event(...)` 增加同 dedupe pending 覆盖处理：当前 processing 事件被覆盖时标记 done 并写 `runtime_defer_superseded`，不再尝试把它改回 pending 触发唯一索引冲突。
-- `write_operation_slo_audit` 的 `workbench_relation_withdraw` profile 更新为 canonical UoW reason：workbench `withdraw_link`、relation `workbench_pair_relation_changed`、下游 `workbench_relation_changed`；并暴露 `--since`，用于生产发布后排除修复前旧失败样本。
+- `write_operation_slo_audit` 的 `workbench_relation_withdraw` profile 当前以 relation mutation reason 为准：workbench `workbench_relation_changed`、relation `workbench_pair_relation_changed`、下游 `workbench_relation_changed`；并暴露 `--since`，用于生产发布后排除修复前旧失败样本。
 
 验证：
 

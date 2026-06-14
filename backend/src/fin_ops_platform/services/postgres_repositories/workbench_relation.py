@@ -156,6 +156,32 @@ class PostgresWorkbenchRelationRepository:
                         reason="workbench_relation_changed",
                         priority="high",
                     )
+            workbench_scope_keys = _workbench_relation_workbench_refresh_scope_keys(dirty_scope_keys)
+            workbench_month_scope_keys = sorted(scope_key for scope_key in workbench_scope_keys if scope_key != "all")
+            for scope_key in workbench_month_scope_keys:
+                _enqueue_read_model_refresh_in_transaction(
+                    connection,
+                    scope_type="workbench",
+                    scope_key=scope_key,
+                    reason="workbench_relation_changed",
+                    priority="high",
+                )
+            if "all" in workbench_scope_keys:
+                if workbench_month_scope_keys:
+                    _enqueue_workbench_all_aggregate_refresh_in_transaction(
+                        connection,
+                        reason="workbench_relation_changed",
+                        priority="high",
+                        parent_scope_keys=workbench_month_scope_keys,
+                    )
+                else:
+                    _enqueue_read_model_refresh_in_transaction(
+                        connection,
+                        scope_type="workbench",
+                        scope_key="all",
+                        reason="workbench_relation_changed",
+                        priority="high",
+                    )
             if dirty_scope_keys and pending_invoice_scope_keys:
                 for pending_scope_key in sorted(pending_invoice_scope_keys):
                     _enqueue_read_model_refresh_in_transaction(
@@ -359,6 +385,19 @@ def _workbench_relation_dirty_scope_keys_from_domain_scope_keys(domain_scope_key
     return scope_keys or {"all"}
 
 
+def _workbench_relation_workbench_refresh_scope_keys(scope_keys: set[str]) -> set[str]:
+    normalized_scope_keys = {
+        str(scope_key).strip()
+        for scope_key in set(scope_keys or set())
+        if str(scope_key).strip()
+    }
+    if not normalized_scope_keys:
+        return {"all"}
+    if normalized_scope_keys == {"all"}:
+        return {"all"}
+    return {*normalized_scope_keys, "all"}
+
+
 def _domain_scope_keys(domain_scope_keys: dict[str, set[str]], key: str, dirty_scope_keys: set[str]) -> set[str]:
     scope_keys = set(domain_scope_keys.get(key, set()))
     if scope_keys:
@@ -541,11 +580,14 @@ def _enqueue_single_read_model_refresh_in_transaction(
     reason: str,
     tenant_id: str = "default",
     priority: str = "normal",
+    payload_extra: dict[str, Any] | None = None,
+    dedupe_kind: str | None = None,
 ) -> None:
     payload = {
         "scope_type": scope_type,
         "scope_key": scope_key,
         "reason": reason,
+        **(payload_extra or {}),
     }
     dirty_row = connection.fetch_one(
         """
@@ -595,6 +637,10 @@ def _enqueue_single_read_model_refresh_in_transaction(
     source_version = int_value((dirty_row or {}).get("source_version"), 0)
     event_type = f"{scope_type}.read_model.refresh"
     event_payload = {**payload, "source_version": source_version}
+    dedupe_key = f"{event_type}:{scope_type}:{scope_key}"
+    normalized_dedupe_kind = text(dedupe_kind)
+    if normalized_dedupe_kind:
+        dedupe_key = f"{event_type}:{scope_type}:{scope_key}:{normalized_dedupe_kind}:{source_version or 'latest'}"
     connection.execute(
         """
         insert into job.outbox_events (
@@ -625,10 +671,33 @@ def _enqueue_single_read_model_refresh_in_transaction(
             scope_key,
             scope_type,
             scope_key,
-            f"{event_type}:{scope_type}:{scope_key}",
+            dedupe_key,
             source_version,
             priority,
             jsonb(event_payload),
             jsonb(event_payload),
         ),
+    )
+
+
+def _enqueue_workbench_all_aggregate_refresh_in_transaction(
+    connection: Any,
+    *,
+    reason: str,
+    tenant_id: str = "default",
+    priority: str = "normal",
+    parent_scope_keys: list[str] | None = None,
+) -> None:
+    _enqueue_single_read_model_refresh_in_transaction(
+        connection,
+        scope_type="workbench",
+        scope_key="all",
+        reason=reason,
+        tenant_id=tenant_id,
+        priority=priority,
+        payload_extra={
+            "aggregate_only": True,
+            "parent_scope_keys": [scope_key for scope_key in list(parent_scope_keys or []) if scope_key],
+        },
+        dedupe_kind="aggregate",
     )

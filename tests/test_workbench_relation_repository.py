@@ -74,6 +74,11 @@ def _snapshot(
     }
 
 
+def _json_payload(value: object) -> dict[str, object]:
+    payload = getattr(value, "obj", value)
+    return payload if isinstance(payload, dict) else {}
+
+
 def test_relation_change_enqueues_relation_read_model_before_relevant_downstream_by_priority() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
@@ -94,6 +99,7 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
     }
 
     assert dirty_by_scope_type["workbench_relation"][-1] == "high"
+    assert dirty_by_scope_type["workbench"][-1] == "high"
     assert dirty_by_scope_type["bank_detail"][-1] == "high"
     assert dirty_by_scope_type["invoice_lifecycle"][-1] == "high"
     assert dirty_by_scope_type["input_invoice_usage"][-1] == "high"
@@ -104,8 +110,18 @@ def test_relation_change_enqueues_relation_read_model_before_relevant_downstream
     assert "oa_pending_payment" not in dirty_by_scope_type
     assert "no_oa_bank_batch" not in dirty_by_scope_type
     assert outbox_by_scope_type["workbench_relation"][-3] == "high"
+    assert outbox_by_scope_type["workbench"][-3] == "high"
     assert outbox_by_scope_type["bank_detail"][-3] == "high"
     assert outbox_by_scope_type["invoice_lifecycle"][-3] == "high"
+    workbench_all_outbox_payloads = [
+        _json_payload(params[8])
+        for sql, params in connection.execute_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+        and str(params[3]) == "workbench"
+        and str(params[4]) == "all"
+    ]
+    assert workbench_all_outbox_payloads
+    assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
 
 
 def test_no_oa_relation_change_keeps_no_oa_read_model_in_downstream_scope() -> None:
@@ -220,6 +236,7 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
         scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-01", "2026-02"}
+    assert scope_keys_by_type["workbench"] == {"2026-01", "2026-02", "all"}
     assert scope_keys_by_type["bank_detail"] == {"2026-02"}
     assert scope_keys_by_type["invoice_lifecycle"] == {"2026-01"}
     assert scope_keys_by_type["input_invoice_usage"] == {"2026-01"}
@@ -232,6 +249,52 @@ def test_relation_downstream_refresh_routes_scope_keys_by_row_domain() -> None:
         "expense:bank_statement_as_invoice:2026-02",
         "expense:no_invoice_required:2026-02",
     }
+    workbench_all_outbox_payloads = [
+        _json_payload(params[8])
+        for sql, params in connection.execute_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+        and str(params[3]) == "workbench"
+        and str(params[4]) == "all"
+    ]
+    assert workbench_all_outbox_payloads[-1]["aggregate_only"] is True
+    assert workbench_all_outbox_payloads[-1]["parent_scope_keys"] == ["2026-01", "2026-02"]
+
+
+def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -> None:
+    connection = RecordingConnection(
+        invoice_types=["input"],
+        bank_directions=["outflow"],
+        bank_scope_keys=[],
+        invoice_scope_keys=[],
+        oa_scope_keys=[],
+        workbench_scope_keys=[],
+    )
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        _snapshot(month_scope=""),
+        changed_case_ids={"CASE-1"},
+    )
+
+    dirty_params = [
+        params
+        for sql, params in connection.fetch_one_calls
+        if "insert into job.read_model_dirty_scopes" in " ".join(sql.lower().split())
+    ]
+    scope_keys_by_type: dict[str, set[str]] = {}
+    for params in dirty_params:
+        scope_keys_by_type.setdefault(str(params[1]), set()).add(str(params[2]))
+
+    assert scope_keys_by_type["workbench"] == {"all"}
+    workbench_all_outbox_payloads = [
+        _json_payload(params[8])
+        for sql, params in connection.execute_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+        and str(params[3]) == "workbench"
+        and str(params[4]) == "all"
+    ]
+    assert workbench_all_outbox_payloads
+    assert "aggregate_only" not in workbench_all_outbox_payloads[-1]
 
 
 def test_relation_downstream_refresh_routes_cost_statistics_by_bank_month_for_cost_bearing_relation() -> None:
