@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-15 - 预约付款日期消歧与 Workbench active generation 刷新闭环
+
+- 目标：修复 6868.55 多个月同金额同对方 OA-bank 不能自动配对，以及 196 等自动候选规则变更后旧 active generation 继续发布旧分组的问题。
+- 影响范围：`WorkbenchFreeMatchingEngine`、legacy `WorkbenchMatchingRules`、`PostgresReadModelRepository` reconciliation decision 写入/过期、Workbench SQL projection/source version provider、本模块文档。
+- 关键决策：不把 OA、银行流水、发票合并成一个源事实池；保留三类源事实和 `app.workbench_pair_relations` canonical relation 边界，只在后端匹配 service 中用统一候选/决策逻辑比较三栏事实。明确“预约 X 月 X 日转款/付款/支付/打款”是 OA-bank 强消歧证据，但必须与银行真实交易日期一致，且仍要求金额、方向和业务文本证据；无预约日期的重复同金额候选继续保持 conflict/open。
+- 真实原因：6868.55 原先在五个月窗口内形成多 OA、多银行同金额同对方候选，互相不唯一，所以被安全地发布为 open；196 类问题叠加了 matching rule version 未进入 SQL active generation `source_versions`，以及 reconciliation decision 写入/过期只刷新 relation、不刷新主 `workbench` month generation，导致旧 generation 可以继续被 API 当 fresh。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 和本实施记录，并同步 read-models/workbench-relations 边界说明。
+- 测试覆盖：新增/更新 free engine、legacy matching rules、decision repository 和 SQL runtime freshness 测试，覆盖预约日期消歧、无日期保持冲突、decision upsert/stale expire/missing expire 双刷新、matching rule version freshness。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_free_matching_engine tests.test_workbench_matching_rules tests.test_workbench_reconciliation_decision_store tests.test_workbench_sql_runtime -v`。
+- 未测风险：未执行生产库写入或真实 active generation rebuild；发布后需要按运维 runbook 对受影响月份重建/刷新 Workbench active generation，并只读抽样验证 196 与 6868.55 分组。
+
 ## 2026-06-15 - 确认/撤回操作级 2 秒 SLO 与后台 cross-page SLO 拆分
 
 - 目标：生产写操作验证显示 withdraw HTTP 成功且最终 fresh，但 `workbench` month shard 和下游 read model 仍有 2.7-11s 长尾，导致全屏 overlay 暴露给用户。将“当前关联台可见状态 2 秒内可用”的阻塞目标收敛为 canonical relation/operation projection + `workbench_relation` fresh，把 Workbench generation 和跨页面 fan-out 改为后台追赶与单独 SLO 监控。

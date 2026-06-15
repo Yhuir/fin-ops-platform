@@ -54,6 +54,8 @@
 
 distribution payload 必须保留关系展示语义：`relation_status='linked'` 表示已确认或已 paired 的关系上下文；`relation_status='candidate'` 表示关联台未配对候选，只能用于页面展示候选证据，不得作为 confirmed fact、支付完成判断或 row 占用事实。下游 mapper 不得把 candidate 硬编码成 `status='active'`。
 
+`read_model.workbench_reconciliation_decisions` 的写入、规则版本过期和 missing 清理会改变 relation distribution，同时也会改变 Workbench 主 active generation 的 open/paired 分组。因此这些事务内 writer 必须同时入队 `workbench_relation` 和主 `workbench` month scope refresh；只刷新 relation 会让下游 relation fresh 但关联台继续发布旧 generation。
+
 `WorkbenchRelationReadFacade` 是下游页面读取关系上下文的唯一后端边界。待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细关系标签、成本、税金、搜索和批量账务的读路径必须通过它或它封装的 request-scoped context 读取 `workbench_relation` distribution。
 
 `WorkbenchPairRelationService` 当前同时承担领域规则对象和部分 runtime mutable snapshot 的角色。它已经覆盖 row 去重、row type 对齐、active row overlap、active case reuse、cancel、withdraw 和 history 生成。后续应保留为纯领域规则对象，不能继续被页面 service 当作事实源或读接口。

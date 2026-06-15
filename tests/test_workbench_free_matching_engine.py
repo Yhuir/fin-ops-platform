@@ -277,6 +277,147 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertFalse(decision.invoice_amount_closed)
         self.assertEqual([warning.code for warning in decision.warnings], [WARNING_INVOICE_AMOUNT_MISMATCH])
 
+    def test_scheduled_payment_date_resolves_repeated_same_amount_oa_bank_candidates(self) -> None:
+        oa_rows = [
+            {
+                "id": "oa-pay-jan",
+                "type": "oa",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "month": "2026-01",
+                "counterparty_name": "刘树刚",
+                "reason": "代购公车款-电车（预约1月3日转款）",
+            },
+            {
+                "id": "oa-pay-feb",
+                "type": "oa",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "month": "2026-02",
+                "counterparty_name": "刘树刚",
+                "reason": "代购公车款-电车（预约2月3日转款）",
+            },
+            {
+                "id": "oa-pay-mar",
+                "type": "oa",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "month": "2026-03",
+                "counterparty_name": "刘树刚",
+                "reason": "代购公车款-电车（预约3月3日转款）",
+            },
+        ]
+        bank_rows = [
+            {
+                "id": "txn-jan",
+                "type": "bank",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "trade_month": "2026-01",
+                "trade_time": "2026-01-03 09:00:13",
+                "counterparty_name": "刘树刚",
+                "summary": "电子转账",
+                "remark": "代购公车款",
+            },
+            {
+                "id": "txn-feb",
+                "type": "bank",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "trade_month": "2026-02",
+                "trade_time": "2026-02-03 09:00:14",
+                "counterparty_name": "刘树刚",
+                "summary": "电子转账",
+                "remark": "代购公车款",
+            },
+            {
+                "id": "txn-mar",
+                "type": "bank",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "trade_month": "2026-03",
+                "trade_time": "2026-03-03 09:00:15",
+                "counterparty_name": "刘树刚",
+                "summary": "电子转账",
+                "remark": "代购公车款",
+            },
+        ]
+
+        expected_pairs = {
+            "2026-01": ("oa-pay-jan", "txn-jan"),
+            "2026-02": ("oa-pay-feb", "txn-feb"),
+            "2026-03": ("oa-pay-mar", "txn-mar"),
+        }
+        for scope_month, expected_row_ids in expected_pairs.items():
+            with self.subTest(scope_month=scope_month):
+                decisions = self.engine.generate_decisions(scope_month, oa_rows, bank_rows, [])
+
+                self.assertEqual(len(decisions), 1)
+                decision = decisions[0]
+                self.assertEqual(decision.display_state, DISPLAY_STATE_PAIRED)
+                self.assertEqual(decision.decision_status, DECISION_STATUS_PAIRED)
+                self.assertEqual(decision.rule_code, "oa_bank_exact_amount")
+                self.assertEqual(decision.match_shape, "oa_bank")
+                self.assertEqual(decision.row_ids, expected_row_ids)
+                self.assertTrue(decision.payment_amount_closed)
+                self.assertIsNone(decision.invoice_amount_closed)
+                self.assertEqual(
+                    decision.evidence["scheduled_payment_date_match"]["scheduled_payment_date"],
+                    f"{scope_month}-03",
+                )
+
+    def test_repeated_same_amount_without_scheduled_payment_date_remains_conflict(self) -> None:
+        oa_rows = [
+            {
+                "id": "oa-pay-jan",
+                "type": "oa",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "month": "2026-01",
+                "counterparty_name": "刘树刚",
+                "reason": "代购公车款-电车",
+            },
+            {
+                "id": "oa-pay-feb",
+                "type": "oa",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "month": "2026-02",
+                "counterparty_name": "刘树刚",
+                "reason": "代购公车款-电车",
+            },
+        ]
+        bank_rows = [
+            {
+                "id": "txn-jan",
+                "type": "bank",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "trade_month": "2026-01",
+                "trade_time": "2026-01-03 09:00:13",
+                "counterparty_name": "刘树刚",
+                "summary": "电子转账",
+                "remark": "代购公车款",
+            },
+            {
+                "id": "txn-feb",
+                "type": "bank",
+                "amount": "6868.55",
+                "direction": "expenditure",
+                "trade_month": "2026-02",
+                "trade_time": "2026-02-03 09:00:14",
+                "counterparty_name": "刘树刚",
+                "summary": "电子转账",
+                "remark": "代购公车款",
+            },
+        ]
+
+        decisions = self.engine.generate_decisions("2026-01", oa_rows, bank_rows, [])
+
+        self.assertEqual({decision.display_state for decision in decisions}, {DISPLAY_STATE_OPEN})
+        self.assertEqual({decision.decision_status for decision in decisions}, {DECISION_STATUS_OPEN})
+        self.assertIn("multiple_two_way_candidates", {b["code"] for d in decisions for b in d.blockers})
+
     def test_oa_bank_and_oa_invoice_evidence_upgrade_to_single_three_way_decision(self) -> None:
         decisions = self.engine.generate_decisions(
             "2026-03",

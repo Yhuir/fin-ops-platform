@@ -47,6 +47,10 @@ Workbench all-scope 聚合还承担跨月分片的展示归属权收敛。统一
 
 all-scope 聚合必须同时读取 canonical active relation occupancy。即使某个月度 active generation 因历史污染或补投顺序仍把 active relation row 带入 open zone，`app.workbench_pair_relations.status='active'` 中占用的 row 也不得在 all-scope open 区继续由 `scope:*:temp:*`、standalone 或 candidate 残留作为可操作 owner 发布；合法的 active relation open/display owner 只能是 `case:<case_id>`。generation consistency 只把非 canonical owner 标成 inconsistent，不能把合法 `case:<case_id>` 撤回/显示 group 误判为失败，也不能让 worker 把污染 generation 完成成 fresh。
 
+自动匹配可以在后端以统一候选/决策引擎同时比较 OA、银行流水和发票，但这不是把三类源事实放进一个写模型或让前端本地“拼池子”。OA、银行流水、正式发票/OA 附件发票仍分别来自各自 repository/projection/import 边界；`WorkbenchFreeMatchingEngine` / legacy `WorkbenchMatchingRules` 只产出可审计 decision/candidate，`app.workbench_pair_relations` 才是人工确认后的 canonical paired fact。页面只能消费 active generation 发布后的真实 group，不做本地自动配对。
+
+OA-bank 自动匹配中，“预约 X 月 X 日转款/付款/支付/打款”是强消歧证据：只有该预约付款日期与银行流水真实交易日期一致时，重复同金额候选才可继续唯一配对；没有明确预约付款日期或日期不一致时保持 open/conflict，不随机选择。匹配规则版本必须进入 Workbench SQL active generation 的 `source_versions`，否则规则变化后旧 generation 会继续被当作 fresh 发布。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

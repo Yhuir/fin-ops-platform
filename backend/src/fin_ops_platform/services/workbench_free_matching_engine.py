@@ -17,10 +17,14 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     expand_scope_month_window,
     resolve_decision_scope_month,
 )
+from fin_ops_platform.services.workbench_scheduled_payment_evidence import (
+    scheduled_payment_date_compatible,
+    scheduled_payment_date_match,
+)
 from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
 
-RULE_VERSION = "2026-06-14-oa-bank-sum-strong-evidence-v1"
+RULE_VERSION = "2026-06-15-scheduled-payment-date-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 MATCHABLE_DIRECTIONS = {"expenditure", "income"}
 MAX_INVOICE_COMBINATION_SIZE = 6
@@ -110,6 +114,8 @@ class WorkbenchFreeMatchingEngine:
                 if oa.direction != bank.direction:
                     continue
                 if oa.amount != bank.amount or not self._has_pair_evidence(oa, bank, "oa_bank"):
+                    continue
+                if not self._oa_bank_scheduled_payment_date_compatible(oa, bank):
                     continue
                 attachment_invoices = self._attachment_invoices(oa, invoice_rows)
                 if attachment_invoices:
@@ -968,6 +974,10 @@ class WorkbenchFreeMatchingEngine:
             if left.direction == right.direction
             and left.amount == right.amount
             and self._has_pair_evidence(left, right, match_shape)
+            and (
+                match_shape != "oa_bank"
+                or self._oa_bank_scheduled_payment_date_compatible(left, right)
+            )
         ]
 
     @staticmethod
@@ -1070,6 +1080,14 @@ class WorkbenchFreeMatchingEngine:
             oa_month=oa_month,
         )
         row_ids = tuple(row.row_id for row in (left, right))
+        evidence = {
+            "scope_window": list(window),
+            "uniqueness_scope": "five_month_window",
+            "text_matches": matching_tokens(self._tokens(left), self._tokens(right)),
+        }
+        scheduled_match = self._oa_bank_scheduled_payment_date_match(left, right)
+        if match_shape == "oa_bank" and scheduled_match is not None:
+            evidence["scheduled_payment_date_match"] = scheduled_match
         return WorkbenchDecision(
             decision_id=self._decision_key(resolved_scope_month, rule_code, row_ids),
             decision_key=self._decision_key(resolved_scope_month, rule_code, row_ids),
@@ -1088,11 +1106,7 @@ class WorkbenchFreeMatchingEngine:
             direction=left.direction,
             payment_amount_closed=True if match_shape in {"oa_bank", "bank_invoice"} else None,
             invoice_amount_closed=True if match_shape in {"oa_invoice", "bank_invoice"} else None,
-            evidence={
-                "scope_window": list(window),
-                "uniqueness_scope": "five_month_window",
-                "text_matches": matching_tokens(self._tokens(left), self._tokens(right)),
-            },
+            evidence=evidence,
             blockers=(),
             explanation="Two-way free matching resolved after no unique three-way match formed.",
             source_versions=source_versions,
@@ -1232,6 +1246,28 @@ class WorkbenchFreeMatchingEngine:
         if match_shape == "bank_invoice":
             return self._has_bank_invoice_counterparty_evidence(left, right)
         return self._has_evidence(left, right)
+
+    @staticmethod
+    def _oa_bank_rows(left: _Row, right: _Row) -> tuple[_Row, _Row] | None:
+        oa = left if left.row_type == "oa" else right if right.row_type == "oa" else None
+        bank = left if left.row_type == "bank" else right if right.row_type == "bank" else None
+        if oa is None or bank is None:
+            return None
+        return oa, bank
+
+    def _oa_bank_scheduled_payment_date_compatible(self, left: _Row, right: _Row) -> bool:
+        rows = self._oa_bank_rows(left, right)
+        if rows is None:
+            return True
+        oa, bank = rows
+        return scheduled_payment_date_compatible(oa.data, bank.data, owner_month=oa.month)
+
+    def _oa_bank_scheduled_payment_date_match(self, left: _Row, right: _Row) -> dict[str, Any] | None:
+        rows = self._oa_bank_rows(left, right)
+        if rows is None:
+            return None
+        oa, bank = rows
+        return scheduled_payment_date_match(oa.data, bank.data, owner_month=oa.month)
 
     def _has_oa_bank_sum_evidence(self, oa: _Row, bank: _Row) -> bool:
         return any(
@@ -1486,6 +1522,9 @@ class WorkbenchFreeMatchingEngine:
             "oa_bank_text_matches": matching_tokens(self._tokens(oa), self._tokens(bank)),
             "invoice_text_matches": invoice_matches,
         }
+        scheduled_match = self._oa_bank_scheduled_payment_date_match(oa, bank)
+        if scheduled_match is not None:
+            payload["scheduled_payment_date_match"] = scheduled_match
         if extra:
             payload.update(extra)
         return payload

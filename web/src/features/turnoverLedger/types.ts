@@ -1,3 +1,5 @@
+import type { OperationBarrierTarget } from "../operationBarrier/api";
+
 export type TurnoverLedgerFamily = "all" | "personal" | "company" | "bank" | "business";
 
 export type TurnoverLedgerDirectionFilter = "all" | "borrow_in" | "borrow_out";
@@ -328,6 +330,7 @@ export type TurnoverRelationMutationResponse = {
   affectedMonths: string[];
   workbenchPairRelationId: string;
   workbenchRelationMode: string;
+  freshnessTargets: OperationBarrierTarget[];
 };
 
 export type ConfirmTurnoverRelationRequest = {

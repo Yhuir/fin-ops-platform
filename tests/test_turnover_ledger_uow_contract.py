@@ -1511,6 +1511,47 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(len(uow.pair_calls), 1)
         self.assertEqual(uow.pair_calls[0]["affected_months"], ["2026-02"])
 
+    def test_closure_request_boundary_returns_workbench_visibility_freshness_targets(self) -> None:
+        module = self._write_adapters_module()
+
+        class _RecordingClosureFacade:
+            def confirm_zero_difference_closure(self, **kwargs: object) -> dict[str, object]:
+                return {
+                    "turnover_relation": {"relation_id": "turnover_rel_closure", "status": "confirmed"},
+                    "workbench_pair_relation": {
+                        "case_id": "turnover:turnover_rel_closure",
+                        "relation_mode": "turnover_manual_closure",
+                    },
+                    "received_affected_months": list(kwargs.get("affected_months") or []),
+                }
+
+        boundary = module.TurnoverLedgerConfirmRequestBoundaryFacade(
+            facade=_RecordingClosureFacade(),
+            affected_months_resolver=lambda _row_ids: ["2026-02", "2026-02", "2026-03"],
+        )
+
+        result = boundary.confirm_zero_difference_closure_from_request(
+            bank_row_ids=["bank_txn_income", "bank_txn_expense", "bank_txn_settlement"],
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual closure",
+            expected_versions={"turnover_bank_row:bank_txn_income": "v1"},
+            idempotency_key="closure-idem-1",
+        )
+
+        self.assertEqual(result["affected_months"], ["2026-02", "2026-02", "2026-03"])
+        self.assertEqual(
+            result["freshness_targets"],
+            [
+                {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+                {"read_model_key": "workbench", "scope_key": "2026-02"},
+                {"read_model_key": "workbench", "scope_key": "2026-03"},
+                {"read_model_key": "workbench", "scope_key": "all"},
+            ],
+        )
+
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))
         handler_called = False

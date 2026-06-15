@@ -25,6 +25,7 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     MATCH_DOMAIN_FREE,
     WARNING_INVOICE_AMOUNT_MISMATCH,
 )
+from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_sql_projection import (
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
@@ -40,6 +41,7 @@ def fresh_workbench_sql_source_versions(app: Application, scope_key: str = "2026
     )
     return {
         "builder": builder,
+        "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
         "bank_auto_tag_rules_version": app._current_bank_auto_tag_rules_version(),
         "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
         "oa_projection_sync_version": app._current_oa_projection_sync_version(),
@@ -994,6 +996,32 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         outbox_scope_keys = [params[4] for params in connection.execute_params]
         self.assertEqual(dirty_scope_keys, ["active:2026-05", "all:2026-05"])
         self.assertEqual(outbox_scope_keys, ["active:2026-05", "all:2026-05"])
+
+    def test_workbench_sql_source_versions_include_matching_rules_version_for_freshness(self) -> None:
+        app = object.__new__(Application)
+
+        versions = app._workbench_sql_read_model_source_versions("2026-05")
+
+        self.assertEqual(
+            versions["workbench_matching_rules_version"],
+            WORKBENCH_MATCHING_RULES_VERSION,
+        )
+        missing_rules_version = {
+            key: value
+            for key, value in versions.items()
+            if key != "workbench_matching_rules_version"
+        }
+        self.assertIn(
+            "workbench_matching_rules_version_missing",
+            app._workbench_sql_read_model_stale_reasons(missing_rules_version, scope_key="2026-05"),
+        )
+        self.assertIn(
+            "workbench_matching_rules_version_mismatch",
+            app._workbench_sql_read_model_stale_reasons(
+                {**versions, "workbench_matching_rules_version": "old-version"},
+                scope_key="2026-05",
+            ),
+        )
 
     def test_workbench_api_queues_oa_sync_when_sql_snapshot_parser_version_is_stale(self) -> None:
         app = object.__new__(Application)

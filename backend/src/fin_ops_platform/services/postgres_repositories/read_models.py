@@ -6324,6 +6324,12 @@ class PostgresReadModelRepository:
                     scope_key=scope_key,
                     reason="workbench_reconciliation_decision_changed",
                 )
+                _enqueue_workbench_refresh_in_transaction(
+                    connection,
+                    tenant_id=text(tenant_id) or "default",
+                    scope_key=scope_key,
+                    reason="workbench_reconciliation_decision_changed",
+                )
 
         run_in_transaction(self._connection, write)
 
@@ -6627,10 +6633,17 @@ class PostgresReadModelRepository:
             )
             if affected:
                 for scope_month in normalized_scope_months:
+                    scope_key = str(scope_month)[:7]
                     _enqueue_workbench_relation_refresh_in_transaction(
                         connection,
                         tenant_id=text(tenant_id) or "default",
-                        scope_key=str(scope_month)[:7],
+                        scope_key=scope_key,
+                        reason="workbench_reconciliation_decision_expired",
+                    )
+                    _enqueue_workbench_refresh_in_transaction(
+                        connection,
+                        tenant_id=text(tenant_id) or "default",
+                        scope_key=scope_key,
                         reason="workbench_reconciliation_decision_expired",
                     )
             return affected
@@ -6674,10 +6687,17 @@ class PostgresReadModelRepository:
             or 0
             )
             if affected and normalized_scope_month is not None:
+                scope_key = str(normalized_scope_month)[:7]
                 _enqueue_workbench_relation_refresh_in_transaction(
                     connection,
                     tenant_id=text(tenant_id) or "default",
-                    scope_key=str(normalized_scope_month)[:7],
+                    scope_key=scope_key,
+                    reason="workbench_reconciliation_decision_expired",
+                )
+                _enqueue_workbench_refresh_in_transaction(
+                    connection,
+                    tenant_id=text(tenant_id) or "default",
+                    scope_key=scope_key,
                     reason="workbench_reconciliation_decision_expired",
                 )
             return affected

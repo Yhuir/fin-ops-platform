@@ -342,6 +342,12 @@ describe("turnover ledger API", () => {
           relation_mode: "turnover_manual_closure",
         },
         affected_months: ["2026-05"],
+        freshness_targets: [
+          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "workbench_relation", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "all" },
+        ],
       });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -357,6 +363,12 @@ describe("turnover ledger API", () => {
       affectedMonths: ["2026-05"],
       workbenchPairRelationId: "turnover:turnover_rel_001",
       workbenchRelationMode: "turnover_manual_closure",
+      freshnessTargets: [
+        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "workbench_relation", scopeKey: "2026-05" },
+        { readModelKey: "workbench", scopeKey: "2026-05" },
+        { readModelKey: "workbench", scopeKey: "all" },
+      ],
     });
   });
 

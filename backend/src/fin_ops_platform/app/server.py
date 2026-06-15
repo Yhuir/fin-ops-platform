@@ -15962,6 +15962,7 @@ class Application:
         )
         payload: dict[str, object] = {
             "builder": builder_version,
+            "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
             "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
         }
         parser_version = self._current_oa_attachment_invoice_parser_version()

@@ -19,6 +19,7 @@
 关键规则：
 
 - `oa_bank_exact_sum`：1 条 OA 与唯一一组 2 到 6 条同方向银行流水，且每条银行流水均有 OA-bank 业务证据，金额按分精度唯一闭合时，生成 open OA-bank candidate；缺少发票时不得进入三方 paired。
+- `oa_bank_exact_amount` 预约付款日期消歧：当 OA 文本明确包含“预约 X 月 X 日转款/付款/支付/打款”时，该日期是 OA-bank 候选的强消歧证据；只有银行流水真实交易日期与预约日期一致的候选可继续参与唯一性判断。预约日期不替代金额、方向和业务文本证据；没有明确预约付款日期时，重复同金额候选仍保持 conflict/open，不随机选择。
 - 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合、任一流水缺少证据、或已有更高优先级候选时，不自动选择。
 - 已有 active relation 的 ETC summary 不得继续出现在 open 区；paired 区仍可展示展开明细。
 - active relation 的 `row_ids` 是集合语义：同一 relation 内重复 row id 必须在写入/normalize/repair/query grouping 层去重；同一 row id 不能跨不同 active case 复用。重复 row id 的真实结果是列表详情重复渲染同一个 OA/银行/发票，不代表存在两条业务事实。
@@ -68,6 +69,8 @@ Refresh 触发来源：
 - 关联台确认/撤回、exception apply/cancel、ignore/unignore。
 - 下游模块如 no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
 - worker `workbench.read_model.refresh` 发布 active generation；matching dirty worker 重建候选。
+- `read_model.workbench_reconciliation_decisions` 的 upsert、stale expire 和 missing expire 必须在同一事务内同时入队 `workbench_relation` 与主 `workbench` month scope refresh；只刷新 relation 会导致 downstream relation fresh 但 Workbench active generation 继续发布旧自动候选/旧分组。
+- Workbench SQL active generation 的 `source_versions` 必须包含 `workbench_matching_rules_version`。匹配规则版本变化后，旧 generation 必须被 freshness 判为 stale 并入队刷新，不能继续被 API 当作 fresh。
 - `startup_stale_scan` 默认关闭；启用时只标记 stale matching dirty scopes；它不直接 invalidating workbench read model。
 - PostgreSQL formal read path 必须恢复 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run，供 `WorkbenchCandidateMatchService.is_scope_fresh(...)` 判断 freshness；否则 opt-in 启动补扫会因为缺少 scope run 证明而把已完成月份重新标 dirty。
 
@@ -82,6 +85,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-15 | 自动匹配加入“预约付款日期”OA-bank 消歧，并将 matching rules version 纳入 Workbench SQL active generation freshness；reconciliation decision 写入/过期同时刷新 `workbench_relation` 与主 `workbench` month scope | `WorkbenchFreeMatchingEngine`、legacy `WorkbenchMatchingRules`、`read_model.workbench_reconciliation_decisions` repository、Workbench SQL projection/source_versions | `tests/test_workbench_free_matching_engine.py`；`tests/test_workbench_matching_rules.py`；`tests/test_workbench_reconciliation_decision_store.py`；`tests/test_workbench_sql_runtime.py` |
 | 2026-06-15 | 确认/撤回提交响应增加 operation freshness targets 与后端 operation projection；前端 overlay 只等操作级 `workbench_relation` fresh 后应用投影，`workbench` month/all 和下游 read model 后台追赶；修复 all aggregate active generation 已发布但被自身 dirty scope 误判 refreshing 的 dead-letter 循环 | `WorkbenchWriteFacade` confirm/withdraw response contract、`WorkbenchReadModelRefreshService` aggregate-only publish gate、`ReconciliationWorkbenchPage` operation overlay、`write_operation_slo_audit` 操作级/cross-page profile | `tests/test_workbench_auth_context_idempotency.py`；`tests/test_workbench_sql_runtime.py`；`tests/test_write_operation_slo_audit.py`；`web/src/test/WorkbenchSelection.test.tsx`；`npm run build` |
 | 2026-06-15 | all-scope 聚合接入 canonical active relation occupancy gate：保留合法 `case:<case_id>` open/display owner，抑制 `scope:*:temp:*` 等旧 open owner；确认预览遇到已 active row-set 时返回撤回预览，防止 all scope 旧 open owner 继续误导用户确认 | `PostgresReadModelRepository` all-scope aggregate/generation consistency、`WorkbenchReadModelRefreshService` aggregate-only event、`WorkbenchWriteFacade.preview_confirm_link`、`RelationPreviewDialog` existing operation flow | `tests/test_workbench_sql_runtime.py`；`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`；`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-14 | 关联台写操作从本地 optimistic 重排改为全屏 operation overlay；初始版本等待 `workbench_relation` barrier 与 Workbench active generation fresh 后释放，后续已收敛为有 operation projection 的确认/撤回只阻塞到 `workbench_relation` fresh | `ReconciliationWorkbenchPage` 写操作 gate、`GlobalOperationOverlayProvider`、`/api/operation-barrier/status` | `web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/GlobalOperationOverlayContext.test.tsx`；`web/src/test/OperationBarrierApi.test.ts`；`tests/test_operation_freshness_barrier.py` |

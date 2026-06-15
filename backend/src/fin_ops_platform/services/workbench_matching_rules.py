@@ -19,6 +19,10 @@ from fin_ops_platform.services.workbench_reconciliation_models import (
     DECISION_STATUS_PAIRED,
     WorkbenchDecision,
 )
+from fin_ops_platform.services.workbench_scheduled_payment_evidence import (
+    scheduled_payment_date_compatible,
+    scheduled_payment_date_match,
+)
 from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
 from fin_ops_platform.services.workbench_text_normalization import evidence_tokens, matching_tokens, normalize_match_text
 
@@ -45,7 +49,7 @@ GENERIC_COUNTERPARTY_NAMES = {
 }
 GENERIC_SUMMARY_TERMS = {"报销", "转账", "付款", "支付", "费用", "代付", "批量"}
 TEXT_SPLIT_RE = re.compile(r"[\s,，.。;；:：、/\\|()（）\[\]【】{}<>《》\"'“”‘’+-]+")
-WORKBENCH_MATCHING_RULES_VERSION = "2026-06-14-oa-bank-sum-strong-evidence-v1"
+WORKBENCH_MATCHING_RULES_VERSION = "2026-06-15-scheduled-payment-date-v1"
 OA_ATTACHMENT_INVOICE_SOURCE_KIND = "oa_attachment_invoice"
 NON_INVOICE_OA_ATTACHMENT_SOURCE_KINDS = {
     "oa_attachment_payment_receipt",
@@ -148,7 +152,7 @@ class WorkbenchMatchingRules:
                     continue
                 if oa_amount != self._amount(bank_row):
                     continue
-                evidence = self._oa_bank_evidence(oa_row, bank_row)
+                evidence = self._oa_bank_evidence(oa_row, bank_row, scope_month=scope_month)
                 if not evidence["eligible"]:
                     continue
                 scored_pairs.append(
@@ -216,7 +220,7 @@ class WorkbenchMatchingRules:
                 bank_amount = self._amount(bank_row)
                 if bank_amount is None or bank_amount <= ZERO or bank_amount > target:
                     continue
-                evidence = self._oa_bank_evidence(oa_row, bank_row)
+                evidence = self._oa_bank_evidence(oa_row, bank_row, scope_month=scope_month)
                 if not evidence["eligible"]:
                     continue
                 if not self._has_strong_oa_bank_sum_evidence(oa_row, bank_row):
@@ -341,14 +345,32 @@ class WorkbenchMatchingRules:
         top_pairs = [pair for pair in pairs if int(pair["score"]) == top_score]
         return top_pairs if len(top_pairs) == 1 else []
 
-    def _oa_bank_evidence(self, oa_row: dict[str, Any], bank_row: dict[str, Any]) -> dict[str, Any]:
+    def _oa_bank_evidence(
+        self,
+        oa_row: dict[str, Any],
+        bank_row: dict[str, Any],
+        *,
+        scope_month: str | None = None,
+    ) -> dict[str, Any]:
         strong: list[str] = []
         medium: list[str] = []
         negative: list[str] = []
 
+        scheduled_match = scheduled_payment_date_match(oa_row, bank_row, owner_month=scope_month)
+        if scheduled_match is not None:
+            strong.append("scheduled_payment_date_match")
+        elif not scheduled_payment_date_compatible(oa_row, bank_row, owner_month=scope_month):
+            return {
+                "eligible": False,
+                "score": 0,
+                "strong": [],
+                "medium": [],
+                "negative": ["scheduled_payment_date_mismatch"],
+            }
+
         oa_date = self._row_date(oa_row)
         bank_date = self._row_date(bank_row)
-        if oa_date is not None and bank_date is not None:
+        if scheduled_match is None and oa_date is not None and bank_date is not None:
             days_delta = abs((oa_date - bank_date).days)
             if days_delta > OA_BANK_CANDIDATE_MAX_DAYS:
                 return {
@@ -482,7 +504,7 @@ class WorkbenchMatchingRules:
             for bank_row in sorted(bank_rows, key=self._row_id):
                 if self._direction(bank_row) != self._direction(oa_row) or self._amount(bank_row) != target:
                     continue
-                evidence = self._oa_bank_evidence(oa_row, bank_row)
+                evidence = self._oa_bank_evidence(oa_row, bank_row, scope_month=scope_month)
                 if not evidence["eligible"]:
                     continue
                 credible_bank_pairs.append(

@@ -78,6 +78,8 @@ same group flow rows selected
   -> Workbench active pair relation
   -> Workbench bank-only open relation，等待 OA + 银行 + 发票三栏补齐
   -> turnover/workbench/workbench_relation dirty-outbox refresh
+  -> API 返回 operation freshness targets
+  -> frontend waits turnover_ledger/workbench_relation/workbench fresh before emitting Workbench refresh event
 ```
 
 校验：

@@ -486,9 +486,11 @@ export default function TurnoverLedgerPage() {
           });
           setClosureSelection(null);
           setClosureDrawerOpen(false);
-          setMessage("正在等待往来款台账读模型同步...");
+          setMessage("正在等待往来款台账和关联台读模型同步...");
           await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths("turnover_ledger", closureResult.affectedMonths, "all"),
+            closureResult.freshnessTargets.length > 0
+              ? closureResult.freshnessTargets
+              : operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
           );
           setMessage("正在刷新往来款台账...");
           await reloadLedgerAfterMutation();

@@ -365,6 +365,52 @@ class WorkbenchMatchingRulesTests(unittest.TestCase):
             [],
         )
 
+    def test_oa_bank_exact_amount_uses_scheduled_payment_date_to_resolve_repeated_amount(self) -> None:
+        candidates = self.rules.generate_candidates(
+            "2026-01",
+            oa_rows=[
+                oa_row(
+                    "oa-pay-jan",
+                    "6868.55",
+                    counterparty_name="刘树刚",
+                    reason="代购公车款-电车（预约1月3日转款）",
+                ),
+                oa_row(
+                    "oa-pay-feb",
+                    "6868.55",
+                    counterparty_name="刘树刚",
+                    reason="代购公车款-电车（预约2月3日转款）",
+                ),
+                oa_row(
+                    "oa-pay-mar",
+                    "6868.55",
+                    counterparty_name="刘树刚",
+                    reason="代购公车款-电车（预约3月3日转款）",
+                ),
+            ],
+            bank_rows=[
+                bank_row("txn-jan", "6868.55", counterparty_name="刘树刚", trade_time="2026-01-03 09:00:13"),
+                bank_row("txn-feb", "6868.55", counterparty_name="刘树刚", trade_time="2026-02-03 09:00:14"),
+                bank_row("txn-mar", "6868.55", counterparty_name="刘树刚", trade_time="2026-03-03 09:00:15"),
+            ],
+            invoice_rows=[],
+        )
+
+        expected_pairs = {
+            ("oa-pay-jan", "txn-jan"),
+            ("oa-pay-feb", "txn-feb"),
+            ("oa-pay-mar", "txn-mar"),
+        }
+        exact_pairs = {
+            tuple(candidate["row_ids"])
+            for candidate in candidates
+            if candidate["rule_code"] == "oa_bank_exact_amount"
+        }
+        self.assertEqual(exact_pairs, expected_pairs)
+        for row_ids in expected_pairs:
+            candidate = find_candidate_by_rows(candidates, "oa_bank_exact_amount", list(row_ids))
+            self.assertIn("scheduled_payment_date_match", candidate["special_metadata"]["evidence"]["strong"])
+
     def test_oa_multi_invoice_exact_sum_is_generic_and_incomplete_without_bank(self) -> None:
         candidates = self.rules.generate_candidates(
             "2026-05",

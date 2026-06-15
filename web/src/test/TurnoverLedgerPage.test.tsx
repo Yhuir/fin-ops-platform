@@ -846,6 +846,12 @@ function installTurnoverLedgerFetch(options: {
           relation_mode: "turnover_manual_closure",
         },
         affected_months: ["2026-05"],
+        freshness_targets: [
+          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "workbench_relation", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "all" },
+        ],
       });
     }
     if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/withdraw" && method === "POST") {
@@ -1257,6 +1263,21 @@ describe("Turnover ledger page", () => {
       expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
         bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
         idempotency_key: expect.stringMatching(/^turnover-manual-closure:/),
+      });
+    });
+    await waitFor(() => {
+      const barrierRequest = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/operation-barrier/status" && init?.method === "POST";
+      });
+      expect(barrierRequest).toBeDefined();
+      expect(JSON.parse(String(barrierRequest?.[1]?.body))).toEqual({
+        targets: [
+          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "workbench_relation", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "all" },
+        ],
       });
     });
   });

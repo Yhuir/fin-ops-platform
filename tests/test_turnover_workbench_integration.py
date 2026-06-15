@@ -206,6 +206,15 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(
+            payload["freshness_targets"],
+            [
+                {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+                {"read_model_key": "workbench", "scope_key": "2026-03"},
+                {"read_model_key": "workbench", "scope_key": "all"},
+            ],
+        )
         self.assertFalse([
             group
             for group in paired_groups
