@@ -2,11 +2,11 @@
 gsd_state_version: '1.0'
 status: planning
 progress:
-  total_phases: 17
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_phases: 18
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 6
 ---
 
 # Project State
@@ -16,21 +16,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 1 page analysis planning
+**Current focus:** Phase 1 page analysis planning, after Phase 0 cross-page dependency baseline.
 
 ## Current Position
 
-Phase: 1 of 17 (完善外部往来款管理页面)
+Phase: 1 of 18 (完善外部往来款管理页面)
 Plan: 0 of 0 in current phase
-Status: Ready to discuss/plan page-specific phases
-Last activity: 2026-06-16 — Created independent GSD phases for all registered pages.
+Status: Ready to discuss/plan page-specific phases using Phase 0 as required baseline
+Last activity: 2026-06-16 — Completed Phase 0 cross-page dependency baseline.
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 6%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
+- Total plans completed: 1
+- Baseline planning docs completed: 1
 - Average duration: N/A
 - Total execution time: 0 hours
 
@@ -46,9 +47,11 @@ Progress: [░░░░░░░░░░] 0%
 
 - Setup: Keep `.planning/codebase/` as a global map and preserve per-page analysis in dedicated phase directories.
 - Setup: Parallel page analysis threads must not modify `.planning/codebase/*.md`.
-- Setup: The three page-analysis phases can run independently in separate worktree threads because they only share the global codebase map as input.
+- Setup: Page-analysis phases can run independently in separate worktree threads only after reading Phase 0 and only when they avoid overlapping shared write targets.
 - Setup: `.planning/codebase/` was regenerated as a full-repository map; future page analysis must write `CONTEXT.md`, `RESEARCH.md`, and plan artifacts under the assigned phase directory.
 - Setup: All 17 app registry pages now have dedicated phase directories.
+- Setup: Phase 0 cross-page dependency baseline is required before page implementation planning; page phases must reference its dataflow, dependency, worker/read model, legacy, test, docs-impact, and implementation-order gates.
+- Setup: Page development does not require all 17 pages to have deep `PLAN.md` files up front, but it does require Phase 0 L1 dependency baseline plus page-level L2 analysis for the selected page or dependency group.
 
 ### Roadmap Evolution
 
@@ -58,6 +61,7 @@ Progress: [░░░░░░░░░░] 0%
 - 2026-06-16: Phase 3 added for 税金抵扣 page analysis and improvement planning.
 - 2026-06-16: `.planning/codebase/` regenerated as a global repository map; page-focused analysis policy reaffirmed.
 - 2026-06-16: Phases 4-17 added for the remaining registered pages.
+- 2026-06-16: Phase 0 added and completed as the cross-page dependency baseline before page implementation work.
 
 ### Pending Todos
 
@@ -76,5 +80,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-06-16
-Stopped at: Ready to run `$gsd-discuss-phase <N>` and `$gsd-plan-phase <N>` for each page.
-Resume file: None
+Stopped at: Ready to run `$gsd-discuss-phase <N>` and `$gsd-plan-phase <N>` for each page, starting from Phase 0 baseline docs.
+Resume file: .planning/phases/00-cross-page-dependency-baseline/README.md

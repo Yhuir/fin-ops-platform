@@ -36,6 +36,7 @@ Preserve production finance workflow correctness while improving individual page
 - [ ] **PAGE-17**: Bank transaction import page analysis and improvement planning is saved in its own phase directory.
 - [ ] **PAGE-18**: Invoice import page analysis and improvement planning is saved in its own phase directory.
 - [ ] **PAGE-19**: ETC invoice import page analysis and improvement planning is saved in its own phase directory.
+- [ ] **BASE-00**: Cross-page dependency baseline is completed before page implementation work starts.
 
 ### Out of Scope
 
@@ -49,10 +50,12 @@ Preserve production finance workflow correctness while improving individual page
 - Page/module facts belong under `docs/modules/<module>/` when they become long-term source of truth.
 - GSD page analysis should first create `CONTEXT.md`, `RESEARCH.md`, and plan files inside each page-specific phase directory.
 - Parallel Codex threads should work in separate worktrees and must not modify `.planning/codebase/*.md` for page-specific analysis.
+- Page implementation should not treat pages as isolated; every page phase must read the cross-page dependency baseline before deep planning.
 
 ## Constraints
 
 - **Planning isolation**: `.planning/codebase/` remains a global map; each page writes only its own `.planning/phases/<phase>/` artifacts.
+- **Cross-page baseline first**: Page implementation requires Phase 0 dependency baseline plus page-level `CONTEXT.md`, `RESEARCH.md`, and plan artifacts.
 - **Repository boundaries**: Backend business logic stays in services/repositories/workers; `server.py` remains HTTP routing and dependency assembly.
 - **Read model governance**: Read model refreshes must go through gateway/registry/queue boundaries and cannot fake freshness.
 - **Docs governance**: Long-term page facts update `docs/modules/<module>/`; temporary analysis remains in phase artifacts.
@@ -65,6 +68,7 @@ Preserve production finance workflow correctness while improving individual page
 | Keep `.planning/codebase/` global-only | Re-running map-codebase per page overwrites the same seven documents and causes merge conflicts across threads. | ✓ Adopted |
 | Store page analysis in separate phases | Phase directories preserve per-page context, research, plans, and verification without overwriting other pages. | ✓ Adopted |
 | Use page-specific Codex worktree threads for parallel analysis | Worktrees isolate in-progress changes and reduce planning artifact conflicts. | ✓ Adopted |
+| Add Phase 0 cross-page dependency baseline | Data moves across pages through imports, relations, read models, workers, and lifecycle events; page implementation cannot be planned as isolated UI work. | ✓ Adopted |
 
 ---
-*Last updated: 2026-06-16 after adding phase directories for all registered pages*
+*Last updated: 2026-06-16 after adding Phase 0 cross-page dependency baseline*

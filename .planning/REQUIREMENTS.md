@@ -7,6 +7,7 @@
 
 ### Page-Scoped Planning
 
+- [ ] **BASE-00**: A cross-page dependency baseline is completed before any page implementation work starts.
 - [ ] **PAGE-01**: External turnover ledger page analysis is stored in its own phase artifacts.
 - [ ] **PAGE-02**: Bank details page analysis is stored in its own phase artifacts.
 - [ ] **PAGE-03**: Tax offset page analysis is stored in its own phase artifacts.
@@ -52,11 +53,12 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| BASE-00 | Phase 0 | Pending |
 | PAGE-01 | Phase 1 | Pending |
 | PAGE-02 | Phase 2 | Pending |
 | PAGE-03 | Phase 3 | Pending |
-| PAGE-04 | Phase 1-17 | Pending |
-| PAGE-05 | Phase 1-17 | Pending |
+| PAGE-04 | Phase 0-17 | Pending |
+| PAGE-05 | Phase 0-17 | Pending |
 | PAGE-06 | Phase 4 | Pending |
 | PAGE-07 | Phase 5 | Pending |
 | PAGE-08 | Phase 6 | Pending |
@@ -71,15 +73,15 @@
 | PAGE-17 | Phase 15 | Pending |
 | PAGE-18 | Phase 16 | Pending |
 | PAGE-19 | Phase 17 | Pending |
-| PAR-01 | Phase 1-17 | Pending |
-| PAR-02 | Phase 1-17 | Pending |
-| PAR-03 | Phase 1-17 | Pending |
+| PAR-01 | Phase 0-17 | Pending |
+| PAR-02 | Phase 0-17 | Pending |
+| PAR-03 | Phase 0-17 | Pending |
 
 **Coverage:**
-- v1 requirements: 22 total
-- Mapped to phases: 22
+- v1 requirements: 23 total
+- Mapped to phases: 23
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-16*
-*Last updated: 2026-06-16 after adding phase directories for all registered pages*
+*Last updated: 2026-06-16 after adding Phase 0 cross-page dependency baseline*
