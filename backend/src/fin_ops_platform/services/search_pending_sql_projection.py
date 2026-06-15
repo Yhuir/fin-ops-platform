@@ -15,6 +15,7 @@ from fin_ops_platform.services.pending_invoice_rules import (
 from fin_ops_platform.services.pending_invoice_relation_identity import sanitize_pending_invoice_oa_summaries
 from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
+    pending_invoice_status_matches_filter,
     pending_invoice_status_payload,
 )
 from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION
@@ -326,8 +327,6 @@ class SearchPendingSqlProjectionBuilder:
             effective_category = pending_invoice_effective_category_payload(category)
             category_code = str(effective_category.get("category_code") or "").strip()
             filter_group = _filter_group_for_category(category_code, tag_groups, direction=direction) or "all"
-            if filter_name != "all" and filter_group != filter_name:
-                continue
             invoices = _relation_invoice_summaries(relation_context, target_invoice_type=target_invoice_type)
             if not invoices:
                 invoices = row.get("invoices") if isinstance(row.get("invoices"), list) else []
@@ -372,7 +371,7 @@ class SearchPendingSqlProjectionBuilder:
                 ),
                 status_override=row.get("income_status_override") if isinstance(row.get("income_status_override"), dict) else None,
             )
-            if filter_name != "all" and not _pending_invoice_status_matches_filter(
+            if filter_name != "all" and not pending_invoice_status_matches_filter(
                 direction=direction,
                 filter_name=filter_name,
                 status_code=str(status_payload.get("code") or ""),
@@ -719,27 +718,6 @@ def _status_label(status: str) -> str:
 
 def _filter_group_for_category(category_code: str, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
     return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
-
-
-def _pending_invoice_status_matches_filter(*, direction: str, filter_name: str, status_code: str) -> bool:
-    if filter_name == "requires_invoice":
-        expected = {"cash_income", "income_pending_invoice"} if direction == "income" else {
-            "paid_invoiced",
-            "paid_pending_invoice",
-            "paid_pending_future_invoice",
-            "invoice_not_fully_paid",
-        }
-        if direction == "income":
-            expected.add("income_invoiced")
-    elif filter_name == "bank_statement_as_invoice":
-        expected = {"bank_statement_as_invoice"}
-    elif filter_name == "no_invoice_required":
-        expected = {"income_no_invoice_required"} if direction == "income" else {"no_invoice_required"}
-    elif filter_name == "cash_income":
-        expected = {"cash_income"}
-    else:
-        return True
-    return status_code in expected
 
 
 def _pending_invoice_category_payload_from_bank_tag_row(row: dict[str, Any]) -> dict[str, object]:

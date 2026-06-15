@@ -9,6 +9,7 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     _decimal,
 )
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
+from fin_ops_platform.services.postgres_repositories.common import serialize_value as _serialize_jsonb_value
 
 
 class PostgresInputInvoiceUsageOaReverseBatchRepository:
@@ -120,9 +121,9 @@ class PostgresInputInvoiceUsageOaReverseBatchRepository:
                 batch.oa_row_id,
                 batch.oa_process_status,
                 batch.oa_detection_status,
-                _jsonb(dict(batch.oa_detection_payload or {})),
-                _jsonb(list(batch.audit_events or [])),
-                _jsonb(payload),
+                _jsonb(_serialize_jsonb_value(dict(batch.oa_detection_payload or {}))),
+                _jsonb(_serialize_jsonb_value(list(batch.audit_events or []))),
+                _jsonb(_serialize_jsonb_value(payload)),
                 batch.created_by,
                 batch.updated_by,
                 batch.created_at,

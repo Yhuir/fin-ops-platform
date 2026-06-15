@@ -4,11 +4,13 @@ from copy import deepcopy
 from datetime import UTC, datetime
 import hashlib
 import json
+from pathlib import Path
 import re
 from threading import RLock
 from typing import Any, Callable
 
 from fin_ops_platform.services.bank_turnover_tag_semantics import (
+    EXTERNAL_TURNOVER_CATEGORY_CODE,
     EXTERNAL_TURNOVER_ROLE,
     EXTERNAL_TURNOVER_THIRD_LABEL_OPTIONS,
     TURNOVER_ACTION_TYPE_OPTIONS,
@@ -251,6 +253,43 @@ BANK_AUTO_TAG_ALLOWED_DIRECTIONS = {"income", "expense", "any"}
 BANK_AUTO_TAG_ALLOWED_ACCOUNT_SCOPE_TYPES = {"any", "bank_account", "account_type", "bank"}
 DEFAULT_BANK_AUTO_TAG_DIRECTION = "any"
 DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE = {"type": "any", "values": []}
+LEGACY_EXTERNAL_TURNOVER_LABEL_REPAIR_SPECS: dict[str, dict[str, Any]] = {
+    "收回借出款": {
+        "primary_label": "外部往来款收款",
+        "direction": "income",
+        "contains_any": ["收回借出款", "收回借款", "收回暂借款", "还借款", "还暂借款", "归还借款"],
+    },
+    "退保证金": {
+        "primary_label": "外部往来款收款",
+        "direction": "income",
+        "contains_any": ["退保证金", "退回保证金", "返还保证金"],
+    },
+    "退款": {
+        "primary_label": "外部往来款收款",
+        "direction": "income",
+        "contains_any": ["退款", "退回", "返还"],
+    },
+    "借入款": {
+        "primary_label": "外部往来款收款",
+        "direction": "income",
+        "contains_any": ["借入款", "暂借款", "借款"],
+    },
+    "归还借款": {
+        "primary_label": "外部往来款付款",
+        "direction": "expense",
+        "contains_any": ["归还借款", "还借款", "还暂借款", "还款"],
+    },
+    "押金": {
+        "primary_label": "外部往来款付款",
+        "direction": "expense",
+        "contains_any": ["押金"],
+    },
+    "退押金": {
+        "primary_label": "外部往来款收款",
+        "direction": "income",
+        "contains_any": ["退押金", "退回押金", "返还押金"],
+    },
+}
 BANK_AUTO_TAG_FILE_FIELD_MAPPING_VERSION = "2026-05-29-bank-auto-tag-field-mapping-v1"
 BANK_AUTO_TAG_FILE_SCHEMA_VERSION = "2026-05-29-bank-auto-tag-rules-normalized-v1"
 BANK_AUTO_TAG_FILE_TEXT_FIELD_LABEL = "用途/交易用途、摘要、备注/附言/客户附言"
@@ -964,8 +1003,17 @@ class BankTransactionCategoryService:
             if cls._is_auto_tag_rule_definition(definition)
         }
         reusable_by_label_path: dict[tuple[str, str], dict[str, Any]] = {}
-        for definition in previous_definitions_by_code.values():
-            if not cls._is_auto_tag_rule_definition(definition):
+        reusable_candidates = sorted(
+            previous_definitions_by_code.values(),
+            key=lambda definition: (
+                str(definition.get("status") or "active") != "active",
+                not cls._is_auto_tag_rule_definition(definition),
+                str(definition.get("source") or "") != "custom",
+                str(definition.get("code") or ""),
+            ),
+        )
+        for definition in reusable_candidates:
+            if not cls._is_auto_tag_rule_definition(definition) and str(definition.get("source") or "") != "custom":
                 continue
             key = (
                 str(definition.get("output_primary_label") or definition.get("label") or "").strip(),
@@ -973,17 +1021,32 @@ class BankTransactionCategoryService:
             )
             if key[0] and key not in reusable_by_label_path:
                 reusable_by_label_path[key] = dict(definition)
+            can_reuse_custom_label_only = (
+                str(definition.get("source") or "") == "custom"
+                and not cls._is_auto_tag_rule_definition(definition)
+            )
+            can_reuse_editable_system_label_only = cls._can_reuse_editable_system_code_by_label(definition)
+            can_reuse_label_only = can_reuse_custom_label_only or can_reuse_editable_system_label_only
+            if can_reuse_label_only:
+                label = str(definition.get("label") or "").strip()
+                label_only_key = ("", label)
+                if label and label_only_key not in reusable_by_label_path:
+                    reusable_by_label_path[label_only_key] = dict(definition)
 
         active_definitions: list[dict[str, Any]] = []
         reused_codes: list[str] = []
         added_codes: list[str] = []
+        recovered_codes: list[str] = []
         active_codes: set[str] = set()
+        active_label_paths: set[tuple[str, str]] = set()
         occupied_codes = dict(previous_definitions_by_code)
         for index, rule in enumerate(parsed["active_rules"]):
             primary_label = str(rule["output_primary_label"])
             sub_label = str(rule.get("output_sub_label") or "")
             label = sub_label or primary_label
             reusable = reusable_by_label_path.get((primary_label, sub_label))
+            if reusable is None and sub_label:
+                reusable = reusable_by_label_path.get(("", sub_label))
             if reusable is not None:
                 code = str(reusable["code"])
                 source_type = str(reusable.get("source") or "custom")
@@ -996,6 +1059,7 @@ class BankTransactionCategoryService:
                 added_codes.append(code)
                 occupied_codes[code] = {"code": code}
             active_codes.add(code)
+            active_label_paths.add((primary_label, sub_label))
             active_definitions.append(
                 {
                     "code": code,
@@ -1013,6 +1077,29 @@ class BankTransactionCategoryService:
                     "rule_code": rule_code,
                 }
             )
+
+        next_sort_order = len(active_definitions) + 1
+        for definition in previous_definitions_by_code.values():
+            code = str(definition.get("code") or "").strip()
+            if not code or code in active_codes:
+                continue
+            recovered_definition = cls._legacy_external_turnover_repair_definition(
+                definition,
+                sort_order=next_sort_order,
+            )
+            if recovered_definition is None:
+                continue
+            label_path_key = (
+                str(recovered_definition.get("output_primary_label") or "").strip(),
+                str(recovered_definition.get("output_sub_label") or "").strip(),
+            )
+            if label_path_key in active_label_paths:
+                continue
+            active_codes.add(code)
+            active_label_paths.add(label_path_key)
+            active_definitions.append(recovered_definition)
+            recovered_codes.append(code)
+            next_sort_order += 1
 
         archived_definitions: list[dict[str, Any]] = []
         for code in sorted(previous_managed_codes - active_codes):
@@ -1036,11 +1123,13 @@ class BankTransactionCategoryService:
         changes["source"] = dict(parsed["source"])
         changes["reused_codes"] = sorted(set(reused_codes))
         changes["added_codes"] = sorted(set(added_codes))
+        changes["recovered_legacy_external_turnover_codes"] = sorted(set(recovered_codes))
         changes["skipped_rows"] = [dict(item) for item in parsed["skipped_rows"]]
         changes["changed"] = bool(
             changes["changed"]
             or changes["reused_codes"]
             or changes["added_codes"]
+            or changes["recovered_legacy_external_turnover_codes"]
             or changes["skipped_rows"]
         )
         normalized_next["version"] = previous_version + 1 if changes["changed"] else previous_version
@@ -1049,6 +1138,72 @@ class BankTransactionCategoryService:
             "changes": changes,
             "old_version": previous_version,
             "new_version": int(normalized_next["version"]),
+        }
+
+    @classmethod
+    def _can_reuse_editable_system_code_by_label(cls, definition: dict[str, Any]) -> bool:
+        code = str(definition.get("code") or "").strip()
+        if str(definition.get("source") or "") != "system":
+            return False
+        if code == EXTERNAL_TURNOVER_CATEGORY_CODE or code == "fee":
+            return True
+        if code not in BANK_AUTO_TAG_EDITABLE_CODES:
+            return False
+        current_label = str(definition.get("label") or "").strip()
+        default_label = str(cls.label_for(code) or "").strip()
+        return bool(current_label and default_label and current_label != default_label)
+
+    @classmethod
+    def _legacy_external_turnover_repair_definition(
+        cls,
+        definition: dict[str, Any],
+        *,
+        sort_order: int,
+    ) -> dict[str, Any] | None:
+        if cls._is_auto_tag_rule_definition(definition):
+            return None
+        if str(definition.get("source") or "") != "custom":
+            return None
+        if str(definition.get("status") or "active") != "active":
+            return None
+        code = str(definition.get("code") or "").strip()
+        label = str(definition.get("label") or "").strip()
+        spec = LEGACY_EXTERNAL_TURNOVER_LABEL_REPAIR_SPECS.get(label)
+        if not code or spec is None:
+            return None
+        primary_label = str(spec["primary_label"])
+        direction = str(spec["direction"])
+        action_type = infer_turnover_action_type(
+            primary_label=primary_label,
+            sub_label=label,
+            direction=direction,
+        )
+        return {
+            "code": code,
+            "label": label,
+            "path": ["自动识别", label],
+            "source": "custom",
+            "status": "active",
+            "priority": 2,
+            "sort_order": sort_order,
+            "direction": direction,
+            "account_scope": deepcopy(DEFAULT_BANK_AUTO_TAG_ACCOUNT_SCOPE),
+            "output_primary_label": primary_label,
+            "output_sub_label": label,
+            "turnover_role": EXTERNAL_TURNOVER_ROLE,
+            "turnover_action_type": action_type,
+            "rules": cls._normalize_auto_tag_rule_conditions(
+                {
+                    "match_fields": list(BANK_AUTO_TAG_DEFAULT_TEXT_FIELDS),
+                    "contains_any": list(spec["contains_any"]),
+                    "contains_all": [],
+                    "exact_any": [],
+                    "regex_any": [],
+                    "none_of": [],
+                },
+                allow_invalid=False,
+            ),
+            "rule_code": str(definition.get("rule_code") or code).strip() or code,
         }
 
     def get(self, transaction_id: str) -> dict[str, Any]:
@@ -1935,6 +2090,10 @@ class BankTransactionCategoryService:
 
     @classmethod
     def _auto_tag_file_rows(cls, source: Any) -> tuple[dict[str, Any], list[Any]]:
+        if isinstance(source, (str, Path)):
+            source_path = Path(source)
+            if source_path.suffix.lower() == ".xlsx":
+                return cls._xlsx_auto_tag_file_rows(source_path)
         if isinstance(source, dict):
             if isinstance(source.get("rules"), list):
                 return dict(source), list(source.get("rules") or [])
@@ -1948,15 +2107,37 @@ class BankTransactionCategoryService:
         return {}, []
 
     @classmethod
+    def _xlsx_auto_tag_file_rows(cls, source_path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:  # pragma: no cover - dependency is declared in backend requirements.
+            raise BankAutoTagRulesValidationError(
+                "bank_auto_tag_rule_xlsx_unavailable",
+                "当前运行环境缺少 openpyxl，无法读取银行流水标签 Excel 文件。",
+            ) from exc
+
+        workbook = load_workbook(source_path, data_only=True, read_only=True)
+        worksheet = workbook.worksheets[0]
+        rows = [list(row) for row in worksheet.iter_rows(values_only=True)]
+        return (
+            {
+                "source_name": source_path.name,
+                "source_workbook_name": source_path.name,
+            },
+            cls._worksheet_auto_tag_file_rows(rows),
+        )
+
+    @classmethod
     def _worksheet_auto_tag_file_rows(cls, rows: Any) -> list[dict[str, Any]]:
         raw_rows = list(rows or [])
         if not raw_rows:
             return []
-        headers = [str(value or "").strip() for value in list(raw_rows[0] or [])]
+        header_row_index = cls._auto_tag_file_header_row_index(raw_rows)
+        headers = [str(value or "").strip() for value in list(raw_rows[header_row_index] or [])]
         normalized_rows: list[dict[str, Any]] = []
         last_flow_type = ""
         last_primary_label = ""
-        for row_index, row in enumerate(raw_rows[1:], start=1):
+        for row_index, row in enumerate(raw_rows[header_row_index + 1 :], start=header_row_index + 1):
             values = list(row or [])
             if not any(str(value or "").strip() for value in values):
                 continue
@@ -1978,6 +2159,20 @@ class BankTransactionCategoryService:
                 normalized["source_row"] = row_index + 1
             normalized_rows.append(normalized)
         return normalized_rows
+
+    @classmethod
+    def _auto_tag_file_header_row_index(cls, rows: list[Any]) -> int:
+        required_fields = ("flow_type", "primary_label", "sub_label", "query_fields", "contains")
+        for index, row in enumerate(rows):
+            cells = {str(value or "").strip() for value in list(row or [])}
+            matched_fields = {
+                field
+                for field, aliases in BANK_AUTO_TAG_FILE_HEADER_ALIASES.items()
+                if any(alias in cells for alias in aliases)
+            }
+            if all(field in matched_fields for field in required_fields):
+                return index
+        return 0
 
     @classmethod
     def _normalize_auto_tag_file_row(cls, row: Any) -> dict[str, Any]:
@@ -2382,6 +2577,43 @@ class BankTransactionCategoryService:
             "category_label_path": label_path,
         }
 
+    def category_semantics_for_code(self, category_code: str | None) -> dict[str, Any]:
+        normalized_category_code = str(category_code or "").strip()
+        label_fields = self._label_fields_for(normalized_category_code or None)
+        definition = self._tag_definitions_by_code.get(normalized_category_code)
+        external_turnover = (
+            is_external_turnover_definition(definition)
+            or is_external_turnover_primary_label(label_fields.get("category_primary_label"))
+        )
+        turnover_role = ""
+        turnover_action_type = None
+        turnover_family = None
+        if external_turnover:
+            turnover_role = EXTERNAL_TURNOVER_ROLE
+            turnover_action_type = (
+                normalize_turnover_action_type((definition or {}).get("turnover_action_type"))
+                or infer_turnover_action_type(
+                    primary_label=label_fields.get("category_primary_label"),
+                    sub_label=label_fields.get("category_sub_label"),
+                    direction=(definition or {}).get("direction"),
+                )
+                or None
+            )
+            turnover_family = (
+                str((definition or {}).get("turnover_family") or "").strip()
+                or turnover_family_for_third_label(label_fields.get("category_third_label"))
+                or None
+            )
+        return {
+            "category_code": normalized_category_code or None,
+            "category_label": self._label_for(normalized_category_code or None),
+            "category_path": self._path_for(normalized_category_code or None),
+            **label_fields,
+            "turnover_role": turnover_role,
+            "turnover_action_type": turnover_action_type,
+            "turnover_family": turnover_family,
+        }
+
     def tag_count_keys(self) -> list[str]:
         with self._lock:
             active_codes = [
@@ -2430,6 +2662,7 @@ class BankTransactionCategoryService:
             if isinstance(record, dict)
             else ""
         ) or self._label_for(category_code)
+        computed_semantics = self.category_semantics_for_code(category_code)
         return {
             "transaction_id": transaction_id,
             "category_code": category_code,
@@ -2447,9 +2680,21 @@ class BankTransactionCategoryService:
                 if isinstance(record, dict)
                 else []
             ) or self._path_for(category_code),
-            "turnover_role": str(record.get("turnover_role") or "") if isinstance(record, dict) else "",
-            "turnover_action_type": str(record.get("turnover_action_type") or "") if isinstance(record, dict) and record.get("turnover_action_type") else None,
-            "turnover_family": str(record.get("turnover_family") or "") if isinstance(record, dict) and record.get("turnover_family") else None,
+            "turnover_role": (
+                str(record.get("turnover_role") or "").strip()
+                if isinstance(record, dict)
+                else ""
+            ) or str(computed_semantics.get("turnover_role") or ""),
+            "turnover_action_type": (
+                str(record.get("turnover_action_type") or "").strip()
+                if isinstance(record, dict) and record.get("turnover_action_type")
+                else None
+            ) or computed_semantics.get("turnover_action_type"),
+            "turnover_family": (
+                str(record.get("turnover_family") or "").strip()
+                if isinstance(record, dict) and record.get("turnover_family")
+                else None
+            ) or computed_semantics.get("turnover_family"),
             "category_version": version,
             "source": str(record.get("source") or "") if isinstance(record, dict) else "",
             "updated_by": str(record.get("updated_by") or "") if isinstance(record, dict) else "",

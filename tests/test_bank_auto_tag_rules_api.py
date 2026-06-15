@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION
+from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
@@ -1306,18 +1307,14 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         )
 
     def test_put_allows_deleting_active_rule_when_archived_has_same_label(self) -> None:
-        app = build_application()
-        settings = app._app_settings_service.get_settings_payload()
-        tag_dictionary = settings["bank_transaction_tags"]
-        existing_definitions = list(tag_dictionary["definitions"])
-        app._app_settings_service.update_settings(
-            completed_project_ids=[],
-            bank_account_mappings=[],
-            allowed_usernames=[],
-            readonly_export_usernames=[],
-            admin_usernames=[],
-            bank_transaction_tags={
-                "version": tag_dictionary["version"],
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            initial_app = build_application(data_dir=data_dir)
+            snapshot = dict(initial_app._app_settings_service._snapshot)
+            tag_dictionary = dict(snapshot["bank_transaction_tags"])
+            existing_definitions = list(tag_dictionary["definitions"])
+            snapshot["bank_transaction_tags"] = {
+                **tag_dictionary,
                 "definitions": [
                     *existing_definitions,
                     {
@@ -1358,40 +1355,40 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                         "rule_code": "custom_online_cert_fee_new",
                     },
                 ],
-            },
-            pending_invoice_tag_groups=settings["pending_invoice_tag_groups"],
-            actor_id="settings-owner",
-        )
-        current = app._app_settings_service.get_bank_auto_tag_rules_payload()
-        target = next(rule for rule in current["active_rules"] if rule["code"] == "custom_online_cert_fee_new")
+            }
+            ApplicationStateStore(data_dir).save_app_settings(snapshot)
+            app = build_application(data_dir=data_dir)
 
-        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
-            response = app._handle_api_bank_details_auto_tag_rules_update(
-                json.dumps(
-                    {
-                        "expected_version": current["version"],
-                        "active_rules": [
-                            rule
-                            for rule in current["active_rules"]
-                            if rule["code"] != "custom_online_cert_fee_new"
-                        ],
-                        "archived_rules": [*current["archived_rules"], target],
-                    },
-                    ensure_ascii=False,
-                ),
-                {},
+            current = app._app_settings_service.get_bank_auto_tag_rules_payload()
+            target = next(rule for rule in current["active_rules"] if rule["code"] == "custom_online_cert_fee_new")
+
+            with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
+                response = app._handle_api_bank_details_auto_tag_rules_update(
+                    json.dumps(
+                        {
+                            "expected_version": current["version"],
+                            "active_rules": [
+                                rule
+                                for rule in current["active_rules"]
+                                if rule["code"] != "custom_online_cert_fee_new"
+                            ],
+                            "archived_rules": [*current["archived_rules"], target],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    {},
+                )
+
+            payload = json.loads(response.body)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                [
+                    rule["code"]
+                    for rule in payload["archived_rules"]
+                    if rule["label"] == "网银证书服务费"
+                ],
+                ["custom_online_cert_fee_new", "custom_online_cert_fee_old"],
             )
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [
-                rule["code"]
-                for rule in payload["archived_rules"]
-                if rule["label"] == "网银证书服务费"
-            ],
-            ["custom_online_cert_fee_new", "custom_online_cert_fee_old"],
-        )
 
     def test_put_archives_referenced_tag_and_detaches_pending_invoice_rules_atomically(self) -> None:
         app = build_application()
@@ -1402,7 +1399,6 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             allowed_usernames=[],
             readonly_export_usernames=[],
             admin_usernames=[],
-            bank_transaction_tags=settings["bank_transaction_tags"],
             pending_invoice_tag_groups={
                 "version": settings["pending_invoice_tag_groups"]["version"],
                 "groups": {

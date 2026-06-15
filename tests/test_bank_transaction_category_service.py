@@ -1,6 +1,7 @@
 import unittest
 import json
 from pathlib import Path
+import tempfile
 
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankAutoTagRulesValidationError,
@@ -79,6 +80,34 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertEqual(fee["rules"]["exact_any"], ["账户管理费", "证书费"])
         self.assertEqual(fee["rules"]["none_of"], ["退款", "退回"])
         self.assertEqual(parsed["active_rules"][1]["rules"]["match_fields"], ["counterparty_name"])
+
+    def test_parse_xlsx_source_skips_title_row_and_preserves_workbook_row_numbers(self) -> None:
+        from openpyxl import Workbook
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "银行流水标签"
+        worksheet.append(["银行流水标签", None, None, None, None, None, None, None, None])
+        worksheet.append(["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样", "优先级"])
+        worksheet.append(["支出或收入", "内部往来款", "系统说明", "", "", "", "", "", "1"])
+        worksheet.append(["支出", "费用", "手续费", "用途/交易用途、摘要、备注/附言/客户附言", "手续费、短信服务费", "", "", "", "2"])
+        worksheet.append([None, None, "网银证书服务费", "用途/交易用途、摘要、备注/附言/客户附言", "网银证书服务费", "", "", "", "2"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "银行流水标签ui.xlsx"
+            workbook.save(source_path)
+
+            parsed = BankTransactionCategoryService.parse_auto_tag_rule_file_source(source_path)
+
+        self.assertEqual(parsed["source"]["source_name"], "银行流水标签ui.xlsx")
+        self.assertEqual(len(parsed["active_rules"]), 2)
+        self.assertEqual(parsed["skipped_rows"][0]["source_row"], "3")
+        self.assertEqual(parsed["active_rules"][0]["source_row"], "4")
+        self.assertEqual(parsed["active_rules"][0]["output_primary_label"], "费用")
+        self.assertEqual(parsed["active_rules"][0]["output_sub_label"], "手续费")
+        self.assertEqual(parsed["active_rules"][1]["source_row"], "5")
+        self.assertEqual(parsed["active_rules"][1]["output_primary_label"], "费用")
+        self.assertEqual(parsed["active_rules"][1]["output_sub_label"], "网银证书服务费")
 
     def test_file_replacement_persists_all_ordinary_rules_as_priority_two_in_file_order(self) -> None:
         fixture_path = Path("fixtures/bank_auto_tag_rules/bank_flow_tag_rules_ui2.normalized.json")
@@ -179,6 +208,225 @@ class BankTransactionCategoryServiceTests(unittest.TestCase):
         self.assertIn("custom_old_office", result["changes"]["reused_codes"])
         self.assertIn("salary", result["changes"]["archived_codes"])
         self.assertTrue(result["changes"]["added_codes"])
+
+    def test_file_replacement_reuses_damaged_custom_label_code_without_archiving_uncovered_custom_labels(self) -> None:
+        source = [
+            ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样"],
+            ["收入", "往来款收款", "退款", "用途/交易用途、摘要、备注/附言/客户附言", "退款、退回", "", "", ""],
+        ]
+        previous = BankTransactionCategoryService.from_snapshot(None).tag_dictionary_payload()
+        previous["version"] = 12
+        previous["definitions"].extend(
+            [
+                {
+                    "code": "custom_archived_refund",
+                    "label": "退款",
+                    "path": ["自动识别", "退款"],
+                    "source": "custom",
+                    "status": "archived",
+                    "output_primary_label": "往来款收款",
+                    "output_sub_label": "退款",
+                },
+                {
+                    "code": "custom_active_refund",
+                    "label": "退款",
+                    "path": ["自动识别", "退款"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "往来款收款",
+                    "output_sub_label": "退款",
+                },
+                {
+                    "code": "custom_uncovered_deposit_refund",
+                    "label": "退押金",
+                    "path": ["自动识别", "退押金"],
+                    "source": "custom",
+                    "status": "active",
+                    "output_primary_label": "往来款收款",
+                    "output_sub_label": "退押金",
+                },
+            ]
+        )
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_file_replacement(
+            source,
+            previous_tag_dictionary=previous,
+        )
+
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in result["tag_dictionary"]["definitions"]
+        }
+        self.assertEqual(definitions_by_code["custom_active_refund"]["rules"]["contains_any"], ["退款", "退回"])
+        self.assertEqual(definitions_by_code["custom_active_refund"]["status"], "active")
+        self.assertEqual(definitions_by_code["custom_uncovered_deposit_refund"]["status"], "active")
+        self.assertIn("custom_active_refund", result["changes"]["reused_codes"])
+        self.assertNotIn("custom_uncovered_deposit_refund", result["changes"]["archived_codes"])
+
+    def test_file_replacement_reuses_damaged_external_turnover_system_code_by_label(self) -> None:
+        source = [
+            ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样"],
+            ["支出", "往来款付款", "借出款", "用途/交易用途、摘要、备注/附言/客户附言", "暂借款、借款", "", "", ""],
+        ]
+        previous = BankTransactionCategoryService.from_snapshot(None).tag_dictionary_payload()
+        previous["version"] = 15
+        for definition in previous["definitions"]:
+            if definition.get("code") == "external_turnover":
+                definition.clear()
+                definition.update(
+                    {
+                        "code": "external_turnover",
+                        "label": "借出款",
+                        "path": ["自动识别", "借出款"],
+                        "source": "system",
+                        "status": "active",
+                    }
+                )
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_file_replacement(
+            source,
+            previous_tag_dictionary=previous,
+        )
+
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in result["tag_dictionary"]["definitions"]
+        }
+        self.assertEqual(definitions_by_code["external_turnover"]["status"], "active")
+        self.assertEqual(definitions_by_code["external_turnover"]["output_primary_label"], "往来款付款")
+        self.assertEqual(definitions_by_code["external_turnover"]["output_sub_label"], "借出款")
+        self.assertEqual(definitions_by_code["external_turnover"]["turnover_action_type"], "pending_collection")
+        self.assertEqual(definitions_by_code["external_turnover"]["rules"]["contains_any"], ["暂借款", "借款"])
+        self.assertIn("external_turnover", result["changes"]["reused_codes"])
+        self.assertNotIn("external_turnover", result["changes"]["archived_codes"])
+
+    def test_file_replacement_reuses_repurposed_editable_system_code_by_label(self) -> None:
+        source = [
+            ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样"],
+            ["支出", "薪资社保福利", "社保", "用途/交易用途、摘要、备注/附言/客户附言", "社保款、社保费", "", "", ""],
+        ]
+        previous = BankTransactionCategoryService.from_snapshot(None).tag_dictionary_payload()
+        previous["version"] = 16
+        for definition in previous["definitions"]:
+            if definition.get("code") == "salary":
+                definition["label"] = "社保"
+                definition["output_primary_label"] = "社保"
+                definition["output_sub_label"] = ""
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_file_replacement(
+            source,
+            previous_tag_dictionary=previous,
+        )
+
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in result["tag_dictionary"]["definitions"]
+        }
+        self.assertEqual(definitions_by_code["salary"]["status"], "active")
+        self.assertEqual(definitions_by_code["salary"]["label"], "社保")
+        self.assertEqual(definitions_by_code["salary"]["output_primary_label"], "薪资社保福利")
+        self.assertEqual(definitions_by_code["salary"]["output_sub_label"], "社保")
+        self.assertEqual(definitions_by_code["salary"]["rules"]["contains_any"], ["社保款", "社保费"])
+        self.assertIn("salary", result["changes"]["reused_codes"])
+        self.assertNotIn("salary", result["changes"]["archived_codes"])
+
+    def test_file_replacement_recovers_legacy_external_turnover_custom_codes_missing_from_file(self) -> None:
+        source = [
+            ["流水类型", "分类（一级）", "银行流水标签（贰级）", "选择查询的项", "包含", "必须同时包含", "精准命重", "不包含字样"],
+            ["支出", "往来款付款", "借出款", "用途/交易用途、摘要、备注/附言/客户附言", "暂借款、借款", "", "", ""],
+        ]
+        previous = {
+            "version": 21,
+            "definitions": [
+                {
+                    "code": "custom_borrow_in",
+                    "label": "借入款",
+                    "path": ["自动识别", "借入款"],
+                    "source": "custom",
+                    "status": "active",
+                },
+                {
+                    "code": "custom_repaid",
+                    "label": "归还借款",
+                    "path": ["自动识别", "归还借款"],
+                    "source": "custom",
+                    "status": "active",
+                },
+                {
+                    "code": "custom_ordinary",
+                    "label": "普通标签",
+                    "path": ["自动识别", "普通标签"],
+                    "source": "custom",
+                    "status": "active",
+                },
+            ],
+        }
+
+        result = BankTransactionCategoryService.normalize_auto_tag_rules_file_replacement(
+            source,
+            previous_tag_dictionary=previous,
+        )
+
+        definitions_by_code = {
+            definition["code"]: definition
+            for definition in result["tag_dictionary"]["definitions"]
+        }
+        self.assertEqual(definitions_by_code["custom_borrow_in"]["output_primary_label"], "外部往来款收款")
+        self.assertEqual(definitions_by_code["custom_borrow_in"]["output_sub_label"], "借入款")
+        self.assertEqual(definitions_by_code["custom_borrow_in"]["turnover_action_type"], "pending_repayment")
+        self.assertEqual(definitions_by_code["custom_borrow_in"]["rules"]["contains_any"], ["借入款", "暂借款", "借款"])
+        self.assertEqual(definitions_by_code["custom_repaid"]["output_primary_label"], "外部往来款付款")
+        self.assertEqual(definitions_by_code["custom_repaid"]["turnover_action_type"], "repaid")
+        self.assertEqual(definitions_by_code["custom_ordinary"]["status"], "active")
+        self.assertNotIn("rules", definitions_by_code["custom_ordinary"])
+        self.assertEqual(
+            result["changes"]["recovered_legacy_external_turnover_codes"],
+            ["custom_borrow_in", "custom_repaid"],
+        )
+
+    def test_legacy_category_record_uses_current_external_definition_semantics(self) -> None:
+        service = BankTransactionCategoryService(
+            categories={
+                "txn-legacy-confirmed": {
+                    "category_code": "custom_borrow_in",
+                    "source": "auto_confirmation",
+                    "version": 3,
+                }
+            },
+            tag_dictionary={
+                "version": 7,
+                "definitions": [
+                    {
+                        "code": "custom_borrow_in",
+                        "label": "借入款",
+                        "path": ["自动识别", "借入款"],
+                        "source": "custom",
+                        "status": "active",
+                        "direction": "income",
+                        "output_primary_label": "外部往来款收款",
+                        "output_sub_label": "借入款",
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "pending_repayment",
+                        "rules": {
+                            "match_fields": ["all_text"],
+                            "contains_any": ["暂借款"],
+                            "contains_all": [],
+                            "exact_any": [],
+                            "regex_any": [],
+                            "none_of": [],
+                        },
+                    }
+                ],
+            },
+        )
+
+        record = service.get("txn-legacy-confirmed")
+
+        self.assertEqual(record["category_primary_label"], "外部往来款收款")
+        self.assertEqual(record["category_sub_label"], "借入款")
+        self.assertEqual(record["category_label_path"], ["外部往来款收款", "借入款"])
+        self.assertEqual(record["turnover_role"], "external_turnover")
+        self.assertEqual(record["turnover_action_type"], "pending_repayment")
 
     def test_apply_updates_persists_category_with_version_and_audit_fields(self) -> None:
         service = BankTransactionCategoryService.from_snapshot(

@@ -809,7 +809,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         all_payload = service.list_rows(direction="expense", filter="all")
         income_payload = service.list_rows(direction="income", filter="all")
 
-        self.assertEqual([row["id"] for row in requires_payload["rows"]], ["txn_requires"])
+        self.assertEqual([row["id"] for row in requires_payload["rows"]], ["txn_requires", "txn_unmapped"])
         self.assertTrue(requires_payload["rows"][0]["can_create_invoice"])
         self.assertEqual([row["id"] for row in statement_payload["rows"]], ["txn_statement"])
         self.assertTrue(statement_payload["rows"][0]["can_create_invoice"])
@@ -978,7 +978,10 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
 
         payload = service.list_rows(direction="expense", filter="requires_invoice")
 
-        self.assertEqual([row["id"] for row in payload["rows"]], ["txn_custom_meal"])
+        self.assertEqual(
+            [row["id"] for row in payload["rows"]],
+            ["txn_custom_meal", "txn_no_category", "txn_archived", "txn_unknown"],
+        )
         self.assertEqual(payload["rows"][0]["invoice_acquisition_status"]["matched_rule"]["group"], "requires_invoice")
 
     def test_expense_status_priority_uses_rules_and_invoice_payment_facts(self) -> None:
@@ -1025,6 +1028,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         )
 
         payload = service.list_rows(direction="expense", filter="all", page_size=10)
+        requires_payload = service.list_rows(direction="expense", filter="requires_invoice", page_size=10)
 
         statuses = {row["id"]: row["invoice_acquisition_status"]["code"] for row in payload["rows"]}
         self.assertEqual(statuses[partial_txn.id], "invoice_not_fully_paid")
@@ -1032,6 +1036,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(statuses[no_rule_txn.id], "no_invoice_required")
         self.assertEqual(statuses[statement_txn.id], "bank_statement_as_invoice")
         self.assertEqual(statuses[missing_txn.id], "paid_pending_invoice")
+        self.assertEqual([row["id"] for row in requires_payload["rows"]], [partial_txn.id, paid_txn.id, missing_txn.id])
 
     def test_filter_rules_use_effective_auto_categories(self) -> None:
         auto_no_invoice_txn = self._bank_transaction(
@@ -1188,7 +1193,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
 
         self.assertEqual([row["id"] for row in no_invoice_payload["rows"]], [no_invoice_txn.id])
         self.assertEqual([row["id"] for row in cash_payload["rows"]], [cash_txn.id])
-        self.assertEqual([row["id"] for row in requires_payload["rows"]], [requires_txn.id])
+        self.assertEqual([row["id"] for row in requires_payload["rows"]], [requires_txn.id, unknown_txn.id, archived_txn.id])
         self.assertEqual(requires_payload["rows"][0]["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["收入", "服务收入"])
 
     def test_bank_account_label_uses_bank_mapping_not_company_account_name(self) -> None:

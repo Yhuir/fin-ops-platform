@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-15 - 自动标签规则恢复入口与历史外部往来语义补齐
+
+- 目标：阻断工作台大 settings 保存入口污染 `bank_transaction_tags`，并让银行明细自动标签文件恢复可以从 Excel 与 app 历史恢复规则、复用旧 code、补齐历史外部往来语义。
+- 影响范围：`AppSettingsService`、银行自动标签 HTTP 入口、Workbench settings 前端 API、`BankTransactionCategoryService`、`BankDetailSqlProjectionBuilder`、bank-details/turnover-ledger 测试矩阵。
+- 关键决策：`/api/workbench/settings` 不再允许保存 `bank_transaction_tags`；唯一写入口保留银行明细“自动标签规则”。文件替换优先按 app 历史复用已有 code，支持 `.xlsx` 标题行解析；对生产中已损坏为 label-only 的历史外部往来 custom code、`external_turnover` code，以及已按 app 历史重命名/重配的 editable system code，按现有规则/外部往来语义 helper 恢复 rules/action，避免恢复时归档仍被下游引用的旧 code。旧确认记录缺 action 时，bank detail SQL projection 从当前 tag definition 补齐语义。生产恢复使用 `fin_ops_platform.tools.restore_bank_auto_tag_rules`，默认 dry-run；写入必须同时提供 `--apply --confirm-write`，并通过银行明细 application service 触发保存、审计和 read model 刷新。
+- 文档影响：更新 `docs/dev/api-contracts.md`、settings/bank-details/turnover-ledger 模块测试文档。
+- 测试覆盖：新增/更新 app settings 写边界、bank auto tag file replacement、xlsx parser、legacy external turnover recovery、bank detail projection enrichment、生产恢复工具 dry-run/write guard、前端 Workbench settings payload 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_transaction_category_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_app_settings_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime.BankDetailSqlProjectionBuilderTests -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_restore_bank_auto_tag_rules_tool -v`。
+- 未测风险：本地未写生产；真实生产仍需备份、应用恢复、刷新 `bank_detail`/`turnover_ledger`/`workbench_relation`/`workbench` read models 后，验证目标三笔流水在关联台 open 区形成 active bank-only 关系组。
+- 后续事项：生产写入前必须输出写入 key/table、版本变化、回滚方案、refresh scope 和验收 SQL/API/UI 步骤，并取得明确授权。
+
 ## 2026-06-14 - Bank detail stale source guard
 
 - 目标：修复真实关联台 confirm/withdraw 连续写入时，旧 `bank_detail` source_version 事件仍完整 rebuild，导致新版本 bank detail 和下游 pending invoice 写后 SLO 超过 5s。

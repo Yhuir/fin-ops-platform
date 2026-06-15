@@ -1044,6 +1044,38 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertIn("status_code", executed_sql)
         self.assertNotIn("filter_group = %s", executed_sql)
 
+    def test_pending_invoice_repository_requires_invoice_filter_uses_status_bucket(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-paid-pending",
+                        "bank_transaction": {"id": "txn-paid-pending"},
+                        "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                        "filter_group": "all",
+                    },
+                    "missing_invoice": True,
+                    "can_create_invoice": True,
+                }
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="requires_invoice",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            filters=json.dumps([{"field": "status_code", "operator": "in", "values": ["paid_pending_invoice"]}]),
+            page=1,
+            page_size=50,
+        )
+
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertIn("status_code = any", executed_sql)
+        self.assertNotIn("filter_group = %s", executed_sql)
+
     def test_pending_invoice_repository_supports_new_column_filter_fields_as_and_clauses(self) -> None:
         connection = SearchPendingConnection(
             pending_rows=[
@@ -1761,8 +1793,12 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
 
         rows = builder._pending_invoice_rows(direction="expense", filter_name="requires_invoice", month="2026-05")
 
-        self.assertEqual([row["payload"]["id"] for row in rows], ["txn-custom-meal"])
+        self.assertEqual(
+            [row["payload"]["id"] for row in rows],
+            ["txn-custom-meal", "txn-no-category", "txn-archived", "txn-unknown"],
+        )
         self.assertEqual(rows[0]["payload"]["filter_group"], "requires_invoice")
+        self.assertEqual(rows[1]["payload"]["filter_group"], "all")
         self.assertEqual(
             rows[0]["payload"]["invoice_acquisition_status"]["matched_rule"]["group"],
             "requires_invoice",
@@ -1783,7 +1819,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(groups_by_id["txn-no-category"], "all")
         self.assertEqual(groups_by_id["txn-unknown"], "all")
         self.assertEqual(groups_by_id["txn-archived"], "all")
-        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-fee"])
+        self.assertEqual(
+            [row["payload"]["id"] for row in requires_rows],
+            ["txn-fee", "txn-no-category", "txn-unknown", "txn-archived"],
+        )
         self.assertEqual([row["payload"]["id"] for row in statement_rows], ["txn-internal-transfer"])
         self.assertEqual([row["payload"]["id"] for row in no_invoice_rows], ["txn-salary"])
 
@@ -1800,7 +1839,8 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["invoice_acquisition_status"]["matched_rule"]["tag_code"], "equipment_purchase")
         self.assertEqual(payload["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["货款", "设备采购"])
         self.assertEqual(payload["bank_transaction"]["effective_tag_label_path"], ["货款", "设备采购"])
-        self.assertEqual(requires_rows, [])
+        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-expense-unknown"])
+        self.assertEqual(requires_rows[0]["payload"]["filter_group"], "all")
 
     def test_pending_invoice_sql_projection_excludes_already_invoiced_rows_from_statement_filter(self) -> None:
         relation_facade = FakeWorkbenchRelationReadFacade(
@@ -1863,10 +1903,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         no_invoice_rows = builder._pending_invoice_rows(direction="income", filter_name="no_invoice_required", month="2026-05")
         cash_rows = builder._pending_invoice_rows(direction="income", filter_name="cash_income", month="2026-05")
 
-        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-output", "txn-manual", "txn-pending"])
+        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-output", "txn-pending"])
         self.assertEqual(requires_rows[0]["payload"]["invoice_acquisition_status"]["code"], "income_invoiced")
         self.assertEqual([row["payload"]["id"] for row in no_invoice_rows], ["txn-no-invoice"])
-        self.assertEqual([row["payload"]["id"] for row in cash_rows], ["txn-cash"])
+        self.assertEqual([row["payload"]["id"] for row in cash_rows], ["txn-cash", "txn-manual"])
 
     def test_pending_invoice_sql_projection_uses_effective_category_fields_for_income_rules(self) -> None:
         builder = SearchPendingSqlProjectionBuilder(connection=PendingEffectiveCategoryProjectionConnection(direction="income"))
@@ -1874,7 +1914,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         requires_rows = builder._pending_invoice_rows(direction="income", filter_name="requires_invoice", month="2026-05")
         cash_rows = builder._pending_invoice_rows(direction="income", filter_name="cash_income", month="2026-05")
 
-        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-income-service"])
+        self.assertEqual([row["payload"]["id"] for row in requires_rows], ["txn-income-service", "txn-income-unknown"])
         self.assertEqual([row["payload"]["id"] for row in cash_rows], ["txn-income-cash"])
         self.assertEqual(requires_rows[0]["payload"]["invoice_acquisition_status"]["matched_rule"]["tag_label_path"], ["收入", "服务收入"])
         self.assertEqual(cash_rows[0]["payload"]["bank_transaction"]["effective_tag_code"], "cash_sale")

@@ -7,12 +7,24 @@
 - 外部往来款管理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、service/UoW、API contract、read model/worker、前端交互、跨页面集成和旧功能回归。
 - 本轮不新增低价值测试。后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `tests.md` 中七类矩阵补测试。
 - 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。bank-only 外部往来闭环在关联台保持 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
+- PostgreSQL SQL runtime 下外部往来闭环的银行流水事实源必须是 `bank_detail` SQL read model，并保留 Workbench 使用的 legacy/source row id；不能再从 legacy import snapshot 推导可闭环流水。
 - 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回 bank-only 闭环再重新选择。
 - 外部往来页撤回只允许 bank-only open 外部往来闭环；若已在关联台补齐三栏并进入 paired，必须去关联台撤回完整关系。
 - `readModelStatus !== "fresh"` 时前端必须显示诊断并避免把旧 grouped payload 当作最终业务结论；manual closure 这类依赖页面所选 flow row versions 的写操作必须先阻断或等待 fresh 后重新加载并重绑定，后端 stale precondition、canonical write safety、权限/session、DB 和 idempotency/version 继续作为最终兜底。写 API 成功后必须用全屏 operation overlay 等待 `turnover_ledger` barrier fresh 并重新加载。
 - 写路径应优先保持 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` 边界；legacy fallback 只作为兼容风险存在，不能继续扩大。
 - 涉及 Workbench relation 的 manual closure/withdraw 即使经过 legacy fallback facade，也必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation write fallback。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
+
+## 2026-06-15 - SQL runtime closure source alignment
+
+- 目标：修复生产环境外部往来页选中三笔银行流水确认闭环失败，且关联台 open 区没有生成同一个关系组的问题。
+- 真实原因：不是关联台渲染丢关系，也不是 deterministic 候选应自动显示为已配对。生产 SQL runtime 的 `bank_detail` read model 已有这三笔流水及当前自动标签版本，但闭环写路径仍从 legacy import snapshot 读取可闭环银行流水；该快照在当前 SQL 部署下为空或不含目标行，所以后端在 stale/unknown bank row precondition 阶段拒绝写入，`TurnoverRelationService.confirm_zero_difference_closure` 和 `WorkbenchRelationCommandService.confirm_relation` 都没有执行。
+- 第二个必须修复的边界：`bank_detail` SQL read model 的 durable `transaction_id` 可能是 UUID，而关联台 row id 使用 legacy/source id，例如 `txn_imported_*`。闭环写入必须把 legacy/source id 保留为 `id` 与 `source_bank_row_id`，否则即使 relation 写成功也可能无法和关联台行聚合。
+- 关键决策：`Application._turnover_bank_transaction_rows()` 在 SQL runtime 下改为读取 `bank_detail_sql_read_repository.list_bank_detail_tagged_rows_by_month(...)`；使用 app settings 中的外部往来选中标签集过滤；`read_model_status` 允许 `fresh` 和 `refreshing`，但 `refreshing` payload 中只接受当前 `bank-auto-tag-rules:{version}` 的行，避免把旧规则版本行拿去闭环；应用启动早期 settings service 尚未绑定时返回空集合，不让 startup wiring 崩溃。
+- 文档影响：更新本模块实施记录和测试矩阵；银行标签恢复和设置入口收口记录在 `bank-details`、`settings` 模块。
+- 测试覆盖：新增 `test_sql_bank_detail_turnover_rows_keep_legacy_source_ids_for_manual_closure` 覆盖 SQL read model row -> turnover closure -> Workbench active relation，新增 `test_sql_turnover_rows_tolerate_early_startup_before_app_settings_service_is_bound` 覆盖启动早期安全返回。
+- 生产验证：已用现有 application facade 对目标三笔 legacy bank row ids 写入 manual zero-difference closure，并验证 `workbench_relation` read facade 返回 `fresh`，三笔行都 linked 到同一个 `turnover:{relation_id}` open group。
+- 未测风险：未在本轮执行标准发布脚本全量重发 release；生产采取当前 release 单文件 hotfix 并重启服务，后续正式发布应带上本地变更和完整验证。
 
 ## 2026-06-15 - Manual closure selected-row fresh gate
 

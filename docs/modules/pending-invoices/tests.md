@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 发票获取状态 | `InvoiceLifecyclePolicy`、`invoice_lifecycle` read boundary、pending invoice read model | `invoice_acquisition_status` shape 保持兼容；页面不能私有定义状态或 primary action。 |
 | 方向 | `expense` / `income` query scope | 支出读取进项发票与支出流水；收入读取销项发票与收入流水；`all` direction 组合双方 summary。 |
-| 规则组 | `pending_invoice_tag_groups.version`、`pending_output_invoice_tag_groups.version` | 支出/收入规则版本独立；`requires_invoice` 是 active tag complement，不是可编辑持久事实。 |
+| 规则组与状态桶 | `pending_invoice_tag_groups.version`、`pending_output_invoice_tag_groups.version`、`invoice_acquisition_status.code` | 支出/收入规则版本独立；`requires_invoice` 作为规则解释是 active tag complement，不是可编辑持久事实；作为列表 filter 是最终状态桶，不能依赖 `filter_group`。 |
 | 银行标签 | bank detail effective category facade/read model | 规则筛选必须使用 effective category；标签归档/重命名刷新规则 drawer 和 pending read model。 |
 | 历史 manual command | `PendingInvoiceApplicationService.preview_manual_invoice` / `confirm_manual_invoice`、command repository | 只保留旧数据恢复/迁移兼容测试；待找发票 HTTP API 和页面 UI 不再暴露 manual invoice 新写入口。 |
 | 选择已有发票 | attach existing preview/confirm、`WorkbenchRelationCommandService` | 只允许 expense 选择 input invoice；支持多条流水和多张发票批量 preview/confirm；可附加已被其他付款关联的发票并通过 command service 合并到兼容 active relation；必须写 audit/finalizer。 |
@@ -75,6 +75,7 @@
 | 2026-06-11 | 支出状态下拉缺少 `已支付待开票` 和 `已支付已开票` 直接筛选入口。 | `web/src/test/PendingInvoicesPage.test.tsx` | covered |
 | 2026-06-15 | 行内三点和补票入口继续暴露，导致旧 manual 新写路径污染待找发票链路。 | `tests/test_pending_invoice_api.py::PendingInvoiceApiTests::test_manual_invoice_endpoints_are_not_reachable`、`web/src/test/PendingInvoicesPage.test.tsx` | covered |
 | 2026-06-15 | 收入侧只能逐行标记，前端循环调用单条接口可能造成半成功。 | `tests/test_pending_invoice_service.py::PendingInvoiceApplicationServiceTests::test_confirm_income_status_overrides_batch_is_idempotent_and_fans_out_once`、`tests/test_pending_invoice_service.py::PendingInvoiceApplicationServiceTests::test_confirm_income_status_overrides_batch_rejects_ineligible_rows_before_writing`、`web/src/test/PendingInvoicesPage.test.tsx` | covered |
+| 2026-06-15 | `filter=requires_invoice` 被错误耦合到 `filter_group='requires_invoice'`，生产中 `filter_group=all` 但状态为 `paid_pending_invoice` / `paid_invoiced` 的行被筛空。 | `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_requires_invoice_filter_uses_status_bucket`、`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_sql_projection_uses_active_complement_for_requires_invoice_filter`、`tests/test_pending_invoice_service.py::PendingInvoiceQueryServiceTests::test_expense_status_priority_uses_rules_and_invoice_payment_facts` | covered |
 
 ## 关键 smoke flows
 

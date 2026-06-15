@@ -1925,22 +1925,6 @@ function mapPendingInvoiceTagGroups(value: ApiWorkbenchSettings["pending_invoice
   };
 }
 
-function serializeBankTransactionTags(value: BankTransactionTagDictionary | undefined) {
-  if (!value) {
-    return undefined;
-  }
-  return {
-    version: value.version,
-    definitions: value.tags.map((tag) => ({
-      code: tag.code,
-      label: tag.label,
-      path: tag.path,
-      status: tag.status,
-      source: tag.source,
-    })),
-  };
-}
-
 function serializePendingInvoiceTagGroups(value: PendingInvoiceTagGroups | undefined) {
   if (!value) {
     return undefined;
@@ -2771,7 +2755,6 @@ export async function saveWorkbenchSettings(
       oa_invoice_offset: {
         applicant_names: settings.oaInvoiceOffset?.applicantNames ?? [],
       },
-      bank_transaction_tags: serializeBankTransactionTags(settings.bankTransactionTags),
       pending_invoice_tag_groups: serializePendingInvoiceTagGroups(settings.pendingInvoiceTagGroups),
     }),
   });

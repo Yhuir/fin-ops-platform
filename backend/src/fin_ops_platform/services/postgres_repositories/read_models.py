@@ -12,6 +12,7 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_COUNT_KEYS
+from fin_ops_platform.services.pending_invoice_status import pending_invoice_filter_status_codes
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     int_value,
@@ -8450,24 +8451,10 @@ def _pending_invoice_option_expression(field: str) -> str:
 def _pending_invoice_visible_filter_clause(*, direction: str, filter_name: str) -> tuple[str, list[Any]]:
     normalized_filter = text(filter_name) or "all"
     normalized_direction = text(direction) or "expense"
-    if normalized_filter == "requires_invoice":
-        status_codes = (
-            ["cash_income", "income_pending_invoice", "income_invoiced"]
-            if normalized_direction == "income"
-            else ["paid_invoiced", "paid_pending_invoice", "paid_pending_future_invoice", "invoice_not_fully_paid"]
-        )
-        return ("filter_group = %s and status_code = any(%s)", [normalized_filter, status_codes])
-    elif normalized_filter == "bank_statement_as_invoice":
-        status_codes = ["bank_statement_as_invoice"]
-    elif normalized_filter == "no_invoice_required":
-        status_codes = ["income_no_invoice_required"] if normalized_direction == "income" else ["no_invoice_required"]
-        return ("filter_group = %s and status_code = any(%s)", [normalized_filter, status_codes])
-    elif normalized_filter == "cash_income":
-        status_codes = ["cash_income"]
-        return ("filter_group = %s and status_code = any(%s)", [normalized_filter, status_codes])
-    else:
+    status_codes = pending_invoice_filter_status_codes(direction=normalized_direction, filter_name=normalized_filter)
+    if not status_codes:
         return ("true", [])
-    return ("status_code = any(%s)", [status_codes])
+    return ("status_code = any(%s)", [list(status_codes)])
 
 
 def _pending_invoice_order_sql(*, sort_field: str | None, sort_direction: str | None) -> str:

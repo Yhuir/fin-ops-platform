@@ -34,8 +34,8 @@
 
 - 列表读取支出/收入流水、候选发票、规则建议、选择已有发票关系和收入状态覆盖。
 - 筛选覆盖月份、项目、付款对象、状态、异常和规则命中。
-- 筛选状态必须以最终 `invoice_acquisition_status.code` 闭环。特别是 `bank_statement_as_invoice` 只展示最终仍为“流水代替发票”的流水；如果同一流水已关联发票并变成 `paid_invoiced`，不能继续出现在“流水代替发票”筛选结果里。
-- 规则组筛选仍表达规则口径，例如收入 `requires_invoice` 可以包含已开票、待开票和人工标记状态；但具体状态筛选和规则组筛选不得互相污染。
+- 筛选状态必须以最终 `invoice_acquisition_status.code` 闭环。`requires_invoice` 作为列表 filter 表达“需要开票”状态桶：支出包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`；收入包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释命中的规则，不作为父筛选可见性的事实源。
+- `bank_statement_as_invoice`、`no_invoice_required`、`cash_income` 也按最终状态筛选。特别是 `bank_statement_as_invoice` 只展示最终仍为“流水代替发票”的流水；如果同一流水已关联发票并变成 `paid_invoiced`，不能继续出现在“流水代替发票”筛选结果里。
 - 支出侧选择多条流水后从选中工具栏进入“选择发票”，只允许选择已有进项发票并写入统一 Workbench relation command。
 - 收入侧支持多选后批量标记“无需开票”或“现金收入”；后端必须先完成整批校验再一次写入，不允许前端逐行循环造成半成功。
 - 当前页面不再提供 manual invoice preview/confirm 或“补票”新写入口；历史 manual command 只用于旧数据恢复/迁移兼容。

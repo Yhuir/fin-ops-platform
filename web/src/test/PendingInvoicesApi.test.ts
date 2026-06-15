@@ -704,7 +704,7 @@ describe("pending invoices and tag settings API mapping", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if ((init?.method ?? "GET").toUpperCase() === "POST") {
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-        expect(body.bank_transaction_tags).toMatchObject({ version: 3 });
+        expect(body).not.toHaveProperty("bank_transaction_tags");
         expect(body.pending_invoice_tag_groups).toEqual({
           groups: {
             requires_invoice: { tag_codes: ["fee"] },

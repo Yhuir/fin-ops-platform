@@ -22,6 +22,7 @@
 - `pending_invoice_tag_groups.version` 只代表支出规则版本；`pending_output_invoice_tag_groups.version` 只代表收入规则版本。
 - 保存规则只递增当前 direction 的规则版本，不递增 `bank_transaction_tags.version`。
 - `requires_invoice` 即使出现在请求中也必须忽略；后端始终按 active tag complement 派生。
+- 列表 `filter=requires_invoice` 是“需要开票”状态桶，不是 `filter_group='requires_invoice'` 条件。支出包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`；收入包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能把生产中 `filter_group=all` 但最终状态待/已开票的行排除。
 - filter-options、export-preview 和 export 必须先读 fresh read model；非 fresh 时返回 accepted/refreshing。
 - 历史 manual invoice service/command 只作为旧数据恢复和迁移兼容能力保留；待找发票页面和 HTTP API 不再提供新建 manual invoice 写入口。
 - 选择已有发票批量 preview 不写事实；confirm 必须返回 affected transaction/invoice arrays。已存在兼容的 bank+invoice relation 时应合并/扩展同一 active relation，不创建复用同一 row 的第二条 active case。
@@ -108,6 +109,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-15 | `requires_invoice` 父筛选改为最终状态桶，解除对 `filter_group` 的可见性依赖 | Pending invoice status helper、service fallback、SQL read repository、SQL projection、API/product/module docs | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py` |
 | 2026-06-15 | 移除待找发票行内三点菜单和 manual invoice HTTP/UI 新写入口；收入侧增加多选批量标记 | PendingInvoiceApplicationService batch income override、pending invoice routes/API、PendingInvoicesPage/Table、SQL projection、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |
 | 2026-06-11 | 补齐测试闭环状态机 | 支出/收入规则、manual/attach/income status、UI、read model 和 worker 状态边界 | `tests.test_pending_invoice_service`、`tests.test_pending_invoice_api`、`tests.test_invoice_lifecycle_page_integration`、`tests.test_search_pending_sql_runtime`、`tests.test_pending_invoice_relation_identity`、`tests.test_pending_invoice_oa_identity_backfill`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_runtime_worker_registry`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` 通过 |
 | 2026-06-11 | 选择已有进项发票支持多流水、多发票批量 preview/confirm，状态菜单新增已支付待开票/已支付已开票快捷筛选 | Pending invoice application service、Workbench active relation、PendingInvoicesPage、候选抽屉、API mapper | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_api.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/PendingInvoicesPage.test.tsx` |

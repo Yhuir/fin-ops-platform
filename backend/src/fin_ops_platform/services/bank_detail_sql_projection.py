@@ -37,6 +37,7 @@ class BankDetailSqlProjectionBuilder:
         self._connection = connection
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._auto_category_service = auto_category_service or BankTransactionAutoCategoryService()
+        self._category_service = BankTransactionCategoryService()
         self._require_fresh_relation_tags = workbench_relation_read_facade is not None
         self._workbench_relation_read_facade = workbench_relation_read_facade or WorkbenchRelationReadFacade(
             read_model_repository=self._read_model_repository,
@@ -200,15 +201,7 @@ class BankDetailSqlProjectionBuilder:
             )
             result[transaction_id] = {
                 "category_code": category_code,
-                "category_label": text(normalized_payload.get("category_label")) or BankTransactionCategoryService.label_for(category_code),
-                "category_path": text_list(normalized_payload.get("category_path")) or BankTransactionCategoryService.path_for(category_code),
-                "category_primary_label": text(normalized_payload.get("category_primary_label")),
-                "category_sub_label": text(normalized_payload.get("category_sub_label")),
-                "category_third_label": text(normalized_payload.get("category_third_label")),
-                "category_label_path": text_list(normalized_payload.get("category_label_path")),
-                "turnover_role": text(normalized_payload.get("turnover_role")),
-                "turnover_action_type": text(normalized_payload.get("turnover_action_type")),
-                "turnover_family": text(normalized_payload.get("turnover_family")),
+                **self._resolved_manual_category_semantics(category_code, normalized_payload),
                 "source": text(row.get("source")) or "manual",
                 "category_version": int(row.get("version") or 0),
                 "category_rule_version": text(normalized_payload.get("category_rule_version")),
@@ -227,15 +220,7 @@ class BankDetailSqlProjectionBuilder:
             )
             result[transaction_id] = {
                 "category_code": category_code,
-                "category_label": text(normalized_payload.get("category_label")) or BankTransactionCategoryService.label_for(category_code),
-                "category_path": text_list(normalized_payload.get("category_path")) or BankTransactionCategoryService.path_for(category_code),
-                "category_primary_label": text(normalized_payload.get("category_primary_label")),
-                "category_sub_label": text(normalized_payload.get("category_sub_label")),
-                "category_third_label": text(normalized_payload.get("category_third_label")),
-                "category_label_path": text_list(normalized_payload.get("category_label_path")),
-                "turnover_role": text(normalized_payload.get("turnover_role")),
-                "turnover_action_type": text(normalized_payload.get("turnover_action_type")),
-                "turnover_family": text(normalized_payload.get("turnover_family")),
+                **self._resolved_manual_category_semantics(category_code, normalized_payload),
                 "source": "auto_confirmation",
                 "category_version": int(row.get("version") or normalized_payload.get("version") or 0),
                 "category_rule_version": text(row.get("rule_version")) or text(normalized_payload.get("rule_version")),
@@ -316,6 +301,44 @@ class BankDetailSqlProjectionBuilder:
             if isinstance(bank_transaction_tags, dict)
             else default_bank_transaction_tag_dictionary_payload()
         )
+        self._category_service.configure_tag_dictionary(
+            bank_transaction_tags
+            if isinstance(bank_transaction_tags, dict)
+            else default_bank_transaction_tag_dictionary_payload()
+        )
+
+    def _resolved_manual_category_semantics(
+        self,
+        category_code: str,
+        normalized_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        semantics = self._category_service.category_semantics_for_code(category_code)
+        return {
+            "category_label": text(normalized_payload.get("category_label")) or text(semantics.get("category_label")),
+            "category_path": text_list(normalized_payload.get("category_path")) or list(semantics.get("category_path") or []),
+            "category_primary_label": (
+                text(normalized_payload.get("category_primary_label"))
+                or text(semantics.get("category_primary_label"))
+            ),
+            "category_sub_label": (
+                text(normalized_payload.get("category_sub_label"))
+                or text(semantics.get("category_sub_label"))
+            ),
+            "category_third_label": (
+                text(normalized_payload.get("category_third_label"))
+                or text(semantics.get("category_third_label"))
+            ),
+            "category_label_path": (
+                text_list(normalized_payload.get("category_label_path"))
+                or list(semantics.get("category_label_path") or [])
+            ),
+            "turnover_role": text(normalized_payload.get("turnover_role")) or text(semantics.get("turnover_role")),
+            "turnover_action_type": (
+                text(normalized_payload.get("turnover_action_type"))
+                or text(semantics.get("turnover_action_type"))
+            ),
+            "turnover_family": text(normalized_payload.get("turnover_family")) or text(semantics.get("turnover_family")),
+        }
 
     @staticmethod
     def _merge_relation_tags(

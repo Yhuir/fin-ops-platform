@@ -255,6 +255,11 @@ class AppSettingsService:
     ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         previous_snapshot = dict(self._snapshot)
+        if bank_transaction_tags is not None:
+            raise AppSettingsValidationError(
+                "bank_transaction_tags_write_forbidden",
+                "Bank transaction auto-tag rules must be saved through the bank details auto-tag rules API.",
+            )
         self._validate_bank_transaction_tag_settings_update(
             previous_snapshot,
             bank_transaction_tags=bank_transaction_tags,
@@ -282,11 +287,7 @@ class AppSettingsService:
                     else self._snapshot.get("manual_projects", [])
                 ),
                 "synced_projects": self._snapshot.get("synced_projects", []),
-                "bank_transaction_tags": (
-                    bank_transaction_tags
-                    if bank_transaction_tags is not None
-                    else self._snapshot.get("bank_transaction_tags", {})
-                ),
+                "bank_transaction_tags": self._snapshot.get("bank_transaction_tags", {}),
                 "pending_invoice_tag_groups": (
                     pending_invoice_tag_groups
                     if pending_invoice_tag_groups is not None

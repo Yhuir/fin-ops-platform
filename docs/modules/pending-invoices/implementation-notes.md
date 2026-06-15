@@ -8,6 +8,7 @@
 - 待找发票行状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 与 pending invoice read model 表达，页面不得在字段缺失时自行推断状态或 primary action。
 - 支出规则版本是 `pending_invoice_tag_groups.version`，收入规则版本是 `pending_output_invoice_tag_groups.version`；二者独立，且都不同于 `bank_transaction_tags.version`。
 - `requires_invoice` 是 active tag complement，由后端实时派生；保存规则时即使请求包含该字段也必须忽略。
+- `requires_invoice` 作为列表 filter 是最终状态桶；支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`，收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能作为 rows/filter-options/export 的父筛选可见性条件。
 - rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
 - filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
 - OA/流水/发票 relation 不是待找发票私有事实；当前页面只通过 attach existing 写入选择已有发票关系，且必须委托 `WorkbenchRelationCommandService`；读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
@@ -31,6 +32,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-15 - 修复 requires_invoice 状态桶筛空
+
+- 目标：修复待找发票“需要开票 / 已支付待开票 / 已支付已开票”筛选在生产数据中返回空结果的问题，禁止旧 `filter_group='requires_invoice'` 假设继续污染 rows、filter-options、export 和 projection scope。
+- 影响范围：`pending_invoice_status` 状态筛选 helper、`PendingInvoiceQueryService` fallback、`PostgresReadModelRepository` pending invoice rows/filter-options SQL、`SearchPendingSqlProjectionBuilder` pending invoice scope projection、模块/API/产品文档和测试矩阵。
+- 关键决策：列表父筛选以最终 `invoice_acquisition_status.code` 为事实源；`filter_group` / `matched_rule` 只保留规则解释和规则列表头筛选。收入 `cash_income` 保持独立状态桶，不再混入 `requires_invoice`。
+- 文档影响：更新 `docs/product-specs/invoice-lifecycle.md`、`docs/dev/api-contracts.md`、`state-machine.md`、`tests.md` 和本实施记录。
+- 测试覆盖：新增/更新 repository SQL、SQL projection、service fallback 测试，覆盖 `filter_group=all` 但状态为待/已开票的生产形态、income cash override 不污染 requires bucket、projection scope row_count 口径。
+- 验证命令：见最终交付说明。
+- 未测风险：本地 fake repository 不执行真实 PostgreSQL EXPLAIN；真实生产 rows/filter-options/export 性能和 worker drain 仍需 staging 或发布后 smoke。
+- 后续事项：发布后对生产 `expense:requires_invoice` 和状态快捷筛选执行一次 read model refresh/smoke，确认旧 `filter_group=all` 行能被返回。
 
 ## 2026-06-15 - 移除补票入口并闭环收入批量状态
 

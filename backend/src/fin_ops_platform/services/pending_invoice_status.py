@@ -8,6 +8,26 @@ from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_NO_INVOICE_GROUP,
 )
 
+EXPENSE_REQUIRES_INVOICE_STATUS_CODES = (
+    "paid_invoiced",
+    "paid_pending_invoice",
+    "paid_pending_future_invoice",
+    "invoice_not_fully_paid",
+)
+INCOME_REQUIRES_INVOICE_STATUS_CODES = ("income_pending_invoice", "income_invoiced")
+PENDING_INVOICE_FILTER_STATUS_CODES: dict[str, dict[str, tuple[str, ...]]] = {
+    "expense": {
+        "requires_invoice": EXPENSE_REQUIRES_INVOICE_STATUS_CODES,
+        "bank_statement_as_invoice": ("bank_statement_as_invoice",),
+        "no_invoice_required": ("no_invoice_required",),
+    },
+    "income": {
+        "requires_invoice": INCOME_REQUIRES_INVOICE_STATUS_CODES,
+        "no_invoice_required": ("income_no_invoice_required",),
+        "cash_income": ("cash_income",),
+    },
+}
+
 
 def pending_invoice_status_payload(
     *,
@@ -83,6 +103,17 @@ def pending_invoice_available_actions(status_payload: dict[str, Any], *, can_cre
     if action in {"view_relation", "view_rules"}:
         return [action]
     return []
+
+
+def pending_invoice_filter_status_codes(*, direction: str, filter_name: str) -> tuple[str, ...]:
+    normalized_direction = str(direction or "").strip() or "expense"
+    normalized_filter = str(filter_name or "").strip() or "all"
+    return PENDING_INVOICE_FILTER_STATUS_CODES.get(normalized_direction, {}).get(normalized_filter, ())
+
+
+def pending_invoice_status_matches_filter(*, direction: str, filter_name: str, status_code: str) -> bool:
+    status_codes = pending_invoice_filter_status_codes(direction=direction, filter_name=filter_name)
+    return True if not status_codes else str(status_code or "").strip() in status_codes
 
 
 def _status(

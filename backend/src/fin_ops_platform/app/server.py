@@ -1339,6 +1339,11 @@ class Application:
         return True
 
     def _turnover_bank_transaction_rows(self) -> list[dict[str, object]]:
+        sql_rows = self._turnover_bank_transaction_rows_from_sql_read_model()
+        if sql_rows:
+            return sql_rows
+        if self._requires_sql_read_model_runtime() and getattr(self, "_bank_detail_sql_read_repository", None) is not None:
+            return []
         rows: list[dict[str, object]] = []
         transaction_payloads: list[dict[str, object]] = []
         for transaction in list(self._import_service.list_transactions(month="all")):
@@ -1390,6 +1395,99 @@ class Application:
             row["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")
             rows.append(row)
         return rows
+
+    def _turnover_bank_transaction_rows_from_sql_read_model(self) -> list[dict[str, object]]:
+        if not self._requires_sql_read_model_runtime():
+            return []
+        repository = getattr(self, "_bank_detail_sql_read_repository", None)
+        loader = getattr(repository, "list_bank_detail_tagged_rows_by_month", None)
+        if not callable(loader):
+            return []
+        app_settings_service = getattr(self, "_app_settings_service", None)
+        selected_codes_provider = getattr(app_settings_service, "turnover_ledger_selected_tag_codes", None)
+        selected_codes = [
+            str(code).strip()
+            for code in list(selected_codes_provider() if callable(selected_codes_provider) else [] or [])
+            if str(code).strip()
+        ]
+        if not selected_codes:
+            return []
+        scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(self._bank_detail_available_month_scope_keys() or [])
+            if SEARCH_MONTH_RE.match(str(scope_key).strip())
+        ]
+        if not scope_keys:
+            return []
+        rows: list[dict[str, object]] = []
+        tenant_id = self._workbench_reconciliation_tenant_id()
+        current_rule_version = self._bank_transaction_category_service.auto_tag_rule_version_label()
+        for scope_key in scope_keys:
+            payload = loader(scope_key, category_codes=selected_codes, tenant_id=tenant_id)
+            if not isinstance(payload, dict):
+                return []
+            read_model_status = str(payload.get("read_model_status") or "fresh").strip()
+            if read_model_status not in {"fresh", "refreshing"}:
+                return []
+            for row in list(payload.get("rows") or []):
+                if not isinstance(row, dict):
+                    continue
+                if read_model_status == "refreshing" and str(row.get("category_rule_version") or "").strip() != current_rule_version:
+                    continue
+                turnover_row = self._turnover_bank_transaction_row_from_bank_detail(row)
+                if turnover_row is not None:
+                    rows.append(turnover_row)
+        return rows
+
+    @staticmethod
+    def _turnover_bank_transaction_row_from_bank_detail(row: dict[str, object]) -> dict[str, object] | None:
+        row_id = str(row.get("id") or row.get("transaction_id") or "").strip()
+        if not row_id:
+            return None
+        category_code = str(row.get("effective_category_code") or row.get("category_code") or "").strip()
+        turnover_role = str(row.get("effective_turnover_role") or row.get("turnover_role") or "").strip()
+        turnover_action_type = str(row.get("effective_turnover_action_type") or row.get("turnover_action_type") or "").strip()
+        turnover_family = str(row.get("effective_turnover_family") or row.get("turnover_family") or "").strip()
+        if not category_code or not turnover_action_type or not turnover_family:
+            return None
+        direction = str(row.get("direction") or "").strip()
+        if direction == "income":
+            txn_direction = "inflow"
+        elif direction == "expense":
+            txn_direction = "outflow"
+        else:
+            return None
+        amount = str(row.get("amount") or "0.00").strip() or "0.00"
+        trade_time = str(row.get("trade_time") or row.get("trade_date") or "").strip()
+        counterparty_name = str(row.get("counterparty_name") or "").strip()
+        category_path = list(row.get("effective_category_path") or row.get("category_path") or [])
+        category_label_path = list(row.get("effective_category_label_path") or row.get("category_label_path") or [])
+        result = dict(row)
+        result.update(
+            {
+                "id": row_id,
+                "source_bank_row_id": row_id,
+                "txn_direction": txn_direction,
+                "txn_date": trade_time[:10],
+                "trade_time": trade_time,
+                "pay_receive_time": trade_time,
+                "counterparty_name": counterparty_name,
+                "counterparty_name_raw": counterparty_name,
+                "debit_amount": amount if txn_direction == "outflow" else "0.00",
+                "credit_amount": amount if txn_direction == "inflow" else "0.00",
+                "category_code": category_code,
+                "category_label": row.get("effective_category_label") or row.get("category_label"),
+                "category_path": category_path,
+                "category_primary_label": row.get("effective_category_primary_label") or row.get("category_primary_label"),
+                "category_sub_label": row.get("effective_category_sub_label") or row.get("category_sub_label"),
+                "category_third_label": row.get("effective_category_third_label") or row.get("category_third_label"),
+                "category_label_path": category_label_path,
+                "turnover_role": turnover_role,
+                "turnover_action_type": turnover_action_type,
+                "turnover_family": turnover_family,
+            }
+        )
+        return result
 
     def _historical_etc_repair_seeded(self) -> bool:
         if self._state_store is None:
@@ -10525,7 +10623,6 @@ class Application:
         oa_retention = payload.get("oa_retention", {})
         oa_invoice_offset = payload.get("oa_invoice_offset", {})
         oa_import = payload.get("oa_import", {})
-        bank_transaction_tags = payload.get("bank_transaction_tags")
         pending_invoice_tag_groups = payload.get("pending_invoice_tag_groups")
         pending_output_invoice_tag_groups = payload.get("pending_output_invoice_tag_groups")
         actor_id = str(session.identity.username or "workbench_settings").strip()
@@ -10554,12 +10651,12 @@ class Application:
                     ),
                 },
             )
-        if bank_transaction_tags is not None and not isinstance(bank_transaction_tags, dict):
+        if "bank_transaction_tags" in payload:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
-                    "error": "invalid_workbench_settings_request",
-                    "message": "bank_transaction_tags must be an object when provided.",
+                    "error": "bank_transaction_tags_write_forbidden",
+                    "message": "银行明细自动标签规则只能在银行明细的自动标签规则中保存。",
                 },
             )
         if pending_invoice_tag_groups is not None and not isinstance(pending_invoice_tag_groups, dict):
@@ -10591,7 +10688,6 @@ class Application:
                 oa_retention=oa_retention,
                 oa_import=oa_import,
                 oa_invoice_offset=oa_invoice_offset,
-                bank_transaction_tags=bank_transaction_tags,
                 pending_invoice_tag_groups=pending_invoice_tag_groups,
                 pending_output_invoice_tag_groups=pending_output_invoice_tag_groups,
                 actor_id=actor_id or "workbench_settings",
@@ -10634,11 +10730,7 @@ class Application:
                 self._workbench_query_service.list_available_months(),
                 reason="oa_invoice_offset_settings_changed",
             )
-        if (
-            bank_transaction_tags is not None
-            or pending_invoice_tag_groups is not None
-            or pending_output_invoice_tag_groups is not None
-        ):
+        if pending_invoice_tag_groups is not None or pending_output_invoice_tag_groups is not None:
             self._invalidate_pending_invoice_read_model_scopes(reason="settings_update")
         return self._json_response(HTTPStatus.OK, updated_payload)
 

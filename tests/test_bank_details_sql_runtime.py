@@ -1545,6 +1545,86 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(repository.saved_rows[0]["category_label_path"], ["费用", "手续费"])
         self.assertEqual(repository.saved_rows[0]["source_versions"]["bank_auto_tag_rules_version"], 2)
 
+    def test_rebuild_enriches_legacy_confirmation_from_current_external_tag_definition(self) -> None:
+        repository = CaptureBankDetailReadModelRepository()
+        connection = FakeConnection(
+            app_settings_payload={
+                "bank_transaction_tags": {
+                    "version": 64,
+                    "definitions": [
+                        {
+                            "code": "custom_borrow_in",
+                            "label": "借入款",
+                            "path": ["自动识别", "借入款"],
+                            "source": "custom",
+                            "status": "active",
+                            "direction": "income",
+                            "output_primary_label": "外部往来款收款",
+                            "output_sub_label": "借入款",
+                            "turnover_role": "external_turnover",
+                            "turnover_action_type": "pending_repayment",
+                            "rules": {
+                                "match_fields": ["all_text"],
+                                "exact": [],
+                                "contains": ["暂借款"],
+                                "excludes": [],
+                            },
+                        }
+                    ],
+                },
+            },
+            confirmation_rows=[
+                {
+                    "transaction_id": "txn_imported_1292",
+                    "category_code": "custom_borrow_in",
+                    "candidate_category_codes": ["custom_borrow_in"],
+                    "rule_version": "legacy-rule-version",
+                    "version": 5,
+                    "raw_payload": {"normalized_payload": {}},
+                }
+            ],
+            rows=[
+                [
+                    {
+                        "id": "txn_imported_1292",
+                        "transaction_id": "uuid-1292",
+                        "account_no": "6227000011118106",
+                        "account_name": "云南溯源科技有限公司",
+                        "txn_direction": "income",
+                        "counterparty_name_raw": "贾小花",
+                        "amount": "100000.00",
+                        "signed_amount": "100000.00",
+                        "balance": "3138.00",
+                        "currency": "CNY",
+                        "txn_date": "2026-02-04",
+                        "trade_time": "2026-02-04 17:07:45",
+                        "summary": "转账存入",
+                        "remark": "暂借款",
+                        "bank_text_fields": [{"label": "备注", "value": "暂借款"}],
+                        "raw_payload": {
+                            "normalized_payload": {
+                                "imported_bank_name": "建设银行",
+                                "imported_bank_last4": "8106",
+                            }
+                        },
+                    }
+                ],
+            ],
+        )
+        builder = BankDetailSqlProjectionBuilder(connection=connection, read_model_repository=repository)
+
+        result = builder.rebuild_bank_detail_read_model_scope("2026-02", source_version=9)
+
+        self.assertEqual(result["row_count"], 1)
+        row = repository.saved_rows[0]
+        self.assertEqual(row["manual_confirmed_category_code"], "custom_borrow_in")
+        self.assertEqual(row["effective_category_code"], "custom_borrow_in")
+        self.assertEqual(row["effective_category_primary_label"], "外部往来款收款")
+        self.assertEqual(row["effective_category_sub_label"], "借入款")
+        self.assertEqual(row["effective_category_label_path"], ["外部往来款收款", "借入款"])
+        self.assertEqual(row["effective_turnover_role"], "external_turnover")
+        self.assertEqual(row["effective_turnover_action_type"], "pending_repayment")
+
     def test_rebuild_projects_legacy_external_turnover_third_label_as_confirmation_candidates(self) -> None:
         repository = CaptureBankDetailReadModelRepository()
         connection = FakeConnection(

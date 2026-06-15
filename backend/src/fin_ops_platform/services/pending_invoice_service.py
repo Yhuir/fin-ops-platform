@@ -23,6 +23,7 @@ from fin_ops_platform.services.pending_invoice_rules import (
 )
 from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
+    pending_invoice_status_matches_filter,
     pending_invoice_status_payload,
 )
 from fin_ops_platform.services.pending_invoice_relation_identity import (
@@ -227,22 +228,17 @@ class PendingInvoiceQueryService:
             "expense": self._pending_invoice_tag_groups(direction="expense"),
             "income": self._pending_invoice_tag_groups(direction="income"),
         }
-        rows = [
-            self._row_payload(
+        rows: list[dict[str, Any]] = []
+        for transaction in transactions:
+            transaction_direction = self.direction_for_transaction(transaction)
+            row = self._row_payload(
                 transaction,
-                direction=self.direction_for_transaction(transaction),
+                direction=transaction_direction,
                 category=categories.get(transaction.id, {}),
-                tag_groups=tag_groups_by_direction[self.direction_for_transaction(transaction)],
+                tag_groups=tag_groups_by_direction[transaction_direction],
             )
-            for transaction in transactions
-            if self._transaction_matches_filter(
-                transaction,
-                direction=normalized_direction,
-                filter_name=normalized_filter,
-                category=categories.get(transaction.id, {}),
-                tag_groups=tag_groups_by_direction[self.direction_for_transaction(transaction)],
-            )
-        ]
+            if self._row_matches_filter(row, direction=transaction_direction, filter_name=normalized_filter):
+                rows.append(row)
         if keyword:
             normalized_keyword = str(keyword).strip().lower()
             rows = [row for row in rows if normalized_keyword in str(row).lower()]
@@ -394,20 +390,17 @@ class PendingInvoiceQueryService:
     def _group_for_category(category_code: str | None, tag_groups: dict[str, set[str]], *, direction: str) -> str | None:
         return pending_invoice_group_for_category(category_code, tag_groups, direction=direction)
 
-    def _transaction_matches_filter(
-        self,
-        transaction: BankTransaction,
-        *,
-        direction: str,
-        filter_name: str,
-        category: dict[str, Any],
-        tag_groups: dict[str, set[str]],
-    ) -> bool:
-        if direction == "all" or filter_name == "all":
+    @staticmethod
+    def _row_matches_filter(row: dict[str, Any], *, direction: str, filter_name: str) -> bool:
+        if filter_name == "all":
             return True
-        effective_category = pending_invoice_effective_category_payload(category)
-        group = self._group_for_category(effective_category.get("category_code"), tag_groups, direction=direction)
-        return group == filter_name
+        status_payload = row.get("invoice_acquisition_status") if isinstance(row, dict) else {}
+        status_code = str(status_payload.get("code") or "").strip() if isinstance(status_payload, dict) else ""
+        return pending_invoice_status_matches_filter(
+            direction=direction,
+            filter_name=filter_name,
+            status_code=status_code,
+        )
 
     def _bank_account_mappings_by_last4(self) -> dict[str, dict[str, str]]:
         settings = self._app_settings_provider()

@@ -122,6 +122,137 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
     def _group_bank_ids(group: dict[str, object]) -> list[str]:
         return [str(row["id"]) for row in list(group.get("bank_rows") or [])]
 
+    def test_sql_bank_detail_turnover_rows_keep_legacy_source_ids_for_manual_closure(self) -> None:
+        class SqlBankDetailRepository:
+            def list_bank_detail_tagged_rows_by_month(
+                self,
+                month: str,
+                *,
+                category_codes: list[str],
+                tenant_id: str = "default",
+            ) -> dict[str, object]:
+                self.last_category_codes = list(category_codes)
+                self.last_tenant_id = tenant_id
+                rows_by_month = {
+                    "2026-02": [
+                        {
+                            "id": "txn_imported_1277",
+                            "transaction_id": "37d2b3d5-0b8c-55d7-980b-508e372d5b54",
+                            "trade_time": "2026-02-04T13:20:48+08:00",
+                            "counterparty_name": "贾小花",
+                            "direction": "income",
+                            "amount": "200000.00",
+                            "effective_category_code": "custom_borrow_in",
+                            "effective_category_label": "借入款",
+                            "effective_category_primary_label": "外部往来款收款",
+                            "effective_category_sub_label": "借入款",
+                            "effective_category_third_label": "个人往来",
+                            "effective_category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                            "effective_turnover_role": "external_turnover",
+                            "effective_turnover_action_type": "pending_repayment",
+                            "effective_turnover_family": "personal",
+                            "category_rule_version": "bank-auto-tag-rules:1",
+                        },
+                        {
+                            "id": "txn_imported_1292",
+                            "transaction_id": "6d50337d-169c-5620-b6fb-4002f52b298e",
+                            "trade_time": "2026-02-04T17:07:45+08:00",
+                            "counterparty_name": "贾小花",
+                            "direction": "income",
+                            "amount": "100000.00",
+                            "effective_category_code": "custom_borrow_in",
+                            "effective_category_label": "借入款",
+                            "effective_category_primary_label": "外部往来款收款",
+                            "effective_category_sub_label": "借入款",
+                            "effective_category_third_label": "个人往来",
+                            "effective_category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                            "effective_turnover_role": "external_turnover",
+                            "effective_turnover_action_type": "pending_repayment",
+                            "effective_turnover_family": "personal",
+                            "category_rule_version": "bank-auto-tag-rules:1",
+                        },
+                        {
+                            "id": "txn_imported_old_version",
+                            "trade_time": "2026-02-05T10:00:00+08:00",
+                            "counterparty_name": "贾小花",
+                            "direction": "income",
+                            "amount": "1.00",
+                            "effective_category_code": "custom_borrow_in",
+                            "effective_category_label": "借入款",
+                            "effective_category_primary_label": "外部往来款收款",
+                            "effective_category_sub_label": "借入款",
+                            "effective_category_third_label": "个人往来",
+                            "effective_category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                            "effective_turnover_role": "external_turnover",
+                            "effective_turnover_action_type": "pending_repayment",
+                            "effective_turnover_family": "personal",
+                            "category_rule_version": "bank-auto-tag-rules:0",
+                        },
+                    ],
+                    "2026-03": [
+                        {
+                            "id": "txn_imported_1344",
+                            "transaction_id": "6b72e6a1-c6ee-5178-93cf-4afc756b7400",
+                            "trade_time": "2026-03-04T15:24:58+08:00",
+                            "counterparty_name": "贾小花",
+                            "direction": "expense",
+                            "amount": "300000.00",
+                            "effective_category_code": "custom_repaid",
+                            "effective_category_label": "归还借款",
+                            "effective_category_primary_label": "外部往来款付款",
+                            "effective_category_sub_label": "归还借款",
+                            "effective_category_third_label": "个人往来",
+                            "effective_category_label_path": ["外部往来款付款", "归还借款", "个人往来"],
+                            "effective_turnover_role": "external_turnover",
+                            "effective_turnover_action_type": "repaid",
+                            "effective_turnover_family": "personal",
+                            "category_rule_version": "bank-auto-tag-rules:1",
+                        }
+                    ],
+                }
+                return {"read_model_status": "refreshing", "rows": rows_by_month.get(month, [])}
+
+        with self._temporary_app() as app:
+            repository = SqlBankDetailRepository()
+            app._bank_detail_sql_read_repository = repository
+            app._requires_sql_read_model_runtime = lambda: True  # type: ignore[method-assign]
+            app._bank_detail_available_month_scope_keys = lambda: ["2026-02", "2026-03"]  # type: ignore[method-assign]
+            app._app_settings_service.turnover_ledger_selected_tag_codes = lambda: ["custom_borrow_in", "custom_repaid"]  # type: ignore[method-assign]
+
+            rows = app._turnover_bank_transaction_rows()
+            app._turnover_relation_service.rebuild_from_bank_rows(rows)
+            relation = app._turnover_relation_service.confirm_zero_difference_closure(
+                ["txn_imported_1277", "txn_imported_1292", "txn_imported_1344"],
+                actor="YNSYLP005",
+                note="生产复现场景",
+            )
+
+        self.assertEqual(repository.last_category_codes, ["custom_borrow_in", "custom_repaid"])
+        self.assertEqual(repository.last_tenant_id, "default")
+        self.assertEqual(
+            {str(row["id"]) for row in rows},
+            {"txn_imported_1277", "txn_imported_1292", "txn_imported_1344"},
+        )
+        self.assertEqual(
+            {str(row["source_bank_row_id"]) for row in rows},
+            {"txn_imported_1277", "txn_imported_1292", "txn_imported_1344"},
+        )
+        self.assertEqual(set(relation["bank_row_ids"]), {"txn_imported_1277", "txn_imported_1292", "txn_imported_1344"})
+        self.assertEqual(relation["status"], "confirmed")
+
+    def test_sql_turnover_rows_tolerate_early_startup_before_app_settings_service_is_bound(self) -> None:
+        with self._temporary_app() as app:
+            app._bank_detail_sql_read_repository = object()
+            app._requires_sql_read_model_runtime = lambda: True  # type: ignore[method-assign]
+            app_settings_service = app._app_settings_service
+            delattr(app, "_app_settings_service")
+            try:
+                rows = app._turnover_bank_transaction_rows()
+            finally:
+                app._app_settings_service = app_settings_service
+
+        self.assertEqual(rows, [])
+
     def test_deterministic_turnover_relation_does_not_sync_to_workbench_without_manual_closure(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app)
