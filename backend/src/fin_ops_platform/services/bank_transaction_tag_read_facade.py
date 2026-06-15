@@ -159,7 +159,12 @@ class BankTransactionTagReadFacade:
         )
         stale_reasons = _stale_reasons(status=status, payload=payload)
         if require_fresh and status != FRESH_BANK_TAG_STATUS:
-            refresh_enqueued = self._enqueue_scope_refresh(scope_keys=scope_keys, reason=reason)
+            refresh_scope_keys = _refresh_scope_keys_for_non_fresh_payload(
+                payload=payload,
+                scope_keys=scope_keys,
+                scope_signatures=scope_signatures,
+            )
+            refresh_enqueued = self._enqueue_scope_refresh(scope_keys=refresh_scope_keys or scope_keys, reason=reason)
             return _facade_result(
                 status=status,
                 rows=[],
@@ -378,6 +383,27 @@ def _stale_reasons(*, status: str, payload: dict[str, Any]) -> list[str]:
         if text_list(payload.get("missing_transaction_ids")):
             reasons.append("missing_transaction_rows")
     return reasons
+
+
+def _refresh_scope_keys_for_non_fresh_payload(
+    *,
+    payload: dict[str, Any],
+    scope_keys: list[str],
+    scope_signatures: dict[str, Any],
+) -> list[str]:
+    dirty_scope_keys = _dedupe_preserve_order(
+        text(row.get("scope_key"))
+        for row in list(payload.get("dirty_scopes") or [])
+        if isinstance(row, dict) and text(row.get("status")) in {"pending", "processing", "failed"}
+    )
+    if dirty_scope_keys:
+        return dirty_scope_keys
+    return _dedupe_preserve_order(
+        scope_key
+        for scope_key in list(scope_keys or [])
+        if isinstance(scope_signatures.get(scope_key), dict)
+        and text(scope_signatures[scope_key].get("dirty_status")) in {"pending", "processing", "failed"}
+    )
 
 
 def _dedupe_preserve_order(values: Any) -> list[str]:

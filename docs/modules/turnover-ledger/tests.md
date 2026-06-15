@@ -78,6 +78,7 @@
 | Worker / App Status | `test_worker_handler_rebuilds_scope_and_completes_dirty_scope`、`test_domain_registry_covers_frontend_routes`、`test_required_worker_missing_marks_critical_domain_blocked` |
 | `bank_detail` dependency fan-out 不阻塞 all-scope 台账 | `RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope` |
 | fresh missing bank tag rows 不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected`、`BankTransactionTagReadFacadeTests.test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
+| blocking dirty scope 粒度不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
 | 前端 stale 写禁用 | `shows grouped read model stale warning and blocks manual closure` |
 | 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 `turnover_ledger:all` fresh 并 reload/rebind 最新 flow rows，提交后等待后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation`、`workbench` barrier fresh，再 reload grouped payload、发送关联台刷新事件 |
 
@@ -97,6 +98,7 @@
 | 银行标签配置损坏为只有 label 的历史定义，旧确认记录缺外部往来 action，导致台账/关联台无法重建关系 | `tests/test_bank_transaction_category_service.py::BankTransactionCategoryServiceTests.test_legacy_category_record_uses_current_external_definition_semantics`、`tests/test_bank_details_sql_runtime.py::BankDetailSqlProjectionBuilderTests.test_rebuild_enriches_legacy_confirmation_from_current_external_tag_definition` |
 | `turnover_ledger:all` 遇到 `bank_detail_read_model_not_fresh` 后自动补投 `bank_detail:all`，与 bank detail 月份 fan-out 互相 bump，页面长期 refreshing 且无数据 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_detail_all_shard_reason_does_not_bump_active_scope` |
 | fresh `bank_detail` read model 里缺少部分 transaction id 时被误判为 non-fresh，`downstream_bank_tag_read` 持续刷新月份 shard，台账 all scope 永久 pending | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
+| 多个月份中一个 `bank_detail` 月份 pending 时，facade 重刷所有月份，导致已 fresh 月份被快速父重试反复打 pending，台账 all scope 等不到同时 fresh | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
 
 新增线上或手工发现 bug 时，必须先在本节补复现测试名称，再修实现。
 

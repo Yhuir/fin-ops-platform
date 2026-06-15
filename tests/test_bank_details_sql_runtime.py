@@ -388,6 +388,45 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(queue.enqueued[0]["reason"], "unit_test")
         self.assertIn("read_model_not_fresh", payload["stale_reasons"])
 
+    def test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "refreshing",
+                "rows": [
+                    bank_detail_projected_row("txn-jan", scope_key="2026-01")["payload"],
+                    bank_detail_projected_row("txn-feb", scope_key="2026-02")["payload"],
+                ],
+                "source_versions": {"bank_detail": 9},
+                "read_model_scope_keys": ["2026-01", "2026-02"],
+                "read_model_scope_signatures": {
+                    "2026-01": {
+                        "schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                        "status": "fresh",
+                        "dirty_status": "",
+                    },
+                    "2026-02": {
+                        "schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                        "status": "fresh",
+                        "dirty_status": "pending",
+                    },
+                },
+                "dirty_scopes": [{"scope_key": "2026-02", "status": "pending", "source_version": 10}],
+                "missing_transaction_ids": [],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        payload = facade.get_by_transaction_ids(["txn-jan", "txn-feb"], require_fresh=True)
+
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["scope_keys"], ["2026-01", "2026-02"])
+        self.assertEqual([item["scope_key"] for item in queue.enqueued], ["2026-02"])
+
     def test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected(self) -> None:
         queue = CaptureRuntimeQueueRepository()
         repository = FakeBankTaggedReadRepository(

@@ -73,6 +73,7 @@ Refresh 触发来源：
 - `startup_stale_scan` 默认关闭，且不直接刷新银行明细 read model；它只标记 workbench matching dirty scopes。
 - `bank_detail:all` 只表示显式 fan-out 到可用月份 shard；它自身不是页面可读 freshness 事实，也不能由 downstream all-scope dependency defer 自动补投。下游依赖银行明细时必须等待对应月份 shard 或具体 read model freshness。
 - fresh `bank_detail` read model 中没有某些 transaction id 时，表示这些行当前没有银行明细标签投影记录；这不是 read model freshness blocker，downstream 标签读取不得因此补投 refresh 或抛 `bank_detail_read_model_not_fresh`。
+- downstream 标签读取遇到非 fresh payload 时，只能补投 `dirty_scopes` / signature `dirty_status` 标记的 blocking 月份；不能因为一个月份 pending/processing 而重刷同一批 rows 中已经 fresh 的月份。
 
 失败恢复：
 
@@ -89,3 +90,4 @@ Refresh 触发来源：
 | 2026-06-11 | 补齐测试闭环状态机 | 自动标签、候选确认、人工补分类、账户余额、relation tag、UI freshness 和 worker 状态边界 | `tests.test_bank_details_service`、`tests.test_bank_auto_tag_rules_api`、`tests.test_bank_details_sql_runtime`、`web/src/test/BankDetailsPage.test.tsx` 等本轮最小闭环 |
 | 2026-06-16 | 明确 `bank_detail:all` 为 fan-out command | 避免下游 `turnover_ledger:all` / `no_oa_bank_batch:all` 把依赖未 fresh 自动补投成 `bank_detail:all`，造成月份 shard source_version 反复 bump | `tests.test_runtime_worker.RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests.test_read_model_refresh_gateway.ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope` |
 | 2026-06-16 | fresh missing transaction 不再阻塞 downstream 标签读取 | 避免 `downstream_bank_tag_read` 对不存在的标签投影行反复补投月份 refresh，导致外部往来/免 OA all scope 永久 refreshing | `tests.test_bank_details_sql_runtime.BankTransactionTagReadFacadeTests.test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
+| 2026-06-16 | downstream refresh 只补投 blocking dirty scopes | 避免多个月份依赖中一个 pending 月份把其他 fresh 月份重新打 pending，导致 all scope 永远等不到同时 fresh | `tests.test_bank_details_sql_runtime.BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
