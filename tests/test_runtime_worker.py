@@ -231,7 +231,7 @@ class RuntimeWorkerTests(unittest.TestCase):
         deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
         self.assertEqual(deferred_payloads[0]["dependency_refreshes"], [{"scope_type": "bank_detail", "scope_key": "2026-04"}])
 
-    def test_run_once_enqueues_bank_detail_all_for_all_scope_dependency(self) -> None:
+    def test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency(self) -> None:
         claimed = RuntimeQueueEvent(
             **{
                 **event("turnover_ledger.read_model.refresh").__dict__,
@@ -252,9 +252,10 @@ class RuntimeWorkerTests(unittest.TestCase):
         )
 
         self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
-        self.assertEqual(queue.enqueued_read_model_refreshes[0]["scope_type"], "bank_detail")
-        self.assertEqual(queue.enqueued_read_model_refreshes[0]["scope_key"], "all")
-        self.assertEqual(queue.enqueued_read_model_refreshes[0]["priority"], "high")
+        self.assertEqual(queue.active_read_model_refresh_checks, [])
+        self.assertEqual(queue.enqueued_read_model_refreshes, [])
+        deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
+        self.assertNotIn("dependency_refreshes", deferred_payloads[0])
 
     def test_run_once_does_not_bump_dependency_refresh_when_scope_already_active(self) -> None:
         claimed = RuntimeQueueEvent(

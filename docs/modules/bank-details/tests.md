@@ -64,6 +64,7 @@
 | 长期 | 标签/分类写入成功但 dirty/outbox 或审计半写入。 | `tests/test_bankdetail_write_uow_contract.py`、`tests/test_bank_details_sql_runtime.py` | covered |
 | 长期 | 关联台关系变更后银行明细 relation tag 不刷新。 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/src/test/BankDetailsPage.test.tsx` | covered |
 | 2026-06-15 | 自动标签配置被历史 settings 保存污染成只有 label 的 custom/system 定义，导致文件恢复生成新 code、旧确认记录缺外部往来 action。 | `tests/test_bank_transaction_category_service.py`、`tests/test_bank_details_sql_runtime.py` | covered |
+| 2026-06-16 | `bank_detail:all` fan-out command 被下游 all-scope dependency defer 当成稳定 freshness scope，导致外部往来和免 OA 页面长期 refreshing。 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_detail_all_shard_reason_does_not_bump_active_scope` | covered |
 
 ## 关键 smoke flows
 

@@ -9,6 +9,7 @@
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
 - authenticated HTTP SLO gate 的默认目标是 5 秒内返回，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。
+- `bank_detail:all` 不是可读 freshness scope，而是 fan-out 控制 scope；真实 readiness 和 downstream dependency 应以具体月份 shard 或明确 read model status 为准。
 
 ## 记录模板
 
@@ -26,6 +27,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-16 - Bank detail fan-out scope 与 downstream dependency 边界
+
+- 目标：修复外部往来款管理和免 OA 批次依赖 `bank_detail` 时的 all-scope fan-out 循环，避免页面无数据但 App Status 长时间显示同步中。
+- 影响范围：read model dependency defer 语义、`bank_detail` all-scope fan-out、active coalescing reason；不改变 `bank_detail` 月份 shard rebuild 和 readiness 发布规则。
+- 关键决策：`bank_detail:all` 只作为显式 fan-out command，不能由 downstream all-scope `bank_detail_read_model_not_fresh` 自动补投；`bank_detail_all_shard` 是 ensure/wakeup 类 reason，目标月份已 active 时不重复 bump dirty source_version。真实写入 reason 仍保持 bump active scope，避免新事实被旧 worker 覆盖。
+- 文档影响：同步更新 runtime-workers、bank-details、turnover-ledger 模块。
+- 测试覆盖：`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_detail_all_shard_reason_does_not_bump_active_scope`。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：真实生产历史 dirty/outbox 需要发布后 drain 观测；如果存在旧版本遗留 dead-letter/processing，必须通过 runtime ops 工具恢复。
 
 ## 2026-06-13 - Dependency-not-fresh runtime defer
 

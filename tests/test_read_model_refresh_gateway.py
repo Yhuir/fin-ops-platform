@@ -137,6 +137,23 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         self.assertEqual(queue.active_checks, [("default", "bank_detail", "2026-02")])
         self.assertEqual(queue.refreshes, [])
 
+    def test_bank_detail_all_shard_reason_does_not_bump_active_scope(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = QueueRecorder()
+        queue.active_refreshes.add(("default", "bank_detail", "2026-02"))
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "bank_detail",
+            ["2026-02"],
+            reason="bank_detail_all_shard",
+        )
+
+        self.assertEqual(enqueued, ["2026-02"])
+        self.assertEqual(queue.active_checks, [("default", "bank_detail", "2026-02")])
+        self.assertEqual(queue.refreshes, [])
+
     def test_mutating_refresh_reason_still_bumps_active_scope(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 

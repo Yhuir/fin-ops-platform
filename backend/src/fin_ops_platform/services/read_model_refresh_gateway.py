@@ -143,6 +143,7 @@ _ACTIVE_COALESCED_REFRESH_REASONS = {
     "dependency_not_fresh",
     "downstream_bank_tag_read",
     "pending_invoice_sql_projection",
+    "bank_detail_all_shard",
     "bank_detail_relation_tags_read",
     "workbench_relation_write_precondition",
 }

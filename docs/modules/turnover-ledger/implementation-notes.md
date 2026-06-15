@@ -15,6 +15,15 @@
 - 涉及 Workbench relation 的 manual closure/withdraw 即使经过 legacy fallback facade，也必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation write fallback。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 
+## 2026-06-16 - Bank detail dependency loop caused empty turnover ledger
+
+- 目标：修复外部往来款管理页无数据、App Status 长时间显示银行明细同步中的问题。
+- 真实原因：`bank_detail` 月份 read model 本身已经有外部往来流水和自动标签结果；页面无数据是因为 `turnover_ledger:all` worker 读取依赖时遇到 `bank_detail_read_model_not_fresh` 后，被 runtime worker 旧逻辑自动补投 `bank_detail:all`。而 `bank_detail:all` 是 fan-out 到月份 shard 的控制命令，不是可稳定完成的 downstream freshness dependency；它会继续产生 `bank_detail_all_shard` 月份刷新，反复 bump source_version，导致 `turnover_ledger:all` 长期 refreshing、read model rows 不发布。
+- 影响范围：runtime worker dependency scope 推导、read model refresh gateway active coalescing；不改变外部往来 grouped ledger 业务计算、手动闭环写入、Workbench relation 写入口或前端 empty state。
+- 关键决策：从架构上禁止 downstream all-scope dependency defer 推导 `bank_detail:all`；只允许从 source scope 推导具体月份。`bank_detail_all_shard` 作为 ensure/wakeup reason 参与 active coalescing，避免重复 bump 正在处理的月份 shard。真实写入 reason 仍保持 bump。
+- 测试覆盖：`RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope`，并运行外部往来和免 OA read model dependency 回归。
+- 生产验证要求：发布后观察 `job.read_model_dirty_scopes` / `job.outbox_events` 中 `bank_detail` 月份 shard、`turnover_ledger:all` 和 `no_oa_bank_batch:all` 收敛；页面必须由 fresh read model 显示数据，不能用手工改 readiness 或直接 SQL 填 rows。
+
 ## 2026-06-15 - SQL runtime closure source alignment
 
 - 目标：修复生产环境外部往来页选中三笔银行流水确认闭环失败，且关联台 open 区没有生成同一个关系组的问题。

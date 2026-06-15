@@ -55,6 +55,8 @@ Runtime worker 本身不拥有业务实体；它维护后台执行事实和派�
 - 如果 handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，`RuntimeWorker` 使用 `RuntimeQueueRepository.defer_event(...)` 将 outbox event 放回 `pending`，默认 `available_at=now()+2s`。
 - defer 会回滚本次 claim 增加的 `attempts`，不会走 `runtime_failure`、`failed` 或 `dead_lettered`。
 - defer 不会把任何 projection/readiness 标为 fresh；它只缩短已知依赖顺序竞态的等待时间。
+- dependency refresh 只能补投可从 source scope 明确推导的依赖 scope。对 `bank_detail` 依赖，裸月份或 source scope 内嵌月份可补投对应月份；下游 `all` scope 不能自动补投 `bank_detail:all`。
+- `bank_detail:all` 是 fan-out 命令，不是稳定 freshness 依赖；它只能由导入、规则变化、backfill 或明确的银行明细 refresh producer 触发，再由 bank detail handler 展开为月份 shard。
 
 Refresh 触发来源：
 
@@ -76,5 +78,6 @@ Refresh 触发来源：
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-13 | 依赖 read model 未 fresh 使用短延迟 defer | `*_read_model_not_fresh` 不再走 60s 普通 retry/dead-letter，减少跨 read model fan-out 长尾 | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_defer_event_delays_dependency_retry_without_failure_or_dead_letter -v` |
+| 2026-06-16 | `bank_detail:all` 不再由 downstream all-scope dependency defer 自动推导 | 防止 `turnover_ledger:all` / `no_oa_bank_batch:all` 与 `bank_detail:all` fan-out 互相放大，页面长期 refreshing | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker.RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency tests.test_read_model_refresh_gateway.ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope -v` |
 | 2026-06-13 | 补齐 RabbitMQ transport 下 stale/superseded processing 运维恢复 | RabbitMQ 只负责 wakeup，PostgreSQL `processing` 超过 lock timeout 且没有 envelope 时，可先用 `resolve-superseded-processing` 清理已被更新同 dedupe event 覆盖的旧 processing，再用 `release-stale-processing` 释放仍需重跑的事件；不伪造 readiness/fresh | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_queue tests.test_runtime_queue_ops -v` |
 | 2026-06-11 | 补齐 runtime worker 状态机 | 明确 outbox、dirty scope、heartbeat、readiness、RabbitMQ transport 和 UI 消费语义 | 待本轮 runtime-workers 验证 |

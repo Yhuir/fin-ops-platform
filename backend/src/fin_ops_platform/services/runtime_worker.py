@@ -343,8 +343,9 @@ class RuntimeWorker:
             months = MONTH_SCOPE_RE.findall(source_scope_key)
             if months:
                 return months[-1]
-            if source_scope_key == "all":
-                return "all"
+            # bank_detail:all is a fan-out command, not a stable freshness dependency.
+            # Downstream all-scope events must not infer it; the source facade is
+            # responsible for enqueueing concrete month shards when it can identify them.
             return ""
         if source_scope_key == "all" or MONTH_SCOPE_RE.fullmatch(source_scope_key):
             return source_scope_key
