@@ -20,6 +20,22 @@ Preserve production finance workflow correctness while improving individual page
 - [ ] **PAGE-01**: External turnover ledger page analysis and improvement planning is saved in its own phase directory.
 - [ ] **PAGE-02**: Bank details page analysis and improvement planning is saved in its own phase directory.
 - [ ] **PAGE-03**: Tax offset page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-04**: The global `.planning/codebase/` map remains repository-wide and is not overwritten by page-specific analysis.
+- [ ] **PAGE-05**: Every page phase records module docs, code entry points, risks, and verification strategy before implementation.
+- [ ] **PAGE-06**: Reconciliation workbench page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-07**: Cost statistics page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-08**: Pending invoices page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-09**: Input invoice usage page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-10**: OA pending payments page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-11**: Output invoice collections page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-12**: No-OA bank batches page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-13**: Batch accounting page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-14**: ETC tickets page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-15**: Settings page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-16**: App Health operations page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-17**: Bank transaction import page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-18**: Invoice import page analysis and improvement planning is saved in its own phase directory.
+- [ ] **PAGE-19**: ETC invoice import page analysis and improvement planning is saved in its own phase directory.
 
 ### Out of Scope
 
@@ -51,4 +67,4 @@ Preserve production finance workflow correctness while improving individual page
 | Use page-specific Codex worktree threads for parallel analysis | Worktrees isolate in-progress changes and reduce planning artifact conflicts. | ✓ Adopted |
 
 ---
-*Last updated: 2026-06-16 after regenerating the global codebase map and adopting page-scoped phase storage*
+*Last updated: 2026-06-16 after adding phase directories for all registered pages*

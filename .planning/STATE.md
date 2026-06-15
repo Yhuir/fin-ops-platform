@@ -2,7 +2,7 @@
 gsd_state_version: '1.0'
 status: planning
 progress:
-  total_phases: 3
+  total_phases: 17
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,10 +20,10 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 1 of 3 (完善外部往来款管理页面)
+Phase: 1 of 17 (完善外部往来款管理页面)
 Plan: 0 of 0 in current phase
 Status: Ready to discuss/plan page-specific phases
-Last activity: 2026-06-16 — Created three independent page-specific GSD phases.
+Last activity: 2026-06-16 — Created independent GSD phases for all registered pages.
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -48,6 +48,7 @@ Progress: [░░░░░░░░░░] 0%
 - Setup: Parallel page analysis threads must not modify `.planning/codebase/*.md`.
 - Setup: The three page-analysis phases can run independently in separate worktree threads because they only share the global codebase map as input.
 - Setup: `.planning/codebase/` was regenerated as a full-repository map; future page analysis must write `CONTEXT.md`, `RESEARCH.md`, and plan artifacts under the assigned phase directory.
+- Setup: All 17 app registry pages now have dedicated phase directories.
 
 ### Roadmap Evolution
 
@@ -56,6 +57,7 @@ Progress: [░░░░░░░░░░] 0%
 - 2026-06-16: Phase 2 added for 银行明细 page analysis and improvement planning.
 - 2026-06-16: Phase 3 added for 税金抵扣 page analysis and improvement planning.
 - 2026-06-16: `.planning/codebase/` regenerated as a global repository map; page-focused analysis policy reaffirmed.
+- 2026-06-16: Phases 4-17 added for the remaining registered pages.
 
 ### Pending Todos
 
