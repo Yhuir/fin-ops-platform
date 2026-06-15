@@ -17,7 +17,6 @@ const pendingInvoicesSourceFiles = [
   "src/components/pendingInvoices/PendingInvoiceInvoicePickerDrawer.tsx",
   "src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx",
   "src/components/pendingInvoices/PendingInvoiceExportDrawer.tsx",
-  "src/components/pendingInvoices/ManualInvoiceDialog.tsx",
 ] as const;
 
 function readWebSource(path: string) {
@@ -72,7 +71,7 @@ function upgradedRows() {
         summaries: [],
       },
       can_create_invoice: true,
-      available_actions: ["attach_existing_invoice", "manual_invoice"],
+      available_actions: ["attach_existing_invoice"],
     },
     {
       id: "txn-invoice-not-paid",
@@ -317,7 +316,7 @@ function pendingRuleClosureRow(id: string, counterpartyName: string, statusLabel
     input_invoices: { primary: null, relation_count: 0, has_multiple: false, summaries: [], payment_summary: null },
     oa: { primary: null, relation_count: 0, has_multiple: false, detail_available: false, summaries: [] },
     can_create_invoice: matchedGroup !== "no_invoice_required",
-    available_actions: matchedGroup === "no_invoice_required" ? ["view_rules"] : ["attach_existing_invoice", "manual_invoice"],
+    available_actions: matchedGroup === "no_invoice_required" ? ["view_rules"] : ["attach_existing_invoice"],
   };
 }
 
@@ -680,6 +679,21 @@ function installPendingInvoiceFetch(options: {
         affected_months: ["2026-05"],
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
+    if (url.pathname === "/api/pending-invoices/income-statuses" && method === "PUT") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { transaction_ids?: string[]; status_code?: string; request_id?: string };
+      const transactionIds = Array.isArray(body.transaction_ids) ? body.transaction_ids : [];
+      return new Response(JSON.stringify({
+        status: "completed",
+        request_id: body.request_id ?? "income-status-batch",
+        request_key: "pending_invoice_income_status_batch:mock",
+        transaction_ids: transactionIds,
+        status_code: body.status_code ?? "cash_income",
+        affected_transaction_ids: transactionIds,
+        affected_invoice_ids: [],
+        affected_months: ["2026-05"],
+        rows: [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
     if (url.pathname === "/api/pending-invoices/rows/txn-paid-pending/attach-existing-invoice/preview") {
       return new Response(JSON.stringify({
         preview_id: "attach-preview-001",
@@ -726,28 +740,6 @@ function installPendingInvoiceFetch(options: {
         },
       });
     }
-    if (url.pathname === "/api/pending-invoices/manual-invoices/preview") {
-      return new Response(JSON.stringify({
-        preview_id: "preview-001",
-        request_key: "manual-key",
-        can_confirm: true,
-        target_invoice_type: "input",
-        bank_transaction_summary: { id: "txn-paid-pending", direction: "expense", counterparty_name: "云南开票供应商", trade_time: "2026-05-02", amount: "1200.00" },
-        invoice_identity: { source_unique_key: "source-key", data_fingerprint: "fingerprint" },
-        duplicate_check: { status: "clear", matched_invoice_id: null, message: "未发现重复发票" },
-        relation_impact: { relation_mode: "pending_invoice_manual_invoice", affected_months: ["2026-05"] },
-        warnings: [],
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }
-    if (url.pathname === "/api/pending-invoices/manual-invoices") {
-      return new Response(JSON.stringify({
-        invoice_id: "inv-created",
-        relation_case_id: "case-created",
-        affected_transaction_ids: ["txn-paid-pending"],
-        affected_invoice_ids: ["inv-created"],
-        affected_months: ["2026-05"],
-      }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }
     return baseFetch(input, init);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -793,7 +785,6 @@ describe("Pending invoices page", () => {
       pendingInvoicesTableSource.includes("Dropdown.Menu") && pendingInvoicesTableSource.includes('selectionMode="multiple"') ? null : "PendingInvoicesTable.tsx should use HeroUI Dropdown multi-select filtering",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx"].includes("AppDrawer") ? null : "PendingInvoiceDrawerFrame.tsx should use AppDrawer for right drawer shape",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should use AppDialog for OA print dialog",
-      sourceByPath["src/components/pendingInvoices/ManualInvoiceDialog.tsx"].includes("AppDialog") ? null : "ManualInvoiceDialog.tsx should use AppDialog",
     ].filter(Boolean);
 
     expect({
@@ -815,11 +806,10 @@ describe("Pending invoices page", () => {
     expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*transition:\s*background-color var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoices-sort-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoices-table-zone-header-grid\s*{[^}]*grid-template-columns:\s*14fr 10fr 11fr 11fr 11fr 10fr 7fr 11fr 15fr/s);
-    expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-row-menu-trigger,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__header\s*{[^}]*padding:\s*10px var\(--fp-space-4\)/s);
     expect(css).toMatch(/\.pending-invoice-drawer__body\s*{[^}]*padding:\s*var\(--fp-space-3\)/s);
     expect(css).toMatch(/\.pending-invoice-metric-grid\s*{[^}]*gap:\s*var\(--fp-space-2\)/s);
-    expect(css).toMatch(/\.pending-invoice-manual-dialog\s*{[^}]*gap:\s*var\(--fp-space-3\)/s);
   });
 
   test("renders project four-zone table contract and summarizes multiple relations", async () => {
@@ -875,10 +865,8 @@ describe("Pending invoices page", () => {
     const pendingRow = within(page).getByRole("row", { name: /云南开票供应商/ });
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 选择发票/ })).not.toBeInTheDocument();
     expect(within(pendingRow).queryByRole("button", { name: /云南开票供应商 补票/ })).not.toBeInTheDocument();
-    await userEvent.setup().click(within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" }));
-    expect(await screen.findByRole("menuitem", { name: "选择发票" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "补票" })).toBeInTheDocument();
-    await userEvent.setup().keyboard("{Escape}");
+    expect(within(pendingRow).queryByRole("button", { name: "云南开票供应商 发票获取操作" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "补票" })).not.toBeInTheDocument();
     expect(within(page).getByText("DIG-001")).toBeInTheDocument();
     expect(within(page).getAllByText("+1").length).toBeGreaterThanOrEqual(2);
     expect(within(page).getByText("2,800.00")).toBeInTheDocument();
@@ -1043,8 +1031,7 @@ describe("Pending invoices page", () => {
 
     const page = await findPendingInvoicesPage();
     const relationRow = await within(page).findByRole("row", { name: /分期供应商/ });
-    await user.click(within(relationRow).getByRole("button", { name: "分期供应商 发票获取操作" }));
-    await user.click(await screen.findByRole("menuitem", { name: "查看支付明细" }));
+    await user.click(within(relationRow).getByRole("button", { name: "分期供应商 查看全部发票关系" }));
     expect(await screen.findByText("关系与支付明细")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关闭关系明细抽屉" })).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "历史支付流水" })).toBeInTheDocument();
@@ -1336,16 +1323,16 @@ describe("Pending invoices page", () => {
     });
   }, 45_000);
 
-  test("opens invoice picker from status column, previews attach-existing, confirms, and refetches rows", async () => {
+  test("opens invoice picker from the selected-row toolbar, previews attach-existing, confirms, and refetches rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
-    const pendingRow = await within(page).findByRole("row", { name: /云南开票供应商/ });
-    await user.click(within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" }));
-    await user.click(await screen.findByRole("menuitem", { name: "选择发票" }));
+    await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商" }));
+    expect(within(page).getByText("已选 1 条流水")).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "选择发票" }));
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();
     expect(await screen.findByRole("table", { name: "发票候选" })).toBeInTheDocument();
@@ -1421,32 +1408,88 @@ describe("Pending invoices page", () => {
     });
   }, 45_000);
 
-  test("manual invoice action still previews before confirm", async () => {
+  test("selects income rows and batch marks invoice status from the toolbar", async () => {
     const user = userEvent.setup();
+    const firstIncomeRow = {
+      ...pendingRuleClosureRow("income-batch-a", "收入批量客户A", "未开票", "requires_invoice"),
+      bank_transaction: {
+        ...pendingRuleClosureRow("income-batch-a", "收入批量客户A", "未开票", "requires_invoice").bank_transaction,
+        debit_amount: "0.00",
+        credit_amount: "300.00",
+        amount: "300.00",
+        effective_tag_primary_label: "收入",
+        effective_tag_sub_label: "服务收入",
+        effective_tag_label_path: ["收入", "服务收入"],
+      },
+      invoice_acquisition_status: {
+        code: "income_pending_invoice",
+        label: "未开票",
+        reason: "收入流水未关联销项发票。",
+        severity: "warning",
+        primary_action: "mark_income_status",
+        matched_rule: { source: "pending_output_invoice_tag_groups", group: "requires_invoice", tag_code: "income-batch-a", tag_label: "服务收入" },
+      },
+      can_create_invoice: false,
+      available_actions: ["mark_income_status"],
+    };
+    const secondIncomeRow = {
+      ...firstIncomeRow,
+      id: "income-batch-b",
+      bank_transaction: {
+        ...firstIncomeRow.bank_transaction,
+        id: "income-batch-b",
+        counterparty_name: "收入批量客户B",
+        credit_amount: "200.00",
+        amount: "200.00",
+      },
+    };
+    const fetchMock = installPendingInvoiceFetch({
+      rowsPayload: (url) => (url.searchParams.get("direction") === "income" ? [firstIncomeRow, secondIncomeRow] : upgradedRows()),
+    });
+    renderAppAt("/pending-invoices");
+
+    const page = await findPendingInvoicesPage();
+    await user.click(await within(page).findByRole("button", { name: "收入 75" }));
+    await within(page).findByText("收入批量客户A");
+    expect(within(page).queryByRole("button", { name: "标记无需开票" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "标记现金收入" })).not.toBeInTheDocument();
+
+    await user.click(await within(page).findByRole("checkbox", { name: "选择流水 收入批量客户A" }));
+    await user.click(await within(page).findByRole("checkbox", { name: "选择流水 收入批量客户B" }));
+
+    expect(within(page).getByText("已选 2 条流水")).toBeInTheDocument();
+    expect(within(page).getByText("流水合计 500.00")).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: "标记现金收入" }));
+
+    await waitFor(() => {
+      const batchCall = fetchMock.mock.calls.find(([input]) => (
+        new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/pending-invoices/income-statuses"
+      ));
+      expect(JSON.parse(String(batchCall?.[1]?.body ?? "{}"))).toMatchObject({
+        transaction_ids: ["income-batch-a", "income-batch-b"],
+        status_code: "cash_income",
+      });
+      expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(2);
+    });
+  }, 45_000);
+
+  test("does not expose manual invoice dialog or API calls", async () => {
     const fetchMock = installPendingInvoiceFetch();
     renderAppAt("/pending-invoices");
 
     const page = await findPendingInvoicesPage();
     const pendingRow = await within(page).findByRole("row", { name: /云南开票供应商/ });
-    await user.click(within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" }));
-    await user.click(await screen.findByRole("menuitem", { name: "补票" }));
-    const dialog = await screen.findByRole("dialog", { name: "手工补录发票" });
-    await user.type(within(dialog).getByLabelText("发票号码"), "INV-MANUAL");
-    await user.type(within(dialog).getByLabelText("开票日期"), "2026-05-06");
-    await user.type(within(dialog).getByLabelText("价税合计"), "1200.00");
-    await user.type(within(dialog).getByLabelText("销方名称"), "手工销方");
-    await user.type(within(dialog).getByLabelText("购方名称"), "云南溯源科技");
-    await user.click(within(dialog).getByRole("button", { name: "预览" }));
 
-    expect(await within(dialog).findByText(/manual-key/)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "确认写入" }));
-
-    await waitFor(() => {
-      const paths = fetchMock.mock.calls.map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname);
-      expect(paths).toContain("/api/pending-invoices/manual-invoices/preview");
-      expect(paths).toContain("/api/pending-invoices/manual-invoices");
-    });
-  }, 45_000);
+    expect(within(pendingRow).queryByRole("button", { name: "云南开票供应商 发票获取操作" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "手工补录发票" })).not.toBeInTheDocument();
+    expect(screen.queryByText("补票")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => (
+      new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname
+    ))).not.toEqual(expect.arrayContaining([
+      "/api/pending-invoices/manual-invoices/preview",
+      "/api/pending-invoices/manual-invoices",
+    ]));
+  });
 
   test("refetches rows when bank detail tag settings update", async () => {
     const fetchMock = installPendingInvoiceFetch();
@@ -1474,12 +1517,10 @@ describe("Pending invoices page", () => {
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
 
     const pendingRow = await within(page).findByRole("row", { name: /云南开票供应商/ });
-    const actionButton = within(pendingRow).getByRole("button", { name: "云南开票供应商 发票获取操作" });
-    expect(actionButton).toBeEnabled();
-
-    await user.click(actionButton);
-    expect(await screen.findByRole("menuitem", { name: "选择发票" })).toBeEnabled();
-    expect(screen.getByRole("menuitem", { name: "补票" })).toBeEnabled();
+    await user.click(within(pendingRow).getByRole("checkbox", { name: "选择流水 云南开票供应商" }));
+    expect(within(page).getByRole("button", { name: "选择发票" })).toBeEnabled();
+    expect(within(pendingRow).queryByRole("button", { name: "云南开票供应商 发票获取操作" })).not.toBeInTheDocument();
+    expect(screen.queryByText("补票")).not.toBeInTheDocument();
   });
 
   test("refetches rows on focus as bank detail tag update fallback", async () => {

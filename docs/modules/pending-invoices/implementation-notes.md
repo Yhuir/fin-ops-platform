@@ -10,8 +10,10 @@
 - `requires_invoice` 是 active tag complement，由后端实时派生；保存规则时即使请求包含该字段也必须忽略。
 - rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
 - filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
-- OA/流水/发票 relation 不是待找发票私有事实；manual invoice 和 attach existing 写入必须委托 `WorkbenchRelationCommandService`，读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
-- 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖支出/收入状态、规则保存、人工补票、attach existing、income status、API 契约、SQL read model、worker fan-out、lifecycle fan-out、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
+- OA/流水/发票 relation 不是待找发票私有事实；当前页面只通过 attach existing 写入选择已有发票关系，且必须委托 `WorkbenchRelationCommandService`；读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
+- manual invoice 不再是当前待找发票 HTTP/UI 新写入口；历史 `preview_manual_invoice` / `confirm_manual_invoice` 只保留旧 command 恢复和迁移兼容。
+- 收入状态覆盖必须走批量 service/API 边界，先整批校验再一次写 command/audit/finalizer，不能由前端循环单条接口形成半成功。
+- 2026-06-15 测试闭环审计确认：现有 P0/P1 覆盖支出/收入状态、规则保存、manual 新写入口移除、历史 manual command 兼容、attach existing、income status batch、API 契约、SQL read model、worker fan-out、lifecycle fan-out、App Status 和前端交互。
 
 ## 记录模板
 
@@ -29,6 +31,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-15 - 移除补票入口并闭环收入批量状态
+
+- 目标：移除待找发票行内三点按钮和“补票”新入口；支出侧只保留选中工具栏“选择发票”；收入侧增加多选后批量“标记无需开票/标记现金收入”。
+- 影响范围：pending invoice routes/application service/status action、SQL projection、`PendingInvoicesPage`、`PendingInvoicesTable`、relation drawer、pending invoice API/types、模块/API/产品/页面架构文档和相关测试。
+- 关键决策：manual invoice HTTP preview/confirm 返回 `not_found`；历史 manual command/service/table 保留为旧数据恢复兼容。收入批量状态复用 income status command/audit/finalizer/projection 模式，先拒绝重复 ID、非收入流水、已关联发票和非法状态，再一次写入并合并 affected months。
+- 文档影响：更新 `README.md`、`state-machine.md`、`tests.md`、本实施记录、`docs/dev/api-contracts.md`、`docs/product-specs/invoice-lifecycle.md` 和 `docs/app-architecture/pages.md`。
+- 测试覆盖：新增/更新 backend service/API、SQL projection 兼容、frontend page/API mapper 测试，覆盖 manual 新入口不可达、历史 command 恢复、支出选中工具栏、收入批量状态和旧 UI/API 移除。
+- 验证命令：见最终交付说明。
+- 未测风险：真实生产 worker drain 和大数据量样本仍按运维 smoke 验证。
+- 后续事项：发布后用真实支出多流水/多发票样本和收入多选样本核对页面筛选、刷新状态与审计记录。
 
 ## 2026-06-13 - filter-options fresh-gated SQL 聚合
 

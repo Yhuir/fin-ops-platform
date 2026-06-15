@@ -1,7 +1,7 @@
 import type { Key } from "react";
 
 import { Button, Dropdown, Label, Table, type Selection, type SortDescriptor } from "@heroui/react";
-import { Filter, Info, MoreVertical } from "lucide-react";
+import { Filter, Info } from "lucide-react";
 import { useMemo, useState, type MutableRefObject, type ReactNode } from "react";
 
 import {
@@ -16,7 +16,6 @@ import type {
   PendingInvoiceColumnFilter,
   PendingInvoiceFilterField,
   PendingInvoiceObjectDetailTarget,
-  PendingInvoicePrimaryAction,
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
@@ -33,17 +32,13 @@ type PendingInvoicesTableProps = {
   config: PendingInvoicesTableConfig;
   onSortChange: (field: PendingInvoiceSortField, direction?: PendingInvoiceSortDirection) => void;
   onOpenRelation: (row: PendingInvoiceRow) => void;
-  onOpenInvoicePicker: (row: PendingInvoiceRow) => void;
-  onOpenManualInvoice: (row: PendingInvoiceRow) => void;
   onOpenObjectDetail: (target: PendingInvoiceObjectDetailTarget) => void;
-  onMarkIncomeStatus: (row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => void;
   direction: PendingInvoiceDirection;
   statusFilterControl: ReactNode;
   filterFields: PendingInvoiceFilterField[];
   columnFilters: PendingInvoiceColumnFilter[];
   onApplyColumnFilters: (filters: PendingInvoiceColumnFilter[]) => void;
   onClearColumnFilters: (fields: string[]) => void;
-  pendingActionRowIds?: Set<string>;
   selectedTransactionIds?: Set<string>;
   onToggleTransactionSelection?: (row: PendingInvoiceRow) => void;
   isTransactionSelectable?: (row: PendingInvoiceRow) => boolean;
@@ -303,109 +298,9 @@ function ColumnFilterMenu({
   );
 }
 
-function shouldOpenRelation(action: PendingInvoicePrimaryAction) {
-  return ["view_relation", "view_payment_detail", "view_accumulated", "view_payment_history"].includes(action);
-}
-
-function shouldOpenInvoicePicker(action: PendingInvoicePrimaryAction) {
-  return ["attach_existing_invoice", "choose_invoice", "select_invoice"].includes(action);
-}
-
-function shouldOpenManualInvoice(action: PendingInvoicePrimaryAction) {
-  return ["manual_invoice", "create_invoice"].includes(action);
-}
-
 function canOpenOaDetail(row: PendingInvoiceRow) {
   const primaryOa = row.oa.primary;
   return Boolean(primaryOa?.id?.startsWith("oa-") && primaryOa.detailAvailable && row.oa.detailAvailable);
-}
-
-function RowActionMenu({
-  row,
-  onOpenRelation,
-  onOpenInvoicePicker,
-  onOpenManualInvoice,
-  onMarkIncomeStatus,
-  disabled = false,
-}: Pick<PendingInvoicesTableProps, "onOpenRelation" | "onOpenInvoicePicker" | "onOpenManualInvoice" | "onMarkIncomeStatus"> & { row: PendingInvoiceRow; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const action = row.invoiceAcquisitionStatus.primaryAction;
-  const prefix = row.bankTransaction.counterpartyName;
-  const available = new Set(row.availableActions);
-  const canAttach = available.has("attach_existing_invoice");
-  const canManual = available.has("manual_invoice");
-  const canMarkIncome = available.has("mark_income_status");
-  const canViewRelation = available.has("view_relation");
-  const menuItems: Array<{ key: string; label: string; onClick: () => void }> = [];
-
-  if (action === "mark_income_status" && canMarkIncome) {
-    menuItems.push(
-      { key: "income_no_invoice_required", label: "无需开票", onClick: () => onMarkIncomeStatus(row, "income_no_invoice_required") },
-      { key: "cash_income", label: "现金收入", onClick: () => onMarkIncomeStatus(row, "cash_income") },
-    );
-  }
-  if (action === "attach_or_create_invoice" && (canAttach || canManual)) {
-    if (canAttach) {
-      menuItems.push({ key: "attach_existing_invoice", label: "选择发票", onClick: () => onOpenInvoicePicker(row) });
-    }
-    if (canManual) {
-      menuItems.push({ key: "manual_invoice", label: "补票", onClick: () => onOpenManualInvoice(row) });
-    }
-  }
-  if (shouldOpenRelation(action) && canViewRelation) {
-    menuItems.push({ key: "view_relation", label: "查看支付明细", onClick: () => onOpenRelation(row) });
-  }
-  if (shouldOpenInvoicePicker(action) && canAttach) {
-    menuItems.push({ key: "choose_invoice", label: "选择发票", onClick: () => onOpenInvoicePicker(row) });
-  }
-  if (shouldOpenManualInvoice(action) && canManual) {
-    menuItems.push({ key: "create_invoice", label: "补票", onClick: () => onOpenManualInvoice(row) });
-  }
-  if (menuItems.length === 0) {
-    return null;
-  }
-
-  return (
-    <div
-      className="pending-invoices-row-menu"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          setOpen(false);
-        }
-      }}
-    >
-      <button
-        aria-expanded={open ? "true" : undefined}
-        aria-haspopup="menu"
-        aria-label={`${prefix} 发票获取操作`}
-        className="pending-invoices-row-menu-trigger"
-        onClick={() => setOpen((current) => !current)}
-        title="发票获取操作"
-        type="button"
-      >
-        <MoreVertical aria-hidden="true" size={15} strokeWidth={2.4} />
-      </button>
-      {open ? (
-        <div aria-label={`${prefix} 发票获取操作菜单`} className="pending-invoices-row-menu-content" role="menu">
-          {menuItems.map((item) => (
-            <button
-              className="pending-invoices-row-menu-item"
-              disabled={disabled}
-              key={item.key}
-              onClick={() => {
-                setOpen(false);
-                item.onClick();
-              }}
-              role="menuitem"
-              type="button"
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 export default function PendingInvoicesTable({
@@ -413,17 +308,13 @@ export default function PendingInvoicesTable({
   config,
   onSortChange,
   onOpenRelation,
-  onOpenInvoicePicker,
-  onOpenManualInvoice,
   onOpenObjectDetail,
-  onMarkIncomeStatus,
   direction,
   statusFilterControl,
   filterFields,
   columnFilters,
   onApplyColumnFilters,
   onClearColumnFilters,
-  pendingActionRowIds,
   selectedTransactionIds,
   onToggleTransactionSelection,
   isTransactionSelectable,
@@ -545,12 +436,8 @@ export default function PendingInvoicesTable({
                 </Table.Row>
               ) : rows.map((row) => (
                 <PendingInvoiceTableRow
-                  actionPending={pendingActionRowIds?.has(row.id) ?? false}
                   direction={direction}
                   key={row.id}
-                  onMarkIncomeStatus={onMarkIncomeStatus}
-                  onOpenInvoicePicker={onOpenInvoicePicker}
-                  onOpenManualInvoice={onOpenManualInvoice}
                   onOpenObjectDetail={onOpenObjectDetail}
                   onOpenRelation={onOpenRelation}
                   onToggleTransactionSelection={onToggleTransactionSelection}
@@ -604,15 +491,11 @@ function PendingInvoiceTableRow({
   row,
   direction,
   onOpenRelation,
-  onOpenInvoicePicker,
-  onOpenManualInvoice,
   onOpenObjectDetail,
-  onMarkIncomeStatus,
   selectedTransactionIds,
   onToggleTransactionSelection,
   isTransactionSelectable,
-  actionPending = false,
-}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters" | "pendingActionRowIds"> & { row: PendingInvoiceRow; actionPending?: boolean }) {
+}: Omit<PendingInvoicesTableProps, "rows" | "config" | "onSortChange" | "statusFilterControl" | "filterFields" | "columnFilters" | "onApplyColumnFilters" | "onClearColumnFilters"> & { row: PendingInvoiceRow }) {
   const primaryInvoice = row.inputInvoices.primary;
   const primaryOa = row.oa.primary;
   const invoiceExtraCount = Math.max(0, row.inputInvoices.relationCount - 1);
@@ -679,18 +562,9 @@ function PendingInvoiceTableRow({
       </Table.Cell>
       <Table.Cell className="pending-invoices-table-cell pending-invoices-table-cell--status pending-invoices-table-cell--left-border pending-invoices-col-status" data-column-role="status">
         <span className="pending-invoices-status-cell">
-          <span aria-hidden="true" />
           <FinanceStatusTag tone={severityTone(row.invoiceAcquisitionStatus.severity)}>
             {row.invoiceAcquisitionStatus.label}
           </FinanceStatusTag>
-          <RowActionMenu
-            disabled={actionPending}
-            onMarkIncomeStatus={onMarkIncomeStatus}
-            onOpenInvoicePicker={onOpenInvoicePicker}
-            onOpenManualInvoice={onOpenManualInvoice}
-            onOpenRelation={onOpenRelation}
-            row={row}
-          />
         </span>
       </Table.Cell>
       <Table.Cell className="pending-invoices-table-cell pending-invoices-table-cell--left-border pending-invoices-col-invoice-no" data-column-role="identity">

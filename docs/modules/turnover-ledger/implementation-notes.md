@@ -9,10 +9,21 @@
 - 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。bank-only 外部往来闭环在关联台保持 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
 - 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回 bank-only 闭环再重新选择。
 - 外部往来页撤回只允许 bank-only open 外部往来闭环；若已在关联台补齐三栏并进入 paired，必须去关联台撤回完整关系。
-- `readModelStatus !== "fresh"` 时前端必须显示诊断并避免把旧 grouped payload 当作最终业务结论；写操作是否可提交由后端 stale precondition、canonical write safety、权限/session、DB 和 idempotency/version 判定。写 API 成功后必须用全屏 operation overlay 等待 `turnover_ledger` barrier fresh 并重新加载。
+- `readModelStatus !== "fresh"` 时前端必须显示诊断并避免把旧 grouped payload 当作最终业务结论；manual closure 这类依赖页面所选 flow row versions 的写操作必须先阻断或等待 fresh 后重新加载并重绑定，后端 stale precondition、canonical write safety、权限/session、DB 和 idempotency/version 继续作为最终兜底。写 API 成功后必须用全屏 operation overlay 等待 `turnover_ledger` barrier fresh 并重新加载。
 - 写路径应优先保持 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` 边界；legacy fallback 只作为兼容风险存在，不能继续扩大。
 - 涉及 Workbench relation 的 manual closure/withdraw 即使经过 legacy fallback facade，也必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation write fallback。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
+
+## 2026-06-15 - Manual closure selected-row fresh gate
+
+- 目标：解决外部往来页选择多条银行流水打开闭环抽屉后，点击确定时使用旧 `categoryVersion` 生成 `expected_versions`，后端返回“银行流水状态已变化，请刷新后重试。”，导致 turnover relation 和 Workbench relation 都未写入、关联台 open 区没有关系组的问题。
+- 影响范围：`TurnoverLedgerPage` manual closure 提交流、stale grouped read model 行为、`web/src/test/TurnoverLedgerPage.test.tsx`。
+- 真实原因：不是关联台渲染丢失配对关系；闭环 POST 在 `TurnoverLedgerBankRowStalePreconditionPort` 前置版本检查被拒绝，后续 `confirm_zero_difference_closure`、`WorkbenchRelationCommandService.confirm_relation`、`freshness_targets` 等链路都没有执行。
+- 关键决策：不新增后端旁路、不放宽 expected_versions。前端在 manual closure 点击确定前先等待 `turnover_ledger:all` fresh，再重新拉取 grouped payload，按原始 bank row ids 在原 group 的 latest `flow_rows` 中重绑，重新计算零差额并用最新 `categoryVersion` 提交。刷新后任一流水缺失、离开原 group 或不再零差额，则关闭抽屉并提示重新选择，不发 POST。当前 grouped read model 非 fresh 时，页面“确认闭环”入口禁用。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 与本实施记录。
+- 测试覆盖：新增/更新 `web/src/test/TurnoverLedgerPage.test.tsx` 中 `refreshes the grouped ledger before manual closure and submits latest bank row versions`、`blocks manual closure when a selected flow disappears after the fresh ledger reload`、`shows grouped read model stale warning and blocks manual closure`。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：真实生产库上的 worker drain 和跨页面视觉刷新仍需 staging/生产前 smoke；本次本地测试已覆盖请求体版本、阻断旧选择、后端 UoW/API/workbench relation contract。
 
 ## 2026-06-15 - Manual closure Workbench visibility barrier
 

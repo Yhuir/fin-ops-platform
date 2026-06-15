@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-15 - Matching completed scope source-version 自愈闭环
+
+- 目标：补齐规则版本发布后的后台闭环，确保 196、6868.55 这类历史 completed matching scope 在 `workbench_matching_rules_version` 变化后会自动重新入队并重建候选/decision。
+- 影响范围：`WorkbenchMatchingDirtyScopeWorker`、`WorkbenchReconciliationDirtyQueue`、`PostgresReadModelRepository` matching dirty scope SQL、`RuntimeQueueRepository` transaction-bound JSONB adapter、Workbench all-scope aggregate source_versions、本模块文档。
+- 关键决策：不新增前端补救逻辑，不手工 SQL 修指定月份，不把 OA/银行/发票事实池合并；把“completed scope 的 matching source_versions 是否覆盖当前版本”作为 durable queue/service 边界内的常驻 worker 自检。repository 使用 `for update skip locked` 原子挑出 stale completed rows 并转回 `dirty`，worker 之后按既有 claim/complete/fail 生命周期处理。
+- 真实原因补充：前一轮修复把 `workbench_matching_rules_version` 纳入 month active generation freshness，但生产 `job.workbench_matching_dirty_scopes` 中 2026-01/02/03 等 scope 仍是旧版本 `completed`，常驻 worker 只 claim `dirty/retry`，因此不会自动重跑；重投后还暴露出 `RuntimeQueueRepository` 在绑定真实 `PostgresTransaction` 时没有把 read model refresh payload 包装成 JSONB，导致 decision expire 同事务入队失败；`all` active generation 还缺少 matching 版本传播，导致全局视图缺少 freshness 证明。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 和 runtime worker 治理文档。
+- 测试覆盖：新增 worker claim 前 stale completed scope 自检测试、dirty queue 内存重投测试、repository 原子 SQL 测试、RuntimeQueue transaction-bound JSONB adapter 测试，并扩展 all-scope 聚合版本传播测试。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_runtime_queue.py tests/test_workbench_matching_dirty_scope_worker.py tests/test_workbench_reconciliation_dirty_queue.py tests/test_workbench_sql_runtime.py tests/test_workbench_reconciliation_decision_store.py -q`。
+- 未测风险：本地测试未直接连接生产库；发布后需通过正常部署和 worker/read model contract 让生产 scope 重投，再只读验证目标月份分组。
+
 ## 2026-06-15 - 预约付款日期消歧与 Workbench active generation 刷新闭环
 
 - 目标：修复 6868.55 多个月同金额同对方 OA-bank 不能自动配对，以及 196 等自动候选规则变更后旧 active generation 继续发布旧分组的问题。

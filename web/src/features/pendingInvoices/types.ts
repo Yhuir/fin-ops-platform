@@ -30,7 +30,6 @@ export type PendingInvoicePrimaryAction =
   | "view_payment_detail"
   | "attach_or_create_invoice"
   | "attach_existing_invoice"
-  | "manual_invoice"
   | "view_rules"
   | "open_rules"
   | "mark_income_status"
@@ -517,58 +516,17 @@ export type PendingInvoiceExportDownload = {
   fileName: string;
 };
 
-export type ManualPendingInvoiceRequest = {
+export type PendingInvoiceIncomeStatusCode = "income_no_invoice_required" | "cash_income";
+
+export type PendingInvoiceIncomeStatusResult = {
+  status: string;
   requestId: string;
-  previewId?: string;
-  bankTransactionId: string;
-  invoiceNo?: string;
-  digitalInvoiceNo?: string;
-  invoiceCode?: string;
-  issueDate: string;
-  totalWithTax: string;
-  taxAmount?: string;
-  taxRate?: string;
-  sellerName: string;
-  sellerTaxNo?: string;
-  buyerName: string;
-  buyerTaxNo?: string;
-  remark?: string;
-};
-
-export type ManualPendingInvoicePreview = {
-  previewId: string;
   requestKey: string;
-  canConfirm: boolean;
-  targetInvoiceType: "input" | "output" | (string & {});
-  bankTransactionSummary: {
-    id: string;
-    direction: PendingInvoiceDirection | (string & {});
-    counterpartyName: string;
-    tradeTime: string;
-    amount: string;
-  };
-  invoiceIdentity: {
-    sourceUniqueKey: string;
-    dataFingerprint: string;
-  };
-  duplicateCheck: {
-    status: string;
-    matchedInvoiceId: string | null;
-    message: string;
-  };
-  relationImpact: {
-    relationMode: string;
-    affectedMonths: string[];
-  };
-  affectedMonths: string[];
-  warnings: string[];
-};
-
-export type ManualPendingInvoiceResult = {
-  invoiceId: string;
-  relationCaseId: string;
+  transactionIds: string[];
+  statusCode: PendingInvoiceIncomeStatusCode | (string & {});
   affectedTransactionIds: string[];
   affectedInvoiceIds: string[];
   affectedMonths: string[];
+  rows: PendingInvoiceRow[];
   row: PendingInvoiceRow | null;
 };

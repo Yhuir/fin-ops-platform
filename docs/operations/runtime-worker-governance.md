@@ -165,6 +165,20 @@ tail -n 100 /var/log/fin-ops/workbench-generation-prune-$(date +%Y%m%d).log
 `pg_wal` 大小和 `/health/ready`。不得直接 `VACUUM FULL` 大表，除非根分区或临时表空间已满足重写
 空间需求；read model 可重建但业务事实表不可清空。
 
+### Workbench matching source-version recovery
+
+`workbench-matching` worker 是 matching 规则版本发布后的常驻一致性边界。每轮 claim dirty scope 前，
+worker 会通过 `WorkbenchReconciliationDirtyQueue` / repository 检查
+`job.workbench_matching_dirty_scopes.status='completed'` 的 scope run；如果 row 的 `source_versions`
+不包含当前 matching source versions（例如 `workbench_matching_rules_version`），repository 使用
+`for update skip locked` 把该 scope 原子转回 `dirty`，再由同一 worker 正常 claim、重建候选/decision、
+complete。不要手工改 `job.workbench_matching_dirty_scopes` 状态来补指定月份；生产恢复应走发布后的
+worker、read model refresh 和只读审计验证。
+
+Workbench `all` active generation 从 month shard 聚合时必须传播单一且完整的
+`workbench_matching_rules_version`。如果 all scope 缺失该版本证明，先通过正式 Workbench refresh 重建
+month/all active generation，并检查 `workbench-matching` worker heartbeat 与 dirty scope 收敛。
+
 ## 生产启动合同
 
 生产 worker 只使用 registration contract：

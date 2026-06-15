@@ -3,7 +3,6 @@ import { ChevronDown } from "lucide-react";
 
 import PageScaffold from "../components/common/PageScaffold";
 import PageToolbar from "../components/common/PageToolbar";
-import ManualInvoiceDialog from "../components/pendingInvoices/ManualInvoiceDialog";
 import PendingInvoiceDetailDrawer from "../components/pendingInvoices/PendingInvoiceDetailDrawer";
 import PendingInvoiceExportDrawer from "../components/pendingInvoices/PendingInvoiceExportDrawer";
 import PendingInvoiceInvoicePickerDrawer from "../components/pendingInvoices/PendingInvoiceInvoicePickerDrawer";
@@ -23,18 +22,18 @@ import {
   fetchPendingInvoiceRules,
   previewAttachExistingInvoices,
   savePendingInvoiceRules,
-  savePendingInvoiceIncomeStatus,
+  savePendingInvoiceIncomeStatuses,
 } from "../features/pendingInvoices/api";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import type {
   AttachExistingInvoiceResult,
   AttachExistingInvoicesResult,
   FetchPendingInvoiceRowsRequest,
-  ManualPendingInvoiceResult,
   PendingInvoiceDirection,
   PendingInvoiceFilter,
   PendingInvoiceColumnFilter,
   PendingInvoiceFilterField,
+  PendingInvoiceIncomeStatusCode,
   PendingInvoiceObjectDetailTarget,
   PendingInvoiceRow,
   PendingInvoiceSortDirection,
@@ -188,7 +187,6 @@ export default function PendingInvoicesPage() {
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [rulesTagRefreshToken, setRulesTagRefreshToken] = useState(0);
-  const [dialogRow, setDialogRow] = useState<PendingInvoiceRow | null>(null);
   const [pendingIncomeStatusRows, setPendingIncomeStatusRows] = useState<Set<string>>(() => new Set());
   const tagVersionRef = useRef<number | null>(readPersistedTagVersion());
 
@@ -346,9 +344,15 @@ export default function PendingInvoicesPage() {
     sortDirection,
   }), [sortDirection, sortField]);
   const exportDisabled = Boolean(readModelStatus && readModelStatus !== "fresh");
-  const isTransactionSelectable = useCallback((row: PendingInvoiceRow) => (
-    direction !== "income" && row.availableActions.includes("attach_existing_invoice")
-  ), [direction]);
+  const isTransactionSelectable = useCallback((row: PendingInvoiceRow) => {
+    if (direction === "expense") {
+      return row.availableActions.includes("attach_existing_invoice");
+    }
+    if (direction === "income") {
+      return row.availableActions.includes("mark_income_status");
+    }
+    return false;
+  }, [direction]);
   const selectedRows = useMemo(() => (
     rows.filter((row) => selectedTransactionIds.has(transactionIdForRow(row)) && isTransactionSelectable(row))
   ), [isTransactionSelectable, rows, selectedTransactionIds]);
@@ -388,16 +392,6 @@ export default function PendingInvoicesPage() {
     setActiveDrawer("relation");
   }, []);
 
-  const handleOpenInvoicePicker = useCallback((row: PendingInvoiceRow) => {
-    setInvoicePickerTransactionIds([transactionIdForRow(row)]);
-    setActiveDrawer("invoicePicker");
-  }, []);
-
-  const handleOpenInvoicePickerById = useCallback((transactionId: string) => {
-    setInvoicePickerTransactionIds([transactionId]);
-    setActiveDrawer("invoicePicker");
-  }, []);
-
   const handleToggleTransactionSelection = useCallback((row: PendingInvoiceRow) => {
     if (!isTransactionSelectable(row)) {
       return;
@@ -433,26 +427,6 @@ export default function PendingInvoicesPage() {
     setDetailTarget(null);
     setRelationTarget(null);
     setInvoicePickerTransactionIds([]);
-  }
-
-  function handleManualConfirmed(result: ManualPendingInvoiceResult) {
-    setDialogRow(null);
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, {
-      affectedMonths: result.affectedMonths,
-      affectedRowIds: [...result.affectedTransactionIds, ...result.affectedInvoiceIds],
-      source: "pending_invoice_manual_invoice",
-    });
-    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-      affectedMonths: result.affectedMonths,
-      affectedRowIds: result.affectedTransactionIds,
-      source: "pending_invoice_manual_invoice",
-    });
-    const updatedRow = result.row;
-    if (updatedRow) {
-      setRows((current) => current.map((row) => (row.id === updatedRow.id ? updatedRow : row)));
-      return;
-    }
-    setRefreshToken((current) => current + 1);
   }
 
   function handleAttachConfirmed(result: AttachExistingInvoiceResult | AttachExistingInvoicesResult) {
@@ -515,14 +489,26 @@ export default function PendingInvoicesPage() {
     setActiveDrawer("rules");
   }, []);
 
-  const handleMarkIncomeStatus = useCallback((row: PendingInvoiceRow, statusCode: "income_no_invoice_required" | "cash_income") => {
-    setPendingIncomeStatusRows((current) => new Set(current).add(row.id));
-    savePendingInvoiceIncomeStatus(row.id, statusCode)
+  const handleMarkSelectedIncomeStatus = useCallback((statusCode: PendingInvoiceIncomeStatusCode) => {
+    const transactionIds = selectedRows.map(transactionIdForRow);
+    if (transactionIds.length === 0) {
+      return;
+    }
+    setPendingIncomeStatusRows((current) => {
+      const next = new Set(current);
+      for (const transactionId of transactionIds) {
+        next.add(transactionId);
+      }
+      return next;
+    });
+    savePendingInvoiceIncomeStatuses(transactionIds, statusCode)
       .then((result) => {
-        if (result.row) {
-          setRows((current) => current.map((item) => (item.id === result.row?.id ? result.row : item)));
+        if (result.rows.length > 0) {
+          const updatedRows = new Map(result.rows.map((row) => [row.id, row]));
+          setRows((current) => current.map((item) => updatedRows.get(item.id) ?? item));
         }
         setRefreshToken((current) => current + 1);
+        clearSelectedTransactions();
       })
       .catch((caught) => {
         setError(caught instanceof Error ? caught.message : "收入流水状态保存失败。");
@@ -530,11 +516,13 @@ export default function PendingInvoicesPage() {
       .finally(() => {
         setPendingIncomeStatusRows((current) => {
           const next = new Set(current);
-          next.delete(row.id);
+          for (const transactionId of transactionIds) {
+            next.delete(transactionId);
+          }
           return next;
         });
       });
-  }, []);
+  }, [clearSelectedTransactions, selectedRows]);
 
   const compactStatusText = error
     ? error
@@ -676,9 +664,30 @@ export default function PendingInvoicesPage() {
           <div className="pending-invoices-selection-toolbar" role="status">
             <span>已选 {selectedRows.length} 条流水</span>
             <span>流水合计 {formatMoney(selectedBankTotal)}</span>
-            <button className="pending-invoices-button pending-invoices-button--primary" onClick={handleOpenSelectedInvoicePicker} type="button">
-              选择发票
-            </button>
+            {direction === "income" ? (
+              <>
+                <button
+                  className="pending-invoices-button pending-invoices-button--primary"
+                  disabled={pendingIncomeStatusRows.size > 0}
+                  onClick={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
+                  type="button"
+                >
+                  标记无需开票
+                </button>
+                <button
+                  className="pending-invoices-button pending-invoices-button--primary"
+                  disabled={pendingIncomeStatusRows.size > 0}
+                  onClick={() => handleMarkSelectedIncomeStatus("cash_income")}
+                  type="button"
+                >
+                  标记现金收入
+                </button>
+              </>
+            ) : (
+              <button className="pending-invoices-button pending-invoices-button--primary" onClick={handleOpenSelectedInvoicePicker} type="button">
+                选择发票
+              </button>
+            )}
             <button className="pending-invoices-button" onClick={clearSelectedTransactions} type="button">
               清除选择
             </button>
@@ -693,13 +702,9 @@ export default function PendingInvoicesPage() {
           onApplyColumnFilters={handleApplyColumnFilters}
           onClearColumnFilters={handleClearColumnFilters}
           onOpenRelation={handleOpenRelation}
-          onOpenInvoicePicker={handleOpenInvoicePicker}
-          onOpenManualInvoice={setDialogRow}
           onOpenObjectDetail={handleOpenDetail}
-          onMarkIncomeStatus={handleMarkIncomeStatus}
           direction={direction}
           statusFilterControl={statusFilterControl}
-          pendingActionRowIds={pendingIncomeStatusRows}
           selectedTransactionIds={selectedTransactionIds}
           onToggleTransactionSelection={handleToggleTransactionSelection}
           isTransactionSelectable={isTransactionSelectable}
@@ -766,7 +771,6 @@ export default function PendingInvoicesPage() {
         open={activeDrawer === "relation"}
         transactionId={relationTarget?.transactionId ?? null}
         loadDetail={loadRelation}
-        onOpenInvoicePicker={handleOpenInvoicePickerById}
         onClose={closeDrawer}
       />
       <PendingInvoiceInvoicePickerDrawer
@@ -789,13 +793,6 @@ export default function PendingInvoicesPage() {
         loadPreview={loadExportPreview}
         downloadExport={handleDownloadExport}
         onClose={closeDrawer}
-      />
-      <ManualInvoiceDialog
-        open={dialogRow !== null}
-        row={dialogRow}
-        direction={direction}
-        onClose={() => setDialogRow(null)}
-        onConfirmed={handleManualConfirmed}
       />
     </div>
   );

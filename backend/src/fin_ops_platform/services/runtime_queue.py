@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import os
 from typing import Any, Iterable
 
-from fin_ops_platform.services.postgres_connection import PostgresConnection
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresTransaction
 from fin_ops_platform.services.runtime_worker_registry import rabbitmq_dispatch_event_types
 
 
@@ -1790,7 +1790,7 @@ class RuntimeQueueRepository:
         }
 
     def _json_param(self, value: dict[str, Any]) -> Any:
-        if isinstance(self._connection, PostgresConnection):
+        if isinstance(self._connection, (PostgresConnection, PostgresTransaction)):
             from psycopg.types.json import Jsonb
 
             return Jsonb(value)

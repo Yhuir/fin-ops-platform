@@ -89,6 +89,49 @@ class WorkbenchReconciliationDirtyQueue:
             entry["source_versions"] = {**entry.get("source_versions", {}), **(source_versions or {})}
         return expanded
 
+    def mark_stale_completed_scopes(
+        self,
+        *,
+        source_versions: dict[str, object],
+        reason: str,
+        debounce_seconds: int = 0,
+        limit: int | None = None,
+    ) -> list[str]:
+        normalized_source_versions = dict(source_versions or {})
+        if not normalized_source_versions:
+            return []
+        resolved_limit = max(0, int(limit)) if limit is not None else None
+        if resolved_limit == 0:
+            return []
+        resolved_debounce_seconds = max(0, int(debounce_seconds))
+        if self._repository is not None:
+            return self._repository.mark_stale_workbench_matching_completed_scopes(
+                tenant_id=self._tenant_id,
+                source_versions=normalized_source_versions,
+                reason=reason,
+                debounce_seconds=resolved_debounce_seconds,
+                limit=resolved_limit,
+            )
+        available_at = self._now() + timedelta(seconds=resolved_debounce_seconds)
+        marked: list[str] = []
+        for scope_month, entry in sorted(self._scopes.items()):
+            if resolved_limit is not None and len(marked) >= resolved_limit:
+                break
+            if entry.get("status") != "completed":
+                continue
+            existing_source_versions = entry.get("source_versions") if isinstance(entry.get("source_versions"), dict) else {}
+            if _source_versions_include(existing_source_versions, normalized_source_versions):
+                continue
+            entry["status"] = "dirty"
+            entry["available_at"] = available_at
+            entry["lease_owner"] = None
+            entry["lease_expires_at"] = None
+            if reason and reason not in entry["reasons"]:
+                entry["reasons"].append(reason)
+            entry["source_versions"] = {**existing_source_versions, **normalized_source_versions}
+            marked.append(scope_month)
+        return marked
+
     def claim_due_scopes(
         self,
         *,
@@ -290,3 +333,7 @@ def _validate_active_lease(entry: dict[str, Any], *, worker_id: str | None, requ
         or str(entry.get("request_id") or "").strip() != str(request_id or "").strip()
     ):
         raise RuntimeError("Dirty scope is not held by the requested active lease.")
+
+
+def _source_versions_include(existing: dict[str, Any], expected: dict[str, object]) -> bool:
+    return all(existing.get(key) == value for key, value in expected.items())

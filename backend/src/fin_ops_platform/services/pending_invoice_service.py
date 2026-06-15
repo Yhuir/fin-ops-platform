@@ -97,11 +97,18 @@ def latest_income_status_override_from_commands(
             continue
         if command.get("status") != "completed":
             continue
+        overrides: list[dict[str, Any]] = []
         override = command.get("income_status_override")
-        if not isinstance(override, dict) or str(override.get("transaction_id") or "") != normalized_transaction_id:
-            continue
-        if latest is None or str(override.get("updated_at") or "") >= str(latest.get("updated_at") or ""):
-            latest = dict(override)
+        if isinstance(override, dict):
+            overrides.append(override)
+        batch_overrides = command.get("income_status_overrides")
+        if isinstance(batch_overrides, list):
+            overrides.extend(dict(item) for item in batch_overrides if isinstance(item, dict))
+        for override_payload in overrides:
+            if str(override_payload.get("transaction_id") or "") != normalized_transaction_id:
+                continue
+            if latest is None or str(override_payload.get("updated_at") or "") >= str(latest.get("updated_at") or ""):
+                latest = dict(override_payload)
     return deepcopy(latest) if latest is not None else None
 
 
@@ -1308,7 +1315,7 @@ class PendingInvoiceQueryService:
             "available_actions": [
                 action
                 for action in list(row.get("available_actions") or [])
-                if action in {"attach_existing_invoice", "manual_invoice"}
+                if action in {"attach_existing_invoice"}
             ],
             "relation_case_ids": list(row.get("relation_case_ids") or []),
         }
@@ -2306,17 +2313,30 @@ class PendingInvoiceApplicationService:
         transaction = self._get_transaction(transaction_id)
         if self.direction_for_transaction(transaction) != "income":
             raise PendingInvoiceError("invalid_direction", "Only income rows can be manually marked.")
-        current_row = self._row_provider(transaction.id, "income") if self._row_provider is not None else None
-        if isinstance(current_row, dict) and current_row.get("invoices"):
-            raise PendingInvoiceError(
-                "income_invoice_already_linked",
-                "Income rows that already have output invoices cannot be manually marked.",
-                status_code=HTTPStatus.CONFLICT,
-            )
         request_key = f"pending_invoice_income_status:{transaction.id}:{status_code}"
         command = self._get_command(request_id)
-        if isinstance(command, dict) and command.get("status") == "completed":
-            return deepcopy(command["result"])
+        if isinstance(command, dict):
+            if command.get("request_key") != request_key:
+                raise PendingInvoiceError(
+                    "invalid_income_status_override_payload",
+                    "request_id was already used for another income status payload.",
+                )
+            if command.get("status") == "completed":
+                return deepcopy(command["result"])
+        current_row = self._row_provider(transaction.id, "income") if self._row_provider is not None else None
+        if isinstance(current_row, dict):
+            if not _row_can_mark_income_status(current_row):
+                raise PendingInvoiceError(
+                    "income_status_not_available",
+                    "Selected income rows cannot be manually marked in their current state.",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            if _row_has_linked_invoice(current_row):
+                raise PendingInvoiceError(
+                    "income_invoice_already_linked",
+                    "Income rows that already have output invoices cannot be manually marked.",
+                    status_code=HTTPStatus.CONFLICT,
+                )
         if not isinstance(command, dict):
             command = {
                 "request_id": request_id,
@@ -2328,11 +2348,6 @@ class PendingInvoiceApplicationService:
                 "updated_at": _now(),
             }
             self._save_command(command)
-        elif command.get("request_key") != request_key:
-            raise PendingInvoiceError(
-                "invalid_income_status_override_payload",
-                "request_id was already used for another income status payload.",
-            )
         affected_months = self._affected_months_for_transaction(transaction)
         override = {
             "transaction_id": transaction.id,
@@ -2369,6 +2384,125 @@ class PendingInvoiceApplicationService:
                 "source": "pending_invoice_income_status_override",
                 "entity_type": "pending_invoice_income_status_override",
                 "transaction_id": transaction.id,
+                "request_id": request_id,
+                "request_key": request_key,
+                "affected_months": affected_months,
+            }
+        )
+        return result
+
+    def confirm_income_status_overrides(self, *, payload: dict[str, Any], actor_id: str) -> dict[str, Any]:
+        request_id = str(payload.get("request_id") or "").strip()
+        status_code = str(payload.get("status_code") or payload.get("code") or "").strip()
+        reason = str(payload.get("reason") or "").strip()
+        if not request_id or status_code not in INCOME_STATUS_OVERRIDE_CODES:
+            raise PendingInvoiceError(
+                "invalid_income_status_override_payload",
+                "request_id and a supported status_code are required.",
+            )
+        raw_transaction_ids = _raw_id_list(payload.get("transaction_ids"), "transaction_ids")
+        seen_transaction_ids: set[str] = set()
+        transaction_ids: list[str] = []
+        for transaction_id in raw_transaction_ids:
+            if transaction_id in seen_transaction_ids:
+                raise PendingInvoiceError(
+                    "duplicate_income_status_transactions",
+                    "transaction_ids must not include duplicate rows.",
+                )
+            seen_transaction_ids.add(transaction_id)
+            transaction_ids.append(transaction_id)
+        if not transaction_ids:
+            raise PendingInvoiceError("invalid_id_list", "transaction_ids must include at least one id.")
+
+        request_key = self.income_status_batch_request_key(transaction_ids=transaction_ids, status_code=status_code)
+        command = self._get_command(request_id)
+        if isinstance(command, dict):
+            if command.get("request_key") != request_key:
+                raise PendingInvoiceError(
+                    "invalid_income_status_override_payload",
+                    "request_id was already used for another income status payload.",
+                )
+            if command.get("status") == "completed":
+                return deepcopy(command["result"])
+
+        transactions = [self._get_transaction(transaction_id) for transaction_id in transaction_ids]
+        for transaction in transactions:
+            if self.direction_for_transaction(transaction) != "income":
+                raise PendingInvoiceError("invalid_direction", "Only income rows can be manually marked.")
+            current_row = self._row_provider(transaction.id, "income") if self._row_provider is not None else None
+            if isinstance(current_row, dict):
+                if not _row_can_mark_income_status(current_row):
+                    raise PendingInvoiceError(
+                        "income_status_not_available",
+                        "Selected income rows cannot be manually marked in their current state.",
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                if _row_has_linked_invoice(current_row):
+                    raise PendingInvoiceError(
+                        "income_invoice_already_linked",
+                        "Income rows that already have output invoices cannot be manually marked.",
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+
+        if not isinstance(command, dict):
+            command = {
+                "request_id": request_id,
+                "request_key": request_key,
+                "operation": "income_status_override",
+                "status": "started",
+                "status_history": ["started"],
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            self._save_command(command)
+
+        updated_at = _now()
+        affected_months = sorted(
+            {
+                month
+                for transaction in transactions
+                for month in self._affected_months_for_transaction(transaction)
+            }
+        )
+        overrides = [
+            {
+                "transaction_id": transaction.id,
+                "status_code": status_code,
+                "reason": reason,
+                "actor_id": actor_id,
+                "updated_at": updated_at,
+            }
+            for transaction in transactions
+        ]
+        command["transaction_ids"] = list(transaction_ids)
+        command["income_status_overrides"] = deepcopy(overrides)
+        result = {
+            "status": "completed",
+            "request_id": request_id,
+            "request_key": request_key,
+            "transaction_ids": list(transaction_ids),
+            "status_code": status_code,
+            "affected_transaction_ids": list(transaction_ids),
+            "affected_months": affected_months,
+        }
+        if self._row_provider is not None:
+            result["rows"] = [self._row_provider(transaction.id, "income") for transaction in transactions]
+        command["result"] = deepcopy(result)
+        self._mark_command(command, "completed")
+        self._record_income_status_override_batch_audit(
+            actor_id=actor_id,
+            transaction_ids=transaction_ids,
+            request_id=request_id,
+            request_key=request_key,
+            status_code=status_code,
+            affected_months=affected_months,
+        )
+        self._finalize(
+            {
+                "action": "pending_invoice_income_status_override_confirmed",
+                "source": "pending_invoice_income_status_override",
+                "entity_type": "pending_invoice_income_status_override",
+                "transaction_ids": list(transaction_ids),
                 "request_id": request_id,
                 "request_key": request_key,
                 "affected_months": affected_months,
@@ -2455,6 +2589,15 @@ class PendingInvoiceApplicationService:
         }
         digest = hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:24]
         return f"pending_invoice_attach_existing_batch:{digest}"
+
+    @staticmethod
+    def income_status_batch_request_key(*, transaction_ids: list[str], status_code: str) -> str:
+        payload = {
+            "transaction_ids": sorted(str(transaction_id).strip() for transaction_id in transaction_ids if str(transaction_id).strip()),
+            "status_code": str(status_code or "").strip(),
+        }
+        digest = hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:24]
+        return f"pending_invoice_income_status_batch:{digest}"
 
     def _get_transaction(self, transaction_id: str) -> BankTransaction:
         if not transaction_id:
@@ -3121,6 +3264,32 @@ class PendingInvoiceApplicationService:
             }
         )
 
+    def _record_income_status_override_batch_audit(
+        self,
+        *,
+        actor_id: str,
+        transaction_ids: list[str],
+        request_id: str,
+        request_key: str,
+        status_code: str,
+        affected_months: list[str],
+    ) -> None:
+        if self._audit_recorder is None:
+            return
+        self._audit_recorder(
+            {
+                "actor_id": actor_id,
+                "action": "pending_invoice_income_status_override_batch_confirmed",
+                "source": "pending_invoice_income_status_override",
+                "entity_type": "pending_invoice_income_status_override",
+                "transaction_ids": list(transaction_ids),
+                "request_id": request_id,
+                "request_key": request_key,
+                "status_code": status_code,
+                "affected_months": list(affected_months),
+            }
+        )
+
     def _finalize(self, event: dict[str, Any]) -> None:
         if self._finalizer is not None:
             self._finalizer(event)
@@ -3213,6 +3382,44 @@ def _normalize_id_list(value: Any, field_name: str) -> list[str]:
     if not normalized:
         raise PendingInvoiceError("invalid_id_list", f"{field_name} must include at least one id.")
     return normalized
+
+
+def _raw_id_list(value: Any, field_name: str) -> list[str]:
+    if isinstance(value, str):
+        raw_values = [value]
+    else:
+        try:
+            raw_values = list(value or [])
+        except TypeError as exc:
+            raise PendingInvoiceError("invalid_id_list", f"{field_name} must be a list of ids.") from exc
+    return [str(raw_value or "").strip() for raw_value in raw_values if str(raw_value or "").strip()]
+
+
+def _row_has_linked_invoice(row: dict[str, Any]) -> bool:
+    if row.get("invoices"):
+        return True
+    for key in ("output_invoices", "input_invoices"):
+        invoice_payload = row.get(key)
+        if not isinstance(invoice_payload, dict):
+            continue
+        if invoice_payload.get("primary") or invoice_payload.get("summaries"):
+            return True
+        try:
+            if int(invoice_payload.get("relation_count") or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _row_can_mark_income_status(row: dict[str, Any]) -> bool:
+    available_actions = row.get("available_actions")
+    if isinstance(available_actions, list):
+        return "mark_income_status" in {str(action) for action in available_actions}
+    status_payload = row.get("invoice_acquisition_status")
+    if isinstance(status_payload, dict) and "primary_action" in status_payload:
+        return str(status_payload.get("primary_action") or "") == "mark_income_status"
+    return True
 
 
 def _decimal_or_none(value: Any) -> Decimal | None:

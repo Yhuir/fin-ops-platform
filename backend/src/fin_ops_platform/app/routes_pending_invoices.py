@@ -181,6 +181,18 @@ class PendingInvoiceApiRoutes:
             actor_id=_actor_id(session, "pending_invoice_income_status"),
         )
 
+    def update_income_statuses(
+        self,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession | None,
+    ) -> dict[str, Any]:
+        self._require_mutation(session, "当前账户没有批量标记收入流水开票状态权限。")
+        return self._application_service.confirm_income_status_overrides(
+            payload=payload,
+            actor_id=_actor_id(session, "pending_invoice_income_status"),
+        )
+
     def export_preview(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
         rows_payload = self._read_model_service.all_rows(query)
         if rows_payload.get("read_model_status") != "fresh":
@@ -199,16 +211,6 @@ class PendingInvoiceApiRoutes:
             filename=filename,
             content=content,
             content_type=self._export_content_type,
-        )
-
-    def manual_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._application_service.preview_manual_invoice(payload)
-
-    def manual_confirm(self, payload: dict[str, Any], *, session: OARequestSession | None) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有手工补票权限。")
-        return self._application_service.confirm_manual_invoice(
-            payload,
-            actor_id=_actor_id(session, "pending_invoice"),
         )
 
     @staticmethod

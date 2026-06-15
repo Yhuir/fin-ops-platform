@@ -10,9 +10,9 @@ const GROUP_LABELS: Record<SettingsPendingInvoiceTagsSectionProps["activeGroup"]
 };
 
 const GROUP_DESCRIPTIONS: Record<SettingsPendingInvoiceTagsSectionProps["activeGroup"], string> = {
-  requiresInvoice: "缺进项票时显示补票入口",
-  bankStatementAsInvoice: "流水可替票，也允许补票",
-  noInvoiceRequired: "缺进项票时不显示补票入口",
+  requiresInvoice: "缺进项票时允许选择已有发票",
+  bankStatementAsInvoice: "流水可替票，通常无需选择发票",
+  noInvoiceRequired: "缺进项票时不显示发票选择入口",
 };
 
 export default function SettingsPendingInvoiceTagsSection({

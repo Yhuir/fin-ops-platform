@@ -7,6 +7,9 @@ from typing import Any
 from uuid import uuid4
 
 
+MATCHING_SOURCE_VERSIONS_CHANGED_REASON = "matching_source_versions_changed"
+
+
 def _default_request_id() -> str:
     return f"workbench-dirty-{uuid4().hex}"
 
@@ -61,9 +64,12 @@ class WorkbenchMatchingDirtyScopeWorker:
         request_id = str(self._config.request_id_factory()).strip()
         if not request_id:
             request_id = _default_request_id()
+        source_versions = dict(self._source_versions_provider() or {})
+        stale_completed_scope_months = self._mark_stale_completed_scopes(source_versions)
         summary: dict[str, object] = {
             "request_id": request_id,
             "scope_months": [],
+            "stale_completed_scope_months": stale_completed_scope_months,
             "processed_months": [],
             "failed_months": [],
             "candidate_count": 0,
@@ -73,6 +79,7 @@ class WorkbenchMatchingDirtyScopeWorker:
             {
                 "batch_size": self._config.batch_size,
                 "lease_seconds": self._config.lease_seconds,
+                "stale_completed_scope_count": len(stale_completed_scope_months),
             },
         )
         scope_months = self._dirty_queue.claim_due_scopes(
@@ -95,7 +102,7 @@ class WorkbenchMatchingDirtyScopeWorker:
             },
         )
         for scope_month in scope_months:
-            self._process_scope(scope_month, request_id=request_id, summary=summary)
+            self._process_scope(scope_month, request_id=request_id, source_versions=source_versions, summary=summary)
 
         if summary["failed_months"]:
             self._record_heartbeat(
@@ -129,7 +136,30 @@ class WorkbenchMatchingDirtyScopeWorker:
                 return
             self._sleep(max(float(self._config.poll_interval_seconds), 0.0))
 
-    def _process_scope(self, scope_month: str, *, request_id: str, summary: dict[str, object]) -> None:
+    def _mark_stale_completed_scopes(self, source_versions: dict[str, object]) -> list[str]:
+        if not source_versions:
+            return []
+        marker = getattr(self._dirty_queue, "mark_stale_completed_scopes", None)
+        if not callable(marker):
+            return []
+        return list(
+            marker(
+                source_versions=source_versions,
+                reason=MATCHING_SOURCE_VERSIONS_CHANGED_REASON,
+                debounce_seconds=0,
+                limit=self._config.batch_size,
+            )
+            or []
+        )
+
+    def _process_scope(
+        self,
+        scope_month: str,
+        *,
+        request_id: str,
+        source_versions: dict[str, object],
+        summary: dict[str, object],
+    ) -> None:
         scope_request_id = f"{request_id}:{scope_month}"
         try:
             run_summary = self._matching_orchestrator.run(
@@ -139,7 +169,7 @@ class WorkbenchMatchingDirtyScopeWorker:
             ) or {}
             self._dirty_queue.complete(
                 scope_month,
-                source_versions=self._source_versions_provider(),
+                source_versions=source_versions,
                 worker_id=self._config.worker_id,
                 request_id=scope_request_id,
             )

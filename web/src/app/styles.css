@@ -7451,10 +7451,9 @@ textarea {
 }
 
 .pending-invoices-status-cell {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  display: flex;
   align-items: center;
-  column-gap: 4px;
+  justify-content: center;
   min-height: 24px;
 }
 
@@ -7464,7 +7463,6 @@ textarea {
 }
 
 .pending-invoices-icon-button,
-.pending-invoices-row-menu-trigger,
 .pending-invoices-inline-action {
   display: inline-flex;
   align-items: center;
@@ -7488,13 +7486,7 @@ textarea {
   background: transparent;
 }
 
-.pending-invoices-row-menu-trigger {
-  border: 1px solid var(--fp-border);
-  background: var(--fp-surface);
-}
-
-.pending-invoices-icon-button,
-.pending-invoices-row-menu-trigger {
+.pending-invoices-icon-button {
   width: 24px;
   height: 24px;
   padding: 0;
@@ -7515,14 +7507,6 @@ textarea {
   outline: none;
 }
 
-.pending-invoices-row-menu-trigger:hover,
-.pending-invoices-row-menu-trigger:focus-visible {
-  border-color: var(--fp-accent);
-  background: var(--fp-accent-soft);
-  color: var(--fp-accent);
-  outline: none;
-}
-
 .pending-invoices-inline-action:disabled {
   background: var(--fp-surface-muted);
   color: var(--fp-text-disabled);
@@ -7530,7 +7514,6 @@ textarea {
 }
 
 .pending-invoices-icon-button:active,
-.pending-invoices-row-menu-trigger:active,
 .pending-invoices-inline-action:active:not(:disabled) {
   transform: translateY(1px);
 }
@@ -7541,55 +7524,6 @@ textarea {
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
-}
-
-.pending-invoices-row-menu {
-  position: relative;
-  display: inline-flex;
-  justify-content: flex-end;
-}
-
-.pending-invoices-row-menu-content {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 55;
-  display: grid;
-  min-width: 112px;
-  padding: 4px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  box-shadow: var(--fp-shadow-popover);
-}
-
-.pending-invoices-row-menu-item {
-  min-height: 30px;
-  padding: 0 var(--fp-space-3);
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--fp-text-primary);
-  cursor: pointer;
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-  text-align: left;
-  white-space: nowrap;
-  transition:
-    background-color var(--motion-fast) var(--ease-standard),
-    color var(--motion-fast) var(--ease-standard);
-}
-
-.pending-invoices-row-menu-item:hover:not(:disabled),
-.pending-invoices-row-menu-item:focus-visible {
-  background: var(--fp-accent-soft);
-  color: var(--fp-accent);
-  outline: none;
-}
-
-.pending-invoices-row-menu-item:disabled {
-  color: var(--fp-text-disabled);
-  cursor: default;
 }
 
 .pending-invoice-drawer .finance-drawer__body {
@@ -7951,32 +7885,6 @@ textarea {
   gap: var(--fp-space-2);
 }
 
-.pending-invoice-manual-dialog {
-  display: grid;
-  gap: var(--fp-space-3);
-}
-
-.pending-invoice-manual-dialog .pending-invoice-panel__description {
-  padding: 0;
-}
-
-.pending-invoice-manual-grid {
-  display: grid;
-  gap: var(--fp-space-3);
-}
-
-.pending-invoice-manual-grid--two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.pending-invoice-manual-grid--three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.pending-invoice-manual-grid--four {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
 .pending-invoice-print-layout {
   width: 100%;
   max-width: 1180px;
@@ -8228,10 +8136,7 @@ textarea {
   .pending-invoice-field-grid,
   .pending-invoice-print-approvals,
   .pending-invoice-rules-grid,
-  .pending-invoice-filter-panel,
-  .pending-invoice-manual-grid--two,
-  .pending-invoice-manual-grid--three,
-  .pending-invoice-manual-grid--four {
+  .pending-invoice-filter-panel {
     grid-template-columns: 1fr;
   }
 

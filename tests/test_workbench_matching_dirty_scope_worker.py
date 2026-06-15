@@ -9,13 +9,26 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
 
 
 class RecordingDirtyQueue:
-    def __init__(self, claimed_scopes: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        claimed_scopes: list[str] | None = None,
+        stale_completed_scopes: list[str] | None = None,
+    ) -> None:
         self.claimed_scopes = list(claimed_scopes or [])
+        self.stale_completed_scopes = list(stale_completed_scopes or [])
+        self.events: list[str] = []
+        self.mark_stale_calls: list[dict[str, object]] = []
         self.claim_calls: list[dict[str, object]] = []
         self.complete_calls: list[dict[str, object]] = []
         self.fail_calls: list[dict[str, object]] = []
 
+    def mark_stale_completed_scopes(self, **kwargs) -> list[str]:
+        self.events.append("mark_stale_completed_scopes")
+        self.mark_stale_calls.append(dict(kwargs))
+        return list(self.stale_completed_scopes)
+
     def claim_due_scopes(self, **kwargs) -> list[str]:
+        self.events.append("claim_due_scopes")
         self.claim_calls.append(dict(kwargs))
         return list(self.claimed_scopes)
 
@@ -68,13 +81,14 @@ class WorkbenchMatchingDirtyScopeWorkerTests(unittest.TestCase):
         heartbeat_recorder: RecordingHeartbeatRecorder | None = None,
         sleep_calls: list[float] | None = None,
         max_iterations: int | None = None,
+        source_versions: dict[str, object] | None = None,
     ) -> tuple[WorkbenchMatchingDirtyScopeWorker, RecordingHeartbeatRecorder, list[float]]:
         recorder = heartbeat_recorder or RecordingHeartbeatRecorder()
         sleeps = sleep_calls if sleep_calls is not None else []
         worker = WorkbenchMatchingDirtyScopeWorker(
             dirty_queue=dirty_queue,
             matching_orchestrator=orchestrator or RecordingOrchestrator(),
-            source_versions_provider=lambda: {"rules": "v1"},
+            source_versions_provider=lambda: dict(source_versions or {"rules": "v1"}),
             heartbeat_recorder=recorder,
             config=WorkbenchMatchingDirtyScopeWorkerConfig(
                 worker_id="worker-a",
@@ -99,8 +113,28 @@ class WorkbenchMatchingDirtyScopeWorkerTests(unittest.TestCase):
         self.assertEqual(dirty_queue.claim_calls[0]["worker_id"], "worker-a")
         self.assertEqual(dirty_queue.claim_calls[0]["limit"], 7)
         self.assertEqual(dirty_queue.claim_calls[0]["lease_seconds"], 300)
+        self.assertEqual(dirty_queue.events, ["mark_stale_completed_scopes", "claim_due_scopes"])
         self.assertEqual([call["status"] for call in recorder.calls], ["polling", "idle"])
         self.assertEqual(recorder.calls[-1]["worker_kind"], "workbench-matching")
+
+    def test_run_once_marks_stale_completed_scopes_before_claiming_due_scopes(self) -> None:
+        dirty_queue = RecordingDirtyQueue(["2026-01"], stale_completed_scopes=["2026-01"])
+        orchestrator = RecordingOrchestrator()
+        worker, recorder, _ = self._worker(
+            dirty_queue=dirty_queue,
+            orchestrator=orchestrator,
+            source_versions={"workbench_matching_rules_version": "v2"},
+        )
+
+        summary = worker.run_once()
+
+        self.assertEqual(dirty_queue.events[:2], ["mark_stale_completed_scopes", "claim_due_scopes"])
+        self.assertEqual(dirty_queue.mark_stale_calls[0]["source_versions"], {"workbench_matching_rules_version": "v2"})
+        self.assertEqual(dirty_queue.mark_stale_calls[0]["reason"], "matching_source_versions_changed")
+        self.assertEqual(dirty_queue.mark_stale_calls[0]["limit"], 7)
+        self.assertEqual(summary["stale_completed_scope_months"], ["2026-01"])
+        self.assertEqual(orchestrator.run_calls[0]["changed_scope_months"], ["2026-01"])
+        self.assertEqual(recorder.calls[0]["payload"]["stale_completed_scope_count"], 1)
 
     def test_run_once_records_processing_then_completes_scope_and_returns_idle(self) -> None:
         dirty_queue = RecordingDirtyQueue(["2026-01"])

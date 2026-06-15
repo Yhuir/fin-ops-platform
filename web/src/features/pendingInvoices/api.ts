@@ -12,9 +12,6 @@ import type {
   FetchPendingInvoiceBatchCandidatesRequest,
   FetchPendingInvoiceCandidatesRequest,
   FetchPendingInvoiceRowsRequest,
-  ManualPendingInvoicePreview,
-  ManualPendingInvoiceRequest,
-  ManualPendingInvoiceResult,
   PendingInvoiceBankTransaction,
   PendingInvoiceCandidate,
   PendingInvoiceCandidatesResponse,
@@ -24,6 +21,8 @@ import type {
   PendingInvoiceExportPreview,
   PendingInvoiceFilter,
   PendingInvoiceFilterOptionsResponse,
+  PendingInvoiceIncomeStatusCode,
+  PendingInvoiceIncomeStatusResult,
   PendingInvoiceObjectDetail,
   PendingInvoiceObjectDetailTarget,
   PendingInvoiceOaPrintLayout,
@@ -339,40 +338,17 @@ type ApiExportPreview = {
   sample_rows?: Array<Record<string, unknown>> | null;
 };
 
-type ApiManualPendingInvoicePreview = {
-  preview_id?: string | null;
+type ApiIncomeStatusResult = {
+  status?: string | null;
+  request_id?: string | null;
   request_key?: string | null;
-  can_confirm?: boolean | null;
-  target_invoice_type?: string | null;
-  bank_transaction_summary?: {
-    id?: string | null;
-    direction?: string | null;
-    counterparty_name?: string | null;
-    trade_time?: string | null;
-    amount?: string | null;
-  } | null;
-  invoice_identity?: {
-    source_unique_key?: string | null;
-    data_fingerprint?: string | null;
-  } | null;
-  duplicate_check?: {
-    status?: string | null;
-    matched_invoice_id?: string | null;
-    message?: string | null;
-  } | null;
-  relation_impact?: {
-    relation_mode?: string | null;
-    affected_months?: unknown[] | null;
-  } | null;
-  warnings?: unknown[] | null;
-};
-
-type ApiManualPendingInvoiceResult = {
-  invoice_id?: string | null;
-  relation_case_id?: string | null;
+  transaction_id?: string | null;
+  transaction_ids?: unknown[] | null;
+  status_code?: string | null;
   affected_transaction_ids?: unknown[] | null;
   affected_invoice_ids?: unknown[] | null;
   affected_months?: unknown[] | null;
+  rows?: ApiPendingInvoiceRow[] | null;
   row?: ApiPendingInvoiceRow | null;
 };
 
@@ -658,26 +634,6 @@ function buildRowsQuery(request: FetchPendingInvoiceRowsRequest, includePaginati
   const params = new URLSearchParams();
   appendRowsQuery(params, request, includePagination);
   return params.toString();
-}
-
-function requestBody(payload: ManualPendingInvoiceRequest) {
-  return {
-    preview_id: payload.previewId,
-    request_id: payload.requestId,
-    bank_transaction_id: payload.bankTransactionId,
-    invoice_no: payload.invoiceNo,
-    digital_invoice_no: payload.digitalInvoiceNo,
-    invoice_code: payload.invoiceCode,
-    issue_date: payload.issueDate,
-    total_with_tax: payload.totalWithTax,
-    tax_amount: payload.taxAmount,
-    tax_rate: payload.taxRate,
-    seller_name: payload.sellerName,
-    seller_tax_no: payload.sellerTaxNo,
-    buyer_name: payload.buyerName,
-    buyer_tax_no: payload.buyerTaxNo,
-    remark: payload.remark,
-  };
 }
 
 export async function fetchPendingInvoiceRows(request: FetchPendingInvoiceRowsRequest): Promise<PendingInvoiceRowsResponse> {
@@ -1218,75 +1174,45 @@ export async function downloadPendingInvoiceExport(request: FetchPendingInvoiceR
   });
 }
 
-export async function previewManualPendingInvoice(request: ManualPendingInvoiceRequest): Promise<ManualPendingInvoicePreview> {
-  const payload = await requestJson<ApiManualPendingInvoicePreview>("/api/pending-invoices/manual-invoices/preview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(requestBody(request)),
-  });
-  const affectedMonths = stringList(payload.relation_impact?.affected_months);
+function mapIncomeStatusResult(payload: ApiIncomeStatusResult): PendingInvoiceIncomeStatusResult {
   return {
-    previewId: stringValue(payload.preview_id),
+    status: stringValue(payload.status),
+    requestId: stringValue(payload.request_id),
     requestKey: stringValue(payload.request_key),
-    canConfirm: payload.can_confirm === true,
-    targetInvoiceType: stringValue(payload.target_invoice_type) as ManualPendingInvoicePreview["targetInvoiceType"],
-    bankTransactionSummary: {
-      id: stringValue(payload.bank_transaction_summary?.id),
-      direction: stringValue(payload.bank_transaction_summary?.direction) as ManualPendingInvoicePreview["bankTransactionSummary"]["direction"],
-      counterpartyName: stringValue(payload.bank_transaction_summary?.counterparty_name),
-      tradeTime: displayDateTime(payload.bank_transaction_summary?.trade_time),
-      amount: stringValue(payload.bank_transaction_summary?.amount),
-    },
-    invoiceIdentity: {
-      sourceUniqueKey: stringValue(payload.invoice_identity?.source_unique_key),
-      dataFingerprint: stringValue(payload.invoice_identity?.data_fingerprint),
-    },
-    duplicateCheck: {
-      status: stringValue(payload.duplicate_check?.status),
-      matchedInvoiceId: payload.duplicate_check?.matched_invoice_id ?? null,
-      message: stringValue(payload.duplicate_check?.message),
-    },
-    relationImpact: {
-      relationMode: stringValue(payload.relation_impact?.relation_mode),
-      affectedMonths,
-    },
-    affectedMonths,
-    warnings: stringList(payload.warnings),
-  };
-}
-
-export async function confirmManualPendingInvoice(request: ManualPendingInvoiceRequest): Promise<ManualPendingInvoiceResult> {
-  const payload = await requestJson<ApiManualPendingInvoiceResult>("/api/pending-invoices/manual-invoices", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(requestBody(request)),
-  });
-  return {
-    invoiceId: stringValue(payload.invoice_id),
-    relationCaseId: stringValue(payload.relation_case_id),
+    transactionIds: stringList(payload.transaction_ids).length > 0
+      ? stringList(payload.transaction_ids)
+      : stringList(payload.affected_transaction_ids),
+    statusCode: stringValue(payload.status_code) as PendingInvoiceIncomeStatusResult["statusCode"],
     affectedTransactionIds: stringList(payload.affected_transaction_ids),
     affectedInvoiceIds: stringList(payload.affected_invoice_ids),
     affectedMonths: stringList(payload.affected_months),
+    rows: (payload.rows ?? []).map(mapPendingInvoiceRow),
     row: payload.row ? mapPendingInvoiceRow(payload.row) : null,
   };
 }
 
 export async function savePendingInvoiceIncomeStatus(
   transactionId: string,
-  statusCode: "income_no_invoice_required" | "cash_income",
-): Promise<ManualPendingInvoiceResult> {
+  statusCode: PendingInvoiceIncomeStatusCode,
+): Promise<PendingInvoiceIncomeStatusResult> {
   const requestId = `income-status-${transactionId}-${statusCode}-${Date.now()}`;
-  const payload = await requestJson<ApiManualPendingInvoiceResult>(`/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/income-status`, {
+  const payload = await requestJson<ApiIncomeStatusResult>(`/api/pending-invoices/rows/${encodeURIComponent(transactionId)}/income-status`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status_code: statusCode, request_id: requestId }),
   });
-  return {
-    invoiceId: stringValue(payload.invoice_id),
-    relationCaseId: stringValue(payload.relation_case_id),
-    affectedTransactionIds: stringList(payload.affected_transaction_ids),
-    affectedInvoiceIds: stringList(payload.affected_invoice_ids),
-    affectedMonths: stringList(payload.affected_months),
-    row: payload.row ? mapPendingInvoiceRow(payload.row) : null,
-  };
+  return mapIncomeStatusResult(payload);
+}
+
+export async function savePendingInvoiceIncomeStatuses(
+  transactionIds: string[],
+  statusCode: PendingInvoiceIncomeStatusCode,
+): Promise<PendingInvoiceIncomeStatusResult> {
+  const requestId = `income-status-batch-${statusCode}-${Date.now()}`;
+  const payload = await requestJson<ApiIncomeStatusResult>("/api/pending-invoices/income-statuses", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transaction_ids: transactionIds, status_code: statusCode, request_id: requestId }),
+  });
+  return mapIncomeStatusResult(payload);
 }

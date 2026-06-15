@@ -5663,9 +5663,11 @@ class PostgresReadModelRepository:
         parser_versions: set[str] = set()
         bank_auto_tag_rules_versions: set[str] = set()
         oa_projection_sync_versions: set[str] = set()
+        workbench_matching_rules_versions: set[str] = set()
         has_group_without_parser_version = False
         has_group_without_bank_auto_tag_rules_version = False
         has_group_without_oa_projection_sync_version = False
+        has_group_without_workbench_matching_rules_version = False
         for row in group_rows:
             group = _read_model_payload(row)
             if not isinstance(group, dict):
@@ -5686,6 +5688,11 @@ class PostgresReadModelRepository:
                 oa_projection_sync_versions.add(oa_projection_sync_version)
             else:
                 has_group_without_oa_projection_sync_version = True
+            workbench_matching_rules_version = text(row_source_versions.get("workbench_matching_rules_version"))
+            if workbench_matching_rules_version:
+                workbench_matching_rules_versions.add(workbench_matching_rules_version)
+            else:
+                has_group_without_workbench_matching_rules_version = True
             normalized_group = deepcopy(group)
             normalized_group["_source_scope_key"] = text(row.get("scope_key"))
             normalized_group["_source_scope_month"] = text(row.get("scope_month"))
@@ -5728,6 +5735,8 @@ class PostgresReadModelRepository:
             aggregate_source_versions["bank_auto_tag_rules_version"] = next(iter(bank_auto_tag_rules_versions))
         if len(oa_projection_sync_versions) == 1 and not has_group_without_oa_projection_sync_version:
             aggregate_source_versions["oa_projection_sync_version"] = next(iter(oa_projection_sync_versions))
+        if len(workbench_matching_rules_versions) == 1 and not has_group_without_workbench_matching_rules_version:
+            aggregate_source_versions["workbench_matching_rules_version"] = next(iter(workbench_matching_rules_versions))
         generated_at = max_generated_at or None
         workbench_rows = list(self._iter_workbench_rows(aggregate_payload))
         workbench_groups = list(self._iter_workbench_groups(aggregate_payload))
@@ -6753,6 +6762,60 @@ class PostgresReadModelRepository:
 
         run_in_transaction(self._connection, write)
         return normalized_months
+
+    def mark_stale_workbench_matching_completed_scopes(
+        self,
+        *,
+        tenant_id: str,
+        source_versions: dict[str, object],
+        reason: str,
+        debounce_seconds: int,
+        limit: int | None = None,
+    ) -> list[str]:
+        normalized_tenant = text(tenant_id) or "default"
+        normalized_source_versions = dict(source_versions or {})
+        if not normalized_source_versions:
+            return []
+        resolved_limit = max(1, int_value(limit, 100)) if limit is not None else 100
+        resolved_debounce_seconds = max(0, int_value(debounce_seconds, 0))
+
+        def write(connection: Any) -> list[dict[str, Any]]:
+            return connection.fetch_all(
+                """
+                with stale as (
+                    select id
+                    from job.workbench_matching_dirty_scopes
+                    where tenant_id = %s
+                      and status = 'completed'
+                      and not (coalesce(source_versions, '{}'::jsonb) @> %s)
+                    order by completed_at nulls first, scope_month
+                    limit %s
+                    for update skip locked
+                )
+                update job.workbench_matching_dirty_scopes dirty
+                set reason = %s,
+                    status = 'dirty',
+                    available_at = now() + (%s::text || ' seconds')::interval,
+                    source_versions = coalesce(dirty.source_versions, '{}'::jsonb) || %s,
+                    lease_owner = null,
+                    lease_expires_at = null,
+                    updated_at = now()
+                from stale
+                where dirty.id = stale.id
+                returning to_char(dirty.scope_month, 'YYYY-MM') as scope_month
+                """,
+                (
+                    normalized_tenant,
+                    jsonb(normalized_source_versions),
+                    resolved_limit,
+                    text(reason),
+                    resolved_debounce_seconds,
+                    jsonb(normalized_source_versions),
+                ),
+            )
+
+        rows = run_in_transaction(self._connection, write)
+        return [str(row.get("scope_month")) for row in rows if row.get("scope_month")]
 
     def claim_workbench_matching_dirty_scopes(
         self,

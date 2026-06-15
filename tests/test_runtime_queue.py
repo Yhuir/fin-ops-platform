@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
+from psycopg.types.json import Jsonb
+
+from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.runtime_queue import (
     DEFAULT_RABBITMQ_DISPATCH_EVENT_TYPES,
     RuntimeQueueDataError,
@@ -610,6 +613,44 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
                 {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
             ),
+        )
+
+    def test_enqueue_read_model_refresh_in_transaction_wraps_payloads_for_postgres_transaction(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                {"source_version": 8},
+                event_row(
+                    event_type="workbench.read_model.refresh",
+                    aggregate_type="read_model",
+                    aggregate_id="2026-05",
+                    scope_type="workbench",
+                    scope_key="2026-05",
+                    dedupe_key="workbench.read_model.refresh:workbench:2026-05",
+                    payload={"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
+                    source_version=8,
+                ),
+            ]
+        )
+        repository = RuntimeQueueRepository(PostgresTransaction(object()))  # type: ignore[arg-type]
+        enqueue_in_transaction = self._enqueue_read_model_refresh_in_transaction(repository)
+
+        enqueue_in_transaction(
+            transaction=transaction,
+            scope_type="workbench",
+            scope_key="2026-05",
+            reason="exception_apply",
+        )
+
+        _, _dirty_sql, dirty_params = transaction.calls[0]
+        _, _outbox_sql, outbox_params = transaction.calls[1]
+        self.assertIsInstance(dirty_params[4], Jsonb)
+        self.assertIsInstance(dirty_params[5], Jsonb)
+        self.assertEqual(dirty_params[4].obj, {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply"})
+        self.assertIsInstance(outbox_params[9], Jsonb)
+        self.assertIsInstance(outbox_params[10], Jsonb)
+        self.assertEqual(
+            outbox_params[9].obj,
+            {"scope_type": "workbench", "scope_key": "2026-05", "reason": "exception_apply", "source_version": 8},
         )
 
     def test_enqueue_read_model_refresh_metadata_records_action_name_only(self) -> None:

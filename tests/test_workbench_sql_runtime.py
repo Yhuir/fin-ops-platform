@@ -2804,7 +2804,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "zone": "paired",
                         "group_id": "case:CASE-1",
                         "generated_at": "2026-05-24T00:02:00+00:00",
-                        "source_versions": {"source_version": 2},
+                        "source_versions": {
+                            "source_version": 2,
+                            "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+                        },
                         "payload": {
                             "group_id": "case:CASE-1",
                             "zone": "paired",
@@ -2821,7 +2824,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "zone": "paired",
                         "group_id": "case:CASE-1",
                         "generated_at": "2026-05-24T00:01:00+00:00",
-                        "source_versions": {"source_version": 1},
+                        "source_versions": {
+                            "source_version": 1,
+                            "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+                        },
                         "payload": {
                             "group_id": "case:CASE-1",
                             "zone": "paired",
@@ -2873,6 +2879,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             if "insert into read_model.workbench_groups" in sql and "values ( %s, %s, 'all'" in sql
         )
         self.assertEqual(aggregate_source_versions["builder"], WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION)
+        self.assertEqual(
+            aggregate_source_versions["workbench_matching_rules_version"],
+            WORKBENCH_MATCHING_RULES_VERSION,
+        )
 
     def test_repository_batches_all_scope_generation_rows_when_supported(self) -> None:
         class BulkAggregateAllWorkbenchConnection(BulkWorkbenchWriteConnection):

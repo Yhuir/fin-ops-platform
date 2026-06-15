@@ -357,17 +357,19 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(payload["error"], "pending_invoice_read_model_unavailable")
 
-    def test_preview_and_confirm_endpoint_create_invoice_and_relation_idempotently(self) -> None:
+    def test_manual_invoice_endpoints_are_not_reachable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Confirm")
+            transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Removed")
             payload = {
                 "bank_transaction_id": transaction_id,
-                "invoice_no": "API-MAN-001",
+                "invoice_no": "API-MAN-REMOVED",
                 "issue_date": "2026-05-20",
                 "total_with_tax": "118.00",
-                "seller_name": "Vendor Confirm",
+                "seller_name": "Vendor Removed",
                 "buyer_name": "云南溯源科技有限公司",
+                "preview_id": "removed-preview",
+                "request_id": "api-manual-removed",
             }
 
             preview_response = app.handle_request(
@@ -375,130 +377,19 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 "/api/pending-invoices/manual-invoices/preview",
                 body=json.dumps(payload),
             )
-            self.assertEqual(preview_response.status_code, 200)
-            preview_payload = json.loads(preview_response.body)
-            confirm_body = {**payload, "preview_id": preview_payload["preview_id"], "request_id": "api-request-001"}
             confirm_response = app.handle_request(
                 "POST",
                 "/api/pending-invoices/manual-invoices",
-                body=json.dumps(confirm_body),
-            )
-            retry_response = app.handle_request(
-                "POST",
-                "/api/pending-invoices/manual-invoices",
-                body=json.dumps(confirm_body),
+                body=json.dumps(payload),
             )
 
+        preview_payload = json.loads(preview_response.body)
         confirm_payload = json.loads(confirm_response.body)
-        retry_payload = json.loads(retry_response.body)
-        self.assertEqual(preview_response.status_code, 200)
-        self.assertEqual(preview_payload["target_invoice_type"], "input")
-        self.assertEqual(confirm_response.status_code, 200)
-        self.assertEqual(retry_response.status_code, 200)
-        self.assertEqual(retry_payload, confirm_payload)
-        self.assertEqual(confirm_payload["affected_transaction_ids"], [transaction_id])
-        self.assertEqual(confirm_payload["row"]["invoices"][0]["invoice_no"], "API-MAN-001")
-
-    def test_confirm_endpoint_uses_session_actor_not_request_body_actor(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Actor")
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["FINANCE001"],
-                readonly_export_usernames=[],
-                admin_usernames=[],
-            )
-            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-                user_id="finance-user-id",
-                username="FINANCE001",
-                nickname="财务用户",
-                display_name="财务用户",
-                roles=["finance"],
-                permissions=[],
-            )
-            payload = {
-                "bank_transaction_id": transaction_id,
-                "invoice_no": "API-MAN-ACTOR",
-                "issue_date": "2026-05-20",
-                "total_with_tax": "118.00",
-                "seller_name": "Vendor Actor",
-                "buyer_name": "云南溯源科技有限公司",
-                "actor_id": "SPOOFED_USER",
-            }
-            preview = json.loads(
-                app.handle_request(
-                    "POST",
-                    "/api/pending-invoices/manual-invoices/preview",
-                    body=json.dumps(payload),
-                ).body
-            )
-
-            response = app.handle_request(
-                "POST",
-                "/api/pending-invoices/manual-invoices",
-                body=json.dumps({**payload, "preview_id": preview["preview_id"], "request_id": "api-actor"}),
-                headers={"Authorization": "Bearer finance-user"},
-            )
-
-        result = json.loads(response.body)
-        relation = app._workbench_pair_relation_service.get_active_relation_by_case_id(result["relation_case_id"])
-        audit_entry = next(
-            entry for entry in app._audit_service.list_entries()
-            if entry.action == "pending_invoice_manual_invoice_confirmed"
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(relation["created_by"], "FINANCE001")
-        self.assertEqual(audit_entry.actor_id, "FINANCE001")
-        self.assertEqual(audit_entry.metadata["actor_id"], "FINANCE001")
-
-    def test_confirm_endpoint_requires_write_permission(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Forbidden")
-            payload = {
-                "bank_transaction_id": transaction_id,
-                "invoice_no": "API-MAN-FORBIDDEN",
-                "issue_date": "2026-05-20",
-                "total_with_tax": "118.00",
-                "seller_name": "Vendor Forbidden",
-                "buyer_name": "云南溯源科技有限公司",
-            }
-            preview = json.loads(
-                (preview_response := app.handle_request(
-                    "POST",
-                    "/api/pending-invoices/manual-invoices/preview",
-                    body=json.dumps(payload),
-                )).body
-            )
-            self.assertEqual(preview_response.status_code, 200)
-            app._app_settings_service.update_settings(
-                completed_project_ids=[],
-                bank_account_mappings=[],
-                allowed_usernames=["READONLY001"],
-                readonly_export_usernames=["READONLY001"],
-                admin_usernames=[],
-            )
-            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
-                user_id="readonly-user-id",
-                username="READONLY001",
-                nickname="只读用户",
-                display_name="只读用户",
-                roles=["finance"],
-                permissions=[],
-            )
-
-            response = app.handle_request(
-                "POST",
-                "/api/pending-invoices/manual-invoices",
-                body=json.dumps({**payload, "preview_id": preview["preview_id"], "request_id": "api-forbidden"}),
-                headers={"Authorization": "Bearer readonly-user"},
-            )
-
-        response_payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response_payload["error"], "permission_denied")
+        self.assertEqual(preview_response.status_code, 404)
+        self.assertEqual(confirm_response.status_code, 404)
+        self.assertEqual(preview_payload["error"], "not_found")
+        self.assertEqual(confirm_payload["error"], "not_found")
+        self.assertNotIn("api-manual-removed", app._pending_invoice_commands)
 
     def test_settings_update_requires_write_permission(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -865,7 +756,42 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(retry_payload, payload)
         self.assertEqual(rows_payload["rows"][0]["invoice_acquisition_status"]["code"], "cash_income")
 
-    def test_recoverable_manual_invoice_failure_persists_command_log(self) -> None:
+    def test_income_status_batch_endpoint_is_idempotent_and_updates_row_statuses(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            first_transaction_id = self._create_bank_transaction(app, counterparty_name="Income Batch A", credit=True)
+            second_transaction_id = self._create_bank_transaction(app, counterparty_name="Income Batch B", credit=True)
+            body = {
+                "transaction_ids": [first_transaction_id, second_transaction_id],
+                "status_code": "cash_income",
+                "request_id": "income-status-batch-001",
+            }
+            self._install_pending_invoice_sql_read_model(app)
+
+            response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/income-statuses",
+                body=json.dumps(body),
+            )
+            retry_response = app.handle_request(
+                "PUT",
+                "/api/pending-invoices/income-statuses",
+                body=json.dumps(body),
+            )
+            rows_response = app.handle_request("GET", "/api/pending-invoices/rows?direction=income&filter=all")
+
+        payload = json.loads(response.body)
+        retry_payload = json.loads(retry_response.body)
+        rows_payload = json.loads(rows_response.body)
+        statuses = {row["id"]: row["invoice_acquisition_status"]["code"] for row in rows_payload["rows"]}
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry_response.status_code, 200)
+        self.assertEqual(retry_payload, payload)
+        self.assertEqual(payload["affected_transaction_ids"], [first_transaction_id, second_transaction_id])
+        self.assertEqual(statuses[first_transaction_id], "cash_income")
+        self.assertEqual(statuses[second_transaction_id], "cash_income")
+
+    def test_legacy_manual_invoice_recoverable_failure_persists_command_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             app = build_application(data_dir=data_dir)
@@ -878,13 +804,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 "seller_name": "Vendor Recoverable",
                 "buyer_name": "云南溯源科技有限公司",
             }
-            preview = json.loads(
-                app.handle_request(
-                    "POST",
-                    "/api/pending-invoices/manual-invoices/preview",
-                    body=json.dumps(payload),
-                ).body
-            )
+            preview = app._pending_invoice_application_service.preview_manual_invoice(payload)
             app._pending_invoice_application_service._fault_injector = (
                 lambda phase, _command: (_ for _ in ()).throw(RuntimeError("boom"))
                 if phase == "after_invoice_created"
@@ -892,11 +812,11 @@ class PendingInvoiceApiTests(unittest.TestCase):
             )
 
             with self.assertRaises(RuntimeError):
-                app.handle_request(
-                    "POST",
-                    "/api/pending-invoices/manual-invoices",
-                    body=json.dumps({**payload, "preview_id": preview["preview_id"], "request_id": "api-recoverable"}),
+                app._pending_invoice_application_service.confirm_manual_invoice(
+                    {**payload, "preview_id": preview["preview_id"], "request_id": "api-recoverable"},
+                    actor_id="api-test",
                 )
+            app._persist_state()
 
             reloaded = build_application(data_dir=data_dir, bootstrap_mode="legacy")
 

@@ -7,7 +7,6 @@ type PendingInvoiceRelationDrawerProps = {
   open: boolean;
   transactionId: string | null;
   loadDetail: (transactionId: string) => Promise<PendingInvoiceRelationDetail>;
-  onOpenInvoicePicker: (transactionId: string) => void;
   onClose: () => void;
 };
 
@@ -27,7 +26,6 @@ export default function PendingInvoiceRelationDrawer({
   open,
   transactionId,
   loadDetail,
-  onOpenInvoicePicker,
   onClose,
 }: PendingInvoiceRelationDrawerProps) {
   const [detail, setDetail] = useState<PendingInvoiceRelationDetail | null>(null);
@@ -69,11 +67,6 @@ export default function PendingInvoiceRelationDrawer({
   return (
     <PendingInvoiceDrawerFrame
       closeLabel="关闭关系明细抽屉"
-      footer={transactionId && detail?.availableActions.includes("attach_existing_invoice") ? (
-        <button className="pending-invoices-button pending-invoices-button--primary" onClick={() => onOpenInvoicePicker(transactionId)} type="button">
-          选择已有发票
-        </button>
-      ) : null}
       onClose={onClose}
       open={open}
       subtitle={detail?.transactionSummary.counterpartyName ?? transactionId ?? undefined}

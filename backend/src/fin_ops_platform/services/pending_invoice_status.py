@@ -77,7 +77,7 @@ def pending_invoice_status_payload(
 def pending_invoice_available_actions(status_payload: dict[str, Any], *, can_create_invoice: bool) -> list[str]:
     action = str(status_payload.get("primary_action") or "").strip()
     if action == "attach_or_create_invoice":
-        return ["attach_existing_invoice", "manual_invoice"] if can_create_invoice else []
+        return ["attach_existing_invoice"] if can_create_invoice else []
     if action == "mark_income_status":
         return ["mark_income_status"]
     if action in {"view_relation", "view_rules"}:

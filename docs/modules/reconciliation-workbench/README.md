@@ -51,6 +51,8 @@ all-scope 聚合必须同时读取 canonical active relation occupancy。即使�
 
 OA-bank 自动匹配中，“预约 X 月 X 日转款/付款/支付/打款”是强消歧证据：只有该预约付款日期与银行流水真实交易日期一致时，重复同金额候选才可继续唯一配对；没有明确预约付款日期或日期不一致时保持 open/conflict，不随机选择。匹配规则版本必须进入 Workbench SQL active generation 的 `source_versions`，否则规则变化后旧 generation 会继续被当作 fresh 发布。
 
+`workbench-matching` 常驻 worker 每轮 claim 前必须检查 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run；只要 completed scope 的 `source_versions` 不包含当前 `workbench_matching_rules_version` 等 matching source versions，就通过 `WorkbenchReconciliationDirtyQueue` / repository 原子转回 `dirty`，再由同一 worker 正常重建候选/decision。不要依赖前端搜索、人工 SQL 改状态或只在 startup stale scan 中补救。Workbench `all` active generation 从 month shards 聚合时也必须传播 `workbench_matching_rules_version`，否则 all 视图会缺少规则 freshness 证明。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

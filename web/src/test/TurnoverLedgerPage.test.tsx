@@ -74,6 +74,10 @@ function requestUrls(fetchMock: ReturnType<typeof installTurnoverLedgerFetch>, p
     .filter((url) => url.pathname === pathname);
 }
 
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function groupedPayload(family: string, overrides: Record<string, unknown> = {}) {
   const allGroups = [
     {
@@ -598,10 +602,36 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
   };
 }
 
+function groupedPayloadWithFlowCategoryVersions(family: string, versionsByBankRowId: Record<string, number>) {
+  const payload = cloneJson(groupedPayload(family));
+  for (const group of payload.groups) {
+    group.flow_rows = (group.flow_rows ?? []).map((row: Record<string, unknown>) => {
+      const bankRowId = String(row.source_bank_row_id ?? "");
+      if (!Object.prototype.hasOwnProperty.call(versionsByBankRowId, bankRowId)) {
+        return row;
+      }
+      return { ...row, category_version: versionsByBankRowId[bankRowId] };
+    });
+  }
+  return payload;
+}
+
+function groupedPayloadWithoutFlow(family: string, missingBankRowId: string) {
+  const payload = cloneJson(groupedPayload(family));
+  for (const group of payload.groups) {
+    group.flow_rows = (group.flow_rows ?? []).filter((row: Record<string, unknown>) => (
+      String(row.source_bank_row_id ?? "") !== missingBankRowId
+    ));
+  }
+  return payload;
+}
+
 function installTurnoverLedgerFetch(options: {
   groupedOverrides?: Record<string, unknown>;
+  groupedPayloads?: Array<Record<string, unknown>>;
   missingDetailForRelationId?: string;
 } = {}) {
+  let groupedRequestCount = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const method = (init?.method ?? "GET").toUpperCase();
@@ -693,6 +723,12 @@ function installTurnoverLedgerFetch(options: {
     }
     if (url.pathname === "/api/turnover-ledger" && method === "GET") {
       expect(url.searchParams.get("view")).toBe("grouped");
+      if (options.groupedPayloads?.length) {
+        const payload = options.groupedPayloads[Math.min(groupedRequestCount, options.groupedPayloads.length - 1)];
+        groupedRequestCount += 1;
+        return Response.json(payload);
+      }
+      groupedRequestCount += 1;
       return Response.json(groupedPayload(url.searchParams.get("family") ?? "all", options.groupedOverrides));
     }
     if (url.pathname === "/api/turnover-ledger/bank-row-tags/batch" && method === "POST") {
@@ -1268,18 +1304,102 @@ describe("Turnover ledger page", () => {
     await waitFor(() => {
       const barrierRequest = fetchMock.mock.calls.find(([input, init]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/operation-barrier/status" && init?.method === "POST";
+        if (url.pathname !== "/api/operation-barrier/status" || init?.method !== "POST") {
+          return false;
+        }
+        return JSON.stringify(JSON.parse(String(init?.body))) === JSON.stringify({
+          targets: [
+            { read_model_key: "turnover_ledger", scope_key: "all" },
+            { read_model_key: "workbench_relation", scope_key: "2026-05" },
+            { read_model_key: "workbench", scope_key: "2026-05" },
+            { read_model_key: "workbench", scope_key: "all" },
+          ],
+        });
       });
       expect(barrierRequest).toBeDefined();
-      expect(JSON.parse(String(barrierRequest?.[1]?.body))).toEqual({
-        targets: [
-          { read_model_key: "turnover_ledger", scope_key: "all" },
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "all" },
-        ],
+    });
+  });
+
+  test("refreshes the grouped ledger before manual closure and submits latest bank row versions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch({
+      groupedPayloads: [
+        groupedPayloadWithFlowCategoryVersions("all", {
+          "bank-jia-income-200000": 1,
+          "bank-jia-income-100000": 2,
+          "bank-jia-expense-300000": 3,
+        }),
+        groupedPayloadWithFlowCategoryVersions("all", {
+          "bank-jia-income-200000": 11,
+          "bank-jia-income-100000": 12,
+          "bank-jia-expense-300000": 13,
+        }),
+      ],
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+
+    await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-100000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    await user.click(within(page).getByRole("button", { name: "确认闭环" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
+      const request = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+      });
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+        bank_row_ids: ["bank-jia-income-200000", "bank-jia-income-100000", "bank-jia-expense-300000"],
+        expected_versions: {
+          "turnover_bank_row:bank-jia-income-200000": 11,
+          "turnover_bank_row:bank-jia-income-100000": 12,
+          "turnover_bank_row:bank-jia-expense-300000": 13,
+        },
       });
     });
+  });
+
+  test("blocks manual closure when a selected flow disappears after the fresh ledger reload", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch({
+      groupedPayloads: [
+        groupedPayload("all"),
+        groupedPayloadWithoutFlow("all", "bank-jia-income-100000"),
+      ],
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const jiaGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+
+    await user.click(within(jiaGroupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-100000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    await user.click(within(page).getByRole("button", { name: "确认闭环" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    expect((await screen.findAllByText("所选流水已刷新，请重新选择后再确认闭环。")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
+    });
+    expect(fetchMock.mock.calls.some(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+    })).toBe(false);
   });
 
   test("confirms closure when cash direction crosses turnover stage columns", async () => {
@@ -1419,7 +1539,7 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).queryByText("rel-jiaxiaohua")).not.toBeInTheDocument();
   });
 
-  test("shows grouped read model stale warning without blocking row actions", async () => {
+  test("shows grouped read model stale warning and blocks manual closure", async () => {
     const user = userEvent.setup();
     installTurnoverLedgerFetch({
       groupedOverrides: {
@@ -1438,6 +1558,9 @@ describe("Turnover ledger page", () => {
 
     expect(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" })).toBeEnabled();
     expect(within(table).getByRole("button", { name: "编辑流水 bank-company-expense-1000" })).toBeEnabled();
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeDisabled();
   });
 
   test("shows bank-detail tags as read-only in turnover management", async () => {

@@ -57,6 +57,11 @@ class RepositoryRecordingConnection:
                 "source_versions": {"bank": 1},
             }
         ]
+        self.stale_completed_rows = [
+            {
+                "scope_month": "2026-03",
+            }
+        ]
         self.scope_update_row = {
             "request_id": "request-1:2026-03",
             "duration_ms": 1200,
@@ -68,7 +73,10 @@ class RepositoryRecordingConnection:
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
-        if "update job.workbench_matching_dirty_scopes" in self.fetch_all_calls[-1][0]:
+        normalized = self.fetch_all_calls[-1][0]
+        if "status = 'completed'" in normalized:
+            return list(self.stale_completed_rows)
+        if "update job.workbench_matching_dirty_scopes" in normalized:
             return list(self.claim_rows)
         return []
 
@@ -152,6 +160,36 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_mark_stale_completed_scopes_requeues_only_source_version_mismatches(self) -> None:
+        clock = Clock()
+        queue = WorkbenchReconciliationDirtyQueue(options=WorkbenchReconciliationDirtyQueueOptions(now=clock.now))
+        queue.mark_dirty_expanded(["2026-05"], reason="unit", source_versions={"rules": "v1"})
+        clock.advance(60)
+        queue.claim_due_scopes(worker_id="worker-a", limit=1, request_id="request-1")
+        queue.complete(
+            "2026-03",
+            source_versions={"rules": "v1", "bank": "same"},
+            worker_id="worker-a",
+            request_id="request-1:2026-03",
+        )
+
+        unchanged = queue.mark_stale_completed_scopes(
+            source_versions={"rules": "v1"},
+            reason="matching_source_versions_changed",
+        )
+        changed = queue.mark_stale_completed_scopes(
+            source_versions={"rules": "v2"},
+            reason="matching_source_versions_changed",
+        )
+
+        self.assertEqual(unchanged, [])
+        self.assertEqual(changed, ["2026-03"])
+        entry = queue.get_dirty_scope("2026-03")
+        self.assertEqual(entry["status"], "dirty")
+        self.assertEqual(entry["source_versions"], {"rules": "v2", "bank": "same"})
+        self.assertEqual(entry["available_at"], datetime(2026, 5, 25, 9, 1, tzinfo=UTC))
+        self.assertIn("matching_source_versions_changed", entry["reasons"])
 
     def test_fail_retries_with_configurable_backoff_until_max_attempts(self) -> None:
         clock = Clock()
@@ -239,6 +277,37 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertIn("tenant_id", run_sql)
         self.assertIn("on conflict (tenant_id, request_id)", run_sql)
         self.assertIn("tenant-a", run_params)
+
+    def test_repository_marks_stale_completed_matching_scopes_dirty_atomically(self) -> None:
+        connection = RepositoryRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+            marked = repository.mark_stale_workbench_matching_completed_scopes(
+                tenant_id="tenant-a",
+                source_versions={"rules": "v2"},
+                reason="matching_source_versions_changed",
+                debounce_seconds=0,
+                limit=3,
+            )
+
+        self.assertEqual(marked, ["2026-03"])
+        self.assertEqual(connection.transaction_enters, 1)
+        self.assertEqual(connection.transaction_exits, 1)
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+        stale_sql, stale_params = connection.fetch_all_calls[0]
+        self.assertIn("status = 'completed'", stale_sql)
+        self.assertIn("not (coalesce(source_versions", stale_sql)
+        self.assertIn("@> %s", stale_sql)
+        self.assertIn("for update skip locked", stale_sql)
+        self.assertIn("limit %s", stale_sql)
+        self.assertIn("status = 'dirty'", stale_sql)
+        self.assertIn("lease_owner = null", stale_sql)
+        self.assertIn("lease_expires_at = null", stale_sql)
+        self.assertIn("source_versions = coalesce(dirty.source_versions", stale_sql)
+        self.assertIn("tenant-a", stale_params)
+        self.assertIn("matching_source_versions_changed", stale_params)
+        self.assertIn(3, stale_params)
 
     def test_repository_complete_and_fail_require_active_lease_identity(self) -> None:
         connection = RepositoryRecordingConnection()

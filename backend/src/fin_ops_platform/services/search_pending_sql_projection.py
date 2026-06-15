@@ -281,12 +281,29 @@ class SearchPendingSqlProjectionBuilder:
                 limit 1
             ) c on true
             left join lateral (
-                select command_payload->'income_status_override' as income_status_override
-                from app.pending_invoice_manual_invoice_commands command
-                where command.status = 'completed'
-                  and command.command_payload->>'operation' = 'income_status_override'
-                  and command.command_payload->'income_status_override'->>'transaction_id' = coalesce(t.legacy_mongo_id, t.id::text)
-                order by command.updated_at desc
+                select override_payload as income_status_override
+                from (
+                    select command.updated_at, command.command_payload->'income_status_override' as override_payload
+                    from app.pending_invoice_manual_invoice_commands command
+                    where command.status = 'completed'
+                      and command.command_payload->>'operation' = 'income_status_override'
+                      and jsonb_typeof(command.command_payload->'income_status_override') = 'object'
+                      and command.command_payload->'income_status_override'->>'transaction_id' = coalesce(t.legacy_mongo_id, t.id::text)
+                    union all
+                    select command.updated_at, batch_override.override_payload
+                    from app.pending_invoice_manual_invoice_commands command
+                    cross join lateral jsonb_array_elements(
+                        case
+                            when jsonb_typeof(command.command_payload->'income_status_overrides') = 'array'
+                            then command.command_payload->'income_status_overrides'
+                            else '[]'::jsonb
+                        end
+                    ) as batch_override(override_payload)
+                    where command.status = 'completed'
+                      and command.command_payload->>'operation' = 'income_status_override'
+                      and batch_override.override_payload->>'transaction_id' = coalesce(t.legacy_mongo_id, t.id::text)
+                ) override_rows
+                order by updated_at desc
                 limit 1
             ) iso on true
             where t.txn_direction = %s

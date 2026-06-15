@@ -73,6 +73,8 @@
 same group flow rows selected
   -> one or more income rows + one or more expense rows
   -> amount delta == 0.00
+  -> frontend waits turnover_ledger:all fresh and reloads grouped ledger
+  -> frontend rebinds selected bank row ids to latest same-group flow rows
   -> backend stale precondition passes
   -> Turnover manual confirmed relation
   -> Workbench active pair relation
@@ -87,6 +89,7 @@ same group flow rows selected
 - `bank_row_ids` 必须至少两条，不能重复；不再限制为正好两条。
 - 全部流水必须同组、同对方、同语义。
 - 必须至少一收一支，收支合计差额为 `0.00`。
+- 前端不能用抽屉打开时缓存的 flow row 版本直接提交；提交前必须刷新并重绑定，若任一流水消失、离开原 group、或刷新后不再零差额，必须中止并要求重新选择。
 - 不得被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用。
 - `expected_versions` 必须在写 relation 和 Workbench pair relation 前校验。
 - `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
@@ -141,10 +144,10 @@ extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `tu
 | loading | 首次或筛选加载 grouped ledger | `web/src/test/TurnoverLedgerPage.test.tsx` |
 | empty | grouped response 无 groups 时展示空态 | `web/src/test/TurnoverLedgerPage.test.tsx` |
 | error | ledger/detail/export/extra API 失败时显示错误或 toast | `shows a business error when relation detail disappears after the ledger was rendered` |
-| stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据和诊断，不能把 grouped payload 当作最终业务结论；写操作仍由后端 stale precondition/canonical write safety 判定 | read model / page tests |
+| stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据和诊断，不能把 grouped payload 当作最终业务结论；manual closure 发起/提交必须被阻断或先等 fresh 后重刷重绑，最终仍由后端 stale precondition/canonical write safety 兜底 | read model / page tests |
 | permission disabled | `canMutateData=false` 时禁用保存、确认、撤回等写动作 | API 403 + 前端 disabled tests |
 | tag drawer | 加载 active tags，保存 selected codes 后 reload ledger | `opens tag selection drawer, saves selected bank detail labels, and reloads ledger` |
-| closure drawer | 允许同组多条 flow rows；至少一收一支且收支合计差额为 0 才允许确认 | manual closure/cross-group tests |
+| closure drawer | 允许同组多条 flow rows；至少一收一支且收支合计差额为 0 才允许确认；点击确定前先等台账 fresh、reload grouped payload，并用最新 row versions 提交 | manual closure/cross-group/fresh-rebind tests |
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
 | operation pending | tag-selection、extra、confirm、withdraw 成功后显示全屏 overlay，等待 `turnover_ledger` operation barrier fresh，再 reload grouped ledger | operation overlay / page tests |
@@ -211,3 +214,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | --- | --- | --- | --- |
 | 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |
 | 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `turnover_ledger` barrier fresh 并 reload，避免旧 grouped payload 暴露给用户 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
+| 2026-06-15 | manual closure 提交前刷新并重绑定所选 flow rows | 防止抽屉缓存旧 `categoryVersion` 导致后端 stale precondition 拒绝，也防止刷新后流水消失时误发 POST | `web/src/test/TurnoverLedgerPage.test.tsx` fresh-rebind/stale tests |

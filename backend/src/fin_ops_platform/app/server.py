@@ -1634,6 +1634,8 @@ class Application:
             return self._handle_api_pending_invoice_rules(query, headers)
         if method == "PUT" and route_path == "/api/pending-invoices/rules":
             return self._handle_api_pending_invoice_rules_update(query, body, headers)
+        if method == "PUT" and route_path == "/api/pending-invoices/income-statuses":
+            return self._handle_api_pending_invoice_income_statuses_update(body, headers)
         if method == "PUT" and route_path.startswith("/api/pending-invoices/rows/") and route_path.endswith("/income-status"):
             transaction_id = route_path.removeprefix("/api/pending-invoices/rows/").removesuffix("/income-status").strip("/")
             return self._handle_api_pending_invoice_income_status_update(transaction_id, body, headers)
@@ -1778,10 +1780,6 @@ class Application:
         if method == "GET" and route_path.startswith("/api/input-invoice-usage/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_input_invoice_usage_relation_details(row_id, query)
-        if method == "POST" and route_path == "/api/pending-invoices/manual-invoices/preview":
-            return self._handle_api_pending_invoice_manual_preview(body)
-        if method == "POST" and route_path == "/api/pending-invoices/manual-invoices":
-            return self._handle_api_pending_invoice_manual_confirm(body, headers)
         if method == "GET" and route_path == "/api/no-oa-bank-batches":
             return self._handle_api_no_oa_bank_batches(query)
         if method == "GET" and route_path == "/api/no-oa-bank-batches/tag-selection":
@@ -2296,6 +2294,7 @@ class Application:
                 "/api/pending-invoices/invoices/{invoice_id}/detail",
                 "/api/pending-invoices/oa/{oa_id}/detail",
                 "/api/pending-invoices/rules",
+                "/api/pending-invoices/income-statuses",
                 "/api/pending-invoices/rows/{transaction_id}/income-status",
                 "/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice/preview",
                 "/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice",
@@ -10219,6 +10218,37 @@ class Application:
         self._persist_state()
         return self._json_response(HTTPStatus.OK, result)
 
+    def _handle_api_pending_invoice_income_statuses_update(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            session = resolve_oa_request_session(
+                headers,
+                identity_service=self._oa_identity_service,
+                access_control_service=self._access_control_service,
+            )
+        except UnauthorizedOASessionError as exc:
+            return self._json_response(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized", "message": str(exc)})
+        except ForbiddenOAAccessError as exc:
+            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": str(exc)})
+        try:
+            result = self._pending_invoice_routes().update_income_statuses(
+                payload if isinstance(payload, dict) else {},
+                session=session,
+            )
+        except PendingInvoiceError as exc:
+            return self._pending_invoice_error_response(exc)
+        except Exception:
+            self._persist_state()
+            raise
+        self._persist_state()
+        return self._json_response(HTTPStatus.OK, result)
+
     def _handle_api_pending_invoice_export_preview(
         self,
         query: dict[str, list[str]],
@@ -10357,40 +10387,6 @@ class Application:
                 {"error": "permission_denied", "message": denied_message},
             )
         return session, None
-
-    def _handle_api_pending_invoice_manual_preview(self, body: str | bytes | None) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        try:
-            preview = self._pending_invoice_routes().manual_preview(payload)
-        except PendingInvoiceError as exc:
-            return self._pending_invoice_error_response(exc)
-        return self._json_response(HTTPStatus.OK, preview)
-
-    def _handle_api_pending_invoice_manual_confirm(
-        self,
-        body: str | bytes | None,
-        headers: dict[str, str] | None,
-    ) -> Response:
-        payload, error = self._load_json_body(body)
-        if error is not None:
-            return error
-        session = resolve_oa_request_session(
-            headers,
-            identity_service=self._oa_identity_service,
-            access_control_service=self._access_control_service,
-        )
-        try:
-            result = self._pending_invoice_routes().manual_confirm(payload, session=session)
-        except PendingInvoiceError as exc:
-            self._persist_state()
-            return self._pending_invoice_error_response(exc)
-        except Exception:
-            self._persist_state()
-            raise
-        self._persist_state()
-        return self._json_response(HTTPStatus.OK, result)
 
     def _pending_invoice_error_response(self, exc: PendingInvoiceError) -> Response:
         payload: dict[str, object] = {"error": exc.error_code, "message": str(exc)}

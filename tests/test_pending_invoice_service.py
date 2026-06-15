@@ -2157,6 +2157,193 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(call["row_types"], ["bank", "bank", "invoice", "invoice"])
         self.assertEqual(call["history_operation_type"], "confirm_link")
 
+    def test_confirm_income_status_overrides_batch_is_idempotent_and_fans_out_once(self) -> None:
+        first_txn = BankTransaction(
+            id="txn_income_batch_a",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.INFLOW,
+            counterparty_name_raw="Customer A",
+            amount=Decimal("60.00"),
+            signed_amount=Decimal("60.00"),
+            txn_date="2026-05-19",
+            trade_time="2026-05-19 10:00:00",
+        )
+        second_txn = BankTransaction(
+            id="txn_income_batch_b",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.INFLOW,
+            counterparty_name_raw="Customer B",
+            amount=Decimal("40.00"),
+            signed_amount=Decimal("40.00"),
+            txn_date="2026-06-20",
+            trade_time="2026-06-20 10:00:00",
+        )
+        self.import_service = ImportNormalizationService(existing_transactions=[first_txn, second_txn])
+        linked_after_success: set[str] = set()
+
+        def row_provider(transaction_id: str, _direction: str) -> dict[str, object]:
+            return {
+                "id": transaction_id,
+                "available_actions": ["mark_income_status"],
+                "output_invoices": {"relation_count": 1 if transaction_id in linked_after_success else 0},
+            }
+
+        service = PendingInvoiceApplicationService(
+            import_service=self.import_service,
+            pair_relation_service=self.pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
+            audit_recorder=self.audit_events.append,
+            finalizer=self.finalize_events.append,
+            row_provider=row_provider,
+        )
+        payload = {
+            "transaction_ids": [first_txn.id, second_txn.id],
+            "status_code": "cash_income",
+            "request_id": "income-batch-001",
+            "reason": "现金收款",
+        }
+
+        result = service.confirm_income_status_overrides(payload=payload, actor_id="finance-user")
+        linked_after_success.add(first_txn.id)
+        retry = service.confirm_income_status_overrides(payload=payload, actor_id="finance-user")
+
+        self.assertEqual(result, retry)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["affected_transaction_ids"], [first_txn.id, second_txn.id])
+        self.assertEqual(result["status_code"], "cash_income")
+        self.assertEqual(result["affected_months"], ["2026-05", "2026-06"])
+        self.assertEqual(len(self.audit_events), 1)
+        self.assertEqual(self.audit_events[0]["action"], "pending_invoice_income_status_override_batch_confirmed")
+        self.assertEqual(self.audit_events[0]["transaction_ids"], [first_txn.id, second_txn.id])
+        self.assertEqual(len(self.finalize_events), 1)
+        self.assertEqual(self.finalize_events[0]["action"], "pending_invoice_income_status_override_confirmed")
+        self.assertEqual(self.finalize_events[0]["transaction_ids"], [first_txn.id, second_txn.id])
+        self.assertEqual(self.finalize_events[0]["affected_months"], ["2026-05", "2026-06"])
+
+    def test_confirm_income_status_overrides_batch_rejects_duplicates_before_writing(self) -> None:
+        income_txn = BankTransaction(
+            id="txn_income_batch_duplicate",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.INFLOW,
+            counterparty_name_raw="Customer Duplicate",
+            amount=Decimal("60.00"),
+            signed_amount=Decimal("60.00"),
+            txn_date="2026-05-19",
+            trade_time="2026-05-19 10:00:00",
+        )
+        self.import_service = ImportNormalizationService(existing_transactions=[income_txn])
+        service = PendingInvoiceApplicationService(
+            import_service=self.import_service,
+            pair_relation_service=self.pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
+            audit_recorder=self.audit_events.append,
+            finalizer=self.finalize_events.append,
+        )
+
+        with self.assertRaises(PendingInvoiceError) as context:
+            service.confirm_income_status_overrides(
+                payload={
+                    "transaction_ids": [income_txn.id, income_txn.id],
+                    "status_code": "cash_income",
+                    "request_id": "income-batch-duplicate",
+                },
+                actor_id="finance-user",
+            )
+
+        self.assertEqual(context.exception.error_code, "duplicate_income_status_transactions")
+        self.assertEqual(self.command_store, {})
+        self.assertEqual(self.audit_events, [])
+        self.assertEqual(self.finalize_events, [])
+
+    def test_confirm_income_status_overrides_batch_rejects_ineligible_rows_before_writing(self) -> None:
+        income_txn = BankTransaction(
+            id="txn_income_batch_valid",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.INFLOW,
+            counterparty_name_raw="Customer Valid",
+            amount=Decimal("60.00"),
+            signed_amount=Decimal("60.00"),
+            txn_date="2026-05-19",
+            trade_time="2026-05-19 10:00:00",
+        )
+        expense_txn = BankTransaction(
+            id="txn_income_batch_expense",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.OUTFLOW,
+            counterparty_name_raw="Vendor Invalid",
+            amount=Decimal("40.00"),
+            signed_amount=Decimal("-40.00"),
+            txn_date="2026-05-20",
+            trade_time="2026-05-20 10:00:00",
+        )
+        self.import_service = ImportNormalizationService(existing_transactions=[income_txn, expense_txn])
+        service = PendingInvoiceApplicationService(
+            import_service=self.import_service,
+            pair_relation_service=self.pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
+            audit_recorder=self.audit_events.append,
+            finalizer=self.finalize_events.append,
+            row_provider=lambda transaction_id, _direction: {
+                "id": transaction_id,
+                "invoices": [{"invoice_id": "out-linked"}] if transaction_id == income_txn.id else [],
+            },
+        )
+
+        with self.assertRaises(PendingInvoiceError) as context:
+            service.confirm_income_status_overrides(
+                payload={
+                    "transaction_ids": [income_txn.id, expense_txn.id],
+                    "status_code": "cash_income",
+                    "request_id": "income-batch-invalid",
+                },
+                actor_id="finance-user",
+            )
+
+        self.assertEqual(context.exception.error_code, "income_invoice_already_linked")
+        self.assertEqual(self.command_store, {})
+        self.assertEqual(self.audit_events, [])
+        self.assertEqual(self.finalize_events, [])
+
+    def test_confirm_income_status_overrides_batch_rejects_explicitly_unavailable_rows_before_writing(self) -> None:
+        income_txn = BankTransaction(
+            id="txn_income_batch_unavailable",
+            account_no="622200001234",
+            txn_direction=TransactionDirection.INFLOW,
+            counterparty_name_raw="Customer Unavailable",
+            amount=Decimal("60.00"),
+            signed_amount=Decimal("60.00"),
+            txn_date="2026-05-19",
+            trade_time="2026-05-19 10:00:00",
+        )
+        self.import_service = ImportNormalizationService(existing_transactions=[income_txn])
+        service = PendingInvoiceApplicationService(
+            import_service=self.import_service,
+            pair_relation_service=self.pair_service,
+            command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
+            audit_recorder=self.audit_events.append,
+            finalizer=self.finalize_events.append,
+            row_provider=lambda transaction_id, _direction: {
+                "id": transaction_id,
+                "available_actions": [],
+                "invoice_acquisition_status": {"primary_action": "view_relation"},
+            },
+        )
+
+        with self.assertRaises(PendingInvoiceError) as context:
+            service.confirm_income_status_overrides(
+                payload={
+                    "transaction_ids": [income_txn.id],
+                    "status_code": "cash_income",
+                    "request_id": "income-batch-unavailable",
+                },
+                actor_id="finance-user",
+            )
+
+        self.assertEqual(context.exception.error_code, "income_status_not_available")
+        self.assertEqual(self.command_store, {})
+        self.assertEqual(self.audit_events, [])
+        self.assertEqual(self.finalize_events, [])
+
     def _payload(self, *, invoice_no: str = "MAN-001") -> dict[str, object]:
         return {
             "bank_transaction_id": "txn_expense",

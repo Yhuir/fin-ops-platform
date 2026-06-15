@@ -50,7 +50,7 @@
 - 手动闭环：用户在页面选择同一往来组多条真实银行流水，至少一收一支且收支合计差额为 `0.00`，后端写 Turnover manual relation，并通过 `WorkbenchRelationCommandService` 写 Workbench active pair relation；bank-only 外部往来闭环在关联台保持 open，只有补齐 OA + 银行 + 发票三栏后才进入 paired。
 - 撤回：只允许撤回 manual/source 合法的外部往来关系；system/generated relation 必须拒绝。Workbench relation 撤回通过 command service cancel，撤回前用 `WorkbenchRelationReadFacade` 检查仍是 bank-only `turnover_manual_closure`。
 - 下游影响：外部往来关系变更影响 `turnover_ledger`、`workbench`、`workbench_relation`、成本统计、搜索和前端跨页刷新提示。
-- 操作闭环：前端 tag-selection、extra 保存、manual closure confirm/withdraw 必须接入 `GlobalOperationOverlayProvider`。manual closure confirm 的写 API 返回 `freshness_targets`，前端必须等待 `turnover_ledger:all`、受影响月份的 `workbench_relation`、受影响月份的 `workbench` 以及 `workbench:all` fresh 后再重新加载 grouped payload 并发送跨页刷新事件；overlay 关闭不能依赖本地行修改、前端事件或旧 read model。
+- 操作闭环：前端 tag-selection、extra 保存、manual closure confirm/withdraw 必须接入 `GlobalOperationOverlayProvider`。manual closure 发起和提交不能依赖 stale grouped payload；提交前必须先等待 `turnover_ledger:all` fresh、重新加载 grouped payload，并按原始 bank row ids 在同一 group 内重绑定最新 flow rows，用最新 `categoryVersion` 生成 `expected_versions`。manual closure confirm 的写 API 返回 `freshness_targets`，前端必须等待 `turnover_ledger:all`、受影响月份的 `workbench_relation`、受影响月份的 `workbench` 以及 `workbench:all` fresh 后再重新加载 grouped payload 并发送跨页刷新事件；overlay 关闭不能依赖本地行修改、前端事件或旧 read model。
 - App Status：`turnover_ledger` domain 绑定 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type。
 
 不属于本模块事实源：

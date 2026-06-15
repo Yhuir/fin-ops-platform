@@ -11,7 +11,6 @@ import type {
   FetchPendingInvoiceBatchCandidatesRequest,
   FetchPendingInvoiceCandidatesRequest,
   FetchPendingInvoiceRowsRequest,
-  ManualPendingInvoiceRequest,
   PendingInvoiceColumnFilter,
   PendingInvoiceObjectDetailTarget,
   PendingInvoiceRulesPayload,
@@ -36,6 +35,7 @@ function api() {
     confirmAttachExistingInvoices: (request: AttachExistingInvoicesConfirmRequest) => Promise<unknown>;
     fetchPendingInvoiceExportPreview: (request: FetchPendingInvoiceRowsRequest) => Promise<unknown>;
     downloadPendingInvoiceExport: (request: FetchPendingInvoiceRowsRequest) => Promise<{ blob: Blob; fileName: string }>;
+    savePendingInvoiceIncomeStatuses: typeof pendingInvoicesApi.savePendingInvoiceIncomeStatuses;
   };
 }
 
@@ -665,67 +665,39 @@ describe("pending invoices and tag settings API mapping", () => {
     });
   });
 
-  test("previews and confirms manual invoice with request id preserved", async () => {
+  test("batch marks income invoice status with generated request id", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      expect(url.pathname).toBe("/api/pending-invoices/income-statuses");
+      expect((init?.method ?? "GET").toUpperCase()).toBe("PUT");
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-      if (url.pathname.endsWith("/preview")) {
-        return new Response(JSON.stringify({
-          preview_id: "preview_001",
-          request_key: "manual-pending-invoice:txn_001:input:INV-001",
-          can_confirm: true,
-          target_invoice_type: "input",
-          bank_transaction_summary: {
-            id: "txn_001",
-            direction: "expense",
-            counterparty_name: "云南供应商有限公司",
-            trade_time: "2026-05-02",
-            amount: "1200.00",
-          },
-          invoice_identity: { source_unique_key: "manual-key", data_fingerprint: "fingerprint" },
-          duplicate_check: { status: "clear", matched_invoice_id: null, message: "" },
-          relation_impact: { relation_mode: "pending_invoice_manual_invoice", affected_months: ["2026-05"] },
-          warnings: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      expect(body.request_id).toBe("request-001");
+      expect(body.transaction_ids).toEqual(["txn_income_001", "txn_income_002"]);
+      expect(body.status_code).toBe("cash_income");
+      expect(String(body.request_id)).toMatch(/^income-status-batch-cash_income-/);
       return new Response(JSON.stringify({
-        invoice_id: "inv_002",
-        relation_case_id: "case_002",
-        affected_transaction_ids: ["txn_001"],
-        affected_invoice_ids: ["inv_002"],
+        status: "completed",
+        request_id: body.request_id,
+        request_key: "pending_invoice_income_status_batch:abc",
+        transaction_ids: ["txn_income_001", "txn_income_002"],
+        status_code: "cash_income",
+        affected_transaction_ids: ["txn_income_001", "txn_income_002"],
+        affected_invoice_ids: [],
         affected_months: ["2026-05"],
-        row: {
-          id: "txn_001",
-          bank_transaction: { id: "txn_001" },
-          invoice_acquisition_status: { code: "paid_invoiced", label: "已支付已开票", primary_action: "view_relation" },
-          available_actions: ["view_relation"],
-        },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const request: ManualPendingInvoiceRequest = {
-      requestId: "request-001",
-      bankTransactionId: "txn_001",
-      invoiceNo: "INV-001",
-      issueDate: "2026-05-03",
-      totalWithTax: "1200.00",
-      sellerName: "云南供应商有限公司",
-      buyerName: "云南溯源科技有限公司",
-    };
+    const result = await pendingInvoicesApi.savePendingInvoiceIncomeStatuses(["txn_income_001", "txn_income_002"], "cash_income");
 
-    const preview = await pendingInvoicesApi.previewManualPendingInvoice(request);
-    const result = await pendingInvoicesApi.confirmManualPendingInvoice({ ...request, previewId: preview.previewId });
-
-    expect(preview).toMatchObject({
-      previewId: "preview_001",
-      requestKey: "manual-pending-invoice:txn_001:input:INV-001",
-      targetInvoiceType: "input",
+    expect(result).toMatchObject({
+      status: "completed",
+      requestKey: "pending_invoice_income_status_batch:abc",
+      transactionIds: ["txn_income_001", "txn_income_002"],
+      statusCode: "cash_income",
+      affectedTransactionIds: ["txn_income_001", "txn_income_002"],
       affectedMonths: ["2026-05"],
     });
-    expect(result).toMatchObject({ invoiceId: "inv_002", relationCaseId: "case_002", affectedMonths: ["2026-05"] });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("maps settings tag dictionary and pending invoice tag groups both directions", async () => {
