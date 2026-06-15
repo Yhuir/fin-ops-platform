@@ -1,0 +1,13 @@
+{
+  "workflow": {
+    "discuss_mode": "discuss",
+    "text_mode": false,
+    "parallelization": true,
+    "research_before_planning": true,
+    "plan_check": true,
+    "verify_after_execution": true
+  },
+  "commit_docs": true,
+  "phase_naming": "numbered",
+  "project_code": ""
+}
