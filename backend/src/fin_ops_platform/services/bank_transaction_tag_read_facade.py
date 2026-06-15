@@ -148,8 +148,6 @@ class BankTransactionTagReadFacade:
             )
         missing_transaction_ids = text_list(payload.get("missing_transaction_ids"))
         status = _facade_status(payload.get("read_model_status"))
-        if missing_transaction_ids and status == FRESH_BANK_TAG_STATUS:
-            status = "missing"
         scope_keys = text_list(payload.get("read_model_scope_keys")) or list(fallback_scope_keys)
         if require_fresh and status != FRESH_BANK_TAG_STATUS and not scope_keys:
             scope_keys = ["all"]
@@ -377,8 +375,8 @@ def _stale_reasons(*, status: str, payload: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     if status != FRESH_BANK_TAG_STATUS:
         reasons.append("read_model_not_fresh")
-    if text_list(payload.get("missing_transaction_ids")):
-        reasons.append("missing_transaction_rows")
+        if text_list(payload.get("missing_transaction_ids")):
+            reasons.append("missing_transaction_rows")
     return reasons
 
 

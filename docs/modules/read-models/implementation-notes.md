@@ -31,10 +31,10 @@
 ## 2026-06-16 - Bank detail fan-out scope 与 downstream dependency 边界
 
 - 目标：修复外部往来款管理和免 OA 批次依赖 `bank_detail` 时的 all-scope fan-out 循环，避免页面无数据但 App Status 长时间显示同步中。
-- 影响范围：read model dependency defer 语义、`bank_detail` all-scope fan-out、active coalescing reason；不改变 `bank_detail` 月份 shard rebuild 和 readiness 发布规则。
-- 关键决策：`bank_detail:all` 只作为显式 fan-out command，不能由 downstream all-scope `bank_detail_read_model_not_fresh` 自动补投；`bank_detail_all_shard` 是 ensure/wakeup 类 reason，目标月份已 active 时不重复 bump dirty source_version。真实写入 reason 仍保持 bump active scope，避免新事实被旧 worker 覆盖。
+- 影响范围：read model dependency defer 语义、`bank_detail` all-scope fan-out、active coalescing reason、bank tag read facade 的 missing transaction 语义；不改变 `bank_detail` 月份 shard rebuild 和 readiness 发布规则。
+- 关键决策：`bank_detail:all` 只作为显式 fan-out command，不能由 downstream all-scope `bank_detail_read_model_not_fresh` 自动补投；`bank_detail_all_shard` 是 ensure/wakeup 类 reason，目标月份已 active 时不重复 bump dirty source_version。真实写入 reason 仍保持 bump active scope，避免新事实被旧 worker 覆盖。fresh `bank_detail` read model 中没有某些 transaction id 时，不再降级为 non-fresh；缺失 id 作为诊断返回，downstream projection 按无标签处理。
 - 文档影响：同步更新 runtime-workers、bank-details、turnover-ledger 模块。
-- 测试覆盖：`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_detail_all_shard_reason_does_not_bump_active_scope`。
+- 测试覆盖：`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_detail_all_shard_reason_does_not_bump_active_scope`、`tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows`。
 - 验证命令：见本轮最终交付说明。
 - 未测风险：真实生产历史 dirty/outbox 需要发布后 drain 观测；如果存在旧版本遗留 dead-letter/processing，必须通过 runtime ops 工具恢复。
 

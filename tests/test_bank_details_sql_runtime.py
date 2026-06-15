@@ -388,7 +388,7 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(queue.enqueued[0]["reason"], "unit_test")
         self.assertIn("read_model_not_fresh", payload["stale_reasons"])
 
-    def test_get_by_transaction_ids_treats_missing_projected_rows_as_non_fresh(self) -> None:
+    def test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected(self) -> None:
         queue = CaptureRuntimeQueueRepository()
         repository = FakeBankTaggedReadRepository(
             by_ids_payload={
@@ -407,11 +407,35 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
 
         payload = facade.get_by_transaction_ids(["txn-001", "txn-missing"], require_fresh=True)
 
-        self.assertEqual(payload["status"], "missing")
-        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual([row["transaction_id"] for row in payload["rows"]], ["txn-001"])
         self.assertEqual(payload["missing_transaction_ids"], ["txn-missing"])
-        self.assertTrue(payload["refresh_enqueued"])
-        self.assertIn("missing_transaction_rows", payload["stale_reasons"])
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(payload["stale_reasons"], [])
+        self.assertEqual(queue.enqueued, [])
+
+    def test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "fresh",
+                "rows": [bank_detail_projected_row("txn-001")["payload"]],
+                "source_versions": {"bank_detail": 9},
+                "read_model_scope_keys": ["2026-05"],
+                "read_model_scope_signatures": {"2026-05": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}},
+                "missing_transaction_ids": ["txn-missing"],
+            }
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        categories = facade.category_records_by_transaction_ids(["txn-001", "txn-missing"], require_fresh=True)
+
+        self.assertEqual(sorted(categories), ["txn-001"])
+        self.assertEqual(categories["txn-001"]["category_code"], "equipment_purchase")
+        self.assertEqual(queue.enqueued, [])
 
     def test_get_by_transaction_ids_enqueues_hint_scope_when_all_projected_rows_are_missing(self) -> None:
         queue = CaptureRuntimeQueueRepository()

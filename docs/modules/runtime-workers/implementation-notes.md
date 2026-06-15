@@ -26,13 +26,14 @@
 
 ## 历史记录
 
-## 2026-06-16 - Bank detail all-scope dependency loop guard
+## 2026-06-16 - Bank detail dependency loop guards
 
 - 目标：修复外部往来款管理和免 OA 银行流水批次在生产长期显示“同步中”、页面无数据的问题。
-- 影响范围：`RuntimeWorker` 的 dependency-not-fresh scope 推导、`ReadModelRefreshGateway` 的 active coalescing reason 列表；不改变业务写入、projection SQL、RabbitMQ/Redis 事实源。
-- 关键决策：`bank_detail:all` 保留为 `BankDetailReadModelRefreshService` 内部 fan-out 到月份 shard 的显式命令；`turnover_ledger:all`、`no_oa_bank_batch:all` 等 downstream event 因 `bank_detail_read_model_not_fresh` defer 时，不再自动补投 `bank_detail:all`。`bank_detail_all_shard` 归入 ensure/wakeup reason，目标月份已 pending/processing 时不再 bump 新 source_version。
+- 影响范围：`RuntimeWorker` 的 dependency-not-fresh scope 推导、`ReadModelRefreshGateway` 的 active coalescing reason 列表、`BankTransactionTagReadFacade` 对 fresh read model 缺失 transaction id 的语义；不改变业务写入、projection SQL、RabbitMQ/Redis 事实源。
+- 真实原因：生产先被 downstream all-scope `bank_detail_read_model_not_fresh` 推导成 `bank_detail:all` 放大；修正后仍发现 `downstream_bank_tag_read` 持续补投月份 shard。后者是因为 fresh `bank_detail` read model 中找不到部分 transaction id 时，facade 把结果降级为 `missing` 并抛 `bank_detail_read_model_not_fresh`，刷新后这些 id 仍不存在，形成永久 refresh loop。
+- 关键决策：`bank_detail:all` 保留为 `BankDetailReadModelRefreshService` 内部 fan-out 到月份 shard 的显式命令；`turnover_ledger:all`、`no_oa_bank_batch:all` 等 downstream event 因 `bank_detail_read_model_not_fresh` defer 时，不再自动补投 `bank_detail:all`。`bank_detail_all_shard` 归入 ensure/wakeup reason，目标月份已 pending/processing 时不再 bump 新 source_version。fresh read model 的 `missing_transaction_ids` 是诊断信息，不是 freshness blocker；downstream category provider 返回已存在行的标签，缺失行按无标签处理。
 - 文档影响：同步更新 runtime-workers、read-models、bank-details 和 turnover-ledger 模块文档。
-- 测试覆盖：`RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope`，并保留月份 dependency 和 mutating reason 回归。
+- 测试覆盖：`RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope`、`BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected`、`BankTransactionTagReadFacadeTests.test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows`，并保留月份 dependency、mutating reason 和 downstream read model 回归。
 - 验证命令：见本轮最终交付说明。
 - 未测风险：本地测试证明架构边界；真实生产仍需发布后观察旧 dirty/outbox 是否自然 drain，并验证 `turnover_ledger:all`、`no_oa_bank_batch:all` 从 refreshing 收敛到 fresh。
 - 后续事项：如果生产仍有历史 stuck `processing` 或 covered dead-letter，必须走 `runtime_queue_ops` 受控 inspect/requeue/resolve，不允许直接 SQL 伪造 fresh。
