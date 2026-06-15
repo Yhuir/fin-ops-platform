@@ -42,7 +42,7 @@
 - 项目范围：OA 项目同步、手工项目、已完成项目、本地删除 override。
 - 访问控制：允许访问、只读导出、admin、full access 派生名单和 OA role sync。
 - 关联台设置：列布局、银行账户映射、OA 留存时间、OA 导入表单类型/状态过滤、OA 发票抵扣申请人。
-- 业务规则：待找发票标签组、免 OA 和往来款标签选择；银行明细自动标签规则只读返回给 settings 页面作为候选事实，写入只能走银行明细 `自动标签规则` 抽屉/API。
+- 业务规则：待找发票标签组、免 OA 和往来款标签选择；银行明细自动标签规则只读返回给 settings 页面作为候选事实，`AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数，写入只能走银行明细 `自动标签规则` 抽屉/API。
 - OA 申请人凭据：独立凭据事实源，只允许 admin 维护，普通 settings payload 不能包含密码、密文或 token。
 - 数据重置：银行流水域、发票域、OA 源重置与重建；必须保护禁止删除目标、保留必要事实、记录 job progress，并避免旧 read model/cache 被误判为 fresh。
 
@@ -53,7 +53,7 @@
 | 设置动作 | 后端事实 / event | 受影响模块 |
 | --- | --- | --- |
 | 待找发票规则保存 | `pending_invoice_rules_changed`，规则 version 递增 | 待找发票、关联台、发票 lifecycle、进项/销项/OA 待付款、税金、成本、搜索 |
-| 银行标签/自动标签保存 | 仅由银行明细 `自动标签规则` API 触发 `bank_auto_tag_rules_changed` / bank auto tag rules audit；`/api/workbench/settings` 携带 `bank_transaction_tags` 必须拒绝 | 银行明细、免 OA、关联台候选、往来款、成本、搜索 |
+| 银行标签/自动标签保存 | 仅由银行明细 `自动标签规则` API 触发 `bank_auto_tag_rules_changed` / bank auto tag rules audit；`/api/workbench/settings` 携带 `bank_transaction_tags` 必须拒绝；settings service 不提供该写参数 | 银行明细、免 OA、关联台候选、往来款、成本、搜索 |
 | 项目范围变化 | `project_scope_changed` 或等价 dirty scope | 成本统计、搜索、关联台项目展示 |
 | 访问控制变化 | state store + OA role sync | 页面可见性、写入权限、导出权限、数据重置权限 |
 | OA 导入过滤/留存设置变化 | state store，后续 OA reset/rebuild 或 sync 使用 | OA 待付款、进项/销项、税金、成本、关联台 |

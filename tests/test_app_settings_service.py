@@ -1,3 +1,4 @@
+import inspect
 import json
 import tempfile
 import unittest
@@ -396,37 +397,15 @@ class AppSettingsServiceTests(unittest.TestCase):
         )
         self.assertEqual(payload["pending_invoice_tag_groups"]["version"], 1)
 
-    def test_update_settings_rejects_bank_transaction_tags_write_boundary(self) -> None:
+    def test_update_settings_does_not_expose_bank_transaction_tags_write_parameter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             initial = app._app_settings_service.get_settings_payload()
-            stripped_tag_payload = {
-                "version": initial["bank_transaction_tags"]["version"],
-                "definitions": [
-                    {
-                        "code": "custom_round_trip_tag",
-                        "label": "被 settings 回写的标签",
-                        "path": ["自动识别", "被 settings 回写的标签"],
-                        "source": "custom",
-                        "status": "active",
-                    }
-                ],
-            }
-
-            with self.assertRaises(AppSettingsValidationError) as context:
-                app._app_settings_service.update_settings(
-                    completed_project_ids=[],
-                    bank_account_mappings=[],
-                    allowed_usernames=[],
-                    readonly_export_usernames=[],
-                    admin_usernames=[],
-                    bank_transaction_tags=stripped_tag_payload,
-                    actor_id="settings-owner",
-                )
+            signature = inspect.signature(app._app_settings_service.update_settings)
 
             current = app._app_settings_service.get_settings_payload()
 
-        self.assertEqual(context.exception.error_code, "bank_transaction_tags_write_forbidden")
+        self.assertNotIn("bank_transaction_tags", signature.parameters)
         self.assertEqual(current["bank_transaction_tags"], initial["bank_transaction_tags"])
 
     def test_workbench_settings_api_rejects_bank_transaction_tags_payload(self) -> None:
@@ -550,40 +529,47 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(income_changed["pending_invoice_tag_groups"]["version"], expense_changed["pending_invoice_tag_groups"]["version"])
         self.assertEqual(income_changed["pending_output_invoice_tag_groups"]["version"], initial["pending_output_invoice_tag_groups"]["version"] + 1)
 
-    def test_settings_rejects_frontend_tags_alias_for_bank_transaction_tags(self) -> None:
+    def test_workbench_settings_api_rejects_frontend_tags_alias_for_bank_transaction_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            with self.assertRaises(AppSettingsValidationError) as context:
-                app._app_settings_service.update_settings(
-                    completed_project_ids=[],
-                    bank_account_mappings=[],
-                    allowed_usernames=[],
-                    readonly_export_usernames=[],
-                    admin_usernames=[],
-                    bank_transaction_tags={
-                        "version": 1,
-                        "tags": [
-                            {
-                                "code": "custom_1779265822964",
-                                "label": "利息",
-                                "path": ["自定义", "利息"],
-                                "source": "custom",
-                                "status": "active",
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/settings",
+                body=json.dumps(
+                    {
+                        "completed_project_ids": [],
+                        "bank_account_mappings": [],
+                        "allowed_usernames": [],
+                        "readonly_export_usernames": [],
+                        "admin_usernames": [],
+                        "bank_transaction_tags": {
+                            "version": 1,
+                            "tags": [
+                                {
+                                    "code": "custom_1779265822964",
+                                    "label": "利息",
+                                    "path": ["自定义", "利息"],
+                                    "source": "custom",
+                                    "status": "active",
+                                }
+                            ],
+                        },
+                        "pending_invoice_tag_groups": {
+                            "groups": {
+                                "requires_invoice": {"tag_codes": []},
+                                "bank_statement_as_invoice": {"tag_codes": ["custom_1779265822964"]},
+                                "no_invoice_required": {"tag_codes": []},
                             }
-                        ],
-                    },
-                    pending_invoice_tag_groups={
-                        "groups": {
-                            "requires_invoice": {"tag_codes": []},
-                            "bank_statement_as_invoice": {"tag_codes": ["custom_1779265822964"]},
-                            "no_invoice_required": {"tag_codes": []},
-                        }
-                    },
-                    actor_id="settings-owner",
-                )
+                        },
+                    }
+                ),
+                headers={"X-User": "admin"},
+            )
 
-        self.assertEqual(context.exception.error_code, "bank_transaction_tags_write_forbidden")
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(payload["error"], "bank_transaction_tags_write_forbidden")
 
     def test_invalid_pending_invoice_group_mappings_do_not_audit_or_finalize(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

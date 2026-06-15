@@ -247,7 +247,6 @@ class AppSettingsService:
         oa_import: dict[str, Any] | None = None,
         oa_invoice_offset: dict[str, Any] | None = None,
         manual_projects: list[dict[str, Any]] | None = None,
-        bank_transaction_tags: dict[str, Any] | None = None,
         pending_invoice_tag_groups: dict[str, Any] | None = None,
         pending_output_invoice_tag_groups: dict[str, Any] | None = None,
         actor_id: str | None = None,
@@ -255,17 +254,6 @@ class AppSettingsService:
     ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         previous_snapshot = dict(self._snapshot)
-        if bank_transaction_tags is not None:
-            raise AppSettingsValidationError(
-                "bank_transaction_tags_write_forbidden",
-                "Bank transaction auto-tag rules must be saved through the bank details auto-tag rules API.",
-            )
-        self._validate_bank_transaction_tag_settings_update(
-            previous_snapshot,
-            bank_transaction_tags=bank_transaction_tags,
-            pending_invoice_tag_groups=pending_invoice_tag_groups,
-            pending_output_invoice_tag_groups=pending_output_invoice_tag_groups,
-        )
         normalized_snapshot = self._normalize_settings(
             {
                 "completed_project_ids": completed_project_ids,
@@ -1846,98 +1834,6 @@ class AppSettingsService:
                 "new_selected_tag_codes": list(event.get("new_selected_tag_codes") or []),
             },
         )
-
-    @staticmethod
-    def _validate_bank_transaction_tag_settings_update(
-        previous_snapshot: dict[str, Any],
-        *,
-        bank_transaction_tags: dict[str, Any] | None,
-        pending_invoice_tag_groups: dict[str, Any] | None,
-        pending_output_invoice_tag_groups: dict[str, Any] | None = None,
-    ) -> None:
-        previous_tags = previous_snapshot["bank_transaction_tags"]
-        previous_version = int(previous_tags.get("version") or 1)
-        if isinstance(bank_transaction_tags, dict):
-            requested_version = BankTransactionCategoryService._normalize_version(
-                bank_transaction_tags.get("version", 1)
-            )
-            if requested_version <= 0:
-                requested_version = 1
-            if requested_version != previous_version:
-                raise AppSettingsValidationError(
-                    "bank_transaction_tags_version_conflict",
-                    "Bank transaction tag settings version conflict.",
-                )
-
-        if not isinstance(bank_transaction_tags, dict):
-            return
-
-        next_tags = AppSettingsService._normalize_bank_transaction_tags(bank_transaction_tags)
-        previous_definitions = {
-            str(definition["code"]): dict(definition)
-            for definition in list(previous_tags.get("definitions") or [])
-            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
-        }
-        next_definitions = {
-            str(definition["code"]): dict(definition)
-            for definition in list(next_tags.get("definitions") or [])
-            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
-        }
-        newly_archived_codes = {
-            code
-            for code, previous_definition in previous_definitions.items()
-            if previous_definition.get("status") != "archived"
-            and next_definitions.get(code, {}).get("status") == "archived"
-        }
-        if not newly_archived_codes:
-            return
-
-        mapped_codes = AppSettingsService._pending_invoice_tag_codes_for_archive_guard(
-            pending_invoice_tag_groups,
-            fallback_groups=previous_snapshot["pending_invoice_tag_groups"],
-            group_labels=PENDING_INVOICE_TAG_GROUP_LABELS,
-        )
-        mapped_codes.update(
-            AppSettingsService._pending_invoice_tag_codes_for_archive_guard(
-                pending_output_invoice_tag_groups,
-                fallback_groups=previous_snapshot["pending_output_invoice_tag_groups"],
-                group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
-            )
-        )
-        blocked_codes = sorted(newly_archived_codes.intersection(mapped_codes))
-        if blocked_codes:
-            raise AppSettingsValidationError(
-                "bank_transaction_tag_in_use_by_pending_invoice_filter",
-                f"Bank transaction tag is still mapped to pending invoice filters: {blocked_codes[0]}",
-            )
-
-    @staticmethod
-    def _pending_invoice_tag_codes_for_archive_guard(
-        value: Any,
-        *,
-        fallback_groups: dict[str, Any],
-        group_labels: dict[str, str] | None = None,
-    ) -> set[str]:
-        labels = group_labels or PENDING_INVOICE_TAG_GROUP_LABELS
-        raw_payload = value if isinstance(value, dict) else fallback_groups
-        raw_groups = raw_payload.get("groups") if isinstance(raw_payload.get("groups"), dict) else raw_payload
-        if not isinstance(raw_groups, dict):
-            raw_groups = {}
-        mapped_codes: set[str] = set()
-        for group_id in labels:
-            raw_group = raw_groups.get(group_id)
-            if isinstance(raw_group, dict):
-                raw_codes = raw_group.get("tag_codes")
-            elif isinstance(raw_group, list):
-                raw_codes = raw_group
-            else:
-                raw_codes = []
-            mapped_codes.update(
-                str(item or "").strip()
-                for item in list(raw_codes or [])
-                if str(item or "").strip()
-            )
-        return mapped_codes
 
     @staticmethod
     def _pending_invoice_reference_map(value: Any) -> dict[str, list[dict[str, Any]]]:

@@ -21,7 +21,7 @@
 | 场景 | 保护测试 | 说明 |
 | --- | --- | --- |
 | 保存项目、权限、银行映射和 OA 配置 | `tests/test_app_settings_service.py`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | 覆盖 normalize、state store round-trip、OA role sync、只读/管理员 UI |
-| 保存待找发票规则且拒绝银行标签回写 | `tests/test_app_settings_service.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/SettingsPage.test.tsx`、`tests/test_derived_data_lifecycle_service.py` | 覆盖 `/api/workbench/settings` 不接受 `bank_transaction_tags`、前端不回传银行标签展示字典、非法映射、audit、规则 version、下游 lifecycle fan-out；银行自动标签保存归属 `bank-details` 模块。 |
+| 保存待找发票规则且拒绝银行标签回写 | `tests/test_app_settings_service.py`、`web/src/test/PendingInvoicesApi.test.ts`、`web/src/test/SettingsPage.test.tsx`、`tests/test_derived_data_lifecycle_service.py` | 覆盖 `/api/workbench/settings` 不接受 `bank_transaction_tags`、`AppSettingsService.update_settings(...)` 不暴露银行标签写参数、前端不回传银行标签展示字典、非法映射、audit、规则 version、下游 lifecycle fan-out；银行自动标签保存归属 `bank-details` 模块。 |
 | 数据重置 | `tests/test_settings_data_reset_service.py`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | 覆盖 admin/password gate、job progress、protected targets、reset OA rebuild、失败不清数据不泄密 |
 | OA 申请人凭据 | `tests/test_oa_applicant_credentials_*`、`tests/test_target_oa_applicant_token_provider.py`、`web/src/test/SettingsPage.test.tsx` | 覆盖 admin-only、无密码回显、加密、目标 OA 登录 provider |
 | 旧功能回归 | `tests/test_postgres_migrations.py`、`tests/test_app_status_overview_service.py`、相关下游模块测试 | 保护 settings payload 兼容、迁移、App Status 和下游页面不被配置变更误伤 |
@@ -45,7 +45,7 @@
 ## 关键 smoke flows
 
 - admin 保存 pending invoice 规则 -> `pending_invoice_rules_changed` -> 待找发票、发票 lifecycle、税金、成本、关联台刷新或进入 refreshing。
-- admin 在银行明细自动标签规则抽屉保存银行标签/自动标签 -> bank detail / no-OA / workbench 候选相关 read model dirty；settings 保存如果携带 `bank_transaction_tags` 必须失败，旧页面不把 stale 数据当 fresh。
+- admin 在银行明细自动标签规则抽屉保存银行标签/自动标签 -> bank detail / no-OA / workbench 候选相关 read model dirty；settings 保存如果携带 `bank_transaction_tags` 必须失败，service 层也不得暴露该写参数，旧页面不把 stale 数据当 fresh。
 - admin 执行银行/发票/OA 数据重置 -> password gate -> job progress -> protected targets 保留 -> read model/dirty scope/cache 清理 -> App Status 可见。
 - admin 保存/删除 OA 申请人凭据 -> settings payload 不泄密 -> 目标 OA token provider 使用独立凭据 -> 外部 OA 失败不泄露密码。
 - 项目同步/手工新增/完成/本地删除 -> settings reload 后项目状态保留 -> 成本统计/search/project scope 不误伤。
