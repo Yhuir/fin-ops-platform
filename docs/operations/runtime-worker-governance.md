@@ -100,12 +100,7 @@ transport/wakeup，不能作为 read model 状态事实源。
 发布前后或 App Status 出现无法解释的 cost statistics failed/refreshing scope 时，先运行只读检查：
 
 ```bash
-cd /opt/fin-ops/current
-set -a
-source /etc/fin-ops/fin-ops.api.env
-set +a
-PYTHONPATH=/opt/fin-ops/current/backend/src \
-  /opt/fin-ops/venv/bin/python scripts/check-read-model-scope-contracts.py --json
+sudo -n /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
 ```
 
 脚本会检查 `job.read_model_dirty_scopes`、`job.outbox_events` 与 `read_model.app_status_readiness`
@@ -124,11 +119,10 @@ dry-run JSON 必须随发布/修复记录归档，至少保留 `repair_manifest.
 确认报告后执行受控修复：
 
 ```bash
-PYTHONPATH=/opt/fin-ops/current/backend/src \
-  /opt/fin-ops/venv/bin/python scripts/check-read-model-scope-contracts.py \
-    --apply \
-    --reason production_scope_contract_repair \
-    --json
+sudo -n /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> \
+  --apply \
+  --reason production_scope_contract_repair \
+  --json
 ```
 
 `--apply` 只删除非规范的 `cost_statistics` runtime 状态，并通过 `ReadModelRefreshGateway` 补投

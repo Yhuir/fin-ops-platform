@@ -30,6 +30,8 @@ commands:
                                       rebuild Workbench SQL read models using runtime env
   workbench-audit-identity <release-name> [args]
                                       run Workbench object identity audit using runtime env
+  read-model-scope-contract <release-name> [args]
+                                      check or repair read model scope contracts using runtime env
   restart                              restart API, active workers, and active dispatcher
   status                               print service state and active release paths
   cleanup-dropins                      remove historical release drop-ins, preserving 99-deploy-release.conf
@@ -371,6 +373,16 @@ workbench_audit_identity() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_object_identity "$@"
 }
 
+read_model_scope_contract() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "read-model-scope-contract requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" "$src/scripts/check-read-model-scope-contracts.py" "$@"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   check-release)
@@ -400,6 +412,10 @@ case "$cmd" in
   workbench-audit-identity)
     shift
     workbench_audit_identity "$@"
+    ;;
+  read-model-scope-contract)
+    shift
+    read_model_scope_contract "$@"
     ;;
   restart)
     assert_runtime_env_contract

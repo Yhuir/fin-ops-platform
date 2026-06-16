@@ -329,12 +329,19 @@ sudo /usr/local/sbin/finops-deploy-control workbench-audit-identity <release-nam
   --json \
   --workbench-scope all \
   --limit 20
+sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
+sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> \
+  --apply \
+  --reason production_scope_contract_repair \
+  --json
 ```
 
 `workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，
 按月份 shard 重建 Workbench SQL read model，再发布 `all` 聚合；`workbench-audit-identity`
 只运行 `fin_ops_platform.tools.audit_object_identity`，用于查看强身份跨区重复、OA alias 和孤儿关系样本。
-两个命令都只接受固定脚本/模块参数，由 helper 加载 runtime env，不提供任意 shell 执行能力。
+`read-model-scope-contract` 只运行 release 内的 `scripts/check-read-model-scope-contracts.py`，
+用于只读检查或受控清理 legacy/invalid read model scope。以上命令都只接受固定脚本/模块参数，
+由 helper 加载 runtime env，不提供任意 shell 执行能力。
 
 说明：
 
