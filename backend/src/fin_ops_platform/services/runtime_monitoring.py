@@ -919,6 +919,172 @@ class RuntimeMonitoringRepository:
             "workbench_read_model": workbench_read_model,
         }
 
+    def ready_health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
+        queue_rows = self._connection.fetch_all(
+            """
+            select status, count(*)::bigint as count
+            from job.outbox_events
+            where status <> 'done'
+            group by status
+            order by status
+            """
+        )
+        age_row = self._connection.fetch_one(
+            """
+            select extract(epoch from max(now() - created_at))::float as max_pending_age_seconds
+            from job.outbox_events
+            where status = 'pending'
+            """
+        )
+        dirty_count_rows = self._connection.fetch_all(
+            """
+            select status, count(*)::bigint as count
+            from job.read_model_dirty_scopes
+            group by status
+            order by status
+            """
+        )
+        stale_rows = self._connection.fetch_all(
+            """
+            select
+              tenant_id,
+              scope_type,
+              scope_key,
+              status,
+              extract(epoch from now() - updated_at)::float as age_seconds,
+              attempts,
+              last_error,
+              count(*) over()::bigint as total_count
+            from job.read_model_dirty_scopes
+            where status in ('pending', 'processing', 'failed')
+              and updated_at < now() - (%s * interval '1 second')
+            order by updated_at, tenant_id, scope_type, scope_key
+            limit 5
+            """,
+            (stale_after_seconds,),
+        )
+        worker_lag_row = self._connection.fetch_one(
+            """
+            with latest_worker_kind_heartbeats as (
+              select distinct on (worker_kind)
+                worker_kind,
+                last_seen_at
+              from job.runtime_worker_heartbeats
+              order by worker_kind, last_seen_at desc
+            )
+            select extract(epoch from max(now() - last_seen_at))::float as max_worker_heartbeat_lag_seconds
+            from latest_worker_kind_heartbeats
+            where worker_kind <> 'runtime'
+            """
+        )
+        refresh_failure_row = self._connection.fetch_one(
+            """
+            with event_type_filter(event_type) as (
+              select unnest(%s::text[])
+            ),
+            recent_refresh_events as (
+              select refresh_event.status
+              from event_type_filter
+              cross join lateral (
+                select status, updated_at
+                from job.outbox_events
+                where event_type = event_type_filter.event_type
+                  and event_type like '%%.read_model.refresh'
+                  and (
+                    status in ('failed', 'dead_lettered')
+                    or (
+                      status = 'done'
+                      and raw_payload->'runtime_result' ? 'duration_ms'
+                    )
+                  )
+                order by updated_at desc
+                limit %s
+              ) refresh_event
+            )
+            select
+              count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
+              count(*)::bigint as read_model_refresh_total
+            from recent_refresh_events
+            """,
+            (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
+        )
+        publish_rows = self._connection.fetch_all(
+            """
+            select publish_status, count(*)::bigint as count
+            from job.outbox_events
+            where status = 'pending'
+              and event_type = any(%s)
+            group by publish_status
+            order by publish_status
+            """,
+            (list(_rabbitmq_dispatch_event_types()),),
+        )
+        publish_lag_row = self._connection.fetch_one(
+            """
+            select extract(epoch from max(now() - created_at))::float as max_unpublished_age_seconds
+            from job.outbox_events
+            where status = 'pending'
+              and event_type = any(%s)
+              and publish_status in ('unpublished', 'failed')
+            """,
+            (list(_rabbitmq_dispatch_event_types()),),
+        )
+        pending_outbox_by_scope = self._pending_outbox_events_by_scope()
+        dirty_scopes_by_scope = self._dirty_scopes_by_scope()
+        queue_backlog = {str(row["status"]): int(row["count"]) for row in queue_rows}
+        dirty_scopes = {str(row["status"]): int(row["count"]) for row in dirty_count_rows}
+        publish_status = {str(row["publish_status"]): int(row["count"]) for row in publish_rows}
+        stale_dirty_scopes = [
+            {
+                "tenant_id": row.get("tenant_id"),
+                "scope_type": row.get("scope_type"),
+                "scope_key": row.get("scope_key"),
+                "status": row.get("status"),
+                "age_seconds": row.get("age_seconds"),
+                "attempts": row.get("attempts"),
+                "last_error": row.get("last_error"),
+            }
+            for row in stale_rows
+        ]
+        total_refresh_count = int((refresh_failure_row or {}).get("read_model_refresh_total") or 0)
+        failed_refresh_count = int((refresh_failure_row or {}).get("failed_count") or 0)
+        worker_metrics = self.dashboard_worker_metrics()
+        missing_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "required_worker_missing")
+        stale_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "worker_heartbeat_stale")
+        mismatched_required_worker_count = sum(
+            1
+            for row in worker_metrics
+            if row.get("required") and row.get("warning_code") in {"worker_kind_mismatch", "worker_event_type_mismatch"}
+        )
+        rabbitmq_metrics = self._rabbitmq_metrics()
+        stale_dirty_scope_count = int(stale_rows[0].get("total_count") or len(stale_rows)) if stale_rows else 0
+        max_pending_age_seconds = (age_row or {}).get("max_pending_age_seconds")
+        return {
+            "queue_backlog": queue_backlog,
+            "dirty_scopes": dirty_scopes,
+            "failed_jobs": int(queue_backlog.get("failed", 0)) + int(queue_backlog.get("dead_lettered", 0)),
+            "max_pending_age_seconds": max_pending_age_seconds,
+            "oldest_pending_event_age_seconds": max_pending_age_seconds,
+            "worker_heartbeat_lag_seconds": (worker_lag_row or {}).get("max_worker_heartbeat_lag_seconds"),
+            "worker_metrics": worker_metrics,
+            "missing_required_worker_count": missing_required_worker_count,
+            "stale_required_worker_count": stale_required_worker_count,
+            "mismatched_required_worker_count": mismatched_required_worker_count,
+            "read_model_refresh_sample_count": total_refresh_count,
+            "read_model_refresh_failure_rate": (
+                round(failed_refresh_count / total_refresh_count, 6) if total_refresh_count else 0.0
+            ),
+            "rabbitmq_publish_status": publish_status,
+            "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
+            "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),
+            "rabbitmq_dispatcher_lag_seconds": (publish_lag_row or {}).get("max_unpublished_age_seconds"),
+            **rabbitmq_metrics,
+            "stale_dirty_scope_count": stale_dirty_scope_count,
+            "stale_dirty_scopes": stale_dirty_scopes,
+            "pending_outbox_events_by_scope": pending_outbox_by_scope,
+            "dirty_scopes_by_scope": dirty_scopes_by_scope,
+        }
+
     def _pending_outbox_events_by_scope(self) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
             """

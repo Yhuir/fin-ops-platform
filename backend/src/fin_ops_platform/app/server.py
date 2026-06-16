@@ -2345,15 +2345,26 @@ class Application:
             },
         )
 
-    def readiness_summary(self, *, check_dependencies: bool = True) -> dict[str, object]:
+    def readiness_summary(
+        self,
+        *,
+        check_dependencies: bool = True,
+        lightweight_runtime: bool = False,
+    ) -> dict[str, object]:
         storage_summary = {
             "mode": self._state_store.storage_mode if self._state_store is not None else "memory",
             "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
             "database": self._state_store.mongo_database_name if self._state_store is not None else None,
         }
-        if check_dependencies and self._state_store is not None and hasattr(self._state_store, "health_summary"):
+        if check_dependencies and self._state_store is not None:
             try:
-                storage_summary.update(getattr(self._state_store, "health_summary")())
+                summary_provider = None
+                if lightweight_runtime:
+                    summary_provider = getattr(self._state_store, "ready_health_summary", None)
+                if summary_provider is None:
+                    summary_provider = getattr(self._state_store, "health_summary", None)
+                if callable(summary_provider):
+                    storage_summary.update(summary_provider())
             except Exception as exc:  # pragma: no cover - readiness should report degraded dependency state.
                 storage_summary.update({"postgres_status": "error", "postgres_error": str(exc)})
 
@@ -2695,7 +2706,7 @@ class Application:
         api_performance_endpoint_limit: int | None = HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT,
         compact_payload: bool = True,
     ) -> dict[str, object]:
-        payload = self.readiness_summary()
+        payload = self.readiness_summary(lightweight_runtime=compact_payload)
         self._attach_health_metadata(payload, api_performance_endpoint_limit=api_performance_endpoint_limit)
         if include_workbench_api_self_test:
             payload["workbench_api_self_test"] = self._workbench_api_self_test()

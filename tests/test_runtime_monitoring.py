@@ -459,6 +459,34 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         )
         self.assertIn("where status <> 'done'", queue_status_sql)
 
+    def test_ready_health_summary_uses_lightweight_runtime_contract(self) -> None:
+        connection = FakeConnection()
+        repository = RuntimeMonitoringRepository(connection, rabbitmq_metrics_provider=FakeRabbitMqMetrics())
+
+        summary = repository.ready_health_summary(stale_after_seconds=300)
+        executed_sql = "\n".join(sql for sql, _params in connection.calls).lower()
+
+        self.assertEqual(summary["queue_backlog"], {"pending": 3, "failed": 1})
+        self.assertEqual(summary["dirty_scopes"], {"pending": 2, "processing": 1})
+        self.assertEqual(summary["failed_jobs"], 1)
+        self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
+        self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
+        self.assertEqual(summary["read_model_refresh_sample_count"], 10)
+        self.assertEqual(summary["read_model_refresh_failure_rate"], 0.1)
+        self.assertEqual(summary["rabbitmq_publish_status"], {"unpublished": 4, "failed": 2})
+        self.assertEqual(summary["rabbitmq_queue_depth"], 5)
+        self.assertEqual(summary["stale_dirty_scope_count"], 1)
+        self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "workbench.read_model.refresh")
+        self.assertEqual(summary["dirty_scopes_by_scope"][0]["scope_key"], "all")
+        self.assertNotIn("read_model_refresh_duration_ms", summary)
+        self.assertNotIn("read_model_refresh_by_key", summary)
+        self.assertNotIn("read_model_refresh_slow_events", summary)
+        self.assertNotIn("workbench_read_model", summary)
+        self.assertNotIn("slow_refresh_event_samples", executed_sql)
+        self.assertNotIn("current_refresh_event_samples", executed_sql)
+        self.assertNotIn("workbench_generation_status_counts", executed_sql)
+        self.assertNotIn("recent_publish_confirms", executed_sql)
+
     def test_dashboard_outbox_metric_only_scans_current_attention_statuses(self) -> None:
         class OutboxMetricConnection:
             def __init__(self) -> None:

@@ -169,6 +169,18 @@ class PostgresStateStore:
             summary["runtime_infrastructure"] = {"status": "error", "error": str(exc)}
         return summary
 
+    def ready_health_summary(self) -> dict[str, object]:
+        summary: dict[str, object]
+        if hasattr(self._connection, "health_summary"):
+            summary = dict(self._connection.health_summary())
+        else:
+            summary = {"postgres_status": "unknown"}
+        try:
+            summary["runtime_infrastructure"] = RuntimeMonitoringRepository(self._connection).ready_health_summary()
+        except Exception as exc:  # pragma: no cover - readiness should degrade instead of blocking probes.
+            summary["runtime_infrastructure"] = {"status": "error", "error": str(exc)}
+        return summary
+
     def app_status_runtime_snapshot(self) -> dict[str, dict[str, dict[str, Any]]]:
         try:
             return RuntimeMonitoringRepository(self._connection).app_status_runtime_snapshot()

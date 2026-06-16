@@ -25,8 +25,10 @@ class FakePostgresConnection:
         self.settings: dict[str, dict] = {}
         self.attachment_cache: dict[str, dict] = {}
         self.executed: list[tuple[str, tuple]] = []
+        self.queries: list[str] = []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.queries.append(sql)
         if "from app.app_settings" in sql:
             payload = self.settings.get(params[0])
             return {"settings_payload": payload} if payload is not None else None
@@ -36,6 +38,7 @@ class FakePostgresConnection:
         return None
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.queries.append(sql)
         return []
 
     def execute(self, sql: str, params: tuple = ()) -> int:
@@ -197,6 +200,23 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertIs(store.search_sql_read_repository._connection, read_connection)
         self.assertIs(store.tax_offset_sql_read_repository._connection, read_connection)
         self.assertIs(store._read_model_repository._connection, write_connection)
+
+    def test_ready_health_summary_uses_lightweight_runtime_summary(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            connection = FakePostgresConnection()
+            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
+
+            summary = store.ready_health_summary()
+
+        runtime = summary["runtime_infrastructure"]
+        executed_sql = "\n".join(connection.queries).lower()
+        self.assertEqual(summary["postgres_status"], "ready")
+        self.assertIn("queue_backlog", runtime)
+        self.assertIn("worker_metrics", runtime)
+        self.assertNotIn("read_model_refresh_by_key", runtime)
+        self.assertNotIn("workbench_read_model", runtime)
+        self.assertNotIn("slow_refresh_event_samples", executed_sql)
+        self.assertNotIn("workbench_generation_status_counts", executed_sql)
 
     def test_postgres_store_settings_and_cache_round_trip_through_parameterized_sql(self) -> None:
         with TemporaryDirectory() as temp_dir:

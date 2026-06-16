@@ -36,6 +36,8 @@ class FakeStore:
         self.workbench_sql_projection_builder = sql_projection_builder
         self.runtime_infrastructure = runtime_infrastructure
         self.runtime_loader_calls: list[str] = []
+        self.health_summary_calls = 0
+        self.ready_health_summary_calls = 0
         self.full_snapshot_load_called = False
         self.saved_workbench_read_models = 0
 
@@ -65,6 +67,14 @@ class FakeStore:
         return None
 
     def health_summary(self) -> dict[str, object]:
+        self.health_summary_calls += 1
+        return self._health_summary_payload()
+
+    def ready_health_summary(self) -> dict[str, object]:
+        self.ready_health_summary_calls += 1
+        return self._health_summary_payload()
+
+    def _health_summary_payload(self) -> dict[str, object]:
         return {
             "postgres_status": "ready",
             "postgres_database": "fin_ops_test",
@@ -195,9 +205,10 @@ class AppPostgresModeTests(unittest.TestCase):
                 {"event_type": "cost_statistics.read_model.refresh", "scope_key": "active/all", "status": "dead_lettered"}
             ],
         }
+        store = FakeStore(runtime_infrastructure=runtime_infrastructure)
         with TemporaryDirectory() as temp_dir, patch(
             "fin_ops_platform.app.server.build_state_store",
-            return_value=FakeStore(runtime_infrastructure=runtime_infrastructure),
+            return_value=store,
         ):
             app = build_application(data_dir=Path(temp_dir))
 
@@ -212,6 +223,8 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertNotIn("worker_metrics", payload["runtime_infrastructure"])
         self.assertEqual(payload["runtime_infrastructure"]["worker_metric_count"], 2)
         self.assertEqual(payload["runtime_infrastructure"]["worker_status_counts"], {"available": 1, "mismatch": 1})
+        self.assertEqual(store.ready_health_summary_calls, 1)
+        self.assertEqual(store.health_summary_calls, 0)
         self.assertEqual(
             payload["runtime_infrastructure"]["worker_problem_samples"][0]["warning_code"],
             "worker_event_type_mismatch",
