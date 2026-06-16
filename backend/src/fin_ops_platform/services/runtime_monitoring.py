@@ -24,6 +24,23 @@ READ_MODEL_REFRESH_SLOW_EVENT_LIMIT = 20
 READ_MODEL_REFRESH_CURRENT_WINDOWS = ("recent_15m", "recent_1h", "recent_6h")
 RABBITMQ_PUBLISH_CONFIRM_METRIC_SAMPLE_LIMIT = 512
 
+_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL = """
+not (
+  event_type = 'cost_statistics.read_model.refresh'
+  and coalesce(scope_type, raw_payload->>'scope_type', payload->>'scope_type', aggregate_type, '') = 'cost_statistics'
+  and (
+    coalesce(scope_key, raw_payload->>'scope_key', payload->>'scope_key', aggregate_id, '') = 'all'
+    or coalesce(scope_key, raw_payload->>'scope_key', payload->>'scope_key', aggregate_id, '') ~ '^[0-9]{4}-[0-9]{2}$'
+  )
+)
+"""
+_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL = """
+not (
+  scope_type = 'cost_statistics'
+  and (scope_key = 'all' or scope_key ~ '^[0-9]{4}-[0-9]{2}$')
+)
+"""
+
 
 class RuntimeMonitoringRepository:
     def __init__(self, connection: Any, rabbitmq_metrics_provider: Any | None = None) -> None:
@@ -384,31 +401,34 @@ class RuntimeMonitoringRepository:
 
     def health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
         queue_rows = self._connection.fetch_all(
-            """
+            f"""
             select status, count(*)::bigint as count
             from job.outbox_events
             where status <> 'done'
+              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
             group by status
             order by status
             """
         )
         age_row = self._connection.fetch_one(
-            """
+            f"""
             select extract(epoch from max(now() - created_at))::float as max_pending_age_seconds
             from job.outbox_events
             where status = 'pending'
+              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
             """
         )
         dirty_count_rows = self._connection.fetch_all(
-            """
+            f"""
             select status, count(*)::bigint as count
             from job.read_model_dirty_scopes
+            where {_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL}
             group by status
             order by status
             """
         )
         stale_rows = self._connection.fetch_all(
-            """
+            f"""
             select
               tenant_id,
               scope_type,
@@ -958,6 +978,7 @@ class RuntimeMonitoringRepository:
             from job.read_model_dirty_scopes
             where status in ('pending', 'processing', 'failed')
               and updated_at < now() - (%s * interval '1 second')
+              and {_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL}
             order by updated_at, tenant_id, scope_type, scope_key
             limit 5
             """,
@@ -978,7 +999,7 @@ class RuntimeMonitoringRepository:
             """
         )
         refresh_failure_row = self._connection.fetch_one(
-            """
+            f"""
             with event_type_filter(event_type) as (
               select unnest(%s::text[])
             ),
@@ -990,6 +1011,7 @@ class RuntimeMonitoringRepository:
                 from job.outbox_events
                 where event_type = event_type_filter.event_type
                   and event_type like '%%.read_model.refresh'
+                  and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
                   and (
                     status in ('failed', 'dead_lettered')
                     or (
@@ -1009,23 +1031,25 @@ class RuntimeMonitoringRepository:
             (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
         )
         publish_rows = self._connection.fetch_all(
-            """
+            f"""
             select publish_status, count(*)::bigint as count
             from job.outbox_events
             where status = 'pending'
               and event_type = any(%s)
+              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
             group by publish_status
             order by publish_status
             """,
             (list(_rabbitmq_dispatch_event_types()),),
         )
         publish_lag_row = self._connection.fetch_one(
-            """
+            f"""
             select extract(epoch from max(now() - created_at))::float as max_unpublished_age_seconds
             from job.outbox_events
             where status = 'pending'
               and event_type = any(%s)
               and publish_status in ('unpublished', 'failed')
+              and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
             """,
             (list(_rabbitmq_dispatch_event_types()),),
         )
@@ -1087,7 +1111,7 @@ class RuntimeMonitoringRepository:
 
     def _pending_outbox_events_by_scope(self) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
-            """
+            f"""
             with pending_outbox_by_scope as (
               select
                 event_type,
@@ -1100,6 +1124,7 @@ class RuntimeMonitoringRepository:
                 max(coalesce(last_error, '')) as last_error
               from job.outbox_events
               where status in ('pending', 'processing', 'failed', 'dead_lettered')
+                and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
               group by 1, 2, 3, 4
               order by oldest_age_seconds desc nulls last, event_type, scope_type, scope_key
               limit 30
@@ -1123,7 +1148,7 @@ class RuntimeMonitoringRepository:
 
     def _dirty_scopes_by_scope(self) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
-            """
+            f"""
             with dirty_scope_backlog_by_scope as (
               select
                 scope_type,
@@ -1135,6 +1160,7 @@ class RuntimeMonitoringRepository:
                 max(coalesce(last_error, '')) as last_error
               from job.read_model_dirty_scopes
               where status in ('pending', 'processing', 'failed')
+                and {_CURRENT_EFFECTIVE_DIRTY_SCOPE_PREDICATE_SQL}
               group by scope_type, scope_key, status
               order by oldest_age_seconds desc nulls last, scope_type, scope_key
               limit 30

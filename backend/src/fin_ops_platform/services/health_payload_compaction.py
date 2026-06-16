@@ -107,6 +107,8 @@ def _worker_status_counts(worker_metrics: list[Any]) -> dict[str, int]:
     for worker in worker_metrics:
         if not isinstance(worker, Mapping):
             continue
+        if worker.get("current_effective") is False:
+            continue
         status = str(worker.get("status") or worker.get("worker_status") or "unknown")
         counts[status] = counts.get(status, 0) + 1
     return counts

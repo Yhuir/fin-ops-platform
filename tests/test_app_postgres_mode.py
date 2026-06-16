@@ -222,7 +222,7 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertNotIn("runtime_infrastructure", payload["storage"])
         self.assertNotIn("worker_metrics", payload["runtime_infrastructure"])
         self.assertEqual(payload["runtime_infrastructure"]["worker_metric_count"], 2)
-        self.assertEqual(payload["runtime_infrastructure"]["worker_status_counts"], {"available": 1, "mismatch": 1})
+        self.assertEqual(payload["runtime_infrastructure"]["worker_status_counts"], {"available": 1})
         self.assertEqual(store.ready_health_summary_calls, 1)
         self.assertEqual(store.health_summary_calls, 0)
         self.assertEqual(

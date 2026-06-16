@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-16 - Health readiness current-effective blocker gate
+
+- 目标：让 `/health/ready` 的 runtime blocker 口径与 App Status current-effective 口径一致，避免历史 `cost_statistics` 裸 `all` / `YYYY-MM` scope 和非 current-effective optional worker heartbeat 持续污染 readiness gate。
+- 影响范围：`RuntimeMonitoringRepository.ready_health_summary()`、ready payload compact worker status summary、health-ready probe 生产门禁；不改变 `/metrics` 完整诊断、App Status 历史诊断或 read model scope contract repair 脚本。
+- 关键决策：ready 轻量 summary 只统计 current-effective dirty/outbox/failed/stale/publish/read-model failure facts；legacy cost statistics scope 继续通过 repair manifest 和历史诊断暴露，不作为当前 ready blocker。compact `worker_status_counts` 跳过 `current_effective=false` 的历史 worker，但仍保留 bounded problem samples 供运维定位。
+- 文档影响：更新本实施记录和测试矩阵。
+- 测试覆盖：`tests.test_runtime_monitoring.RuntimeMonitoringRepositoryTests.test_ready_health_summary_uses_lightweight_runtime_contract` 锁定 legacy scope SQL 过滤；`tests.test_app_postgres_mode.AppPostgresModeTests.test_ready_endpoint_exposes_runtime_infrastructure_contract` 锁定 compact worker status counts 不包含 historical optional worker。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app_postgres_mode tests.test_runtime_monitoring tests.test_postgres_state_store tests.test_health_ready_payload_probe -v`。
+- 未测风险：本地 fake connection 证明 SQL contract 和 payload shape；生产仍需发布后复跑服务器本机 `health_ready_payload_probe`，并在具备 root-owned helper 后执行 `read-model-scope-contract --json/--apply` 清理历史行。
+
 ## 2026-06-16 - Health readiness runtime payload compact mode
 
 - 目标：修复生产 `/fin-ops-api/health/ready` 仍携带约 90KB runtime drilldown、探针自身超过一秒的问题，让 readiness endpoint 只返回部署和运行门禁所需的轻量摘要。
