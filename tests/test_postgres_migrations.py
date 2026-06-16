@@ -715,6 +715,50 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             sql,
         )
 
+    def test_output_invoice_receipt_numbering_schema_contract(self) -> None:
+        sql = strip_sql_comments(migration_sql()).lower()
+        counters = re.search(
+            r"create table if not exists app\.output_invoice_receipt_number_counters\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        receipts = re.search(
+            r"create table if not exists app\.output_invoice_receipts\s*\((.*?)\);",
+            sql,
+            flags=re.S,
+        )
+        self.assertIsNotNone(counters)
+        self.assertIsNotNone(receipts)
+
+        counters_body = counters.group(1)
+        for required in (
+            "tenant_id text not null default 'default'",
+            "prefix text not null",
+            "period_key text not null",
+            "next_sequence integer not null default 1",
+        ):
+            self.assertIn(required, counters_body)
+
+        receipts_body = receipts.group(1)
+        for required in (
+            "tenant_id text not null default 'default'",
+            "receipt_no text not null",
+            "idempotency_key text not null",
+            "constraint output_invoice_receipts_status_chk",
+            "status in ('issued', 'voided', 'reissued')",
+        ):
+            self.assertIn(required, receipts_body)
+
+        for required in (
+            "create unique index if not exists output_invoice_receipt_number_counters_scope_uidx",
+            "on app.output_invoice_receipt_number_counters(tenant_id, prefix, period_key)",
+            "create unique index if not exists output_invoice_receipts_receipt_no_uidx",
+            "on app.output_invoice_receipts(tenant_id, receipt_no)",
+            "create unique index if not exists output_invoice_receipts_idempotency_uidx",
+            "on app.output_invoice_receipts(tenant_id, idempotency_key)",
+        ):
+            self.assertIn(required, sql)
+
     def test_sql_does_not_contain_forbidden_operations_or_secrets(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
         sql = re.sub(r"\binsert\s+into\s+app\.oa_attachment_invoice_cache_sources\b", "insert into allowed_lookup_backfill", sql)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application, build_application
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 from tests.test_oa_manual_import_service import (
     MemoryManualImportStore,
@@ -40,6 +42,16 @@ class OAManualImportApiTests(unittest.TestCase):
             workbench_query_service=workbench or RecordingWorkbenchQueryService(),
         )
         return app
+
+    def _readonly_identity(self) -> OAUserIdentity:
+        return OAUserIdentity(
+            user_id="readonly-user-id",
+            username="READONLY001",
+            nickname="只读用户",
+            display_name="只读用户",
+            roles=["finance"],
+            permissions=["finops:access"],
+        )
 
     def test_search_endpoint_returns_early_rows_ignoring_global_cutoff_and_supports_paging(self) -> None:
         app = self._build_app_with_service(
@@ -157,6 +169,59 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], [])
         self.assertEqual(set(invalidate.call_args.args[0]), {"all", "2025-12"})
         clear_cache.assert_called_once()
+
+    def test_manual_import_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:
+        with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}):
+            store = MemoryManualImportStore()
+            store.add_manual_oa_imports(["oa-exp-1981"], "tester", {})
+            app = self._build_app_with_service(
+                adapter=RecordingOAAdapter([oa_record("oa-exp-1981")]),
+                store=store,
+            )
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["READONLY001"],
+                readonly_export_usernames=["READONLY001"],
+                admin_usernames=[],
+            )
+            app._oa_identity_service.resolve_identity = lambda _token: self._readonly_identity()
+            headers = {"Authorization": "Bearer readonly-token"}
+
+            with (
+                patch.object(app._oa_manual_import_service, "refresh_attachments") as refresh_attachments,
+                patch.object(app._oa_manual_import_service, "import_row_ids") as import_row_ids,
+                patch.object(app._oa_manual_import_service, "remove_manual_import") as remove_manual_import,
+            ):
+                refresh_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/oa/manual-search/refresh-attachments",
+                    body=json.dumps({"row_ids": ["oa-exp-1981"]}),
+                    headers=headers,
+                )
+                import_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/oa/manual-imports",
+                    body=json.dumps({"row_ids": ["oa-exp-1981"], "actor_id": "spoofed-owner"}),
+                    headers=headers,
+                )
+                delete_response = app.handle_request(
+                    "DELETE",
+                    "/api/workbench/settings/oa/manual-imports/oa-exp-1981",
+                    body=json.dumps({"actor_id": "spoofed-owner"}),
+                    headers=headers,
+                )
+
+        self.assertEqual(refresh_response.status_code, 403)
+        self.assertEqual(json.loads(refresh_response.body)["error"], "permission_denied")
+        self.assertEqual(import_response.status_code, 403)
+        self.assertEqual(json.loads(import_response.body)["error"], "permission_denied")
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertEqual(json.loads(delete_response.body)["error"], "permission_denied")
+        refresh_attachments.assert_not_called()
+        import_row_ids.assert_not_called()
+        remove_manual_import.assert_not_called()
+        self.assertEqual(store.load_manual_oa_imports()["row_ids"], ["oa-exp-1981"])
 
 
 if __name__ == "__main__":

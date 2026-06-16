@@ -645,6 +645,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:2026-05")])
         self.assertEqual(result["entry_count"], 1)
 
+    def test_cost_statistics_refresh_handler_requires_projection_builder_boundary(self) -> None:
+        with self.assertRaisesRegex(ValueError, "projection_builder is required"):
+            CostStatisticsReadModelRefreshService(queue_repository=object())
+
     def test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts(self) -> None:
         repository = CostStatisticsSaveRecorder()
         connection = CostStatisticsProjectionConnection(include_open_candidate=True)

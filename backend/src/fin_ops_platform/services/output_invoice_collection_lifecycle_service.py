@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import UTC, date, datetime
 from http import HTTPStatus
+from threading import RLock
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -35,17 +36,19 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         self._receipts: dict[str, dict[str, Any]] = {}
         self._receipt_events: list[dict[str, Any]] = []
         self._receipt_idempotency: dict[tuple[str, str], str] = {}
+        self._receipt_lock = RLock()
 
     def overlays_for_identity_keys(self, identity_keys: list[str], *, tenant_id: str = "default") -> dict[str, dict[str, Any]]:
         selected = {str(item) for item in identity_keys}
         result: dict[str, dict[str, Any]] = {}
         for identity_key in selected:
-            receipts = [
-                deepcopy(receipt)
-                for receipt in self._receipts.values()
-                if receipt.get("invoiceIdentityKey") == identity_key and receipt.get("status") in {"issued", "voided", "reissued"}
-                and receipt.get("tenantId") == tenant_id
-            ]
+            with self._receipt_lock:
+                receipts = [
+                    deepcopy(receipt)
+                    for receipt in self._receipts.values()
+                    if receipt.get("invoiceIdentityKey") == identity_key and receipt.get("status") in {"issued", "voided", "reissued"}
+                    and receipt.get("tenantId") == tenant_id
+                ]
             receipts.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
             red_relations = [
                 deepcopy(relation)
@@ -214,20 +217,22 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         return deepcopy(relation)
 
     def get_receipt_settings(self, *, tenant_id: str) -> dict[str, Any]:
-        settings = dict(self._receipt_settings)
-        settings["tenantId"] = tenant_id
-        return settings
+        with self._receipt_lock:
+            settings = dict(self._receipt_settings)
+            settings["tenantId"] = tenant_id
+            return settings
 
     def update_receipt_settings(self, *, tenant_id: str, prefix: str, reset_period: str, actor_id: str) -> dict[str, Any]:
-        self._receipt_settings = {
-            "tenantId": tenant_id,
-            "prefix": prefix,
-            "resetPeriod": reset_period,
-            "version": int(self._receipt_settings.get("version") or 1) + 1,
-            "updatedBy": actor_id,
-            "updatedAt": _now_iso(),
-        }
-        return dict(self._receipt_settings)
+        with self._receipt_lock:
+            self._receipt_settings = {
+                "tenantId": tenant_id,
+                "prefix": prefix,
+                "resetPeriod": reset_period,
+                "version": int(self._receipt_settings.get("version") or 1) + 1,
+                "updatedBy": actor_id,
+                "updatedAt": _now_iso(),
+            }
+            return dict(self._receipt_settings)
 
     def create_receipt(
         self,
@@ -240,78 +245,82 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         actor_id: str,
         tenant_id: str,
     ) -> dict[str, Any]:
-        idempotency = (tenant_id, idempotency_key)
-        existing_id = self._receipt_idempotency.get(idempotency)
-        if existing_id and existing_id in self._receipts:
-            return deepcopy(self._receipts[existing_id])
-        settings = self.get_receipt_settings(tenant_id=tenant_id)
-        prefix = str(settings.get("prefix") or "SK")
-        period = _period_key(row_ref.invoice_date, str(settings.get("resetPeriod") or "monthly"))
-        counter_key = (tenant_id, prefix, period)
-        sequence = self._receipt_counters.get(counter_key, 0) + 1
-        self._receipt_counters[counter_key] = sequence
-        now = _now_iso()
-        receipt = {
-            "id": str(uuid4()),
-            "tenantId": tenant_id,
-            "invoiceIdentityKey": row_ref.invoice_identity_key,
-            "invoiceId": row_ref.invoice_id,
-            "bankTransactionId": str(bank_summary.get("bankTransactionId") or ""),
-            "receiptNo": f"{prefix}{period}{sequence:04d}",
-            "amount": amount,
-            "status": "issued",
-            "idempotencyKey": idempotency_key,
-            "payload": deepcopy(payload),
-            "createdBy": actor_id,
-            "createdAt": now,
-            "updatedBy": actor_id,
-            "updatedAt": now,
-            "voidedBy": None,
-            "voidedAt": None,
-            "voidReason": None,
-            "reissuedFromReceiptId": None,
-        }
-        self._receipts[receipt["id"]] = receipt
-        self._receipt_idempotency[idempotency] = receipt["id"]
-        self._append_receipt_event(receipt, "created", actor_id, payload)
-        return deepcopy(receipt)
+        with self._receipt_lock:
+            idempotency = (tenant_id, idempotency_key)
+            existing_id = self._receipt_idempotency.get(idempotency)
+            if existing_id and existing_id in self._receipts:
+                return deepcopy(self._receipts[existing_id])
+            settings = self.get_receipt_settings(tenant_id=tenant_id)
+            prefix = str(settings.get("prefix") or "SK")
+            period = _period_key(row_ref.invoice_date, str(settings.get("resetPeriod") or "monthly"))
+            counter_key = (tenant_id, prefix, period)
+            sequence = self._receipt_counters.get(counter_key, 0) + 1
+            self._receipt_counters[counter_key] = sequence
+            now = _now_iso()
+            receipt = {
+                "id": str(uuid4()),
+                "tenantId": tenant_id,
+                "invoiceIdentityKey": row_ref.invoice_identity_key,
+                "invoiceId": row_ref.invoice_id,
+                "bankTransactionId": str(bank_summary.get("bankTransactionId") or ""),
+                "receiptNo": f"{prefix}{period}{sequence:04d}",
+                "amount": amount,
+                "status": "issued",
+                "idempotencyKey": idempotency_key,
+                "payload": deepcopy(payload),
+                "createdBy": actor_id,
+                "createdAt": now,
+                "updatedBy": actor_id,
+                "updatedAt": now,
+                "voidedBy": None,
+                "voidedAt": None,
+                "voidReason": None,
+                "reissuedFromReceiptId": None,
+            }
+            self._receipts[receipt["id"]] = receipt
+            self._receipt_idempotency[idempotency] = receipt["id"]
+            self._append_receipt_event(receipt, "created", actor_id, payload)
+            return deepcopy(receipt)
 
     def list_receipts(self, *, invoice_id: str | None = None, invoice_identity_key: str | None = None, tenant_id: str = "default") -> list[dict[str, Any]]:
-        receipts = [
-            deepcopy(receipt)
-            for receipt in self._receipts.values()
-            if receipt.get("tenantId") == tenant_id
-            and (not invoice_id or receipt.get("invoiceId") == invoice_id)
-            and (not invoice_identity_key or receipt.get("invoiceIdentityKey") == invoice_identity_key)
-        ]
-        receipts.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
-        return receipts
+        with self._receipt_lock:
+            receipts = [
+                deepcopy(receipt)
+                for receipt in self._receipts.values()
+                if receipt.get("tenantId") == tenant_id
+                and (not invoice_id or receipt.get("invoiceId") == invoice_id)
+                and (not invoice_identity_key or receipt.get("invoiceIdentityKey") == invoice_identity_key)
+            ]
+            receipts.sort(key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+            return receipts
 
     def get_receipt(self, *, receipt_id: str, tenant_id: str) -> dict[str, Any] | None:
-        receipt = self._receipts.get(receipt_id)
-        if receipt is None or receipt.get("tenantId") != tenant_id:
-            return None
-        return deepcopy(receipt)
+        with self._receipt_lock:
+            receipt = self._receipts.get(receipt_id)
+            if receipt is None or receipt.get("tenantId") != tenant_id:
+                return None
+            return deepcopy(receipt)
 
     def void_receipt(self, *, receipt_id: str, reason: str, actor_id: str, tenant_id: str) -> dict[str, Any]:
-        receipt = self.get_receipt(receipt_id=receipt_id, tenant_id=tenant_id)
-        if receipt is None:
-            raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
-        if receipt.get("status") != "issued":
-            raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已开具收据可以作废。", status_code=HTTPStatus.CONFLICT)
-        receipt.update(
-            {
-                "status": "voided",
-                "voidReason": reason,
-                "voidedBy": actor_id,
-                "voidedAt": _now_iso(),
-                "updatedBy": actor_id,
-                "updatedAt": _now_iso(),
-            }
-        )
-        self._receipts[receipt_id] = receipt
-        self._append_receipt_event(receipt, "voided", actor_id, {"reason": reason})
-        return deepcopy(receipt)
+        with self._receipt_lock:
+            receipt = self.get_receipt(receipt_id=receipt_id, tenant_id=tenant_id)
+            if receipt is None:
+                raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
+            if receipt.get("status") != "issued":
+                raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已开具收据可以作废。", status_code=HTTPStatus.CONFLICT)
+            receipt.update(
+                {
+                    "status": "voided",
+                    "voidReason": reason,
+                    "voidedBy": actor_id,
+                    "voidedAt": _now_iso(),
+                    "updatedBy": actor_id,
+                    "updatedAt": _now_iso(),
+                }
+            )
+            self._receipts[receipt_id] = receipt
+            self._append_receipt_event(receipt, "voided", actor_id, {"reason": reason})
+            return deepcopy(receipt)
 
     def reissue_receipt(
         self,
@@ -321,40 +330,41 @@ class InMemoryOutputInvoiceCollectionLifecycleRepository:
         actor_id: str,
         tenant_id: str,
     ) -> dict[str, Any]:
-        old = self.get_receipt(receipt_id=receipt_id, tenant_id=tenant_id)
-        if old is None:
-            raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
-        if old.get("status") != "voided":
-            raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已作废收据可以重开。", status_code=HTTPStatus.CONFLICT)
-        if any(
-            receipt.get("tenantId") == tenant_id
-            and receipt.get("reissuedFromReceiptId") == receipt_id
-            for receipt in self._receipts.values()
-        ):
-            raise OutputInvoiceCollectionError("invalid_receipt_status", "该收据已重开，不能重复重开。", status_code=HTTPStatus.CONFLICT)
-        row_ref = OutputInvoiceCollectionRowRef(
-            row_id="",
-            invoice_id=str(old.get("invoiceId") or ""),
-            invoice_identity_key=str(old.get("invoiceIdentityKey") or ""),
-            invoice_date=str((old.get("payload") or {}).get("date") or "") or None,
-            invoice_no=str((old.get("payload") or {}).get("invoiceNo") or "") or None,
-            buyer_name=str((old.get("payload") or {}).get("payerName") or "") or None,
-            taxable_item_name=str((old.get("payload") or {}).get("summary") or "") or None,
-            total_with_tax=str(old.get("amount") or "0.00"),
-        )
-        new_receipt = self.create_receipt(
-            row_ref=row_ref,
-            bank_summary={"bankTransactionId": old.get("bankTransactionId")},
-            amount=str(old.get("amount") or "0.00"),
-            idempotency_key=f"reissue:{receipt_id}:{uuid4()}",
-            payload=dict(old.get("payload") or {}),
-            actor_id=actor_id,
-            tenant_id=tenant_id,
-        )
-        new_receipt["reissuedFromReceiptId"] = receipt_id
-        self._receipts[new_receipt["id"]] = new_receipt
-        self._append_receipt_event(new_receipt, "reissued", actor_id, {"reason": reason, "fromReceiptId": receipt_id})
-        return deepcopy(new_receipt)
+        with self._receipt_lock:
+            old = self.get_receipt(receipt_id=receipt_id, tenant_id=tenant_id)
+            if old is None:
+                raise OutputInvoiceCollectionError("receipt_not_found", "收据不存在。", status_code=HTTPStatus.NOT_FOUND)
+            if old.get("status") != "voided":
+                raise OutputInvoiceCollectionError("invalid_receipt_status", "只有已作废收据可以重开。", status_code=HTTPStatus.CONFLICT)
+            if any(
+                receipt.get("tenantId") == tenant_id
+                and receipt.get("reissuedFromReceiptId") == receipt_id
+                for receipt in self._receipts.values()
+            ):
+                raise OutputInvoiceCollectionError("invalid_receipt_status", "该收据已重开，不能重复重开。", status_code=HTTPStatus.CONFLICT)
+            row_ref = OutputInvoiceCollectionRowRef(
+                row_id="",
+                invoice_id=str(old.get("invoiceId") or ""),
+                invoice_identity_key=str(old.get("invoiceIdentityKey") or ""),
+                invoice_date=str((old.get("payload") or {}).get("date") or "") or None,
+                invoice_no=str((old.get("payload") or {}).get("invoiceNo") or "") or None,
+                buyer_name=str((old.get("payload") or {}).get("payerName") or "") or None,
+                taxable_item_name=str((old.get("payload") or {}).get("summary") or "") or None,
+                total_with_tax=str(old.get("amount") or "0.00"),
+            )
+            new_receipt = self.create_receipt(
+                row_ref=row_ref,
+                bank_summary={"bankTransactionId": old.get("bankTransactionId")},
+                amount=str(old.get("amount") or "0.00"),
+                idempotency_key=f"reissue:{receipt_id}:{uuid4()}",
+                payload=dict(old.get("payload") or {}),
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+            )
+            new_receipt["reissuedFromReceiptId"] = receipt_id
+            self._receipts[new_receipt["id"]] = new_receipt
+            self._append_receipt_event(new_receipt, "reissued", actor_id, {"reason": reason, "fromReceiptId": receipt_id})
+            return deepcopy(new_receipt)
 
     def _append_receipt_event(self, receipt: dict[str, Any], event_type: str, actor_id: str, payload: dict[str, Any]) -> None:
         self._receipt_events.append(

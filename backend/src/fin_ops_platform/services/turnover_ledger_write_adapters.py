@@ -6,6 +6,10 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.read_model_scope_policy import (
+    DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
+    ReadModelScopePolicyRegistry,
+)
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
@@ -2194,11 +2198,13 @@ class TurnoverLedgerDirtyOutboxWriter:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        scope_policy_registry: ReadModelScopePolicyRegistry = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
     ) -> None:
         self._queue_repository = queue_repository
         self._tenant_id = str(tenant_id or "default")
         self._priority = str(priority or "normal")
         self._trace_id = str(trace_id).strip() if trace_id else None
+        self._scope_policy_registry = scope_policy_registry
 
     def enqueue_refresh(
         self,
@@ -2213,12 +2219,17 @@ class TurnoverLedgerDirtyOutboxWriter:
         if not callable(enqueue):
             raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction.")
         events = []
-        for scope_key in list(scope_keys or ["all"]):
+        normalized_scope_type = str(scope_type or "").strip()
+        normalized_scope_keys = self._scope_policy_registry.normalize_and_validate(
+            normalized_scope_type,
+            [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
+        )
+        for scope_key in normalized_scope_keys:
             events.append(
                 enqueue(
                     transaction=transaction,
-                    scope_type=scope_type,
-                    scope_key=str(scope_key or "all"),
+                    scope_type=normalized_scope_type,
+                    scope_key=scope_key,
                     reason=reason,
                     tenant_id=self._tenant_id,
                     priority=self._priority,

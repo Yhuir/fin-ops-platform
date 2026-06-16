@@ -15,7 +15,7 @@ from fin_ops_platform.services.workbench_relation_command_service import Workben
 
 class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
     def test_migrates_existing_submission_batch_to_business_model_and_syncs_metadata(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.import_historical_invoices_from_records(
                 records=[
@@ -185,7 +185,7 @@ class HistoricalEtcBusinessBatchMigrationServiceTests(unittest.TestCase):
         )
 
     def test_migration_requires_relation_command_service_before_business_batch_write(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.import_historical_invoices_from_records(
                 records=[

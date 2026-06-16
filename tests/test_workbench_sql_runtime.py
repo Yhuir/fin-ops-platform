@@ -2207,6 +2207,24 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(any("scope_key = %s" in sql and params[:1] == ("all",) for sql, params in group_queries))
         self.assertFalse(any("scope_key <> 'all'" in sql for sql, _params in group_queries))
 
+    def test_repository_bounds_all_scope_groups_page_query(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        page = repository.get_workbench_groups_page(scope_key="all", zone="open", page=2, page_size=500)
+
+        page_queries = [
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "select group_id, zone, payload, raw_payload" in sql
+            and "from read_model.workbench_groups" in sql
+        ]
+        self.assertTrue(page_queries)
+        sql, params = page_queries[-1]
+        self.assertIn("limit %s offset %s", sql)
+        self.assertEqual(params[-2:], (201, 200))
+        self.assertEqual(page["page_size"], 200)
+
     def test_repository_reads_workbench_groups_summary_page_without_heavy_details(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
@@ -5100,6 +5118,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 7)])
         self.assertEqual(result["scope_key"], "2026-05")
         self.assertEqual(result["row_count"], 1)
+
+    def test_workbench_refresh_handler_requires_projection_builder_boundary(self) -> None:
+        with self.assertRaisesRegex(ValueError, "projection_builder is required"):
+            WorkbenchReadModelRefreshService(queue_repository=object())
 
     def test_workbench_refresh_handler_skips_stale_source_version(self) -> None:
         class FakeBuilder:

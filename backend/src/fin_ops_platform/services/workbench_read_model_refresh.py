@@ -12,12 +12,13 @@ class WorkbenchReadModelRefreshService:
         self,
         *,
         projection_builder: Any | None = None,
-        application: Any | None = None,
         queue_repository: Any | None = None,
         post_refresh_warmer: Callable[[str], dict[str, Any] | None] | None = None,
     ) -> None:
-        self._projection_builder = projection_builder if projection_builder is not None else application
+        if projection_builder is None:
+            raise ValueError("projection_builder is required for workbench read model refresh.")
         self._queue_repository = queue_repository
+        self._projection_builder = projection_builder
         self._post_refresh_warmer = post_refresh_warmer
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
@@ -54,7 +55,7 @@ class WorkbenchReadModelRefreshService:
         else:
             rebuild = getattr(self._projection_builder, "rebuild_workbench_read_model_scope", None)
         if not callable(rebuild):
-            raise RuntimeError("Application does not expose rebuild_workbench_read_model_scope.")
+            raise RuntimeError("Projection builder does not expose rebuild_workbench_read_model_scope.")
         if "source_version" in signature(rebuild).parameters:
             result = rebuild(scope_key, source_version=source_version)
         else:

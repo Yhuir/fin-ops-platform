@@ -126,12 +126,28 @@ class BatchAccountingService:
         bank_year: str | None = None,
         oa_year: str | None = None,
         bucket: str,
+        page: int | str | None = None,
+        page_size: int | str | None = None,
+        bank_page: int | str | None = None,
+        bank_page_size: int | str | None = None,
+        oa_page: int | str | None = None,
+        oa_page_size: int | str | None = None,
     ) -> dict[str, Any]:
         fallback_year = str(year or "").strip()
         resolved_bank_year = self._validate_year(bank_year or fallback_year)
         resolved_oa_year = self._validate_year(oa_year or fallback_year)
         if bucket not in {"unsubmitted", "submitted"}:
             raise BatchAccountingError("invalid_batch_accounting_bucket", "bucket must be unsubmitted or submitted.")
+        bank_pagination = self._pagination_from_values(
+            page=bank_page if bank_page is not None else page,
+            page_size=bank_page_size if bank_page_size is not None else page_size,
+            requested=any(value is not None for value in (page, page_size, bank_page, bank_page_size)),
+        )
+        oa_pagination = self._pagination_from_values(
+            page=oa_page if oa_page is not None else page,
+            page_size=oa_page_size if oa_page_size is not None else page_size,
+            requested=any(value is not None for value in (page, page_size, oa_page, oa_page_size)),
+        )
         context = self._build_context(bank_year=resolved_bank_year, oa_year=resolved_oa_year)
         submitted_relations = self._submitted_relations(resolved_bank_year, context)
         if bucket == "submitted":
@@ -141,6 +157,15 @@ class BatchAccountingService:
             bank_rows = [self._bank_row_payload(row) for row in context.eligible_bank_rows]
             oa_rows = [self._oa_row_payload(row, context.invoice_ids_by_oa_id.get(str(row.get("id")), [])) for row in context.eligible_oa_rows]
             relations_by_bank_row_id = {}
+        visible_bank_rows = self._page_items(bank_rows, bank_pagination)
+        visible_oa_rows = self._page_items(oa_rows, oa_pagination)
+        if bank_pagination is not None:
+            visible_bank_row_ids = {str(row.get("id") or "") for row in visible_bank_rows}
+            relations_by_bank_row_id = {
+                bank_row_id: relation_payload
+                for bank_row_id, relation_payload in relations_by_bank_row_id.items()
+                if str(bank_row_id) in visible_bank_row_ids
+            }
         return {
             "summary": {
                 "unsubmitted_count": len(context.eligible_bank_rows),
@@ -148,11 +173,81 @@ class BatchAccountingService:
                 "bank_year": resolved_bank_year,
                 "oa_year": resolved_oa_year,
             },
-            "bank_rows": bank_rows,
-            "oa_rows": oa_rows,
+            "bank_rows": visible_bank_rows,
+            "oa_rows": visible_oa_rows,
             "relations_by_bank_row_id": relations_by_bank_row_id,
+            **self._pagination_payload(
+                bank_rows=bank_rows,
+                oa_rows=oa_rows,
+                bank_pagination=bank_pagination,
+                oa_pagination=oa_pagination,
+            ),
             **context.relation_read_model_status.as_payload(),
         }
+
+    @classmethod
+    def _pagination_from_values(
+        cls,
+        *,
+        page: int | str | None,
+        page_size: int | str | None,
+        requested: bool,
+    ) -> dict[str, int] | None:
+        if not requested:
+            return None
+        return {
+            "page": cls._positive_int(page if page is not None else 1, "page"),
+            "page_size": cls._positive_int(page_size if page_size is not None else 100, "page_size", maximum=200),
+        }
+
+    @staticmethod
+    def _positive_int(value: object, field: str, *, maximum: int | None = None) -> int:
+        try:
+            number = int(value if value not in (None, "") else 1)
+        except (TypeError, ValueError) as exc:
+            raise BatchAccountingError("invalid_paging", f"{field} must be a positive integer.") from exc
+        if number < 1:
+            raise BatchAccountingError("invalid_paging", f"{field} must be a positive integer.")
+        if maximum is not None and number > maximum:
+            raise BatchAccountingError("invalid_paging", f"{field} must be <= {maximum}.")
+        return number
+
+    @staticmethod
+    def _page_items(items: list[dict[str, Any]], pagination: dict[str, int] | None) -> list[dict[str, Any]]:
+        if pagination is None:
+            return items
+        start = (pagination["page"] - 1) * pagination["page_size"]
+        return items[start : start + pagination["page_size"]]
+
+    @staticmethod
+    def _pagination_payload(
+        *,
+        bank_rows: list[dict[str, Any]],
+        oa_rows: list[dict[str, Any]],
+        bank_pagination: dict[str, int] | None,
+        oa_pagination: dict[str, int] | None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        pagination: dict[str, object] = {}
+        if bank_pagination is not None:
+            page_size = bank_pagination["page_size"]
+            pagination["bank_rows"] = {
+                "page": bank_pagination["page"],
+                "page_size": page_size,
+                "pageSize": page_size,
+                "total": len(bank_rows),
+            }
+        if oa_pagination is not None:
+            page_size = oa_pagination["page_size"]
+            pagination["oa_rows"] = {
+                "page": oa_pagination["page"],
+                "page_size": page_size,
+                "pageSize": page_size,
+                "total": len(oa_rows),
+            }
+        if pagination:
+            payload["pagination"] = pagination
+        return payload
 
     def submit(
         self,
@@ -446,41 +541,26 @@ class BatchAccountingService:
             reason="batch_accounting_withdraw_relation_readiness",
         )
         self._ensure_relation_read_model_fresh(relation_read_model_status)
-        if self._relation_command_service is not None:
-            try:
-                command_result = self._relation_command_service.withdraw_relation(
-                    case_id=normalized_relation_id,
-                    actor_id=actor,
-                    reason=note,
-                    history_operation_type="withdraw_link",
-                )
-            except WorkbenchRelationCommandError as exc:
-                raise self._command_error(exc) from exc
-            restored_relations = list(command_result.get("restored_relations") or [])
-            affected_row_ids = self._dedupe(list(command_result.get("affected_row_ids") or row_ids))
-            changed_case_ids = self._dedupe(
-                [str(case_id) for case_id in list(command_result.get("changed_case_ids") or [])]
+        if self._relation_command_service is None:
+            raise BatchAccountingError(
+                "batch_accounting_relation_command_unavailable",
+                "批量账务关联写入服务不可用，请稍后重试。",
+                payload={"case_id": normalized_relation_id, "row_ids": row_ids},
             )
-        else:
-            restored_relations, _history = self._pair_relation_service.withdraw_latest_for_row_ids(
-                row_ids,
-                created_by=actor,
-                note=note,
+        try:
+            command_result = self._relation_command_service.withdraw_relation(
+                case_id=normalized_relation_id,
+                actor_id=actor,
+                reason=note,
+                history_operation_type="withdraw_link",
             )
-            affected_row_ids = self._dedupe(
-                [
-                    *row_ids,
-                    *[
-                        str(row_id)
-                        for relation in restored_relations
-                        for row_id in list(relation.get("row_ids") or [])
-                        if str(row_id).strip()
-                    ],
-                ]
-            )
-            changed_case_ids = self._dedupe(
-                [normalized_relation_id, *[str(relation.get("case_id") or "") for relation in restored_relations]]
-            )
+        except WorkbenchRelationCommandError as exc:
+            raise self._command_error(exc) from exc
+        restored_relations = list(command_result.get("restored_relations") or [])
+        affected_row_ids = self._dedupe(list(command_result.get("affected_row_ids") or row_ids))
+        changed_case_ids = self._dedupe(
+            [str(case_id) for case_id in list(command_result.get("changed_case_ids") or [])]
+        )
         return {
             "success": True,
             "action": "withdraw_batch_accounting",

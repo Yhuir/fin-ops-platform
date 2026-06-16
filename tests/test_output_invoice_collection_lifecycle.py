@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import unittest
 
@@ -13,6 +14,7 @@ from fin_ops_platform.services.output_invoice_collection_lifecycle_service impor
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionError
 from fin_ops_platform.services.output_invoice_collection_receipt_service import OutputInvoiceCollectionReceiptService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
+from fin_ops_platform.services.postgres_repositories.output_invoice_collection import PostgresOutputInvoiceCollectionLifecycleRepository
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from tests.test_pending_invoice_service import FakeWorkbenchRelationFacade
 
@@ -23,6 +25,15 @@ class RecordingRefreshQueue:
 
     def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_: object) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+
+
+class EmptyPostgresConnection:
+    def __init__(self) -> None:
+        self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+        self.fetch_one_calls.append((sql, params))
+        return None
 
 
 class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
@@ -147,6 +158,19 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         self.assertEqual(manual[0]["evidence"], "客户邮件确认红冲")
         self.assertEqual(manual[0]["confidence"], "manual_confirmed")
 
+    def test_postgres_red_relation_revoke_not_found_fails_closed(self) -> None:
+        repository = PostgresOutputInvoiceCollectionLifecycleRepository(EmptyPostgresConnection())
+
+        with self.assertRaises(OutputInvoiceCollectionError) as caught:
+            repository.revoke_red_relation(
+                relation_id="missing-relation",
+                actor_id="tester",
+                tenant_id="default",
+            )
+
+        self.assertEqual(caught.exception.error_code, "relation_not_found")
+        self.assertEqual(caught.exception.status_code.value, 404)
+
     def test_receipts_are_idempotent_and_history_is_real(self) -> None:
         repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
         invoice = self._invoice("out-receipt", "3001", "客户C", total_with_tax="120.00")
@@ -198,6 +222,74 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
             receipts.reissue_receipt(first["receipt"]["id"], {"reason": "重复重开"}, actor_id="tester", tenant_id="default")
         self.assertEqual(duplicate_reissue.exception.error_code, "invalid_receipt_status")
 
+    def test_receipt_numbers_are_unique_under_concurrent_creates_and_reset_periods(self) -> None:
+        repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
+        invoices = [
+            self._invoice(f"out-month-{index}", f"5{index:03d}", f"客户M{index}", total_with_tax="100.00", invoice_date="2026-05-20")
+            for index in range(1, 13)
+        ]
+        invoices.extend(
+            [
+                self._invoice("out-june", "6001", "客户June", total_with_tax="100.00", invoice_date="2026-06-01"),
+                self._invoice("out-year-jan", "7001", "客户Y1", total_with_tax="100.00", invoice_date="2026-01-05"),
+                self._invoice("out-year-dec", "7002", "客户Y2", total_with_tax="100.00", invoice_date="2026-12-31"),
+                self._invoice("out-year-next", "7003", "客户Y3", total_with_tax="100.00", invoice_date="2027-01-01"),
+                self._invoice("out-none-first", "8001", "客户N1", total_with_tax="100.00", invoice_date="2026-05-20"),
+                self._invoice("out-none-next", "8002", "客户N2", total_with_tax="100.00", invoice_date="2027-01-01"),
+            ]
+        )
+        banks = [self._bank(f"bank-{invoice.id}", "100.00") for invoice in invoices]
+        pair_service = WorkbenchPairRelationService()
+        for invoice, bank in zip(invoices, banks, strict=True):
+            pair_service.create_active_relation(
+                case_id=f"case-{invoice.id}",
+                row_ids=[invoice.id, bank.id],
+                row_types=["invoice", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="tester",
+                amount_check={"matched": True},
+            )
+        query = self._query_service(invoices, repository, transactions=banks, pair_service=pair_service)
+        rows_by_invoice_id = {str(row["invoice"]["id"]): row for row in query.list_rows(page_size=100)["rows"]}
+        receipts = OutputInvoiceCollectionReceiptService(
+            repository=repository,
+            row_provider=lambda row_id: query.row_by_id(row_id),
+            queue_repository=RecordingRefreshQueue(),
+        )
+
+        def create_for(invoice_id: str) -> str:
+            row = rows_by_invoice_id[invoice_id]
+            result = receipts.create_receipt(
+                row["id"],
+                {
+                    "bankTransactionId": f"bank-{invoice_id}",
+                    "idempotencyKey": f"receipt-{invoice_id}",
+                },
+                actor_id="tester",
+                tenant_id="default",
+            )
+            return str(result["receipt"]["receiptNo"])
+
+        month_invoice_ids = [f"out-month-{index}" for index in range(1, 13)]
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            month_receipt_numbers = list(executor.map(create_for, month_invoice_ids))
+
+        self.assertEqual(
+            set(month_receipt_numbers),
+            {f"SK202605{index:04d}" for index in range(1, 13)},
+        )
+        self.assertEqual(create_for("out-june"), "SK2026060001")
+
+        repository.update_receipt_settings(tenant_id="default", prefix="SK", reset_period="yearly", actor_id="tester")
+        yearly_numbers = [create_for(invoice_id) for invoice_id in ["out-year-jan", "out-year-dec", "out-year-next"]]
+        self.assertEqual(yearly_numbers, ["SK20260001", "SK20260002", "SK20270001"])
+
+        repository.update_receipt_settings(tenant_id="default", prefix="SK", reset_period="none", actor_id="tester")
+        never_reset_numbers = [create_for(invoice_id) for invoice_id in ["out-none-first", "out-none-next"]]
+        self.assertEqual(never_reset_numbers, ["SK0000000001", "SK0000000002"])
+        all_numbers = month_receipt_numbers + ["SK2026060001"] + yearly_numbers + never_reset_numbers
+        self.assertEqual(len(all_numbers), len(set(all_numbers)))
+
     @staticmethod
     def _query_service(
         invoices: list[Invoice],
@@ -227,6 +319,7 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         *,
         total_with_tax: str,
         is_positive_invoice: str = "是",
+        invoice_date: str = "2026-05-20",
     ) -> Invoice:
         buyer = Counterparty(
             id=f"cp-{invoice_id}",
@@ -242,7 +335,7 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
             counterparty=buyer,
             amount=Decimal(total_with_tax),
             signed_amount=Decimal(total_with_tax),
-            invoice_date="2026-05-20",
+            invoice_date=invoice_date,
             seller_name="云南溯源科技有限公司",
             buyer_name=buyer_name,
             seller_tax_no="91530000SELLER",

@@ -11,10 +11,11 @@ class CostStatisticsReadModelRefreshService:
         self,
         *,
         projection_builder: Any | None = None,
-        application: Any | None = None,
         queue_repository: Any | None = None,
     ) -> None:
-        self._projection_builder = projection_builder if projection_builder is not None else application
+        if projection_builder is None:
+            raise ValueError("projection_builder is required for cost statistics read model refresh.")
+        self._projection_builder = projection_builder
         self._queue_repository = queue_repository
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
@@ -42,7 +43,7 @@ class CostStatisticsReadModelRefreshService:
         if not callable(rebuild_month):
             rebuild_month = getattr(self._projection_builder, "rebuild_cost_statistics_read_model_scope", None)
         if not callable(rebuild_month):
-            raise RuntimeError("Application does not expose rebuild_cost_statistics_month_scope.")
+            raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_month_scope.")
         result = rebuild_month(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("refresh_kind", "month")
@@ -64,7 +65,7 @@ class CostStatisticsReadModelRefreshService:
         if not callable(rebuild_parent):
             rebuild_parent = getattr(self._projection_builder, "rebuild_cost_statistics_read_model_scope", None)
         if not callable(rebuild_parent):
-            raise RuntimeError("Application does not expose rebuild_cost_statistics_parent_scope.")
+            raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_parent_scope.")
         result = rebuild_parent(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("refresh_kind", "parent")

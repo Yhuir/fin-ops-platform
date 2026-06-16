@@ -436,6 +436,61 @@ class BatchAccountingApiTests(unittest.TestCase):
             },
         }
 
+    def _large_batch_accounting_payload(self, total: int = 250) -> dict[str, object]:
+        bank_rows = [
+            {
+                "id": f"txn_imported_202601_batch_{index:03d}",
+                "type": "bank",
+                "trade_time": f"2026-01-{(index % 28) + 1:02d} 09:00:00",
+                "pay_receive_time": f"2026-01-{(index % 28) + 1:02d} 09:00:00",
+                "counterparty_name": " 批量账务集中处理 ",
+                "debit_amount": "10.00",
+                "credit_amount": "",
+                "payment_account_label": f"建行基本户 {index:04d}",
+                "bank_name": "建行",
+                "account_last4": f"{index % 10000:04d}",
+                "version": 1,
+            }
+            for index in range(total)
+        ]
+        oa_rows = [
+            {
+                "id": f"oa-exp-ba-{index:03d}",
+                "type": "oa",
+                "case_id": f"CASE-OA-{index:03d}",
+                "applicant": f"申请人{index:03d}",
+                "apply_time": f"2026-01-{(index % 28) + 1:02d}",
+                "project_name": "批量账务首屏保护",
+                "amount": "10.00",
+                "reason": "日常报销",
+                "apply_type": "日常报销",
+                "expense_type": "交通费",
+                "summary_fields": {"申请日期": f"2026-01-{(index % 28) + 1:02d}"},
+            }
+            for index in range(total)
+        ]
+        return {
+            "month": "all",
+            "summary": {},
+            "paired": {"groups": []},
+            "open": {
+                "groups": [
+                    {
+                        "group_id": "large-batch-bank",
+                        "bank_rows": bank_rows,
+                        "oa_rows": [],
+                        "invoice_rows": [],
+                    },
+                    {
+                        "group_id": "large-batch-oa",
+                        "bank_rows": [],
+                        "oa_rows": oa_rows,
+                        "invoice_rows": [],
+                    },
+                ]
+            },
+        }
+
     def _app_with_grouped_payload(self) -> tuple[Application, patch]:
         app = build_application()
         payload_patcher = patch.object(app, "_build_api_workbench_payload", return_value=self._grouped_payload())
@@ -467,6 +522,54 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(sql_read_model.calls, [("2026", "2025")])
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
         self.assertEqual([row["id"] for row in payload["oa_rows"]], ["oa-exp-ba-2025", "oa-exp-ba-2025b"])
+
+    def test_unsubmitted_list_explicit_pagination_protects_first_screen_slo(self) -> None:
+        app = build_application()
+        payload_patcher = patch.object(app, "_build_api_workbench_payload", return_value=self._large_batch_accounting_payload())
+        payload_patcher.start()
+        self.addCleanup(payload_patcher.stop)
+
+        first_response = app.handle_request(
+            "GET",
+            "/api/batch-accounting?year=2026&bucket=unsubmitted&page=1&page_size=200",
+        )
+        second_response = app.handle_request(
+            "GET",
+            "/api/batch-accounting?year=2026&bucket=unsubmitted&page=2&page_size=200",
+        )
+        invalid_response = app.handle_request(
+            "GET",
+            "/api/batch-accounting?year=2026&bucket=unsubmitted&page=1&page_size=201",
+        )
+        first_payload = json.loads(first_response.body)
+        second_payload = json.loads(second_response.body)
+        invalid_payload = json.loads(invalid_response.body)
+
+        self.assertEqual(first_response.status_code, 200, first_response.body)
+        self.assertEqual(len(first_payload["bank_rows"]), 200)
+        self.assertEqual(len(first_payload["oa_rows"]), 200)
+        self.assertEqual(first_payload["summary"]["unsubmitted_count"], 250)
+        self.assertEqual(
+            first_payload["pagination"],
+            {
+                "bank_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 250},
+                "oa_rows": {"page": 1, "page_size": 200, "pageSize": 200, "total": 250},
+            },
+        )
+        self.assertEqual(second_response.status_code, 200, second_response.body)
+        self.assertEqual(len(second_payload["bank_rows"]), 50)
+        self.assertEqual(len(second_payload["oa_rows"]), 50)
+        self.assertEqual(second_payload["summary"]["unsubmitted_count"], 250)
+        self.assertEqual(
+            second_payload["pagination"],
+            {
+                "bank_rows": {"page": 2, "page_size": 200, "pageSize": 200, "total": 250},
+                "oa_rows": {"page": 2, "page_size": 200, "pageSize": 200, "total": 250},
+            },
+        )
+        self.assertEqual(invalid_response.status_code, 400, invalid_response.body)
+        self.assertEqual(invalid_payload["error"], "invalid_paging")
+        self.assertEqual(invalid_payload["message"], "page_size must be <= 200.")
 
     def test_unsubmitted_list_deduplicates_sql_read_model_rows_by_row_id(self) -> None:
         duplicate_payload = self._grouped_payload()
@@ -1402,6 +1505,37 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(call["actor_id"], "finance-user")
         self.assertEqual(call["reason"], "选择错误")
         self.assertEqual(call["history_operation_type"], "withdraw_link")
+
+    def test_withdraw_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
+        pair_service = WriteBlockingPairRelationService()
+        pair_service.create_active_relation(
+            case_id="CASE-BATCH-txn_imported_202601_batch_001",
+            row_ids=["txn_imported_202601_batch_001", "oa-exp-ba-001"],
+            row_types=["bank", "oa"],
+            relation_mode="batch_accounting",
+            created_by="finance-user",
+            month_scope="2026-01",
+            special_metadata={
+                "source": "batch_accounting",
+                "bank_row_id": "txn_imported_202601_batch_001",
+                "oa_row_ids": ["oa-exp-ba-001"],
+                "year": "2026",
+            },
+        )
+        service = BatchAccountingService(
+            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            pair_relation_service=pair_service,
+            relation_facade=FakeBatchRelationFacade(),
+        )
+
+        with self.assertRaises(BatchAccountingError) as context:
+            service.withdraw(
+                relation_id="CASE-BATCH-txn_imported_202601_batch_001",
+                actor="finance-user",
+                reason="选择错误",
+            )
+
+        self.assertEqual(context.exception.code, "batch_accounting_relation_command_unavailable")
 
     def test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

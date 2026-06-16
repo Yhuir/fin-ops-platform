@@ -178,6 +178,27 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(field_error.exception.error_code, "invalid_filter_field")
         self.assertEqual(sort_error.exception.error_code, "invalid_sort_field")
 
+    def test_page_size_limit_protects_first_screen_slo(self) -> None:
+        service = self._service(
+            oa_records=[
+                self._oa(
+                    f"oa-large-{index}",
+                    "大数据申请人",
+                    "1.00",
+                    project_name=f"大数据项目 {index:04d}",
+                )
+                for index in range(250)
+            ]
+        )
+
+        payload = service.list_rows(page=1, page_size=200)
+
+        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 200, "total": 250})
+        self.assertEqual(len(payload["rows"]), 200)
+        with self.assertRaises(OaPendingPaymentError) as context:
+            service.list_rows(page=1, page_size=201)
+        self.assertEqual(context.exception.error_code, "invalid_paging")
+
     def test_detail_routes_return_oa_bank_invoice_and_relation_payloads(self) -> None:
         bank = self._bank("bank-detail", "100.00")
         invoice = self._invoice("inv-detail", "SD-DETAIL", "详情供应商", "100.00")

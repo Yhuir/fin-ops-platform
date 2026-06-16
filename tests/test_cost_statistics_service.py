@@ -648,6 +648,76 @@ class CostStatisticsServiceTests(unittest.TestCase):
         self.assertEqual(all_payload["summary"]["total_amount"], "600.00")
         self.assertEqual(preview_payload["summary"]["transaction_count"], 2)
 
+    def test_export_preview_and_download_reject_large_time_export_before_workbook_generation(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import (
+            COST_STATISTICS_EXPORT_ROW_LIMIT,
+            CostStatisticsExportLimitError,
+            CostStatisticsService,
+        )
+
+        bank_rows = [
+            {
+                "id": f"txn-large-cost-{index}",
+                "type": "bank",
+                "trade_time": "2026-03-10 21:27:55",
+                "debit_amount": "1.00",
+                "credit_amount": "",
+                "counterparty_name": "批量供应商",
+                "payment_account_label": "工商银行 账户 0001",
+                "remark": "批量成本",
+            }
+            for index in range(COST_STATISTICS_EXPORT_ROW_LIMIT + 1)
+        ]
+        payloads = {
+            "2026-03": {
+                "month": "2026-03",
+                "summary": {},
+                "paired": {
+                    "groups": [
+                        {
+                            "group_id": "group-cost-large",
+                            "group_type": "manual_confirmed",
+                            "match_confidence": "high",
+                            "reason": "confirmed",
+                            "oa_rows": [
+                                {
+                                    "id": "oa-cost-large",
+                                    "type": "oa",
+                                    "project_name": "大数据项目",
+                                    "expense_type": "材料费",
+                                    "expense_content": "批量材料",
+                                    "amount": "20001.00",
+                                }
+                            ],
+                            "bank_rows": bank_rows,
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+                "open": {"groups": []},
+            }
+        }
+        service = CostStatisticsService(
+            self.import_service,
+            grouped_workbench_loader=lambda month: payloads[month],
+            row_detail_loader=lambda row_id: self.row_details[row_id],
+        )
+
+        with self.assertRaises(CostStatisticsExportLimitError) as preview_context:
+            service.get_export_preview(month="2026-03", view="time")
+        with self.assertRaises(CostStatisticsExportLimitError) as export_context:
+            service.export_view(month="2026-03", view="time")
+
+        expected_details = {
+            "view": "time",
+            "total": COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
+            "limit": COST_STATISTICS_EXPORT_ROW_LIMIT,
+        }
+        self.assertEqual(preview_context.exception.error_code, "cost_statistics_export_row_limit_exceeded")
+        self.assertEqual(export_context.exception.error_code, "cost_statistics_export_row_limit_exceeded")
+        self.assertEqual(preview_context.exception.details, expected_details)
+        self.assertEqual(export_context.exception.details, expected_details)
+
     def test_open_candidate_groups_are_excluded_from_cost_statistics(self) -> None:
         from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 

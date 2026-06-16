@@ -220,6 +220,36 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["source_batch_id"], batch["batch_id"])
         self.assertEqual(call["display_tags"], ["免OA", "手续费"])
 
+    def test_list_batches_explicit_pagination_protects_first_screen_slo(self) -> None:
+        rows = [
+            no_oa_bank_row(
+                f"fee-{index:03d}",
+                category_code="fee",
+                debit_amount="1.00",
+                account_key=f"CCB:{index:04d}",
+            )
+            for index in range(250)
+        ]
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=rows,
+            selected_tag_codes=["fee"],
+        )
+        service.refresh_batches()
+
+        first_page = service.list_batches_payload({"bucket": ["unsubmitted"], "page": ["1"], "page_size": ["200"]})
+        second_page = service.list_batches_payload({"bucket": ["unsubmitted"], "page": ["2"], "page_size": ["200"]})
+
+        self.assertEqual(len(first_page["batches"]), 200)
+        self.assertEqual(first_page["summary"]["total"], 250)
+        self.assertEqual(first_page["pagination"], {"page": 1, "page_size": 200, "pageSize": 200, "total": 250})
+        self.assertEqual(len(second_page["batches"]), 50)
+        self.assertEqual(second_page["summary"]["total"], 250)
+        self.assertEqual(second_page["pagination"], {"page": 2, "page_size": 200, "pageSize": 200, "total": 250})
+
+        with self.assertRaisesRegex(ValueError, "page_size must be <= 200") as context:
+            service.list_batches_payload({"page": ["1"], "page_size": ["201"]})
+        self.assertEqual(getattr(context.exception, "error_code", ""), "invalid_paging")
+
     def test_withdraw_batch_delegates_relation_cancel_to_command_service(self) -> None:
         rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="3.00")]
         setup_pair_service = WorkbenchPairRelationService()

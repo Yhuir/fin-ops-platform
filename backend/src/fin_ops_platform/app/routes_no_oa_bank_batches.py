@@ -16,7 +16,10 @@ class NoOaBankBatchApiRoutes:
         self._application_service = application_service
 
     def list_batches(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        return HTTPStatus.OK, self._application_service.list_batches_payload(query)
+        try:
+            return HTTPStatus.OK, self._application_service.list_batches_payload(query)
+        except ValueError as exc:
+            return self._value_error_response(exc)
 
     def detail(self, batch_id: str) -> tuple[HTTPStatus, dict[str, Any]]:
         try:

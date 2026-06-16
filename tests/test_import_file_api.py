@@ -262,6 +262,8 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(confirm_response.status_code, 202)
         confirm_payload = json.loads(confirm_response.body)
         self.assertEqual(confirm_payload["job"]["type"], "file_import")
+        self.assertEqual(confirm_payload["job"]["affected_domains"], ["imports_invoices"])
+        self.assertEqual(confirm_payload["job"]["route"], "/imports/invoices")
         job_id = confirm_payload["job"]["job_id"]
         job_payload = confirm_payload["job"]
         for _ in range(20):
@@ -293,6 +295,53 @@ class ImportFileApiTests(unittest.TestCase):
 
         session_file = next(item for item in confirm_payload["files"] if item["id"] == invoice_file["id"])
         self.assertEqual(session_file["status"], "confirmed")
+
+    def test_confirm_bank_transaction_file_job_reports_bank_import_domain(self) -> None:
+        app = build_application()
+        preview_body, preview_headers = build_multipart_payload(
+            imported_by="user_finance_01",
+            files=[PINGAN_JAN],
+            file_overrides=[
+                {
+                    "file_name": PINGAN_JAN.name,
+                    "template_code": "pingan_transaction_detail",
+                    "batch_type": "bank_transaction",
+                    "bank_mapping_id": "bank_mapping_pingan_0093",
+                    "bank_name": "平安银行",
+                    "bank_short_name": "平安",
+                    "last4": "0093",
+                }
+            ],
+        )
+        preview_response = app.handle_request(
+            "POST",
+            "/imports/files/preview",
+            body=preview_body,
+            headers=preview_headers,
+        )
+        preview_payload = json.loads(preview_response.body)
+        bank_file = preview_payload["files"][0]
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/imports/files/confirm",
+            json.dumps(
+                {
+                    "session_id": preview_payload["session"]["id"],
+                    "selected_file_ids": [bank_file["id"]],
+                }
+            ),
+        )
+        confirm_payload = json.loads(confirm_response.body)
+        job_id = confirm_payload["job"]["job_id"]
+        job_response = app.handle_request("GET", f"/api/background-jobs/{job_id}")
+        job_payload = json.loads(job_response.body)["job"]
+
+        self.assertEqual(confirm_response.status_code, 202)
+        self.assertEqual(confirm_payload["job"]["affected_domains"], ["imports_bank_transactions"])
+        self.assertEqual(confirm_payload["job"]["route"], "/imports/bank-transactions")
+        self.assertEqual(job_payload["affected_domains"], ["imports_bank_transactions"])
+        self.assertEqual(job_payload["route"], "/imports/bank-transactions")
 
 
 if __name__ == "__main__":

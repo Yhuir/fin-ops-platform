@@ -368,6 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         projection_builder = TurnoverLedgerSqlProjectionBuilder(
             connection=connection,
             bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
+            workbench_relation_read_facade=workbench_relation_read_facade,
         )
         refresh_service = TurnoverLedgerReadModelRefreshService(
             projection_builder=projection_builder,

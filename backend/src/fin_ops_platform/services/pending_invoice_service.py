@@ -73,6 +73,7 @@ PENDING_INVOICE_SORT_FIELDS = {
     "project_name",
 }
 INVOICE_CANDIDATE_SORT_FIELDS = {"issue_date", "total_with_tax", "seller_name", "amount_difference_abs"}
+PENDING_INVOICE_EXPORT_ROW_LIMIT = 20000
 COMMAND_STATUSES = {
     "started",
     "invoice_created",
@@ -1612,6 +1613,12 @@ class PendingInvoiceQueryService:
             page_size=200,
         )
         total = int((payload.get("pagination") or {}).get("total") or len(payload.get("rows") or []))
+        if total > PENDING_INVOICE_EXPORT_ROW_LIMIT:
+            raise PendingInvoiceError(
+                "pending_invoice_export_row_limit_exceeded",
+                f"当前筛选命中 {total} 行，超过 {PENDING_INVOICE_EXPORT_ROW_LIMIT} 行导出上限，请缩小筛选范围。",
+                details={"total": total, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT},
+            )
         rows = list(payload.get("rows") or [])
         page = 2
         while len(rows) < total:

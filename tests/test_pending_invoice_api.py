@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.pending_invoice_read_model_service import pending_invoice_source_versions
+from fin_ops_platform.services.pending_invoice_service import PENDING_INVOICE_EXPORT_ROW_LIMIT
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.pending_invoice_rules import pending_invoice_rules_payload
 
@@ -162,6 +163,62 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertTrue(export_response.body)
         self.assertEqual(rules_response.status_code, 200)
         self.assertIn("pending_invoice_tag_groups", rules_payload)
+
+    def test_export_endpoints_reject_row_limit_before_xlsx_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            class PendingInvoiceSqlReadRepository:
+                def __init__(self) -> None:
+                    self.calls: list[dict[str, object]] = []
+
+                def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
+                    self.calls.append(dict(kwargs))
+                    return {
+                        "direction": "expense",
+                        "filter": "all",
+                        "rows": [
+                            {
+                                "id": "txn-large-export-api",
+                                "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                                "input_invoices": {"primary": None, "summaries": []},
+                                "oa": {"primary": None, "summaries": []},
+                            }
+                        ],
+                        "pagination": {
+                            "page": 1,
+                            "page_size": 200,
+                            "total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1,
+                        },
+                        "summary": {"total_rows": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1},
+                        "bank_transaction_tags": {},
+                        "bank_transaction_tags_version": 1,
+                        "refresh_status": "fresh",
+                        "source_versions": pending_invoice_source_versions(
+                            app._app_settings_service.get_settings_payload(),
+                            attachment_invoice_parser_version=app._current_oa_attachment_invoice_parser_version(),
+                            oa_projection_sync_version=app._current_oa_projection_sync_version(),
+                        ),
+                    }
+
+            repository = PendingInvoiceSqlReadRepository()
+            app._pending_invoice_sql_read_repository = repository
+            if hasattr(app, "_pending_invoice_api_routes"):
+                delattr(app, "_pending_invoice_api_routes")
+
+            preview_response = app.handle_request("GET", "/api/pending-invoices/export-preview?direction=expense")
+            export_response = app.handle_request("GET", "/api/pending-invoices/export?direction=expense")
+
+        preview_payload = json.loads(preview_response.body)
+        export_payload = json.loads(export_response.body)
+        self.assertEqual(preview_response.status_code, 400)
+        self.assertEqual(export_response.status_code, 400)
+        self.assertEqual(preview_payload["error"], "pending_invoice_export_row_limit_exceeded")
+        self.assertEqual(export_payload["error"], "pending_invoice_export_row_limit_exceeded")
+        self.assertEqual(preview_payload["details"], {"total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT})
+        self.assertEqual(export_payload["details"], {"total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT})
+        self.assertEqual([call["page"] for call in repository.calls], ["1", "1"])
+        self.assertEqual([call["page_size"] for call in repository.calls], ["200", "200"])
 
     def test_batch_attach_existing_invoice_endpoints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

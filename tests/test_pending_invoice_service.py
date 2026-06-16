@@ -397,6 +397,26 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["input_invoices"]["payment_summary"]["paid_total"], "100.00")
         self.assertEqual(payload["rows"][0]["oa"]["primary"]["applicant"], "张三")
 
+    def test_page_size_limit_protects_first_screen_slo(self) -> None:
+        transactions = [
+            self._bank_transaction(
+                f"txn_pending_page_{index:03d}",
+                TransactionDirection.OUTFLOW,
+                f"Vendor {index:03d}",
+                "1.00",
+            )
+            for index in range(250)
+        ]
+        service = self._query_service(transactions=transactions)
+
+        first_page = service.list_rows(direction="expense", filter="all", page=1, page_size=500)
+        second_page = service.list_rows(direction="expense", filter="all", page=2, page_size=500)
+
+        self.assertEqual(first_page["pagination"], {"page": 1, "page_size": 200, "total": 250})
+        self.assertEqual(len(first_page["rows"]), 200)
+        self.assertEqual(second_page["pagination"], {"page": 2, "page_size": 200, "total": 250})
+        self.assertEqual(len(second_page["rows"]), 50)
+
     def test_oa_detail_uses_oa_projection_payment_application_layout(self) -> None:
         txn = self._bank_transaction("txn_expense", TransactionDirection.OUTFLOW, "重庆维诺安工程技术有限公司", "7680.00")
         pair_service = WorkbenchPairRelationService()

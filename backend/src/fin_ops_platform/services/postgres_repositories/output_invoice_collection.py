@@ -263,6 +263,8 @@ class PostgresOutputInvoiceCollectionLifecycleRepository:
             """,
             (actor_id, relation_id, tenant_id),
         )
+        if row is None:
+            raise OutputInvoiceCollectionError("relation_not_found", "红蓝票关系不存在或已撤销。", status_code=HTTPStatus.NOT_FOUND)
         return _red_relation_payload(row or {})
 
     def get_receipt_settings(self, *, tenant_id: str) -> dict[str, Any]:

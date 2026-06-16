@@ -101,6 +101,7 @@ class BackgroundJobService:
         self._recent_success_window = timedelta(seconds=max(0, int(recent_success_seconds)))
         self._stale_after = timedelta(seconds=max(1, int(stale_after_seconds)))
         self._memory_jobs: dict[str, dict[str, object]] = {}
+        self._futures: dict[str, Future] = {}
         self._mark_interrupted_jobs_failed()
 
     def create_job(
@@ -510,10 +511,28 @@ class BackgroundJobService:
             if completed.status not in TERMINAL_BACKGROUND_JOB_STATUSES:
                 self.succeed_job(job.job_id, completed.message or "后台任务已完成。", result_summary=result_summary)
 
-        return self._executor.submit(runner)
+        future = self._executor.submit(runner)
+        with self._lock:
+            self._futures[job.job_id] = future
+        future.add_done_callback(lambda completed: self._clear_future(job.job_id, completed))
+        return future
+
+    def wait_for_job_completion(self, job_id: str, *, timeout: float | None = None) -> None:
+        normalized_job_id = str(job_id or "").strip()
+        if not normalized_job_id:
+            return
+        with self._lock:
+            future = self._futures.get(normalized_job_id)
+        if future is not None:
+            future.result(timeout=timeout)
 
     def shutdown(self, *, wait: bool = True) -> None:
         self._executor.shutdown(wait=wait)
+
+    def _clear_future(self, job_id: str, future: Future) -> None:
+        with self._lock:
+            if self._futures.get(job_id) is future:
+                self._futures.pop(job_id, None)
 
     def _mutate_job(self, job_id: str, mutator: Callable[[BackgroundJob], None]) -> BackgroundJob:
         normalized_job_id = str(job_id or "").strip()

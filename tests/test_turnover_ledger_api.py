@@ -19,6 +19,7 @@ from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.turnover_ledger_write_adapters import TurnoverLedgerDirtyOutboxWriter
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 
 
@@ -97,7 +98,7 @@ class _PostgresQueueRecorder:
     ) -> dict[str, object]:
         _ = tenant_id, priority, trace_id, metadata
         self.transactional.append((scope_type, scope_key, reason, transaction))
-        return {"scope_type": scope_type, "scope_key": scope_key, "reason": reason}
+        return {"scope_type": scope_type, "scope_key": scope_key, "reason": reason, "source_version": len(self.transactional)}
 
 
 class _RelationExtraWriteFacadeRecorder:
@@ -237,6 +238,40 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.addCleanup(cost_warmup_patcher.stop)
         cost_warmup_patcher.start()
 
+    def test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction(self) -> None:
+        queue = _PostgresQueueRecorder()
+        transaction = _PostgresFakeTransaction()
+        writer = TurnoverLedgerDirtyOutboxWriter(queue_repository=queue)
+
+        events = writer.enqueue_refresh(
+            transaction=transaction,
+            scope_type="cost_statistics",
+            scope_keys=["2026-02", "all"],
+            reason="turnover_relation_changed",
+        )
+
+        self.assertEqual(
+            [item[:3] for item in queue.transactional],
+            [
+                ("cost_statistics", "active:2026-02", "turnover_relation_changed"),
+                ("cost_statistics", "all:2026-02", "turnover_relation_changed"),
+                ("cost_statistics", "active:all", "turnover_relation_changed"),
+                ("cost_statistics", "all:all", "turnover_relation_changed"),
+            ],
+        )
+        self.assertEqual(
+            [event["scope_key"] for event in events],
+            ["active:2026-02", "all:2026-02", "active:all", "all:all"],
+        )
+        self.assertNotIn(
+            ("cost_statistics", "2026-02", "turnover_relation_changed", transaction),
+            queue.transactional,
+        )
+        self.assertNotIn(
+            ("cost_statistics", "all", "turnover_relation_changed", transaction),
+            queue.transactional,
+        )
+
     @contextmanager
     def _without_default_test_auth(self):
         previous = os.environ.get("FIN_OPS_TEST_DEFAULT_AUTH")
@@ -248,6 +283,61 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 os.environ.pop("FIN_OPS_TEST_DEFAULT_AUTH", None)
             else:
                 os.environ["FIN_OPS_TEST_DEFAULT_AUTH"] = previous
+
+    def test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_missing(self) -> None:
+        row = {
+            "id": "bank-row-manual-version",
+            "effective_category_code": "external_personal",
+            "effective_turnover_action_type": "personal_advance",
+            "effective_turnover_family": "personal",
+            "direction": "income",
+            "amount": "100.00",
+            "trade_time": "2026-02-03T10:11:12",
+            "counterparty_name": "张三",
+            "manual_category_version": 9,
+        }
+
+        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
+
+        self.assertIsNotNone(turnover_row)
+        self.assertEqual(turnover_row["category_version"], 9)
+
+    def test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_versions_missing(self) -> None:
+        row = {
+            "id": "bank-row-base-version",
+            "effective_category_code": "external_personal",
+            "effective_turnover_action_type": "personal_advance",
+            "effective_turnover_family": "personal",
+            "direction": "expense",
+            "amount": "100.00",
+            "trade_time": "2026-02-03T10:11:12",
+            "counterparty_name": "张三",
+            "version": 5,
+        }
+
+        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
+
+        self.assertIsNotNone(turnover_row)
+        self.assertEqual(turnover_row["category_version"], 5)
+
+    def test_sql_bank_detail_turnover_row_prefers_category_version_over_manual_version(self) -> None:
+        row = {
+            "id": "bank-row-category-version",
+            "effective_category_code": "external_personal",
+            "effective_turnover_action_type": "personal_advance",
+            "effective_turnover_family": "personal",
+            "direction": "income",
+            "amount": "100.00",
+            "trade_time": "2026-02-03T10:11:12",
+            "counterparty_name": "张三",
+            "category_version": 3,
+            "manual_category_version": 9,
+        }
+
+        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
+
+        self.assertIsNotNone(turnover_row)
+        self.assertEqual(turnover_row["category_version"], 3)
 
     def _import_bank_rows(self, app: Application) -> list[str]:
         preview = app._import_service.preview_import(
@@ -437,7 +527,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         return transaction_id
 
     def test_get_turnover_ledger_returns_summary_rows_and_filters(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -475,7 +565,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
                 self.saved_payload = payload
 
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -526,7 +616,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("rows", payload["groups"][0])
 
     def test_confirmed_external_turnover_rule_enters_ledger_with_default_selection(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(
                 {
                     "bank_transaction_tags": {
@@ -598,6 +688,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             before_payload = json.loads(before_response.body)
             flat_payload = json.loads(flat_response.body)
             grouped_payload = json.loads(grouped_response.body)
+            app.shutdown_background_jobs()
 
         self.assertEqual(before_response.status_code, 200)
         self.assertEqual(before_payload["pagination"]["total"], 0)
@@ -1142,7 +1233,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_withdraw_stale_precondition_rejects_changed_relation_before_mutation_or_refresh(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -1190,7 +1281,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(queue.enqueued, [])
 
     def test_confirm_stale_bank_row_precondition_rejects_before_mutation_or_refresh(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -1236,7 +1327,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.request_fingerprint, "")
 
     def test_confirm_request_body_without_expected_versions_keeps_empty_write_command_versions(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             uow = _RecordingTurnoverLedgerUow()
@@ -1262,7 +1353,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_confirm_request_expected_versions_reach_write_command(self) -> None:
         expected_versions = {"turnover_bank_row:bank-txn-confirm-1": "v1"}
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             uow = _RecordingTurnoverLedgerUow()
@@ -1286,7 +1377,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.expected_versions, expected_versions)
 
     def test_target_confirm_idempotency_key_replays_without_duplicate_confirm_or_refresh(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -1322,7 +1413,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(len(queue.enqueued), 1)
 
     def test_target_confirm_idempotency_key_conflict_rejects_different_payload(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -1661,7 +1752,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_tag_selection_idempotency_key_replays_without_duplicate_settings_save_or_refresh(self) -> None:
         # PF-P183 target contract: same idempotency key/fingerprint should replay the first response.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             self._seed_turnover_tag_selection_settings(Path(temp_dir))
             app = build_application(data_dir=Path(temp_dir))
             queue = _PostgresQueueRecorder()
@@ -1698,7 +1789,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_tag_selection_idempotency_key_conflict_rejects_different_payload(self) -> None:
         # PF-P183 target contract: same key with a different payload must fail before another settings save/refresh.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             self._seed_turnover_tag_selection_settings(Path(temp_dir))
             app = build_application(data_dir=Path(temp_dir))
             queue = _PostgresQueueRecorder()
@@ -1736,7 +1827,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
 
@@ -1761,6 +1852,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 f"/api/bank-details/transactions?category_code=borrow_in_company_pending_repayment",
             )
             details_payload = json.loads(details_response.body)
+            app.shutdown_background_jobs()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["updated_categories"][0]["category_code"], "borrow_in_company_pending_repayment")
@@ -1771,7 +1863,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(details_payload["rows"][0]["category_label"], "公司暂借款：待还款")
 
     def test_turnover_bank_row_tag_batch_queue_failure_happens_after_category_save(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _FailingQueueRecorder()
@@ -1816,7 +1908,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(details_payload["rows"][0]["category_code"], "borrow_in_company_pending_repayment")
 
     def test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _FailingQueueRecorder()
@@ -1851,7 +1943,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_relation_snapshot(self) -> None:
         # PF-P118 characterization: local facade rollback must restore both category and relation snapshots.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _FailingQueueRecorder()
@@ -1898,7 +1990,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_turnover_bank_row_tag_batch_local_facade_saves_snapshots_and_rebuilds_after_apply(self) -> None:
         # PF-P118 characterization: local facade success saves category/relation snapshots and preserves apply -> rebuild order.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _QueueRecorder()
@@ -1961,7 +2053,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_turnover_bank_row_tag_batch_facade_none_keeps_legacy_direct_side_effects(self) -> None:
         # PF-P118 characterization: facade None fallback remains a legacy direct-save/direct-invalidation path.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _QueueRecorder()
@@ -2011,7 +2103,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
     def test_bank_row_tags_handler_override_passes_affected_months_and_keeps_response_flags(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             facade = _BankRowTagsWriteFacadeRecorder()
@@ -2038,6 +2130,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ),
             )
             payload = json.loads(response.body)
+            app.shutdown_background_jobs()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["updated"], 2)
@@ -2074,7 +2167,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_turnover_bank_row_tag_batch_dependency_missing_keeps_legacy_direct_side_effects(self) -> None:
         # PF-P121 characterization: unsupported postgres queue API still falls back to legacy direct side effects.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _QueueRecorder()
@@ -2163,7 +2256,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("save_category_snapshot=lambda snapshot", source)
 
     def test_after_turnover_relation_mutation_keeps_legacy_side_effect_order(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             call_order: list[object] = []
 
@@ -2200,7 +2293,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_after_turnover_relation_mutation_persistence_failure_is_best_effort_and_still_refreshes(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             queue = _QueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
@@ -2219,7 +2312,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
     def test_after_turnover_relation_mutation_queue_failure_happens_after_clear_and_invalidation(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             queue = _FailingQueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
@@ -2237,7 +2330,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_turnover_bank_row_tag_batch_postgres_facade_path_skips_legacy_after_mutation_helper(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _PostgresQueueRecorder()
@@ -2273,7 +2366,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(queue.enqueued, [])
 
     def test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _PostgresQueueRecorder()
@@ -2317,7 +2410,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
 
     def test_target_bank_row_tags_idempotency_key_conflict_rejects_different_payload(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _PostgresQueueRecorder()
@@ -2365,7 +2458,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_turnover_bank_row_tag_batch_dependency_missing_queue_failure_happens_after_category_save(self) -> None:
         # PF-P129 characterization: unsupported postgres queue API fallback keeps legacy post-mutation queue failure.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _FailingQueueRecorder()
@@ -2406,7 +2499,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_target_turnover_bank_row_tag_batch_uow_path_does_not_clear_read_model_directly(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _QueueRecorder()
@@ -2435,7 +2528,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_postgres_bank_row_tags_batch_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: postgres storage should enter facade/UoW path.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _PostgresQueueRecorder()
@@ -2466,7 +2559,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(queue.enqueued, [])
 
     def test_turnover_bank_row_tag_batch_refreshes_all_required_scopes(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _QueueRecorder()
@@ -3247,7 +3340,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "invalid_turnover_ledger_extra")
 
     def test_relation_extra_put_rejects_readonly_user(self) -> None:
-        with self._without_default_test_auth(), TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
@@ -3350,8 +3443,37 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(data_row[5], "业务往来")
         self.assertEqual(data_row[6], "昆明建设集团")
 
+    def test_export_limit_returns_structured_error(self) -> None:
+        from fin_ops_platform.services.turnover_ledger_export_service import (
+            TURNOVER_LEDGER_EXPORT_ROW_LIMIT,
+            TurnoverLedgerExportLimitError,
+        )
+
+        class ExportLimitFacade:
+            def export_preview(self, **_kwargs: object) -> dict[str, object]:
+                raise TurnoverLedgerExportLimitError(total=TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1)
+
+            def export(self, **_kwargs: object) -> tuple[str, bytes]:
+                raise TurnoverLedgerExportLimitError(total=TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1)
+
+        app = build_application()
+        app._turnover_ledger_read_facade = ExportLimitFacade()
+
+        preview_response = app.handle_request("GET", "/api/turnover-ledger/export-preview?family=all")
+        export_response = app.handle_request("GET", "/api/turnover-ledger/export?family=all")
+
+        expected_details = {"total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1, "limit": TURNOVER_LEDGER_EXPORT_ROW_LIMIT}
+        preview_payload = json.loads(preview_response.body)
+        export_payload = json.loads(export_response.body)
+        self.assertEqual(preview_response.status_code, 400)
+        self.assertEqual(export_response.status_code, 400)
+        self.assertEqual(preview_payload["error"], "turnover_ledger_export_row_limit_exceeded")
+        self.assertEqual(export_payload["error"], "turnover_ledger_export_row_limit_exceeded")
+        self.assertEqual(preview_payload["details"], expected_details)
+        self.assertEqual(export_payload["details"], expected_details)
+
     def test_confirm_and_withdraw_require_mutation_permission_and_write_audit(self) -> None:
-        with self._without_default_test_auth(), TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with self._without_default_test_auth(), TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
@@ -3426,7 +3548,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_confirm_duplicate_submit_rejects_after_first_success_without_second_refresh(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3459,7 +3581,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_confirm_relation_persistence_failure_is_best_effort_success_and_still_enqueues_refresh(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3519,7 +3641,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("relation_rebuild=lambda", source)
 
     def test_confirm_relation_queue_failure_happens_after_relation_confirm_and_read_model_clear(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3545,7 +3667,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_target_confirm_relation_queue_failure_rolls_back_relation_confirm(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3568,7 +3690,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_confirm_relation_fallback_adapter_keeps_legacy_rebuild_confirm_and_after_mutation(self) -> None:
         # PF-P126 target: unsupported postgres queue API uses explicit confirm fallback adapter.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3624,7 +3746,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
     def test_target_confirm_relation_uow_path_does_not_clear_read_model_directly(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3644,7 +3766,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_postgres_confirm_relation_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: confirm relation should not fall back on postgres.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3670,7 +3792,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_confirm_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:
         # PF-P110 characterization: facade path must not call handler fallback invalidation orchestration.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             facade = _RelationWriteFacadeRecorder()
@@ -3706,7 +3828,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_withdraw_duplicate_submit_rejects_after_first_withdraw_without_second_refresh(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3756,7 +3878,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_withdraw_idempotency_key_replays_without_duplicate_withdraw_or_refresh(self) -> None:
         # PF-P179 target contract: same idempotency key/fingerprint should replay the first withdraw response.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3804,7 +3926,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_withdraw_idempotency_key_conflict_rejects_different_payload(self) -> None:
         # PF-P179 target contract: same idempotency key with different payload must be a 409 conflict.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3849,7 +3971,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh(self) -> None:
         # PF-P099 target contract: duplicate withdraw should become a conflict, not a second mutation.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3897,7 +4019,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: withdraw relation should not fall back on postgres.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -3932,9 +4054,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ("workbench_relation", "2026-02", "turnover_relation_changed"),
                 ("workbench_relation", "2026-03", "turnover_relation_changed"),
                 ("workbench_relation", "all", "turnover_relation_changed"),
-                ("cost_statistics", "2026-02", "turnover_relation_changed"),
-                ("cost_statistics", "2026-03", "turnover_relation_changed"),
-                ("cost_statistics", "all", "turnover_relation_changed"),
+                ("cost_statistics", "active:2026-02", "turnover_relation_changed"),
+                ("cost_statistics", "all:2026-02", "turnover_relation_changed"),
+                ("cost_statistics", "active:2026-03", "turnover_relation_changed"),
+                ("cost_statistics", "all:2026-03", "turnover_relation_changed"),
+                ("cost_statistics", "active:all", "turnover_relation_changed"),
+                ("cost_statistics", "all:all", "turnover_relation_changed"),
                 ("search", "2026-02", "turnover_relation_changed"),
                 ("search", "2026-03", "turnover_relation_changed"),
                 ("search", "all", "turnover_relation_changed"),
@@ -3944,30 +4069,33 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_withdraw_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:
         # PF-P110 characterization: facade path must not call direct fallback invalidation orchestration.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            transaction_ids = self._import_bank_rows(app)
-            self._tag_rows(app, transaction_ids)
-            confirmed_response = app.handle_request(
-                "POST",
-                "/api/turnover-ledger/relations/confirm",
-                body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before facade withdraw"}),
-            )
-            relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
-            facade = _RelationWriteFacadeRecorder()
-            app._turnover_ledger_withdraw_write_facade_override = facade
+            try:
+                transaction_ids = self._import_bank_rows(app)
+                self._tag_rows(app, transaction_ids)
+                confirmed_response = app.handle_request(
+                    "POST",
+                    "/api/turnover-ledger/relations/confirm",
+                    body=json.dumps({"bank_row_ids": transaction_ids, "note": "confirm before facade withdraw"}),
+                )
+                relation_id = json.loads(confirmed_response.body)["relation"]["relation_id"]
+                facade = _RelationWriteFacadeRecorder()
+                app._turnover_ledger_withdraw_write_facade_override = facade
 
-            def unexpected_after_mutation(*_args: object, **_kwargs: object) -> None:
-                raise AssertionError("legacy after-mutation side effect should not run on withdraw facade path")
+                def unexpected_after_mutation(*_args: object, **_kwargs: object) -> None:
+                    raise AssertionError("legacy after-mutation side effect should not run on withdraw facade path")
 
-            app._after_turnover_relation_mutation = unexpected_after_mutation  # type: ignore[method-assign]
+                app._after_turnover_relation_mutation = unexpected_after_mutation  # type: ignore[method-assign]
 
-            response = app.handle_request(
-                "POST",
-                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
-                body=json.dumps({"note": "facade withdraw"}),
-            )
-            payload = json.loads(response.body)
+                response = app.handle_request(
+                    "POST",
+                    f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                    body=json.dumps({"note": "facade withdraw"}),
+                )
+                payload = json.loads(response.body)
+            finally:
+                app.shutdown_background_jobs()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
@@ -4010,7 +4138,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("save_snapshot=lambda", source)
 
     def test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -4047,7 +4175,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
     def test_withdraw_relation_fallback_adapter_keeps_legacy_withdraw_and_after_mutation(self) -> None:
         # PF-P127 characterization: fallback adapter still runs legacy withdraw/after-mutation.
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -4103,7 +4231,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn(("turnover_ledger", "all", "turnover_relation_changed"), queue.enqueued)
 
     def test_target_withdraw_relation_queue_failure_rolls_back_relation_withdraw(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -4135,7 +4263,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
 
     def test_target_withdraw_relation_uow_path_does_not_clear_read_model_directly(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
@@ -4195,7 +4323,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(audit_log, [])
 
     def test_turnover_bank_row_tag_batch_rejects_non_turnover_rows_without_refresh_side_effects(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             preview = app._import_service.preview_import(
                 batch_type=BatchType.BANK_TRANSACTION,

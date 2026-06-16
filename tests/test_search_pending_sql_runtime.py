@@ -8,6 +8,10 @@ import unittest
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.pending_invoice_read_model_service import PendingInvoiceReadModelService
+from fin_ops_platform.services.pending_invoice_service import (
+    PENDING_INVOICE_EXPORT_ROW_LIMIT,
+    PendingInvoiceError,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
@@ -1457,6 +1461,54 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["rows"], [])
         self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_miss")])
+
+    def test_pending_invoice_read_model_service_all_rows_rejects_export_row_limit_before_scanning_more_pages(self) -> None:
+        class PendingRepo:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                return {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": "txn-large-export",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                    ],
+                    "pagination": {
+                        "page": 1,
+                        "page_size": 200,
+                        "total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1,
+                    },
+                    "summary": {"total_rows": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1},
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": _pending_invoice_expected_source_versions(),
+                }
+
+        repository = PendingRepo()
+        service = PendingInvoiceReadModelService(
+            repository=repository,
+            queue_repository=QueueRecorder(),
+            row_normalizer=lambda rows: rows,
+            settings_provider=lambda: {},
+            source_versions_provider=_pending_invoice_expected_source_versions,
+        )
+
+        with self.assertRaises(PendingInvoiceError) as context:
+            service.all_rows({"direction": ["expense"], "page": ["1"], "page_size": ["50"]})
+
+        self.assertEqual(context.exception.error_code, "pending_invoice_export_row_limit_exceeded")
+        self.assertEqual(context.exception.details, {"total": PENDING_INVOICE_EXPORT_ROW_LIMIT + 1, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT})
+        self.assertEqual(len(repository.calls), 1)
+        self.assertEqual(repository.calls[0]["page"], "1")
+        self.assertEqual(repository.calls[0]["page_size"], "200")
 
     def test_pending_invoice_sql_page_preserves_bank_tag_settings(self) -> None:
         app = object.__new__(Application)

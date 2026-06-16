@@ -933,6 +933,73 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
         busy_domains = {domain["key"] for domain in payload["domains"] if domain["level"] == "busy"}
         self.assertEqual(busy_domains, {"imports_invoices"})
 
+    def test_generic_import_job_defaults_cover_all_import_domains_without_wrong_invoice_route(self) -> None:
+        service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
+        job = {
+            "job_id": "job_import_001",
+            "type": "import.process.requested",
+            "status": "running",
+            "label": "导入处理",
+            "short_label": "导入处理",
+        }
+
+        payload = service.build_overview(
+            session=FakeSession(identity=FakeIdentity()),
+            active_jobs=[job],
+            attention_jobs=[],
+            app_health_snapshot={
+                "generated_at": "2026-06-04T10:00:00+00:00",
+                "status": "busy",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+            },
+        )
+
+        task = payload["background_tasks"][0]
+        self.assertEqual(
+            task["affected_domains"],
+            ["imports_bank_transactions", "imports_invoices", "imports_etc_invoices"],
+        )
+        self.assertEqual(task["route"], "/imports/bank-transactions")
+        busy_domains = {domain["key"] for domain in payload["domains"] if domain["level"] == "busy"}
+        self.assertEqual(busy_domains, {"imports_bank_transactions", "imports_invoices", "imports_etc_invoices"})
+
+    def test_background_job_registry_file_import_default_does_not_point_bank_import_to_invoice_page(self) -> None:
+        now = "2026-06-04T10:00:00+00:00"
+        payload = BackgroundJob(
+            job_id="job_001",
+            type="file_import",
+            label="导入文件",
+            short_label="导入文件",
+            owner_user_id="u1",
+            visibility="owner",
+            status="running",
+            phase="persist",
+            current=0,
+            total=0,
+            percent=None,
+            message="正在导入文件。",
+            result_summary={},
+            error=None,
+            idempotency_key=None,
+            source={},
+            affected_scopes=["imports"],
+            affected_months=[],
+            created_at=now,
+            started_at=now,
+            updated_at=now,
+            finished_at=None,
+            acknowledged_at=None,
+            superseded_by_job_id=None,
+            superseded_at=None,
+        ).to_payload()
+
+        self.assertEqual(
+            payload["affected_domains"],
+            ["imports_bank_transactions", "imports_invoices", "imports_etc_invoices"],
+        )
+        self.assertEqual(payload["route"], "/operations/app-health")
+
     def test_background_job_payload_contract_exposes_progress_fields(self) -> None:
         now = "2026-06-04T10:00:00+00:00"
         payload = BackgroundJob(

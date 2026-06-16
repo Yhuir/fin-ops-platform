@@ -22,6 +22,14 @@ CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PROJECT_SCOPE_ACTIVE = "active"
 PROJECT_SCOPE_ALL = "all"
+COST_STATISTICS_EXPORT_ROW_LIMIT = 20000
+
+
+class CostStatisticsExportLimitError(ValueError):
+    def __init__(self, *, view: str, total: int, limit: int = COST_STATISTICS_EXPORT_ROW_LIMIT) -> None:
+        super().__init__(f"当前筛选命中 {total} 行，超过 {limit} 行导出上限，请缩小筛选范围。")
+        self.error_code = "cost_statistics_export_row_limit_exceeded"
+        self.details = {"view": view, "total": total, "limit": limit}
 
 
 class CostStatisticsService:
@@ -253,6 +261,7 @@ class CostStatisticsService:
                 end_date=end_date,
                 project_scope=normalized_project_scope,
             )
+            self._ensure_export_row_limit(view=view, total=len(entries))
             scope_label = self._build_scope_label(
                 month=month,
                 start_month=start_month,
@@ -295,6 +304,7 @@ class CostStatisticsService:
                     expense_types=normalized_expense_types,
                     project_scope=normalized_project_scope,
                 )
+                self._ensure_export_row_limit(view=view, total=len(entries))
                 rows = self._build_project_aggregate_rows(entries, aggregate_by=resolved_aggregate_by or "month")
                 scope_label = self._build_scope_label(
                     month="all",
@@ -358,6 +368,7 @@ class CostStatisticsService:
                     include_expense_content_summary=True,
                     sort_by="time",
                 )
+            self._ensure_export_row_limit(view=view, total=self._project_detail_export_row_count(payload))
             return self._build_preview_payload(
                 view=view,
                 file_name=self._build_filename(
@@ -394,6 +405,7 @@ class CostStatisticsService:
                 expense_types=normalized_expense_types,
                 project_scope=normalized_project_scope,
             )
+            self._ensure_export_row_limit(view=view, total=len(entries))
             scope_label = self._build_scope_label(
                 month=month,
                 start_month=start_month,
@@ -558,6 +570,7 @@ class CostStatisticsService:
                 end_date=end_date,
                 project_scope=normalized_project_scope,
             )
+            self._ensure_export_row_limit(view=view, total=len(entries))
             scope_label = self._build_scope_label(
                 month=month,
                 start_month=start_month,
@@ -573,6 +586,10 @@ class CostStatisticsService:
             return filename, self._serialize_workbook(workbook)
         if view == "month":
             payload = self.get_month_statistics(month, project_scope=normalized_project_scope)
+            self._ensure_export_row_limit(
+                view=view,
+                total=int((payload.get("summary") or {}).get("row_count") or 0),
+            )
             workbook = self._build_month_workbook(payload)
             filename = self._build_filename(month=month, view=view)
             return filename, self._serialize_workbook(workbook)
@@ -590,6 +607,7 @@ class CostStatisticsService:
                     expense_types=normalized_expense_types,
                     project_scope=normalized_project_scope,
                 )
+                self._ensure_export_row_limit(view=view, total=len(entries))
                 rows = self._build_project_aggregate_rows(entries, aggregate_by=resolved_aggregate_by or "month")
                 workbook = self._build_project_aggregate_workbook(rows)
                 scope_label = self._build_scope_label(
@@ -637,6 +655,7 @@ class CostStatisticsService:
                     include_expense_content_summary=include_expense_content_summary,
                     sort_by=sort_by,
                 )
+            self._ensure_export_row_limit(view=view, total=self._project_detail_export_row_count(payload))
             workbook = self._project_detail_export_service.build_workbook(payload)
             filename = self._build_filename(
                 month=payload["summary"]["scope_label"],
@@ -656,6 +675,7 @@ class CostStatisticsService:
                 expense_types=normalized_expense_types,
                 project_scope=normalized_project_scope,
             )
+            self._ensure_export_row_limit(view=view, total=len(entries))
             scope_label = self._build_scope_label(
                 month=month,
                 start_month=start_month,
@@ -1268,6 +1288,22 @@ class CostStatisticsService:
             "exception_rows": [],
             "ignored_rows": [],
         }
+
+    @staticmethod
+    def _ensure_export_row_limit(*, view: str, total: int) -> None:
+        if total > COST_STATISTICS_EXPORT_ROW_LIMIT:
+            raise CostStatisticsExportLimitError(view=view, total=total)
+
+    @staticmethod
+    def _project_detail_export_row_count(payload: dict[str, Any]) -> int:
+        count_keys = (
+            "transaction_rows",
+            "oa_rows",
+            "invoice_rows",
+            "exception_rows",
+            "ignored_rows",
+        )
+        return sum(len(payload.get(key) or []) for key in count_keys)
 
     @staticmethod
     def _build_preview_payload(

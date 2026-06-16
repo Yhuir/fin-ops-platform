@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from fin_ops_platform.app.routes_no_oa_bank_batches import NoOaBankBatchApiRoutes
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchRelationMutationError
 
 
 class FakeNoOaApplicationService:
@@ -86,6 +87,22 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
                 ("tag_selection", None),
             ],
         )
+
+    def test_list_batches_invalid_paging_returns_structured_400(self) -> None:
+        class InvalidPagingService(FakeNoOaApplicationService):
+            def list_batches_payload(self, query):  # type: ignore[no-untyped-def]
+                self.calls.append(("list", query))
+                raise NoOaBankBatchRelationMutationError("invalid_paging", "page_size must be <= 200.")
+
+        service = InvalidPagingService()
+        routes = NoOaBankBatchApiRoutes(application_service=service)
+
+        status, payload = routes.list_batches({"page": ["1"], "page_size": ["201"]})
+
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload["error"], "invalid_paging")
+        self.assertEqual(payload["message"], "page_size must be <= 200.")
+        self.assertEqual(service.calls, [("list", {"page": ["1"], "page_size": ["201"]})])
 
     def test_tag_selection_version_conflict_returns_409_and_error_code(self) -> None:
         service = FakeNoOaApplicationService()

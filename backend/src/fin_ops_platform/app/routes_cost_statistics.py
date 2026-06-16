@@ -5,6 +5,8 @@ from http import HTTPStatus
 from time import monotonic
 from typing import Any, Callable
 
+from fin_ops_platform.services.cost_statistics_service import CostStatisticsExportLimitError
+
 
 class CostStatisticsApiRoutes:
     def __init__(
@@ -130,6 +132,11 @@ class CostStatisticsApiRoutes:
                 HTTPStatus.NOT_FOUND,
                 {"error": "cost_statistics_transaction_not_found", "transaction_id": transaction_id},
             )
+        except CostStatisticsExportLimitError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": error.error_code, "message": str(error), "details": dict(error.details)},
+            )
         except ValueError as error:
             if str(error) == "project_scope must be active or all":
                 return self._project_scope_error_response(error)
@@ -174,6 +181,11 @@ class CostStatisticsApiRoutes:
                 end_date=end_date,
                 aggregate_by=aggregate_by,
                 project_scope=project_scope or "active",
+            )
+        except CostStatisticsExportLimitError as error:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": error.error_code, "message": str(error), "details": dict(error.details)},
             )
         except ValueError as error:
             if str(error) == "project_scope must be active or all":

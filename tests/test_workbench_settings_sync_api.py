@@ -1,12 +1,15 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from pymongo.errors import NetworkTimeout
 
 from fin_ops_platform.app.server import build_application
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 
 
@@ -29,6 +32,16 @@ class ExplodingProjectAdapter:
 
 
 class WorkbenchSettingsSyncApiTests(unittest.TestCase):
+    def _readonly_identity(self) -> OAUserIdentity:
+        return OAUserIdentity(
+            user_id="readonly-user-id",
+            username="READONLY001",
+            nickname="只读用户",
+            display_name="只读用户",
+            roles=["finance"],
+            permissions=["finops:access"],
+        )
+
     def test_settings_update_returns_bad_gateway_when_oa_role_sync_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -157,6 +170,64 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(payload["error"], "oa_project_sync_failed")
         self.assertEqual(settings_payload["projects"]["active"][0]["project_name"], "本地测试项目")
+
+    def test_project_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:
+        with (
+            patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}),
+            tempfile.TemporaryDirectory() as temp_dir,
+        ):
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["READONLY001"],
+                readonly_export_usernames=["READONLY001"],
+                admin_usernames=[],
+            )
+            created_payload = app._app_settings_service.create_manual_project(
+                actor_id="settings_owner",
+                project_code="LOCAL-001",
+                project_name="本地测试项目",
+            )
+            project_id = created_payload["projects"]["active"][0]["id"]
+            app._oa_identity_service.resolve_identity = lambda _token: self._readonly_identity()
+            headers = {"Authorization": "Bearer readonly-token"}
+
+            with patch.object(app._project_costing_service, "sync_projects_from_oa") as sync_projects:
+                sync_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/projects/sync",
+                    body=json.dumps({"actor_id": "spoofed-owner"}),
+                    headers=headers,
+                )
+                create_response = app.handle_request(
+                    "POST",
+                    "/api/workbench/settings/projects",
+                    body=json.dumps(
+                        {
+                            "actor_id": "spoofed-owner",
+                            "project_code": "LOCAL-002",
+                            "project_name": "伪造项目",
+                        }
+                    ),
+                    headers=headers,
+                )
+                delete_response = app.handle_request(
+                    "DELETE",
+                    f"/api/workbench/settings/projects/{project_id}",
+                    headers=headers,
+                )
+
+            settings_payload = app._app_settings_service.get_settings_payload()
+
+        self.assertEqual(sync_response.status_code, 403)
+        self.assertEqual(json.loads(sync_response.body)["error"], "permission_denied")
+        self.assertEqual(create_response.status_code, 403)
+        self.assertEqual(json.loads(create_response.body)["error"], "permission_denied")
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertEqual(json.loads(delete_response.body)["error"], "permission_denied")
+        sync_projects.assert_not_called()
+        self.assertEqual([project["project_code"] for project in settings_payload["projects"]["active"]], ["LOCAL-001"])
 
 
 if __name__ == "__main__":

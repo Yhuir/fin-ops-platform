@@ -990,6 +990,10 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(queue.completed, [("tenant-a", "input_invoice_usage", "all", 7)])
 
+    def test_refresh_handler_requires_projection_builder_boundary(self) -> None:
+        with self.assertRaisesRegex(ValueError, "projection_builder is required"):
+            InvoiceUsageCollectionReadModelRefreshService(queue_repository=object())
+
     def test_oa_refresh_handler_expands_all_scopes_and_completes_with_source_version(self) -> None:
         class FakeBuilder:
             def list_oa_pending_payment_scope_shards(self, scope_key: str) -> list[str]:

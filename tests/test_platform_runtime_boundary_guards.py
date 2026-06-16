@@ -557,6 +557,25 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_batch_accounting_withdraw_has_no_direct_pair_write_fallback(self) -> None:
+        path = SERVICES_ROOT / "batch_accounting_service.py"
+        source = path.read_text(encoding="utf-8")
+        tree = _parse(path)
+        withdraw_source = _function_source(tree, source, "_withdraw_unlocked")
+
+        violations: list[str] = []
+        for forbidden in (
+            "withdraw_latest_for_row_ids",
+            "_pair_relation_service.create_active_relation",
+            "_pair_relation_service.record_history",
+        ):
+            if forbidden in withdraw_source:
+                violations.append(f"BatchAccountingService.withdraw keeps direct pair write fallback {forbidden}")
+        if "batch_accounting_relation_command_unavailable" not in withdraw_source:
+            violations.append("BatchAccountingService.withdraw does not fail fast when relation command service is unavailable")
+
+        self.assertEqual(violations, [])
+
     def test_batch_accounting_repair_has_no_direct_pair_write_fallback(self) -> None:
         path = SERVICES_ROOT / "batch_accounting_service.py"
         source = path.read_text(encoding="utf-8")

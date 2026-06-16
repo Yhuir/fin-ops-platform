@@ -7,6 +7,7 @@ from typing import Any, Callable
 from fin_ops_platform.services.pending_invoice_service import (
     EXPENSE_FILTERS,
     INCOME_FILTERS,
+    PENDING_INVOICE_EXPORT_ROW_LIMIT,
     VALID_FILTERS,
     PendingInvoiceError,
 )
@@ -133,6 +134,12 @@ class PendingInvoiceReadModelService:
         rows = list(first_payload.get("rows") or [])
         pagination = first_payload.get("pagination") if isinstance(first_payload.get("pagination"), dict) else {}
         total = int(pagination.get("total") or len(rows))
+        if total > PENDING_INVOICE_EXPORT_ROW_LIMIT:
+            raise PendingInvoiceError(
+                "pending_invoice_export_row_limit_exceeded",
+                f"当前筛选命中 {total} 行，超过 {PENDING_INVOICE_EXPORT_ROW_LIMIT} 行导出上限，请缩小筛选范围。",
+                details={"total": total, "limit": PENDING_INVOICE_EXPORT_ROW_LIMIT},
+            )
         page = 2
         while len(rows) < total:
             page_query = {key: list(values) for key, values in query.items()}

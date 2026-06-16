@@ -12,10 +12,11 @@ class InvoiceUsageCollectionReadModelRefreshService:
         self,
         *,
         projection_builder: Any | None = None,
-        application: Any | None = None,
         queue_repository: Any | None = None,
     ) -> None:
-        self._projection_builder = projection_builder if projection_builder is not None else application
+        if projection_builder is None:
+            raise ValueError("projection_builder is required for invoice usage collection read model refresh.")
+        self._projection_builder = projection_builder
         self._queue_repository = queue_repository
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
@@ -69,7 +70,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
         else:
             raise ValueError(f"Unsupported invoice relation read model event type: {event.event_type}")
         if not callable(rebuild):
-            raise RuntimeError(f"Application does not expose rebuild method for {scope_type}.")
+            raise RuntimeError(f"Projection builder does not expose rebuild method for {scope_type}.")
         result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         self._complete_dirty_scope(event, scope_type=scope_type, scope_key=scope_key)

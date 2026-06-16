@@ -131,8 +131,12 @@ class TurnoverLedgerWriteUnitOfWork:
                     if event_id is not None:
                         outbox_event_ids.append(event_id)
                     if source_version is not None:
-                        for scope_key in list(request.get("scope_keys") or ["all"]):
-                            source_versions[str(scope_key)] = source_version
+                        event_scope_key = _event_value(event, "scope_key")
+                        if event_scope_key is not None:
+                            source_versions[str(event_scope_key)] = source_version
+                        else:
+                            for scope_key in list(request.get("scope_keys") or ["all"]):
+                                source_versions[str(scope_key)] = source_version
             if idempotency is not None and idempotency_store is not None:
                 if not isinstance(result, dict):
                     raise TypeError("TurnoverLedgerWriteUnitOfWork idempotent handler must return a dict result.")

@@ -13,6 +13,8 @@ from fin_ops_platform.services.turnover_ledger_extra_service import TurnoverLedg
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
+from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_by_row_id_from_distribution_payload
+from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
 from fin_ops_platform.services.state_store import default_data_dir
 
 
@@ -25,28 +27,37 @@ class TurnoverLedgerSqlProjectionBuilder:
         ledger_service: TurnoverLedgerService | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
         bank_transaction_tag_read_facade: Any | None = None,
+        workbench_relation_read_facade: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_repository = read_repository
         self._ledger_service = ledger_service
         self._source_versions_provider = source_versions_provider
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
+        self._workbench_relation_read_facade = workbench_relation_read_facade
 
     def rebuild_turnover_ledger_read_model_scope(self, scope_key: str, *, source_version: object = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         ledger_service = self._ledger_service
         source_versions_provider = self._source_versions_provider
         read_repository = self._read_repository
+        workbench_relation_read_facade = self._workbench_relation_read_facade
         if ledger_service is None or source_versions_provider is None or read_repository is None:
             built = self._build_runtime_dependencies()
             ledger_service = built["ledger_service"]
             source_versions_provider = built["source_versions_provider"]
             read_repository = built["read_repository"]
+            workbench_relation_read_facade = workbench_relation_read_facade or built.get("workbench_relation_read_facade")
 
         rows = self._collect_rows(ledger_service)
         if normalized_scope_key != "all":
             rows = [row for row in rows if self._row_scope_key(row) == normalized_scope_key]
         source_versions = dict(source_versions_provider())
+        rows = self._with_workbench_relation_context(
+            rows,
+            workbench_relation_read_facade=workbench_relation_read_facade,
+            source_versions=source_versions,
+        )
         rows = [{**row, "source_versions": source_versions} for row in rows]
         payload = {
             "scope_key": normalized_scope_key,
@@ -157,6 +168,9 @@ class TurnoverLedgerSqlProjectionBuilder:
         return {
             "ledger_service": ledger_service,
             "read_repository": state_store.read_model_repository,
+            "workbench_relation_read_facade": WorkbenchRelationReadFacade(
+                read_model_repository=state_store.read_model_repository,
+            ),
             "source_versions_provider": lambda: _with_bank_detail_source_versions(
                 build_turnover_ledger_source_versions(
                     relation_service=relation_service,
@@ -168,6 +182,67 @@ class TurnoverLedgerSqlProjectionBuilder:
             ),
         }
 
+    @classmethod
+    def _with_workbench_relation_context(
+        cls,
+        rows: list[dict[str, Any]],
+        *,
+        workbench_relation_read_facade: Any | None,
+        source_versions: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if workbench_relation_read_facade is None:
+            return rows
+        get_by_row_ids = getattr(workbench_relation_read_facade, "get_by_row_ids", None)
+        if not callable(get_by_row_ids):
+            return rows
+        row_ids = _dedupe_preserve_order(row_id for row in rows for row_id in cls._bank_row_ids(row))
+        if not row_ids:
+            return rows
+        scope_keys = _dedupe_preserve_order(cls._row_scope_key(row) for row in rows)
+        payload = get_by_row_ids(
+            row_ids,
+            require_fresh=True,
+            reason="turnover_ledger_sql_projection",
+            scope_keys_hint=scope_keys,
+        )
+        if not isinstance(payload, dict) or str(payload.get("status") or "") != FRESH_WORKBENCH_RELATION_STATUS:
+            raise RuntimeError("workbench_relation_read_model_not_fresh")
+        relation_source_versions = payload.get("source_versions")
+        if isinstance(relation_source_versions, dict):
+            source_versions["workbench_relation_source_versions"] = dict(relation_source_versions)
+        relations_by_row_id = relation_dicts_by_row_id_from_distribution_payload(payload)
+        return [cls._apply_workbench_relation_context(row, relations_by_row_id) for row in rows]
+
+    @classmethod
+    def _apply_workbench_relation_context(
+        cls,
+        row: dict[str, Any],
+        relations_by_row_id: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        enriched = dict(row)
+        flow_rows = [dict(item) for item in list(row.get("flow_rows") or []) if isinstance(item, dict)]
+        enriched_flow_rows = [
+            cls._apply_workbench_relation_context_to_leaf(flow_row, relations_by_row_id)
+            for flow_row in flow_rows
+        ]
+        if flow_rows:
+            enriched["flow_rows"] = enriched_flow_rows
+        enriched.update(_workbench_relation_summary_for_ids(cls._bank_row_ids(enriched), relations_by_row_id))
+        return enriched
+
+    @staticmethod
+    def _apply_workbench_relation_context_to_leaf(
+        row: dict[str, Any],
+        relations_by_row_id: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        enriched = dict(row)
+        enriched.update(_workbench_relation_summary_for_ids(_bank_row_ids(row), relations_by_row_id))
+        return enriched
+
+    @staticmethod
+    def _bank_row_ids(row: dict[str, Any]) -> list[str]:
+        return _bank_row_ids(row)
+
 
 def _with_bank_detail_source_versions(source_versions: dict[str, Any], category_provider: Any) -> dict[str, Any]:
     result = dict(source_versions)
@@ -175,3 +250,74 @@ def _with_bank_detail_source_versions(source_versions: dict[str, Any], category_
     if isinstance(provider_source_versions, dict):
         result["bank_detail_source_versions"] = dict(provider_source_versions)
     return result
+
+
+def _workbench_relation_summary_for_ids(
+    row_ids: list[str],
+    relations_by_row_id: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    relations: list[dict[str, Any]] = []
+    seen_case_ids: set[str] = set()
+    for row_id in row_ids:
+        for relation in list(relations_by_row_id.get(row_id) or []):
+            if not isinstance(relation, dict):
+                continue
+            case_id = _text(relation.get("case_id"))
+            if case_id and case_id in seen_case_ids:
+                continue
+            if case_id:
+                seen_case_ids.add(case_id)
+            relations.append(relation)
+    if not relations:
+        return {
+            "workbench_relation_status": "unlinked",
+            "workbench_relation_case_ids": [],
+            "workbench_relation_mode": "",
+            "workbench_relation_source": "",
+            "workbench_relation_row_ids": [],
+        }
+    statuses = _dedupe_preserve_order(_text(relation.get("relation_status") or relation.get("status")) for relation in relations)
+    case_ids = _dedupe_preserve_order(_text(relation.get("case_id")) for relation in relations)
+    modes = _dedupe_preserve_order(_text(relation.get("relation_mode")) for relation in relations)
+    sources = _dedupe_preserve_order(_text(relation.get("relation_source")) for relation in relations)
+    relation_row_ids = _dedupe_preserve_order(row_id for relation in relations for row_id in _text_list(relation.get("row_ids")))
+    return {
+        "workbench_relation_status": statuses[0] if len(statuses) == 1 else "mixed",
+        "workbench_relation_case_ids": case_ids,
+        "workbench_relation_mode": modes[0] if len(modes) == 1 else ("multiple" if len(modes) > 1 else ""),
+        "workbench_relation_source": sources[0] if len(sources) == 1 else ("multiple" if len(sources) > 1 else ""),
+        "workbench_relation_row_ids": relation_row_ids,
+    }
+
+
+def _bank_row_ids(row: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("source_bank_row_id", "principal_bank_row_id"):
+        ids.append(_text(row.get(key)))
+    ids.extend(_text_list(row.get("bank_row_ids")))
+    ids.extend(_text_list(row.get("settlement_bank_row_ids")))
+    for child_key in ("flow_rows", "allocation_lots", "lot_rows", "rows"):
+        for child in list(row.get(child_key) or []):
+            if isinstance(child, dict):
+                ids.extend(_bank_row_ids(child))
+    return _dedupe_preserve_order(ids)
+
+
+def _dedupe_preserve_order(values: Any) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = _text(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _text_list(value: Any) -> list[str]:
+    return [_text(item) for item in list(value or []) if _text(item)]
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()

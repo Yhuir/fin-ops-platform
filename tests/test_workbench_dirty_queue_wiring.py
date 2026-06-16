@@ -526,9 +526,21 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         app = build_application()
         queue = RecordingDirtyQueue()
         app._workbench_reconciliation_dirty_queue = queue
+        current = app._app_settings_service.get_settings_payload()
+        access_control = current.get("access_control") or {}
+        projects = current.get("projects") or {}
         payload = {
-            **app._app_settings_service.get_settings_payload(),
+            "completed_project_ids": list(projects.get("completed_project_ids") or []),
+            "bank_account_mappings": list(current.get("bank_account_mappings") or []),
+            "allowed_usernames": list(access_control.get("allowed_usernames") or []),
+            "readonly_export_usernames": list(access_control.get("readonly_export_usernames") or []),
+            "admin_usernames": list(access_control.get("admin_usernames") or []),
+            "workbench_column_layouts": dict(current.get("workbench_column_layouts") or {}),
+            "oa_retention": dict(current.get("oa_retention") or {}),
+            "oa_import": dict(current.get("oa_import") or {}),
             "oa_invoice_offset": {"applicant_names": ["李四"]},
+            "pending_invoice_tag_groups": dict(current.get("pending_invoice_tag_groups") or {}),
+            "pending_output_invoice_tag_groups": dict(current.get("pending_output_invoice_tag_groups") or {}),
         }
         session = SimpleNamespace(
             can_mutate_data=True,

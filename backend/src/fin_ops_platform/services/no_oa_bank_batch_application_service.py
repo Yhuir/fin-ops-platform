@@ -94,6 +94,7 @@ class NoOaBankBatchApplicationService:
         self._relation_command_service = relation_command_service
 
     def list_batches_payload(self, query: dict[str, list[str]]) -> dict[str, object]:
+        pagination = self._pagination_from_query(query)
         filters = {
             "month": query.get("month", [""])[0],
             "type": query.get("type", [""])[0],
@@ -115,6 +116,7 @@ class NoOaBankBatchApplicationService:
                 return {
                     "summary": self.summary([]),
                     "batches": [],
+                    **self._pagination_payload([], pagination),
                     "read_model_status": "missing",
                     "read_model_stale_reasons": [],
                     "refresh_enqueued": refresh_enqueued,
@@ -127,7 +129,8 @@ class NoOaBankBatchApplicationService:
                     refresh_enqueued = self.enqueue_background_refresh(["all"], reason=refresh_reason)
                     return {
                         "summary": self.summary(summary_read_model_batches),
-                        "batches": self.resolve_labels(read_model_batches),
+                        "batches": self.resolve_labels(self._page_items(read_model_batches, pagination)),
+                        **self._pagination_payload(read_model_batches, pagination),
                         "read_model_status": "stale",
                         "read_model_stale_reasons": stale_reasons,
                         "refresh_enqueued": refresh_enqueued,
@@ -135,7 +138,8 @@ class NoOaBankBatchApplicationService:
                     }
                 return {
                     "summary": self.summary(summary_read_model_batches),
-                    "batches": self.resolve_labels(read_model_batches),
+                    "batches": self.resolve_labels(self._page_items(read_model_batches, pagination)),
+                    **self._pagination_payload(read_model_batches, pagination),
                     "read_model_status": "fresh",
                 }
         summary_batches = self._no_oa_bank_batch_service.list_batches(summary_filters)
@@ -143,7 +147,8 @@ class NoOaBankBatchApplicationService:
         if summary_batches or read_batches:
             return {
                 "summary": self.summary(summary_batches),
-                "batches": self.resolve_labels(read_batches),
+                "batches": self.resolve_labels(self._page_items(read_batches, pagination)),
+                **self._pagination_payload(read_batches, pagination),
                 "read_model_status": "fresh",
             }
         refresh_reason = "api_no_oa_read_model_unavailable"
@@ -151,6 +156,7 @@ class NoOaBankBatchApplicationService:
         return {
             "summary": self.summary([]),
             "batches": [],
+            **self._pagination_payload([], pagination),
             "read_model_status": "unavailable",
             "read_model_stale_reasons": [],
             "refresh_enqueued": refresh_enqueued,
@@ -394,6 +400,54 @@ class NoOaBankBatchApplicationService:
                 payload=exc.payload,
             )
         return NoOaBankBatchRelationMutationError(exc.error_code, exc.error_code, payload=exc.payload)
+
+    @classmethod
+    def _pagination_from_query(cls, query: dict[str, list[str]]) -> dict[str, int] | None:
+        if "page" not in query and "page_size" not in query and "pageSize" not in query:
+            return None
+        return {
+            "page": cls._positive_int((query.get("page") or [1])[0], "page"),
+            "page_size": cls._positive_int(
+                (query.get("page_size") or query.get("pageSize") or [100])[0],
+                "page_size",
+                maximum=200,
+            ),
+        }
+
+    @staticmethod
+    def _positive_int(value: object, field: str, *, maximum: int | None = None) -> int:
+        try:
+            number = int(value if value not in (None, "") else 1)
+        except (TypeError, ValueError) as exc:
+            raise NoOaBankBatchRelationMutationError("invalid_paging", f"{field} must be a positive integer.") from exc
+        if number < 1:
+            raise NoOaBankBatchRelationMutationError("invalid_paging", f"{field} must be a positive integer.")
+        if maximum is not None and number > maximum:
+            raise NoOaBankBatchRelationMutationError("invalid_paging", f"{field} must be <= {maximum}.")
+        return number
+
+    @staticmethod
+    def _page_items(items: list[dict[str, Any]], pagination: dict[str, int] | None) -> list[dict[str, Any]]:
+        if pagination is None:
+            return items
+        page = pagination["page"]
+        page_size = pagination["page_size"]
+        start = (page - 1) * page_size
+        return items[start : start + page_size]
+
+    @staticmethod
+    def _pagination_payload(items: list[dict[str, Any]], pagination: dict[str, int] | None) -> dict[str, object]:
+        if pagination is None:
+            return {}
+        page_size = pagination["page_size"]
+        return {
+            "pagination": {
+                "page": pagination["page"],
+                "page_size": page_size,
+                "pageSize": page_size,
+                "total": len(items),
+            }
+        }
 
     def refresh_batches(
         self,

@@ -211,6 +211,29 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["totalWithTax"], "50.00")
         self.assertEqual(payload["sort"], {"field": "total_with_tax", "direction": "desc"})
 
+    def test_page_size_limit_protects_first_screen_slo(self) -> None:
+        vendor = self._counterparty("vendor-large", "大数据供应商")
+        service = self._service(
+            invoices=[
+                self._invoice(
+                    f"inv-large-{index}",
+                    f"LG-{index:04d}",
+                    vendor,
+                    digital_invoice_no=f"2637200000045{index:07d}",
+                    total_with_tax="1.00",
+                )
+                for index in range(250)
+            ]
+        )
+
+        payload = service.list_rows(page=1, page_size=200)
+
+        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 200, "total": 250})
+        self.assertEqual(len(payload["rows"]), 200)
+        with self.assertRaises(InputInvoiceUsageError) as context:
+            service.list_rows(page=1, page_size=201)
+        self.assertEqual(context.exception.error_code, "invalid_paging")
+
     def test_canonical_filter_validation_rejects_unknown_fields_and_operators(self) -> None:
         service = self._service(invoices=[])
 

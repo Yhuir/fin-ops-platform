@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import unittest
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile, is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -15,6 +15,17 @@ if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
 from mock_import_files import BOCOM_JAN, CEB_JAN, INVOICE_JAN, PINGAN_JAN, icbc_history_file, invoice_export_file
+
+
+def repeat_last_xlsx_row(content: bytes, *, total_data_rows: int) -> bytes:
+    workbook = load_workbook(BytesIO(content))
+    sheet = workbook.active
+    last_row = [cell.value for cell in sheet[sheet.max_row]]
+    for _ in range(total_data_rows - 1):
+        sheet.append(last_row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 class FakeImportIdStore:
@@ -263,6 +274,37 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(session.files[0].audit.importable_count, 1)
         self.assertEqual(session.files[1].audit.duplicate_across_files_count, 1)
 
+    def test_preview_bounds_large_invoice_duplicate_group_to_one_confirmable_row(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = invoice_export_file("large-invoice-duplicates.xlsx")
+        content = repeat_last_xlsx_row(upload.content, total_data_rows=240)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=upload.name, content=content)],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.row_count, 240)
+        self.assertEqual(preview_file.success_count, 240)
+        self.assertEqual(preview_file.error_count, 0)
+        self.assertEqual(session.audit.original_count, 240)
+        self.assertEqual(session.audit.unique_count, 1)
+        self.assertEqual(session.audit.duplicate_in_file_count, 239)
+        self.assertEqual(session.audit.duplicate_across_files_count, 0)
+        self.assertEqual(session.audit.importable_count, 1)
+        self.assertEqual(session.audit.confirmable_count, 1)
+        self.assertEqual(session.audit.skipped_count, 239)
+        self.assertEqual(preview_file.audit.duplicate_in_file_count, 239)
+        self.assertEqual(len(session.duplicate_groups), 1)
+        duplicate_group = session.duplicate_groups[0]
+        self.assertEqual(duplicate_group.record_type, "invoice")
+        self.assertEqual(duplicate_group.duplicate_type, "duplicate_in_file")
+        self.assertEqual(len(duplicate_group.rows), 240)
+        self.assertEqual(duplicate_group.rows[-1]["row_no"], 240)
+
     def test_preview_files_audit_counts_cross_file_bank_transaction_identity_duplicates(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service)
@@ -311,6 +353,49 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(duplicate_row["counterparty_name"], "重庆高新技术产业开发区国家税务局")
         self.assertEqual(session.files[0].audit.importable_count, 1)
         self.assertEqual(session.files[1].audit.duplicate_across_files_count, 1)
+
+    def test_preview_bounds_large_bank_duplicate_group_to_one_confirmable_row(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = icbc_history_file(name="large-historydetail.xlsx", account_no="6222020200006386")
+        content = repeat_last_xlsx_row(upload.content, total_data_rows=240)
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=upload.name,
+                    content=content,
+                    selected_bank_mapping_id="bank_mapping_icbc_6386",
+                    selected_bank_name="工商银行",
+                    selected_bank_short_name="工行",
+                    selected_bank_last4="6386",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.row_count, 240)
+        self.assertEqual(preview_file.success_count, 240)
+        self.assertEqual(preview_file.error_count, 0)
+        self.assertEqual(session.audit.original_count, 240)
+        self.assertEqual(session.audit.unique_count, 1)
+        self.assertEqual(session.audit.duplicate_in_file_count, 239)
+        self.assertEqual(session.audit.duplicate_across_files_count, 0)
+        self.assertEqual(session.audit.importable_count, 1)
+        self.assertEqual(session.audit.confirmable_count, 1)
+        self.assertEqual(session.audit.skipped_count, 239)
+        self.assertEqual(preview_file.audit.duplicate_in_file_count, 239)
+        self.assertEqual(len(session.duplicate_groups), 1)
+        duplicate_group = session.duplicate_groups[0]
+        self.assertEqual(duplicate_group.record_type, "bank_transaction")
+        self.assertEqual(duplicate_group.duplicate_type, "duplicate_in_file")
+        self.assertEqual(len(duplicate_group.rows), 240)
+        self.assertEqual(duplicate_group.rows[-1]["row_no"], 240)
+        self.assertEqual(duplicate_group.rows[-1]["account_no"], "6222020200006386")
+        self.assertEqual(duplicate_group.rows[-1]["direction"], "outflow")
+        self.assertEqual(duplicate_group.rows[-1]["amount"], "6180.00")
 
     def test_confirm_session_rejects_stale_preview_when_existing_records_change(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())

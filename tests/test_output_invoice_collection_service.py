@@ -278,6 +278,29 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertIn("collection_status", [field["field"] for field in options["fields"]])
         self.assertIn("receipt_status", [field["field"] for field in options["fields"]])
 
+    def test_page_size_limit_protects_first_screen_slo(self) -> None:
+        buyer = self._counterparty("buyer-large", "大数据客户")
+        service = self._service(
+            invoices=[
+                self._invoice(
+                    f"out-large-{index}",
+                    f"OUT-LG-{index:04d}",
+                    buyer,
+                    digital_invoice_no=f"2637200000099{index:07d}",
+                    total_with_tax="1.00",
+                )
+                for index in range(250)
+            ]
+        )
+
+        payload = service.list_rows(page=1, page_size=200)
+
+        self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 200, "total": 250})
+        self.assertEqual(len(payload["rows"]), 200)
+        with self.assertRaises(OutputInvoiceCollectionError) as context:
+            service.list_rows(page=1, page_size=201)
+        self.assertEqual(context.exception.error_code, "invalid_paging")
+
     def test_receipt_preview_uses_single_income_transaction_or_requires_selection(self) -> None:
         buyer = self._counterparty("buyer", "客户")
         single_invoice = self._invoice("out-single", "2001", buyer, total_with_tax="80.00")

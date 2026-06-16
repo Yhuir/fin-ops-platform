@@ -882,6 +882,44 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(expense_sheet["A2"].value, "2026-03-10 21:27:55")
         self.assertEqual(expense_sheet["B2"].value, "云南溯源科技")
 
+    def test_cost_statistics_export_limit_returns_structured_error(self) -> None:
+        from fin_ops_platform.services.cost_statistics_service import (
+            COST_STATISTICS_EXPORT_ROW_LIMIT,
+            CostStatisticsExportLimitError,
+        )
+
+        class ExportLimitService:
+            def get_export_preview(self, **_kwargs: object) -> dict[str, object]:
+                raise CostStatisticsExportLimitError(view="time", total=COST_STATISTICS_EXPORT_ROW_LIMIT + 1)
+
+            def export_view(self, **_kwargs: object) -> tuple[str, bytes]:
+                raise CostStatisticsExportLimitError(view="time", total=COST_STATISTICS_EXPORT_ROW_LIMIT + 1)
+
+        self.app._cost_statistics_service = ExportLimitService()
+
+        preview_response = self.app.handle_request(
+            "GET",
+            "/api/cost-statistics/export-preview?month=2026-03&view=time",
+        )
+        export_response = self.app.handle_request(
+            "GET",
+            "/api/cost-statistics/export?month=2026-03&view=time",
+        )
+
+        expected_details = {
+            "view": "time",
+            "total": COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
+            "limit": COST_STATISTICS_EXPORT_ROW_LIMIT,
+        }
+        preview_payload = json.loads(preview_response.body)
+        export_payload = json.loads(export_response.body)
+        self.assertEqual(preview_response.status_code, 400)
+        self.assertEqual(export_response.status_code, 400)
+        self.assertEqual(preview_payload["error"], "cost_statistics_export_row_limit_exceeded")
+        self.assertEqual(export_payload["error"], "cost_statistics_export_row_limit_exceeded")
+        self.assertEqual(preview_payload["details"], expected_details)
+        self.assertEqual(export_payload["details"], expected_details)
+
     def test_project_export_honors_advanced_export_options(self) -> None:
         from fin_ops_platform.domain.enums import BatchType
 

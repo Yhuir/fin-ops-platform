@@ -6,7 +6,7 @@ import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.services.background_job_service import BackgroundJobService
@@ -59,6 +59,56 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(updated.percent, 9)
         self.assertEqual(active_jobs[0].current, 3)
         self.assertEqual(active_jobs[0].short_label, "正在导入 ETC发票 3/31")
+
+    def test_job_acceptance_and_progress_visibility_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            job = service.create_job(
+                job_type="etc_invoice_import",
+                label="导入 ETC发票",
+                owner_user_id="user-001",
+                total=31,
+                source={
+                    "affected_domains": ["imports_etc_invoices", "etc_tickets"],
+                    "route": "/imports/etc-invoices",
+                },
+            )
+            queued_jobs = service.list_active_jobs("user-001")
+
+            service.start_job(job.job_id)
+            service.update_progress(
+                job.job_id,
+                phase="persist_items",
+                message="正在导入 ETC发票。",
+                current=3,
+                total=31,
+            )
+            running_jobs = service.list_active_jobs("user-001")
+
+        self.assertEqual([item.job_id for item in queued_jobs], [job.job_id])
+        queued_payload = queued_jobs[0].to_payload()
+        self.assertEqual(queued_payload["status"], "queued")
+        self.assertEqual(queued_payload["current"], 0)
+        self.assertEqual(queued_payload["total"], 31)
+        self.assertEqual(queued_payload["percent"], 0)
+        self.assertEqual(queued_payload["short_label"], "正在导入 ETC发票 0/31")
+        self.assertEqual(queued_payload["created_at"], queued_payload["updated_at"])
+        self.assertEqual(queued_payload["affected_domains"], ["imports_etc_invoices", "etc_tickets"])
+        self.assertEqual(queued_payload["route"], "/imports/etc-invoices")
+
+        self.assertEqual([item.job_id for item in running_jobs], [job.job_id])
+        running_payload = running_jobs[0].to_payload()
+        self.assertEqual(running_payload["status"], "running")
+        self.assertEqual(running_payload["phase"], "persist_items")
+        self.assertEqual(running_payload["current"], 3)
+        self.assertEqual(running_payload["total"], 31)
+        self.assertEqual(running_payload["percent"], 9)
+        self.assertEqual(running_payload["short_label"], "正在导入 ETC发票 3/31")
+        self.assertIsNotNone(running_payload["started_at"])
+        self.assertGreaterEqual(
+            datetime.fromisoformat(str(running_payload["updated_at"])),
+            datetime.fromisoformat(str(queued_payload["created_at"])),
+        )
 
     def test_succeeded_job_is_active_until_acknowledged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -371,6 +421,50 @@ class BackgroundJobServiceTests(unittest.TestCase):
 
         self.assertEqual(completed.status, "succeeded")
         self.assertEqual(completed.result_summary, {"rebuilt": 1})
+
+    def test_wait_for_job_completion_waits_until_runner_returns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            job = service.create_job(
+                job_type="etc_invoice_import",
+                label="导入 ETC发票",
+                owner_user_id="user-001",
+            )
+            terminal_written = Event()
+            release_handler = Event()
+            waiter_finished = Event()
+            wait_errors: list[BaseException] = []
+
+            def handler(running_job):
+                service.succeed_job(running_job.job_id, "ETC发票导入完成。")
+                terminal_written.set()
+                if not release_handler.wait(timeout=2):
+                    raise RuntimeError("handler was not released")
+                return {"imported": 1}
+
+            service.run_job(job, handler)
+            self.assertTrue(terminal_written.wait(timeout=2))
+            self.assertEqual(service.get_job(job.job_id, "user-001").status, "succeeded")
+
+            def wait_for_completion() -> None:
+                try:
+                    service.wait_for_job_completion(job.job_id, timeout=2)
+                except BaseException as exc:  # pragma: no cover - asserted below
+                    wait_errors.append(exc)
+                finally:
+                    waiter_finished.set()
+
+            waiter = Thread(target=wait_for_completion)
+            waiter.start()
+            time.sleep(0.05)
+            self.assertFalse(waiter_finished.is_set())
+
+            release_handler.set()
+            self.assertTrue(waiter_finished.wait(timeout=2))
+            waiter.join(timeout=2)
+            service.shutdown()
+
+        self.assertEqual(wait_errors, [])
 
     def test_background_job_api_returns_and_acknowledges_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
