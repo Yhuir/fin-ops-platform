@@ -1212,10 +1212,10 @@ export default function CostStatisticsPage() {
         tone: "success",
         message: `已导出 ${fileName}`,
       });
-    } catch {
+    } catch (caught) {
       setExportFeedback({
         tone: "error",
-        message: "成本统计导出失败，请稍后重试。",
+        message: caught instanceof Error ? caught.message : "成本统计导出失败，请稍后重试。",
       });
     } finally {
       setIsExporting(false);
@@ -1236,10 +1236,10 @@ export default function CostStatisticsPage() {
     try {
       const payload = await fetchCostStatisticsExportPreview(params);
       setExportPreview(payload);
-    } catch {
+    } catch (caught) {
       setExportFeedback({
         tone: "error",
-        message: "导出预览加载失败，请稍后重试。",
+        message: caught instanceof Error ? caught.message : "导出预览加载失败，请稍后重试。",
       });
     } finally {
       setIsPreviewLoading(false);

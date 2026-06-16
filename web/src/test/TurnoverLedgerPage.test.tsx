@@ -616,6 +616,18 @@ function groupedPayloadWithFlowCategoryVersions(family: string, versionsByBankRo
   return payload;
 }
 
+function groupedPayloadWithWorkbenchRelation(family: string, bankRowId: string, relation: Record<string, unknown>) {
+  const payload = cloneJson(groupedPayload(family));
+  for (const group of payload.groups) {
+    group.flow_rows = (group.flow_rows ?? []).map((row: Record<string, unknown>) => (
+      String(row.source_bank_row_id ?? "") === bankRowId
+        ? { ...row, ...relation }
+        : row
+    ));
+  }
+  return payload;
+}
+
 function groupedPayloadWithoutFlow(family: string, missingBankRowId: string) {
   const payload = cloneJson(groupedPayload(family));
   for (const group of payload.groups) {
@@ -630,6 +642,7 @@ function installTurnoverLedgerFetch(options: {
   groupedOverrides?: Record<string, unknown>;
   groupedPayloads?: Array<Record<string, unknown>>;
   missingDetailForRelationId?: string;
+  exportDownloadResponse?: (url: URL) => Response;
 } = {}) {
   let groupedRequestCount = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -864,6 +877,9 @@ function installTurnoverLedgerFetch(options: {
       });
     }
     if (url.pathname === "/api/turnover-ledger/export" && method === "GET") {
+      if (options.exportDownloadResponse) {
+        return options.exportDownloadResponse(url);
+      }
       return new Response(new Blob(["mock xlsx"], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       }));
@@ -890,8 +906,20 @@ function installTurnoverLedgerFetch(options: {
         ],
       });
     }
-    if (url.pathname === "/api/turnover-ledger/relations/rel-personal-1/withdraw" && method === "POST") {
-      return Response.json({ relation_id: "rel-personal-1", status: "withdrawn" });
+    const withdrawMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/withdraw$/);
+    if (withdrawMatch && method === "POST") {
+      const relationId = decodeURIComponent(withdrawMatch[1]);
+      return Response.json({
+        relation_id: relationId,
+        status: "withdrawn",
+        affected_months: ["2026-05"],
+        freshness_targets: [
+          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "workbench_relation", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "all" },
+        ],
+      });
     }
     if (url.pathname === "/api/operation-barrier/status" && method === "POST") {
       return Response.json({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
@@ -1462,6 +1490,76 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).getByRole("button", { name: "确定" })).toBeDisabled();
   });
 
+  test("withdraws a selected linked manual closure from the table toolbar", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch({
+      groupedPayloads: [
+        groupedPayloadWithWorkbenchRelation("all", "bank-jia-income-200000", {
+          workbench_relation_status: "linked",
+          workbench_relation_case_ids: ["turnover:rel-jiaxiaohua"],
+          workbench_relation_mode: "turnover_manual_closure",
+          workbench_relation_source: "manual",
+          workbench_relation_row_ids: ["bank-jia-income-200000", "bank-jia-expense-300000"],
+        }),
+        groupedPayload("all"),
+      ],
+    });
+    const turnoverListener = vi.fn();
+    const workbenchListener = vi.fn();
+    window.addEventListener("turnoverRelationUpdated", turnoverListener);
+    window.addEventListener("workbenchRelationUpdated", workbenchListener);
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+    await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
+
+    expect(within(page).getByText("已选 1 笔")).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeDisabled();
+    const withdrawButton = within(page).getByRole("button", { name: "撤回闭环" });
+    expect(withdrawButton).toBeEnabled();
+    await user.click(withdrawButton);
+
+    await waitFor(() => {
+      const withdrawRequest = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/withdraw" && init?.method === "POST";
+      });
+      expect(withdrawRequest).toBeDefined();
+    });
+    await waitFor(() => {
+      const barrierRequest = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        if (url.pathname !== "/api/operation-barrier/status" || init?.method !== "POST") {
+          return false;
+        }
+        return JSON.stringify(JSON.parse(String(init?.body))) === JSON.stringify({
+          targets: [
+            { read_model_key: "turnover_ledger", scope_key: "all" },
+            { read_model_key: "workbench_relation", scope_key: "2026-05" },
+            { read_model_key: "workbench", scope_key: "2026-05" },
+            { read_model_key: "workbench", scope_key: "all" },
+          ],
+        });
+      });
+      expect(barrierRequest).toBeDefined();
+    });
+    await waitFor(() => {
+      expectCustomEventDetailContaining(turnoverListener, {
+        relationId: "rel-jiaxiaohua",
+        action: "manual_closure_withdraw",
+      });
+      expectCustomEventDetailContaining(workbenchListener, {
+        relationId: "turnover:rel-jiaxiaohua",
+        action: "turnover_manual_closure_withdraw",
+      });
+    });
+    window.removeEventListener("turnoverRelationUpdated", turnoverListener);
+    window.removeEventListener("workbenchRelationUpdated", workbenchListener);
+  });
+
   test("opens the extra drawer from a flow row, hides technical relation ids, saves, and keeps relation actions in the drawer", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
@@ -1592,6 +1690,32 @@ describe("Turnover ledger page", () => {
     })).toBe(false);
   });
 
+  test("shows Workbench relation feedback from the grouped ledger payload", async () => {
+    const user = userEvent.setup();
+    installTurnoverLedgerFetch({
+      groupedPayloads: [
+        groupedPayloadWithWorkbenchRelation("all", "bank-jia-income-200000", {
+          workbench_relation_status: "linked",
+          workbench_relation_case_ids: ["turnover:rel-jiaxiaohua"],
+          workbench_relation_mode: "turnover_manual_closure",
+          workbench_relation_source: "manual",
+          workbench_relation_row_ids: ["bank-jia-income-200000", "bank-jia-expense-300000"],
+        }),
+      ],
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
+
+    expect(within(groupCell).getByText("部分已关联 1/3")).toBeInTheDocument();
+    await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
+
+    const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
+    expect(within(flowRows[0]).getByText("关联台手工闭环")).toBeInTheDocument();
+  });
+
   test("reloads on category updates and downloads a previewed export for the current tab", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
@@ -1626,5 +1750,29 @@ describe("Turnover ledger page", () => {
       const request = requestUrls(fetchMock, "/api/turnover-ledger/export").at(-1);
       expect(request?.searchParams.get("family")).toBe("company");
     });
+  });
+
+  test("shows backend export row-limit messages inside the export dialog", async () => {
+    const user = userEvent.setup();
+    installTurnoverLedgerFetch({
+      exportDownloadResponse: () => new Response(JSON.stringify({
+        error: "turnover_ledger_export_row_limit_exceeded",
+        message: "往来款台账导出超过 20000 行，请缩小下载范围后重试。",
+        details: { total: 20001, limit: 20000 },
+      }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    await within(page).findByText("张三");
+    await user.click(within(page).getByRole("button", { name: "下载表格" }));
+    const dialog = await screen.findByRole("dialog", { name: "下载往来款台账" });
+    await user.click(within(dialog).getByRole("button", { name: "确认下载" }));
+
+    expect(await within(dialog).findByText("往来款台账导出超过 20000 行，请缩小下载范围后重试。")).toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 });

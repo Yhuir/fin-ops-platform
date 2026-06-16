@@ -1125,6 +1125,35 @@ describe("Bank details page", () => {
     Object.defineProperty(window.URL, "revokeObjectURL", { configurable: true, value: originalRevokeObjectUrl });
   });
 
+  test("shows backend export row-limit messages without starting a download", async () => {
+    const user = userEvent.setup();
+    const baseFetch = installMockApiFetch();
+    const originalCreateObjectUrl = window.URL.createObjectURL;
+    Object.defineProperty(window.URL, "createObjectURL", { configurable: true, value: vi.fn() });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/bank-details/transactions/export") {
+        return new Response(JSON.stringify({
+          error: "bank_detail_export_row_limit_exceeded",
+          details: { total: 20001, limit: 20000 },
+        }), { status: 400, headers: { "Content-Type": "application/json" } });
+      }
+      return baseFetch(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    await user.click(within(page).getByRole("button", { name: "导出" }));
+    await user.click(await screen.findByRole("menuitem", { name: "导出全部银行" }));
+
+    expect(await within(page).findByText("当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。")).toBeInTheDocument();
+    expect(window.URL.createObjectURL).not.toHaveBeenCalled();
+
+    Object.defineProperty(window.URL, "createObjectURL", { configurable: true, value: originalCreateObjectUrl });
+  });
+
   test("refetches bank detail data when workbench relation updates without local tag patching", async () => {
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();

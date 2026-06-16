@@ -4037,6 +4037,7 @@ textarea {
 
 .batch-accounting-button:focus-visible,
 .batch-accounting-segment__button:focus-visible,
+.batch-accounting-pagination__button:focus-visible,
 .batch-accounting-field input:focus-visible,
 .batch-accounting-field textarea:focus-visible,
 .batch-accounting-feedback__close:focus-visible,
@@ -4247,6 +4248,56 @@ textarea {
 .batch-accounting-bank-panel__state {
   border-top: 1px solid var(--fp-border-subtle);
   padding: var(--fp-space-3);
+}
+
+.batch-accounting-pagination {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: var(--fp-space-1);
+  white-space: nowrap;
+}
+
+.batch-accounting-pagination__summary {
+  min-width: 96px;
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-caption);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--fp-leading-tight);
+  text-align: right;
+}
+
+.batch-accounting-pagination__button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
+}
+
+.batch-accounting-pagination__button:hover:not(:disabled) {
+  border-color: var(--fp-primary);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
+  color: var(--fp-primary-hover);
+}
+
+.batch-accounting-pagination__button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.batch-accounting-pagination__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .batch-accounting-bank-list {
@@ -4867,6 +4918,20 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: var(--fp-space-2);
+}
+
+.turnover-ledger-selection-summary {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid var(--fp-border-subtle);
+  border-radius: var(--fp-radius-sm);
+  background: color-mix(in srgb, var(--fp-surface-muted) 72%, var(--fp-surface));
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-label);
+  font-weight: 850;
+  padding: 0 var(--fp-space-2);
+  white-space: nowrap;
 }
 
 .turnover-ledger-table-wrap {
@@ -5740,7 +5805,7 @@ textarea {
 
 .no-oa-bank-batches-filter {
   display: grid;
-  grid-template-columns: minmax(290px, max-content) minmax(148px, 180px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(290px, max-content) minmax(148px, 180px) minmax(180px, max-content) max-content minmax(0, 1fr);
   align-items: end;
   gap: var(--fp-space-2);
   padding: 1px var(--fp-space-1);
@@ -5783,6 +5848,7 @@ textarea {
 
 .no-oa-bank-batches-button:focus-visible,
 .no-oa-bank-batches-segment__button:focus-visible,
+.no-oa-bank-batches-pagination__button:focus-visible,
 .no-oa-bank-batches-field input:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
 }
@@ -5889,6 +5955,56 @@ textarea {
   font-size: var(--fp-text-body);
   font-weight: 850;
   line-height: 1.3;
+}
+
+.no-oa-bank-batches-pagination {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: var(--fp-space-1);
+  white-space: nowrap;
+}
+
+.no-oa-bank-batches-pagination__summary {
+  min-width: 96px;
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-caption);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: var(--fp-leading-tight);
+  text-align: right;
+}
+
+.no-oa-bank-batches-pagination__button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    color var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
+}
+
+.no-oa-bank-batches-pagination__button:hover:not(:disabled) {
+  border-color: var(--fp-primary);
+  background: color-mix(in srgb, var(--fp-primary-soft) 84%, var(--fp-surface));
+  color: var(--fp-primary-hover);
+}
+
+.no-oa-bank-batches-pagination__button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.no-oa-bank-batches-pagination__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .no-oa-bank-batches-layout {
@@ -6567,6 +6683,7 @@ textarea {
   .no-oa-bank-batches-actions,
   .no-oa-bank-batches-filter,
   .no-oa-bank-batches-segment,
+  .no-oa-bank-batches-pagination,
   .no-oa-bank-batches-button,
   .no-oa-bank-batches-field {
     width: 100%;

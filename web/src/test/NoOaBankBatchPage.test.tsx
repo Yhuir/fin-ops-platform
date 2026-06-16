@@ -278,10 +278,69 @@ function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function batchesForBucket(payload: typeof listPayload, bucket: string | null) {
+function batchesForBucket<T extends { batches: Array<{ status_bucket?: string | null; statusBucket?: string | null }> }>(payload: T, bucket: string | null) {
   return bucket && bucket !== "all"
-    ? payload.batches.filter((batch) => batch.status_bucket === bucket)
+    ? payload.batches.filter((batch) => (batch.status_bucket ?? batch.statusBucket) === bucket)
     : payload.batches;
+}
+
+function positiveParam(params: URLSearchParams, name: string, fallback: number) {
+  const value = Number(params.get(name));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function slicePage<T>(rows: T[], page: number, pageSize: number) {
+  const start = (page - 1) * pageSize;
+  return rows.slice(start, start + pageSize);
+}
+
+function withPagination<T extends { batches: Array<{ status_bucket?: string | null; statusBucket?: string | null }> }>(payload: T, url: URL) {
+  const filteredBatches = batchesForBucket(payload, url.searchParams.get("bucket"));
+  const page = positiveParam(url.searchParams, "page", 1);
+  const pageSize = positiveParam(url.searchParams, "page_size", 200);
+  return {
+    ...payload,
+    batches: slicePage(filteredBatches, page, pageSize),
+    pagination: { page, page_size: pageSize, pageSize, total: filteredBatches.length },
+  };
+}
+
+function largeListPayload(total = 205) {
+  return {
+    summary: {
+      draft_count: total,
+      submitted_count: 0,
+      withdrawn_count: 0,
+      conflict_count: 0,
+      stale_count: 0,
+      total_amount: total.toFixed(2),
+      categories: [
+        { code: "fee", label: "手续费", primary_label: "费用", sub_label: "手续费", total, draft: total, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: total.toFixed(2) },
+      ],
+    },
+    batches: Array.from({ length: total }, (_, index) => ({
+      batch_id: `batch-large-${index.toString().padStart(3, "0")}`,
+      batch_type: "fee",
+      batch_label: "手续费",
+      category_primary_label: "费用",
+      category_sub_label: "手续费",
+      category_label_path: ["费用", "手续费"],
+      scope_month: "2026-05",
+      account_key: `ccb:${index.toString().padStart(4, "0")}`,
+      bank_name: "建设银行",
+      account_last4: index.toString().padStart(4, "0"),
+      status: "draft",
+      status_bucket: "unsubmitted",
+      row_count: 1,
+      total_amount: "1.00",
+      tag_counts: { fee: 1 },
+      direction_counts: { expense: 1 },
+      can_submit: true,
+      can_withdraw: false,
+      blocked_reason: "",
+      version: 1,
+    })),
+  };
 }
 
 function installFetchMock(payload = listPayload) {
@@ -295,7 +354,7 @@ function installFetchMock(payload = listPayload) {
       return jsonResponse({ ...tagSelectionPayload, version: 4, selected_tag_codes: body.selected_tag_codes ?? [] });
     }
     if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
-      return jsonResponse({ ...payload, batches: batchesForBucket(payload, url.searchParams.get("bucket")) });
+      return jsonResponse(withPagination(payload, url));
     }
     if (url.pathname === "/api/no-oa-bank-batches/batch-draft-fee") {
       return jsonResponse(feeDetailPayload);
@@ -407,6 +466,7 @@ describe("NoOaBankBatchPage", () => {
     const drawerGroupsRule = cssRule(styles, ".no-oa-bank-batches-drawer__groups");
     const drawerCloseRule = cssRule(styles, ".no-oa-bank-batches-drawer__close");
     const textareaRule = cssRule(styles, ".no-oa-bank-batches-dialog__field textarea");
+    const paginationButtonRule = cssRule(styles, ".no-oa-bank-batches-pagination__button");
     const toastRule = cssRule(styles, ".no-oa-bank-batches-toast");
     const toastButtonRule = cssRule(styles, ".no-oa-bank-batches-toast button");
 
@@ -420,6 +480,7 @@ describe("NoOaBankBatchPage", () => {
     expect(tableCellRule).toContain("var(--motion-fast)");
     expect(drawerCloseRule).toContain("var(--motion-fast)");
     expect(textareaRule).toContain("var(--motion-fast)");
+    expect(paginationButtonRule).toContain("var(--motion-fast)");
     expect(toastButtonRule).toContain("var(--motion-fast)");
 
     expect(railRule).toContain("border-radius: var(--fp-radius-sm)");
@@ -434,6 +495,8 @@ describe("NoOaBankBatchPage", () => {
     expect(drawerRule).toContain("min(960px, 92vw)");
     expect(drawerRule).toContain("box-shadow: var(--fp-shadow-drawer)");
     expect(drawerGroupsRule).toContain("repeat(auto-fit, minmax(260px, 1fr))");
+    expect(paginationButtonRule).toContain("width: 30px");
+    expect(paginationButtonRule).toContain("height: 30px");
     expect(toastRule).toContain("box-shadow: var(--fp-shadow-popover)");
     expect(tagRule).not.toContain("--fp-bg-muted");
     expect(drawerRule).not.toContain("--fp-shadow-lg");
@@ -441,10 +504,20 @@ describe("NoOaBankBatchPage", () => {
   });
 
   test("renders tag management and compact main/sub/transaction layout without account search or debug fields", async () => {
-    installFetchMock();
+    const fetchMock = installFetchMock();
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    await waitFor(() => {
+      const firstGet = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET");
+      });
+      expect(firstGet).toBeTruthy();
+      const url = new URL(typeof firstGet?.[0] === "string" ? firstGet[0] : firstGet?.[0] instanceof URL ? firstGet[0].toString() : firstGet?.[0].url ?? "", "http://localhost");
+      expect(url.searchParams.get("page")).toBe("1");
+      expect(url.searchParams.get("page_size")).toBe("200");
+    });
     expect(screen.getByRole("button", { name: "免OA流水标签管理" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
@@ -456,6 +529,7 @@ describe("NoOaBankBatchPage", () => {
     await waitFor(() => {
       expect(within(primaryRegion).getByRole("button", { name: "费用 1批 · 2条" })).toHaveAttribute("aria-pressed", "true");
     });
+    expect(screen.getByRole("group", { name: "免OA批次分页" })).toHaveTextContent("1-4 / 4");
     expect(within(primaryRegion).getByRole("button", { name: "福利 1批 · 5条" })).toBeInTheDocument();
 
     const subRegion = screen.getByRole("region", { name: "子标签" });
@@ -470,6 +544,77 @@ describe("NoOaBankBatchPage", () => {
     expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 bank-row-001" })).toBeInTheDocument();
     expect(within(transactionRegion).queryByText("分类来源")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("自动")).not.toBeInTheDocument();
+  });
+
+  test("uses backend pagination for no OA first-screen batches", async () => {
+    const user = userEvent.setup();
+    const payload = largeListPayload();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/no-oa-bank-batches/tag-selection") {
+        return jsonResponse(tagSelectionPayload);
+      }
+      if (url.pathname === "/api/no-oa-bank-batches" && (!init?.method || init.method === "GET")) {
+        return jsonResponse(withPagination(payload, url));
+      }
+      const detailMatch = url.pathname.match(/^\/api\/no-oa-bank-batches\/(batch-large-\d{3})$/);
+      if (detailMatch) {
+        const batch = payload.batches.find((item) => item.batch_id === detailMatch[1]) ?? payload.batches[0];
+        return jsonResponse({
+          batch,
+          tag_counts: { fee: 1 },
+          direction_counts: { expense: 1 },
+          rows: [{
+            transaction_id: `row-${batch.batch_id}`,
+            trade_time: "2026-05-03 10:20:00",
+            counterparty_name: "建设银行",
+            direction: "expense",
+            direction_label: "支",
+            amount: "1.00",
+            bank_name: batch.bank_name,
+            account_last4: batch.account_last4,
+            account_key: batch.account_key,
+            summary: "网银手续费",
+            purpose: "结算",
+            remark: "月结",
+            category_code: "fee",
+            category_label: "手续费",
+            category_primary_label: "费用",
+            category_sub_label: "手续费",
+            category_label_path: ["费用", "手续费"],
+            category_source: "auto",
+          }],
+        });
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(within(screen.getByRole("group", { name: "免OA批次分页" })).getByText("1-200 / 205")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "费用 200批 · 200条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "手续费 200批 · 200条" })).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(screen.getByText("建设银行0000")).toBeInTheDocument();
+    expect(screen.queryByText("建设银行0204")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "免OA批次分页下一页" }));
+
+    await waitFor(() => {
+      expect(within(screen.getByRole("group", { name: "免OA批次分页" })).getByText("201-205 / 205")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "费用 5批 · 5条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "手续费 5批 · 5条" })).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(screen.getAllByText("建设银行0200").length).toBeGreaterThan(0);
+    expect(screen.queryByText("建设银行0000")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/no-oa-bank-batches"
+        && url.searchParams.get("page") === "2"
+        && url.searchParams.get("page_size") === "200";
+    })).toBe(true);
   });
 
   test("shows batch blocking reasons without default audit metadata", async () => {

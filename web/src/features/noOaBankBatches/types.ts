@@ -82,12 +82,21 @@ export type NoOaBankBatchesRequest = {
   status?: NoOaBankBatchStatusFilter;
   bucket?: NoOaBankBatchStatusBucket;
   accountKey?: string | null;
+  page?: number;
+  pageSize?: number;
   signal?: AbortSignal;
+};
+
+export type NoOaBankBatchesPageInfo = {
+  page: number;
+  pageSize: number;
+  total: number;
 };
 
 export type NoOaBankBatchesResponse = {
   summary: NoOaBankBatchSummary;
   batches: NoOaBankBatch[];
+  pagination?: NoOaBankBatchesPageInfo;
   readModelStatus: NoOaBankBatchReadModelStatus;
   readModelStaleReasons: string[];
 };

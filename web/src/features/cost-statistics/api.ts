@@ -516,18 +516,60 @@ async function readExportBlob(response: Response) {
   throw new Error("cost_statistics_export_blob_unavailable");
 }
 
+function textField(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function exportErrorMessageFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const message = textField((payload as { message?: unknown }).message);
+  if (message) {
+    return message;
+  }
+  const errorValue = (payload as { error?: unknown }).error;
+  if (errorValue && typeof errorValue === "object") {
+    const nestedMessage = textField((errorValue as { message?: unknown }).message);
+    if (nestedMessage) {
+      return nestedMessage;
+    }
+  }
+  return textField(errorValue);
+}
+
+function exportErrorMessageFromText(rawText: string, fallback: string) {
+  const trimmedText = rawText.trim();
+  if (!trimmedText) {
+    return fallback;
+  }
+  try {
+    const payload = JSON.parse(trimmedText);
+    return exportErrorMessageFromPayload(payload) || fallback;
+  } catch {
+    return trimmedText;
+  }
+}
+
 export async function exportCostStatisticsView(params: CostExportParams) {
   const query = buildCostStatisticsQuery(params, { includeProjectExportOptions: true });
   const response = await apiFetch(`/api/cost-statistics/export?${query.toString()}`, { method: "GET" });
   const contentType = typeof response.headers?.get === "function" ? response.headers.get("Content-Type") ?? "" : "";
+
+  if (!response.ok) {
+    const rawText = await response.text();
+    if (looksLikeHtmlResponse(rawText, contentType)) {
+      throw new Error("成本统计导出接口返回了 HTML 页面，请确认后端服务和 /api 代理已正常启动。");
+    }
+    throw new Error(exportErrorMessageFromText(rawText, "cost_statistics_export_failed"));
+  }
+
   if (contentType.toLowerCase().includes("text/html")) {
     const rawText = await response.text();
     if (looksLikeHtmlResponse(rawText, contentType)) {
       throw new Error("成本统计导出接口返回了 HTML 页面，请确认后端服务和 /api 代理已正常启动。");
     }
-  }
-  if (!response.ok) {
-    throw new Error("cost_statistics_export_failed");
+    throw new Error(rawText || `成本统计导出接口返回的不是 xlsx 文件：${contentType}`);
   }
   const blob = await readExportBlob(response);
   const contentDisposition =

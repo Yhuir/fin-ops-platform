@@ -49,11 +49,23 @@ export type BatchAccountingRelationBucket = {
   oaRows: BatchAccountingOaRow[];
 };
 
+export type BatchAccountingPageInfo = {
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
+export type BatchAccountingPagination = {
+  bankRows?: BatchAccountingPageInfo;
+  oaRows?: BatchAccountingPageInfo;
+};
+
 export type BatchAccountingResponse = {
   summary: BatchAccountingSummary;
   bankRows: BatchAccountingBankRow[];
   oaRows: BatchAccountingOaRow[];
   relationsByBankRowId: Record<string, BatchAccountingRelationBucket>;
+  pagination: BatchAccountingPagination;
   readModelStatus: string;
   readModelStaleReasons: string[];
   readModelScopeKeys: string[];
@@ -64,6 +76,10 @@ export type FetchBatchAccountingRequest = {
   bankYear: string;
   oaYear: string;
   bucket: BatchAccountingBucket;
+  bankPage?: number;
+  bankPageSize?: number;
+  oaPage?: number;
+  oaPageSize?: number;
   signal?: AbortSignal;
 };
 

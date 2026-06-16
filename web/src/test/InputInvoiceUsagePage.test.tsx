@@ -100,7 +100,10 @@ const rowsPayload = {
   filterConfig: [],
 };
 
-function installInputInvoiceUsageFetch(payload: unknown = rowsPayload) {
+function installInputInvoiceUsageFetch(
+  payload: unknown = rowsPayload,
+  options: { exportDownloadResponse?: (url: URL) => Response } = {},
+) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/input-invoice-usage/rows") {
@@ -240,6 +243,9 @@ function installInputInvoiceUsageFetch(payload: unknown = rowsPayload) {
       });
     }
     if (url.pathname === "/api/input-invoice-usage/export") {
+      if (options.exportDownloadResponse) {
+        return options.exportDownloadResponse(url);
+      }
       return new Response(new Blob(["xlsx"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), {
         status: 200,
         headers: {
@@ -531,6 +537,10 @@ describe("Input invoice usage page", () => {
     renderAuthenticatedAppAt("/input-invoice-usage");
 
     const page = await screen.findByTestId("input-invoice-usage-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    const initialRowsRequest = rowsRequests(fetchMock)[0];
+    expect(initialRowsRequest.searchParams.get("page")).toBe("1");
+    expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(within(page).getByRole("heading", { name: "进项发票使用情况" })).toBeInTheDocument();
     expect(within(page).queryByText("以进项发票为主对象反查支付状态、OA 和银行流水。")).not.toBeInTheDocument();
     expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
@@ -539,6 +549,7 @@ describe("Input invoice usage page", () => {
     expect(within(page).getByRole("button", { name: "筛选内容导出" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "以发票反提 OA" })).toHaveClass("input-invoice-usage-button--accent");
     expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
+    expect(Array.from((within(page).getByLabelText("每页行数") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);
 
     const headerRows = within(page).getAllByRole("row").slice(0, 2);
     for (const label of ["进项发票", "支付状态", "OA", "流水"]) {
@@ -898,5 +909,30 @@ describe("Input invoice usage page", () => {
       })).toBe(true);
     });
     expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  test("shows backend export row-limit messages inside the export drawer", async () => {
+    const user = userEvent.setup();
+    installInputInvoiceUsageFetch(rowsPayload, {
+      exportDownloadResponse: () => new Response(JSON.stringify({
+        error: "input_invoice_usage_export_row_limit_exceeded",
+        message: "进项发票使用情况导出超过 20000 行，请缩小筛选范围后重试。",
+        details: { total: 20001, limit: 20000 },
+      }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    });
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
+
+    expect(await screen.findByText("预计导出 1 行")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下载导出" }));
+
+    expect(await screen.findByText("进项发票使用情况导出超过 20000 行，请缩小筛选范围后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("已生成 进项.xlsx")).not.toBeInTheDocument();
   });
 });

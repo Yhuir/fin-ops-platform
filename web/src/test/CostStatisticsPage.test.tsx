@@ -515,6 +515,22 @@ describe("Cost statistics page", () => {
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
   });
 
+  test("shows backend export failure messages inside the export center", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costExportErrorViews: ["time"] });
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "导出中心" }));
+    const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    await user.click(within(dialog).getByRole("button", { name: "导出" }));
+
+    expect(await within(dialog).findByText("cost statistics export failed")).toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
   test("uses export center in project mode with project and expense type filters", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();

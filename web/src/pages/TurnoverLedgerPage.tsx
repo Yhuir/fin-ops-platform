@@ -162,6 +162,19 @@ function relationIdForRow(row: TurnoverLedgerGroupedRow) {
   return row.relationId || row.parentRelationId || "";
 }
 
+function turnoverManualClosureRelationId(row: TurnoverLedgerGroupedRow) {
+  const relationId = relationIdForRow(row);
+  if (relationId) {
+    return relationId;
+  }
+  const caseId = row.workbenchRelationCaseIds.find((item) => item.startsWith("turnover:"));
+  return caseId ? caseId.slice("turnover:".length) : "";
+}
+
+function isTurnoverManualClosureLinkedRow(row: TurnoverLedgerGroupedRow) {
+  return row.workbenchRelationStatus === "linked" && row.workbenchRelationMode === "turnover_manual_closure";
+}
+
 function isFlowRow(row: TurnoverLedgerGroupedRow) {
   return row.rowKind === "flow";
 }
@@ -375,6 +388,25 @@ export default function TurnoverLedgerPage() {
     [selectedClosureRows],
   );
   const closurePreview = useMemo(() => buildClosurePreview(selectedClosureRows), [selectedClosureRows]);
+  const selectedRowsContainLinkedWorkbenchRelation = selectedClosureRows.some((row) => row.workbenchRelationStatus === "linked");
+  const selectedManualClosureRelationId = useMemo(() => {
+    if (selectedClosureRows.length === 0 || selectedClosureRows.some((row) => !isTurnoverManualClosureLinkedRow(row))) {
+      return "";
+    }
+    const relationIds = new Set(selectedClosureRows.map(turnoverManualClosureRelationId).filter(Boolean));
+    return relationIds.size === 1 ? Array.from(relationIds)[0] : "";
+  }, [selectedClosureRows]);
+  const canWithdrawSelectedManualClosure = Boolean(
+    canMutateData
+      && !readModelNeedsRefresh
+      && selectedManualClosureRelationId
+      && !closureSubmitting
+      && !mutatingRelation,
+  );
+  const canOpenClosureDrawer = canMutateData
+    && !readModelNeedsRefresh
+    && selectedClosureRows.length >= 2
+    && !selectedRowsContainLinkedWorkbenchRelation;
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -668,7 +700,9 @@ export default function TurnoverLedgerPage() {
             : await withdrawTurnoverRelation({ relationId: targetRow.relationId });
           setMessage("正在等待往来款台账读模型同步...");
           await waitForOperationFreshness(
-            operationBarrierTargetsFromMonths("turnover_ledger", mutationResult.affectedMonths, "all"),
+            mutationResult.freshnessTargets.length > 0
+              ? mutationResult.freshnessTargets
+              : operationBarrierTargetsFromMonths("turnover_ledger", mutationResult.affectedMonths, "all"),
           );
           setMessage("正在刷新往来款台账...");
           await reloadLedgerAfterMutation();
@@ -696,6 +730,56 @@ export default function TurnoverLedgerPage() {
       setToast({ severity: "success", message: kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销" });
     } else {
       setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "往来关系操作失败" });
+    }
+  };
+
+  const handleWithdrawSelectedManualClosure = async () => {
+    if (!selectedManualClosureRelationId || !canWithdrawSelectedManualClosure) {
+      return;
+    }
+    const relationId = selectedManualClosureRelationId;
+    const affectedRowIds = selectedClosureRows.map(flowBankRowId).filter(Boolean);
+    const result = await runOperation({
+      loadingMessage: "正在撤回外部往来闭环...",
+      action: async ({ setMessage }) => {
+        setMutatingRelation(true);
+        try {
+          const mutationResult = await withdrawTurnoverRelation({ relationId });
+          setClosureSelection(null);
+          setClosureDrawerOpen(false);
+          setMessage("正在等待往来款台账和关联台读模型同步...");
+          await waitForOperationFreshness(
+            mutationResult.freshnessTargets.length > 0
+              ? mutationResult.freshnessTargets
+              : operationBarrierTargetsFromMonths("turnover_ledger", mutationResult.affectedMonths, "all"),
+          );
+          setMessage("正在刷新往来款台账...");
+          await reloadLedgerAfterMutation();
+          return mutationResult;
+        } finally {
+          setMutatingRelation(false);
+        }
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "外部往来闭环撤回失败",
+    });
+    if (result.status === "success") {
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
+        relationId: result.value.relationId || relationId,
+        affectedRowIds,
+        affectedMonths: result.value.affectedMonths,
+        action: "manual_closure_withdraw",
+        source: "turnover_manual_closure",
+      });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
+        relationId: result.value.workbenchPairRelationId || `turnover:${relationId}`,
+        affectedRowIds,
+        affectedMonths: result.value.affectedMonths,
+        action: "turnover_manual_closure_withdraw",
+        source: "turnover_manual_closure",
+      });
+      setToast({ severity: "success", message: "外部往来闭环已撤回" });
+    } else {
+      setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "外部往来闭环撤回失败" });
     }
   };
 
@@ -840,14 +924,29 @@ export default function TurnoverLedgerPage() {
                 ))}
               </div>
               <div className="turnover-ledger-actions">
+                {selectedClosureRows.length > 0 ? (
+                  <span className="turnover-ledger-selection-summary" role="status">
+                    已选 {selectedClosureRows.length} 笔
+                  </span>
+                ) : null}
                 <button
                   className="turnover-ledger-button"
-                  disabled={!canMutateData || readModelNeedsRefresh || selectedClosureRows.length < 2}
+                  disabled={!canOpenClosureDrawer}
                   onClick={() => setClosureDrawerOpen(true)}
                   type="button"
                 >
                   确认闭环
                 </button>
+                {selectedRowsContainLinkedWorkbenchRelation ? (
+                  <button
+                    className="turnover-ledger-button turnover-ledger-button--warning"
+                    disabled={!canWithdrawSelectedManualClosure}
+                    onClick={() => void handleWithdrawSelectedManualClosure()}
+                    type="button"
+                  >
+                    撤回闭环
+                  </button>
+                ) : null}
                 <button className="turnover-ledger-button turnover-ledger-button--primary" onClick={handleOpenExport} type="button">
                   <Download aria-hidden="true" size={16} strokeWidth={2.2} />
                   下载表格

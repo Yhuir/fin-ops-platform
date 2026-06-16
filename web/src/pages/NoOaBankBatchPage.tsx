@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
-import { RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
@@ -61,6 +61,7 @@ const EMPTY_TAG_SELECTION: NoOaBankBatchTagSelection = {
 const SELF_SUB_LABEL = "主标签本身";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const NO_OA_READ_MODEL_REFRESH_RETRY_MS = 1000;
+const NO_OA_BANK_BATCH_PAGE_SIZE = 200;
 
 const STATUS_META: Record<NoOaBankBatchStatus, { label: string; color: "default" | "primary" | "success" | "warning" | "error" }> = {
   draft: { label: "待提交", color: "warning" },
@@ -97,6 +98,63 @@ function formatMoney(value: string | number | null | undefined) {
 function accountLabel(batch: NoOaBankBatch) {
   const account = batch.accountLast4 ? `${batch.bankName || "多账户"}${batch.accountLast4}` : batch.bankName || "多账户";
   return account || "多账户";
+}
+
+function pageRange(page: number, pageSize: number, total: number) {
+  if (total <= 0) {
+    return "0-0 / 0";
+  }
+  const start = (page - 1) * pageSize + 1;
+  if (start > total) {
+    return `0-0 / ${total}`;
+  }
+  const end = Math.min(total, page * pageSize);
+  return `${start}-${end} / ${total}`;
+}
+
+function PageControls({
+  disabled,
+  label,
+  onNext,
+  onPrevious,
+  page,
+  pageSize,
+  total,
+}: {
+  disabled?: boolean;
+  label: string;
+  onNext: () => void;
+  onPrevious: () => void;
+  page: number;
+  pageSize: number;
+  total: number;
+}) {
+  const pageCount = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
+  return (
+    <div aria-label={label} className="no-oa-bank-batches-pagination" role="group">
+      <span className="no-oa-bank-batches-pagination__summary">{pageRange(page, pageSize, total)}</span>
+      <button
+        aria-label={`${label}上一页`}
+        className="no-oa-bank-batches-pagination__button"
+        disabled={disabled || page <= 1}
+        onClick={onPrevious}
+        title={`${label}上一页`}
+        type="button"
+      >
+        <ChevronLeft aria-hidden="true" size={15} strokeWidth={2.4} />
+      </button>
+      <button
+        aria-label={`${label}下一页`}
+        className="no-oa-bank-batches-pagination__button"
+        disabled={disabled || page >= pageCount}
+        onClick={onNext}
+        title={`${label}下一页`}
+        type="button"
+      >
+        <ChevronRight aria-hidden="true" size={15} strokeWidth={2.4} />
+      </button>
+    </div>
+  );
 }
 
 function bankTagLabel(row: { bankName?: string; accountLast4?: string; accountKey?: string }) {
@@ -335,6 +393,7 @@ export default function NoOaBankBatchPage() {
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(() => new Set());
   const [selectedAccountForSubmit, setSelectedAccountForSubmit] = useState<string | null>(null);
+  const [batchPage, setBatchPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
   const [tagLoading, setTagLoading] = useState(false);
@@ -382,6 +441,8 @@ export default function NoOaBankBatchPage() {
     const nextPayload = await fetchNoOaBankBatches({
       month,
       bucket,
+      page: batchPage,
+      pageSize: NO_OA_BANK_BATCH_PAGE_SIZE,
     });
     if (requestId !== batchRequestSeqRef.current) {
       return null;
@@ -390,7 +451,7 @@ export default function NoOaBankBatchPage() {
     setLoading(false);
     setBackgroundRefreshing(false);
     return nextPayload;
-  }, [applyBatchesPayload, bucket, month]);
+  }, [applyBatchesPayload, batchPage, bucket, month]);
 
   const loadBatches = useCallback((signal?: AbortSignal, options: { background?: boolean } = {}) => {
     const background = options.background === true;
@@ -405,6 +466,8 @@ export default function NoOaBankBatchPage() {
     fetchNoOaBankBatches({
       month,
       bucket,
+      page: batchPage,
+      pageSize: NO_OA_BANK_BATCH_PAGE_SIZE,
       signal,
     })
       .then((nextPayload) => {
@@ -434,7 +497,7 @@ export default function NoOaBankBatchPage() {
           }
         }
       });
-  }, [applyBatchesPayload, bucket, month]);
+  }, [applyBatchesPayload, batchPage, bucket, month]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -444,7 +507,7 @@ export default function NoOaBankBatchPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const batchQueryKey = JSON.stringify({ bucket, month });
+    const batchQueryKey = JSON.stringify({ bucket, month, page: batchPage });
     if (batchQueryKeyRef.current !== batchQueryKey) {
       batchQueryKeyRef.current = batchQueryKey;
       setDetails({});
@@ -453,7 +516,7 @@ export default function NoOaBankBatchPage() {
     }
     loadBatches(controller.signal);
     return () => controller.abort();
-  }, [bucket, loadBatches, month, refreshToken]);
+  }, [batchPage, bucket, loadBatches, month, refreshToken]);
 
   useEffect(() => {
     if (!active || !readModelNeedsRefresh || loading || backgroundRefreshing) {
@@ -599,6 +662,11 @@ export default function NoOaBankBatchPage() {
     const codes = new Set(selectedSubGroup?.codes ?? []);
     return visibleBucketBatches.filter((batch) => codes.has(batch.batchType));
   }, [selectedSubGroup, visibleBucketBatches]);
+  const listPagination = payload.pagination ?? {
+    page: batchPage,
+    pageSize: NO_OA_BANK_BATCH_PAGE_SIZE,
+    total: payload.batches.length,
+  };
 
   useEffect(() => {
     if (visibleBatches.length === 0) {
@@ -874,16 +942,34 @@ export default function NoOaBankBatchPage() {
   }, [tagSelection.activeTags]);
 
   const unsubmittedCount = payload.summary.draftCount + payload.summary.conflictCount + payload.summary.staleCount;
-  const selectBucket = (nextBucket: NoOaBankBatchStatusBucket) => {
-    if (nextBucket === bucket) {
-      return;
-    }
+  const resetListScope = useCallback(() => {
     clearSelection();
     manualLabelSelectionRef.current = false;
     setSelectedPrimaryLabel("");
     setSelectedSubKey("");
     setSelectedBatchId("");
+    setDetails({});
+    setDetailErrors({});
+  }, [clearSelection]);
+
+  const selectBucket = (nextBucket: NoOaBankBatchStatusBucket) => {
+    if (nextBucket === bucket) {
+      return;
+    }
+    resetListScope();
+    setBatchPage(1);
     setBucket(nextBucket);
+  };
+
+  const handleMonthChange = (nextMonth: string) => {
+    resetListScope();
+    setBatchPage(1);
+    setMonth(nextMonth);
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    resetListScope();
+    setBatchPage(Math.max(1, nextPage));
   };
 
   return (
@@ -947,18 +1033,27 @@ export default function NoOaBankBatchPage() {
         </div>
         <label className="no-oa-bank-batches-field">
           <span>月份</span>
-          <input onChange={(event) => setMonth(event.target.value)} type="month" value={month} />
+          <input onChange={(event) => handleMonthChange(event.target.value)} type="month" value={month} />
         </label>
-          {bucket === "unsubmitted" ? (
-            <button
-              className="no-oa-bank-batches-button no-oa-bank-batches-button--primary"
-              disabled={selectedTransactionIds.size === 0 || mutating}
-              type="button"
-              onClick={handleSubmitSelected}
-            >
-              提交批次
-            </button>
-          ) : null}
+        <PageControls
+          disabled={loading}
+          label="免OA批次分页"
+          onNext={() => handlePageChange(listPagination.page + 1)}
+          onPrevious={() => handlePageChange(listPagination.page - 1)}
+          page={listPagination.page}
+          pageSize={listPagination.pageSize}
+          total={listPagination.total}
+        />
+        {bucket === "unsubmitted" ? (
+          <button
+            className="no-oa-bank-batches-button no-oa-bank-batches-button--primary"
+            disabled={selectedTransactionIds.size === 0 || mutating}
+            type="button"
+            onClick={handleSubmitSelected}
+          >
+            提交批次
+          </button>
+        ) : null}
           {selectedTransactionIds.size > 0 ? (
             <span className="no-oa-bank-batches-selected-count">
               已选 {selectedTransactionIds.size} 条

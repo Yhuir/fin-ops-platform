@@ -3,6 +3,7 @@ import type {
   BatchAccountingBankRow,
   BatchAccountingMutationResult,
   BatchAccountingOaRow,
+  BatchAccountingPageInfo,
   BatchAccountingRelation,
   BatchAccountingResponse,
   FetchBatchAccountingRequest,
@@ -87,6 +88,21 @@ type ApiResponse = {
   readModelScopeKeys?: string[] | null;
   refresh_enqueued?: boolean | null;
   refreshEnqueued?: boolean | null;
+  pagination?: ApiPagination | null;
+};
+
+type ApiPageInfo = {
+  page?: number | null;
+  page_size?: number | null;
+  pageSize?: number | null;
+  total?: number | null;
+};
+
+type ApiPagination = {
+  bank_rows?: ApiPageInfo | null;
+  bankRows?: ApiPageInfo | null;
+  oa_rows?: ApiPageInfo | null;
+  oaRows?: ApiPageInfo | null;
 };
 
 type ApiRelationValue = ApiOaRow[] | {
@@ -123,6 +139,11 @@ function text(value: string | null | undefined, fallback = "") {
 
 function numberValue(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function positiveNumberValue(value: number | null | undefined, fallback: number) {
+  const number = numberValue(value);
+  return number > 0 ? number : fallback;
 }
 
 function nullableNumberValue(value: number | null | undefined) {
@@ -220,6 +241,17 @@ function mapRelations(value: ApiRelationsByBankRowId | null | undefined) {
   );
 }
 
+function mapPageInfo(value: ApiPageInfo | null | undefined): BatchAccountingPageInfo | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return {
+    page: positiveNumberValue(value.page, 1),
+    pageSize: positiveNumberValue(value.page_size ?? value.pageSize, 200),
+    total: Math.max(0, numberValue(value.total)),
+  };
+}
+
 function mapMutationResult(payload: ApiMutationResult): BatchAccountingMutationResult {
   return {
     success: Boolean(payload.success),
@@ -234,13 +266,30 @@ export async function fetchBatchAccounting({
   bankYear,
   oaYear,
   bucket,
+  bankPage,
+  bankPageSize,
+  oaPage,
+  oaPageSize,
   signal,
 }: FetchBatchAccountingRequest): Promise<BatchAccountingResponse> {
   const params = new URLSearchParams();
   params.set("bank_year", bankYear);
   params.set("oa_year", oaYear);
   params.set("bucket", bucket);
+  if (bankPage !== undefined) {
+    params.set("bank_page", String(bankPage));
+  }
+  if (bankPageSize !== undefined) {
+    params.set("bank_page_size", String(bankPageSize));
+  }
+  if (oaPage !== undefined) {
+    params.set("oa_page", String(oaPage));
+  }
+  if (oaPageSize !== undefined) {
+    params.set("oa_page_size", String(oaPageSize));
+  }
   const payload = await requestJson<ApiResponse>(`/api/batch-accounting?${params.toString()}`, { method: "GET", signal });
+  const pagination = payload.pagination;
   return {
     summary: {
       unsubmittedCount: numberValue(payload.summary?.unsubmitted_count ?? payload.summary?.unsubmittedCount),
@@ -249,6 +298,10 @@ export async function fetchBatchAccounting({
     bankRows: Array.isArray(payload.bank_rows ?? payload.bankRows) ? (payload.bank_rows ?? payload.bankRows ?? []).map(mapBankRow) : [],
     oaRows: Array.isArray(payload.oa_rows ?? payload.oaRows) ? (payload.oa_rows ?? payload.oaRows ?? []).map(mapOaRow) : [],
     relationsByBankRowId: mapRelations(payload.relations_by_bank_row_id ?? payload.relationsByBankRowId),
+    pagination: {
+      bankRows: mapPageInfo(pagination?.bank_rows ?? pagination?.bankRows),
+      oaRows: mapPageInfo(pagination?.oa_rows ?? pagination?.oaRows),
+    },
     readModelStatus: text(payload.read_model_status ?? payload.readModelStatus, "fresh"),
     readModelStaleReasons: stringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
     readModelScopeKeys: stringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),

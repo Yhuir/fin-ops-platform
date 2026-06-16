@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FocusEvent, type MouseEvent } from "react";
-import { AlertTriangle, RefreshCw, Search, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 
 import AppDialog from "../components/common/AppDialog";
 import PageScaffold from "../components/common/PageScaffold";
@@ -29,11 +29,14 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
   bankRows: [],
   oaRows: [],
   relationsByBankRowId: {},
+  pagination: {},
   readModelStatus: "fresh",
   readModelStaleReasons: [],
   readModelScopeKeys: [],
   refreshEnqueued: false,
 };
+
+const BATCH_ACCOUNTING_PAGE_SIZE = 200;
 
 function currentYear() {
   return String(new Date().getFullYear());
@@ -79,6 +82,63 @@ function formatCents(cents: number) {
 function accountLabel(row: BatchAccountingBankRow) {
   const bankName = row.bankName || "多账户";
   return row.accountLast4 ? `${bankName} ${row.accountLast4}` : bankName;
+}
+
+function pageRange(page: number, pageSize: number, total: number) {
+  if (total <= 0) {
+    return "0-0 / 0";
+  }
+  const start = (page - 1) * pageSize + 1;
+  if (start > total) {
+    return `0-0 / ${total}`;
+  }
+  const end = Math.min(total, page * pageSize);
+  return `${start}-${end} / ${total}`;
+}
+
+function PageControls({
+  disabled,
+  label,
+  onNext,
+  onPrevious,
+  page,
+  pageSize,
+  total,
+}: {
+  disabled?: boolean;
+  label: string;
+  onNext: () => void;
+  onPrevious: () => void;
+  page: number;
+  pageSize: number;
+  total: number;
+}) {
+  const pageCount = Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
+  return (
+    <div aria-label={label} className="batch-accounting-pagination" role="group">
+      <span className="batch-accounting-pagination__summary">{pageRange(page, pageSize, total)}</span>
+      <button
+        aria-label={`${label}上一页`}
+        className="batch-accounting-pagination__button"
+        disabled={disabled || page <= 1}
+        onClick={onPrevious}
+        title={`${label}上一页`}
+        type="button"
+      >
+        <ChevronLeft aria-hidden="true" size={15} strokeWidth={2.4} />
+      </button>
+      <button
+        aria-label={`${label}下一页`}
+        className="batch-accounting-pagination__button"
+        disabled={disabled || page >= pageCount}
+        onClick={onNext}
+        title={`${label}下一页`}
+        type="button"
+      >
+        <ChevronRight aria-hidden="true" size={15} strokeWidth={2.4} />
+      </button>
+    </div>
+  );
 }
 
 function normalizeSearchText(value: string | number | null | undefined) {
@@ -213,6 +273,8 @@ export default function BatchAccountingPage() {
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
   const [bankRowsById, setBankRowsById] = useState<Record<string, BatchAccountingBankRow>>({});
   const [oaRowsById, setOaRowsById] = useState<Record<string, BatchAccountingOaRow>>({});
+  const [bankPage, setBankPage] = useState(1);
+  const [oaPage, setOaPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -285,6 +347,16 @@ export default function BatchAccountingPage() {
     && !mutating
     && (differenceCents === 0 || differenceNote.trim().length > 0);
   const canWithdraw = Boolean(selectedBankRow?.relationId) && !mutating;
+  const bankPagination = payload.pagination.bankRows ?? {
+    page: bankPage,
+    pageSize: BATCH_ACCOUNTING_PAGE_SIZE,
+    total: payload.bankRows.length,
+  };
+  const oaPagination = payload.pagination.oaRows ?? {
+    page: oaPage,
+    pageSize: BATCH_ACCOUNTING_PAGE_SIZE,
+    total: bucket === "unsubmitted" ? payload.oaRows.length : sourceOaRows.length,
+  };
 
   const applyBatchAccountingPayload = useCallback((nextPayload: BatchAccountingResponse) => {
     setPayload(nextPayload);
@@ -308,10 +380,18 @@ export default function BatchAccountingPage() {
     if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
       return null;
     }
-    const nextPayload = await fetchBatchAccounting({ bankYear, oaYear, bucket });
+    const nextPayload = await fetchBatchAccounting({
+      bankYear,
+      oaYear,
+      bucket,
+      bankPage,
+      bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
+      oaPage: bucket === "unsubmitted" ? oaPage : undefined,
+      oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
+    });
     applyBatchAccountingPayload(nextPayload);
     return nextPayload;
-  }, [applyBatchAccountingPayload, bankYear, bucket, oaYear]);
+  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaYear]);
 
   const loadData = useCallback((signal?: AbortSignal) => {
     if (!isValidYear(bankYear) || !isValidYear(oaYear)) {
@@ -319,7 +399,16 @@ export default function BatchAccountingPage() {
     }
     setLoading(true);
     setError(null);
-    fetchBatchAccounting({ bankYear, oaYear, bucket, signal })
+    fetchBatchAccounting({
+      bankYear,
+      oaYear,
+      bucket,
+      bankPage,
+      bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
+      oaPage: bucket === "unsubmitted" ? oaPage : undefined,
+      oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
+      signal,
+    })
       .then(applyBatchAccountingPayload)
       .catch((caught: unknown) => {
         if (isAbortLikeError(caught)) {
@@ -329,7 +418,7 @@ export default function BatchAccountingPage() {
         setError(caught instanceof Error ? caught.message : "批量账务数据加载失败");
       })
       .finally(() => setLoading(false));
-  }, [applyBatchAccountingPayload, bankYear, bucket, oaYear]);
+  }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaYear]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -364,9 +453,24 @@ export default function BatchAccountingPage() {
       return;
     }
     setBucket(nextBucket);
+    setBankPage(1);
+    setOaPage(1);
     setSelectedBankRowId(null);
     setSelectedOaRowIds(new Set());
     setDifferenceNote("");
+  };
+
+  const handleBankYearChange = (nextYear: string) => {
+    setBankYear(nextYear);
+    setBankPage(1);
+    setSelectedBankRowId(null);
+    setSelectedOaRowIds(new Set());
+    setDifferenceNote("");
+  };
+
+  const handleOaYearChange = (nextYear: string) => {
+    setOaYear(nextYear);
+    setOaPage(1);
   };
 
   const handleSelectBankRow = (row: BatchAccountingBankRow) => {
@@ -388,6 +492,17 @@ export default function BatchAccountingPage() {
       }
       return next;
     });
+  };
+
+  const handleBankPageChange = (nextPage: number) => {
+    setBankPage(Math.max(1, nextPage));
+    setSelectedBankRowId(null);
+    setSelectedOaRowIds(new Set());
+    setDifferenceNote("");
+  };
+
+  const handleOaPageChange = (nextPage: number) => {
+    setOaPage(Math.max(1, nextPage));
   };
 
   const handleMutationComplete = (fallbackMessage: string, result: { affectedMonths?: string[]; message?: string }) => {
@@ -531,11 +646,20 @@ export default function BatchAccountingPage() {
                 id="batch-accounting-bank-year"
                 max={2100}
                 min={2000}
-                onChange={(event) => setBankYear(event.target.value)}
+                onChange={(event) => handleBankYearChange(event.target.value)}
                 type="number"
                 value={bankYear}
               />
             </label>
+            <PageControls
+              disabled={loading}
+              label="批量账务流水分页"
+              onNext={() => handleBankPageChange(bankPagination.page + 1)}
+              onPrevious={() => handleBankPageChange(bankPagination.page - 1)}
+              page={bankPagination.page}
+              pageSize={bankPagination.pageSize}
+              total={bankPagination.total}
+            />
           </header>
           {loading ? (
             <div className="batch-accounting-bank-panel__state">
@@ -615,7 +739,7 @@ export default function BatchAccountingPage() {
                   id="batch-accounting-oa-year"
                   max={2100}
                   min={2000}
-                  onChange={(event) => setOaYear(event.target.value)}
+                  onChange={(event) => handleOaYearChange(event.target.value)}
                   type="number"
                   value={oaYear}
                 />
@@ -643,6 +767,17 @@ export default function BatchAccountingPage() {
                   ) : null}
                 </div>
               </div>
+              {bucket === "unsubmitted" ? (
+                <PageControls
+                  disabled={loading}
+                  label="可关联OA项分页"
+                  onNext={() => handleOaPageChange(oaPagination.page + 1)}
+                  onPrevious={() => handleOaPageChange(oaPagination.page - 1)}
+                  page={oaPagination.page}
+                  pageSize={oaPagination.pageSize}
+                  total={oaPagination.total}
+                />
+              ) : null}
             </div>
             {bucket === "unsubmitted" ? (
               <button

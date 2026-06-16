@@ -138,6 +138,7 @@ describe("no OA bank batch API", () => {
             version: 2,
           },
         ],
+        pagination: { page: 2, page_size: 50, total: 125 },
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
 
@@ -146,10 +147,12 @@ describe("no OA bank batch API", () => {
       type: "all",
       bucket: "unsubmitted",
       accountKey: "ccb:8106",
+      page: 2,
+      pageSize: 50,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/no-oa-bank-batches?month=2026-05&bucket=unsubmitted&account_key=ccb%3A8106",
+      "/api/no-oa-bank-batches?month=2026-05&bucket=unsubmitted&account_key=ccb%3A8106&page=2&page_size=50",
       expect.objectContaining({ method: "GET" }),
     );
     expect(payload.summary).toEqual({
@@ -194,6 +197,7 @@ describe("no OA bank batch API", () => {
         canWithdraw: true,
       }),
     ]);
+    expect(payload.pagination).toEqual({ page: 2, pageSize: 50, total: 125 });
   });
 
   test("maps batch detail rows", async () => {

@@ -518,6 +518,11 @@ describe("turnover ledger API", () => {
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-001", "lot-002"],
                   bank_row_ids: ["bank_003"],
+                  workbench_relation_status: "linked",
+                  workbench_relation_case_ids: ["case-turnover-001"],
+                  workbench_relation_mode: "turnover_manual_closure",
+                  workbench_relation_source: "manual",
+                  workbench_relation_row_ids: ["bank_001", "bank_002", "bank_003"],
                 },
               ],
               allocation_lots: [
@@ -670,6 +675,11 @@ describe("turnover ledger API", () => {
       allocationStatus: "allocated",
       allocatedLotIds: ["lot-001", "lot-002"],
       bankRowIds: ["bank_003"],
+      workbenchRelationStatus: "linked",
+      workbenchRelationCaseIds: ["case-turnover-001"],
+      workbenchRelationMode: "turnover_manual_closure",
+      workbenchRelationSource: "manual",
+      workbenchRelationRowIds: ["bank_001", "bank_002", "bank_003"],
     });
     expect(ledger.groups[0].allocationLots).toHaveLength(1);
     expect(ledger.groups[0].allocationLots[0]).toMatchObject({
@@ -890,5 +900,20 @@ describe("turnover ledger API", () => {
     expect(downloaded.blob).toBeInstanceOf(Blob);
     expect(downloaded.blob.size).toBeGreaterThan(0);
     expect(exportJsonSpy).not.toHaveBeenCalled();
+  });
+
+  test("surfaces backend row-limit messages from failed export downloads", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "turnover_ledger_export_row_limit_exceeded",
+      message: "往来款台账导出超过 20000 行，请缩小下载范围后重试。",
+      details: { total: 20001, limit: 20000 },
+    }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    })));
+
+    await expect(downloadTurnoverLedgerExport({ family: "all" })).rejects.toThrow(
+      "往来款台账导出超过 20000 行，请缩小下载范围后重试。",
+    );
   });
 });

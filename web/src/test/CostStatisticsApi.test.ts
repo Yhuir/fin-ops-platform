@@ -36,6 +36,24 @@ describe("Cost statistics export API", () => {
     expect(result.fileName).toBe("成本统计_2026-03_按时间统计.xlsx");
   });
 
+  test("surfaces backend row-limit messages from failed export downloads", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        error: "cost_statistics_export_row_limit_exceeded",
+        message: "导出结果超过 20000 行，请缩小筛选范围后重试。",
+        details: { total: 20001, limit: 20000 },
+      }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as typeof fetch;
+
+    await expect(exportCostStatisticsView({
+      month: "all",
+      view: "time",
+    })).rejects.toThrow("导出结果超过 20000 行，请缩小筛选范围后重试。");
+  });
+
   test("passes project scope to explorer, export preview, and export requests", async () => {
     global.fetch = vi.fn(async (input) => {
       const url = String(input);

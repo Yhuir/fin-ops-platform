@@ -456,6 +456,20 @@ describe("bank details API", () => {
     await expect(downloadBankDetailTransactionsExport({ mode: "account" })).rejects.toThrow("请选择具体银行账户后再导出当前账户。");
   });
 
+  test("maps bank detail export row-limit errors to actionable messages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        error: "bank_detail_export_row_limit_exceeded",
+        details: { total: 20001, limit: 20000 },
+      }), { status: 400, headers: { "Content-Type": "application/json" } })),
+    );
+
+    await expect(downloadBankDetailTransactionsExport({ mode: "all" })).rejects.toThrow(
+      "当前筛选命中流水过多，请缩小日期范围、选择具体银行或增加搜索条件后再导出。",
+    );
+  });
+
   test("includes automatic tag rule field errors in save failures", async () => {
     vi.stubGlobal(
       "fetch",

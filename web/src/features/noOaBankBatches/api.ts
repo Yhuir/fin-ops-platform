@@ -2,6 +2,7 @@ import type {
   NoOaBankBatch,
   NoOaBankBatchDetail,
   NoOaBankBatchDetailRow,
+  NoOaBankBatchesPageInfo,
   NoOaBankBatchReadModelStatus,
   NoOaBankBatchTagDefinition,
   NoOaBankBatchTagSelection,
@@ -131,10 +132,18 @@ type ApiNoOaBankBatchTagSelection = {
 type ApiNoOaBankBatchesResponse = {
   summary?: ApiNoOaBankBatchSummary;
   batches?: ApiNoOaBankBatch[];
+  pagination?: ApiNoOaBankBatchesPageInfo | null;
   read_model_status?: string | null;
   readModelStatus?: string | null;
   read_model_stale_reasons?: unknown[] | null;
   readModelStaleReasons?: unknown[] | null;
+};
+
+type ApiNoOaBankBatchesPageInfo = {
+  page?: number | null;
+  page_size?: number | null;
+  pageSize?: number | null;
+  total?: number | null;
 };
 
 type ApiNoOaBankBatchDetailRow = {
@@ -209,6 +218,11 @@ function text(value: string | null | undefined, fallback = "") {
 
 function numberValue(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function positiveNumberValue(value: number | null | undefined, fallback: number) {
+  const number = numberValue(value);
+  return number > 0 ? number : fallback;
 }
 
 function nullableNumberValue(value: number | null | undefined) {
@@ -289,6 +303,17 @@ function mapSummary(summary: ApiNoOaBankBatchSummary = {}): NoOaBankBatchSummary
     staleCount: numberValue(summary.stale_count ?? summary.staleCount),
     totalAmount: text(summary.total_amount ?? summary.totalAmount, "0.00"),
     categories: Array.isArray(summary.categories) ? summary.categories.map(mapSummaryCategory) : [],
+  };
+}
+
+function mapPagination(value: ApiNoOaBankBatchesPageInfo | null | undefined): NoOaBankBatchesPageInfo | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return {
+    page: positiveNumberValue(value.page, 1),
+    pageSize: positiveNumberValue(value.page_size ?? value.pageSize, 200),
+    total: Math.max(0, numberValue(value.total)),
   };
 }
 
@@ -384,6 +409,8 @@ export async function fetchNoOaBankBatches({
   status,
   bucket,
   accountKey,
+  page,
+  pageSize,
   signal,
 }: NoOaBankBatchesRequest = {}): Promise<NoOaBankBatchesResponse> {
   const params = new URLSearchParams();
@@ -402,6 +429,12 @@ export async function fetchNoOaBankBatches({
   if (accountKey) {
     params.set("account_key", accountKey);
   }
+  if (page !== undefined) {
+    params.set("page", String(page));
+  }
+  if (pageSize !== undefined) {
+    params.set("page_size", String(pageSize));
+  }
   const query = params.toString();
   const payload = await requestJson<ApiNoOaBankBatchesResponse>(
     `/api/no-oa-bank-batches${query ? `?${query}` : ""}`,
@@ -410,6 +443,7 @@ export async function fetchNoOaBankBatches({
   return {
     summary: mapSummary(payload.summary),
     batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch) : [],
+    pagination: mapPagination(payload.pagination),
     readModelStatus: normalizeReadModelStatus(payload.read_model_status ?? payload.readModelStatus),
     readModelStaleReasons: unknownStringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
   };

@@ -584,6 +584,10 @@ describe("Output invoice collections page", () => {
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     const page = await screen.findByTestId("output-invoice-collections-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    const initialRowsRequest = rowsRequests(fetchMock)[0];
+    expect(initialRowsRequest.searchParams.get("page")).toBe("1");
+    expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(within(page).getByRole("heading", { name: "销项发票收款情况" })).toBeInTheDocument();
     expect(within(page).queryByText("以销项发票为主对象查看收款状态、收入流水和收据预览。")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
@@ -593,6 +597,7 @@ describe("Output invoice collections page", () => {
       expect(within(page).queryByText(label)).not.toBeInTheDocument();
     }
     expect(within(page).queryByRole("button", { name: /导出/ })).not.toBeInTheDocument();
+    expect(Array.from((within(page).getByLabelText("每页行数") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);
     expect(await within(page).findByText("XSFP-2026-0001")).toBeInTheDocument();
     expect(statusRulesRequests(fetchMock)).toHaveLength(0);
 

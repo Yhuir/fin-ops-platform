@@ -528,6 +528,22 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(downloaded.blob).toBeInstanceOf(Blob);
   });
 
+  test("surfaces backend row-limit messages from failed export downloads", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "pending_invoice_export_row_limit_exceeded",
+      message: "待找发票导出超过 20000 行，请缩小筛选范围后重试。",
+      details: { total: 20001, limit: 20000 },
+    }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    })));
+
+    await expect(api().downloadPendingInvoiceExport({
+      direction: "expense",
+      filter: "requires_invoice",
+    })).rejects.toThrow("待找发票导出超过 20000 行，请缩小筛选范围后重试。");
+  });
+
   test("maps batch candidate, preview, and confirm attach-existing invoice endpoints", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");

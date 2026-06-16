@@ -139,6 +139,11 @@ type ApiTurnoverLedgerGroupedRow = {
   interest_payment_method?: string | null;
   note?: string | null;
   bank_row_ids?: string[];
+  workbench_relation_status?: string | null;
+  workbench_relation_case_ids?: string[];
+  workbench_relation_mode?: string | null;
+  workbench_relation_source?: string | null;
+  workbench_relation_row_ids?: string[];
 };
 
 type ApiTurnoverLedgerTagDefinition = {
@@ -591,6 +596,11 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     interestPaymentMethod: text(row.interest_payment_method),
     note: text(row.note),
     bankRowIds: stringList(row.bank_row_ids),
+    workbenchRelationStatus: text(row.workbench_relation_status),
+    workbenchRelationCaseIds: stringList(row.workbench_relation_case_ids),
+    workbenchRelationMode: text(row.workbench_relation_mode),
+    workbenchRelationSource: text(row.workbench_relation_source),
+    workbenchRelationRowIds: stringList(row.workbench_relation_row_ids),
   };
 }
 

@@ -163,6 +163,73 @@ function renderPage() {
   );
 }
 
+function positiveParam(params: URLSearchParams, name: string, fallback: number) {
+  const value = Number(params.get(name));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function slicePage<T>(rows: T[], page: number, pageSize: number) {
+  const start = (page - 1) * pageSize;
+  return rows.slice(start, start + pageSize);
+}
+
+function withPagination<T extends { bank_rows?: unknown[]; oa_rows?: unknown[] }>(payload: T, url: URL): T & { pagination: Record<string, unknown> } {
+  const bankRows = Array.isArray(payload.bank_rows) ? payload.bank_rows : [];
+  const oaRows = Array.isArray(payload.oa_rows) ? payload.oa_rows : [];
+  const bankPage = positiveParam(url.searchParams, "bank_page", 1);
+  const bankPageSize = positiveParam(url.searchParams, "bank_page_size", 200);
+  const nextPayload = {
+    ...payload,
+    bank_rows: slicePage(bankRows, bankPage, bankPageSize),
+    pagination: {
+      bank_rows: { page: bankPage, page_size: bankPageSize, total: bankRows.length },
+    } as Record<string, unknown>,
+  };
+  if (url.searchParams.has("oa_page") || url.searchParams.has("oa_page_size")) {
+    const oaPage = positiveParam(url.searchParams, "oa_page", 1);
+    const oaPageSize = positiveParam(url.searchParams, "oa_page_size", 200);
+    return {
+      ...nextPayload,
+      oa_rows: slicePage(oaRows, oaPage, oaPageSize),
+      pagination: {
+        ...nextPayload.pagination,
+        oa_rows: { page: oaPage, page_size: oaPageSize, total: oaRows.length },
+      },
+    };
+  }
+  return nextPayload;
+}
+
+function largeUnsubmittedPayload(total = 205) {
+  return {
+    summary: {
+      unsubmitted_count: total,
+      submitted_count: 0,
+    },
+    bank_rows: Array.from({ length: total }, (_, index) => ({
+      id: `bank-large-${index.toString().padStart(3, "0")}`,
+      trade_time: `2026-01-${(index % 28 + 1).toString().padStart(2, "0")} 09:00:00`,
+      counterparty_name: "批量账务集中处理",
+      direction: "expense",
+      direction_label: "支出",
+      amount: "10.00",
+      bank_name: "建行",
+      account_last4: index.toString().padStart(4, "0"),
+      relation_id: "",
+      version: 1,
+    })),
+    oa_rows: Array.from({ length: total }, (_, index) => ({
+      id: `oa-large-${index.toString().padStart(3, "0")}`,
+      applicant: `申请人${index.toString().padStart(3, "0")}`,
+      apply_time: `2026-01-${(index % 28 + 1).toString().padStart(2, "0")}`,
+      project_name: "批量账务分页验证",
+      amount: "10.00",
+      reason: "日常报销",
+      linked_invoice_row_ids: [],
+    })),
+  };
+}
+
 function installFetchMock() {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -181,7 +248,7 @@ function installFetchMock() {
           bank_rows: bankYear === "2026" ? unsubmittedPayload.bank_rows : [],
           oa_rows: oaYear === "2025" ? oa2025Rows : unsubmittedPayload.oa_rows,
         };
-      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(withPagination(payload, url)), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/batch-accounting/submit") {
       return new Response(JSON.stringify({
@@ -281,6 +348,7 @@ describe("BatchAccountingPage", () => {
     const inputRule = cssRule(styles, ".batch-accounting-field input,\\n.batch-accounting-field textarea");
     const searchRule = cssRule(styles, ".batch-accounting-search");
     const searchClearRule = cssRule(styles, ".batch-accounting-search__clear");
+    const paginationButtonRule = cssRule(styles, ".batch-accounting-pagination__button");
     const bankRowRule = cssRule(styles, ".batch-accounting-bank-row");
     const selectedBankRowRule = cssRule(styles, ".batch-accounting-bank-row--selected,\\n.batch-accounting-bank-row[aria-pressed=\"true\"]");
     const tagRule = cssRule(styles, ".batch-accounting-tag,\\n.batch-accounting-summary-tag");
@@ -299,6 +367,7 @@ describe("BatchAccountingPage", () => {
     expect(inputRule).toContain("var(--motion-fast)");
     expect(searchRule).toContain("var(--motion-fast)");
     expect(searchClearRule).toContain("var(--motion-fast)");
+    expect(paginationButtonRule).toContain("var(--motion-fast)");
     expect(bankRowRule).toContain("var(--motion-fast)");
     expect(mismatchRule).toContain("var(--motion-fast)");
     expect(tableCellRule).toContain("var(--motion-fast)");
@@ -311,6 +380,8 @@ describe("BatchAccountingPage", () => {
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
     expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
     expect(oaToolbarRule).toContain("padding: var(--fp-space-2) var(--fp-space-3)");
+    expect(paginationButtonRule).toContain("width: 30px");
+    expect(paginationButtonRule).toContain("height: 30px");
     expect(tableWrapRule).toContain("max-height: calc(100vh - 252px)");
     expect(tableHeadRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
     expect(amountRule).toContain("text-align: right");
@@ -322,10 +393,22 @@ describe("BatchAccountingPage", () => {
   });
 
   test("renders controls, bank list, and selectable OA table for unsubmitted rows", async () => {
-    installFetchMock();
+    const fetchMock = installFetchMock();
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "日常报销批量账务管理" })).toBeInTheDocument();
+    await waitFor(() => {
+      const firstGet = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET");
+      });
+      expect(firstGet).toBeTruthy();
+      const url = new URL(typeof firstGet?.[0] === "string" ? firstGet[0] : firstGet?.[0] instanceof URL ? firstGet[0].toString() : firstGet?.[0].url ?? "", "http://localhost");
+      expect(url.searchParams.get("bank_page")).toBe("1");
+      expect(url.searchParams.get("bank_page_size")).toBe("200");
+      expect(url.searchParams.get("oa_page")).toBe("1");
+      expect(url.searchParams.get("oa_page_size")).toBe("200");
+    });
     expect(screen.getByRole("button", { name: "未提交 2" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "已提交 1" })).toBeInTheDocument();
     expect(screen.queryByLabelText("年份")).not.toBeInTheDocument();
@@ -334,7 +417,9 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
 
     const bankList = screen.getByRole("region", { name: "批量账务流水" });
-    expect(within(bankList).getAllByRole("button")).toHaveLength(2);
+    expect(within(bankList).getAllByRole("button", { name: /批量账务集中处理/ })).toHaveLength(2);
+    expect(screen.getByRole("group", { name: "批量账务流水分页" })).toHaveTextContent("1-2 / 2");
+    expect(screen.getByRole("group", { name: "可关联OA项分页" })).toHaveTextContent("1-2 / 2");
     expect(within(bankList).queryByRole("table")).not.toBeInTheDocument();
     expect(within(bankList).getByRole("button", { name: /批量账务集中处理.*1,200.00.*2026-01-07 15:54:00.*支出.*建行 8106/ })).toHaveAttribute("aria-pressed", "true");
 
@@ -345,6 +430,46 @@ describe("BatchAccountingPage", () => {
     expect(within(oaTable).getByText("品牌广告投放；市场活动项目")).toBeInTheDocument();
     expect(within(oaTable).getByText("700.00")).toBeInTheDocument();
     expect(within(oaTable).getByText("1月日常报销，包含广告素材制作和渠道投放费用")).toBeInTheDocument();
+  });
+
+  test("uses backend pagination for bank and OA first screens", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET")) {
+        return jsonResponse(withPagination(largeUnsubmittedPayload(), url));
+      }
+      return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(within(screen.getByRole("group", { name: "批量账务流水分页" })).getByText("1-200 / 205")).toBeInTheDocument();
+      expect(within(screen.getByRole("group", { name: "可关联OA项分页" })).getByText("1-200 / 205")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /批量账务集中处理.*建行 0000/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /批量账务集中处理.*建行 0204/ })).not.toBeInTheDocument();
+    expect(screen.getByText("申请人000")).toBeInTheDocument();
+    expect(screen.queryByText("申请人204")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "批量账务流水分页下一页" }));
+    expect(await screen.findByText("201-205 / 205")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /批量账务集中处理.*建行 0200/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /批量账务集中处理.*建行 0000/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "可关联OA项分页下一页" }));
+    await waitFor(() => {
+      expect(screen.getByText("申请人200")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("申请人000")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/batch-accounting"
+        && url.searchParams.get("bank_page_size") === "200"
+        && url.searchParams.get("oa_page_size") === "200";
+    })).toBe(true);
   });
 
   test("shows loading and empty states in the bank and OA regions", async () => {

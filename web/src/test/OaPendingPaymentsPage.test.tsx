@@ -767,6 +767,10 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    const initialRowsRequest = rowsRequests(fetchMock)[0];
+    expect(initialRowsRequest.searchParams.get("page")).toBe("1");
+    expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(within(page).getByRole("heading", { name: "OA 待付款核对" })).toBeInTheDocument();
     expect(await within(page).findByRole("table", { name: "OA待付款核对表格" })).toBeInTheDocument();
 
@@ -786,6 +790,7 @@ describe("OA pending payments page", () => {
     expect(within(page).queryByRole("columnheader", { name: "类型" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("columnheader", { name: "OA详情" })).not.toBeInTheDocument();
     expect(within(page).queryByText("销方名称")).not.toBeInTheDocument();
+    expect(Array.from((within(page).getByLabelText("每页") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);
     expect(await within(page).findByText("张三")).toBeInTheDocument();
     expect(within(page).getByText("报销")).toBeInTheDocument();
     expect(within(page).getAllByText("支付少了").some((element) => element.closest(".oa-pending-payment-status-cell"))).toBe(true);

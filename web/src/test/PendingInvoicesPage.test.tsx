@@ -353,6 +353,7 @@ function installPendingInvoiceFetch(options: {
   rulesPayload?: () => ReturnType<typeof pendingInvoiceRulesPayload>;
   rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
   readModelStatus?: string;
+  exportDownloadResponse?: (url: URL) => Response;
   onRulesSaved?: () => void;
   rulesSaveResponse?: (body: Record<string, unknown>, url: URL) => Response;
 } = {}) {
@@ -363,11 +364,12 @@ function installPendingInvoiceFetch(options: {
     if (url.pathname === "/api/pending-invoices/rows") {
       const rows = options.rowsPayload?.(url) ?? upgradedRows();
       const direction = url.searchParams.get("direction") ?? "expense";
+      const pageSize = Number(url.searchParams.get("page_size") ?? 50);
       return new Response(JSON.stringify({
         direction,
         filter: url.searchParams.get("filter") ?? "all",
         rows,
-        pagination: { page: Number(url.searchParams.get("page") ?? 1), page_size: 50, total: rows.length },
+        pagination: { page: Number(url.searchParams.get("page") ?? 1), page_size: pageSize, total: rows.length },
         summary: {
           total_rows: rows.length,
           missing_invoice_rows: 2,
@@ -732,6 +734,9 @@ function installPendingInvoiceFetch(options: {
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/export") {
+      if (options.exportDownloadResponse) {
+        return options.exportDownloadResponse(url);
+      }
       return new Response(new Blob(["xlsx"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), {
         status: 200,
         headers: {
@@ -875,8 +880,12 @@ describe("Pending invoices page", () => {
 
     const request = pendingInvoiceRowsRequests(fetchMock)[0];
     expect(request.searchParams.get("direction")).toBe("expense");
+    expect(request.searchParams.get("page")).toBe("1");
+    expect(request.searchParams.get("page_size")).toBe("50");
     expect(request.searchParams.get("sort_field")).toBe("trade_date");
     expect(request.searchParams.get("sort_direction")).toBe("desc");
+    const pageSizeSelect = within(page).getByLabelText("每页行数") as HTMLSelectElement;
+    expect(Array.from(pageSizeSelect.options).map((option) => option.value)).toEqual(["25", "50", "100"]);
   });
 
   test("shows paid status shortcuts under the expense requires-invoice filter", async () => {
@@ -1092,6 +1101,29 @@ describe("Pending invoices page", () => {
     await user.click(screen.getByRole("button", { name: "下载导出" }));
     expect(await screen.findByText("已生成 pending-invoices.xlsx")).toBeInTheDocument();
   }, 45_000);
+
+  test("shows backend export row-limit messages inside the export drawer", async () => {
+    const user = userEvent.setup();
+    installPendingInvoiceFetch({
+      exportDownloadResponse: () => new Response(JSON.stringify({
+        error: "pending_invoice_export_row_limit_exceeded",
+        message: "待找发票导出超过 20000 行，请缩小筛选范围后重试。",
+        details: { total: 20001, limit: 20000 },
+      }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    });
+    renderAppAt("/pending-invoices");
+
+    const page = await findPendingInvoicesPage();
+    await user.click(within(page).getByRole("button", { name: "筛选内容导出" }));
+    expect(await screen.findByRole("heading", { name: "导出预览" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下载导出" }));
+
+    expect(await screen.findByText("待找发票导出超过 20000 行，请缩小筛选范围后重试。")).toBeInTheDocument();
+    expect(screen.queryByText("已生成 pending-invoices.xlsx")).not.toBeInTheDocument();
+  });
 
   test("keeps pending invoice rule draft and shows conflict feedback on stale version", async () => {
     const user = userEvent.setup();

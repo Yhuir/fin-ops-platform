@@ -144,6 +144,11 @@ export type TurnoverLedgerGroupedRow = {
   interestPaymentMethod: string;
   note: string;
   bankRowIds: string[];
+  workbenchRelationStatus: string;
+  workbenchRelationCaseIds: string[];
+  workbenchRelationMode: string;
+  workbenchRelationSource: string;
+  workbenchRelationRowIds: string[];
   counterpartyName?: string;
   familyLabel?: string;
 };

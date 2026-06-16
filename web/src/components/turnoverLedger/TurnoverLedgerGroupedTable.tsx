@@ -67,6 +67,51 @@ function categoryChipLabels(row: TurnoverLedgerGroupedRow) {
   return fallback === "-" ? [] : [fallback];
 }
 
+function workbenchRelationLabel(row: TurnoverLedgerGroupedRow) {
+  const status = row.workbenchRelationStatus;
+  if (!status) {
+    return "";
+  }
+  if (status === "linked") {
+    if (row.workbenchRelationMode === "turnover_manual_closure") {
+      return "关联台手工闭环";
+    }
+    return "关联台已关联";
+  }
+  if (status === "candidate") {
+    return "关联台候选";
+  }
+  if (status === "unlinked") {
+    return "关联台未关联";
+  }
+  if (status === "mixed") {
+    return "关联台多状态";
+  }
+  return `关联台 ${status}`;
+}
+
+function workbenchRelationGroupLabel(group: TurnoverLedgerGroup) {
+  const rows = runtimeGroup(group).flowRows ?? [];
+  if (rows.length === 0) {
+    const summaryRow = runtimeGroup(group).summaryRow;
+    return summaryRow ? workbenchRelationLabel(summaryRow) : "";
+  }
+  const linkedRows = rows.filter((row) => row.workbenchRelationStatus === "linked");
+  if (linkedRows.length === rows.length) {
+    const manualClosureCount = linkedRows.filter((row) => row.workbenchRelationMode === "turnover_manual_closure").length;
+    const label = manualClosureCount === linkedRows.length ? "关联台手工闭环" : "关联台已关联";
+    return `${label} · ${linkedRows.length}笔`;
+  }
+  if (linkedRows.length > 0) {
+    return `部分已关联 ${linkedRows.length}/${rows.length}`;
+  }
+  const candidateRows = rows.filter((row) => row.workbenchRelationStatus === "candidate");
+  if (candidateRows.length > 0) {
+    return `关联台候选 ${candidateRows.length}/${rows.length}`;
+  }
+  return "";
+}
+
 function directionKey(direction: TurnoverLedgerDirection | null | undefined): "income" | "expense" | "neutral" {
   if (direction === "income") {
     return "income";
@@ -287,6 +332,7 @@ function BalanceBlock({
   onToggle: () => void;
 }) {
   const labelName = group.counterpartyName || "未命名对方";
+  const relationLabel = workbenchRelationGroupLabel(group);
   return (
     <span className="turnover-ledger-balance-block">
       <span className="turnover-ledger-balance-block__row">
@@ -309,6 +355,11 @@ function BalanceBlock({
           <span className="turnover-ledger-chip turnover-ledger-chip--filled turnover-ledger-chip--family">
             {group.familyLabel || group.family || "-"}
           </span>
+          {relationLabel ? (
+            <span className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--compact">
+              {relationLabel}
+            </span>
+          ) : null}
           <BalanceLines group={group} />
         </span>
       </span>
@@ -371,7 +422,19 @@ function RowCells({
           />
         )}
       </td>
-      <td>{formatNullable(isFlow ? row.repaymentRemark : "")}</td>
+      <td>
+        <span className="turnover-ledger-cell-stack">
+          <span>{formatNullable(isFlow ? row.repaymentRemark : "")}</span>
+          {workbenchRelationLabel(row) ? (
+            <span
+              className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--compact"
+              title={row.workbenchRelationCaseIds.join("、")}
+            >
+              {workbenchRelationLabel(row)}
+            </span>
+          ) : null}
+        </span>
+      </td>
       <td>
         <span className="turnover-ledger-interest-cell">
           <span className="turnover-ledger-interest-cell__amount">
