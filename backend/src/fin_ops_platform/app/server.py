@@ -105,6 +105,7 @@ from fin_ops_platform.services.cost_statistics_query_service import CostStatisti
 from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
+from fin_ops_platform.services.health_payload_compaction import compact_ready_payload
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -2692,11 +2693,14 @@ class Application:
         *,
         include_workbench_api_self_test: bool,
         api_performance_endpoint_limit: int | None = HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT,
+        compact_payload: bool = True,
     ) -> dict[str, object]:
         payload = self.readiness_summary()
         self._attach_health_metadata(payload, api_performance_endpoint_limit=api_performance_endpoint_limit)
         if include_workbench_api_self_test:
             payload["workbench_api_self_test"] = self._workbench_api_self_test()
+        if compact_payload:
+            compact_ready_payload(payload)
         return payload
 
     def _handle_prometheus_metrics(self, headers: dict[str, str] | None) -> Response:
@@ -2706,6 +2710,7 @@ class Application:
         payload = self._readiness_health_payload(
             include_workbench_api_self_test=False,
             api_performance_endpoint_limit=None,
+            compact_payload=False,
         )
         return Response(
             status_code=int(HTTPStatus.OK),

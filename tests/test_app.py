@@ -102,6 +102,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("storage", payload)
         self.assertIn("production_runtime_guard", payload)
+        self.assertIn("entrypoint_count", payload)
+        self.assertNotIn("entrypoints", payload)
         self.assertNotIn("workbench_api_self_test", payload)
 
     def test_ready_endpoint_bounds_api_performance_payload(self) -> None:

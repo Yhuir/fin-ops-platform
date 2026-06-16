@@ -90,6 +90,29 @@ class HealthReadyPayloadProbeTests(unittest.TestCase):
         self.assertEqual(report["runtime_blockers"]["worker_status_counts"], {"available": 1, "stale": 1})
         self.assertGreaterEqual(report["runtime_blocker_count"], 4)
 
+    def test_extracts_runtime_blockers_from_compact_worker_status_counts(self) -> None:
+        report = collect_health_ready_payload(
+            base_url="https://example.test",
+            request_fn=lambda _url, _headers, _timeout: _json_response(
+                {
+                    "status": "ready",
+                    "runtime_infrastructure": {
+                        "queue_backlog": {"done": 20},
+                        "dirty_scopes": {"done": 100},
+                        "worker_metric_count": 2,
+                        "worker_status_counts": {"available": 1, "mismatch": 1},
+                    },
+                    "api_performance": {
+                        "endpoint_count": 1,
+                        "omitted_endpoint_count": 0,
+                        "endpoints": {"GET /api/example": {}},
+                    },
+                }
+            ),
+        )
+
+        self.assertEqual(report["runtime_blockers"], {"worker_status_counts": {"available": 1, "mismatch": 1}})
+
     def test_fails_for_slow_or_large_payload(self) -> None:
         def slow_large_response(_url: str, _headers: dict[str, str], _timeout: float) -> HttpProbeResponse:
             sleep(0.005)

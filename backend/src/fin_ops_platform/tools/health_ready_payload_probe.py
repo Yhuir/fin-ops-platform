@@ -193,6 +193,12 @@ def _runtime_blockers(payload: Mapping[str, Any]) -> dict[str, Any]:
                 worker_status_counts[status] = worker_status_counts.get(status, 0) + 1
             if any(status not in {"available", "idle", "ok"} for status in worker_status_counts):
                 blockers["worker_status_counts"] = worker_status_counts
+        worker_status_counts = runtime.get("worker_status_counts")
+        if isinstance(worker_status_counts, dict) and any(
+            str(status) not in {"available", "idle", "ok"} and _is_blocking_value(count)
+            for status, count in worker_status_counts.items()
+        ):
+            blockers["worker_status_counts"] = worker_status_counts
     production_guard = payload.get("production_runtime_guard")
     if isinstance(production_guard, dict) and production_guard.get("problems"):
         blockers["production_runtime_guard_problems"] = production_guard.get("problems")

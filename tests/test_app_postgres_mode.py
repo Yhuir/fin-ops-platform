@@ -168,7 +168,37 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertNotIn("password", str(storage).lower())
 
     def test_ready_endpoint_exposes_runtime_infrastructure_contract(self) -> None:
-        with TemporaryDirectory() as temp_dir, patch("fin_ops_platform.app.server.build_state_store", return_value=FakeStore()):
+        runtime_infrastructure = {
+            "queue_backlog": {"dead_lettered": 3},
+            "dirty_scopes": {"done": 10, "pending": 2},
+            "failed_jobs": 3,
+            "stale_dirty_scope_count": 2,
+            "missing_required_worker_count": 0,
+            "stale_required_worker_count": 0,
+            "mismatched_required_worker_count": 1,
+            "worker_metrics": [
+                {"worker_instance": "workbench", "worker_kind": "workbench", "status": "available", "required": True},
+                {
+                    "worker_instance": "legacy-drain",
+                    "worker_kind": "cost-tax-read-model",
+                    "status": "mismatch",
+                    "warning_code": "worker_event_type_mismatch",
+                    "required": False,
+                    "current_effective": False,
+                },
+            ],
+            "dirty_scopes_by_scope": [
+                {"scope_type": "cost_statistics", "scope_key": "active/all", "status": "pending", "count": 1},
+                {"scope_type": "search", "scope_key": "all", "status": "pending", "count": 1},
+            ],
+            "pending_outbox_events_by_scope": [
+                {"event_type": "cost_statistics.read_model.refresh", "scope_key": "active/all", "status": "dead_lettered"}
+            ],
+        }
+        with TemporaryDirectory() as temp_dir, patch(
+            "fin_ops_platform.app.server.build_state_store",
+            return_value=FakeStore(runtime_infrastructure=runtime_infrastructure),
+        ):
             app = build_application(data_dir=Path(temp_dir))
 
         response = app.handle_request("GET", "/health/ready")
@@ -177,8 +207,17 @@ class AppPostgresModeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["runtime_infrastructure"]["missing_required_worker_count"], 0)
         self.assertEqual(payload["runtime_infrastructure"]["stale_required_worker_count"], 0)
-        self.assertEqual(payload["runtime_infrastructure"]["mismatched_required_worker_count"], 0)
-        self.assertEqual(payload["storage"]["runtime_infrastructure"], payload["runtime_infrastructure"])
+        self.assertEqual(payload["runtime_infrastructure"]["mismatched_required_worker_count"], 1)
+        self.assertNotIn("runtime_infrastructure", payload["storage"])
+        self.assertNotIn("worker_metrics", payload["runtime_infrastructure"])
+        self.assertEqual(payload["runtime_infrastructure"]["worker_metric_count"], 2)
+        self.assertEqual(payload["runtime_infrastructure"]["worker_status_counts"], {"available": 1, "mismatch": 1})
+        self.assertEqual(
+            payload["runtime_infrastructure"]["worker_problem_samples"][0]["warning_code"],
+            "worker_event_type_mismatch",
+        )
+        self.assertEqual(payload["runtime_infrastructure"]["dirty_scopes_by_scope_summary"]["count"], 2)
+        self.assertEqual(payload["runtime_infrastructure"]["pending_outbox_events_by_scope_summary"]["count"], 1)
 
     def test_health_endpoint_exposes_workbench_relation_distribution_status(self) -> None:
         runtime_infrastructure = {

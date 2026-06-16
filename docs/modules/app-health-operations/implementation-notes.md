@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-16 - Health readiness runtime payload compact mode
+
+- 目标：修复生产 `/fin-ops-api/health/ready` 仍携带约 90KB runtime drilldown、探针自身超过一秒的问题，让 readiness endpoint 只返回部署和运行门禁所需的轻量摘要。
+- 影响范围：`/health/ready` payload shape、health-ready probe blocker 提取、系统状态测试矩阵；不改变 `/metrics`、operations dashboard、read model/worker 事实源或生产 repair 语义。
+- 关键决策：ready payload 删除完整 `entrypoints` 明细并输出 `entrypoint_count`，删除 `storage.runtime_infrastructure` 重复块；顶层 `runtime_infrastructure` 保留 dirty/outbox/failed/stale/required-worker/RabbitMQ/read-model refresh scalar blocker，并把 `worker_metrics`、slow events、by-scope drilldown 等大集合压缩为 count + bounded samples。完整诊断继续由 `/metrics` 和 admin-only operations dashboard 承担。
+- 文档影响：更新本模块 `tests.md` 和本实施记录。
+- 测试覆盖：`tests.test_app.AppTests.test_ready_endpoint_reports_readiness_without_workbench_api_self_test`、`tests.test_app_postgres_mode.AppPostgresModeTests.test_ready_endpoint_exposes_runtime_infrastructure_contract`、`tests.test_health_ready_payload_probe.HealthReadyPayloadProbeTests.test_extracts_runtime_blockers_from_compact_worker_status_counts`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app tests.test_app_postgres_mode tests.test_health_ready_payload_probe -v`。
+- 未测风险：本地测试证明 payload shape 和 blocker contract；真实生产耗时仍需发布后用服务器本机 `health_ready_payload_probe` 复测。dirty/dead-letter/failed job blocker 需要安全 runtime DB env 后单独 read-only 诊断和受控修复。
+
 ## 2026-06-16 - Runtime closure gate 纳入 health-ready payload gate
 
 - 目标：防止最终 P2/P3 runtime closure gate 漏掉 `/fin-ops-api/health/ready` 自身慢、大、未截断或 HTML fallback 的生产风险。
