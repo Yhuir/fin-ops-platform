@@ -9,10 +9,12 @@ from pathlib import Path
 import sys
 from typing import Any, Sequence, TextIO
 
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
+from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
 
 
-DEFAULT_TARGET_MS = 5_000.0
+DEFAULT_TARGET_MS = 1_000.0
+DEFAULT_P99_TARGET_MS = 3_000.0
 DEFAULT_LOOKBACK_HOURS = 24.0
 DEFAULT_LIMIT = 2_000
 
@@ -37,6 +39,7 @@ class OperationExpectationResult:
     sample_count: int
     failed_sample_count: int
     p95_enqueue_to_done_ms: float | None
+    p99_enqueue_to_done_ms: float | None
     max_enqueue_to_done_ms: float | None
     latest_scope_key: str | None
     latest_event_id: str | None
@@ -169,6 +172,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional ISO timestamp lower bound for event created_at. When set, it overrides --lookback-hours.",
     )
     parser.add_argument("--target-ms", type=float, default=DEFAULT_TARGET_MS)
+    parser.add_argument(
+        "--p99-target-ms",
+        type=float,
+        help=(
+            "P99 enqueue-to-done target. Defaults to max(--target-ms, 3000) so one-second "
+            "P95 gates still enforce a three-second long-tail ceiling."
+        ),
+    )
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument(
         "--operation",
@@ -182,13 +193,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
-    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        connection = PostgresConnection(PostgresSettings.from_env())
+    except PostgresConfigurationError as exc:
+        report = postgres_configuration_missing_report(tool="write_operation_slo_audit", message=str(exc))
+        write_json_report(report, output=args.output, stdout=stdout)
+        return 2
     report = audit_write_operation_slo(
         connection,
         tenant_id=str(args.tenant_id or "default"),
         lookback_hours=max(0.1, float(args.lookback_hours)),
         since=_parse_since(args.since),
         target_ms=max(1.0, float(args.target_ms)),
+        p99_target_ms=None if args.p99_target_ms is None else max(1.0, float(args.p99_target_ms)),
         limit=max(1, int(args.limit)),
         operations=args.operation,
     )
@@ -207,10 +224,12 @@ def audit_write_operation_slo(
     lookback_hours: float = DEFAULT_LOOKBACK_HOURS,
     since: datetime | None = None,
     target_ms: float = DEFAULT_TARGET_MS,
+    p99_target_ms: float | None = None,
     limit: int = DEFAULT_LIMIT,
     operations: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     expectations = _selected_expectations(operations)
+    effective_p99_target_ms = effective_p99_target_ms_for(target_ms, p99_target_ms)
     rows = (
         recent_read_model_refresh_events_since(
             connection,
@@ -226,7 +245,12 @@ def audit_write_operation_slo(
             limit=limit,
         )
     )
-    results = evaluate_operation_expectations(rows, expectations=expectations, target_ms=target_ms)
+    results = evaluate_operation_expectations(
+        rows,
+        expectations=expectations,
+        target_ms=target_ms,
+        p99_target_ms=effective_p99_target_ms,
+    )
     failures = [result for result in results if result.status != "pass"]
     missing = [result for result in results if result.status == "missing"]
     return {
@@ -237,6 +261,7 @@ def audit_write_operation_slo(
         "lookback_hours": lookback_hours,
         "since": since.isoformat() if since is not None else None,
         "target_ms": target_ms,
+        "p99_target_ms": effective_p99_target_ms,
         "event_sample_count": len(rows),
         "expectation_count": len(expectations),
         "failed_expectation_count": len(failures),
@@ -251,12 +276,15 @@ def evaluate_operation_expectations(
     *,
     expectations: Sequence[OperationExpectation],
     target_ms: float,
+    p99_target_ms: float | None = None,
 ) -> list[OperationExpectationResult]:
+    effective_p99_target_ms = effective_p99_target_ms_for(target_ms, p99_target_ms)
     return [
         _evaluate_expectation(
             expectation,
             rows,
             target_ms=target_ms,
+            p99_target_ms=effective_p99_target_ms,
         )
         for expectation in expectations
     ]
@@ -380,6 +408,7 @@ def _evaluate_expectation(
     rows: Sequence[dict[str, Any]],
     *,
     target_ms: float,
+    p99_target_ms: float,
 ) -> OperationExpectationResult:
     samples = [
         row
@@ -403,6 +432,7 @@ def _evaluate_expectation(
             sample_count=0,
             failed_sample_count=0,
             p95_enqueue_to_done_ms=None,
+            p99_enqueue_to_done_ms=None,
             max_enqueue_to_done_ms=None,
             latest_scope_key=None,
             latest_event_id=None,
@@ -423,6 +453,7 @@ def _evaluate_expectation(
         or str(row.get("dirty_status") or "") not in {"", "done"}
     ]
     p95 = _percentile(durations, 0.95)
+    p99 = _percentile(durations, 0.99)
     max_duration = max(durations) if durations else None
     latest_error = str(latest.get("event_last_error") or latest.get("dirty_last_error") or "").strip() or None
     if failed_samples:
@@ -433,6 +464,9 @@ def _evaluate_expectation(
     elif p95 > target_ms:
         status = "fail"
         latest_error = latest_error or f"p95_enqueue_to_done_ms_exceeded_target:{p95}>{target_ms}"
+    elif p99 is not None and p99 > p99_target_ms:
+        status = "fail"
+        latest_error = latest_error or f"p99_enqueue_to_done_ms_exceeded_target:{p99}>{p99_target_ms}"
     else:
         status = "pass"
     return OperationExpectationResult(
@@ -445,6 +479,7 @@ def _evaluate_expectation(
         sample_count=len(samples),
         failed_sample_count=len(failed_samples),
         p95_enqueue_to_done_ms=p95,
+        p99_enqueue_to_done_ms=p99,
         max_enqueue_to_done_ms=round(max_duration, 3) if max_duration is not None else None,
         latest_scope_key=str(latest.get("scope_key") or "") or None,
         latest_event_id=str(latest.get("event_id") or "") or None,
@@ -484,6 +519,12 @@ def _parse_since(value: str | None) -> datetime | None:
     if parsed is None:
         raise ValueError(f"Invalid --since timestamp: {value}")
     return parsed
+
+
+def effective_p99_target_ms_for(target_ms: float, p99_target_ms: float | None) -> float:
+    if p99_target_ms is not None:
+        return max(1.0, float(p99_target_ms))
+    return max(float(target_ms), DEFAULT_P99_TARGET_MS)
 
 
 def _percentile(values: Sequence[float], percentile: float) -> float | None:

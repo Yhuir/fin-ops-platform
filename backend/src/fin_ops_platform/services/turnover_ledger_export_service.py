@@ -47,6 +47,14 @@ FAMILY_SCOPE_LABELS = {
 }
 MONEY_QUANT = Decimal("0.01")
 ZERO = Decimal("0.00")
+TURNOVER_LEDGER_EXPORT_ROW_LIMIT = 20000
+
+
+class TurnoverLedgerExportLimitError(ValueError):
+    def __init__(self, *, total: int, limit: int = TURNOVER_LEDGER_EXPORT_ROW_LIMIT) -> None:
+        super().__init__(f"当前筛选命中 {total} 行，超过 {limit} 行导出上限，请缩小筛选范围。")
+        self.error_code = "turnover_ledger_export_row_limit_exceeded"
+        self.details = {"total": total, "limit": limit}
 
 
 class TurnoverLedgerExportService:
@@ -57,7 +65,9 @@ class TurnoverLedgerExportService:
         normalized_family = self._normalize_family(family)
         normalized_limit = max(int(limit or 20), 1)
         grouped_payload = self._grouped_ledger_loader(family=normalized_family, page=1, page_size=max(normalized_limit, 200))
+        self._ensure_export_group_limit(grouped_payload)
         rows = self._formal_rows(grouped_payload, family=normalized_family)
+        self._ensure_export_row_limit(len(rows))
         preview_rows = rows[:normalized_limit]
         return {
             "columns": list(EXPORT_COLUMNS),
@@ -74,7 +84,9 @@ class TurnoverLedgerExportService:
     def export(self, *, family: str = "all", today: date | None = None) -> tuple[str, bytes]:
         normalized_family = self._normalize_family(family)
         grouped_payload = self._grouped_ledger_loader(family=normalized_family, page=1, page_size=10000)
+        self._ensure_export_group_limit(grouped_payload)
         rows = self._formal_rows(grouped_payload, family=normalized_family)
+        self._ensure_export_row_limit(len(rows))
         workbook = self._build_workbook(rows)
         scope = FAMILY_SCOPE_LABELS.get(normalized_family, FAMILY_SCOPE_LABELS["all"])
         filename = f"往来款台账-{scope}-{(today or date.today()).isoformat()}.xlsx"
@@ -145,6 +157,21 @@ class TurnoverLedgerExportService:
             return [("summary", dict(summary)), *(("flow", row) for row in flow_rows)]
         legacy_rows = [dict(row) for row in list(group.get("rows") or []) if isinstance(row, dict)]
         return [(cls._row_type_for_legacy_row(index, row), row) for index, row in enumerate(legacy_rows)]
+
+    @staticmethod
+    def _ensure_export_group_limit(grouped_payload: dict[str, Any]) -> None:
+        pagination = grouped_payload.get("pagination") if isinstance(grouped_payload.get("pagination"), dict) else {}
+        try:
+            total = int(pagination.get("total") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        if total > TURNOVER_LEDGER_EXPORT_ROW_LIMIT:
+            raise TurnoverLedgerExportLimitError(total=total)
+
+    @staticmethod
+    def _ensure_export_row_limit(total: int) -> None:
+        if total > TURNOVER_LEDGER_EXPORT_ROW_LIMIT:
+            raise TurnoverLedgerExportLimitError(total=total)
 
     @staticmethod
     def _row_type_for_legacy_row(index: int, row: dict[str, Any]) -> str:

@@ -19,15 +19,17 @@ class FakeRunner(preflight.CommandRunner):
 
 
 class RabbitMqStagingPreflightTests(unittest.TestCase):
-    def test_missing_env_fails_before_running_commands(self) -> None:
+    def test_missing_env_returns_configuration_missing_before_running_commands(self) -> None:
         runner = FakeRunner()
         stdout = StringIO()
 
         exit_code = preflight.main(["--json"], stdout=stdout, runner=runner, environ={})
 
-        self.assertEqual(exit_code, 1)
+        self.assertEqual(exit_code, 2)
         report = json.loads(stdout.getvalue())
-        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["status"], "configuration_missing")
+        self.assertEqual(report["error"], "staging_preflight_environment_missing")
+        self.assertEqual(report["required_env"], ["FIN_OPS_TEST_DATABASE_URL", "RABBITMQ_TEST_URL"])
         self.assertEqual(report["checks"][0]["name"], "env.required")
         self.assertEqual(report["checks"][0]["metadata"]["missing"], ["FIN_OPS_TEST_DATABASE_URL", "RABBITMQ_TEST_URL"])
         self.assertEqual(runner.calls, [])

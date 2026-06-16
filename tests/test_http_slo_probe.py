@@ -33,10 +33,17 @@ class HttpSloProbeTests(unittest.TestCase):
             self.assertIn(path, http_slo_probe.DEFAULT_PAGE_PATHS)
 
         for name in (
+            "workbench_groups_all_paired",
+            "pending_invoices_rows",
+            "input_invoice_usage_rows",
             "pending_invoices_filter_options",
             "input_invoice_usage_filter_options",
+            "oa_pending_payments_rows",
             "oa_pending_payments_filter_options",
+            "output_invoice_collections_rows",
             "output_invoice_collections_filter_options",
+            "cost_statistics_explorer_all",
+            "cost_statistics_summary_all",
             "no_oa_bank_batches",
             "batch_accounting",
             "turnover_ledger_grouped",
@@ -49,11 +56,29 @@ class HttpSloProbeTests(unittest.TestCase):
         probe_paths = {probe.name: probe.path for probe in http_slo_probe.DEFAULT_API_PROBES}
         self.assertIn("date_from=", probe_paths["bank_details_transactions"])
         self.assertIn("date_to=", probe_paths["bank_details_transactions"])
+        self.assertIn("page=1", probe_paths["workbench_groups_all_paired"])
+        self.assertIn("page_size=50", probe_paths["workbench_groups_all_paired"])
+        self.assertIn("page=1", probe_paths["pending_invoices_rows"])
+        self.assertIn("page_size=50", probe_paths["pending_invoices_rows"])
         self.assertIn("direction=expense", probe_paths["pending_invoices_filter_options"])
+        self.assertIn("page=1", probe_paths["input_invoice_usage_rows"])
+        self.assertIn("page_size=20", probe_paths["input_invoice_usage_rows"])
+        self.assertIn("page=1", probe_paths["oa_pending_payments_rows"])
+        self.assertIn("page_size=20", probe_paths["oa_pending_payments_rows"])
+        self.assertIn("page=1", probe_paths["output_invoice_collections_rows"])
+        self.assertIn("page_size=20", probe_paths["output_invoice_collections_rows"])
         self.assertIn("month=2026-03", probe_paths["tax_offset_rows"])
+        self.assertIn("month=2026-03", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("project_scope=active", probe_paths["cost_statistics_explorer_all"])
+        self.assertIn("project_scope=active", probe_paths["cost_statistics_summary_all"])
         self.assertIn("bucket=unsubmitted", probe_paths["no_oa_bank_batches"])
+        self.assertIn("page=1", probe_paths["no_oa_bank_batches"])
+        self.assertIn("page_size=200", probe_paths["no_oa_bank_batches"])
         self.assertIn("bank_year=", probe_paths["batch_accounting"])
+        self.assertIn("bank_page=1", probe_paths["batch_accounting"])
+        self.assertIn("bank_page_size=200", probe_paths["batch_accounting"])
+        self.assertIn("oa_page=1", probe_paths["batch_accounting"])
+        self.assertIn("oa_page_size=200", probe_paths["batch_accounting"])
         self.assertIn("q=%E5%85%AC%E5%8F%B8", probe_paths["search_all"])
 
     def test_configured_default_page_probes_have_stable_page_names(self) -> None:
@@ -74,6 +99,28 @@ class HttpSloProbeTests(unittest.TestCase):
             ),
             page_probes,
         )
+
+    def test_public_page_shell_smoke_args_exclude_default_api_probes(self) -> None:
+        args = http_slo_probe.build_parser().parse_args(
+            [
+                "--allow-unauthenticated",
+                "--replace-default-probes",
+                "--iterations",
+                "3",
+                "--target-ms",
+                "1000",
+            ]
+        )
+
+        probes = http_slo_probe._configured_probes(args)
+
+        self.assertTrue(args.allow_unauthenticated)
+        self.assertEqual(len(probes), len(http_slo_probe.DEFAULT_PAGE_PATHS))
+        self.assertTrue(all(probe.kind == "page" for probe in probes))
+        self.assertTrue(all(probe.expected_statuses == (200,) for probe in probes))
+        self.assertTrue(all(probe.target_ms == 1000.0 for probe in probes))
+        default_api_names = {probe.name for probe in http_slo_probe.DEFAULT_API_PROBES}
+        self.assertFalse(default_api_names.intersection({probe.name for probe in probes}))
 
     def test_requires_auth_by_default_without_sampling(self) -> None:
         report = http_slo_probe.collect_http_slo(
@@ -182,6 +229,70 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["probes"][0]["status_counts"], {"401": 1})
         self.assertEqual(report["probes"][0]["errors"], ["unexpected_status:401"])
+
+    def test_api_probe_rejects_html_shell_response(self) -> None:
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                body=b"<!doctype html><html><body>fin ops</body></html>",
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            api_prefix="/wrong-prefix",
+            probes=[http_slo_probe.HttpProbe("ready", "/api/health/ready")],
+            headers={"Cookie": "Admin-Token=token"},
+            iterations=1,
+            warmup=0,
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["probes"][0]["success_count"], 0)
+        self.assertEqual(report["probes"][0]["errors"], ["html_response_for_api_probe"])
+
+    def test_unexpected_html_status_keeps_status_error(self) -> None:
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=401,
+                headers={"content-type": "text/html; charset=utf-8"},
+                body=b"<!doctype html><html><body>login</body></html>",
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            probes=[http_slo_probe.HttpProbe("session", "/api/session/me")],
+            headers={"Cookie": "Admin-Token=token"},
+            iterations=1,
+            warmup=0,
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["probes"][0]["status_counts"], {"401": 1})
+        self.assertEqual(report["probes"][0]["errors"], ["unexpected_status:401"])
+
+    def test_page_probe_allows_html_shell_response(self) -> None:
+        def request_fn(url: str, headers, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                body=b"<!doctype html><html><body>fin ops</body></html>",
+            )
+
+        report = http_slo_probe.collect_http_slo(
+            base_url="https://example.test",
+            probes=[http_slo_probe.HttpProbe("home", "/fin-ops/", kind="page")],
+            headers={"Cookie": "Admin-Token=token"},
+            iterations=1,
+            warmup=0,
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["probes"][0]["success_count"], 1)
+        self.assertEqual(report["probes"][0]["errors"], [])
 
     def test_cli_auth_missing_exit_code(self) -> None:
         from io import StringIO

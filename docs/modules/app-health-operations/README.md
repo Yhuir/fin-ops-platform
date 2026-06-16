@@ -43,6 +43,7 @@
 - `/api/app-health`：面向页面和 App Status provider 的运行健康 snapshot，包含 workbench/read model、background jobs、dependencies、alerts、`app_status`。
 - `/api/app-health/stream`：SSE snapshot/heartbeat，只负责通知 UI 更新状态，不替代 durable facts。
 - `/api/operations/app-health-dashboard`：admin-only 只读运维 dashboard，展示数据 inventory、请求性能、runtime outbox/RabbitMQ/read model/worker 指标。
+- `/health` / `/health/ready`：公开或探针使用的轻量运行健康摘要；`api_performance.endpoints` 只保留 bounded 最慢 endpoint 摘要，完整 endpoint 明细由 `/metrics` 或 admin-only operations dashboard 提供。
 - App Status icon/popover：全局状态入口，只消费后端 `app_status`，不读取当前页面局部 loading。
 - App Status overview：由 session、background jobs、read model readiness、dirty scopes、outbox、worker heartbeat、dependencies、alerts 推导 green/yellow/red。
 

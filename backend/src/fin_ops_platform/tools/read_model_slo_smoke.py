@@ -4,6 +4,7 @@ import argparse
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import json
+from math import ceil
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any, Sequence, TextIO
@@ -15,12 +16,13 @@ from fin_ops_platform.services.app_status_read_model_registry import (
     APP_STATUS_READ_MODEL_REGISTRY,
     read_model_by_scope_type,
 )
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
 
 
-DEFAULT_TARGET_MS = 5_000.0
+DEFAULT_TARGET_MS = 1_000.0
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -89,7 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
-    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        connection = PostgresConnection(PostgresSettings.from_env())
+    except PostgresConfigurationError as exc:
+        report = postgres_configuration_missing_report(tool="read_model_slo_smoke", message=str(exc))
+        write_json_report(report, output=args.output, stdout=stdout)
+        return 2
     report = run_smoke(
         connection,
         apply=bool(args.apply),
@@ -150,6 +157,23 @@ def run_smoke(
             "missing_read_model_keys": missing_keys,
             "planned_scope_count": len(scopes),
             "planned_scopes": plan_payload,
+        }
+    if not scopes:
+        return {
+            "version": 1,
+            "status": "fail",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "target_ms": target_ms,
+            "tenant_id": tenant_id,
+            "critical_only": bool(critical_only),
+            "missing_read_model_keys": missing_keys,
+            "planned_scope_count": 0,
+            "planned_scopes": plan_payload,
+            "result_count": 0,
+            "failed_count": max(1, len(missing_keys)),
+            "summary": _results_summary([]),
+            "results": [],
+            "error": "no_smoke_scopes_discovered",
         }
 
     queue = RuntimeQueueRepository(connection)
@@ -232,6 +256,7 @@ def run_smoke(
         "planned_scopes": plan_payload,
         "result_count": len(results),
         "failed_count": len(failed) + len(missing_keys),
+        "summary": _results_summary(results),
         "results": [asdict(result) for result in results],
     }
 
@@ -418,6 +443,45 @@ def _default_smoke_scope() -> dict[str, Any]:
         "row_count": None,
         "updated_at": None,
     }
+
+
+def _results_summary(results: Sequence[SmokeEventResult]) -> dict[str, Any]:
+    enqueue_values = [
+        result.enqueue_to_fresh_ms
+        for result in results
+        if result.enqueue_to_fresh_ms is not None
+    ]
+    handler_values = [
+        result.handler_duration_ms
+        for result in results
+        if result.handler_duration_ms is not None
+    ]
+    return {
+        "sample_count": len(results),
+        "measured_enqueue_sample_count": len(enqueue_values),
+        "failed_count": sum(1 for result in results if result.status != "pass"),
+        "enqueue_to_fresh_ms": _percentiles(enqueue_values),
+        "handler_duration_ms": _percentiles(handler_values),
+    }
+
+
+def _percentiles(values: Sequence[float]) -> dict[str, float | None]:
+    if not values:
+        return {"p50": None, "p95": None, "p99": None, "max": None}
+    ordered = sorted(float(value) for value in values)
+    return {
+        "p50": _percentile(ordered, 0.50),
+        "p95": _percentile(ordered, 0.95),
+        "p99": _percentile(ordered, 0.99),
+        "max": round(max(ordered), 3),
+    }
+
+
+def _percentile(ordered_values: Sequence[float], percentile: float) -> float | None:
+    if not ordered_values:
+        return None
+    index = max(0, min(len(ordered_values) - 1, ceil(percentile * len(ordered_values)) - 1))
+    return round(float(ordered_values[index]), 3)
 
 
 def _active_workbench_generations(connection: Any, *, tenant_id: str) -> list[dict[str, Any]]:

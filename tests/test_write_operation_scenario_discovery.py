@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from io import StringIO
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.tools import write_operation_scenario_discovery as discovery
 
@@ -53,6 +56,11 @@ class FakeConnection:
         raise AssertionError(sql)
 
 
+class EmptyCandidateConnection:
+    def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+        return []
+
+
 class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
     def test_discovers_turnover_scenario_and_context_candidates(self) -> None:
         report = discovery.discover_write_operation_scenarios(FakeConnection(), limit=5)
@@ -95,7 +103,8 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             report_path = Path(temp_dir) / "report.json"
             scenario_path = Path(temp_dir) / "scenario.json"
-            with unittest.mock.patch.object(discovery.PostgresSettings, "from_env", return_value=object()), unittest.mock.patch.object(
+            stdout = StringIO()
+            with patch.object(discovery.PostgresSettings, "from_env", return_value=object()), patch.object(
                 discovery,
                 "PostgresConnection",
                 return_value=FakeConnection(),
@@ -106,7 +115,8 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
                         str(report_path),
                         "--scenario-output",
                         str(scenario_path),
-                    ]
+                    ],
+                    stdout=stdout,
                 )
 
             report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -114,7 +124,56 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(report["mode"], "read_only")
+        self.assertTrue(report["scenario_output"]["written"])
+        self.assertEqual(report["scenario_output"]["scenario_count"], 3)
         self.assertEqual(len(scenario["scenarios"]), 3)
+
+    def test_cli_does_not_write_empty_scenario_file_when_no_candidates_are_found(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "report.json"
+            scenario_path = Path(temp_dir) / "scenario.json"
+            stdout = StringIO()
+            with patch.object(discovery.PostgresSettings, "from_env", return_value=object()), patch.object(
+                discovery,
+                "PostgresConnection",
+                return_value=EmptyCandidateConnection(),
+            ):
+                exit_code = discovery.main(
+                    [
+                        "--output",
+                        str(report_path),
+                        "--scenario-output",
+                        str(scenario_path),
+                    ],
+                    stdout=stdout,
+                )
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            stdout_report = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["status"], "no_candidates")
+        self.assertEqual(stdout_report["status"], "no_candidates")
+        self.assertFalse(report["scenario_output"]["written"])
+        self.assertEqual(report["scenario_output"]["reason"], "no_candidates")
+        self.assertFalse(scenario_path.exists())
+
+    def test_cli_returns_configuration_missing_when_postgres_url_is_absent(self) -> None:
+        env = {
+            "FIN_OPS_APP_STORAGE_BACKEND": "postgres",
+            "FIN_OPS_POSTGRES_DATABASE_URL": "",
+            "DATABASE_URL": "",
+        }
+        stdout = StringIO()
+
+        with patch.dict(os.environ, env, clear=False):
+            exit_code = discovery.main(["--json"], stdout=stdout)
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "configuration_missing")
+        self.assertEqual(payload["tool"], "write_operation_scenario_discovery")
+        self.assertEqual(payload["error"], "postgres_configuration_missing")
 
 
 if __name__ == "__main__":

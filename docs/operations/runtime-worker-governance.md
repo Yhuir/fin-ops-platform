@@ -383,7 +383,7 @@ PostgreSQL done/fresh。
 
 `cost-tax` worker 仍作为兼容 combined consumer 处理 `cost_statistics.read_model.refresh` 与 `tax_offset.read_model.refresh`；生产 SLO lane 还会启动专用 `cost-statistics` 与 `tax-offset` RabbitMQ consumers。成本统计是跨银行流水、发票、OA 关系、项目归因和费用分类的派生 read model，因此 App Status 必须展示 scope 级 readiness，而不是只显示一个聚合后的 `cost_statistics=failed`。
 
-高频 read model 的 5s SLO 依赖专用 consumers：
+高频 read model 的专用 consumers 是当前 P2/P3 一秒级 closure 的基础；历史 5s SLO 记录只是旧基线，不是当前验收上限。当前 direct refresh / 首屏 API 以 p95 <= 1000ms 为门禁，写操作链路还要求 operation-to-fresh p99 <= 3000ms：
 
 - `search` / `search-secondary` / `search-tertiary`：只消费 `search.read_model.refresh`，并发处理关系变更中的 bank 月、invoice 月以及快速 confirm/withdraw 连续写入产生的同 scope search 事件。
 - `pending-invoice`：只消费 `pending_invoice.read_model.refresh`。

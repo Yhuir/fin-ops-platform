@@ -26,6 +26,47 @@
 
 ## 历史记录
 
+## 2026-06-16 - ETC API 测试严格临时目录扫尾
+
+- 目标：把 P2/P3-016 中剩余的 ETC 后端 `TemporaryDirectory(ignore_cleanup_errors=True)` 测试卫生风险转为可执行证据。
+- 影响范围：`tests/test_etc_backend.py` 中 22 条 API/service/import/Workbench 组合回归；业务代码不变。
+- 关键决策：不继续用宽松 cleanup 掩盖后台收尾问题；全部改为严格 `TemporaryDirectory()`。其中 `test_etc_business_manual_status_accepts_confirmation_pending_state` 暴露出退出时后台 executor 未关闭的清理竞态，测试改为在退出数据目录前调用 `app.shutdown_background_jobs()`。
+- 文档影响：更新本实施记录、测试矩阵和 `.planning/P2P3-CLOSURE-PLAN.md`。
+- 测试覆盖：22 条受影响 ETC API 测试全部通过，且 `rg` 确认 `tests/test_etc_backend.py` 已无 `TemporaryDirectory(ignore_cleanup_errors=True)`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_delete_etc_submission_batch_route_cascades_mutable_batch_contents tests.test_etc_backend.EtcApiTests.test_etc_business_batch_detail_returns_invoice_items_without_detection_fields tests.test_etc_backend.EtcApiTests.test_etc_business_batch_scope_uses_session_dept_id tests.test_etc_backend.EtcApiTests.test_etc_business_batch_oa_draft_waits_for_manual_confirmation_without_detection_runtime tests.test_etc_backend.EtcApiTests.test_etc_business_batch_source_files_append_to_reconciliation_task tests.test_etc_backend.EtcApiTests.test_etc_business_batch_source_file_upload_returns_structured_storage_error tests.test_etc_backend.EtcApiTests.test_etc_business_manual_status_accepts_confirmation_pending_state tests.test_etc_backend.EtcApiTests.test_etc_business_batch_submitted_list_counts_use_filtered_passage_month tests.test_etc_backend.EtcApiTests.test_historical_business_batch_lists_by_scope_month_and_reported_amount tests.test_etc_backend.EtcApiTests.test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount tests.test_etc_backend.EtcApiTests.test_submitted_etc_business_batch_delete_releases_summary_and_deletes_local_task tests.test_etc_backend.EtcApiTests.test_legacy_submission_batch_delete_delegates_to_business_batch_reset tests.test_etc_backend.EtcApiTests.test_submitted_etc_business_batch_delete_cancels_summary_relation_without_restoring_oa_bank_pair tests.test_etc_backend.EtcApiTests.test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service tests.test_etc_backend.EtcApiTests.test_submitted_etc_business_batch_delete_uses_canonical_relation_when_read_model_is_stale tests.test_etc_backend.EtcApiTests.test_reconciliation_task_delete_cancels_submitted_business_summary_relation tests.test_etc_backend.EtcApiTests.test_reconciliation_task_delete_removes_orphan_submission_metadata_link tests.test_etc_backend.EtcApiTests.test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle tests.test_etc_backend.EtcApiTests.test_historical_etc_repair_requires_relation_command_service_before_local_writes tests.test_etc_backend.EtcApiTests.test_existing_etc_batch_link_extends_active_oa_bank_relation_and_renders_summary tests.test_etc_backend.EtcApiTests.test_existing_etc_batch_link_requires_relation_command_service_before_local_writes tests.test_etc_backend.EtcApiTests.test_existing_etc_batch_link_is_idempotent_and_does_not_create_parallel_relation -v`。
+- 未测风险：本轮只证明本地 ETC 后端测试严格 cleanup；真实大 ZIP、对象存储/Nginx 上传、真实 OA 和真实 Redis/RabbitMQ/systemd worker drain 仍需 staging/生产 smoke。
+
+## 2026-06-16 - 异步导入测试严格临时目录证据
+
+- 目标：推进 P2/P3 测试卫生，验证 ETC 异步导入测试在等待 background job runner 完成后可以释放严格 `TemporaryDirectory()`，不再依赖宽松 cleanup 掩盖后台收尾竞态。
+- 影响范围：`tests/test_etc_backend.py::EtcApiTests::test_etc_business_manual_submitted_closes_the_linked_reconciliation_task`、P2/P3 closure ledger；业务代码不变。
+- 关键决策：先收敛一条代表性真实异步 import job 回归，避免批量替换全部 `ignore_cleanup_errors=True` 造成无关用例噪声。该测试通过 `/api/etc/import/confirm` 触发后台 job，并由 `_wait_for_job` 调用 `wait_for_job_completion` 等待 runner 返回后再离开临时目录。
+- 文档影响：更新本实施记录、测试矩阵和 `.planning/P2P3-CLOSURE-PLAN.md`。
+- 测试覆盖：`BackgroundJobServiceTests.test_wait_for_job_completion_waits_until_runner_returns` 覆盖 service 语义；`EtcApiTests.test_etc_business_manual_submitted_closes_the_linked_reconciliation_task` 覆盖 ETC 调用方严格 cleanup。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_etc_business_manual_submitted_closes_the_linked_reconciliation_task -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_background_job_service.BackgroundJobServiceTests.test_wait_for_job_completion_waits_until_runner_returns tests.test_background_job_service.BackgroundJobServiceTests.test_run_job_executes_handler_and_marks_success -v`。
+- 未测风险：后续严格目录扫尾已在同日记录完成；生产真实大文件和对象存储仍需 staging/运维验证。
+
+## 2026-06-16 - Phase12后台job收尾同步与ETC闭环审计
+
+## 2026-06-16 - ETC业务批次旧pickle启动兼容
+
+- 目标：修复后端启动检查加载旧 ETC 状态时，历史 `EtcBusinessBatch` pickle 带已移除 `oa_detection_status` slot 导致 `AttributeError`、阻断 app 启动的问题。
+- 影响范围：`EtcBusinessBatch` 反序列化兼容与 ETC 模块测试矩阵；不恢复已废弃的 OA 检测 runtime 字段，不改变业务批次 API payload、状态机或数据库迁移口径。
+- 关键决策：在 `EtcBusinessBatch.__setstate__` 中只接收当前 dataclass 字段，忽略旧 pickle 的废弃字段，并为当前字段补默认值；这样旧本地/Mongo 二进制状态能加载，后续持久化会写回当前 snapshot 形态。
+- 文档影响：更新本模块 `tests.md` 和本实施记录；长期 API/产品事实不变。
+- 测试覆盖：`tests.test_etc_backend.EtcServiceTests.test_legacy_business_batch_pickle_drops_removed_oa_detection_status` 构造旧 slotted 同名类 pickle，验证当前类能加载、丢弃 `oa_detection_status` 并补齐默认集合字段。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcServiceTests.test_legacy_business_batch_pickle_drops_removed_oa_detection_status -v`；`PYTHONPATH=backend/src python3 -m fin_ops_platform.app.main --check`。
+- 未测风险：真实生产 Mongo/app state 是否还存在其它已移除 slotted 字段，需要部署前通过 production/staging 启动检查和只读状态 smoke 验证。
+
+- 目标：审计 ETC 票据管理的 business batch、source file、人工 OA 状态、删除/reset、历史迁移和关联台投影闭环，并消除 ETC 导入重复确认测试中后台 job terminal 状态早于 runner 完全收尾导致的临时目录清理竞态。
+- 影响范围：`BackgroundJobService.run_job`、ETC 后端导入确认测试辅助、后台 job service 测试，以及本模块 Phase 12 验证记录。
+- 关键决策：后台 job 的用户可见 terminal 状态仍写入 `background_jobs`；测试和需要严格收尾的调用方可通过 `wait_for_job_completion(job_id)` 等待对应 `Future` 真正完成，避免在 handler 标记成功后 runner 仍在收尾时释放同一数据目录。
+- 文档影响：更新本测试矩阵和实施记录；ETC 页面 API、状态机和产品口径不变。
+- 测试覆盖：新增 `BackgroundJobServiceTests.test_wait_for_job_completion_waits_until_runner_returns`；ETC `_wait_for_job` 在 terminal 后等待后台 runner 完成；Phase 12 组合验证覆盖 ETC API/service/import/Workbench/App Status/background job。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_background_job_service.BackgroundJobServiceTests.test_wait_for_job_completion_waits_until_runner_returns tests.test_background_job_service.BackgroundJobServiceTests.test_run_job_executes_handler_and_marks_success -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_etc_confirm_repeated_session_returns_same_job_without_duplicate_import -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend tests.test_etc_reconciliation_service tests.test_import_service tests.test_postgres_core_repository tests.test_workbench_sql_runtime tests.test_workbench_pair_relation_service tests.test_platform_runtime_boundary_guards tests.test_app_status_overview_service tests.test_background_job_service -v`。
+- 未测风险：真实大 ZIP、对象存储/Nginx 上传、真实 OA、真实 Redis/RabbitMQ/systemd worker drain 和生产历史迁移仍需 staging/运维窗口验证；ETC 后端历史宽松临时目录测试已在同日后续记录清零。
+- 后续事项：如后续 phase 专门整理测试基础设施，应继续保持严格 `TemporaryDirectory()`，需要后台收尾时显式使用 `wait_for_job_completion()` 或 `shutdown_background_jobs()`。
+
 ## 2026-06-11 - ETC新建批次闭环与task-only列表收敛
 
 - 目标：消除刷新、重新部署或删除后仍在未提交列表看到多条“新建ETC批次”的问题，并保证新建批次和删除批次都走同一套后端闭环语义。

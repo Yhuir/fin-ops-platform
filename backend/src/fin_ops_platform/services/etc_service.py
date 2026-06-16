@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import MISSING, dataclass, field, fields, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -438,6 +438,28 @@ class EtcBusinessBatch:
     @property
     def is_active(self) -> bool:
         return str(self.status) in ETC_BUSINESS_BATCH_ACTIVE_STATUSES
+
+    def __setstate__(self, state: object) -> None:
+        raw: dict[str, object] = {}
+        if isinstance(state, tuple) and len(state) == 2:
+            dict_state, slot_state = state
+            if isinstance(dict_state, dict):
+                raw.update(dict_state)
+            if isinstance(slot_state, dict):
+                raw.update(slot_state)
+        elif isinstance(state, dict):
+            raw.update(state)
+
+        for item in fields(type(self)):
+            if item.name in raw:
+                value = raw[item.name]
+            elif item.default is not MISSING:
+                value = item.default
+            elif item.default_factory is not MISSING:
+                value = item.default_factory()
+            else:
+                value = None
+            object.__setattr__(self, item.name, value)
 
 
 @dataclass(slots=True)

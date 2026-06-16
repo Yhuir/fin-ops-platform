@@ -64,7 +64,8 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - read model stale/unavailable 计数日志使用 `workbench_read_model_status_metric`，按 `endpoint`、`scope_key`、`read_model_status` 和 `reason` 聚合。
 - workbench generation consistency failure 会把 `/api/app-health.workbench_read_model.status` 提升为 `error`，并在 `last_error` 中保留 `generation_metadata_actual_mismatch`、all-scope parent inconsistency、`duplicate_invoice_identity_cross_zone` 或 `duplicate_bank_identity_cross_zone` 原因。
 - 工作台实时刷新事件由 `/api/workbench/events` 暴露。SSE 连接失败时前端应回退 `/api/workbench/refresh-status`，运维排障需要同时查看代理是否缓冲 `text/event-stream`、worker lag 和 dirty scope 状态。
-- `/health` 输出 `api_performance` 进程内 rolling window 指标，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99。
+- `/health` / `/health/ready` 输出 bounded `api_performance` 进程内 rolling window 摘要，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99，但只保留 p95 最慢的有限 endpoint，并通过 `endpoint_count` / `omitted_endpoint_count` 标明是否被截断。完整 endpoint 明细由 `/metrics` 或 admin-only `/api/operations/app-health-dashboard` 提供。
+- P2/P3 readiness payload gate 使用 `health_ready_payload_probe` 验证 `/fin-ops-api/health/ready` 本身不成为慢探针：默认要求 1000ms 内、JSON、response 不超过 50KB、`api_performance.endpoints<=20` 且带 `endpoint_count` / `omitted_endpoint_count`；慢、大、未截断、缺 metadata 或 HTML fallback 均视为失败。
 - 不输出 token、密码、完整附件正文或敏感原始文件内容。
 - 高风险动作需要审计日志，不只依赖应用日志。
 
@@ -152,7 +153,7 @@ PYTHONPATH=backend/src python3 scripts/rehydrate-workbench-read-models.py \
 告警建议：
 
 - `rabbitmq_publish_failed_backlog > 0` 且持续 5 分钟。
-- `rabbitmq_dispatcher_lag_seconds` 持续超过 worker SLO。5 秒页面同步目标下，dispatcher idle poll 应保持
+- `rabbitmq_dispatcher_lag_seconds` 持续超过 worker SLO。一秒级页面同步目标下，dispatcher idle poll 应保持
   `RABBITMQ_DISPATCHER_POLL_INTERVAL_SECONDS=0.5` 量级；5 秒 poll 会把 outbox-to-broker 等待本身变成 SLO 风险。
 - `rabbitmq_queue_depth` 持续增长且 `consumer_count=0`。
 - `rabbitmq_unacked_messages` 长时间不下降。
@@ -294,8 +295,14 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.read_model_slo_smoke --
 该工具默认 dry-run，只选择已有 fresh readiness 或 active generation 中的 direct scope；显式加
 `--apply` 后才会通过 `ReadModelRefreshGateway` 入队，并等待 outbox event `done` 与
 `read_model.app_status_readiness.status='fresh'`，用真实 `created_at -> processed_at` 判断
-enqueue-to-fresh 是否满足目标。生产运行必须把 JSON 输出保存到 `/tmp` 或运维归档路径，且在运行后
+enqueue-to-fresh 是否满足目标。`summary.enqueue_to_fresh_ms` 会输出 p50/p95/p99/max，最终 P2/P3 gate
+必须用 p95 `<= 1000ms` 解读，而不是只看单个最快样本。生产运行必须把 JSON 输出保存到 `/tmp` 或运维归档路径，且在运行后
 复核 `/health/ready`、dirty scope、outbox、RabbitMQ DLQ 均收敛。
+
+最终 closure 不能接受空样本：`--apply` 报告必须有 `planned_scope_count > 0`、`result_count > 0`，
+且 `failed_count = 0`。如果报告返回 `no_smoke_scopes_discovered` 或 runtime gate 返回
+`read_model_smoke_empty_samples`，先修 registry/scope selection 或显式传入 `--read-model-key` / `--scope`，
+不要把零样本当作 worker SLO 通过。
 
 `--critical-only` 只在未显式传 `--read-model-key` 时按 App Status registry 的 `critical=true`
 过滤 smoke scope。它适合先验证当前会阻断页面可用性的 read model；最终全 app 验收仍必须解释
@@ -328,11 +335,62 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 
 判定原则：
 
-- 默认目标是每个 probe p95 `< 1000ms`；可用 `--target-ms` 调整单次阶段验收阈值。
+- 默认目标是每个 probe p95 `<= 1000ms`；可用 `--target-ms` 调整单次阶段验收阈值。
 - read model API 可接受 `200` 或 `202`，但必须记录响应中的 `read_model_status`、`cache_status` 和 `refresh_enqueued`，用于区分 fresh snapshot、refreshing 和后台追赶。
 - 工具默认要求真实认证；没有 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`、`FIN_OPS_HTTP_SLO_BEARER_TOKEN`、`FIN_OPS_HTTP_SLO_COOKIE` 或 CLI auth 参数时返回 `auth_missing`，不能作为生产页面 SLO 证据。
+- API probe 如果拿到 `text/html` 或 HTML 文档体，即使 HTTP status 是 200，也按 `html_response_for_api_probe` 失败处理。这通常表示 API prefix、Nginx fallback 或路径配置错误；例如 `www.yn-sourcing.com/health/ready` 会落到前端页面壳，生产 readiness 应使用 `/fin-ops-api/health/ready`。
+- Readiness payload 单独用只读 probe 验证，不需要登录态：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.health_ready_payload_probe \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --target-ms 1000 \
+  --output /tmp/finops-health-ready-payload-$(date +%Y%m%d%H%M%S).json
+```
+
 - `--allow-unauthenticated` 只允许做 public page shell smoke，不能用于最终“登录态页面/API p95”验收。
+- 只做 public page shell smoke 时必须同时传 `--replace-default-probes`，否则默认 API probes 会一起执行并因未登录返回 401，导致整体报告失败。示例：
+
+```bash
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --allow-unauthenticated \
+  --replace-default-probes \
+  --iterations 3 \
+  --warmup 1 \
+  --target-ms 1000 \
+  --output /tmp/finops-public-page-shell-$(date +%Y%m%d%H%M%S).json
+```
 - 输出不包含 token、cookie 或 Authorization header；采样结果可以进入阶段报告和事故复盘。
+
+## SSE 首事件 Smoke
+
+App Health 和 Workbench 依赖 SSE 做运行状态/刷新状态提示。P2/P3 中 Nginx/OA iframe/SSE buffering 不能只靠页面 shell 或普通
+HTTP probe 证明，使用只读 `sse_smoke_probe` 验证 event-stream 首事件：
+
+```bash
+export FIN_OPS_HTTP_SLO_ADMIN_TOKEN='真实管理员 Admin-Token'
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.sse_smoke_probe \
+  --base-url https://www.yn-sourcing.com \
+  --api-prefix /fin-ops-api \
+  --target-ms 1000 \
+  --output /tmp/finops-sse-smoke-$(date +%Y%m%d%H%M%S).json
+```
+
+默认 probe 覆盖：
+
+- `/api/app-health/stream`：期望 `event: app_health` 或 `event: heartbeat`。
+- `/api/workbench/events?month=all`：期望 `event: workbench.read_model.*` 或 `event: heartbeat`。
+
+判定原则：
+
+- 默认目标是首个 SSE event `<= 1000ms`；超过目标返回 `sse_first_event_slo_miss`。
+- 缺少 token/cookie 返回 `auth_missing`，不能作为生产 SSE 证据。
+- 返回 HTML 页面壳按 `html_response_for_api_probe` 失败；这通常表示 API prefix 或 Nginx fallback 配置错误。
+- 返回非 `text/event-stream`、没有 `event:` 行或事件名不匹配均失败；失败时先区分 auth、proxy buffering、API prefix、后端 route 和 worker/readiness 源头。
+- 输出不包含 token、cookie 或 Authorization header。
 
 ## 真实写操作刷新 SLO 审计
 
@@ -342,7 +400,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 ```bash
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_audit \
   --lookback-hours 24 \
-  --target-ms 5000 \
+  --target-ms 1000 \
+  --p99-target-ms 3000 \
   --output /tmp/finops-write-operation-slo-$(date +%Y%m%d%H%M%S).json
 ```
 
@@ -360,8 +419,12 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 
 - 工具只读 `job.outbox_events` 和 `job.read_model_dirty_scopes`，不会发起业务写操作。
 - 每个 required expectation 必须在 lookback window 内有真实样本；没有样本返回 `missing`，不能当作通过。
+- 最终闭环要求 `event_sample_count > 0`、`expectation_count > 0`、`failed_expectation_count = 0` 且
+  `missing_expectation_count = 0`。如果 runtime gate 返回 `write_operation_audit_empty_samples`，表示缺少真实 durable
+  write 证据，应生成或审批受控写 scenario 后复跑，而不是把空样本当成性能通过。
 - 新发布后的 turnover UoW 事件会把非敏感 `action_name` 写入 outbox payload；工具会用它区分共享同一 reason 的不同写操作。
-- 样本必须 `event_status=done`，dirty scope 必须为空或 `done`，且 p95 enqueue-to-done `< target-ms`。
+- 样本必须 `event_status=done`，dirty scope 必须为空或 `done`，且 p95 enqueue-to-done `<= target-ms`、p99
+  enqueue-to-done `<= p99-target-ms`。P2/P3 一秒级闭环默认使用 p95 `1000ms`、p99 `3000ms`。
 - 该工具能证明“最近真实写操作产生的 refresh 是否及时完成”，但不能证明没有被执行过的操作；最终闭环仍需要受控
   E2E 写操作 smoke 覆盖关联、撤回、导入确认和规则变更。
 
@@ -420,7 +483,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
   --apply \
   --base-url https://www.yn-sourcing.com \
   --api-prefix /fin-ops-api \
-  --write-target-ms 5000 \
+  --write-target-ms 1000 \
   --http-target-ms 1000 \
   --output /tmp/finops-write-e2e-slo-$(date +%Y%m%d%H%M%S).json
 ```
@@ -429,7 +492,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 
 - scenario 必须使用可控测试对象或已确认可回滚的业务对象；不要直接对生产真实待处理业务做破坏性测试。
 - 每个 mutating step 必须有预期状态码；工具不会把 409/403/500 继续包装成已同步。
-- 写步骤成功后，工具以数据库 `clock_timestamp()` 为起点，等待对应 operation profile 的 outbox/dirty scope 达到 5 秒 SLO。
+- mutating step 如果拿到 `text/html` 或 HTML 页面壳，即使状态码匹配，也会按 `html_response_for_api_probe` 失败并跳过 write SLO claim；这通常表示 API prefix、Nginx fallback 或路径配置错误。
+- 写步骤成功后，工具以数据库 `clock_timestamp()` 为起点，等待对应 operation profile 的 outbox/dirty scope 达到 p95
+  `1000ms` / p99 `3000ms` SLO。
 - post API probe 只用于验证写后页面首屏 API；最终仍要结合登录态 HTTP SLO、App Health 和审计记录。
 - 输出不包含 token、cookie、Authorization header，也不输出 scenario 请求 body，只记录路径、状态码、耗时和 outbox/readiness 结果。
 
@@ -446,21 +511,50 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
   --write-scenario /tmp/finops-write-e2e-scenarios.json \
   --apply-write-scenarios \
   --http-target-ms 1000 \
-  --read-model-target-ms 5000 \
-  --write-target-ms 5000 \
+  --sse-target-ms 1000 \
+  --health-ready-target-ms 1000 \
+  --read-model-target-ms 1000 \
+  --write-target-ms 1000 \
   --output /tmp/finops-runtime-sync-closure-gate-$(date +%Y%m%d%H%M%S).json
 ```
 
-该 gate 必须全部通过才可宣称“所有页面 5 秒内真同步”：
+该 gate 必须全部通过才可宣称“所有页面一秒级真同步”：
 
 - runtime health：required worker、RabbitMQ queue/unacked/DLQ、dirty scope、failure rate 没有当前 blocker。
+- health-ready payload：`/fin-ops-api/health/ready` 自身在 1000ms 内返回轻量 JSON，`api_performance` bounded 且带截断 metadata。
 - direct read model smoke：显式 `--apply-read-model-smoke` 后，每个 App Status read model 的 enqueue-to-fresh 在目标内。
 - 登录态 HTTP SLO：必须使用真实 OA token/Admin-Token/cookie，覆盖全 app 页面 shell 与首屏 API p95。
+- 登录态 SSE smoke：必须使用真实 OA token/Admin-Token/cookie，覆盖 App Health 和 Workbench event-stream 首事件 `<= 1000ms`，并拒绝 HTML fallback 或错误事件名。
 - 真实写操作 audit：最近真实 durable outbox 样本覆盖内置高影响 operation profile，并满足写入后 outbox done SLO。
 - 受控写操作 E2E：必须提供安全、可回滚的 scenario，并显式 `--apply-write-scenarios` 通过 mutating HTTP + 写后 outbox/readiness + 可选 post API。
 
-缺少真实认证、缺少 scenario、只 dry-run、或 write audit 没有样本时，gate 会返回 `fail`。这是预期行为，不应改成
-`pass` 或 `skip` 来绕过最终验收。
+缺少真实认证、缺少 scenario、只 dry-run、invalid scenario、runtime health 缺事实字段、或 write audit 没有样本时，gate 会返回 `fail`。
+Postgres-backed gates 在缺少 `FIN_OPS_POSTGRES_DATABASE_URL` / `DATABASE_URL` 时会返回
+`status=configuration_missing`、`blocking_condition=database_url_required`、`required_env`、
+安全 `next_actions`、`allowed_remote_evidence` 和 `forbidden_without_approval`。这表示需要在安全运行环境
+配置 DB URL，或进入批准的生产只读采样分支；不能把它改成 `pass`、`skip` 或一秒级 SLO 证据。
+runtime health 没有 durable queue、dirty scope、required worker 或 refresh failure facts 时，`runtime_health` check
+会返回 `runtime_health_missing_facts`，不能作为 worker/readiness/queue 收敛证据。
+health-ready payload 慢、大、未截断、缺 `endpoint_count` / `omitted_endpoint_count` 或 HTML fallback 时，
+`health_ready_payload` check 会返回 fail；这通常表示 bounded readiness fix 未部署、API prefix/Nginx fallback 错误，
+或 readiness endpoint 本身已经成为慢探针。
+单独的 `health_ready_payload_probe` 还会输出 `runtime_release_name`、`runtime_blocker_count` 和
+`runtime_blockers`。这些字段用于在不登录服务器的第一步区分 release 未部署、dirty/outbox backlog、
+failed jobs、worker mismatch、Postgres/readiness 状态异常或 runtime guard 问题；`dirty_scopes.done`
+等完成态计数不应被当作 blocker。
+HTTP SLO 没有 probe/sample 时，`authenticated_http_slo` check 会返回 `http_slo_empty_samples`；SSE smoke
+没有 probe 时，`sse_first_event_smoke` check 会返回 `sse_smoke_empty_samples`。这通常表示 probe 配置、认证、
+API prefix 或采样输入错误，不能作为一秒级证据。
+缺少受控写 E2E 参数时，`write_operation_e2e` check 会暴露 `missing_args` / `required_args`；scenario 文件存在但
+不可用时，`write_operation_audit` 和 `write_operation_e2e` 会返回 `input_error`，不会退回运行 unscoped write audit。
+直接调用 `write_operation_e2e_smoke` 时，空 scenario list 返回 `input_error` / `scenario_empty`，不能作为 dry-run
+或 apply 成功。
+受控写 E2E apply 后没有 scenario/result 样本时，`write_operation_e2e` check 会返回
+`write_operation_e2e_empty_samples`，不能作为真实 mutating 写入证据。
+write audit 没有真实 event/expectation 样本时，`write_operation_audit` check 会返回
+`write_operation_audit_empty_samples`。
+主控 workflow 应据此分流到 scenario 生成、输入修复、审批或 apply。上述失败是预期行为，不应改成 `pass` 或
+`skip` 来绕过最终验收。
 
 ## 写操作 Scenario 发现
 
@@ -476,8 +570,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 边界：
 
 - 工具只读，不发 mutating HTTP，也不写数据库。
-- 默认只把已被 write-operation audit profile 覆盖的 `turnover_manual_closure_or_withdraw` 候选写入 scenario。
-- `workbench_pair_withdraw_context` 和 `no_oa_bank_batch_withdraw_context` 只作为上下文输出；加入最终 gate 前必须先补对应 audit profile。
+- 默认把已被 write-operation audit profile 覆盖的 `turnover_manual_closure_or_withdraw`、`workbench_relation_withdraw`
+  和 `no_oa_bank_batch_withdraw` 候选写入 scenario。
+- 如果没有发现候选，报告返回 `status=no_candidates`，即使传了 `--scenario-output` 也不会写空 scenario 文件；主控
+  workflow 应先准备已审批、可回滚的测试对象，再重新 discovery。
 - 生成的 scenario 仍需要人工确认测试对象、业务影响和回滚路径；不能直接对真实待处理业务盲目 `--apply`。
 
 ## Phase 1.5 读 API 验证

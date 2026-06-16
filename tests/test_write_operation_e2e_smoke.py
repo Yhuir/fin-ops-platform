@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.tools import http_slo_probe, write_operation_e2e_smoke
 
@@ -65,6 +67,29 @@ def _turnover_withdraw_rows() -> list[dict[str, object]]:
 
 
 class WriteOperationE2ESmokeTests(unittest.TestCase):
+    def test_empty_scenarios_return_input_error_instead_of_pass(self) -> None:
+        calls: list[str] = []
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            calls.append(url)
+            return http_slo_probe.HttpProbeResponse(status_code=200, headers={}, body=b"{}")
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection([]),
+            scenarios=[],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            request_fn=request_fn,
+        )
+
+        self.assertEqual(report["status"], "input_error")
+        self.assertEqual(report["error"], "scenario_empty")
+        self.assertEqual(report["scenario_count"], 0)
+        self.assertEqual(calls, [])
+
     def test_load_scenarios_and_dry_run_redacts_write_body(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
@@ -138,6 +163,77 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(stdout.getvalue())["status"], "dry_run")
+
+    def test_cli_returns_input_error_when_scenario_file_is_missing(self) -> None:
+        stdout = StringIO()
+
+        exit_code = write_operation_e2e_smoke.main(
+            ["--scenario", "/tmp/finops-missing-scenario.json", "--json"],
+            stdout=stdout,
+        )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "input_error")
+        self.assertEqual(payload["tool"], "write_operation_e2e_smoke")
+        self.assertEqual(payload["error"], "scenario_file_missing")
+
+    def test_cli_returns_input_error_when_scenario_contract_is_invalid(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text("[]", encoding="utf-8")
+            stdout = StringIO()
+
+            exit_code = write_operation_e2e_smoke.main(
+                ["--scenario", str(path), "--json"],
+                stdout=stdout,
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "input_error")
+        self.assertEqual(payload["error"], "scenario_contract_invalid")
+
+    def test_cli_apply_returns_configuration_missing_when_postgres_url_is_absent(self) -> None:
+        env = {
+            "FIN_OPS_APP_STORAGE_BACKEND": "postgres",
+            "FIN_OPS_POSTGRES_DATABASE_URL": "",
+            "DATABASE_URL": "",
+        }
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "name": "turnover-withdraw",
+                            "operation": "turnover_manual_closure_or_withdraw",
+                            "steps": [
+                                {
+                                    "name": "withdraw",
+                                    "method": "POST",
+                                    "path": "/api/turnover-ledger/relations/REL-1/withdraw",
+                                    "json": {"note": "apply"},
+                                }
+                            ],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            stdout = StringIO()
+
+            with patch.dict(os.environ, env, clear=False):
+                exit_code = write_operation_e2e_smoke.main(
+                    ["--scenario", str(path), "--apply", "--json"],
+                    stdout=stdout,
+                )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "configuration_missing")
+        self.assertEqual(payload["tool"], "write_operation_e2e_smoke")
+        self.assertEqual(payload["error"], "postgres_configuration_missing")
 
     def test_apply_requires_auth_before_mutating_requests(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -252,6 +348,45 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["results"][0]["write_slo"]["status"], "skipped")
+
+    def test_write_step_rejects_html_shell_even_when_status_matches(self) -> None:
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="turnover-withdraw",
+            operations=("turnover_manual_closure_or_withdraw",),
+            steps=(
+                write_operation_e2e_smoke.WriteStep(
+                    name="withdraw",
+                    method="POST",
+                    path="/api/turnover-ledger/relations/REL-1/withdraw",
+                    json_body={"note": "smoke"},
+                    expected_statuses=(200,),
+                ),
+            ),
+            post_api_probes=(),
+        )
+
+        def request_fn(url: str, method: str, headers, body, timeout_seconds: float) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                body=b"<!doctype html><html><body>fin ops</body></html>",
+            )
+
+        report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+            FakeConnection(_turnover_withdraw_rows()),
+            scenarios=[scenario],
+            apply=True,
+            base_url="https://example.test",
+            api_prefix="/wrong-prefix",
+            tenant_id="default",
+            headers={"Authorization": "Bearer token"},
+            request_fn=request_fn,
+        )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(result["steps"][0]["error"], "html_response_for_api_probe")
+        self.assertEqual(result["write_slo"]["status"], "skipped")
 
     def test_unknown_operation_in_scenario_is_rejected(self) -> None:
         with TemporaryDirectory() as temp_dir:

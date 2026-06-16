@@ -302,7 +302,10 @@ from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntim
 from fin_ops_platform.services.tax_offset_service import TaxOffsetService
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_service import TURNOVER_LEDGER_SCHEMA_VERSION, TurnoverLedgerService
-from fin_ops_platform.services.turnover_ledger_export_service import XLSX_MIME_TYPE
+from fin_ops_platform.services.turnover_ledger_export_service import (
+    XLSX_MIME_TYPE,
+    TurnoverLedgerExportLimitError,
+)
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankdetailWritePort,
@@ -437,6 +440,7 @@ WORKBENCH_READ_MODEL_SCHEMA_VERSION = "2026-06-11-turnover-bank-only-open"
 PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 PROMETHEUS_BEARER_TOKEN_ENV = "FIN_OPS_PROMETHEUS_BEARER_TOKEN"
+HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT = 20
 APP_HEALTH_DASHBOARD_STALE_WARNING_CODES = {
     "bank_inventory_unknown",
     "invoice_inventory_unknown",
@@ -1462,6 +1466,15 @@ class Application:
         counterparty_name = str(row.get("counterparty_name") or "").strip()
         category_path = list(row.get("effective_category_path") or row.get("category_path") or [])
         category_label_path = list(row.get("effective_category_label_path") or row.get("category_label_path") or [])
+        raw_category_version = row.get("category_version")
+        if raw_category_version is None:
+            raw_category_version = row.get("manual_category_version")
+        if raw_category_version is None:
+            raw_category_version = row.get("version")
+        try:
+            category_version = int(raw_category_version or 0)
+        except (TypeError, ValueError):
+            category_version = 0
         result = dict(row)
         result.update(
             {
@@ -1477,6 +1490,7 @@ class Application:
                 "credit_amount": amount if txn_direction == "inflow" else "0.00",
                 "category_code": category_code,
                 "category_label": row.get("effective_category_label") or row.get("category_label"),
+                "category_version": category_version,
                 "category_path": category_path,
                 "category_primary_label": row.get("effective_category_primary_label") or row.get("category_primary_label"),
                 "category_sub_label": row.get("effective_category_sub_label") or row.get("category_sub_label"),
@@ -2050,21 +2064,21 @@ class Application:
         if method == "GET" and route_path == "/api/workbench/settings/oa/manual-search":
             return self._handle_api_workbench_settings_oa_manual_search(query)
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/refresh-attachments":
-            return self._handle_api_workbench_settings_oa_manual_search_refresh_attachments(body)
+            return self._handle_api_workbench_settings_oa_manual_search_refresh_attachments(body, headers)
         if method == "GET" and route_path == "/api/workbench/settings/oa/manual-imports":
             return self._handle_api_workbench_settings_oa_manual_imports()
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-imports":
-            return self._handle_api_workbench_settings_oa_manual_imports_create(body)
+            return self._handle_api_workbench_settings_oa_manual_imports_create(body, headers)
         if method == "DELETE" and route_path.startswith("/api/workbench/settings/oa/manual-imports/"):
             row_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_workbench_settings_oa_manual_import_delete(row_id, body)
+            return self._handle_api_workbench_settings_oa_manual_import_delete(row_id, body, headers)
         if method == "POST" and route_path == "/api/workbench/settings/projects/sync":
-            return self._handle_api_workbench_settings_projects_sync(body)
+            return self._handle_api_workbench_settings_projects_sync(body, headers)
         if method == "POST" and route_path == "/api/workbench/settings/projects":
-            return self._handle_api_workbench_settings_project_create(body)
+            return self._handle_api_workbench_settings_project_create(body, headers)
         if method == "DELETE" and route_path.startswith("/api/workbench/settings/projects/"):
             project_id = unquote(route_path.rsplit("/", 1)[-1])
-            return self._handle_api_workbench_settings_project_delete(project_id)
+            return self._handle_api_workbench_settings_project_delete(project_id, headers)
         if method == "POST" and route_path == "/api/workbench/settings/data-reset/jobs":
             return self._handle_api_workbench_settings_data_reset_job_create(body, headers)
         if method == "GET" and route_path == "/api/workbench/settings/data-reset/jobs/active":
@@ -2670,12 +2684,17 @@ class Application:
 
     def _health_payload(self) -> dict[str, object]:
         payload = self.readiness_summary(check_dependencies=False)
-        self._attach_health_metadata(payload)
+        self._attach_health_metadata(payload, api_performance_endpoint_limit=HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT)
         return payload
 
-    def _readiness_health_payload(self, *, include_workbench_api_self_test: bool) -> dict[str, object]:
+    def _readiness_health_payload(
+        self,
+        *,
+        include_workbench_api_self_test: bool,
+        api_performance_endpoint_limit: int | None = HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT,
+    ) -> dict[str, object]:
         payload = self.readiness_summary()
-        self._attach_health_metadata(payload)
+        self._attach_health_metadata(payload, api_performance_endpoint_limit=api_performance_endpoint_limit)
         if include_workbench_api_self_test:
             payload["workbench_api_self_test"] = self._workbench_api_self_test()
         return payload
@@ -2684,7 +2703,10 @@ class Application:
         auth_error = self._authorize_prometheus_metrics(headers)
         if auth_error is not None:
             return auth_error
-        payload = self._readiness_health_payload(include_workbench_api_self_test=False)
+        payload = self._readiness_health_payload(
+            include_workbench_api_self_test=False,
+            api_performance_endpoint_limit=None,
+        )
         return Response(
             status_code=int(HTTPStatus.OK),
             body=render_prometheus_metrics(payload),
@@ -2717,7 +2739,12 @@ class Application:
             )
         return None
 
-    def _attach_health_metadata(self, payload: dict[str, object]) -> None:
+    def _attach_health_metadata(
+        self,
+        payload: dict[str, object],
+        *,
+        api_performance_endpoint_limit: int | None,
+    ) -> None:
         payload["seed_counts"] = {
             key: len(value) for key, value in self._seed_payload.items() if isinstance(value, list)
         }
@@ -2737,7 +2764,9 @@ class Application:
             ],
             "planned": ["costing"],
         }
-        payload["api_performance"] = self._api_performance_recorder.summary()
+        payload["api_performance"] = self._api_performance_recorder.summary(
+            max_endpoints=api_performance_endpoint_limit,
+        )
 
     def _workbench_api_self_test(self) -> dict[str, object]:
         scope_key = "all"
@@ -5993,7 +6022,12 @@ class Application:
             total=total,
             message="ETC发票导入任务已创建。",
             result_summary=initial_summary,
-            source={"session_id": normalized_session_id},
+            source={
+                "session_id": normalized_session_id,
+                "task_id": normalized_task_id,
+                "affected_domains": ["imports_etc_invoices", "etc_tickets"],
+                "route": "/imports/etc-invoices",
+            },
             affected_scopes=["etc_invoices", "imports", "workbench"],
         )
         if not created:
@@ -10755,7 +10789,11 @@ class Application:
     def _handle_api_workbench_settings_oa_manual_search_refresh_attachments(
         self,
         body: str | bytes | None,
+        headers: dict[str, str] | None,
     ) -> Response:
+        _session, auth_error = self._resolve_settings_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         service = self._oa_manual_import_service_or_response()
         if isinstance(service, Response):
             return service
@@ -10775,7 +10813,14 @@ class Application:
             return service
         return self._json_response(HTTPStatus.OK, service.list_manual_imports())
 
-    def _handle_api_workbench_settings_oa_manual_imports_create(self, body: str | bytes | None) -> Response:
+    def _handle_api_workbench_settings_oa_manual_imports_create(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_settings_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         service = self._oa_manual_import_service_or_response()
         if isinstance(service, Response):
             return service
@@ -10785,7 +10830,11 @@ class Application:
         row_ids, row_ids_error = self._parse_oa_manual_import_row_ids(payload)
         if row_ids_error is not None:
             return row_ids_error
-        actor_id = str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
+        actor_id = (
+            actor_id_for_session(session)
+            if session is not None
+            else str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
+        )
         normalized_actor_id = actor_id or "workbench_settings"
         if self._import_job_processing_enabled():
             try:
@@ -10825,7 +10874,11 @@ class Application:
         self,
         row_id: str,
         body: str | bytes | None,
+        headers: dict[str, str] | None,
     ) -> Response:
+        session, auth_error = self._resolve_settings_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         service = self._oa_manual_import_service_or_response()
         if isinstance(service, Response):
             return service
@@ -10840,7 +10893,11 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_manual_import_request", "message": "row_id is required."},
             )
-        actor_id = str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
+        actor_id = (
+            actor_id_for_session(session)
+            if session is not None
+            else str(payload.get("actor_id") or payload.get("actor") or "workbench_settings").strip()
+        )
         result = service.remove_manual_import(normalized_row_id, actor_id=actor_id or "workbench_settings")
         self._invalidate_after_oa_manual_import_mutation(result, row_ids=[normalized_row_id])
         return self._json_response(HTTPStatus.OK, result)
@@ -10979,11 +11036,35 @@ class Application:
                 return value[:7]
         return ""
 
-    def _handle_api_workbench_settings_projects_sync(self, body: str | bytes | None) -> Response:
+    def _resolve_settings_mutation_session(
+        self,
+        headers: dict[str, str] | None,
+    ) -> tuple[OARequestSession | None, Response | None]:
+        session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问设置页面权限。",
+        )
+        if auth_error is not None:
+            return None, auth_error
+        if session is not None and not session.can_mutate_data:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "permission_denied", "message": "当前账户没有保存设置权限。"},
+            )
+        return session, None
+
+    def _handle_api_workbench_settings_projects_sync(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_settings_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor_id = str(payload.get("actor_id", "")).strip()
+        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id", "")).strip()
         if not actor_id:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -11007,11 +11088,18 @@ class Application:
             },
         )
 
-    def _handle_api_workbench_settings_project_create(self, body: str | bytes | None) -> Response:
+    def _handle_api_workbench_settings_project_create(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session, auth_error = self._resolve_settings_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        actor_id = str(payload.get("actor_id", "")).strip()
+        actor_id = actor_id_for_session(session) if session is not None else str(payload.get("actor_id", "")).strip()
         if not actor_id:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -11032,7 +11120,14 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"settings": settings_payload})
 
-    def _handle_api_workbench_settings_project_delete(self, project_id: str) -> Response:
+    def _handle_api_workbench_settings_project_delete(
+        self,
+        project_id: str,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _session, auth_error = self._resolve_settings_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
         normalized_project_id = str(project_id).strip()
         if not normalized_project_id:
             return self._json_response(
@@ -13295,12 +13390,25 @@ class Application:
         bank_year = query.get("bank_year", [year])[0]
         oa_year = query.get("oa_year", [year])[0]
         bucket = query.get("bucket", ["unsubmitted"])[0] or "unsubmitted"
+
+        def query_value(*names: str) -> str | None:
+            for name in names:
+                if name in query:
+                    return (query.get(name) or [None])[0]
+            return None
+
         try:
             payload = self._batch_accounting_service(use_sql_read_model=True).build_payload(
                 year=year,
                 bank_year=bank_year,
                 oa_year=oa_year,
                 bucket=bucket,
+                page=query_value("page"),
+                page_size=query_value("page_size", "pageSize"),
+                bank_page=query_value("bank_page", "bankPage"),
+                bank_page_size=query_value("bank_page_size", "bankPageSize"),
+                oa_page=query_value("oa_page", "oaPage"),
+                oa_page_size=query_value("oa_page_size", "oaPageSize"),
             )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)
@@ -13779,6 +13887,11 @@ class Application:
                 family=self._turnover_ledger_query_value(query, "family", "all"),
                 limit=self._turnover_ledger_query_int(query, "limit", 20),
             )
+        except TurnoverLedgerExportLimitError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc), "details": dict(exc.details)},
+            )
         except (TypeError, ValueError) as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -13790,6 +13903,11 @@ class Application:
         try:
             filename, content = self._turnover_ledger_read_facade.export(
                 family=self._turnover_ledger_query_value(query, "family", "all"),
+            )
+        except TurnoverLedgerExportLimitError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc), "details": dict(exc.details)},
             )
         except (TypeError, ValueError) as exc:
             return self._json_response(
@@ -15315,6 +15433,10 @@ class Application:
         label = self._file_import_job_label(session, normalized_selected_file_ids)
         owner_user_id = self._resolve_background_job_owner(headers)
         selected_key = ",".join(sorted(normalized_selected_file_ids))
+        affected_import_domains, import_route = self._file_import_job_status_scope(
+            session,
+            normalized_selected_file_ids,
+        )
         job, created = self._background_job_service.create_or_get_idempotent_job_with_created(
             job_type="file_import",
             label=label,
@@ -15325,7 +15447,12 @@ class Application:
             total=total,
             message=f"{label}任务已创建。",
             result_summary={"confirmed": 0, "selected": total, "matching_results": 0},
-            source={"session_id": normalized_session_id, "selected_file_ids": normalized_selected_file_ids},
+            source={
+                "session_id": normalized_session_id,
+                "selected_file_ids": normalized_selected_file_ids,
+                "affected_domains": affected_import_domains,
+                "route": import_route,
+            },
             affected_scopes=["imports", "workbench"],
         )
         if created and self._import_job_processing_enabled():
@@ -15373,6 +15500,30 @@ class Application:
     @staticmethod
     def _file_import_job_label(session, selected_file_ids: list[str]) -> str:
         return ImportProcessingService.file_import_job_label(session, selected_file_ids)
+
+    @staticmethod
+    def _file_import_job_status_scope(session, selected_file_ids: list[str]) -> tuple[list[str], str]:
+        selected = {str(file_id) for file_id in list(selected_file_ids or []) if str(file_id)}
+        domains: list[str] = []
+        for item in list(getattr(session, "files", []) or []):
+            if str(getattr(item, "id", "")) not in selected:
+                continue
+            batch_type = getattr(item, "batch_type", None)
+            domain = ""
+            if batch_type == BatchType.BANK_TRANSACTION:
+                domain = "imports_bank_transactions"
+            elif batch_type in {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE}:
+                domain = "imports_invoices"
+            if domain and domain not in domains:
+                domains.append(domain)
+        if not domains:
+            return [], "/operations/app-health"
+        route_by_domain = {
+            "imports_bank_transactions": "/imports/bank-transactions",
+            "imports_invoices": "/imports/invoices",
+        }
+        route = route_by_domain.get(domains[0], "/operations/app-health") if len(domains) == 1 else "/operations/app-health"
+        return domains, route
 
     def _execute_file_import_confirm_job(
         self,

@@ -20,6 +20,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
 
 PASS = "pass"
 FAIL = "fail"
+CONFIGURATION_MISSING = "configuration_missing"
 
 REQUIRED_ENV = (
     "FIN_OPS_TEST_DATABASE_URL",
@@ -101,7 +102,8 @@ def main(
         skip_real_tests=args.skip_real_tests,
         include_optional_workers=args.include_optional_workers,
     )
-    status = PASS if all(check.status == PASS for check in checks) else FAIL
+    missing_env = _missing_required_env(checks)
+    status = CONFIGURATION_MISSING if missing_env else PASS if all(check.status == PASS for check in checks) else FAIL
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
         "status": status,
@@ -110,11 +112,16 @@ def main(
         "include_optional_workers": bool(args.include_optional_workers),
         "checks": [check.to_dict() for check in checks],
     }
+    if missing_env:
+        report["error"] = "staging_preflight_environment_missing"
+        report["required_env"] = missing_env
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(encoded + "\n", encoding="utf-8")
     print(encoded if args.json else _format_text(report), file=stdout)
+    if status == CONFIGURATION_MISSING:
+        return 2
     return 0 if status == PASS else 1
 
 
@@ -249,6 +256,17 @@ def _check_required_env(env: Mapping[str, str]) -> CheckResult:
             },
         },
     )
+
+
+def _missing_required_env(checks: Sequence[CheckResult]) -> list[str]:
+    if not checks:
+        return []
+    first = checks[0]
+    if first.name != "env.required" or first.status == PASS:
+        return []
+    metadata = first.metadata or {}
+    missing = metadata.get("missing")
+    return [str(item) for item in missing] if isinstance(missing, list) else []
 
 
 def _runtime_env(env: Mapping[str, str]) -> dict[str, str]:

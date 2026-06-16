@@ -104,6 +104,27 @@ class AppTests(unittest.TestCase):
         self.assertIn("production_runtime_guard", payload)
         self.assertNotIn("workbench_api_self_test", payload)
 
+    def test_ready_endpoint_bounds_api_performance_payload(self) -> None:
+        app = build_application()
+        for index in range(25):
+            app._api_performance_recorder.record_request(
+                method="GET",
+                route_path=f"/api/example-{index:02d}",
+                status_code=200,
+                duration_ms=float(index),
+            )
+
+        response = app.handle_request("GET", "/health/ready")
+        payload = json.loads(response.body)
+        api_performance = payload["api_performance"]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(api_performance["endpoint_count"], 25)
+        self.assertEqual(api_performance["omitted_endpoint_count"], 5)
+        self.assertEqual(len(api_performance["endpoints"]), 20)
+        self.assertIn("GET /api/example-24", api_performance["endpoints"])
+        self.assertNotIn("GET /api/example-00", api_performance["endpoints"])
+
     @patch.dict("os.environ", {"FIN_OPS_PROMETHEUS_BEARER_TOKEN": ""})
     def test_metrics_endpoint_is_hidden_when_token_is_not_configured(self) -> None:
         app = build_application()
@@ -148,6 +169,24 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("Access-Control-Allow-Origin", response.headers)
         self.assertIn("# TYPE finops_ready gauge", body)
         self.assertIn("finops_ready", body)
+
+    @patch.dict("os.environ", {"FIN_OPS_PROMETHEUS_BEARER_TOKEN": "metric-token"})
+    def test_metrics_endpoint_exports_full_api_performance_payload(self) -> None:
+        app = build_application()
+        for index in range(25):
+            app._api_performance_recorder.record_request(
+                method="GET",
+                route_path=f"/api/example-{index:02d}",
+                status_code=200,
+                duration_ms=float(index),
+            )
+
+        response = app.handle_request("GET", "/metrics", headers={"Authorization": "Bearer metric-token"})
+        body = response.body.decode("utf-8") if isinstance(response.body, bytes) else str(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('endpoint="GET /api/example-00"', body)
+        self.assertIn('endpoint="GET /api/example-24"', body)
 
     def test_health_endpoint_marks_release_import_path_mismatch_not_ready(self) -> None:
         app = build_application()

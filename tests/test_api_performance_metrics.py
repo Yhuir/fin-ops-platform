@@ -38,6 +38,32 @@ class ApiPerformanceMetricsTests(unittest.TestCase):
         self.assertEqual(endpoint["database_query_count"], {"p50": 1.0, "p95": 2.0, "p99": 2.0})
         self.assertEqual(endpoint["last_status_code"], 200)
 
+    def test_recorder_can_return_bounded_slowest_endpoint_summary(self) -> None:
+        recorder = ApiPerformanceRecorder(max_samples_per_endpoint=10)
+        for index in range(25):
+            recorder.record_request(
+                method="GET",
+                route_path=f"/api/example-{index:02d}",
+                status_code=200,
+                duration_ms=float(index),
+            )
+
+        summary = recorder.summary(max_endpoints=5)
+
+        self.assertEqual(summary["endpoint_count"], 25)
+        self.assertEqual(summary["omitted_endpoint_count"], 20)
+        self.assertEqual(len(summary["endpoints"]), 5)
+        self.assertEqual(
+            set(summary["endpoints"]),
+            {
+                "GET /api/example-20",
+                "GET /api/example-21",
+                "GET /api/example-22",
+                "GET /api/example-23",
+                "GET /api/example-24",
+            },
+        )
+
     def test_database_timing_context_tracks_only_current_request(self) -> None:
         record_database_query(100.0)
         self.assertIsNone(current_request_database_metrics())

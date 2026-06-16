@@ -15,7 +15,7 @@ from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 
-DEFAULT_TARGET_MS = 5_000.0
+DEFAULT_TARGET_MS = 1_000.0
 DEFAULT_ITERATIONS = 5
 DEFAULT_WARMUP = 1
 DEFAULT_TIMEOUT_SECONDS = 10.0
@@ -146,12 +146,12 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
         expected_statuses=(200, 202),
     ),
     HttpProbe("pending_invoices_rules", "/api/pending-invoices/rules", expected_statuses=(200, 202)),
-    HttpProbe("input_invoice_usage_rows", "/api/input-invoice-usage/rows?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("input_invoice_usage_rows", "/api/input-invoice-usage/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("input_invoice_usage_filter_options", "/api/input-invoice-usage/filter-options", expected_statuses=(200, 202)),
     HttpProbe("input_invoice_usage_payment_status_rules", "/api/input-invoice-usage/payment-status-rules", expected_statuses=(200, 202)),
-    HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("oa_pending_payments_filter_options", "/api/oa-pending-payments/filter-options", expected_statuses=(200, 202)),
-    HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=50", expected_statuses=(200, 202)),
+    HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_filter_options", "/api/output-invoice-collections/filter-options", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_status_rules", "/api/output-invoice-collections/status-rules", expected_statuses=(200, 202)),
     HttpProbe("tax_offset_summary", f"/api/tax-offset/summary?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
@@ -168,13 +168,13 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     ),
     HttpProbe(
         "no_oa_bank_batches",
-        f"/api/no-oa-bank-batches?month={_current_month()}&bucket=unsubmitted&page=1&page_size=50",
+        f"/api/no-oa-bank-batches?month={_current_month()}&bucket=unsubmitted&page=1&page_size=200",
         expected_statuses=(200, 202),
     ),
     HttpProbe("no_oa_bank_batches_tag_selection", "/api/no-oa-bank-batches/tag-selection", expected_statuses=(200, 202)),
     HttpProbe(
         "batch_accounting",
-        f"/api/batch-accounting?bank_year={_current_year()}&oa_year={_current_year()}&bucket=unsubmitted&page=1&page_size=50",
+        f"/api/batch-accounting?bank_year={_current_year()}&oa_year={_current_year()}&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
         expected_statuses=(200, 202),
     ),
     HttpProbe("turnover_ledger_grouped", "/api/turnover-ledger?view=grouped&page=1&page_size=50", expected_statuses=(200, 202)),
@@ -345,7 +345,9 @@ def _collect_one(
         content_type = _header(response.headers, "content-type")
         body = response.body or b""
         metadata = _extract_response_metadata(body, content_type)
-        ok = response.status_code in probe.expected_statuses
+        status_ok = response.status_code in probe.expected_statuses
+        html_api_error = _html_response_error(probe, content_type, body) if status_ok else None
+        ok = status_ok and html_api_error is None
         return HttpProbeSample(
             name=probe.name,
             path=probe.path,
@@ -358,7 +360,7 @@ def _collect_one(
             response_bytes=len(body),
             content_type=content_type,
             ok=ok,
-            error=None if ok else f"unexpected_status:{response.status_code}",
+            error=None if ok else html_api_error or f"unexpected_status:{response.status_code}",
             read_model_status=metadata.get("read_model_status"),
             cache_status=metadata.get("cache_status"),
             refresh_enqueued=metadata.get("refresh_enqueued"),
@@ -565,6 +567,18 @@ def _first_string(payload: Mapping[str, Any], keys: Sequence[str]) -> str | None
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    return None
+
+
+def _html_response_error(probe: HttpProbe, content_type: str, body: bytes) -> str | None:
+    if str(probe.kind or "").lower() != "api":
+        return None
+    normalized_content_type = content_type.lower()
+    if "html" in normalized_content_type:
+        return "html_response_for_api_probe"
+    prefix = body.lstrip()[:128].lower()
+    if prefix.startswith(b"<!doctype html") or prefix.startswith(b"<html"):
+        return "html_response_for_api_probe"
     return None
 
 

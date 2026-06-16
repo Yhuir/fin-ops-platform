@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, make_dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
 import json
+import pickle
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
@@ -14,11 +15,13 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services import etc_service as etc_service_module
 from fin_ops_platform.services.etc_service import (
     EtcBusinessBatchActiveExistsError,
     EtcBusinessBatchInvalidTransitionError,
     EtcBusinessBatchNotFoundError,
     EtcBusinessBatchStatus,
+    EtcBusinessBatch,
     EtcDraftRequestError,
     EtcOAHttpClientSettings,
     EtcInvoiceStatus,
@@ -289,6 +292,42 @@ class PostgresLikeReconciliationStateStore(ApplicationStateStore):
 
 
 class EtcServiceTests(unittest.TestCase):
+    def test_legacy_business_batch_pickle_drops_removed_oa_detection_status(self) -> None:
+        current_batch_cls = etc_service_module.EtcBusinessBatch
+        legacy_batch_cls = make_dataclass(
+            "EtcBusinessBatch",
+            [
+                ("business_batch_id", str),
+                ("task_id", str),
+                ("status", str, EtcBusinessBatchStatus.DRAFT.value),
+                ("version", int, 1),
+                ("oa_detection_status", str, "legacy_detection_pending"),
+            ],
+            slots=True,
+        )
+        legacy_batch_cls.__module__ = etc_service_module.__name__
+        legacy_batch_cls.__qualname__ = "EtcBusinessBatch"
+        try:
+            etc_service_module.EtcBusinessBatch = legacy_batch_cls
+            legacy_payload = pickle.dumps(
+                legacy_batch_cls(
+                    business_batch_id="etc_business_batch_legacy",
+                    task_id="ETC-RECON-LEGACY",
+                    oa_detection_status="legacy_detection_pending",
+                )
+            )
+        finally:
+            etc_service_module.EtcBusinessBatch = current_batch_cls
+
+        loaded = pickle.loads(legacy_payload)  # noqa: S301 - trusted legacy state fixture
+
+        self.assertIsInstance(loaded, EtcBusinessBatch)
+        self.assertEqual(loaded.business_batch_id, "etc_business_batch_legacy")
+        self.assertEqual(loaded.task_id, "ETC-RECON-LEGACY")
+        self.assertFalse(hasattr(loaded, "oa_detection_status"))
+        self.assertEqual(loaded.import_batch_ids, [])
+        self.assertEqual(loaded.amount_breakdown, {})
+
     def test_business_batch_create_list_detail_and_active_guard(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
@@ -778,6 +817,36 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(preview["audit"]["duplicate_across_files_count"], 1)
         self.assertEqual(preview["audit"]["importable_count"], 1)
         self.assertEqual(preview["audit"]["skipped_count"], 1)
+
+    def test_preview_large_mixed_zip_keeps_valid_invoices_duplicates_and_failures_separate(self) -> None:
+        entries: dict[str, bytes] = {}
+        for index in range(1, 121):
+            invoice_number = f"ETC{index:03d}"
+            entries[f"xml/{invoice_number}.xml"] = etc_xml(invoice_number)
+            entries[f"pdf/{invoice_number}.pdf"] = fake_pdf(invoice_number)
+        entries["xml/ETC001-copy.xml"] = etc_xml("ETC001")
+        entries["bad/malformed.xml"] = b"<Invoice>"
+
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+
+            preview = service.preview_import_zips([UploadedEtcZipFile("mixed-large-ticket-root.zip", zip_bytes(entries))])
+            invoices, total, _counts = service.list_invoices(page=1, page_size=20)
+
+        self.assertEqual(preview["summary"], {"imported": 120, "duplicatesSkipped": 1, "attachmentsCompleted": 0, "failed": 1})
+        self.assertEqual(preview["audit"]["original_count"], 122)
+        self.assertEqual(preview["audit"]["unique_count"], 120)
+        self.assertEqual(preview["audit"]["duplicate_in_file_count"], 1)
+        self.assertEqual(preview["audit"]["error_count"], 1)
+        self.assertEqual(preview["audit"]["importable_count"], 120)
+        self.assertEqual(preview["audit"]["confirmable_count"], 120)
+        self.assertEqual(preview["audit"]["skipped_count"], 2)
+        self.assertEqual(len(preview["items"]), 122)
+        failed_items = [item for item in preview["items"] if item["status"] == "failed"]
+        self.assertEqual(len(failed_items), 1)
+        self.assertIn("XML 解析失败", failed_items[0]["message"])
+        self.assertEqual(total, 0)
+        self.assertEqual(invoices, [])
 
     def test_confirm_import_session_persists_records_and_is_idempotent(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1295,6 +1364,9 @@ class EtcApiTests(unittest.TestCase):
             payload = json.loads(response.body)
             job = payload.get("job", {})
             if isinstance(job, dict) and job.get("status") in {"succeeded", "partial_success", "failed"}:
+                wait_for_completion = getattr(app._background_job_service, "wait_for_job_completion", None)
+                if callable(wait_for_completion):
+                    wait_for_completion(job_id, timeout=max(0.1, deadline - time.monotonic()))
                 return job
             time.sleep(0.02)
         self.fail(f"background job {job_id} did not finish: {payload}")
@@ -2541,7 +2613,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(submitted_after_delete["items"], [])
 
     def test_delete_etc_submission_batch_route_cascades_mutable_batch_contents(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
             app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001", "ETC002"]))])
@@ -2639,7 +2711,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(deleted_legacy_response.body)["items"], [])
 
     def test_etc_business_batch_detail_returns_invoice_items_without_detection_fields(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
             create_response = app.handle_request(
@@ -2683,7 +2755,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertNotIn("oaDetectionFinalRetryUntil", detail)
 
     def test_etc_business_batch_scope_uses_session_dept_id(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._access_control_service.dynamic_allowed_usernames_provider = lambda: ["OWNER", "OTHER", "ADMIN"]
             app._access_control_service.dynamic_admin_usernames_provider = lambda: ["ADMIN"]
@@ -2757,7 +2829,7 @@ class EtcApiTests(unittest.TestCase):
                 self.events.append(dict(kwargs))
                 return {"event_id": f"evt-{len(self.events)}"}
 
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
             queue = QueueRecorder()
@@ -2820,7 +2892,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertNotIn("etc_business.oa_detection.refresh", registry_event_types)
 
     def test_etc_business_batch_source_files_append_to_reconciliation_task(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC source files", created_by="alice")
             create_response = app.handle_request(
@@ -2847,7 +2919,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(task_after_upload.source_files[0].original_name, "ticket-root.zip")
 
     def test_etc_business_batch_source_file_upload_returns_structured_storage_error(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC source files", created_by="alice")
             create_response = app.handle_request(
@@ -2879,42 +2951,45 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(task_after_upload.source_files, [])
 
     def test_etc_business_manual_status_accepts_confirmation_pending_state(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-            app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001"]))])
-            batch = app._etc_service.create_business_batch(task_id="ETC-TASK-MANUAL")
-            imported, _ = app._etc_service.confirm_business_batch_import(
-                batch.business_batch_id,
-                app._etc_service.preview_business_batch_import_zips(
+            try:
+                app._etc_service.oa_client = FakeEtcOAClient()
+                app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001"]))])
+                batch = app._etc_service.create_business_batch(task_id="ETC-TASK-MANUAL")
+                imported, _ = app._etc_service.confirm_business_batch_import(
                     batch.business_batch_id,
-                    [UploadedEtcZipFile("manual.zip", etc_zip(["ETC002"]))],
+                    app._etc_service.preview_business_batch_import_zips(
+                        batch.business_batch_id,
+                        [UploadedEtcZipFile("manual.zip", etc_zip(["ETC002"]))],
+                        expected_version=batch.version,
+                    )["sessionId"],
                     expected_version=batch.version,
-                )["sessionId"],
-                expected_version=batch.version,
-            )
-            drafted = app._etc_service.create_business_batch_oa_draft(
-                imported.business_batch_id,
-                expected_version=imported.version,
-            )
+                )
+                drafted = app._etc_service.create_business_batch_oa_draft(
+                    imported.business_batch_id,
+                    expected_version=imported.version,
+                )
 
-            response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{drafted.business_batch_id}/manual-oa-status",
-                json.dumps({
-                    "decision": "submitted",
-                    "reason": "用户确认 OA 草稿已提交。",
-                    "expectedVersion": drafted.version,
-                }),
-            )
-            payload = json.loads(response.body)["data"]["businessBatch"]
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{drafted.business_batch_id}/manual-oa-status",
+                    json.dumps({
+                        "decision": "submitted",
+                        "reason": "用户确认 OA 草稿已提交。",
+                        "expectedVersion": drafted.version,
+                    }),
+                )
+                payload = json.loads(response.body)["data"]["businessBatch"]
+            finally:
+                app.shutdown_background_jobs()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "manually_marked_submitted")
         self.assertEqual(payload["oaProcessStatus"], "manual_without_oa_row")
 
     def test_etc_business_manual_submitted_closes_the_linked_reconciliation_task(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -2961,7 +3036,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(submitted_batches["items"][0]["businessBatchId"], manual_payload["businessBatchId"])
 
     def test_etc_business_batch_submitted_list_counts_use_filtered_passage_month(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -3037,7 +3112,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(june_payload["items"], [])
 
     def test_historical_business_batch_lists_by_scope_month_and_reported_amount(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.import_historical_invoices_from_records(
                 records=[
@@ -3108,7 +3183,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(business_payload["items"][0]["invoiceSummary"]["amount"], "1549.00")
 
     def test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -3169,7 +3244,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("ETC002", detail_payload["row"]["detail_fields"]["发票清单"])
 
     def test_submitted_etc_business_batch_delete_releases_summary_and_deletes_local_task(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -3251,7 +3326,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
 
     def test_legacy_submission_batch_delete_delegates_to_business_batch_reset(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -3303,7 +3378,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
 
     def test_submitted_etc_business_batch_delete_cancels_summary_relation_without_restoring_oa_bank_pair(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -3400,7 +3475,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
 
     def test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             batch = SimpleNamespace(
                 business_batch_id="etc_business_batch_command",
@@ -3488,7 +3563,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(persisted_case_ids, [["CASE-ETC-COMMAND"]])
 
     def test_submitted_etc_business_batch_delete_uses_canonical_relation_when_read_model_is_stale(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             batch = app._etc_service.create_business_batch(task_id="ETC-STALE-TASK")
             mutable_batch = app._etc_service._business_batches[batch.business_batch_id]
@@ -3539,7 +3614,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertIsNone(relation_after)
 
     def test_reconciliation_task_delete_cancels_submitted_business_summary_relation(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -3636,7 +3711,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
 
     def test_reconciliation_task_delete_removes_orphan_submission_metadata_link(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
 
@@ -4367,6 +4442,9 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(before_confirm_response.body)["total"], 0)
         self.assertEqual(confirm_response.status_code, 202)
         self.assertEqual(job["type"], "etc_invoice_import")
+        self.assertEqual(job["affected_domains"], ["imports_etc_invoices", "etc_tickets"])
+        self.assertEqual(job["route"], "/imports/etc-invoices")
+        self.assertEqual(job["source"]["task_id"], task_id)
         self.assertEqual(job["total"], 2)
         self.assertEqual(completed_job["status"], "succeeded")
         self.assertEqual(completed_job["current"], 2)
@@ -5057,7 +5135,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(bad_revoke.body)["error"], "invalid_etc_invoice_request")
 
     def test_historical_etc_repair_reconcile_is_idempotent_from_seed_bundle(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             spec = HistoricalEtcRepairBatchSpec(
                 label="测试历史批次",
@@ -5162,7 +5240,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(relation_command_service.confirm_calls[-1]["relation_mode"], "etc_batch_invoice_link")
 
     def test_historical_etc_repair_requires_relation_command_service_before_local_writes(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             spec = HistoricalEtcRepairBatchSpec(
                 label="测试历史批次",
@@ -5208,7 +5286,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertIsNone(relation)
 
     def test_existing_etc_batch_link_extends_active_oa_bank_relation_and_renders_summary(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             manual_preview = app._import_service.preview_import(
                 batch_type=BatchType.INPUT_INVOICE,
@@ -5398,7 +5476,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(invoice_rows[0]["total_with_tax"], "26.14")
 
     def test_existing_etc_batch_link_requires_relation_command_service_before_local_writes(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             manual_preview = app._import_service.preview_import(
                 batch_type=BatchType.INPUT_INVOICE,
@@ -5468,7 +5546,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(batches, [])
 
     def test_existing_etc_batch_link_is_idempotent_and_does_not_create_parallel_relation(self) -> None:
-        with TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
+        with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             manual_preview = app._import_service.preview_import(
                 batch_type=BatchType.INPUT_INVOICE,

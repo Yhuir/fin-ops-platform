@@ -8,7 +8,8 @@ import sys
 from typing import Any, Sequence, TextIO
 from urllib.parse import quote
 
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
+from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report, write_json_report
 
 
 DEFAULT_LIMIT = 10
@@ -33,27 +34,23 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
-    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        connection = PostgresConnection(PostgresSettings.from_env())
+    except PostgresConfigurationError as exc:
+        report = postgres_configuration_missing_report(tool="write_operation_scenario_discovery", message=str(exc))
+        write_json_report(report, output=args.output, stdout=stdout)
+        return 2
     report = discover_write_operation_scenarios(
         connection,
         tenant_id=str(args.tenant_id or "default"),
         limit=max(1, int(args.limit)),
     )
+    if args.scenario_output is not None:
+        _write_scenario_output(report, args.scenario_output)
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(encoded + "\n", encoding="utf-8")
-    if args.scenario_output is not None:
-        scenario_payload = {
-            "version": 1,
-            "generated_at": report["generated_at"],
-            "scenarios": report["scenario_json"]["scenarios"],
-        }
-        args.scenario_output.parent.mkdir(parents=True, exist_ok=True)
-        args.scenario_output.write_text(
-            json.dumps(scenario_payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
-            encoding="utf-8",
-        )
     print(encoded, file=stdout)
     return 0
 
@@ -103,6 +100,33 @@ def discover_write_operation_scenarios(
                 "Every generated scenario remains blocked for --apply until real OA/Admin auth and manual approval are supplied.",
             ],
         },
+    }
+
+
+def _write_scenario_output(report: dict[str, Any], path: Path) -> None:
+    scenarios = list((report.get("scenario_json") or {}).get("scenarios") or [])
+    if not scenarios:
+        report["scenario_output"] = {
+            "path": str(path),
+            "written": False,
+            "reason": "no_candidates",
+            "message": "No approved write-operation candidates were discovered; do not run write_operation_e2e_smoke with an empty scenario file.",
+        }
+        return
+    scenario_payload = {
+        "version": 1,
+        "generated_at": report["generated_at"],
+        "scenarios": scenarios,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(scenario_payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+    )
+    report["scenario_output"] = {
+        "path": str(path),
+        "written": True,
+        "scenario_count": len(scenarios),
     }
 
 

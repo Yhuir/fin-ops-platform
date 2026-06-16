@@ -318,6 +318,25 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(result["readiness_status"], "fresh")
         self.assertEqual(result["enqueue_to_fresh_ms"], 3000.0)
         self.assertEqual(result["handler_duration_ms"], 500.0)
+        self.assertEqual(report["summary"]["sample_count"], 1)
+        self.assertEqual(report["summary"]["measured_enqueue_sample_count"], 1)
+        self.assertEqual(report["summary"]["enqueue_to_fresh_ms"]["p95"], 3000.0)
+        self.assertEqual(report["summary"]["enqueue_to_fresh_ms"]["p99"], 3000.0)
+        self.assertEqual(report["summary"]["handler_duration_ms"]["p95"], 500.0)
+
+    def test_apply_fails_when_no_smoke_scopes_are_discovered(self) -> None:
+        with patch.dict(read_model_slo_smoke.APP_STATUS_READ_MODEL_REGISTRY, {}, clear=True):
+            report = read_model_slo_smoke.run_smoke(
+                FakeConnection(),
+                apply=True,
+            )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["planned_scope_count"], 0)
+        self.assertEqual(report["result_count"], 0)
+        self.assertEqual(report["failed_count"], 1)
+        self.assertEqual(report["error"], "no_smoke_scopes_discovered")
+        self.assertEqual(report["summary"]["sample_count"], 0)
 
     def test_wait_does_not_fail_on_stale_failed_readiness_while_event_is_pending(self) -> None:
         connection = PendingThenFreshConnection()
@@ -377,6 +396,38 @@ class ReadModelSloSmokeTests(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["failed_count"], 1)
         self.assertIn("enqueue_to_fresh_ms_exceeded_target", report["results"][0]["error"])
+        self.assertEqual(report["summary"]["failed_count"], 1)
+        self.assertEqual(report["summary"]["enqueue_to_fresh_ms"]["max"], 6000.0)
+
+    def test_summary_reports_enqueue_and_handler_percentiles(self) -> None:
+        base = {
+            "read_model_key": "bank_detail",
+            "scope_type": "bank_detail",
+            "scope_key": "2026-01",
+            "event_type": "bank_detail.read_model.refresh",
+            "event_id": "event",
+            "status": "pass",
+            "event_status": "done",
+            "dirty_status": "done",
+            "readiness_status": "fresh",
+            "source_version": 1,
+            "error": None,
+        }
+        results = [
+            read_model_slo_smoke.SmokeEventResult(
+                **base,
+                enqueue_to_fresh_ms=float(index * 100),
+                handler_duration_ms=float(index * 10),
+            )
+            for index in range(1, 21)
+        ]
+
+        summary = read_model_slo_smoke._results_summary(results)
+
+        self.assertEqual(summary["sample_count"], 20)
+        self.assertEqual(summary["measured_enqueue_sample_count"], 20)
+        self.assertEqual(summary["enqueue_to_fresh_ms"], {"p50": 1000.0, "p95": 1900.0, "p99": 2000.0, "max": 2000.0})
+        self.assertEqual(summary["handler_duration_ms"], {"p50": 100.0, "p95": 190.0, "p99": 200.0, "max": 200.0})
 
 
 if __name__ == "__main__":

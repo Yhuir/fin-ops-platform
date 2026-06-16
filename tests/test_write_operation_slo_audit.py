@@ -48,6 +48,19 @@ def _event(
 
 
 class WriteOperationSloAuditTests(unittest.TestCase):
+    def test_no_recent_write_samples_fail_instead_of_claiming_write_chain_closed(self) -> None:
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection([]),
+            operations=["turnover_manual_closure_or_withdraw"],
+            target_ms=1_000,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["event_sample_count"], 0)
+        self.assertEqual(report["expectation_count"], 5)
+        self.assertEqual(report["missing_expectation_count"], 5)
+        self.assertTrue(all(result["status"] == "missing" for result in report["results"]))
+
     def test_turnover_relation_profile_passes_only_with_all_required_refresh_scopes(self) -> None:
         rows = [
             _event(
@@ -146,6 +159,40 @@ class WriteOperationSloAuditTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "fail")
         self.assertIn("p95_enqueue_to_done_ms_exceeded_target", report["results"][0]["latest_error"])
+
+    def test_p99_long_tail_fails_even_when_p95_meets_one_second_target(self) -> None:
+        rows = [
+            _event(
+                scope_type="turnover_ledger",
+                reason="turnover_relation_extra_changed",
+                action_name="relation_extra_update",
+                seconds=0.8,
+                event_id=f"fast-{index}",
+            )
+            for index in range(19)
+        ]
+        rows.append(
+            _event(
+                scope_type="turnover_ledger",
+                reason="turnover_relation_extra_changed",
+                action_name="relation_extra_update",
+                seconds=3.5,
+                event_id="slow-tail",
+            )
+        )
+
+        report = write_operation_slo_audit.audit_write_operation_slo(
+            FakeConnection(rows),
+            operations=["turnover_relation_extra"],
+            target_ms=1_000,
+        )
+
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["p99_target_ms"], 3_000.0)
+        result = report["results"][0]
+        self.assertEqual(result["p95_enqueue_to_done_ms"], 800.0)
+        self.assertEqual(result["p99_enqueue_to_done_ms"], 3500.0)
+        self.assertIn("p99_enqueue_to_done_ms_exceeded_target", result["latest_error"])
 
     def test_failed_event_status_fails_even_when_duration_is_fast(self) -> None:
         rows = [

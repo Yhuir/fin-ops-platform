@@ -6,7 +6,11 @@ import unittest
 
 from openpyxl import load_workbook
 
-from fin_ops_platform.services.turnover_ledger_export_service import TurnoverLedgerExportService
+from fin_ops_platform.services.turnover_ledger_export_service import (
+    TURNOVER_LEDGER_EXPORT_ROW_LIMIT,
+    TurnoverLedgerExportLimitError,
+    TurnoverLedgerExportService,
+)
 
 
 class TurnoverLedgerExportServiceTests(unittest.TestCase):
@@ -352,6 +356,43 @@ class TurnoverLedgerExportServiceTests(unittest.TestCase):
         self.assertEqual(sheet.cell(row=2, column=6).value, "业务往来")
         self.assertEqual(sheet.cell(row=2, column=7).value, "昆明建设集团")
         self.assertEqual(sheet.max_row, 2)
+
+    def test_export_rejects_group_count_above_sync_row_limit(self) -> None:
+        payload = self._grouped_payload()
+        payload["pagination"] = {"page": 1, "page_size": 10000, "total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1}
+        service = TurnoverLedgerExportService(lambda **_: payload)
+
+        with self.assertRaises(TurnoverLedgerExportLimitError) as preview_context:
+            service.preview(family="all")
+        with self.assertRaises(TurnoverLedgerExportLimitError) as export_context:
+            service.export(family="all")
+
+        expected_details = {"total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1, "limit": TURNOVER_LEDGER_EXPORT_ROW_LIMIT}
+        self.assertEqual(preview_context.exception.error_code, "turnover_ledger_export_row_limit_exceeded")
+        self.assertEqual(export_context.exception.error_code, "turnover_ledger_export_row_limit_exceeded")
+        self.assertEqual(preview_context.exception.details, expected_details)
+        self.assertEqual(export_context.exception.details, expected_details)
+
+    def test_export_rejects_flattened_flow_rows_above_sync_row_limit(self) -> None:
+        payload = self._grouped_payload()
+        group = dict(payload["groups"][0])
+        group["flow_rows"] = [
+            {
+                "source_bank_row_id": f"bank-large-{index}",
+                "flow_direction": "income",
+                "flow_amount": "1.00",
+                "balance_amount": "1.00",
+            }
+            for index in range(TURNOVER_LEDGER_EXPORT_ROW_LIMIT)
+        ]
+        payload["groups"] = [group]
+        payload["pagination"] = {"page": 1, "page_size": 1, "total": 1}
+        service = TurnoverLedgerExportService(lambda **_: payload)
+
+        with self.assertRaises(TurnoverLedgerExportLimitError) as context:
+            service.export(family="all")
+
+        self.assertEqual(context.exception.details, {"total": TURNOVER_LEDGER_EXPORT_ROW_LIMIT + 1, "limit": TURNOVER_LEDGER_EXPORT_ROW_LIMIT})
 
 
 if __name__ == "__main__":

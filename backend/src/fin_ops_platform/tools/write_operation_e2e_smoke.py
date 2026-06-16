@@ -10,11 +10,12 @@ from typing import Any, Callable, Mapping, Sequence, TextIO
 import os
 import sys
 
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import PostgresConfigurationError, PostgresConnection, PostgresSettings
 from fin_ops_platform.tools import http_slo_probe, write_operation_slo_audit
+from fin_ops_platform.tools.cli_reports import input_file_error_report, postgres_configuration_missing_report, write_json_report
 
 
-DEFAULT_WRITE_TARGET_MS = 5_000.0
+DEFAULT_WRITE_TARGET_MS = 1_000.0
 DEFAULT_HTTP_TARGET_MS = 1_000.0
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
@@ -79,14 +80,50 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
     write_target_ms = max(1.0, float(args.write_target_ms))
-    scenarios = load_scenarios(args.scenario, http_target_ms=max(1.0, float(args.http_target_ms)))
+    try:
+        scenarios = load_scenarios(args.scenario, http_target_ms=max(1.0, float(args.http_target_ms)))
+    except FileNotFoundError:
+        report = input_file_error_report(
+            tool="write_operation_e2e_smoke",
+            path=str(args.scenario),
+            error="scenario_file_missing",
+            message="Scenario file does not exist.",
+        )
+        write_json_report(report, output=args.output, stdout=stdout)
+        return 2
+    except json.JSONDecodeError as exc:
+        report = input_file_error_report(
+            tool="write_operation_e2e_smoke",
+            path=str(args.scenario),
+            error="scenario_json_invalid",
+            message=str(exc),
+        )
+        write_json_report(report, output=args.output, stdout=stdout)
+        return 2
+    except ValueError as exc:
+        report = input_file_error_report(
+            tool="write_operation_e2e_smoke",
+            path=str(args.scenario),
+            error="scenario_contract_invalid",
+            message=str(exc),
+        )
+        write_json_report(report, output=args.output, stdout=stdout)
+        return 2
     headers = http_slo_probe._auth_headers(  # Reuse the existing HTTP SLO auth boundary.
         bearer_token=args.bearer_token,
         admin_token=args.admin_token,
         cookie=args.cookie,
     )
+    connection = None
+    if args.apply:
+        try:
+            connection = PostgresConnection(PostgresSettings.from_env())
+        except PostgresConfigurationError as exc:
+            report = postgres_configuration_missing_report(tool="write_operation_e2e_smoke", message=str(exc))
+            write_json_report(report, output=args.output, stdout=stdout)
+            return 2
     report = run_write_operation_e2e_smoke(
-        PostgresConnection(PostgresSettings.from_env()) if args.apply else None,
+        connection,
         scenarios=scenarios,
         apply=bool(args.apply),
         base_url=str(args.base_url),
@@ -157,6 +194,19 @@ def run_write_operation_e2e_smoke(
 ) -> dict[str, Any]:
     auth_configured = any(str(key).lower() in {"authorization", "cookie"} for key in dict(headers))
     plan = [_scenario_plan_payload(scenario) for scenario in scenarios]
+    if not scenarios:
+        return {
+            "version": 1,
+            "status": "input_error",
+            "generated_at": datetime.now(UTC).isoformat(),
+            "base_url": http_slo_probe._normalized_base_url(base_url),
+            "api_prefix": api_prefix,
+            "auth_configured": auth_configured,
+            "scenario_count": 0,
+            "error": "scenario_empty",
+            "message": "write-operation E2E smoke requires at least one approved scenario.",
+            "planned_scenarios": plan,
+        }
     if not apply:
         return {
             "version": 1,
@@ -295,7 +345,22 @@ def _execute_step(
         response = request_fn(url, step.method, request_headers, body, timeout_seconds)
         elapsed_ms = (monotonic() - started) * 1000
         content_type = _header(response.headers, "content-type")
-        ok = response.status_code in step.expected_statuses
+        status_ok = response.status_code in step.expected_statuses
+        html_api_error = (
+            http_slo_probe._html_response_error(
+                http_slo_probe.HttpProbe(
+                    name=step.name,
+                    path=step.path,
+                    kind="api",
+                    expected_statuses=step.expected_statuses,
+                ),
+                content_type,
+                response.body or b"",
+            )
+            if status_ok
+            else None
+        )
+        ok = status_ok and html_api_error is None
         return WriteStepResult(
             name=step.name,
             method=step.method,
@@ -305,7 +370,7 @@ def _execute_step(
             status_code=response.status_code,
             response_bytes=len(response.body or b""),
             content_type=content_type,
-            error=None if ok else f"unexpected_status:{response.status_code}",
+            error=None if ok else html_api_error or f"unexpected_status:{response.status_code}",
         )
     except Exception as exc:
         elapsed_ms = (monotonic() - started) * 1000
@@ -334,6 +399,7 @@ def _wait_for_write_slo(
     limit: int,
 ) -> dict[str, Any]:
     expectations = write_operation_slo_audit.selected_expectations_for_operations(operations)
+    p99_target_ms = write_operation_slo_audit.effective_p99_target_ms_for(target_ms, None)
     deadline = monotonic() + max(1.0, timeout_seconds)
     last_results: list[Any] = []
     last_rows: list[dict[str, Any]] = []
@@ -348,6 +414,7 @@ def _wait_for_write_slo(
             rows,
             expectations=expectations,
             target_ms=target_ms,
+            p99_target_ms=p99_target_ms,
         )
         last_results = results
         last_rows = rows
@@ -355,6 +422,7 @@ def _wait_for_write_slo(
             return {
                 "status": "pass",
                 "target_ms": target_ms,
+                "p99_target_ms": p99_target_ms,
                 "event_sample_count": len(rows),
                 "results": [asdict(result) for result in results],
             }
@@ -362,6 +430,7 @@ def _wait_for_write_slo(
             return {
                 "status": "fail",
                 "target_ms": target_ms,
+                "p99_target_ms": p99_target_ms,
                 "event_sample_count": len(last_rows),
                 "error": "timeout_waiting_for_write_operation_refresh_slo",
                 "results": [asdict(result) for result in last_results],

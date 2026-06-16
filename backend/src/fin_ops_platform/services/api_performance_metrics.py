@@ -106,17 +106,19 @@ class ApiPerformanceRecorder:
         with self._lock:
             self._samples[endpoint].append(sample)
 
-    def summary(self) -> dict[str, object]:
+    def summary(self, *, max_endpoints: int | None = None) -> dict[str, object]:
+        if max_endpoints is not None and max_endpoints <= 0:
+            raise ValueError("max_endpoints must be positive when provided.")
         with self._lock:
             samples_by_endpoint = {
                 endpoint: list(samples)
                 for endpoint, samples in sorted(self._samples.items())
             }
-        endpoints: dict[str, object] = {}
+        endpoint_metrics: dict[str, dict[str, object]] = {}
         total_sample_count = 0
         for endpoint, samples in samples_by_endpoint.items():
             total_sample_count += len(samples)
-            endpoints[endpoint] = {
+            endpoint_metrics[endpoint] = {
                 "sample_count": len(samples),
                 "duration_ms": _percentiles([sample.duration_ms for sample in samples]),
                 "connection_acquire_ms": _percentiles([sample.connection_acquire_duration_ms for sample in samples]),
@@ -125,9 +127,24 @@ class ApiPerformanceRecorder:
                 "database_query_count": _percentiles([float(sample.database_query_count) for sample in samples]),
                 "last_status_code": samples[-1].status_code if samples else None,
             }
+        endpoint_count = len(endpoint_metrics)
+        endpoints: dict[str, object] = dict(endpoint_metrics)
+        if max_endpoints is not None and endpoint_count > max_endpoints:
+            selected = sorted(
+                endpoint_metrics.items(),
+                key=lambda item: (
+                    _percentile_sort_value(item[1].get("duration_ms"), "p95"),
+                    int(item[1].get("sample_count") or 0),
+                    item[0],
+                ),
+                reverse=True,
+            )[:max_endpoints]
+            endpoints = dict(sorted(selected, key=lambda item: item[0]))
         return {
             "window_sample_limit": self._max_samples_per_endpoint,
             "total_sample_count": total_sample_count,
+            "endpoint_count": endpoint_count,
+            "omitted_endpoint_count": max(0, endpoint_count - len(endpoints)),
             "endpoints": endpoints,
         }
 
@@ -152,3 +169,12 @@ def _percentiles(values: list[float]) -> dict[str, float | None]:
 def _nearest_rank(sorted_values: list[float], percentile: float) -> float:
     index = max(0, min(len(sorted_values) - 1, ceil(percentile * len(sorted_values)) - 1))
     return round(sorted_values[index], 3)
+
+
+def _percentile_sort_value(metric: object, key: str) -> float:
+    if not isinstance(metric, dict):
+        return -1.0
+    value = metric.get(key)
+    if value is None:
+        return -1.0
+    return float(value)
