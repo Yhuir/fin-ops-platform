@@ -73,6 +73,15 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 该事件的影响域必须保持低耦合：刷新 `invoice_lifecycle`、`pending_invoice`、workbench、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和 search；不刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。App Health 只根据这些 read model 的 readiness/dirty/outbox/worker 事实判定页面 busy 或 blocked，不能因为规则版本变化把无关页面标红。
 
+### 关联台候选拆分写入
+
+关联台未配对区的“撤回关联”是统一入口，不等同于一定撤销 active relation：
+
+1. route / facade 先通过 `WorkbenchRelationCommandService` 预览 canonical active relation 撤回；只有存在 active relation 时才返回 `withdraw_relation`。
+2. 若没有 active relation，facade 继续判定自动候选拆分。legacy candidate 来自 `WorkbenchCandidateMatchService`；当前 SQL 自动匹配来自 `read_model.workbench_reconciliation_decisions` / `WorkbenchReconciliationDecisionStore`。
+3. 命中自动候选或 automatic decision 时，preview 必须返回 `operation_type=split_candidate`、`preview_id`、`submit_expected_versions` 和候选自身的 affected scope；submit suppress candidate/decision，不写 `app.workbench_pair_relations` history。
+4. candidate/decision split 完成后触发 `candidate_match_changed` 派生数据事件，并只刷新候选所属月份的 workbench/read model scope；`month=all` 页面不能把候选拆分降级成普通 all-scope 全量刷新。
+
 ### 成本统计全期间 read model
 
 成本统计的 `all` scope 是真实物化视图，不是只负责 fan-out 的队列父 scope：

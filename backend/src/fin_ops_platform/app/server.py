@@ -3051,6 +3051,7 @@ class Application:
             relation_command_service_factory=lambda repository=None: self._workbench_relation_command_service(
                 repository=repository,
             ),
+            reconciliation_decision_store=getattr(self, "_workbench_reconciliation_decision_store", None),
         )
 
     def _next_workbench_relation_case_id(self) -> str:

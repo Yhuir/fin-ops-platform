@@ -22,6 +22,7 @@ type MockApiOptions = {
   costErrorMonths?: string[];
   costRefreshingMonths?: string[];
   costExportErrorViews?: string[];
+  costDuplicateTransactionRows?: boolean;
   sessionMode?: "authorized" | "forbidden" | "expired" | "error";
   sessionAccessTier?: "admin" | "full_access" | "read_export_only" | "denied";
   sessionUsername?: string;
@@ -3970,8 +3971,29 @@ function buildAllCostProjectRows() {
   }, {});
 }
 
-function buildCostStatisticsExplorerPayload(month: string, projectScope = "active") {
-  const sourceProjectRowMap = month === "all" ? buildAllCostProjectRows() : (costStatisticsProjectRows[month] ?? {});
+function buildCostStatisticsExplorerPayload(
+  month: string,
+  projectScope = "active",
+  options: { duplicateTransactionRows?: boolean } = {},
+) {
+  const baseProjectRowMap = month === "all" ? buildAllCostProjectRows() : (costStatisticsProjectRows[month] ?? {});
+  const sourceProjectRowMap = Object.fromEntries(
+    Object.entries(baseProjectRowMap).map(([projectName, rows]) => [projectName, [...rows]]),
+  );
+  if (options.duplicateTransactionRows && (month === "all" || month === "2026-03")) {
+    const projectRows = sourceProjectRowMap["云南溯源科技"] ?? [];
+    const duplicateSourceRow = projectRows.find((row) => row.transaction_id === "cost-txn-001");
+    if (duplicateSourceRow) {
+      sourceProjectRowMap["云南溯源科技"] = [
+        ...projectRows,
+        {
+          ...duplicateSourceRow,
+          amount: "1,250.00",
+          expense_content: "PLC 模块采购追加成本",
+        },
+      ];
+    }
+  }
   const projectRowMap = Object.fromEntries(
     Object.entries(sourceProjectRowMap).filter(([projectName]) =>
       isCostProjectVisibleForScope(projectName, projectScope),
@@ -5139,7 +5161,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         return {
           status: 202,
           body: {
-            ...buildCostStatisticsExplorerPayload(month, projectScope),
+            ...buildCostStatisticsExplorerPayload(month, projectScope, {
+              duplicateTransactionRows: options.costDuplicateTransactionRows,
+            }),
             summary: { row_count: 0, transaction_count: 0, total_amount: "0.00" },
             time_rows: [],
             project_rows: [],
@@ -5149,7 +5173,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           },
         };
       }
-      return { body: buildCostStatisticsExplorerPayload(month, projectScope) };
+      return {
+        body: buildCostStatisticsExplorerPayload(month, projectScope, {
+          duplicateTransactionRows: options.costDuplicateTransactionRows,
+        }),
+      };
     },
     "/api/cost-statistics/export-preview": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";

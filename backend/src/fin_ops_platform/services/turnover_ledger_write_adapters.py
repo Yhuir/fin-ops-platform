@@ -1765,6 +1765,7 @@ class TurnoverLedgerWorkbenchPairPort:
             "source": "turnover_ledger",
             "turnover_relation_id": relation_id,
             "turnover_closure_mode": turnover_closure_mode,
+            "turnover_closure_bank_row_ids": list(normalized_row_ids),
         }
         evidence = {
             "source": "turnover_ledger",
@@ -1773,11 +1774,28 @@ class TurnoverLedgerWorkbenchPairPort:
         }
         relation_command_service = self._relation_command_service(transaction)
         if relation_command_service is not None:
+            active_relations = self._active_relations_for_row_ids_from_command(
+                relation_command_service,
+                normalized_row_ids,
+            )
+            merge_relations = [
+                dict(active_relation)
+                for active_relation in active_relations
+                if str(active_relation.get("case_id") or "").strip() != case_id
+            ]
+            self._assert_mergeable_turnover_manual_closure_relations(
+                merge_relations,
+                selected_bank_row_ids=normalized_row_ids,
+            )
+            merged_row_ids, merged_row_types = self._merged_turnover_manual_closure_rows(
+                selected_bank_row_ids=normalized_row_ids,
+                merge_relations=merge_relations,
+            )
             try:
                 result = relation_command_service.confirm_relation(
                     case_id=case_id,
-                    row_ids=list(normalized_row_ids),
-                    row_types=["bank" for _ in normalized_row_ids],
+                    row_ids=merged_row_ids,
+                    row_types=merged_row_types,
                     relation_mode=TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
                     actor_id=actor_id,
                     month_scope=self._month_scope(affected_months),
@@ -1786,6 +1804,8 @@ class TurnoverLedgerWorkbenchPairPort:
                     special_metadata=special_metadata,
                     evidence=evidence,
                     display_tags=["外部往来款手动闭环"],
+                    before_relations=merge_relations if merge_relations else None,
+                    replace_existing=bool(merge_relations),
                     history_operation_type="turnover_manual_closure_confirm",
                 )
             except WorkbenchRelationCommandError as exc:
@@ -1844,7 +1864,7 @@ class TurnoverLedgerWorkbenchPairPort:
             )
         active_relation = self._active_relation_by_case_id_from_facade(case_id, list(bank_row_ids or []))
         if active_relation is not None:
-            if not self._is_bank_only_turnover_manual_closure(active_relation):
+            if not self._is_turnover_manual_closure_withdrawable_from_turnover(active_relation):
                 raise TurnoverLedgerWritePreconditionError(
                     error_code="turnover_closure_withdraw_requires_workbench",
                     message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
@@ -1857,7 +1877,7 @@ class TurnoverLedgerWorkbenchPairPort:
         active_relation = self._active_relation_by_case_id(case_id)
         if active_relation is None:
             return
-        if not self._is_bank_only_turnover_manual_closure(active_relation):
+        if not self._is_turnover_manual_closure_withdrawable_from_turnover(active_relation):
             raise TurnoverLedgerWritePreconditionError(
                 error_code="turnover_closure_withdraw_requires_workbench",
                 message="外部往来闭环已在关联台补齐 OA/发票，请到关联台撤回完整关系。",
@@ -1888,7 +1908,7 @@ class TurnoverLedgerWorkbenchPairPort:
         relation_command_service = self._relation_command_service(transaction)
         if relation_command_service is not None:
             try:
-                result = relation_command_service.cancel_relation(
+                result = relation_command_service.withdraw_relation(
                     case_id=case_id,
                     actor_id=actor_id,
                     reason=note,
@@ -1898,12 +1918,125 @@ class TurnoverLedgerWorkbenchPairPort:
                 if exc.error_code == "workbench_relation_not_found":
                     return {}
                 raise self._command_precondition_error(exc) from exc
-            return dict(result.get("relation") if isinstance(result, dict) and isinstance(result.get("relation"), dict) else result or {})
+            relation_result = dict(
+                result.get("relation")
+                if isinstance(result, dict) and isinstance(result.get("relation"), dict)
+                else result or {}
+            )
+            if isinstance(result, dict) and isinstance(result.get("restored_relations"), list):
+                relation_result["restored_relations"] = [
+                    dict(item)
+                    for item in list(result.get("restored_relations") or [])
+                    if isinstance(item, dict)
+                ]
+            return relation_result
         raise self._command_unavailable_error(
             case_id=case_id,
             row_ids=bank_row_ids,
             action="turnover_manual_closure_withdraw",
         )
+
+    @staticmethod
+    def _active_relations_for_row_ids_from_command(
+        relation_command_service: Any,
+        row_ids: list[str],
+    ) -> list[dict[str, object]]:
+        reader = getattr(relation_command_service, "active_relations_for_row_ids", None)
+        if not callable(reader):
+            return []
+        relations = reader([
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        ])
+        return [
+            dict(relation)
+            for relation in list(relations or [])
+            if isinstance(relation, dict)
+        ]
+
+    @classmethod
+    def _assert_mergeable_turnover_manual_closure_relations(
+        cls,
+        relations: list[dict[str, object]],
+        *,
+        selected_bank_row_ids: list[str],
+    ) -> None:
+        selected = {
+            str(row_id).strip()
+            for row_id in list(selected_bank_row_ids or [])
+            if str(row_id).strip()
+        }
+        for relation in list(relations or []):
+            row_ids = [
+                str(row_id).strip()
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            ]
+            row_types = cls._normalized_relation_row_types(relation)
+            if not row_ids or not row_types or len(row_ids) != len(row_types):
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="关联台关系结构不完整，请到关联台处理后重试。",
+                    payload={"case_id": str(relation.get("case_id") or "")},
+                )
+            relation_bank_rows = {
+                row_id
+                for row_id, row_type in zip(row_ids, row_types, strict=False)
+                if row_type == "bank"
+            }
+            if not selected.intersection(relation_bank_rows):
+                continue
+            relation_mode = str(relation.get("relation_mode") or "").strip()
+            if relation_mode == TURNOVER_MANUAL_CLOSURE_RELATION_MODE:
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="所选流水已存在外部往来闭环，请先撤回原闭环后再重新确认。",
+                    payload={"case_id": str(relation.get("case_id") or "")},
+                )
+            if set(row_types).issubset({"oa", "bank"}) and "oa" in row_types:
+                continue
+            raise TurnoverLedgerWritePreconditionError(
+                error_code="turnover_closure_requires_workbench",
+                message="所选流水已在关联台补齐发票或属于其他业务关系，请到关联台处理完整关系。",
+                payload={
+                    "case_id": str(relation.get("case_id") or ""),
+                    "row_types": list(row_types),
+                },
+            )
+
+    @classmethod
+    def _merged_turnover_manual_closure_rows(
+        cls,
+        *,
+        selected_bank_row_ids: list[str],
+        merge_relations: list[dict[str, object]],
+    ) -> tuple[list[str], list[str]]:
+        merged_row_ids: list[str] = []
+        merged_row_types: list[str] = []
+
+        def append(row_id: str, row_type: str) -> None:
+            normalized_row_id = str(row_id or "").strip()
+            normalized_row_type = str(row_type or "").strip()
+            if not normalized_row_id or not normalized_row_type:
+                return
+            if normalized_row_id in merged_row_ids:
+                return
+            merged_row_ids.append(normalized_row_id)
+            merged_row_types.append(normalized_row_type)
+
+        for relation in list(merge_relations or []):
+            row_ids = [
+                str(row_id).strip()
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            ]
+            row_types = cls._normalized_relation_row_types(relation)
+            for row_id, row_type in zip(row_ids, row_types, strict=False):
+                append(row_id, row_type)
+        for row_id in list(selected_bank_row_ids or []):
+            append(str(row_id), "bank")
+        return merged_row_ids, merged_row_types
 
     def _relation_command_service(self, transaction: Any) -> Any | None:
         if self._relation_command_service_factory is None:
@@ -2016,15 +2149,19 @@ class TurnoverLedgerWorkbenchPairPort:
         return None
 
     @staticmethod
-    def _is_bank_only_turnover_manual_closure(relation: dict[str, object]) -> bool:
+    def _is_turnover_manual_closure_withdrawable_from_turnover(relation: dict[str, object]) -> bool:
         if str(relation.get("relation_mode") or "").strip() != TURNOVER_MANUAL_CLOSURE_RELATION_MODE:
             return False
-        row_types = [
+        row_types = TurnoverLedgerWorkbenchPairPort._normalized_relation_row_types(relation)
+        return bool(row_types) and set(row_types).issubset({"oa", "bank"})
+
+    @staticmethod
+    def _normalized_relation_row_types(relation: dict[str, object]) -> list[str]:
+        return [
             str(row_type).strip()
             for row_type in list(relation.get("row_types") or [])
             if str(row_type).strip()
         ]
-        return bool(row_types) and all(row_type == "bank" for row_type in row_types)
 
     @staticmethod
     def _month_scope(affected_months: list[str]) -> str:

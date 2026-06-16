@@ -12,6 +12,7 @@ import type {
   BankAutoTagRulesResponse,
   BankAutoTagSystemRule,
   SaveBankAutoTagRule,
+  SaveBankAutoTagRulesRequest,
 } from "./types";
 
 type AutoTagRulesDrawerProps = {
@@ -20,6 +21,8 @@ type AutoTagRulesDrawerProps = {
   onSaved?: (payload: BankAutoTagRulesResponse) => void;
   refreshStatus?: "idle" | "refreshing" | "fresh";
   refreshScope?: BankAutoTagRefreshScope;
+  saveAutoTagRules?: (payload: SaveBankAutoTagRulesRequest) => Promise<BankAutoTagRulesResponse>;
+  reapplyAutoTagRules?: () => Promise<BankAutoTagRulesResponse>;
 };
 
 type DraftRule = Omit<BankAutoTagEditableRule, "priority"> & { localId: string; priority: number | "" };
@@ -271,7 +274,15 @@ function groupRules(rules: DraftRule[]): RuleGroup[] {
   return groups;
 }
 
-export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStatus = "idle", refreshScope }: AutoTagRulesDrawerProps) {
+export default function AutoTagRulesDrawer({
+  open,
+  onClose,
+  onSaved,
+  refreshStatus = "idle",
+  refreshScope,
+  saveAutoTagRules = saveBankAutoTagRules,
+  reapplyAutoTagRules = reapplyBankAutoTagRules,
+}: AutoTagRulesDrawerProps) {
   const [tab, setTab] = useState<"active" | "archived">("active");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -429,7 +440,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
     setSaving(true);
     setError(null);
     setLastRefreshAction("save");
-    saveBankAutoTagRules({
+    saveAutoTagRules({
       expectedVersion: version,
       refreshScope,
       activeRules: activeRules.map(serializeRule),
@@ -464,7 +475,7 @@ export default function AutoTagRulesDrawer({ open, onClose, onSaved, refreshStat
     setReapplying(true);
     setError(null);
     setLastRefreshAction("reapply");
-    reapplyBankAutoTagRules()
+    reapplyAutoTagRules()
       .then((payload) => {
         const nextActive = payload.activeRules.map(cloneRule);
         const nextArchived = payload.archivedRules.map(cloneRule);

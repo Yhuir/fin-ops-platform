@@ -4,7 +4,7 @@
 
 - `tests/test_workbench_pair_relation_service.py`：领域规则、row 去重、row type 对齐、active overlap、cancel、withdraw 可恢复关系策略、ETC 删除不恢复旧二栏 relation。
 - `tests/test_workbench_relation_command_service.py`：command service confirm/cancel/withdraw 基座、withdraw preview lock、row-id batch cancel、metadata update、freshness precondition、idempotency、mode registry 和 active row conflict。
-- `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service、withdraw route 复用 request-local OA session actor/tenant，以及纯候选 `split_candidate` suppress 边界。
+- `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service、withdraw route 复用 request-local OA session actor/tenant，以及 legacy candidate / reconciliation decision 纯候选 `split_candidate` suppress 边界。
 - `tests/test_workbench_write_characterization.py`：confirm/withdraw UoW、idempotency、rollback、stale precondition、目标月 Workbench refresh，以及已知 affected month 时 `all` 只能走 aggregate-only 收敛，不能触发 full all shard fan-out。
 - `tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`：confirm preview 基于 canonical active relation 判定已配对 row-set，返回 withdraw preview，而不是继续允许 confirm。
 - `tests/test_write_operation_slo_audit.py`：Workbench confirm/withdraw canonical UoW 后的 write operation SLO profile，覆盖 `workbench_relation`、下游 read model reason、bank+invoice 非成本 profile、以及 `--since` 过滤生产修复前旧样本。
@@ -53,6 +53,7 @@
 
 - workbench confirm/cancel。
 - workbench withdraw 必须和 confirm/cancel 一样解析 request-local OA session actor/tenant，并把 actor/tenant 传入 UoW replay/run command 与 relation command service；不得落到 fallback actor。
+- workbench withdraw 统一按钮不能把 automatic decision 当作 active relation 撤回；无 active relation 且命中 legacy candidate 或 reconciliation decision 时，preview/submit 必须锁定为 `split_candidate` 并 suppress 候选事实源。
 - workbench confirm/withdraw 写入后必须刷新 affected month scopes；affected month 已知时，Workbench `all` 页面只能通过 aggregate-only refresh 从 active month shards 收敛，不能用普通 `all` refresh 触发全量 shard fan-out 阻塞目标写链路。只有完全无法推导 affected month 时才允许普通 `all` fallback。
 - pending invoice attach/create 已覆盖 application service command delegation、canonical write safety 和 API 旧 shape 回归；读侧 non-fresh response shape 仍由 read model/facade 测试保护。
 - no-OA submit/withdraw 已覆盖 success、rollback、version conflict 和 relation freshness 诊断；legacy migration/repair/consolidation 已覆盖 command delegation、active row occupation、single-source case reuse 和 read model worker 不隐式 repair。

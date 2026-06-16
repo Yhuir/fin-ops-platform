@@ -18,6 +18,12 @@ from fin_ops_platform.services.workbench_row_identity import row_type_for_workbe
 ACTIVE_PAIR_RELATION_STATUS = "active"
 CANCELLED_PAIR_RELATION_STATUS = "cancelled"
 DISPLAY_ONLY_PAIR_RELATION_MODES = set(DISPLAY_ONLY_WORKBENCH_RELATION_MODES)
+WITHDRAW_RESTORABLE_CONFIRM_OPERATION_TYPES = frozenset(
+    {
+        "confirm_link",
+        "turnover_manual_closure_confirm",
+    }
+)
 
 
 class WorkbenchPairRelationService:
@@ -736,7 +742,7 @@ class WorkbenchPairRelationService:
         case_id = str(relation.get("case_id", "")).strip()
         row_ids = {str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()}
         for history in reversed(self._pair_relation_history):
-            if str(history.get("operation_type")) != "confirm_link":
+            if str(history.get("operation_type")) not in WITHDRAW_RESTORABLE_CONFIRM_OPERATION_TYPES:
                 continue
             for after_relation in list(history.get("after_relations") or []):
                 if not isinstance(after_relation, dict):

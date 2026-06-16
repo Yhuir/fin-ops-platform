@@ -6,6 +6,7 @@ import { afterEach, vi } from "vitest";
 
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import type { SessionPayload } from "../features/session/api";
 import BankDetailsPage from "../pages/BankDetailsPage";
 import { installMockApiFetch } from "./apiMock";
@@ -39,9 +40,11 @@ const staticSession: SessionContextValue = {
 function renderBankDetailsPage() {
   return render(
     <SessionContext.Provider value={staticSession}>
-      <PageSessionStateProvider>
-        <BankDetailsPage />
-      </PageSessionStateProvider>
+      <GlobalOperationOverlayProvider>
+        <PageSessionStateProvider>
+          <BankDetailsPage />
+        </PageSessionStateProvider>
+      </GlobalOperationOverlayProvider>
     </SessionContext.Provider>,
   );
 }
@@ -50,6 +53,15 @@ function requestUrls(fetchMock: ReturnType<typeof installMockApiFetch>, pathname
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
     .filter((url) => url.pathname === pathname);
+}
+
+function operationBarrierRequests(fetchMock: ReturnType<typeof installMockApiFetch>) {
+  return fetchMock.mock.calls
+    .filter(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST";
+    })
+    .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
 }
 
 function findTransactionRequest(
@@ -517,9 +529,28 @@ describe("Bank details page", () => {
 
   test("saving automatic tag rules refreshes bank details", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({
+    const baseFetchMock = installMockApiFetch({
       bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing", "fresh"],
     });
+    let releaseBarrier: (() => void) | null = null;
+    const barrierGate = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST") {
+        await barrierGate;
+        return new Response(JSON.stringify({
+          status: "fresh",
+          fresh: true,
+          targets: [],
+          blocked_targets: [],
+          refreshing_targets: [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return baseFetchMock(input, init);
+    }) as ReturnType<typeof installMockApiFetch>;
+    vi.stubGlobal("fetch", fetchMock);
     const autoTagRulesListener = vi.fn();
     window.addEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     renderBankDetailsPage();
@@ -531,12 +562,19 @@ describe("Bank details page", () => {
 
       await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
       const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
-      await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "人员薪酬");
+      await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "规则刷新测试");
       await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
       await waitFor(() => {
-        expect(screen.getAllByText("规则已保存，银行明细正在刷新。").length).toBeGreaterThan(0);
+        expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
+          targets: [
+            { read_model_key: "bank_detail", scope_key: "2026-05" },
+          ],
+        });
       });
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBe(initialTransactionRequests);
+      releaseBarrier?.();
+
       await waitFor(() => {
         expect(autoTagRulesListener).toHaveBeenCalled();
         expect(autoTagRulesListener.mock.calls[0][0].detail).toEqual(expect.objectContaining({
@@ -562,6 +600,7 @@ describe("Bank details page", () => {
         date_to: "2026-12-31",
       });
     } finally {
+      releaseBarrier?.();
       window.removeEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     }
   });
@@ -590,6 +629,9 @@ describe("Bank details page", () => {
     await waitFor(() => {
       expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests);
     });
+    await waitFor(() => {
+      expect(screen.getAllByText("重新应用已完成，银行明细已刷新。").length).toBeGreaterThan(0);
+    });
     const reapplyCall = fetchMock.mock.calls.find(([input, init]) => (
       new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules/reapply"
       && String(init?.method || "GET").toUpperCase() === "POST"
@@ -606,7 +648,7 @@ describe("Bank details page", () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       bankDetailAccountReadModelStatuses: ["fresh"],
-      bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing"],
+      bankDetailTransactionReadModelStatuses: ["refreshing", "fresh"],
       bankDetailRefreshingTransactionsEmpty: true,
     });
     renderBankDetailsPage();
@@ -625,7 +667,9 @@ describe("Bank details page", () => {
     });
 
     expect(screen.queryByText("银行明细读模型正在刷新，已显示当前可用数据。")).not.toBeInTheDocument();
-    expect(screen.queryByText("规则已保存，银行明细已刷新。")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
+    });
     expect(within(page).getByText("云南溯源科技有限公司")).toBeInTheDocument();
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
   });
@@ -664,7 +708,7 @@ describe("Bank details page", () => {
     const fetchMock = installMockApiFetch({
       bankDetailAccountReadModelStatuses: ["stale"],
       bankDetailPostSaveAccountsTotalBalance: "116395.83",
-      bankDetailTransactionReadModelStatuses: ["stale"],
+      bankDetailTransactionReadModelStatuses: ["stale", "fresh"],
     });
     renderBankDetailsPage();
 
@@ -681,6 +725,9 @@ describe("Bank details page", () => {
         new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
         && String(init?.method || "GET").toUpperCase() === "PUT"
       ))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
     });
     expect(screen.queryByText("银行明细读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
@@ -765,6 +812,9 @@ describe("Bank details page", () => {
         "/api/bank-details/auto-tag-rules",
         expect.objectContaining({ method: "PUT" }),
       );
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
     });
     await user.click(within(drawer).getByRole("button", { name: "关闭自动标签规则抽屉" }));
 

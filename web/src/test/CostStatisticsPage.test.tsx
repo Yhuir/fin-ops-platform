@@ -227,6 +227,37 @@ describe("Cost statistics page", () => {
     expect(screen.queryByRole("dialog", { name: "流水详情" })).not.toBeInTheDocument();
   });
 
+  test("project view keeps split cost rows with the same transaction id renderable", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    installMockApiFetch({ costDuplicateTransactionRows: true });
+
+    try {
+      renderCostStatisticsPage();
+
+      expect(await findCostStatisticsHeading()).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "按项目" }));
+
+      const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
+      expect(projectLane).not.toBeNull();
+      await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
+
+      const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
+      expect(expenseLane).not.toBeNull();
+      await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
+
+      const transactionTable = screen.getByRole("grid", { name: "项目对应流水表" });
+      expect(within(transactionTable).getAllByRole("button", { name: "查看流水 cost-txn-001" })).toHaveLength(2);
+      expect(within(transactionTable).getByText("PLC 模块采购追加成本")).toBeInTheDocument();
+      expect(
+        consoleError.mock.calls.some((call) => call.join(" ").includes("Encountered two children with the same key")),
+      ).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   test("project view supports all time, year, month, and custom date range scopes", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();

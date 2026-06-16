@@ -34,7 +34,7 @@
 | App Status scope-level semantics | P0 | `tests/test_app_status_overview_service.py`、`tests/test_runtime_monitoring.py` | covered | 父 scope failed blocks；月份 shard failed/unavailable busy；scope details preserved。 |
 | 首屏 SLO 探针与有界聚合 | P2 | `tests/test_http_slo_probe.py`、`tests/test_cost_statistics_sql_runtime.py` | covered | 成本统计没有 rows 分页首屏；认证态 SLO 覆盖 page shell、explorer 和 summary，父 scope 从已物化月份 shard 聚合，不读 Workbench 全量 payload。 |
 | warmup job recovery/retry | P1 | `tests/test_cost_statistics_api.py`、`tests/test_import_job_queue.py` | covered | warmup summary、partial retry、interrupted recovery、duplicate running job guard。 |
-| 前端页面交互 | P1 | `web/src/test/CostStatisticsPage.test.tsx` | covered | time/project/bank/expense view、drilldown、range picker、empty/error/refreshing、export center、后端导出失败消息展示。 |
+| 前端页面交互 | P1 | `web/src/test/CostStatisticsPage.test.tsx` | covered | time/project/bank/expense view、drilldown、range picker、empty/error/refreshing、export center、后端导出失败消息展示、同一流水拆成多条成本行时项目费用类型下钻不丢行/不触发表格重复 key。 |
 | 前端 API mapper/cache | P1 | `web/src/test/CostStatisticsApi.test.ts` | covered | project scope 透传、read model status mapping、explorer cache keyed by month/scope、export 下载错误 JSON message 透出。 |
 | 真实生产 scope cleanup `--apply` | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres 环境，只能按 runbook 只读检查后受控执行。 |
 
@@ -54,6 +54,7 @@
 
 | 日期 | Bug / 风险 | 回归测试 | 状态 |
 | --- | --- | --- | --- |
+| 2026-06-17 | 成本统计项目视图选中项目后再选择费用类型，若同一 `transaction_id` 对应多条成本行，前端用裸流水 id 作为 HeroUI Table 行 id/key，导致行身份冲突、丢行，真实浏览器可表现为卡死后白屏。 | `web/src/test/CostStatisticsPage.test.tsx::project view keeps split cost rows with the same transaction id renderable` | covered |
 | 2026-06-10 | 裸月份/裸 `all` scope 进入 durable queue，导致成本统计 worker 报 scope contract 错误并污染 App Status。 | `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` | covered |
 | 2026-06-16 | 外部往来 Postgres 事务写路径绕过 scope policy，再次向成本统计投递裸 `2026-02`、`2026-03`、`all` 并造成生产 dead-letter。 | `tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests::test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction`、`tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests::test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear` | covered locally; production cleanup apply pending |
 | 2026-06-16 | 把成本统计误当普通分页列表处理，遗漏 explorer/summary 认证态 SLO 或让父 scope 回退读取 Workbench 全量 payload。 | `tests/test_http_slo_probe.py::HttpSloProbeTests::test_default_probes_cover_page_domains_and_known_slow_endpoints`、`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows` | covered |

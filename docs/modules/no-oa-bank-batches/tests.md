@@ -86,7 +86,7 @@
 | worker stale source version / relation repair 边界 | `test_stale_source_version_does_not_rebuild_or_overwrite_read_model`、`test_refresh_does_not_repair_workbench_relations_from_read_model_path` |
 | worker 月度刷新和 Bankdetail 依赖 | `test_month_scope_refresh_reads_only_month_and_preserves_other_month_batches`、`test_refresh_reads_effective_categories_once_for_same_rows`、`tests/test_read_model_readiness_reporter.py::ReadModelReadinessReporterTests::test_dependency_not_fresh_exception_records_refreshing_not_failed` |
 | 前端 stale polling | `shows read model stale state and reloads until the no OA read model is fresh`、`cleans up stale read model retry reload after route unmount` |
-| 前端 operation-to-fresh closure | `submit-selection`、单批次 submit、withdraw、tag-selection 保存后保持全屏 overlay，等待 `no_oa_bank_batch` barrier fresh，再 reload |
+| 前端 operation-to-fresh closure | `submit-selection`、单批次 submit、withdraw、tag-selection 保存后保持全屏 overlay；tag-selection 等待 `no_oa_bank_batch:all` barrier fresh，其它写操作按 affected month 等待 fresh，再 reload |
 | 前端分类/规则事件刷新 | `refreshes tag selection, list, and detail cache after bank transaction category updates`、`refreshes tag selection, list, and detail cache after bank auto tag rules update` |
 
 ## 历史 bug 回归库
@@ -110,6 +110,7 @@
 | 标签规则变更后 no-OA 标签选择或候选未刷新 | `tests/test_bank_auto_tag_rules_api.py`、前端 category/rules event tests |
 | route unmount 后 stale polling 继续 replay | `web/src/test/NoOaBankBatchPage.test.tsx` route unmount cleanup test |
 | 写操作成功但 no-OA read model 仍 refreshing 时页面提前可操作，导致用户看到旧批次或重复提交 | `web/src/test/NoOaBankBatchPage.test.tsx` operation overlay 回归、`web/src/test/OperationBarrierApi.test.ts` |
+| 2026-06-17 标签准入保存等待当前月份 scope 而不是后端实际 dirty 的 `all` scope，overlay 提前释放后列表仍需手动刷新 | `web/src/test/NoOaBankBatchPage.test.tsx::saves tag selection through the global overlay and reloads after the barrier is fresh` |
 
 新增线上或手工发现 bug 时，必须先在本节补复现测试名称，再修实现。
 
@@ -123,7 +124,7 @@
 4. submitted batch 撤回 -> pair relation cancel -> 流水回到未配对/open。
 5. SQL read model stale/missing -> API 返回当前/空 payload + refresh enqueued，不同步 rebuild，不伪装 fresh。
 6. 前端首屏默认请求 `page=1&page_size=200` -> list 返回有界 `batches`、保留 summary total；点击下一页重新读取下一批并清空旧选择/详情；`page_size>200` 返回 `invalid_paging`。
-7. submit/withdraw/tag-selection -> 全屏 overlay -> `no_oa_bank_batch` operation barrier fresh -> reload list/detail/tag selection -> overlay 释放。
+7. submit/withdraw/tag-selection -> 全屏 overlay -> `no_oa_bank_batch` operation barrier fresh（tag-selection 使用 `all` scope）-> reload list/detail/tag selection -> overlay 释放。
 
 真实环境 smoke 仍需在发布前执行：
 

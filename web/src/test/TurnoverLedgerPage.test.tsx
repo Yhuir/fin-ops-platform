@@ -1560,6 +1560,54 @@ describe("Turnover ledger page", () => {
     window.removeEventListener("workbenchRelationUpdated", workbenchListener);
   });
 
+  test("allows manual closure confirmation when selected rows are only linked to OA", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch({
+      groupedPayloads: [
+        groupedPayloadWithWorkbenchRelation("all", "bank-company-expense-1000", {
+          workbench_relation_status: "linked",
+          workbench_relation_case_ids: ["case-oa-company-1"],
+          workbench_relation_mode: "manual_confirmed",
+          workbench_relation_source: "manual",
+          workbench_relation_row_ids: ["oa-company-1", "bank-company-expense-1000"],
+        }),
+      ],
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+
+    const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-company-1-/);
+    expect(within(flowRows[0]).getByText("已关联 OA")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByText("未闭环")).toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "撤回闭环" })).not.toBeInTheDocument();
+
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+
+    const openButton = within(page).getByRole("button", { name: "确认闭环" });
+    expect(openButton).toBeEnabled();
+    expect(within(page).queryByRole("button", { name: "撤回闭环" })).not.toBeInTheDocument();
+    await user.click(openButton);
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+      });
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+        bank_row_ids: ["bank-company-expense-1000", "bank-company-income-1000"],
+      });
+    });
+  });
+
   test("opens the extra drawer from a flow row, hides technical relation ids, saves, and keeps relation actions in the drawer", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
@@ -1709,11 +1757,15 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
-    expect(within(groupCell).getByText("部分已关联 1/3")).toBeInTheDocument();
+    expect(within(groupCell).getByText("部分已闭环 1/3")).toBeInTheDocument();
+    expect(within(groupCell).queryByText("部分已关联 1/3")).not.toBeInTheDocument();
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
 
     const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
-    expect(within(flowRows[0]).getByText("关联台手工闭环")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByText("已闭环")).toBeInTheDocument();
+    expect(within(flowRows[1]).getByText("未闭环")).toBeInTheDocument();
+    expect(within(flowRows[2]).getByText("未闭环")).toBeInTheDocument();
+    expect(within(flowRows[0]).queryByText("关联台手工闭环")).not.toBeInTheDocument();
   });
 
   test("reloads on category updates and downloads a previewed export for the current tab", async () => {

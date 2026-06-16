@@ -4537,6 +4537,67 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(stored_decision["decision_status"], DECISION_STATUS_CONSUMED)
         self.assertEqual(stored_decision["consumed_by_relation_id"], "CASE-PAIR-ONLY-001")
 
+    def test_withdraw_link_preview_splits_reconciliation_decision_without_active_relation(self) -> None:
+        app = build_application()
+        payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-03").body)
+
+        bank_row = flatten_groups(payload["open"]["groups"], "bank")[0]
+        invoice_row = flatten_groups(payload["open"]["groups"], "invoice")[0]
+        decision_store = WorkbenchReconciliationDecisionStore()
+        decision_store.upsert_decisions(
+            [
+                workbench_reconciliation_decision(
+                    "decision-withdraw-split",
+                    scope_month="2026-03",
+                    row_ids=(bank_row["id"], invoice_row["id"]),
+                )
+            ]
+        )
+        app._workbench_reconciliation_decision_store = decision_store
+        app._workbench_candidate_match_service = WorkbenchCandidateMatchService()
+
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link/preview",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [bank_row["id"], invoice_row["id"]],
+                }
+            ),
+        )
+
+        self.assertEqual(preview_response.status_code, 200, preview_response.body)
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_payload["operation_type"], "split_candidate")
+        self.assertEqual(preview_payload["candidate_keys"], ["decision-withdraw-split"])
+        self.assertEqual(preview_payload["affected_row_ids"], [bank_row["id"], invoice_row["id"]])
+        self.assertEqual(preview_payload["affected_scope_keys"], ["2026-03"])
+        self.assertIn("decision:decision-withdraw-split", preview_payload["submit_expected_versions"])
+
+        submit_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/withdraw-link",
+            json.dumps(
+                {
+                    "month": "2026-03",
+                    "row_ids": [bank_row["id"], invoice_row["id"]],
+                    "operation_type": "split_candidate",
+                    "preview_id": preview_payload["preview_id"],
+                    "expected_versions": preview_payload["submit_expected_versions"],
+                    "idempotency_key": "api-split-decision-1",
+                }
+            ),
+        )
+
+        self.assertEqual(submit_response.status_code, 200, submit_response.body)
+        submit_payload = json.loads(submit_response.body)
+        self.assertEqual(submit_payload["operation"], "split_candidate")
+        self.assertEqual(submit_payload["affected_months"], ["2026-03"])
+        stored_decision = decision_store.list_decisions("2026-03")[0]
+        self.assertEqual(stored_decision["decision_status"], "suppressed")
+        self.assertEqual(stored_decision["suppressed_by_exception_case_id"], "workbench_split_candidate")
+
     def test_confirm_link_returns_503_and_rolls_back_when_pair_relation_persist_fails(self) -> None:
         app = build_application()
         app._state_store = _FailingPairRelationStateStore()

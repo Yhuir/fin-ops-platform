@@ -21,7 +21,7 @@
 | `pending_invoice_attach_existing` | 待找发票 | 是 | 选择已有发票并挂接银行流水。 |
 | `pending_invoice_manual_invoice` | 待找发票 | 是 | 人工补票确认后建立关系。 |
 | `no_oa_bank_batch` | 免 OA 批次 | 是 | 免 OA 批次提交和 internal transfer confirm-link 统一使用。 |
-| `turnover_manual_closure` | 外部往来 | 是 | 手工零差额闭环对应的 bank-only relation。 |
+| `turnover_manual_closure` | 外部往来 | 是 | 手工零差额闭环对应的 relation。通常只含 bank rows；当所选银行流水已处于 OA-bank relation 时，可由外部往来确认闭环合并为包含 `oa` + `bank` rows 的同一 active case。不得包含 invoice；包含发票或其他业务 row type 的完整关系必须在关联台处理。 |
 | `batch_accounting` | 批量账务 | 是 | 日常报销 OA 与银行流水批量账务关系。 |
 | `etc_business_batch` | ETC | 是 | ETC summary 或业务批次关系。 |
 | `etc_historical_repair` | ETC repair | 是 | 历史 ETC 修复工具创建或修复的关系。 |
@@ -69,9 +69,9 @@ stateDiagram-v2
 - 同一个 `case_id` 已 active 且 row set 不同，必须 fail fast。
 - 同一个 row 已属于其他 active case，必须 fail fast。
 - 同一 request/idempotency key 重放，只能返回原 relation 或原业务错误。
-- `cancelled`、`withdrawn`、`superseded` 不自动恢复先前 relation。ETC 删除场景已明确不能恢复旧 OA+银行二栏 relation。
+- `cancelled`、`withdrawn`、`superseded` 默认不恢复先前 relation。只有 `withdraw_relation` 按最新确认历史中的 `before_relations` 恢复显式标记为 `restorable_on_withdraw` 的关系；普通 cancel/delete repair 不能恢复。ETC 删除场景已明确不能恢复旧 OA+银行二栏 relation。
 - owner withdraw 不能绕过 owner 状态。例如 no-OA submitted batch 必须从 no-OA API 撤回，不能从关联台普通取消绕过业务 batch。
-- turnover bank-only relation 如果已升级为完整三栏关系，turnover withdraw 必须返回冲突并要求到关联台处理完整关系。
+- turnover relation 如果仅包含 `oa` + `bank` rows，外部往来页可撤回 `turnover_manual_closure` 并恢复闭环确认前的 OA-bank relation；如果已升级为包含发票或其他业务 row type 的完整关系，turnover withdraw 必须返回冲突并要求到关联台处理完整关系。
 
 ## Freshness 与写安全
 
@@ -106,3 +106,10 @@ stateDiagram-v2
 - occurred_at。
 
 history 是生产审计事实，不得在 repository 抽离时丢失。
+
+## 外部往来闭环恢复规则
+
+- `turnover_manual_closure_confirm` 与普通 `confirm_link` 一样，是可被 `withdraw_relation` 查询的确认历史类型。
+- 外部往来确认闭环合并既有 OA-bank relation 时，必须把被替换的 active relation 写入 `before_relations` 并标记 `restorable_on_withdraw`。
+- 外部往来撤回闭环只能撤回 `turnover_manual_closure` active case；撤回后应恢复被替换的 OA-bank relation，未参与既有 OA 关系的新增银行流水不应留在任何 active relation 中。
+- 外部往来页不得撤回包含 `invoice` 或其他业务 row type 的 relation；这类完整关系必须由关联台按完整 case 处理。

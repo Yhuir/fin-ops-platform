@@ -444,6 +444,9 @@ class WorkbenchRelationCommandService:
             month_scope=month_scope,
         )
 
+    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        return self._pair_service().active_relations_for_row_ids(list(row_ids or []))
+
     def preview_withdraw_relation(
         self,
         *,

@@ -47,9 +47,9 @@
 - 候选来源：银行明细有效分类和外部往来标签规则；`deterministic` 只表示零差额候选，不表示已闭环。
 - 台账读取：优先走 `turnover_ledger` SQL read model；`TurnoverLedgerSqlProjectionBuilder` 在 projection 阶段通过 `WorkbenchRelationReadFacade` 读取 fresh 的 Workbench relation distribution，并把 `workbench_relation_status/case_ids/mode/source/row_ids` 投影到 grouped payload。若 Workbench relation read model 不 fresh，projection 必须 fail fast，不保存半成品 turnover read model；`TurnoverLedgerQueryService` 通过 `ReadModelQueryGateway` 处理 fresh/stale/missing/refreshing。
 - 写入入口：tag-selection、bank-row-tags batch、relation extra、confirm、withdraw 通过 `TurnoverLedgerWriteFacade` / UoW 或 legacy fallback 边界；涉及 Workbench relation 的 manual closure/withdraw 必须统一委托 `WorkbenchRelationCommandService`，缺 command service 时 fail fast，不回退 direct pair relation mutation。
-- 手动闭环：用户在页面选择同一往来组多条真实银行流水，至少一收一支且收支合计差额为 `0.00`，后端写 Turnover manual relation，并通过 `WorkbenchRelationCommandService` 写 Workbench active pair relation；bank-only 外部往来闭环在关联台保持 open，只有补齐 OA + 银行 + 发票三栏后才进入 paired。
-- 撤回：只允许撤回 manual/source 合法的外部往来关系；system/generated relation 必须拒绝。Workbench relation 撤回通过 command service cancel，撤回前用 `WorkbenchRelationReadFacade` 检查仍是 bank-only `turnover_manual_closure`。
-- 前端撤回入口：表格 checkbox 选中已由 `turnover_manual_closure` 占用的 flow row 时，普通“确认闭环”必须禁用；只有所选 flow rows 全部属于同一个 `turnover_manual_closure` relation 时，toolbar 才允许“撤回闭环”。混选已关联和未关联行不得进入普通闭环提交。
+- 手动闭环：用户在页面选择同一往来组多条真实银行流水，至少一收一支且收支合计差额为 `0.00`，后端写 Turnover manual relation，并通过 `WorkbenchRelationCommandService` 写 Workbench active pair relation。若所选银行流水已处在仅含 `oa` + `bank` 的 active relation 中，闭环确认必须把这些既有关联一起合并进同一个 `turnover_manual_closure` active case；例如流水 1 + OA1、流水 2 + OA2、流水 3 共同确认后，同一个 active case 应包含流水 1/2/3 和 OA1/OA2。若既有 relation 包含发票或其他 row type，外部往来页不得替换，必须转关联台处理完整关系。
+- 撤回：只允许撤回 manual/source 合法的外部往来关系；system/generated relation 必须拒绝。Workbench relation 撤回通过 command service `withdraw_relation`，只撤回 `turnover_manual_closure` active case，并恢复确认闭环前标记为可恢复的 OA-bank 关系；不得删除或取消原 OA 关系。若 Workbench active relation 已补齐发票或属于其他业务关系，外部往来页必须拒绝并要求到关联台处理完整关系。
+- 前端撤回入口：表格 checkbox 选中已由 `turnover_manual_closure` 占用的 flow row 时，普通“确认闭环”必须禁用；只有所选 flow rows 全部属于同一个 `turnover_manual_closure` relation 时，toolbar 才允许“撤回闭环”。仅已关联 OA/业务单据但未处于 `turnover_manual_closure` 的 flow row 不得禁用“确认闭环”，也不得显示“撤回闭环”。
 - 下游影响：外部往来关系变更影响 `turnover_ledger`、`workbench`、`workbench_relation`、成本统计、搜索和前端跨页刷新提示。
 - 操作闭环：前端 tag-selection、extra 保存、manual closure confirm/withdraw 必须接入 `GlobalOperationOverlayProvider`。manual closure 发起和提交不能依赖 stale grouped payload；提交前必须先等待 `turnover_ledger:all` fresh、重新加载 grouped payload，并按原始 bank row ids 在同一 group 内重绑定最新 flow rows，用最新 `categoryVersion` 生成 `expected_versions`。manual closure confirm 的写 API 返回 `freshness_targets`，前端必须等待 `turnover_ledger:all`、受影响月份的 `workbench_relation`、受影响月份的 `workbench` 以及 `workbench:all` fresh 后再重新加载 grouped payload 并发送跨页刷新事件；overlay 关闭不能依赖本地行修改、前端事件或旧 read model。
 - App Status：`turnover_ledger` domain 绑定 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type。
@@ -57,7 +57,7 @@
 不属于本模块事实源：
 
 - 银行明细分类规则的长期业务口径归 `bank-details` 和产品规格维护。
-- Workbench 已配对区事实由 Workbench pair relation/read model 维护，不能由 Turnover query 层临时拼接或直接读取 pair service snapshot；Turnover 页面只能消费 projection 已写入的 Workbench relation 状态字段。
+- Workbench 已配对区事实由 Workbench pair relation/read model 维护，不能由 Turnover query 层临时拼接或直接读取 pair service snapshot；Turnover 页面只能消费 projection 已写入的 Workbench relation 状态字段。外部往来页的“已关联 OA/业务单据”chip 仅展示业务单据关联，不参与确认闭环/撤回闭环的可操作性判断；“已闭环/未闭环”chip 才表示多笔流水之间的外部往来闭环状态。
 - 前端 domain event 只作为同浏览器刷新提示，不是跨页面一致性的事实源。
 
 ## 维护触发器

@@ -12,7 +12,7 @@ import {
 } from "../features/domainEvents";
 import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { operationBarrierTargets, operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   fetchNoOaBankBatchDetail,
   fetchNoOaBankBatchTagSelection,
@@ -915,7 +915,7 @@ export default function NoOaBankBatchPage() {
           setDetails({});
           setDetailErrors({});
           setMessage("正在等待免OA批次读模型同步...");
-          await waitForOperationFreshness(operationBarrierTargetsFromMonths("no_oa_bank_batch", [], month));
+          await waitForOperationFreshness(operationBarrierTargets("no_oa_bank_batch", ["all"]));
           setMessage("正在刷新免OA流水批次...");
           await reloadBatchesAfterMutation();
           return saved;

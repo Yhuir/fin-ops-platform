@@ -11,6 +11,7 @@ import {
   FinanceTableRow,
 } from "../components/common/FinanceTable";
 import StatePanel from "../components/common/StatePanel";
+import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
@@ -23,13 +24,16 @@ import {
   fetchBankAutoTagRules,
   fetchBankDetailAccounts,
   fetchBankDetailTransactions,
+  reapplyBankAutoTagRules,
   revokeBankDetailCategoryConfirmation,
+  saveBankAutoTagRules,
 } from "../features/bankDetails/api";
 import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
   eventAffectedMonths,
 } from "../features/domainEvents";
+import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import type {
   BankAutoTagRulesResponse,
@@ -39,15 +43,19 @@ import type {
   BankDetailExportMode,
   BankDetailReadModelStatus,
   BankDetailTransaction,
+  BankDetailTransactionsResponse,
   BankTransactionDirection,
   BankTransactionCategoryCode,
   BankTransactionCategoryCounts,
+  SaveBankAutoTagRulesRequest,
 } from "../features/bankDetails/types";
 import type { BankTransactionTagDefinition } from "../features/pendingInvoices/types";
 
 const TODAY = new Date(2026, 4, 2);
 const DEFAULT_PAGE_SIZE = 100;
 const BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS = 1000;
+const BANK_DETAIL_RULE_REFRESH_RETRY_MS = 300;
+const BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS = 20;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
@@ -320,6 +328,53 @@ function selectedCategoryFilterStillExists(filter: BankCategoryFilter, options: 
       return option.code === filter.code;
     }
     return tagDefinitionDisplayParts(option).primaryLabel === filter.primaryLabel;
+  });
+}
+
+function monthScopeKey(value: string | null | undefined) {
+  const match = /^(\d{4})-(\d{2})/.exec(String(value ?? "").trim());
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function monthScopeKeysForRange(dateFrom: string | null | undefined, dateTo: string | null | undefined) {
+  const startMonth = monthScopeKey(dateFrom);
+  const endMonth = monthScopeKey(dateTo);
+  if (!startMonth && !endMonth) {
+    return [];
+  }
+  if (!startMonth || !endMonth || startMonth === endMonth) {
+    return [startMonth ?? endMonth].filter((value): value is string => Boolean(value));
+  }
+  const [startYear, startMonthNumber] = startMonth.split("-").map(Number);
+  const [endYear, endMonthNumber] = endMonth.split("-").map(Number);
+  const startIndex = startYear * 12 + startMonthNumber - 1;
+  const endIndex = endYear * 12 + endMonthNumber - 1;
+  if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex) || startIndex > endIndex) {
+    return Array.from(new Set([startMonth, endMonth])).sort();
+  }
+  const scopeKeys: string[] = [];
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const year = Math.floor(index / 12);
+    const month = (index % 12) + 1;
+    scopeKeys.push(`${year}-${String(month).padStart(2, "0")}`);
+  }
+  return scopeKeys;
+}
+
+function bankDetailOperationScopeKeys(rows: BankDetailTransaction[], dateFilter: BankDateFilter) {
+  const visibleRowScopes = Array.from(new Set(
+    rows
+      .map((row) => monthScopeKey(row.tradeTime))
+      .filter((value): value is string => Boolean(value)),
+  ));
+  return visibleRowScopes.length > 0
+    ? visibleRowScopes
+    : monthScopeKeysForRange(dateFilter.dateFrom, dateFilter.dateTo);
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
   });
 }
 
@@ -1359,6 +1414,7 @@ function BankTextCell({ value }: { value: string }) {
 
 export default function BankDetailsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
+  const { runOperation } = useGlobalOperationOverlay();
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const selectedAccountSession = usePageSessionState<string | null>({
@@ -1457,6 +1513,50 @@ export default function BankDetailsPage() {
   const categoryOptions = categorySnapshotCurrent ? categoryFilterSnapshot.tagDefinitions : [];
   const categoryFilterTotalCount = categorySnapshotCurrent ? categoryFilterSnapshot.totalCount : 0;
 
+  const applyCategorySnapshotPayload = useCallback((payload: BankDetailTransactionsResponse, snapshotQueryKey: string) => {
+    setCategoryFilterSnapshot((current) => ({
+      queryKey: snapshotQueryKey,
+      totalCount: payload.pagination.total,
+      categoryCounts: payload.categoryCounts,
+      tagDefinitions: payload.tagDictionary?.tags
+        ? activeTagDefinitions(payload.tagDictionary.tags)
+        : current.queryKey === snapshotQueryKey
+        ? current.tagDefinitions
+        : [],
+    }));
+    if (typeof payload.tagDictionary?.version === "number" && payload.tagDictionary.version > 0) {
+      tagVersionRef.current = payload.tagDictionary.version;
+      persistTagVersion(payload.tagDictionary.version);
+    }
+  }, []);
+
+  const applyTransactionsPayload = useCallback((
+    payload: BankDetailTransactionsResponse,
+    {
+      snapshotQueryKey,
+      requestHasCategoryFilter,
+    }: {
+      snapshotQueryKey: string;
+      requestHasCategoryFilter: boolean;
+    },
+  ) => {
+    const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
+    setTransactionsReadModelStatus(nextReadModelStatus);
+    if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
+      return;
+    }
+    hasTransactionPayloadRef.current = true;
+    setRows(payload.rows);
+    setRowCount(payload.pagination.total);
+    if (!requestHasCategoryFilter) {
+      applyCategorySnapshotPayload(payload, snapshotQueryKey);
+    }
+    if (typeof payload.tagDictionary?.version === "number" && payload.tagDictionary.version > 0) {
+      tagVersionRef.current = payload.tagDictionary.version;
+      persistTagVersion(payload.tagDictionary.version);
+    }
+  }, [applyCategorySnapshotPayload]);
+
   const refreshAutoTagRules = useCallback(() => {
     fetchBankAutoTagRules()
       .then((payload) => {
@@ -1554,22 +1654,6 @@ export default function BankDetailsPage() {
     const accountKey = selectedTransactionAccountKey;
     const snapshotQueryKey = categoryFilterQueryKey;
     const requestHasCategoryFilter = hasCategoryRequestFilter(selectedCategoryRequestParams);
-    const updateSnapshotFromPayload = (payload: Awaited<ReturnType<typeof fetchBankDetailTransactions>>) => {
-      setCategoryFilterSnapshot((current) => ({
-        queryKey: snapshotQueryKey,
-        totalCount: payload.pagination.total,
-        categoryCounts: payload.categoryCounts,
-        tagDefinitions: payload.tagDictionary?.tags
-          ? activeTagDefinitions(payload.tagDictionary.tags)
-          : current.queryKey === snapshotQueryKey
-          ? current.tagDefinitions
-          : [],
-      }));
-      if (typeof payload.tagDictionary?.version === "number" && payload.tagDictionary.version > 0) {
-        tagVersionRef.current = payload.tagDictionary.version;
-        persistTagVersion(payload.tagDictionary.version);
-      }
-    };
 
     if (requestHasCategoryFilter) {
       fetchBankDetailTransactions({
@@ -1586,7 +1670,7 @@ export default function BankDetailsPage() {
           if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
             return;
           }
-          updateSnapshotFromPayload(payload);
+          applyCategorySnapshotPayload(payload, snapshotQueryKey);
         })
         .catch((caught) => {
           if (!isAbortLikeError(caught)) {
@@ -1609,21 +1693,7 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => {
-        const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
-        setTransactionsReadModelStatus(nextReadModelStatus);
-        if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
-          return;
-        }
-        hasTransactionPayloadRef.current = true;
-        setRows(payload.rows);
-        setRowCount(payload.pagination.total);
-        if (!requestHasCategoryFilter) {
-          updateSnapshotFromPayload(payload);
-        }
-        if (typeof payload.tagDictionary?.version === "number" && payload.tagDictionary.version > 0) {
-          tagVersionRef.current = payload.tagDictionary.version;
-          persistTagVersion(payload.tagDictionary.version);
-        }
+        applyTransactionsPayload(payload, { snapshotQueryKey, requestHasCategoryFilter });
       })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
@@ -1638,6 +1708,8 @@ export default function BankDetailsPage() {
       });
     return () => controller.abort();
   }, [
+    applyCategorySnapshotPayload,
+    applyTransactionsPayload,
     categoryFilterQueryKey,
     dateFilter.dateFrom,
     dateFilter.dateTo,
@@ -1972,6 +2044,68 @@ export default function BankDetailsPage() {
     setExportMenuOpen(false);
   };
 
+  const reloadTransactionsAfterRulesMutation = useCallback(async () => {
+    const accountKey = selectedTransactionAccountKey;
+    const snapshotQueryKey = categoryFilterQueryKey;
+    const requestHasCategoryFilter = hasCategoryRequestFilter(selectedCategoryRequestParams);
+    setTransactionRequestPending(true);
+    setError(null);
+    try {
+      let latestPayload: BankDetailTransactionsResponse | null = null;
+      for (let attempt = 0; attempt < BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS; attempt += 1) {
+        if (requestHasCategoryFilter) {
+          const snapshotPayload = await fetchBankDetailTransactions({
+            accountKey,
+            dateFrom: dateFilter.dateFrom,
+            dateTo: dateFilter.dateTo,
+            keyword: searchKeyword,
+            page: 1,
+            pageSize: 1,
+          });
+          const snapshotStatus = normalizeReadModelStatus(snapshotPayload.readModelStatus);
+          if (snapshotStatus === "fresh" || snapshotPayload.rows.length > 0) {
+            applyCategorySnapshotPayload(snapshotPayload, snapshotQueryKey);
+          }
+        }
+
+        latestPayload = await fetchBankDetailTransactions({
+          accountKey,
+          dateFrom: dateFilter.dateFrom,
+          dateTo: dateFilter.dateTo,
+          keyword: searchKeyword,
+          categoryCode: selectedCategoryRequestParams.categoryCode,
+          categoryPrimaryLabel: selectedCategoryRequestParams.categoryPrimaryLabel,
+          categorySubLabel: selectedCategoryRequestParams.categorySubLabel,
+          categoryThirdLabel: selectedCategoryRequestParams.categoryThirdLabel,
+          page: paginationModel.page + 1,
+          pageSize: paginationModel.pageSize,
+        });
+        applyTransactionsPayload(latestPayload, { snapshotQueryKey, requestHasCategoryFilter });
+        if (normalizeReadModelStatus(latestPayload.readModelStatus) === "fresh") {
+          return latestPayload;
+        }
+        await wait(BANK_DETAIL_RULE_REFRESH_RETRY_MS);
+      }
+      throw new Error("银行明细读模型仍在刷新，请稍后重试。");
+    } finally {
+      setTransactionRequestPending(false);
+    }
+  }, [
+    applyCategorySnapshotPayload,
+    applyTransactionsPayload,
+    categoryFilterQueryKey,
+    dateFilter.dateFrom,
+    dateFilter.dateTo,
+    paginationModel.page,
+    paginationModel.pageSize,
+    searchKeyword,
+    selectedCategoryRequestParams.categoryCode,
+    selectedCategoryRequestParams.categoryPrimaryLabel,
+    selectedCategoryRequestParams.categorySubLabel,
+    selectedCategoryRequestParams.categoryThirdLabel,
+    selectedTransactionAccountKey,
+  ]);
+
   const handleExport = (mode: BankDetailExportMode) => {
     closeExportMenu();
     const accountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey;
@@ -2014,7 +2148,7 @@ export default function BankDetailsPage() {
       });
   };
 
-  const handleAutoTagRulesSaved = (payload: BankAutoTagRulesResponse) => {
+  const publishAutoTagRulesSaved = useCallback((payload: BankAutoTagRulesResponse) => {
     persistTagVersion(payload.version);
     tagVersionRef.current = payload.version;
     setActiveAutoTagRules(payload.activeRules);
@@ -2032,8 +2166,7 @@ export default function BankDetailsPage() {
       channel.postMessage({ version: payload.version, activeRules: payload.activeRules });
       channel.close();
     }
-    rulesRefreshPendingRef.current = true;
-    rulesRefreshFeedbackRef.current = payload.refreshReason === "reapplied"
+    const feedback = payload.refreshReason === "reapplied"
       ? {
         refreshing: "已提交重新应用，银行明细正在刷新。",
         fresh: "重新应用已完成，银行明细已刷新。",
@@ -2042,11 +2175,58 @@ export default function BankDetailsPage() {
         refreshing: "规则已保存，银行明细正在刷新。",
         fresh: "规则已保存，银行明细已刷新。",
       };
-    setRulesRefreshStatus("refreshing");
-    setRulesFeedback(rulesRefreshFeedbackRef.current.refreshing);
-    setTransactionsReadModelStatus("refreshing");
-    setRefreshToken((current) => current + 1);
-  };
+    rulesRefreshFeedbackRef.current = feedback;
+    return feedback;
+  }, []);
+
+  const handleAutoTagRulesSavedAfterRefresh = useCallback((payload: BankAutoTagRulesResponse) => {
+    const feedback = publishAutoTagRulesSaved(payload);
+    rulesRefreshPendingRef.current = false;
+    setRulesRefreshStatus("fresh");
+    setRulesFeedback(feedback.fresh);
+  }, [publishAutoTagRulesSaved]);
+
+  const waitForCurrentBankDetailRulesRefresh = useCallback(async (setMessage: (message: string) => void) => {
+    const scopeKeys = bankDetailOperationScopeKeys(rows, dateFilter);
+    setMessage("正在等待银行明细读模型同步...");
+    await waitForOperationFreshness(operationBarrierTargets("bank_detail", scopeKeys));
+    setMessage("正在刷新银行流水...");
+    await reloadTransactionsAfterRulesMutation();
+  }, [dateFilter, reloadTransactionsAfterRulesMutation, rows]);
+
+  const saveAutoTagRulesWithRefresh = useCallback(async (request: SaveBankAutoTagRulesRequest) => {
+    const result = await runOperation({
+      loadingMessage: "正在保存自动标签规则...",
+      action: async ({ setMessage }) => {
+        const payload = await saveBankAutoTagRules(request);
+        await waitForCurrentBankDetailRulesRefresh(setMessage);
+        handleAutoTagRulesSavedAfterRefresh(payload);
+        return payload;
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "自动标签规则保存失败。",
+    });
+    if (result.status === "success") {
+      return result.value;
+    }
+    throw result.error;
+  }, [handleAutoTagRulesSavedAfterRefresh, runOperation, waitForCurrentBankDetailRulesRefresh]);
+
+  const reapplyAutoTagRulesWithRefresh = useCallback(async () => {
+    const result = await runOperation({
+      loadingMessage: "正在重新应用自动标签规则...",
+      action: async ({ setMessage }) => {
+        const payload = await reapplyBankAutoTagRules();
+        await waitForCurrentBankDetailRulesRefresh(setMessage);
+        handleAutoTagRulesSavedAfterRefresh(payload);
+        return payload;
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "自动标签规则重新应用失败。",
+    });
+    if (result.status === "success") {
+      return result.value;
+    }
+    throw result.error;
+  }, [handleAutoTagRulesSavedAfterRefresh, runOperation, waitForCurrentBankDetailRulesRefresh]);
 
   const handleMonthChange = (value: string) => {
     if (!value) {
@@ -2367,7 +2547,9 @@ export default function BankDetailsPage() {
       <AutoTagRulesDrawer
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}
-        onSaved={handleAutoTagRulesSaved}
+        onSaved={() => undefined}
+        saveAutoTagRules={saveAutoTagRulesWithRefresh}
+        reapplyAutoTagRules={reapplyAutoTagRulesWithRefresh}
         refreshScope={{ dateFrom: dateFilter.dateFrom, dateTo: dateFilter.dateTo }}
         refreshStatus={rulesRefreshStatus}
       />

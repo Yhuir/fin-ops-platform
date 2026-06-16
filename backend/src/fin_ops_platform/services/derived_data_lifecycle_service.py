@@ -30,6 +30,7 @@ DERIVED_DATA_EVENTS = (
     "project_scope_changed",
     "manual_derived_cache_cleanup",
     "startup_stale_scan",
+    "candidate_match_changed",
 )
 
 DERIVED_DATA_DOMAINS = (
@@ -320,6 +321,11 @@ class DerivedDataLifecycleService:
         "manual_derived_cache_cleanup": DERIVED_DATA_DOMAINS,
         "startup_stale_scan": (
             "workbench_matching_dirty_scopes",
+        ),
+        "candidate_match_changed": (
+            "workbench_read_model",
+            "workbench_relation_read_model",
+            "search_cache",
         ),
     }
 

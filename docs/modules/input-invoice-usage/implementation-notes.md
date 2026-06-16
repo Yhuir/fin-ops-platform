@@ -34,6 +34,16 @@
 
 ## 历史记录
 
+## 2026-06-17 - OA reverse 子集候选 preview hash 修复
+
+- 目标：修复 `以发票反提 OA` drawer 中只勾选部分候选后点击 `创建 OA 草稿` 报 `OA reverse preview is stale. Refresh preview before creating an OA draft.` 的问题。
+- 影响范围：`OaReverseWorkspaceDrawer` 创建草稿交互、OA reverse 前端回归测试和模块测试矩阵；后端 preview hash fail-fast 契约保持不变。
+- 关键决策：不放松后端 stale 校验；前端创建草稿前按当前勾选发票和目标申请人重新请求 preview，使用刷新后的 `previewId`/`previewHash` 与有效候选发票创建草稿。
+- 文档影响：更新本实施记录和 `tests.md` 历史 bug 回归库；状态机/API contract 未变化。
+- 测试覆盖：更新 `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`，先验证旧行为会继续使用全量候选 hash，再改为断言子集创建前刷新 preview 并提交刷新后的 hash。
+- 验证命令：`npm --prefix web test -- --run src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`；`npm --prefix web test -- --run src/test/InputInvoiceUsagePage.test.tsx`；完整最终命令见本轮最终说明。
+- 未测风险：真实 OA 草稿创建仍依赖 staging/生产 OA 登录和草稿接口 smoke；本修复只覆盖 FinOps 前端 preview/hash 提交流程。
+
 ## 2026-06-16 - 首屏 page-size 性能护栏证据
 
 - 目标：补齐 P2/P3 大数据列表本地 synthetic SLO 与前端首屏请求证据，防止进项发票使用情况首屏请求把超大 page size 透传为全量读取。

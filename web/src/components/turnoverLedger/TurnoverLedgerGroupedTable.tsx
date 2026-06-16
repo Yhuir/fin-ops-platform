@@ -67,47 +67,69 @@ function categoryChipLabels(row: TurnoverLedgerGroupedRow) {
   return fallback === "-" ? [] : [fallback];
 }
 
-function workbenchRelationLabel(row: TurnoverLedgerGroupedRow) {
+function isTurnoverManualClosureLinkedRow(row: TurnoverLedgerGroupedRow) {
+  return row.workbenchRelationStatus === "linked" && row.workbenchRelationMode === "turnover_manual_closure";
+}
+
+function hasOaWorkbenchRelation(row: TurnoverLedgerGroupedRow) {
+  if (row.workbenchRelationMode.includes("oa")) {
+    return true;
+  }
+  return row.workbenchRelationRowIds.some((rowId) => /^oa(?:[-_:]|$)/i.test(rowId.trim()));
+}
+
+function workbenchDocumentRelationLabel(row: TurnoverLedgerGroupedRow) {
   const status = row.workbenchRelationStatus;
   if (!status) {
     return "";
   }
   if (status === "linked") {
-    if (row.workbenchRelationMode === "turnover_manual_closure") {
-      return "关联台手工闭环";
+    if (row.workbenchRelationMode === "turnover_manual_closure" && !hasOaWorkbenchRelation(row)) {
+      return "";
     }
-    return "关联台已关联";
+    return hasOaWorkbenchRelation(row) ? "已关联 OA" : "已关联业务单据";
   }
   if (status === "candidate") {
-    return "关联台候选";
-  }
-  if (status === "unlinked") {
-    return "关联台未关联";
+    return "候选关联";
   }
   if (status === "mixed") {
-    return "关联台多状态";
+    return "多种关联状态";
   }
-  return `关联台 ${status}`;
+  return "";
+}
+
+function workbenchClosureRelationLabel(row: TurnoverLedgerGroupedRow) {
+  return isTurnoverManualClosureLinkedRow(row) ? "已闭环" : "未闭环";
+}
+
+function workbenchRelationChips(row: TurnoverLedgerGroupedRow, isFlow: boolean) {
+  const labels: string[] = [];
+  const documentLabel = workbenchDocumentRelationLabel(row);
+  if (documentLabel) {
+    labels.push(documentLabel);
+  }
+  if (isFlow) {
+    labels.push(workbenchClosureRelationLabel(row));
+  }
+  return labels;
 }
 
 function workbenchRelationGroupLabel(group: TurnoverLedgerGroup) {
   const rows = runtimeGroup(group).flowRows ?? [];
   if (rows.length === 0) {
     const summaryRow = runtimeGroup(group).summaryRow;
-    return summaryRow ? workbenchRelationLabel(summaryRow) : "";
+    return summaryRow && isTurnoverManualClosureLinkedRow(summaryRow) ? "已闭环" : "";
   }
-  const linkedRows = rows.filter((row) => row.workbenchRelationStatus === "linked");
-  if (linkedRows.length === rows.length) {
-    const manualClosureCount = linkedRows.filter((row) => row.workbenchRelationMode === "turnover_manual_closure").length;
-    const label = manualClosureCount === linkedRows.length ? "关联台手工闭环" : "关联台已关联";
-    return `${label} · ${linkedRows.length}笔`;
+  const closedRows = rows.filter(isTurnoverManualClosureLinkedRow);
+  if (closedRows.length === rows.length) {
+    return `已闭环 · ${closedRows.length}笔`;
   }
-  if (linkedRows.length > 0) {
-    return `部分已关联 ${linkedRows.length}/${rows.length}`;
+  if (closedRows.length > 0) {
+    return `部分已闭环 ${closedRows.length}/${rows.length}`;
   }
   const candidateRows = rows.filter((row) => row.workbenchRelationStatus === "candidate");
   if (candidateRows.length > 0) {
-    return `关联台候选 ${candidateRows.length}/${rows.length}`;
+    return `候选关联 ${candidateRows.length}/${rows.length}`;
   }
   return "";
 }
@@ -390,6 +412,7 @@ function RowCells({
         categoryLabels: [],
         bankAccountLabels: [],
       };
+  const relationChips = workbenchRelationChips(row, isFlow);
   return (
     <>
       <td>
@@ -425,14 +448,15 @@ function RowCells({
       <td>
         <span className="turnover-ledger-cell-stack">
           <span>{formatNullable(isFlow ? row.repaymentRemark : "")}</span>
-          {workbenchRelationLabel(row) ? (
+          {relationChips.map((label) => (
             <span
               className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--compact"
+              key={label}
               title={row.workbenchRelationCaseIds.join("、")}
             >
-              {workbenchRelationLabel(row)}
+              {label}
             </span>
-          ) : null}
+          ))}
         </span>
       </td>
       <td>

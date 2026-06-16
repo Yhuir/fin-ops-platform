@@ -342,7 +342,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 当响应携带 `read_model_status` 且不为 `fresh` 时，前端可以展示当前可用数据，但必须把闭环确认、流水选择、补充信息编辑等写操作置为不可用，直到后续查询恢复 fresh。未返回 `read_model_status` 时按 `fresh` 处理。
 
-外部往来款 `deterministic` 只表示系统识别到零差额候选，不表示已闭环，也不得作为关联台 open 分组或已配对事实。外部往来闭环的共同事实源是人工确认闭环后写入的 Workbench active pair relation；该 relation 只是占用和闭环事实，Workbench 分区仍必须遵守三栏规则：bank-only 外部往来闭环留在 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
+外部往来款 `deterministic` 只表示系统识别到零差额候选，不表示已闭环，也不得作为关联台 open 分组或已配对事实。外部往来闭环的共同事实源是人工确认闭环后写入的 Workbench active pair relation；该 relation 只是外部往来多流水闭环事实。若所选银行流水已存在仅含 OA + 银行的 active relation，确认闭环应把既有 OA-bank relation 和新增银行流水合并进同一个 `turnover_manual_closure` active case。Workbench 分区仍必须遵守三栏规则：未补齐发票的外部往来闭环留在 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
 
 `POST /api/turnover-ledger/closures/confirm`
 
@@ -362,7 +362,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `bank_row_ids` 必须至少两条且不能重复；不再限制为正好两条。
 - 后端必须重新读取当前银行流水和分类事实；全部流水必须属于同一往来台账组、同一往来语义、同一对方，并同时包含收入和支出。
 - 收入金额与支出金额差额必须为 `0.00`；否则返回 `400 turnover_closure_amount_mismatch` 或方向/语义相关业务错误。
-- 流水不得已被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用；占用返回 `409 turnover_relation_conflict`。已确认 2 笔后如需补第 3 笔，必须先撤回原 bank-only 闭环，再重新选择完整流水确认。
+- 流水不得已被其他 active Turnover confirmed relation 占用。若所选流水已被 Workbench active relation 占用，只有 row types 子集为 `{oa, bank}` 的 relation 可被本次闭环合并；包含 `invoice` 或其他业务 row type 时返回 `409 turnover_closure_requires_workbench` 或 `409 turnover_relation_conflict`，并提示去关联台处理完整关系。已确认后如需补选流水，必须先撤回原闭环关系，再重新选择完整流水确认。
 - `expected_versions` 进入写 UoW 的 stale precondition；版本冲突必须在写 relation 和 pair relation 前失败。
 - `idempotency_key` 进入写 UoW 的幂等边界；相同 payload 重放返回第一次结果，不同 payload 返回 `409 idempotency_key_conflict`。
 
@@ -371,12 +371,12 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | 字段 | 说明 |
 | --- | --- |
 | `turnover_relation` / `relation` | Turnover 手动闭环关系，`status=confirmed`、`source=manual`；两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`，三笔及以上为 `manual_zero_difference_group`。该 relation 自身不再依赖 `sync_to_workbench` 表示闭环。 |
-| `workbench_pair_relation` | 同一写事务内创建的 Workbench active pair relation，`relation_mode=turnover_manual_closure`，作为共同事实源。bank-only 关系不得直接驱动关联台 paired 区；三栏补齐后才进入 paired。 |
+| `workbench_pair_relation` | 同一写事务内创建的 Workbench active pair relation，`relation_mode=turnover_manual_closure`，作为共同事实源。可为 bank-only，也可在合并既有 OA-bank relation 时包含 `oa` + `bank` rows；未含发票的关系不得直接驱动关联台 paired 区，三栏补齐后才进入 paired。 |
 | `affected_months` | 受影响月份，用于前端刷新外部往来、关联台和 relation read model。 |
 
 成功写入必须通过 dirty/outbox 标记 `turnover_ledger`、`workbench`、`workbench_relation` 相关 scope 刷新；不得在页面或 Workbench 查询层用 `turnover_relation` 重新拼 open 分组。
 
-`POST /api/turnover-ledger/relations/{relation_id}/withdraw` 撤回外部往来手动闭环时，若对应 Workbench active relation 仍是 `turnover:{relation_id}` 的 bank-only `relation_mode=turnover_manual_closure`，后端必须在同一写事务中撤回 Turnover relation 并取消 Workbench pair relation，同时刷新 `turnover_ledger`、`workbench`、`workbench_relation`、`cost_statistics`、`search`。若该 Workbench relation 已补齐 OA + 银行 + 发票或被升级为普通三栏关系，接口必须返回 `409 turnover_closure_withdraw_requires_workbench`，提示用户到关联台撤回完整关系。
+`POST /api/turnover-ledger/relations/{relation_id}/withdraw` 撤回外部往来手动闭环时，若对应 Workbench active relation 仍是 `turnover:{relation_id}` 的 `relation_mode=turnover_manual_closure`，且 row types 只包含 `oa` 与 `bank`，后端必须在同一写事务中撤回 Turnover relation，并通过 Workbench relation command service 只撤回该外部往来闭环 active case。若闭环确认前存在被合并的 OA-bank relation，撤回后必须恢复这些 relation；未参与既有 OA 关系的新增银行流水不应留在 active relation 中。该操作同时刷新 `turnover_ledger`、`workbench`、`workbench_relation`、`cost_statistics`、`search`。若该 Workbench relation 已补齐发票或其他业务 row type，接口必须返回 `409 turnover_closure_withdraw_requires_workbench`，提示用户到关联台撤回完整关系。
 
 ## 银行明细自动标签规则 API
 

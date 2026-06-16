@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-17 - 未配对自动 decision 撤回关联拆分
+
+- 目标：修复未配对区银行流水+发票自动匹配候选点击“撤回关联”返回 `Workbench relation is not active or does not exist.` 的问题。
+- 影响范围：`WorkbenchWriteFacade.preview_withdraw_link` / `withdraw_link`、`WorkbenchReconciliationDecisionStore` suppress 边界、`candidate_match_changed` 派生数据刷新事件、Application wiring、本模块测试矩阵。
+- 关键决策：未配对区统一按钮仍由后端 preview 判定操作类型。优先查 canonical active relation；不存在 active relation 时，先兼容 legacy `WorkbenchCandidateMatchService`，再查当前 SQL `read_model.workbench_reconciliation_decisions` 中 active open/paired decision。命中 decision 时返回 `split_candidate` preview，submit suppress decision 并刷新 decision 所属月份，而不是把它当作可撤回 active relation。
+- 真实原因：截图中选中的两行是 `automatic_decision` 展示组，事实源是 `read_model.workbench_reconciliation_decisions`；它没有写入 `app.workbench_pair_relations`，也不在 legacy candidate snapshot 中。旧 withdraw preview 因而只得到 relation command 的 not-found 错误，没有落到当前页面实际使用的 decision store。
+- 文档影响：更新本模块 `tests.md`、本实施记录和 app runtime ownership 文档。
+- 测试覆盖：新增 facade decision preview split、decision submit suppress 回归，新增 HTTP preview/submit contract 回归，并保留 legacy candidate split 回归。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_auth_context_idempotency.WorkbenchAuthContextIdempotencyTests.test_withdraw_link_preview_splits_reconciliation_decision_when_no_active_relation tests.test_workbench_auth_context_idempotency.WorkbenchAuthContextIdempotencyTests.test_withdraw_link_submit_suppresses_reconciliation_decision_candidate tests.test_workbench_auth_context_idempotency.WorkbenchAuthContextIdempotencyTests.test_withdraw_link_splits_pure_candidate_group_without_relation_history -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_withdraw_link_preview_splits_reconciliation_decision_without_active_relation -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_reconciliation_decision_store -v`。
+- 未测风险：本地测试使用 fake store/live rows，不直接回放生产 active generation；发布后仍需用真实数据抽样确认该自动 decision 被 suppress 后页面刷新为独立未配对行。
+
 ## 2026-06-16 - server.py boundary 守卫证据
 
 - 目标：收敛 P2/P3 中 `server.py` broad dispatch / transitional delegate 风险，判断是否需要在本轮为关联台、税金抵扣、成本统计相关路径做大范围迁移。

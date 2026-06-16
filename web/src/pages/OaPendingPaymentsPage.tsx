@@ -236,6 +236,7 @@ export default function OaPendingPaymentsPage() {
         open={rulesOpen}
         loadRules={loadExpensePendingInvoiceRules}
         saveRules={saveExpensePendingInvoiceRules}
+        title="支出流水无需开票规则设置"
         onSaved={() => loadRows("refresh")}
         onClose={() => setRulesOpen(false)}
       />

@@ -9,6 +9,7 @@ import PendingInvoiceInvoicePickerDrawer from "../components/pendingInvoices/Pen
 import PendingInvoiceRelationDrawer from "../components/pendingInvoices/PendingInvoiceRelationDrawer";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import PendingInvoicesTable from "../components/pendingInvoices/PendingInvoicesTable";
+import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import {
   confirmAttachExistingInvoices,
@@ -25,6 +26,7 @@ import {
   savePendingInvoiceIncomeStatuses,
 } from "../features/pendingInvoices/api";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
+import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import type {
   AttachExistingInvoiceResult,
   AttachExistingInvoicesResult,
@@ -36,6 +38,7 @@ import type {
   PendingInvoiceIncomeStatusCode,
   PendingInvoiceObjectDetailTarget,
   PendingInvoiceRow,
+  PendingInvoiceRowsResponse,
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
   PendingInvoiceSourceSummary,
@@ -78,6 +81,15 @@ function isExpenseStatusShortcut(filter: StatusFilterSelection): filter is Expen
 
 function effectiveBackendFilter(filter: StatusFilterSelection): PendingInvoiceFilter {
   return isExpenseStatusShortcut(filter) ? "requires_invoice" : filter;
+}
+
+function pendingInvoiceRuleRefreshScopes(
+  rulesDirection: RulesDirection,
+  currentDirection: PendingInvoiceDirection,
+  currentFilter: StatusFilterSelection,
+) {
+  const refreshFilter = currentDirection === rulesDirection ? effectiveBackendFilter(currentFilter) : "all";
+  return [`${rulesDirection}:${refreshFilter}`];
 }
 
 function filterLabel(direction: PendingInvoiceDirection, filter: StatusFilterSelection) {
@@ -161,6 +173,7 @@ function displayedPendingInvoiceRange(page: number, pageSize: number, total: num
 
 export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
+  const { runOperation } = useGlobalOperationOverlay();
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
@@ -212,25 +225,27 @@ export default function PendingInvoicesPage() {
     sortDirection,
   }), [direction, filter, keyword, page, pageSize, queryFilters, sortDirection, sortField]);
 
+  const applyRowsPayload = useCallback((payload: PendingInvoiceRowsResponse) => {
+    setRows(payload.rows);
+    setTotal(payload.pagination.total);
+    setSourceSummary(payload.summary.sourceSummary ?? null);
+    setReadModelStatus(payload.readModelStatus);
+    const version = payload.tagDictionary?.version;
+    if (typeof version === "number" && version > 0) {
+      const previousVersion = tagVersionRef.current;
+      tagVersionRef.current = version;
+      persistTagVersion(version);
+      if (previousVersion !== null && previousVersion !== version) {
+        setRulesTagRefreshToken((current) => current + 1);
+      }
+    }
+  }, []);
+
   const loadRows = useCallback((signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     fetchPendingInvoiceRows({ ...query, signal })
-      .then((payload) => {
-        setRows(payload.rows);
-        setTotal(payload.pagination.total);
-        setSourceSummary(payload.summary.sourceSummary ?? null);
-        setReadModelStatus(payload.readModelStatus);
-        const version = payload.tagDictionary?.version;
-        if (typeof version === "number" && version > 0) {
-          const previousVersion = tagVersionRef.current;
-          tagVersionRef.current = version;
-          persistTagVersion(version);
-          if (previousVersion !== null && previousVersion !== version) {
-            setRulesTagRefreshToken((current) => current + 1);
-          }
-        }
-      })
+      .then(applyRowsPayload)
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
           setError(caught instanceof Error ? caught.message : "待找发票加载失败。");
@@ -241,7 +256,7 @@ export default function PendingInvoicesPage() {
           setLoading(false);
         }
       });
-  }, [query]);
+  }, [applyRowsPayload, query]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -452,7 +467,27 @@ export default function PendingInvoicesPage() {
   const loadRelation = useCallback((transactionId: string) => fetchPendingInvoiceRelationDetail(transactionId, direction), [direction]);
   const loadObjectDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => fetchPendingInvoiceObjectDetail(target), []);
   const loadRules = useCallback(() => fetchPendingInvoiceRules(rulesDirection), [rulesDirection]);
-  const saveRules = useCallback((payload: Parameters<typeof savePendingInvoiceRules>[0]) => savePendingInvoiceRules(payload, rulesDirection), [rulesDirection]);
+  const saveRules = useCallback(async (payload: Parameters<typeof savePendingInvoiceRules>[0]) => {
+    const result = await runOperation({
+      loadingMessage: "正在保存待找发票规则...",
+      action: async ({ setMessage }) => {
+        const savedPayload = await savePendingInvoiceRules(payload, rulesDirection);
+        setMessage("正在等待待找发票读模型同步...");
+        await waitForOperationFreshness(
+          operationBarrierTargets("pending_invoice", pendingInvoiceRuleRefreshScopes(rulesDirection, direction, filter)),
+        );
+        setMessage("正在刷新待找发票...");
+        const rowsPayload = await fetchPendingInvoiceRows(query);
+        applyRowsPayload(rowsPayload);
+        return savedPayload;
+      },
+      errorMessage: (caught) => caught instanceof Error ? caught.message : "待找发票规则保存失败。",
+    });
+    if (result.status === "success") {
+      return result.value;
+    }
+    throw result.error;
+  }, [applyRowsPayload, direction, filter, query, rulesDirection, runOperation]);
   const loadCandidates = useCallback(fetchPendingInvoiceCandidatesBatch, []);
   const loadExportPreview = useCallback(() => fetchPendingInvoiceExportPreview(query), [query]);
   const handleDownloadExport = useCallback(() => downloadPendingInvoiceExport(query), [query]);
@@ -761,10 +796,7 @@ export default function PendingInvoicesPage() {
         saveRules={saveRules}
         title={rulesDirection === "income" ? "收入待找发票规则设置" : "支出待找发票规则设置"}
         refreshToken={rulesTagRefreshToken}
-        onSaved={(savedPayload) => {
-          setReadModelStatus(savedPayload.readModelStatus ?? "refreshing");
-          setRefreshToken((current) => current + 1);
-        }}
+        onSaved={() => undefined}
         onClose={closeDrawer}
       />
       <PendingInvoiceRelationDrawer

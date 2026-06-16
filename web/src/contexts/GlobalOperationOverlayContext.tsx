@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 type GlobalOperationOverlayState =
   | {
@@ -115,29 +116,31 @@ export function GlobalOperationOverlayProvider({ children }: { children: ReactNo
     [runOperation, state],
   );
 
+  const overlay = state ? (
+    <div aria-label="全局操作进度" aria-modal="true" className="global-operation-overlay" role="dialog">
+      <div className="global-operation-overlay__panel">
+        <div className="global-operation-overlay__title">{state.title}</div>
+        <div className="global-operation-overlay__body">
+          {state.phase === "loading" ? (
+            <span aria-hidden="true" className="global-operation-overlay__spinner" />
+          ) : null}
+          <span>{state.message}</span>
+        </div>
+        {state.phase === "error" ? (
+          <div className="global-operation-overlay__actions">
+            <button className="primary-button" type="button" onClick={acknowledgeError}>
+              确定
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <GlobalOperationOverlayContext.Provider value={value}>
       {children}
-      {state ? (
-        <div aria-label="全局操作进度" aria-modal="true" className="global-operation-overlay" role="dialog">
-          <div className="global-operation-overlay__panel">
-            <div className="global-operation-overlay__title">{state.title}</div>
-            <div className="global-operation-overlay__body">
-              {state.phase === "loading" ? (
-                <span aria-hidden="true" className="global-operation-overlay__spinner" />
-              ) : null}
-              <span>{state.message}</span>
-            </div>
-            {state.phase === "error" ? (
-              <div className="global-operation-overlay__actions">
-                <button className="primary-button" type="button" onClick={acknowledgeError}>
-                  确定
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      {overlay && typeof document !== "undefined" ? createPortal(overlay, document.body) : overlay}
     </GlobalOperationOverlayContext.Provider>
   );
 }

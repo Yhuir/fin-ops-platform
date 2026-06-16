@@ -29,9 +29,9 @@
 - 自动识别只产生候选和差额提示。`deterministic` 表示系统发现同组零差额候选，不表示业务已闭环。
 - 页面汇总行只承载组级聚合、余额和展开入口；流水选择、补充信息编辑、确认闭环和撤销归并等写操作必须以真实流水行为入口。
 - 所有外部往来闭环都必须由用户在外部往来款管理页手动选择同一往来组内真实流水确认；可选择多笔流水，但必须同时包含收入和支出，且收支合计差额为 `0.00`。确认前不进入关联台已配对区。
-- 人工闭环成功后，后端在同一写事务中写 Turnover 手动闭环 evidence 和 Workbench active pair relation。Workbench relation 是外部往来闭环的共同事实源；关联台分区仍遵守三栏规则，bank-only 外部往来闭环留在 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
-- 已确认的外部往来闭环不能直接追加流水；用户发现漏选流水时，必须先撤回原 bank-only 闭环，再重新选择完整流水确认。
-- 撤回范围必须受限：仍是 bank-only open 外部往来闭环时，外部往来款管理页可以撤回；若该 Workbench relation 已在关联台补齐 OA + 银行 + 发票并进入 paired，外部往来页不得直接撤回整组三栏关系，必须转到关联台撤回完整关系。
+- 人工闭环成功后，后端在同一写事务中写 Turnover 手动闭环 evidence 和 Workbench active pair relation。Workbench relation 是外部往来闭环的共同事实源；若所选流水已存在仅含 OA + 银行的 active relation，确认闭环应把这些既有关联合并进同一个 `turnover_manual_closure` active case。关联台分区仍遵守三栏规则：未补齐发票的外部往来闭环留在 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
+- 已确认的外部往来闭环不能直接追加流水；用户发现漏选流水时，必须先撤回原闭环关系，再重新选择完整流水确认。
+- 撤回范围必须受限：当 Workbench active relation 仍是只含 `oa` + `bank` rows 的 `turnover_manual_closure` 时，外部往来款管理页可以撤回；撤回只撤回外部往来闭环关系，并恢复确认闭环前已有的 OA-bank relation。若该 Workbench relation 已在关联台补齐发票或其他业务 row type，外部往来页不得直接撤回整组关系，必须转到关联台撤回完整关系。
 - 旧的自动关系和旧 `sync_to_workbench` 字段只能作为历史兼容/候选信息，不作为闭环事实。
 
 ## 免 OA 流水

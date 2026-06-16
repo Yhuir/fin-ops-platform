@@ -423,6 +423,59 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         assert restored is not None
         self.assertEqual(restored["case_id"], "CASE-PARTIAL")
 
+    def test_withdraw_restores_previous_relations_from_turnover_manual_closure_history(self) -> None:
+        service = WorkbenchPairRelationService()
+        previous_oa_1 = service.create_active_relation(
+            case_id="CASE-OA-1",
+            row_ids=["oa-001", "bank-001"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-04",
+        )
+        previous_oa_2 = service.create_active_relation(
+            case_id="CASE-OA-2",
+            row_ids=["oa-002", "bank-002"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-04",
+        )
+        service.replace_with_confirmed_relation(
+            case_id="turnover:REL-CLOSURE",
+            row_ids=["oa-001", "bank-001", "oa-002", "bank-002", "bank-003"],
+            row_types=["oa", "bank", "oa", "bank", "bank"],
+            relation_mode="turnover_manual_closure",
+            created_by="finance",
+            month_scope="2026-04",
+            before_relations=[previous_oa_1, previous_oa_2],
+            operation_type="turnover_manual_closure_confirm",
+        )
+
+        preview = service.preview_withdraw_for_row_ids(["bank-003"])
+        self.assertEqual(
+            [relation["case_id"] for relation in preview["after_relations"]],
+            ["CASE-OA-1", "CASE-OA-2"],
+        )
+
+        restored_relations, history = service.withdraw_latest_for_row_ids(
+            ["bank-003"],
+            created_by="finance",
+        )
+
+        self.assertEqual(
+            [relation["case_id"] for relation in restored_relations],
+            ["CASE-OA-1", "CASE-OA-2"],
+        )
+        self.assertEqual(
+            [relation["case_id"] for relation in history["after_relations"]],
+            ["CASE-OA-1", "CASE-OA-2"],
+        )
+        self.assertIsNone(service.get_active_relation_by_case_id("turnover:REL-CLOSURE"))
+        self.assertEqual(service.get_active_relation_by_row_id("bank-001")["case_id"], "CASE-OA-1")
+        self.assertEqual(service.get_active_relation_by_row_id("bank-002")["case_id"], "CASE-OA-2")
+        self.assertIsNone(service.get_active_relation_by_row_id("bank-003"))
+
     def test_withdraw_ignores_historical_display_only_existing_case_before_relation(self) -> None:
         service = WorkbenchPairRelationService()
         active = service.create_active_relation(

@@ -106,6 +106,84 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             app._bank_transaction_category_service.snapshot()
         )
 
+    def _import_three_personal_borrow_rows(self, app: Application) -> list[str]:
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="turnover-bank-oa-closure.xlsx",
+            imported_by="YNSYLP005",
+            rows=[
+                {
+                    "account_no": "6222000011118106",
+                    "account_name": "云南溯源科技有限公司基本户",
+                    "txn_date": "2026-02-03",
+                    "trade_time": "2026-02-03 09:16:49",
+                    "pay_receive_time": "2026-02-03 09:16:49",
+                    "counterparty_name": "刘涵静",
+                    "debit_amount": "",
+                    "credit_amount": "100000.00",
+                    "summary": "电子汇入",
+                    "remark": "暂借款",
+                    "imported_bank_name": "建行",
+                    "imported_bank_last4": "8106",
+                },
+                {
+                    "account_no": "6222000011118106",
+                    "account_name": "云南溯源科技有限公司基本户",
+                    "txn_date": "2026-04-14",
+                    "trade_time": "2026-04-14 08:02:25",
+                    "pay_receive_time": "2026-04-14 08:02:25",
+                    "counterparty_name": "刘涵静",
+                    "debit_amount": "",
+                    "credit_amount": "140000.00",
+                    "summary": "电子汇入",
+                    "remark": "暂借款",
+                    "imported_bank_name": "建行",
+                    "imported_bank_last4": "8106",
+                },
+                {
+                    "account_no": "6222000011118106",
+                    "account_name": "云南溯源科技有限公司基本户",
+                    "txn_date": "2026-03-09",
+                    "trade_time": "2026-03-09 12:06:30",
+                    "pay_receive_time": "2026-03-09 12:06:30",
+                    "counterparty_name": "刘涵静",
+                    "debit_amount": "240000.00",
+                    "credit_amount": "",
+                    "summary": "电子转账",
+                    "remark": "还暂借款",
+                    "imported_bank_name": "建行",
+                    "imported_bank_last4": "8106",
+                },
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        transaction_ids = [transaction.id for transaction in app._import_service.list_transactions()]
+        app._bank_transaction_category_service.apply_updates(
+            [
+                {
+                    "transaction_id": transaction_ids[0],
+                    "category_code": "borrow_in_personal_pending_repayment",
+                    "expected_version": 0,
+                },
+                {
+                    "transaction_id": transaction_ids[1],
+                    "category_code": "borrow_in_personal_pending_repayment",
+                    "expected_version": 0,
+                },
+                {
+                    "transaction_id": transaction_ids[2],
+                    "category_code": "borrow_in_personal_repaid",
+                    "expected_version": 0,
+                },
+            ],
+            actor="YNSYLP005",
+        )
+        app._turnover_ledger_service._selected_tag_codes_provider = None
+        app._state_store.save_bank_transaction_categories(
+            app._bank_transaction_category_service.snapshot()
+        )
+        return transaction_ids
+
     @staticmethod
     def _workbench_open_groups(app: Application) -> list[dict[str, object]]:
         response = app.handle_request("GET", "/api/workbench?month=2026-03")
@@ -520,6 +598,78 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             for group in open_groups
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
+
+    def test_manual_closure_merges_existing_oa_bank_relations_and_withdraw_restores_them(self) -> None:
+        with self._temporary_app() as app:
+            transaction_ids = self._import_three_personal_borrow_rows(app)
+            bank_1, bank_2, bank_3 = transaction_ids
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="case-oa-1",
+                row_ids=["oa-1", bank_1],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="YNSYLP005",
+                month_scope="all",
+                note="流水 1 已配对 OA1",
+            )
+            app._workbench_pair_relation_service.create_active_relation(
+                case_id="case-oa-2",
+                row_ids=["oa-2", bank_2],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="YNSYLP005",
+                month_scope="all",
+                note="流水 2 已配对 OA2",
+            )
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "外部往来手动闭环"}),
+            )
+            payload = json.loads(response.body)
+            relation_id = str(payload["turnover_relation"]["relation_id"])
+            case_id = f"turnover:{relation_id}"
+            active_closure = app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
+            case_oa_1_after_confirm = app._workbench_pair_relation_service.get_active_relation_by_case_id("case-oa-1")
+            case_oa_2_after_confirm = app._workbench_pair_relation_service.get_active_relation_by_case_id("case-oa-2")
+
+            withdraw = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "仅撤回外部往来闭环"}),
+            )
+            withdraw_payload = json.loads(withdraw.body)
+            active_closure_after_withdraw = app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
+            restored_case_oa_1 = app._workbench_pair_relation_service.get_active_relation_by_case_id("case-oa-1")
+            restored_case_oa_2 = app._workbench_pair_relation_service.get_active_relation_by_case_id("case-oa-2")
+            bank_3_active_relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(bank_3)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertIsNotNone(active_closure)
+        assert active_closure is not None
+        self.assertEqual(active_closure["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(active_closure["row_ids"], ["oa-1", bank_1, "oa-2", bank_2, bank_3])
+        self.assertEqual(active_closure["row_types"], ["oa", "bank", "oa", "bank", "bank"])
+        self.assertEqual(
+            active_closure["special_metadata"]["turnover_closure_bank_row_ids"],
+            transaction_ids,
+        )
+        self.assertIsNone(case_oa_1_after_confirm)
+        self.assertIsNone(case_oa_2_after_confirm)
+
+        self.assertEqual(withdraw.status_code, 200, withdraw.body)
+        self.assertEqual(withdraw_payload["relation"]["status"], "withdrawn")
+        self.assertEqual(withdraw_payload["workbench_pair_relation"]["status"], "cancelled")
+        self.assertIsNone(active_closure_after_withdraw)
+        self.assertIsNotNone(restored_case_oa_1)
+        self.assertIsNotNone(restored_case_oa_2)
+        assert restored_case_oa_1 is not None
+        assert restored_case_oa_2 is not None
+        self.assertEqual(restored_case_oa_1["row_ids"], ["oa-1", bank_1])
+        self.assertEqual(restored_case_oa_2["row_ids"], ["oa-2", bank_2])
+        self.assertIsNone(bank_3_active_relation)
 
     def test_turnover_withdraw_rejects_after_workbench_relation_is_upgraded_to_three_panes(self) -> None:
         with self._temporary_app() as app:

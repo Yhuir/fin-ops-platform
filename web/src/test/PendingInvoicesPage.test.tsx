@@ -353,6 +353,7 @@ function installPendingInvoiceFetch(options: {
   rulesPayload?: () => ReturnType<typeof pendingInvoiceRulesPayload>;
   rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
   readModelStatus?: string;
+  operationBarrierResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
   exportDownloadResponse?: (url: URL) => Response;
   onRulesSaved?: () => void;
   rulesSaveResponse?: (body: Record<string, unknown>, url: URL) => Response;
@@ -391,6 +392,10 @@ function installPendingInvoiceFetch(options: {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
+    }
+    if (url.pathname === "/api/operation-barrier/status" && method === "POST" && options.operationBarrierResponse) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return options.operationBarrierResponse(body, url);
     }
     if (url.pathname === "/api/pending-invoices/filter-options") {
       return new Response(JSON.stringify({
@@ -762,6 +767,15 @@ function pendingInvoiceRulesRequests(fetchMock: ReturnType<typeof installPending
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     return url.pathname === "/api/pending-invoices/rules" && (init?.method ?? "GET").toUpperCase() === method;
   });
+}
+
+function operationBarrierRequests(fetchMock: ReturnType<typeof installPendingInvoiceFetch>) {
+  return fetchMock.mock.calls
+    .filter(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST";
+    })
+    .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
 }
 
 function findPendingInvoicesPage() {
@@ -1291,13 +1305,27 @@ describe("Pending invoices page", () => {
   test("refetches rows after saving rules and displays refreshed rule filter buckets", async () => {
     const user = userEvent.setup();
     let rulesSaved = false;
+    let releaseBarrier: (() => void) | null = null;
     const requiresRow = pendingRuleClosureRow("fee", "需要开票闭环供应商", "已支付待开票", "requires_invoice");
     const statementRow = pendingRuleClosureRow("internal_transfer", "流水代替闭环供应商", "流水代替发票", "bank_statement_as_invoice");
     const noInvoiceRow = pendingRuleClosureRow("salary", "无需开票闭环供应商", "无需开票", "no_invoice_required");
     const unknownRow = pendingRuleClosureRow("unknown_external_code", "未知标签闭环供应商", "未分类", "unknown");
+    const barrierGate = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
     const fetchMock = installPendingInvoiceFetch({
       onRulesSaved: () => {
         rulesSaved = true;
+      },
+      operationBarrierResponse: async () => {
+        await barrierGate;
+        return new Response(JSON.stringify({
+          status: "fresh",
+          fresh: true,
+          targets: [],
+          blocked_targets: [],
+          refreshing_targets: [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
       },
       rowsPayload: (url) => {
         if (!rulesSaved) {
@@ -1322,6 +1350,16 @@ describe("Pending invoices page", () => {
     const initialRequests = pendingInvoiceRowsRequests(fetchMock).length;
     await user.click(within(page).getByRole("button", { name: "支出待找发票规则设置" }));
     await user.click(await screen.findByRole("button", { name: "保存规则" }));
+
+    await waitFor(() => {
+      expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
+        targets: [
+          { read_model_key: "pending_invoice", scope_key: "expense:all" },
+        ],
+      });
+    });
+    expect(pendingInvoiceRowsRequests(fetchMock).length).toBe(initialRequests);
+    releaseBarrier?.();
 
     await waitFor(() => {
       expect(rulesSaved).toBe(true);

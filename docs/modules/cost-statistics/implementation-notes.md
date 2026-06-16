@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-17 - 成本统计项目费用类型下钻重复流水行修复
+
+- 目标：修复成本统计项目视图中选中项目后再切换费用类型，真实数据含同一流水多条成本行时页面卡死/白屏的问题。
+- 影响范围：`CostStatisticsPage` 的成本流水表行身份、`CostStatisticsTable` 行 key contract、成本统计前端 mock 和页面交互测试。
+- 关键决策：`transaction_id` 是银行流水身份，不是成本统计行身份；前端表格行 key 改为由流水 id、交易时间、项目、费用类型、费用内容、金额和行序号组成的渲染键，避免同一流水拆成多条成本行时 HeroUI Table collection 冲突或丢行。不改变 API shape，后端 `row_key` 是否外露另行评估。
+- 文档影响：更新本实施记录和 `tests.md` 历史 bug/前端交互覆盖；产品、API、read model 和 worker 长期事实源不变。
+- 测试覆盖：新增 `web/src/test/CostStatisticsPage.test.tsx::project view keeps split cost rows with the same transaction id renderable`，mock API 可返回重复 `transaction_id` 的成本行。
+- 验证命令：`cd web && npm test -- --run src/test/CostStatisticsPage.test.tsx -t "project view keeps split cost rows" --reporter=verbose`；`cd web && npm test -- --run src/test/CostStatisticsPage.test.tsx --reporter=verbose`；`cd web && npm run build`。
+- 未测风险：本地没有连接真实生产后端复现用户截图中的 123 条明细；真实生产数据量、浏览器白屏堆栈和后端是否应外露 canonical cost row key 仍需 staging/production smoke 进一步确认。
+- 后续事项：如后端 API 后续补充 `row_key`，前端可优先使用后端 canonical cost row identity，保留当前合成键作为兼容 fallback。
+
 ## 2026-06-16 - 成本统计导出错误反馈闭环
 
 - 目标：确保成本统计同步导出被后端行数上限拒绝时，前端下载路径解析结构化错误并在导出中心展示具体原因。

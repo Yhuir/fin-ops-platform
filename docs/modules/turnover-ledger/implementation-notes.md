@@ -6,15 +6,30 @@
 
 - 外部往来款管理首轮测试闭环状态为 `documented-risk`：已有测试覆盖 business core、service/UoW、API contract、read model/worker、前端交互、跨页面集成和旧功能回归。
 - 本轮不新增低价值测试。后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `tests.md` 中七类矩阵补测试。
-- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。bank-only 外部往来闭环在关联台保持 open，只有 OA + 银行 + 发票三栏补齐后才进入 paired。
+- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示候选，不是已闭环事实。外部往来闭环 relation 在关联台保持 open，直到发票等完整业务关系在关联台补齐；若闭环确认前已有 OA-bank relation，可合并为同一个包含 `oa` + `bank` rows 的 active case。
 - PostgreSQL SQL runtime 下外部往来闭环的银行流水事实源必须是 `bank_detail` SQL read model，并保留 Workbench 使用的 legacy/source row id；不能再从 legacy import snapshot 推导可闭环流水。
-- 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回 bank-only 闭环再重新选择。
-- 外部往来页撤回只允许 bank-only open 外部往来闭环；若已在关联台补齐三栏并进入 paired，必须去关联台撤回完整关系。
+- 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回原闭环关系再重新选择。
+- 外部往来页撤回只允许 row types 子集为 `{oa, bank}` 的 `turnover_manual_closure`；若已在关联台补齐发票或其他业务 row type，必须去关联台撤回完整关系。
 - `readModelStatus !== "fresh"` 时前端必须显示诊断并避免把旧 grouped payload 当作最终业务结论；manual closure 这类依赖页面所选 flow row versions 的写操作必须先阻断或等待 fresh 后重新加载并重绑定，后端 stale precondition、canonical write safety、权限/session、DB 和 idempotency/version 继续作为最终兜底。写 API 成功后必须用全屏 operation overlay 等待 `turnover_ledger` barrier fresh 并重新加载。
 - 写路径应优先保持 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` 边界；legacy fallback 只作为兼容风险存在，不能继续扩大。
 - 涉及 Workbench relation 的 manual closure/withdraw 即使经过 legacy fallback facade，也必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation write fallback。
+- 外部往来闭环和 OA/业务单据关联是两个不同事实：OA/业务单据关联 chip 只展示，不参与“确认闭环/撤回闭环”的决定链路；每条 flow row 单独展示“已闭环/未闭环”chip。确认闭环可合并所选银行流水已有的 OA-bank active relation；撤回闭环只撤回 `turnover_manual_closure`，并恢复确认前的 OA-bank relation。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
+
+## 2026-06-17 - OA 关联展示与外部往来闭环关系拆分
+
+- 目标：修复外部往来款管理页把某条流水已关联 OA 的状态显示成“关联台已关联”，并把它误用于确认/撤回闭环判断的问题；同时支持流水 1/OA1、流水 2/OA2、流水 3 共同确认成一个外部往来闭环 active case。
+- 影响范围：`TurnoverLedgerWorkbenchPairPort`、`WorkbenchRelationCommandService`、`WorkbenchPairRelationService` withdraw restore history、`TurnoverLedgerGroupedTable`、`TurnoverLedgerPage`、turnover/workbench integration tests、本模块文档和关联台关系状态机。
+- 关键决策：
+  - `turnover_manual_closure` 可以包含 `oa` + `bank` rows，但外部往来页只能合并 row types 子集为 `{oa, bank}` 且实际包含 OA 的既有 relation；包含 `invoice`、纯 bank-only 既有 relation、已有 `turnover_manual_closure` 或其他 row type 时拒绝并要求按对应 owner 先处理。
+  - 确认闭环使用 `confirm_relation(..., replace_existing=True, before_relations=...)` 替换既有 OA-bank relation，并在 metadata 中保留本次选择的 `turnover_closure_bank_row_ids`。
+  - 撤回闭环使用 `withdraw_relation`，底层 `WorkbenchPairRelationService` 识别 `turnover_manual_closure_confirm` 历史并恢复被标记为 `restorable_on_withdraw` 的 OA-bank relation；不再使用普通 `cancel_relation` 作为外部往来撤回语义。
+  - 前端 group chip 只统计闭环关系；行内 chip 拆成“已关联 OA/已关联业务单据”和“已闭环/未闭环”。OA/业务单据 chip 仅展示，不禁用确认闭环，也不显示撤回闭环。
+- 文档影响：更新 `README.md`、`state-machine.md`、`tests.md`、本实施记录和 `docs/modules/workbench-relations/state-machine.md`；长期产品口径不新增独立文档。
+- 测试覆盖：新增/更新 `test_turnover_manual_closure_merges_existing_oa_bank_relations`、`test_turnover_manual_closure_rejects_rows_already_in_turnover_closure`、`test_turnover_workbench_pair_port_withdraw_restores_merged_oa_bank_relations`、`test_withdraw_restores_previous_relations_from_turnover_manual_closure_history`、`test_manual_closure_merges_existing_oa_bank_relations_and_withdraw_restores_them`、`allows manual closure confirmation when selected rows are only linked to OA`、`shows Workbench relation feedback from the grouped ledger payload`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service tests.test_workbench_relation_command_service tests.test_turnover_ledger_uow_contract tests.test_turnover_workbench_integration -v`；`cd web && npm test -- --run src/test/TurnoverLedgerPage.test.tsx`。
+- 未测风险：本地测试没有用真实生产 PostgreSQL 数据和真实浏览器截图证明所有历史 OA id 命名都可被前端识别为 OA；后端关系恢复以 row type 为准，UI 的“已关联 OA”chip 仍依赖 projected row ids/mode 中可识别 OA 线索。
 
 ## 2026-06-16 - P2/P3 外部往来同步导出上限
 

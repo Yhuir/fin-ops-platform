@@ -817,6 +817,139 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["turnover_closure_mode"], "manual_zero_difference_group")
         self.assertEqual(call["history_operation_type"], "turnover_manual_closure_confirm")
 
+    def test_turnover_manual_closure_merges_existing_oa_bank_relations(self) -> None:
+        module = self._write_adapters_module()
+
+        class BlockingPairService:
+            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
+                raise AssertionError("turnover manual closure must not read active relations from pair service.")
+
+            def replace_with_confirmed_relation(self, **_kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
+                raise AssertionError("turnover manual closure must delegate merge to WorkbenchRelationCommandService.")
+
+        class RecordingRelationCommandService:
+            def __init__(self) -> None:
+                self.active_calls: list[dict[str, object]] = []
+                self.confirm_calls: list[dict[str, object]] = []
+
+            def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+                self.active_calls.append({"row_ids": list(row_ids)})
+                return [
+                    {
+                        "case_id": "case-oa-1",
+                        "row_ids": ["oa-1", "bank-1"],
+                        "row_types": ["oa", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-02",
+                    },
+                    {
+                        "case_id": "case-oa-2",
+                        "row_ids": ["oa-2", "bank-2"],
+                        "row_types": ["oa", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-02",
+                    },
+                ]
+
+            def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+                self.confirm_calls.append(dict(kwargs))
+                return {
+                    "relation": {
+                        "case_id": str(kwargs["case_id"]),
+                        "row_ids": list(kwargs["row_ids"]),
+                        "row_types": list(kwargs["row_types"]),
+                        "relation_mode": str(kwargs["relation_mode"]),
+                        "status": "active",
+                        "month_scope": str(kwargs.get("month_scope") or "all"),
+                        "special_metadata": dict(kwargs.get("special_metadata") or {}),
+                    }
+                }
+
+        command = RecordingRelationCommandService()
+        port = module.TurnoverLedgerWorkbenchPairPort(
+            pair_relation_service=BlockingPairService(),
+            relation_command_service_factory=lambda transaction: command,
+        )
+
+        relation = port.create_turnover_manual_closure(
+            relation={
+                "relation_id": "turnover_rel_closure",
+                "principal_amount": "100.00",
+                "settled_amount": "100.00",
+                "evidence": {"closure_mode": "manual_zero_difference_group"},
+            },
+            bank_row_ids=["bank-1", "bank-2", "bank-3"],
+            actor_id="finance-user",
+            note="manual closure",
+            affected_months=["2026-02"],
+            transaction=object(),
+        )
+
+        self.assertEqual(relation["case_id"], "turnover:turnover_rel_closure")
+        self.assertEqual(command.active_calls, [{"row_ids": ["bank-1", "bank-2", "bank-3"]}])
+        self.assertEqual(len(command.confirm_calls), 1)
+        call = command.confirm_calls[0]
+        self.assertEqual(call["case_id"], "turnover:turnover_rel_closure")
+        self.assertEqual(call["row_ids"], ["oa-1", "bank-1", "oa-2", "bank-2", "bank-3"])
+        self.assertEqual(call["row_types"], ["oa", "bank", "oa", "bank", "bank"])
+        self.assertEqual(call["relation_mode"], "turnover_manual_closure")
+        self.assertTrue(call["replace_existing"])
+        self.assertEqual(
+            [item["case_id"] for item in list(call["before_relations"] or [])],
+            ["case-oa-1", "case-oa-2"],
+        )
+        self.assertEqual(
+            call["special_metadata"]["turnover_closure_bank_row_ids"],
+            ["bank-1", "bank-2", "bank-3"],
+        )
+
+    def test_turnover_manual_closure_rejects_rows_already_in_turnover_closure(self) -> None:
+        module = self._write_adapters_module()
+
+        class BlockingPairService:
+            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
+                raise AssertionError("turnover manual closure must not read active relations from pair service.")
+
+        class ExistingClosureRelationCommandService:
+            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
+                return [
+                    {
+                        "case_id": "turnover:existing_closure",
+                        "row_ids": ["bank-1", "bank-2"],
+                        "row_types": ["bank", "bank"],
+                        "status": "active",
+                        "relation_mode": "turnover_manual_closure",
+                    }
+                ]
+
+            def confirm_relation(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("existing turnover closure must block confirm before writing.")
+
+        port = module.TurnoverLedgerWorkbenchPairPort(
+            pair_relation_service=BlockingPairService(),
+            relation_command_service_factory=lambda transaction: ExistingClosureRelationCommandService(),
+        )
+
+        with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+            port.create_turnover_manual_closure(
+                relation={
+                    "relation_id": "turnover_rel_closure",
+                    "principal_amount": "100.00",
+                    "settled_amount": "100.00",
+                    "evidence": {"closure_mode": "manual_zero_difference_group"},
+                },
+                bank_row_ids=["bank-1", "bank-2", "bank-3"],
+                actor_id="finance-user",
+                note="manual closure",
+                affected_months=["2026-02"],
+                transaction=object(),
+            )
+
+        self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
+        self.assertIn("先撤回原闭环", str(context.exception))
+
     def test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure(self) -> None:
         module = self._write_adapters_module()
 
@@ -882,10 +1015,10 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
-                self.cancel_calls: list[dict[str, object]] = []
+                self.withdraw_calls: list[dict[str, object]] = []
 
-            def cancel_relation(self, **kwargs: object) -> dict[str, object]:
-                self.cancel_calls.append(dict(kwargs))
+            def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+                self.withdraw_calls.append(dict(kwargs))
                 return {
                     "relation": {
                         "case_id": str(kwargs["case_id"]),
@@ -913,8 +1046,89 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(relation["case_id"], "turnover:turnover_rel_1")
         self.assertEqual(relation["status"], "cancelled")
-        self.assertEqual(len(command.cancel_calls), 1)
-        call = command.cancel_calls[0]
+        self.assertEqual(len(command.withdraw_calls), 1)
+        call = command.withdraw_calls[0]
+        self.assertEqual(call["case_id"], "turnover:turnover_rel_1")
+        self.assertEqual(call["actor_id"], "finance-user")
+        self.assertEqual(call["reason"], "withdraw closure")
+        self.assertEqual(call["history_operation_type"], "turnover_manual_closure_withdraw")
+
+    def test_turnover_workbench_pair_port_withdraw_restores_merged_oa_bank_relations(self) -> None:
+        module = self._write_adapters_module()
+
+        class BlockingPairService:
+            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
+                raise AssertionError("turnover withdraw must not read active relation from pair service.")
+
+            def list_active_relations(self) -> list[dict[str, object]]:
+                raise AssertionError("turnover withdraw must not list pair service relations.")
+
+            def cancel_relation(self, _case_id: str) -> dict[str, object]:
+                raise AssertionError("turnover withdraw must use WorkbenchRelationCommandService withdraw semantics.")
+
+        class FreshRelationFacade:
+            def get_by_row_ids(self, row_ids: list[str], **_kwargs: object) -> dict[str, object]:
+                return {
+                    "status": "fresh",
+                    "rows": [
+                        {"row_id": str(row_id), "row_type": "bank_transaction", "group_ids": ["turnover:turnover_rel_1"]}
+                        for row_id in row_ids
+                    ],
+                    "groups": [
+                        {
+                            "group_id": "turnover:turnover_rel_1",
+                            "payload": {
+                                "group_id": "turnover:turnover_rel_1",
+                                "relation_mode": "turnover_manual_closure",
+                                "row_ids": ["oa-1", "bank-1", "oa-2", "bank-2", "bank-3"],
+                                "row_types": ["oa", "bank", "oa", "bank", "bank"],
+                            },
+                        }
+                    ],
+                    "read_model_scope_keys": ["2026-02"],
+                }
+
+        class RecordingRelationCommandService:
+            def __init__(self) -> None:
+                self.withdraw_calls: list[dict[str, object]] = []
+
+            def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+                self.withdraw_calls.append(dict(kwargs))
+                return {
+                    "relation": {
+                        "case_id": str(kwargs["case_id"]),
+                        "status": "cancelled",
+                    },
+                    "restored_relations": [
+                        {"case_id": "case-oa-1", "row_ids": ["oa-1", "bank-1"], "status": "active"},
+                        {"case_id": "case-oa-2", "row_ids": ["oa-2", "bank-2"], "status": "active"},
+                    ],
+                }
+
+        command = RecordingRelationCommandService()
+        port = module.TurnoverLedgerWorkbenchPairPort(
+            pair_relation_service=BlockingPairService(),
+            relation_command_service_factory=lambda transaction: command,
+            relation_facade=FreshRelationFacade(),
+        )
+
+        relation = port.withdraw_turnover_manual_closure(
+            relation={
+                "relation_id": "turnover_rel_1",
+                "status": "withdrawn",
+                "bank_row_ids": ["bank-1", "bank-2", "bank-3"],
+            },
+            actor_id="finance-user",
+            note="withdraw closure",
+            transaction=object(),
+        )
+
+        self.assertEqual(relation["case_id"], "turnover:turnover_rel_1")
+        self.assertEqual(relation["status"], "cancelled")
+        self.assertEqual(relation["restored_relations"][0]["case_id"], "case-oa-1")
+        self.assertEqual(relation["restored_relations"][1]["case_id"], "case-oa-2")
+        self.assertEqual(len(command.withdraw_calls), 1)
+        call = command.withdraw_calls[0]
         self.assertEqual(call["case_id"], "turnover:turnover_rel_1")
         self.assertEqual(call["actor_id"], "finance-user")
         self.assertEqual(call["reason"], "withdraw closure")

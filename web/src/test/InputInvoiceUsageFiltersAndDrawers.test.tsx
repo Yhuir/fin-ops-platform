@@ -435,12 +435,32 @@ describe("Input invoice usage workflow drawers", () => {
 
   test("OA reverse drawer creates OA draft directly and records submitted confirmation", async () => {
     const user = userEvent.setup();
-    const loadPreview = vi.fn(() => Promise.resolve({
+    const initialPreview: OaReversePreviewPayload = {
       ...previewPayload,
       canCreateDraft: true,
       nextAction: "create_oa_draft",
       permissions: { canCreateDraft: true },
-    }));
+    };
+    const refreshedPreview: OaReversePreviewPayload = {
+      ...initialPreview,
+      previewId: "oa_reverse_preview_subset_001",
+      previewHash: "preview-hash-subset-001",
+      invoiceCount: 1,
+      totalWithTax: "49.86",
+      groups: [{
+        ...initialPreview.groups[0],
+        invoiceCount: 1,
+        totalWithTax: "49.86",
+        invoiceRows: initialPreview.groups[0].invoiceRows?.filter((invoice) => invoice.invoiceId === "inv-001"),
+        candidateInvoiceIds: ["inv-001"],
+        candidateInvoices: initialPreview.groups[0].candidateInvoices?.filter((invoice) => invoice.invoiceId === "inv-001"),
+      }],
+      invoiceRows: initialPreview.invoiceRows?.filter((invoice) => invoice.invoiceId === "inv-001"),
+      candidateInvoices: initialPreview.candidateInvoices?.filter((invoice) => invoice.invoiceId === "inv-001"),
+    };
+    const loadPreview = vi.fn((request) => Promise.resolve(
+      request.selectedInvoiceIds.length === 1 ? refreshedPreview : initialPreview,
+    ));
     const createDraftFromSelection = vi.fn(() => Promise.resolve({
       batchId: "oa_reverse_batch_001",
       version: 4,
@@ -499,9 +519,14 @@ describe("Input invoice usage workflow drawers", () => {
     await user.click(await screen.findByRole("checkbox", { name: "选择候选发票 SD-INV-002" }));
     expect(screen.queryByRole("button", { name: "创建本地批次" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "创建 OA 草稿" }));
+    await waitFor(() => expect(loadPreview).toHaveBeenLastCalledWith({
+      sourceFilters: [],
+      selectedInvoiceIds: ["inv-001"],
+      targetApplicantCode: "chen_xiuyun",
+    }));
     await waitFor(() => expect(createDraftFromSelection).toHaveBeenCalledWith(expect.objectContaining({
-      previewId: "oa_reverse_preview_001",
-      expectedPreviewHash: "preview-hash-001",
+      previewId: "oa_reverse_preview_subset_001",
+      expectedPreviewHash: "preview-hash-subset-001",
       selectedInvoiceIds: ["inv-001"],
       targetApplicantCode: "chen_xiuyun",
     })));

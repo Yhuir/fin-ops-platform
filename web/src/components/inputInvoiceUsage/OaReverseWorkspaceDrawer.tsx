@@ -190,15 +190,30 @@ export default function OaReverseWorkspaceDrawer({
     if (!preview?.previewId || !createDraftFromSelection) {
       return;
     }
+    const selectedIds = [...selectedCandidateIds];
+    const resolvedTargetApplicantCode = selectedTargetApplicantCode || firstTargetApplicantCode(preview);
     runBatchAction(
       "createDraft",
-      () => createDraftFromSelection({
-        previewId: preview.previewId ?? "",
-        expectedPreviewHash: preview.previewHash,
-        idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-draft"),
-        selectedInvoiceIds: selectedCandidateIds,
-        targetApplicantCode: selectedTargetApplicantCode || firstTargetApplicantCode(preview),
-      }),
+      async () => {
+        const refreshedPreview = await loadPreview({
+          sourceFilters,
+          selectedInvoiceIds: selectedIds,
+          targetApplicantCode: resolvedTargetApplicantCode || null,
+        });
+        setPreview(refreshedPreview);
+        const refreshedCandidateIds = invoicesFromPreview(refreshedPreview).map((invoice) => invoice.invoiceId);
+        setSelectedCandidateIds(refreshedCandidateIds);
+        if (!refreshedPreview.previewId || !refreshedPreview.previewHash || refreshedCandidateIds.length === 0) {
+          throw new Error(refreshedPreview.unavailableReason || "当前选择没有可创建 OA 草稿的候选发票。");
+        }
+        return createDraftFromSelection({
+          previewId: refreshedPreview.previewId,
+          expectedPreviewHash: refreshedPreview.previewHash,
+          idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-draft"),
+          selectedInvoiceIds: refreshedCandidateIds,
+          targetApplicantCode: refreshedPreview.targetApplicantCode || resolvedTargetApplicantCode,
+        });
+      },
       "OA 草稿已创建，请在 OA 页面处理后选择提交状态。",
       () => setConfirmationOpen(true),
     );

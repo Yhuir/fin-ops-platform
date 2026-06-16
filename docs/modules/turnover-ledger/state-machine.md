@@ -78,7 +78,8 @@ same group flow rows selected
   -> backend stale precondition passes
   -> Turnover manual confirmed relation
   -> Workbench active pair relation
-  -> Workbench bank-only open relation，等待 OA + 银行 + 发票三栏补齐
+  -> merge selected banks plus any selected banks' existing OA-bank active relations into one turnover_manual_closure case
+  -> Workbench open relation until invoice/full business relation is completed in Workbench
   -> turnover/workbench/workbench_relation dirty-outbox refresh
   -> API 返回 operation freshness targets
   -> frontend waits turnover_ledger/workbench_relation/workbench fresh before emitting Workbench refresh event
@@ -90,10 +91,11 @@ same group flow rows selected
 - 全部流水必须同组、同对方、同语义。
 - 必须至少一收一支，收支合计差额为 `0.00`。
 - 前端不能用抽屉打开时缓存的 flow row 版本直接提交；提交前必须刷新并重绑定，若任一流水消失、离开原 group、或刷新后不再零差额，必须中止并要求重新选择。
-- 不得被其他 active Turnover confirmed relation 或 Workbench active pair relation 占用。
+- 不得被其他 active Turnover confirmed relation 占用。
+- 已处于 Workbench active relation 的所选银行流水，只有当既有 relation 的 row types 仅包含 `oa` 和 `bank` 时，外部往来闭环确认才可合并这些 relation；合并后新的 `turnover_manual_closure` active case 包含既有 OA rows、既有 bank rows 和本次新增 bank rows。既有 relation 包含 `invoice` 或其他业务 row type 时必须拒绝，并要求到关联台处理完整关系。
 - `expected_versions` 必须在写 relation 和 Workbench pair relation 前校验。
 - `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
-- 已确认后不能追加流水；漏选时必须先撤回原 bank-only 闭环，再重新选择完整流水确认。
+- 已确认后不能追加流水；漏选时必须先撤回原闭环关系，再重新选择完整流水确认。
 - 两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`；三笔及以上使用 `manual_zero_difference_group`。
 
 ### 撤回
@@ -109,6 +111,8 @@ manual confirmed relation
   -> stale precondition passes
   -> Workbench relation scope check passes
   -> withdrawn
+  -> command service withdraws only turnover_manual_closure case
+  -> restorable previous OA-bank relations are reactivated
   -> turnover/workbench/workbench_relation dirty-outbox refresh
 ```
 
@@ -117,7 +121,8 @@ manual confirmed relation
 - system/generated relation 撤回。
 - stale relation version 撤回。
 - duplicate withdraw 产生第二次 mutation 或第二次 refresh。
-- 若 Workbench active relation 已从 bank-only 外部往来 open 组升级为 OA + 银行 + 发票三栏 paired，外部往来页不得撤回整组关系；必须去关联台撤回完整 relation，避免误删 OA/发票关系。
+- 外部往来页不得撤回包含发票或其他业务 row type 的 Workbench active relation；必须去关联台撤回完整 relation，避免误删 OA/发票关系。
+- 外部往来页撤回只撤回 `turnover_manual_closure` 这个多流水闭环关系；确认闭环前已经存在且被合并的 OA-bank relation 必须恢复为 active，不能被取消或删除。
 
 ### Relation extra
 
@@ -147,11 +152,11 @@ extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `tu
 | stale/refreshing | `readModelStatus !== "fresh"` 时展示当前可用数据和诊断，不能把 grouped payload 当作最终业务结论；manual closure 发起/提交必须被阻断或先等 fresh 后重刷重绑，最终仍由后端 stale precondition/canonical write safety 兜底 | read model / page tests |
 | permission disabled | `canMutateData=false` 时禁用保存、确认、撤回等写动作 | API 403 + 前端 disabled tests |
 | tag drawer | 加载 active tags，保存 selected codes 后 reload ledger | `opens tag selection drawer, saves selected bank detail labels, and reloads ledger` |
-| closure drawer | 允许同组多条 flow rows；至少一收一支且收支合计差额为 0 才允许确认；点击确定前先等台账 fresh、reload grouped payload，并用最新 row versions 提交 | manual closure/cross-group/fresh-rebind tests |
+| closure drawer | 允许同组多条 flow rows；至少一收一支且收支合计差额为 0 才允许确认；仅已关联 OA/业务单据但未闭环的 flow row 不阻断确认；点击确定前先等台账 fresh、reload grouped payload，并用最新 row versions 提交 | manual closure/cross-group/fresh-rebind tests |
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
 | operation pending | tag-selection、extra、confirm、withdraw 成功后显示全屏 overlay，等待 `turnover_ledger` operation barrier fresh，再 reload grouped ledger | operation overlay / page tests |
-| workbench relation feedback | grouped payload 中的 flow row 展示 `workbench_relation_status`：`linked` 显示关联台已关联/手工闭环，`candidate` 显示候选，`unlinked` 显示未关联；这些字段来自后端 projection，不来自前端本地事件 | API mapper / page tests |
+| workbench relation feedback | grouped payload 中的 flow row 展示 `workbench_relation_status`。OA/业务单据关联 chip 使用“已关联 OA”或“已关联业务单据”，仅作为展示；每条 flow row 另有“已闭环/未闭环”chip 表示是否存在 `turnover_manual_closure` 多流水闭环。toolbar 的确认/撤回只看闭环 chip 对应的 relation mode，不看 OA/业务单据 chip；这些字段来自后端 projection，不来自前端本地事件 | API mapper / page tests |
 
 前端跨页事件：
 
@@ -219,3 +224,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `turnover_ledger` barrier fresh 并 reload，避免旧 grouped payload 暴露给用户 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
 | 2026-06-15 | manual closure 提交前刷新并重绑定所选 flow rows | 防止抽屉缓存旧 `categoryVersion` 导致后端 stale precondition 拒绝，也防止刷新后流水消失时误发 POST | `web/src/test/TurnoverLedgerPage.test.tsx` fresh-rebind/stale tests |
 | 2026-06-16 | grouped payload 投影 Workbench relation 状态 | 关联台反向变化可通过 fresh `workbench_relation` read model 反馈到流水台；relation 不 fresh 时不发布新的 turnover read model | `tests/test_turnover_ledger_read_model_refresh.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
+| 2026-06-17 | 拆分 OA/业务单据关联展示与外部往来闭环状态 | OA/业务单据关联 chip 仅展示，不参与确认/撤回闭环判断；确认闭环可合并既有 OA-bank relation，撤回只撤回 `turnover_manual_closure` 并恢复旧 OA-bank relation | `tests/test_workbench_pair_relation_service.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/TurnoverLedgerPage.test.tsx` |

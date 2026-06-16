@@ -934,7 +934,8 @@ describe("OA pending payments page", () => {
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
-    await screen.findByText("待找发票规则设置");
+    await screen.findByRole("heading", { name: "支出流水无需开票规则设置" });
+    expect(screen.queryByRole("heading", { name: "待找发票规则设置" })).not.toBeInTheDocument();
     expect(screen.queryByText(/版本\s+\d+/)).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -970,7 +971,7 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
-    await screen.findByText("待找发票规则设置");
+    await screen.findByRole("heading", { name: "支出流水无需开票规则设置" });
     expect(rulesRequests(fetchMock)).toHaveLength(1);
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");

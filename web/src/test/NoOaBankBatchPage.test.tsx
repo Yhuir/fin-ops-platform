@@ -392,6 +392,15 @@ function installFetchMock(payload = listPayload) {
   return fetchMock;
 }
 
+function operationBarrierRequests(fetchMock: ReturnType<typeof installFetchMock>) {
+  return fetchMock.mock.calls
+    .filter(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST";
+    })
+    .map(([, init]) => JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -695,6 +704,11 @@ describe("NoOaBankBatchPage", () => {
           }),
         }),
       );
+    });
+    expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
+      targets: [
+        { read_model_key: "no_oa_bank_batch", scope_key: "all" },
+      ],
     });
     expect(await screen.findByText("免OA流水标签范围已保存")).toBeInTheDocument();
   });

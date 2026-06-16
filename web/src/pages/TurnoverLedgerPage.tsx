@@ -388,7 +388,7 @@ export default function TurnoverLedgerPage() {
     [selectedClosureRows],
   );
   const closurePreview = useMemo(() => buildClosurePreview(selectedClosureRows), [selectedClosureRows]);
-  const selectedRowsContainLinkedWorkbenchRelation = selectedClosureRows.some((row) => row.workbenchRelationStatus === "linked");
+  const selectedRowsContainTurnoverClosure = selectedClosureRows.some(isTurnoverManualClosureLinkedRow);
   const selectedManualClosureRelationId = useMemo(() => {
     if (selectedClosureRows.length === 0 || selectedClosureRows.some((row) => !isTurnoverManualClosureLinkedRow(row))) {
       return "";
@@ -406,7 +406,7 @@ export default function TurnoverLedgerPage() {
   const canOpenClosureDrawer = canMutateData
     && !readModelNeedsRefresh
     && selectedClosureRows.length >= 2
-    && !selectedRowsContainLinkedWorkbenchRelation;
+    && !selectedRowsContainTurnoverClosure;
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -937,7 +937,7 @@ export default function TurnoverLedgerPage() {
                 >
                   确认闭环
                 </button>
-                {selectedRowsContainLinkedWorkbenchRelation ? (
+                {selectedRowsContainTurnoverClosure ? (
                   <button
                     className="turnover-ledger-button turnover-ledger-button--warning"
                     disabled={!canWithdrawSelectedManualClosure}

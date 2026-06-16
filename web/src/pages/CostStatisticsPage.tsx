@@ -103,6 +103,18 @@ function formatCurrencyFromRows(rows: Array<{ amount: string }>) {
   });
 }
 
+function getCostTimeRowRenderKey(row: CostTimeRow, index: number) {
+  return [
+    row.transactionId || "transaction",
+    row.tradeTime,
+    row.projectName,
+    row.expenseType,
+    row.expenseContent,
+    row.amount,
+    String(index),
+  ].join("|");
+}
+
 function groupProjectExpenseTypes(rows: CostTimeRow[]) {
   const grouped = new Map<string, { totalAmount: number; transactionCount: number }>();
   const projectTotalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
@@ -1507,7 +1519,7 @@ export default function CostStatisticsPage() {
                     ariaLabel="按时间统计表"
                     columns={timeColumns}
                     rows={filteredTimeRows}
-                    getRowKey={(row) => row.transactionId}
+                    getRowKey={getCostTimeRowRenderKey}
                     emptyLabel="当前时间范围没有可用于成本统计的支出流水。"
                     onRowClick={(row) => void openTransactionDetail(row, "time")}
                     getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
@@ -1688,7 +1700,7 @@ export default function CostStatisticsPage() {
                         ariaLabel="项目对应流水表"
                         columns={transactionColumns}
                         rows={selectedProjectTransactionRows}
-                        getRowKey={(row) => row.transactionId}
+                        getRowKey={getCostTimeRowRenderKey}
                         onRowClick={(row) => void openTransactionDetail(row, "project")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"
@@ -1853,7 +1865,7 @@ export default function CostStatisticsPage() {
                         ariaLabel="银行对应流水表"
                         columns={transactionColumns}
                         rows={selectedBankProjectRows}
-                        getRowKey={(row) => row.transactionId}
+                        getRowKey={getCostTimeRowRenderKey}
                         onRowClick={(row) => void openTransactionDetail(row, "bank")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该项目下暂无流水。"
@@ -2024,7 +2036,7 @@ export default function CostStatisticsPage() {
                         ariaLabel="按费用类型流水表"
                         columns={transactionColumns}
                         rows={selectedExpenseTypeRows}
-                        getRowKey={(row) => row.transactionId}
+                        getRowKey={getCostTimeRowRenderKey}
                         onRowClick={(row) => void openTransactionDetail(row, "expenseType")}
                         getRowActionLabel={(row) => `查看流水 ${row.transactionId}`}
                         emptyLabel="该费用类型下暂无流水。"

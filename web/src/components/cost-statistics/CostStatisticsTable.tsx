@@ -33,7 +33,7 @@ type CostStatisticsTableProps<Row extends object> = {
   ariaLabel: string;
   columns: CostStatisticsTableColumn<Row>[];
   rows: Row[];
-  getRowKey: (row: Row) => string;
+  getRowKey: (row: Row, index: number) => string;
   emptyLabel?: string;
   onRowClick?: (row: Row) => void;
   getRowActionLabel?: (row: Row) => string;
@@ -79,8 +79,8 @@ export default function CostStatisticsTable<Row extends object>({
                 </FinanceTableCell>
               ))}
             </FinanceTableRow>
-          ) : rows.map((row) => {
-            const rowKey = getRowKey(row);
+          ) : rows.map((row, rowIndex) => {
+            const rowKey = getRowKey(row, rowIndex);
             return (
               <FinanceTableRow
                 key={rowKey}

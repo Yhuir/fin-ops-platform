@@ -18,6 +18,12 @@ from fin_ops_platform.services.workbench_idempotency import (
 from fin_ops_platform.services.no_oa_bank_batch_application_service import NoOaBankBatchPersistenceError
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
+from fin_ops_platform.services.workbench_reconciliation_models import (
+    DECISION_STATUS_OPEN,
+    DECISION_STATUS_PAIRED,
+    DISPLAY_STATE_OPEN,
+    DISPLAY_STATE_PAIRED,
+)
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
@@ -117,6 +123,9 @@ class _WorkbenchWithdrawLinkCommand:
 CASH_PASS_THROUGH_MODE = "cash_pass_through"
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
 PERSONAL_ADVANCE_REPAYMENT_MODE = "personal_advance_repayment_settlement"
+ACTIVE_RECONCILIATION_DECISION_STATUSES = {DECISION_STATUS_OPEN, DECISION_STATUS_PAIRED}
+ACTIVE_RECONCILIATION_DECISION_DISPLAY_STATES = {DISPLAY_STATE_OPEN, DISPLAY_STATE_PAIRED}
+SPLIT_RECONCILIATION_DECISION_SUPPRESSION_MARKER = "workbench_split_candidate"
 
 
 class WorkbenchWriteFacade:
@@ -170,6 +179,7 @@ class WorkbenchWriteFacade:
         submit_internal_transfer_rows_from_workbench: Callable[..., dict[str, object]] | None = None,
         relation_command_service: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
+        reconciliation_decision_store: Any | None = None,
     ) -> None:
         self._pair_relation_service = pair_relation_service
         self._exception_service = exception_service
@@ -218,6 +228,7 @@ class WorkbenchWriteFacade:
         self._submit_internal_transfer_rows_from_workbench = submit_internal_transfer_rows_from_workbench
         self._relation_command_service = relation_command_service
         self._relation_command_service_factory = relation_command_service_factory
+        self._reconciliation_decision_store = reconciliation_decision_store
 
     def preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
         try:
@@ -1399,6 +1410,12 @@ class WorkbenchWriteFacade:
             )
             if candidate_preview is not None:
                 return WorkbenchWriteResult(HTTPStatus.OK, candidate_preview)
+            decision_preview = self._preview_split_reconciliation_decision(
+                month=month,
+                row_ids=row_ids,
+            )
+            if decision_preview is not None:
+                return WorkbenchWriteResult(HTTPStatus.OK, decision_preview)
             return self._relation_command_error_result(exc)
         except _WorkbenchWritePersistenceError as exc:
             return self._persistence_unavailable_result(str(exc))
@@ -1850,6 +1867,11 @@ class WorkbenchWriteFacade:
             candidate_keys=[candidate_key],
             expected_versions=expected_versions,
         )
+        affected_scope_keys = self._split_candidate_affected_scope_keys(
+            month=month,
+            row_ids=candidate_row_ids,
+            scope_month=str(candidate.get("scope_month") or ""),
+        )
         return {
             "operation": "split_candidate",
             "operation_type": "split_candidate",
@@ -1858,6 +1880,67 @@ class WorkbenchWriteFacade:
             "can_submit": True,
             "requires_note": False,
             "message": "将拆分该自动候选组合，保留各记录为未配对状态。",
+            "affected_row_ids": candidate_row_ids,
+            "affected_scope_keys": affected_scope_keys,
+            "before": {
+                "groups": self._relation_groups(
+                    [],
+                    selected_rows=rows,
+                    ungrouped_selected_rows="single",
+                )
+            },
+            "after": {"groups": []},
+            "amount_summary": {
+                "before": amount_check,
+                "after": amount_check,
+                **amount_check,
+            },
+            "submit_expected_versions": expected_versions,
+        }
+
+    def _preview_split_reconciliation_decision(
+        self,
+        *,
+        month: str,
+        row_ids: list[str],
+    ) -> dict[str, object] | None:
+        decisions = self._active_reconciliation_decisions_for_row_ids(month=month, row_ids=row_ids)
+        if not decisions:
+            return None
+        if len(decisions) > 1:
+            raise ValueError("一次只能处理一个关联组。")
+        decision = decisions[0]
+        decision_key = str(decision.get("decision_key") or decision.get("decision_id") or "").strip()
+        if not decision_key:
+            return None
+        decision_row_ids = [
+            str(row_id)
+            for row_id in list(decision.get("row_ids") or [])
+            if str(row_id).strip()
+        ]
+        rows = self._resolve_live_rows_direct(decision_row_ids, month_hint=month) if decision_row_ids else []
+        amount_check = self._amount_check_for_rows_by_type(self._rows_by_type(rows))
+        expected_versions = self._split_reconciliation_decision_expected_versions(decision)
+        preview_id = self._split_reconciliation_decision_preview_id(
+            decision_keys=[decision_key],
+            expected_versions=expected_versions,
+        )
+        affected_scope_keys = self._split_candidate_affected_scope_keys(
+            month=month,
+            row_ids=decision_row_ids,
+            scope_month=str(decision.get("scope_month") or ""),
+        )
+        return {
+            "operation": "split_candidate",
+            "operation_type": "split_candidate",
+            "preview_id": preview_id,
+            "candidate_keys": [decision_key],
+            "decision_keys": [decision_key],
+            "can_submit": True,
+            "requires_note": False,
+            "message": "将拆分该自动候选组合，保留各记录为未配对状态。",
+            "affected_row_ids": decision_row_ids,
+            "affected_scope_keys": affected_scope_keys,
             "before": {
                 "groups": self._relation_groups(
                     [],
@@ -1890,6 +1973,21 @@ class WorkbenchWriteFacade:
                 {"error": "invalid_split_candidate_request", "message": str(exc)},
             )
         if preview is None:
+            try:
+                decision_preview = self._preview_split_reconciliation_decision(month=month, row_ids=row_ids)
+            except ValueError as exc:
+                return WorkbenchWriteResult(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "invalid_split_candidate_request", "message": str(exc)},
+                )
+            if decision_preview is not None:
+                return self._split_reconciliation_decision_from_withdraw_link(
+                    payload=payload,
+                    month=month,
+                    row_ids=row_ids,
+                    preview=decision_preview,
+                    request_id=request_id,
+                )
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
                 {
@@ -1921,7 +2019,7 @@ class WorkbenchWriteFacade:
                 suppressed_reason="manual_override",
             )
             self._persist_candidate_matches_best_effort(operation="split_candidate")
-            changed_scope_keys = list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids, month_scope=month))
+            changed_scope_keys = self._preview_split_scope_keys(preview=preview, month=month, row_ids=row_ids)
             schedule_started_at = monotonic()
             self._execute_derived_data_lifecycle_event(
                 "candidate_match_changed",
@@ -1958,10 +2056,85 @@ class WorkbenchWriteFacade:
                 "operation": "split_candidate",
                 "action": "split_candidate",
                 "month": month,
-                "changed_scopes": list(self._scope_keys_for_row_ids(month=month, row_ids=affected_row_ids or row_ids, month_scope=month)),
-                "affected_months": list(self._scope_keys_for_row_ids(month=month, row_ids=affected_row_ids or row_ids, month_scope=month)),
+                "changed_scopes": changed_scope_keys,
+                "affected_months": changed_scope_keys,
                 "affected_row_ids": affected_row_ids or row_ids,
                 "candidate_keys": candidate_keys,
+                "message": "已拆分 1 个候选组合。",
+            },
+        )
+
+    def _split_reconciliation_decision_from_withdraw_link(
+        self,
+        *,
+        payload: dict[str, object],
+        month: str,
+        row_ids: list[str],
+        preview: dict[str, object],
+        request_id: str | None,
+    ) -> WorkbenchWriteResult:
+        conflict = self._split_candidate_preview_conflict(payload=payload, preview=preview)
+        if conflict is not None:
+            return conflict
+        marker = getattr(self._reconciliation_decision_store, "suppress_by_row_ids", None)
+        if not callable(marker):
+            return WorkbenchWriteResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "workbench_reconciliation_decision_store_unavailable",
+                    "message": "Workbench reconciliation decision store is not configured.",
+                },
+            )
+        decision_keys = [
+            str(decision_key)
+            for decision_key in list(preview.get("decision_keys") or preview.get("candidate_keys") or [])
+            if str(decision_key).strip()
+        ]
+        affected_row_ids = self._preview_split_row_ids(preview=preview, fallback_row_ids=row_ids)
+        try:
+            suppressed_count = int(
+                marker(
+                    affected_row_ids,
+                    exception_case_id=SPLIT_RECONCILIATION_DECISION_SUPPRESSION_MARKER,
+                )
+                or 0
+            )
+            changed_scope_keys = self._preview_split_scope_keys(
+                preview=preview,
+                month=month,
+                row_ids=affected_row_ids,
+            )
+            schedule_started_at = monotonic()
+            self._execute_derived_data_lifecycle_event(
+                "candidate_match_changed",
+                scope_keys=changed_scope_keys,
+                metadata={"source": "split_candidate", "decision_keys": decision_keys},
+            )
+            self._schedule_read_model_persist(
+                changed_scope_keys=changed_scope_keys,
+                request_id=request_id,
+                action_name="split_candidate",
+            )
+            self._emit_timing_if_requested(
+                request_id=request_id,
+                action_name="split_candidate",
+                phase="schedule_background_persist",
+                started_at=schedule_started_at,
+            )
+        except Exception:
+            return self._persistence_unavailable_result("工作台候选关系暂时无法保存，请稍后重试。")
+        return WorkbenchWriteResult(
+            HTTPStatus.OK,
+            {
+                "success": True,
+                "operation": "split_candidate",
+                "action": "split_candidate",
+                "month": month,
+                "changed_scopes": changed_scope_keys,
+                "affected_months": changed_scope_keys,
+                "affected_row_ids": affected_row_ids,
+                "candidate_keys": decision_keys,
+                "suppressed_count": suppressed_count,
                 "message": "已拆分 1 个候选组合。",
             },
         )
@@ -1994,6 +2167,155 @@ class WorkbenchWriteFacade:
             if requested_row_ids.intersection(candidate_row_ids):
                 matched.append(dict(candidate))
         return matched
+
+    def _active_reconciliation_decisions_for_row_ids(self, *, month: str, row_ids: list[str]) -> list[dict[str, object]]:
+        requested_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
+        if not requested_row_ids:
+            return []
+        lister = getattr(self._reconciliation_decision_store, "list_decisions", None)
+        if not callable(lister):
+            return []
+        matched_by_key: dict[str, dict[str, object]] = {}
+        for scope_month in self._reconciliation_decision_scope_months(month=month, row_ids=list(requested_row_ids)):
+            decisions = lister(scope_month, statuses=set(ACTIVE_RECONCILIATION_DECISION_STATUSES))
+            for decision in list(decisions or []):
+                if not isinstance(decision, dict):
+                    continue
+                if not self._is_active_split_reconciliation_decision(decision):
+                    continue
+                decision_row_ids = {
+                    str(row_id).strip()
+                    for row_id in list(decision.get("row_ids") or [])
+                    if str(row_id).strip()
+                }
+                if not requested_row_ids.intersection(decision_row_ids):
+                    continue
+                decision_key = str(decision.get("decision_key") or decision.get("decision_id") or "").strip()
+                if decision_key:
+                    matched_by_key[decision_key] = dict(decision)
+        return list(matched_by_key.values())
+
+    def _reconciliation_decision_scope_months(self, *, month: str, row_ids: list[str]) -> list[str]:
+        months: set[str] = set()
+        normalized_month = str(month or "").strip()
+        if SEARCH_MONTH_RE.match(normalized_month):
+            months.add(normalized_month)
+        month_scope = str(self._month_scope_for_selected_row_ids(month=normalized_month, row_ids=row_ids) or "").strip()
+        if SEARCH_MONTH_RE.match(month_scope):
+            months.add(month_scope)
+        try:
+            scope_keys = self._scope_keys_for_row_ids(month=normalized_month, row_ids=row_ids, month_scope=month_scope)
+        except Exception:
+            scope_keys = set()
+        months.update(str(scope_key).strip() for scope_key in scope_keys if SEARCH_MONTH_RE.match(str(scope_key).strip()))
+        try:
+            rows = self._resolve_live_rows_direct(row_ids, month_hint=normalized_month or None)
+        except Exception:
+            rows = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            decision = row.get("workbench_reconciliation_decision")
+            if not isinstance(decision, dict):
+                continue
+            scope_month = str(decision.get("scope_month") or "").strip()
+            if SEARCH_MONTH_RE.match(scope_month):
+                months.add(scope_month)
+        return sorted(months)
+
+    @staticmethod
+    def _is_active_split_reconciliation_decision(decision: dict[str, object]) -> bool:
+        status = str(decision.get("decision_status") or "").strip()
+        display_state = str(decision.get("display_state") or "").strip()
+        decision_key = str(decision.get("decision_key") or decision.get("decision_id") or "").strip()
+        return (
+            bool(decision_key)
+            and status in ACTIVE_RECONCILIATION_DECISION_STATUSES
+            and display_state in ACTIVE_RECONCILIATION_DECISION_DISPLAY_STATES
+        )
+
+    @staticmethod
+    def _split_reconciliation_decision_expected_versions(decision: dict[str, object]) -> dict[str, object]:
+        decision_key = str(decision.get("decision_key") or decision.get("decision_id") or "").strip()
+        if not decision_key:
+            return {}
+        return {
+            f"decision:{decision_key}": {
+                "decision_status": str(decision.get("decision_status") or "").strip(),
+                "display_state": str(decision.get("display_state") or "").strip(),
+                "scope_month": str(decision.get("scope_month") or "").strip(),
+                "rule_version": str(decision.get("rule_version") or "").strip(),
+            }
+        }
+
+    @staticmethod
+    def _split_reconciliation_decision_preview_id(
+        *,
+        decision_keys: list[str],
+        expected_versions: dict[str, object],
+    ) -> str:
+        payload = {
+            "operation_type": "split_candidate",
+            "decision_keys": list(decision_keys),
+            "expected_versions": dict(expected_versions),
+        }
+        digest = sha256(
+            json.dumps(payload, sort_keys=True, default=str, ensure_ascii=True).encode("utf-8")
+        ).hexdigest()[:24]
+        return f"split_candidate:{digest}"
+
+    @staticmethod
+    def _preview_split_row_ids(*, preview: dict[str, object], fallback_row_ids: list[str]) -> list[str]:
+        preview_row_ids = [
+            str(row_id)
+            for row_id in list(preview.get("affected_row_ids") or [])
+            if str(row_id).strip()
+        ]
+        if preview_row_ids:
+            return preview_row_ids
+        before = preview.get("before")
+        rows: list[str] = []
+        if isinstance(before, dict):
+            for group in list(before.get("groups") or []):
+                if not isinstance(group, dict):
+                    continue
+                for key in ("oa_rows", "bank_rows", "invoice_rows"):
+                    for row in list(group.get(key) or []):
+                        if isinstance(row, dict):
+                            row_id = str(row.get("id") or "").strip()
+                            if row_id and row_id not in rows:
+                                rows.append(row_id)
+        if rows:
+            return rows
+        return [str(row_id) for row_id in list(fallback_row_ids or []) if str(row_id).strip()]
+
+    def _split_candidate_affected_scope_keys(
+        self,
+        *,
+        month: str,
+        row_ids: list[str],
+        scope_month: str,
+    ) -> list[str]:
+        normalized_scope = str(scope_month or "").strip()
+        if SEARCH_MONTH_RE.match(normalized_scope):
+            return [normalized_scope]
+        return list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids, month_scope=month))
+
+    def _preview_split_scope_keys(
+        self,
+        *,
+        preview: dict[str, object],
+        month: str,
+        row_ids: list[str],
+    ) -> list[str]:
+        preview_scope_keys = [
+            str(scope_key).strip()
+            for scope_key in list(preview.get("affected_scope_keys") or [])
+            if str(scope_key).strip()
+        ]
+        if preview_scope_keys:
+            return preview_scope_keys
+        return list(self._scope_keys_for_row_ids(month=month, row_ids=row_ids, month_scope=month))
 
     @staticmethod
     def _split_candidate_preview_id(
