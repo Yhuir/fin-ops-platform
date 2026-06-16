@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-16 - settings mutation API 权限闭环
+
+- 目标：修复 settings 页面只读用户可绕过 UI、直接调用部分 mutation API 的风险，确保后端 API 与页面权限一致。
+- 影响范围：`/api/workbench/settings/projects/sync`、`/api/workbench/settings/projects`、`/api/workbench/settings/projects/{id}`、`/api/workbench/settings/oa/manual-search/refresh-attachments`、`/api/workbench/settings/oa/manual-imports`、`/api/workbench/settings/oa/manual-imports/{row_id}`。
+- 关键决策：新增统一 settings mutation session gate；有 OA session 时 actor 以 session 身份为准，不接受 body `actor_id` 伪造。无 session 的本地/测试模式仍保留原有 body actor fallback。
+- 文档影响：更新 `tests.md` 的 HTTP route、API contract 和 regression 覆盖；`state-machine.md` 增加权限闭环变更记录。
+- 测试覆盖：新增 project mutation 和 OA manual import mutation API contract regression，覆盖只读 session、body actor 伪造、下游写服务不被调用、既有状态不被删除。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_settings_sync_api.WorkbenchSettingsSyncApiTests.test_project_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor tests.test_oa_manual_import_api.OAManualImportApiTests.test_manual_import_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_app_settings_service tests.test_workbench_settings_sync_api tests.test_oa_manual_import_api tests.test_settings_data_reset_service tests.test_oa_applicant_credentials_service tests.test_oa_applicant_credentials_api tests.test_postgres_oa_applicant_credentials_repository tests.test_target_oa_applicant_token_provider tests.test_postgres_migrations tests.test_app_status_overview_service tests.test_derived_data_lifecycle_service -v`；`cd web && npm test -- --run src/test/SettingsPage.test.tsx src/test/WorkbenchSelection.test.tsx src/test/AppStatusIndicator.test.tsx`。
+- 未测风险：真实 OA session/角色同步和生产 project/manual import 操作仍需 staging smoke；本地测试已覆盖后端权限 contract。
+- 后续事项：新增 settings mutation route 时必须复用统一 session gate，并补只读 session API regression。
+
 ## 2026-06-11 - settings 测试闭环首轮
 
 - 目标：把 settings 从“凭据管理局部文档”扩展为完整配置域闭环，覆盖设置保存、规则 fan-out、数据重置、OA 凭据、权限和下游 read model/worker 风险。

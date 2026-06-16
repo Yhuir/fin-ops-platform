@@ -57,6 +57,8 @@
 4. ETC 业务批次创建 OA 草稿 -> 撤销本地绑定或人工确认 submitted -> 删除本地批次不删除真实 OA 草稿/流程。
 5. OA Mongo 临时不可用 -> 页面/API 不把旧投影伪装为 fresh，App Status 暴露 blocked/degraded。
 
+P2/P3 一秒级闭环中，这些真实 OA 场景对应 `.planning/P2P3-CLOSURE-PLAN.md` 的 P2P3-013 staging gate。通过条件不是本地 mock 绿灯，而是真实 OA 登录、角色同步、目标申请人、草稿 URL、附件、人工 submitted/not_submitted、投影 freshness 和 App Status 语义均有 staging/production 证据。缺凭据、缺测试对象、只跑本地 stub 或只返回 `auth_missing` 时，状态保持 `staging-gated`。
+
 ## 现有验证命令
 
 ```bash

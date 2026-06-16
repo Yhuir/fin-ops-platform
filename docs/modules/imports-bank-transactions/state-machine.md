@@ -12,7 +12,7 @@
 | `preview_ready` | 后端已创建 import session，文件级 preview 可确认。 | `FileImportSession.files[].status` |
 | `file_error` / `unrecognized_template` | 某文件损坏、无法识别或模板不支持；同 session 其他 ready 文件仍可确认。 | `FileImportService.preview_files` |
 | `preview_stale` | 预览后底层已存在记录或 audit 发生变化；确认被拒绝。 | `ImportPreviewStaleError` / API `409 preview_stale` |
-| `queued` | 确认后创建 background `file_import` job，可能同时创建 `import.process.requested` durable event。 | background job + `job.import_jobs` / runtime queue |
+| `queued` | 确认后创建 background `file_import` job，银行流水 selected files 必须携带 `affected_domains=["imports_bank_transactions"]` 和 `/imports/bank-transactions` route；可能同时创建 `import.process.requested` durable event。 | background job + `job.import_jobs` / runtime queue |
 | `processing` | import worker 或 inline background job 正在确认 selected files。 | `ImportJobWorker` / background job service |
 | `confirmed` | selected files 已持久化并触发下游刷新/匹配。 | import session / import batch / row facts |
 | `failed` | 确认任务失败，job 记录错误，session 可重试或重新预览。 | background job / import job |
@@ -85,3 +85,4 @@ Refresh / fan-out 来源：
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确文件/session/job/worker/read model 状态和禁止流转 | `tests/test_import_*`、`tests/test_import_job_queue.py`、`web/src/test/ImportCenterPage.test.tsx` |
+| 2026-06-16 | 修复银行流水导入 job 的 App Status 域 | 银行流水文件确认后的 background job 不再误归到发票导入页；generic import fallback 覆盖全部导入域 | `tests.test_import_file_api`、`tests.test_app_status_overview_service` |

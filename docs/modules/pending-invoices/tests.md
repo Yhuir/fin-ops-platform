@@ -35,12 +35,14 @@
 | API contract | P0 | `tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts` | covered | rows、detail、candidates、rules、manual endpoint removal、attach、income status batch、export、权限和错误 shape。 |
 | SQL read model freshness | P0 | `tests/test_search_pending_sql_runtime.py` | covered | miss/stale/source mismatch 返回 refreshing 并入队，不同步扫描；filter-options/export 非 fresh 返回 accepted。 |
 | filter-options SQL 聚合 | P0 | `tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py`、`tests/test_http_slo_probe.py` | covered | fresh gate 通过后由 PostgreSQL 聚合筛选项，避免页面首屏为选项拉取全量 rows；HTTP SLO 探针使用前端默认 `direction=expense`。 |
+| export 全量收集上限 | P2 | `tests/test_search_pending_sql_runtime.py`、`tests/test_pending_invoice_api.py` | covered | `PendingInvoiceReadModelService.all_rows()` 和 export-preview/export API 在匹配行数超过 20,000 时结构化返回 `pending_invoice_export_row_limit_exceeded`，且只读取第一页，不继续分页生成 XLSX。 |
+| 首屏分页性能护栏 | P2 | `tests/test_pending_invoice_service.py`、`web/src/test/PendingInvoicesPage.test.tsx` | covered | 页面首屏 rows 请求固定 `page=1&page_size=50`，控件限制 25/50/100；service 对异常大 `page_size` 夹到 200 并保留真实 `total`。 |
 | SQL projection 内容 | P0 | `tests/test_search_pending_sql_runtime.py` | covered | four-zone payload、relation distribution、bank tag freshness、OA identity、candidate id 隔离、filter/sort。 |
 | worker scope fan-out | P0 | `tests/test_search_pending_sql_runtime.py`、`tests/test_runtime_worker_registry.py` | covered | search/pending refresh handler、legacy pending scope、filter scope、month shard。 |
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_pending_invoice_api.py` | covered | rules/attach/income status 事件刷新正确 read model；历史 manual command 恢复保持兼容，不误刷无关域。 |
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py` | covered | pending route/read model/worker 在 domain registry 中可观测。 |
-| 前端交互 | P1 | `web/src/test/PendingInvoicesPage.test.tsx` | covered | four-zone table、filters、状态快捷筛选、rules drawer、conflict、detail drawers、选中工具栏 attach existing、收入批量标记、refreshing 时选择栏可用。 |
-| 前端 API mapper | P1 | `web/src/test/PendingInvoicesApi.test.ts` | covered | 不猜缺失状态、filter/sort query、rules/detail/candidates、批量 candidates/attach、export/income batch mapper。 |
+| 前端交互 | P1 | `web/src/test/PendingInvoicesPage.test.tsx` | covered | four-zone table、filters、状态快捷筛选、rules drawer、conflict、detail drawers、选中工具栏 attach existing、收入批量标记、refreshing 时选择栏可用、导出下载错误消息可见。 |
+| 前端 API mapper | P1 | `web/src/test/PendingInvoicesApi.test.ts` | covered | 不猜缺失状态、filter/sort query、rules/detail/candidates、批量 candidates/attach、export/income batch mapper、下载失败结构化消息透出。 |
 | 真实生产数据与 worker drain | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres、RabbitMQ/Redis、`pending-invoice` / `search` / `invoice-lifecycle` workers 和大数据量样本。 |
 
 ## 七类测试适用性
@@ -48,10 +50,10 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_pending_invoice_service.py`、`tests/test_invoice_lifecycle_page_integration.py` | 覆盖支出/收入状态、规则组、attach existing、income override、manual 新入口移除、候选排序和状态优先级。 |
-| 2. Service-layer tests | 适用 | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_pending_invoice_relation_identity.py`、`tests/test_pending_invoice_oa_identity_backfill.py` | 覆盖 application service、command repository、relation command service 委托、audit/finalizer、identity/backfill 和状态写入边界。 |
+| 2. Service-layer tests | 适用 | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_pending_invoice_relation_identity.py`、`tests/test_pending_invoice_oa_identity_backfill.py` | 覆盖 application service、command repository、relation command service 委托、audit/finalizer、identity/backfill、状态写入边界和 `page_size` 上限。 |
 | 3. API contract tests | 适用 | `tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts` | 覆盖 rows、filter-options、detail、rules、manual endpoint removal、attach、income status batch、export 和权限/错误。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_search_pending_sql_runtime.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` | 覆盖 SQL read model fresh/stale/missing/source mismatch、worker refresh、lifecycle fan-out 和 App Status。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesApi.test.ts` | 覆盖页面状态、筛选、规则、drawer、选中工具栏 attach/income 操作、manual UI 移除、refreshing 状态和 API mapper。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesApi.test.ts` | 覆盖页面状态、筛选、规则、drawer、选中工具栏 attach/income 操作、manual UI 移除、refreshing 状态、首屏有界请求、API mapper 和下载失败消息。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py`、`web/src/test/PendingInvoicesPage.test.tsx` | 覆盖 attach/rules/income status -> lifecycle/dirty scope -> read model -> 页面刷新；真实 worker drain 仍为 documented-risk。 |
 | 7. Existing feature regression tests | 适用 | 上述全部 pending invoice tests，加 invoice lifecycle、workbench、tax offset、cost statistics、bank details tests 的按改动选择扩展集 | 待找发票规则和关系会影响多个下游页面；任何改动都要问旧页面会不会被误刷或误判 fresh。 |
 
@@ -67,6 +69,8 @@
 | 长期 | API/read model miss 时同步扫描旧 snapshot 并伪装 fresh。 | `tests/test_pending_invoice_api.py::test_read_model_miss_returns_refreshing_without_sync_scan`、`tests/test_search_pending_sql_runtime.py` | covered |
 | 2026-06-13 | filter-options 为生成筛选项读取全量 rows，导致认证态页面 HTTP SLO 长尾。 | `tests/test_pending_invoice_api.py::PendingInvoiceApiTests::test_filter_options_uses_sql_aggregation_after_fresh_gate`、`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_builds_filter_options_in_sql` | covered |
 | 2026-06-14 | direct read model SLO 只刷新月度 shard，未覆盖页面默认 `direction=expense` 使用的 `pending_invoice:expense:all` aggregate scope，导致登录态 HTTP SLO 首屏返回 `refreshing`。 | `tests/test_read_model_slo_smoke.py::ReadModelSloSmokeTests::test_pending_invoice_smoke_includes_page_first_screen_aggregate_scope`、`tests/test_http_slo_probe.py` | covered |
+| 2026-06-16 | 页面或调用方请求过大 `page_size`，导致待找发票首屏 rows 长尾或误把全量列表当首屏渲染。 | `tests/test_pending_invoice_service.py::PendingInvoiceQueryServiceTests::test_page_size_limit_protects_first_screen_slo`、`web/src/test/PendingInvoicesPage.test.tsx` | covered |
+| 2026-06-16 | 待找发票 export-preview/export 对大匹配集继续分页收集并同步生成 XLSX，拖慢 API 线程和内存；或前端下载路径/导出抽屉吞掉后端超限消息。 | `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_read_model_service_all_rows_rejects_export_row_limit_before_scanning_more_pages`、`tests/test_pending_invoice_api.py::PendingInvoiceApiTests::test_export_endpoints_reject_row_limit_before_xlsx_generation`、`web/src/test/PendingInvoicesApi.test.ts::surfaces backend row-limit messages from failed export downloads`、`web/src/test/PendingInvoicesPage.test.tsx::shows backend export row-limit messages inside the export drawer` | covered |
 | 长期 | 人工补票 confirm 中途失败后重复创建发票或关系。 | `tests/test_pending_invoice_service.py::test_retry_recovers_invoice_created_before_relation_created`、`tests/test_pending_invoice_service.py::test_retry_recovers_relation_created_before_finalization` | covered |
 | 2026-06-12 | relation write safety 不通过时人工补票先创建发票，形成孤儿发票或半写状态。 | `tests/test_pending_invoice_service.py` command service / rollback coverage | covered |
 | 2026-06-12 | 待找发票 relation 写入绕过统一 command service，形成页面私有事实源。 | `tests/test_pending_invoice_service.py::test_confirm_manual_invoice_delegates_relation_write_to_command_service`、`tests/test_pending_invoice_service.py::test_confirm_attach_existing_invoice_delegates_relation_write_to_command_service`、`tests/test_pending_invoice_service.py::test_confirm_attach_existing_invoices_batch_delegates_relation_write_to_command_service`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_downstream_relation_read_models_use_workbench_relation_distribution` | covered |
@@ -94,6 +98,7 @@
 PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service tests.test_pending_invoice_api tests.test_invoice_lifecycle_page_integration -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime tests.test_pending_invoice_relation_identity tests.test_pending_invoice_oa_identity_backfill -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_app_status_overview_service tests.test_runtime_worker_registry -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service.PendingInvoiceQueryServiceTests.test_page_size_limit_protects_first_screen_slo -v
 cd web && npm test -- --run src/test/PendingInvoicesApi.test.ts src/test/PendingInvoicesPage.test.tsx
 bash scripts/verify.sh docs
 ```
@@ -115,4 +120,4 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 
 - 本地测试不连接真实生产 Postgres 大数据量，不验证真实搜索/待找发票 SQL projection 的 EXPLAIN、锁等待或长尾分页性能。
 - 本地测试不跑真实 RabbitMQ/Redis/systemd `pending-invoice`、`search` 与 invoice-lifecycle worker drain；dirty/outbox 到 projection 的最终收敛需要 staging 或夜间 CI/生产前 smoke。
-- 前端 Vitest 覆盖交互和 mapper，不覆盖真实浏览器下载、大文件导出和真实网络中断恢复。
+- 本地已覆盖待找发票超过 20,000 行导出 fail-closed，但前端 Vitest 不覆盖真实浏览器下载、文件打开、大文件下载耗时和真实网络中断恢复。

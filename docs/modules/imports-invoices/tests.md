@@ -23,6 +23,7 @@
 - 路由切换、卸载、重挂载、sessionStorage 恢复时不能丢失已选文件、预览结果或 in-flight preview 结果。
 - `preview_stale` 必须映射为重新预览提示，不能继续确认旧结果。
 - 损坏 Excel 必须是 file-level `unrecognized_template`，不能让整个 preview 请求崩溃。
+- 240 行合成发票同文件重复组必须只产生一个 confirmable representative，其余进入 duplicate audit / skipped count。
 - input/output invoice identity 必须覆盖稳定号码、占位电子发票号、弱 fingerprint、跨批次重复、批内重复。
 - ETC 来源或 tag 指向 ETC 时，input invoice import 需要合并 canonical invoice 而不是产生重复发票。
 - confirm 必须跳过重复行、更新 source status、持久化 source links，并对 later preview batch 的重复保持幂等。
@@ -51,11 +52,14 @@
 | 既有 canonical invoice 读取时保留过期弱 fingerprint | `tests/test_import_service.py::ImportNormalizationServiceTests::test_existing_canonical_invoice_drops_weak_fingerprint_on_load` |
 | ETC canonical invoice 与 input invoice import 重复 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_merges_existing_etc_canonical_invoice_without_duplicate` |
 | 预览后源事实变化仍允许确认 | `tests/test_import_file_service.py::ImportFileServiceTests::test_confirm_session_rejects_stale_preview_when_existing_records_change`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
+| 大重复组被全部当作可确认行 | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_bounds_large_invoice_duplicate_group_to_one_confirmable_row` |
 | 发票导入路由重挂载丢失预览或选择 | `web/src/test/ImportCenterPage.test.tsx` 中 invoice import session restore / navigating away tests |
+| 发票文件确认 background job 在 App Status 中落到泛化导入域 | `tests/test_import_file_api.py::ImportFileApiTests::test_confirm_files_imports_only_selected_files_from_session` 断言 `affected_domains=["imports_invoices"]`、route `/imports/invoices`；`tests/test_app_status_overview_service.py` 覆盖泛化 import fallback |
 
 ## 关键 smoke flows
 
 - 发票 Excel 上传 -> 每文件选择进项/销项 -> 预览 -> 确认 -> import worker/job 完成 -> `invoice_import_confirmed` -> invoice lifecycle -> 待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计刷新。
+- 240 行同文件重复发票 -> preview audit 只保留一个 confirmable representative -> duplicate group 展示 240 行，skipped count 为 239。
 - 预览后手工导入或另一个导入批次改变发票事实 -> 当前 confirm 返回 `preview_stale` -> 前端要求重新预览。
 - 发票导入确认 -> 关联台 read model invalidation -> matching/candidate 重新生成，不使用旧 cache。
 - input invoice import 与 ETC canonical invoice 相遇 -> 只更新同一 canonical invoice 并保留 ETC tag。
@@ -97,7 +101,7 @@ bash scripts/verify.sh docs
 
 ## 未测风险
 
-- 真实客户发票 Excel 大文件、历史模板变体、异常编码和超大重复组未由本地 fixture 完全覆盖。
+- 本地已覆盖 240 行合成发票重复组；真实客户发票 Excel 大文件、历史模板变体、异常编码、超大重复组内存/耗时和真实浏览器上传仍需 staging/manual smoke。
 - 真实 Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、RabbitMQ transport wakeup 未由本地单测完全证明。
 - 下游所有页面的真实浏览器大数据表格、长分页、导出下载和网络恢复 smoke 仍是 `documented-risk`。
-- `import.process.requested` 是共享 import job envelope；其 App Status affected domain 与具体导入类型的精确映射仍需后续专项校准。
+- 共享 `import.process.requested` 仍是多导入域 fallback；具体发票文件确认通过 `file_import.source.affected_domains` / `source.route` 精确指向发票导入页。

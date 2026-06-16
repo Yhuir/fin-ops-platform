@@ -56,7 +56,7 @@ ETC 发票导入确认会创建或复用 task-scoped ETC business batch，写入
 | ready task 查询 | `EtcReconciliationTaskService.list_ready_for_import_tasks()` | ETC 导入页 task selector |
 | zip preview | `preview_etc_zip_for_task(...)` + `EtcService.preview_import_zips(...)` | 当前导入页 preview、missing requirements、duplicate audit |
 | preview stale | `stale_reconciliation_task_preview` 或 `preview_stale` | 当前导入页必须清空 preview 并要求重新预览 |
-| confirm queued | `etc_invoice_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status/App Health |
+| confirm queued | `etc_invoice_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status/App Health；job source 必须携带 `task_id`、`affected_domains=["imports_etc_invoices","etc_tickets"]` 和 route `/imports/etc-invoices` |
 | confirm processed | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | ETC business batch、ETC invoice facts、canonical invoice facts |
 | lifecycle refresh | `etc_import_confirmed` | 关联台、invoice lifecycle、税金抵扣、成本统计、历史 ETC repair、search |
 | 业务批次提交/删除 | `manual-oa-status`、business batch delete | ETC 票据管理、关联台 summary row、税金/成本刷新 |

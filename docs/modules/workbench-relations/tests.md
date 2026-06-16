@@ -11,7 +11,7 @@
 - `tests/test_workbench_relation_sql_projection.py`：`workbench_relation` distribution、linked/candidate/unlinked rows、正式发票和 OA 附件发票 identity 去重。
 - `tests/test_workbench_relation_read_facade.py`：freshness-gated facade、missing 入队刷新、unlinked 过滤、candidate relation status 映射不被硬编码为 active。
 - `tests/test_platform_runtime_boundary_guards.py`：下游读模型不得直接 join `app.workbench_pair_relations`，银行明细关系标签必须走 facade，ETC summary 删除、server OA offset auto pair、OA 附件上下文 repair、batch accounting legacy repair 和 no-OA legacy repair/consolidation 不得退回 direct pair relation mutation。
-- `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`：批量账务 relation freshness 诊断、submit/withdraw command service 委托、submit 缺 command fail-fast 和 canonical write safety。
+- `tests/test_batch_accounting_api.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/BatchAccountingPage.test.tsx`：批量账务 relation freshness 诊断、submit/withdraw command service 委托、submit/withdraw/repair 缺 command fail-fast、direct pair fallback 禁止和 canonical write safety。
 - `tests/test_no_oa_bank_batch_*`：no-OA submit/withdraw、internal transfer confirm-link、command service 写入委托、relation read model freshness 诊断、Workbench paired/open 收敛。
 - `tests/test_turnover_*`：turnover manual closure/withdraw command service 委托、relation read model freshness 诊断、Application wiring guard 和 workbench pair relation 集成。
 - `tests/test_pending_invoice_service.py`：待找发票 attach/create 幂等、relation detail 读 distribution、manual/attach relation 写入委托 command service、relation read model freshness 诊断。
@@ -57,8 +57,8 @@
 - pending invoice attach/create 已覆盖 application service command delegation、canonical write safety 和 API 旧 shape 回归；读侧 non-fresh response shape 仍由 read model/facade 测试保护。
 - no-OA submit/withdraw 已覆盖 success、rollback、version conflict 和 relation freshness 诊断；legacy migration/repair/consolidation 已覆盖 command delegation、active row occupation、single-source case reuse 和 read model worker 不隐式 repair。
 - turnover manual closure/withdraw 已覆盖 command service 委托、缺 command fail-fast、relation freshness 诊断、API wiring guard 和 Workbench 集成。
-- batch accounting submit/withdraw。
-- batch accounting submit 缺 command service 时不得 direct pair fallback。
+- batch accounting submit/withdraw 必须委托 command service，并覆盖缺 command service 时不得 direct pair fallback。
+- batch accounting relation read model non-fresh 必须作为读侧诊断透出；普通 non-fresh 不应全局禁用具备 canonical write safety 的 mutation。显式 freshness precondition 失败时必须返回 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。
 - ETC repair/delete 可见入口；已提交业务批次删除必须在本地 reset 前检查 `workbench_relation` fresh，非 fresh 返回 409 且不删除 batch 或 relation。
 - input invoice OA reverse evidence detected 写入：success、command service unavailable、relation read model stale/conflict 409、no half-write。
 
@@ -72,7 +72,7 @@
 - relation 写入后 `pending_invoice` dirty/outbox 必须按银行流水月份投递 shard scope（例如 `expense:all:2026-02`），不能投递会扩展到多个月份的基础 scope（例如 `expense:all`）。
 - relation 写入后 downstream dirty/outbox 必须按 row domain 路由：银行明细只刷银行流水月份，发票生命周期/进项使用/销项收款/税抵扣只刷发票或 OA 相关月份，`search` / `workbench_relation` 保留跨域 broad scope；`cost_statistics` 只由未知 row type、bank+OA、no-OA batch 或 turnover 成本关系触发，bank+invoice 不应刷新成本统计。旧数据缺少事实表月份时必须保留 `read_model.workbench_rows` fallback。
 - relation 写入后 downstream dirty/outbox 必须使用 `high` priority，避免用户写操作后的真实同步被普通后台刷新排队拖慢；只有无法从 relation/bank/invoice/OA 事实拿到月份时才允许查 `read_model.workbench_rows` legacy fallback。
-- search read model 保存必须走批量写入路径，避免 relation 写后 `search.read_model.refresh` 因逐行写 `read_model.search_index_rows` 成为 5s SLO 长尾。
+- search read model 保存必须走批量写入路径，避免 relation 写后 `search.read_model.refresh` 因逐行写 `read_model.search_index_rows` 成为当前 P2/P3 一秒级写后同步门禁的长尾。
 - relation UoW 写入的 workbench refresh outbox 必须保留 downstream metadata、invoice usage scope types 和 pending invoice scope keys，避免 audit/SLO 只能看到 `action_name`。
 - downstream `bank_detail`、`pending_invoice`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`no_oa_bank_batch`、`turnover_ledger`、`search`、`cost_statistics`、`tax_offset` scope 覆盖。
 - worker rebuild 后 relation distribution fresh。

@@ -33,7 +33,7 @@
 
 列表父筛选以最终 `invoice_acquisition_status.code` 为事实源；`requires_invoice` 是“需要开票”状态桶，不等同于 `filter_group='requires_invoice'`。`filter_group` / `matched_rule` 只解释规则命中，不能把生产中 `filter_group=all` 但状态为待/已开票的行排除。
 
-生产刷新由专用 `pending-invoice` 与 `search` RabbitMQ consumers 承担 5s SLO drain；旧 `search-pending` combined worker 保留为兼容消费者，不再是唯一性能 lane。`invoice_lifecycle` 另有 `invoice-lifecycle-secondary` 并发消费者用于多月份 scope 收敛。
+生产刷新由专用 `pending-invoice` 与 `search` RabbitMQ consumers 承担独立性能 lane；旧 `search-pending` combined worker 保留为兼容消费者，不再是唯一性能 lane。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`invoice_lifecycle` 另有 `invoice-lifecycle-secondary` 并发消费者用于多月份 scope 收敛；所有 read model freshness 仍以 durable queue/readiness 为事实源。
 
 OA/流水/发票配对关系不属于待找发票页面私有状态。读关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution；attach existing 单条和批量写关系必须委托 `WorkbenchRelationCommandService`。普通 relation read model 非 fresh 只影响读侧 freshness 和候选展示；写 API 的阻断条件必须来自权限/session、DB/目标写模型不可用、canonical relation version/idempotency/row occupation 冲突，不能因为 distribution 追赶中先写本模块半事实。历史 manual invoice command/service 只保留为旧数据恢复和迁移兼容事实，不再通过待找发票 HTTP API 或页面 UI 暴露新写入口。
 

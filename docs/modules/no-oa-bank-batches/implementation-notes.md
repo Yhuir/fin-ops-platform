@@ -13,7 +13,32 @@
 - Workbench confirm-link 的 internal transfer 特例必须最终写 no-OA submitted batch 和 `relation_mode=no_oa_bank_batch`，不得绕过批次写普通 `manual_confirmed`。
 - no-OA legacy migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 必须通过 `WorkbenchRelationCommandService` 写 relation；缺 command service 时 fail fast，不回退 direct pair mutation。
 - no-OA submit/withdraw 的长期目标是 facts/audit/dirty/outbox 同事务；当前目标契约由 `tests/test_bankdetail_write_uow_contract.py` 保护，真实收敛前保持 `documented-risk`。
+- `GET /api/no-oa-bank-batches` 支持可选显式分页 `page/page_size` 或 `pageSize`；只有请求带分页参数时才裁剪 `batches` 并返回 `pagination`，旧调用方不带分页参数时保持原 shape。no-OA 前端默认以 `page=1&page_size=200` 读取列表并渲染分页控件；切换月份、状态 bucket 或页码时必须清空选择、详情缓存和详情错误。`page_size` 上限为 200，超限必须 fail closed 为 `invalid_paging`。
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
+
+## 2026-06-16 - P2/P3 显式分页首屏保护
+
+- 目标：为免 OA list 建立可执行首屏上限，避免后续大数据月份把全部批次一次性返回给首屏。
+- 影响范围：`NoOaBankBatchApplicationService.list_batches_payload(...)`、`NoOaBankBatchApiRoutes.list_batches(...)`、`web/src/features/noOaBankBatches/api.ts`、`web/src/pages/NoOaBankBatchPage.tsx`、no-OA route/service/API/page tests。
+- 关键决策：
+  - 显式请求 `page/page_size` 或 `pageSize` 时，list 只返回当前页 `batches`，但 `summary` 仍基于完整过滤结果，`pagination.total` 返回完整命中数。
+  - 不带分页参数时保持旧 response shape，避免破坏旧调用方和既有测试。
+  - 前端默认发送 `page=1&page_size=200`，用后端 `pagination` 渲染上一页/下一页控件；月份、状态 bucket 或页码变化会清空当前选择、详情缓存和详情错误，避免旧页状态污染新页操作。
+  - `page_size>200`、非正数或非法整数统一返回 `invalid_paging`，route facade 映射为结构化 400。
+- 测试覆盖：
+  - `NoOaBankBatchApplicationServiceTests.test_list_batches_explicit_pagination_protects_first_screen_slo`
+  - `NoOaBankBatchRoutesTests.test_list_batches_invalid_paging_returns_structured_400`
+  - `web/src/test/NoOaBankBatchApi.test.ts`
+  - `web/src/test/NoOaBankBatchPage.test.tsx::uses backend pagination for no OA first-screen batches`
+- 七类测试覆盖：
+  - Business core unit tests：本轮未改 no-OA 批次生成业务规则。
+  - Service-layer tests：适用，覆盖 250-row synthetic list、`page_size=200`、第二页和超限 fail closed。
+  - API contract tests：适用，覆盖 `invalid_paging` 结构化 400。
+  - Read model/cache/background job tests：本轮未改 freshness、dirty scope 或 worker。
+  - Frontend component and interaction tests：适用，覆盖 API client 参数/响应映射、首屏 200-row 分页、下一页重载、旧页批次不残留和分页控件 CSS contract。
+  - End-to-end business-flow integration tests：本轮未改跨页写流程。
+  - Existing feature regression tests：适用，通过 no-OA application/routes/API/page 全量目标测试保护既有 list/submit/withdraw contract。
+- 未测风险：真实 PostgreSQL 大数据 EXPLAIN、真实浏览器长列表滚动/视觉遮挡和生产登录态 API p95 仍需 staging/生产 smoke。
 
 ## 2026-06-14 - 写操作后 freshness barrier
 

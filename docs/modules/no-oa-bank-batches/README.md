@@ -40,6 +40,7 @@
 - 候选来源：银行明细有效分类和免 OA 标签准入；未提交候选必须排除已被 Workbench active relation 占用的流水。
 - 标签准入：`GET/PUT /api/no-oa-bank-batches/tag-selection` 只读取银行明细自动标签规则中的可用标签，不保存第三层外部往来分类字段。
 - 读取路径：`GET /api/no-oa-bank-batches` 优先读 `no_oa_bank_batch` SQL read model；missing/stale 时只 enqueue refresh，不在 GET 热路径同步重建批次。
+- 首屏分页：`GET /api/no-oa-bank-batches` 支持显式 `page/page_size` 或 `pageSize`，`page_size` 上限为 200。前端列表默认以 `page=1&page_size=200` 读取，并渲染分页控件；切换月份、状态 bucket 或页码时必须清空当前选择、详情缓存和详情错误，避免跨 scope 操作旧批次。
 - 提交路径：`submit-selection` 只提交用户当前选择的流水；要求同月、同银行账户、同 `category_code`，且 code 在当前免 OA 标签准入范围内。
 - Relation 写入：`submit-selection`、单批次 submit、关联台 internal transfer submit、withdraw、legacy migration、submitted repair、category drift cleanup 和 submitted single-side consolidation 都必须通过 `WorkbenchRelationCommandService` 写入或撤销 `relation_mode=no_oa_bank_batch`；`NoOaBankBatchService` 在常规写入口只负责批次状态机和 relation command payload，legacy/repair/consolidation 路径只负责识别修复意图并委托 command service。缺 command service 时 fail fast，不回退 direct pair mutation。
 - Freshness 与写安全：`workbench_relation` distribution non-fresh 只影响读侧候选和 App Status 诊断；submit/withdraw 写入必须通过 `WorkbenchRelationCommandService` 的 canonical relation、idempotency、row occupation、owner 状态、权限/session 和 DB 可写性校验。只有目标写模型或 canonical 写安全不可确认时才阻断写入，不因普通 distribution 追赶中全局禁用操作。

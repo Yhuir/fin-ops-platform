@@ -26,6 +26,28 @@
 
 ## 历史记录
 
+## 2026-06-16 - 发票导入合成大重复组守护
+
+- 目标：为 P2/P3 发票大文件和超大重复组风险补本地可重复证据，防止同文件重复发票在 preview audit 中被全部当作可确认。
+- 影响范围：`FileImportService.preview_files`、invoice Excel parser、invoice identity、import preview duplicate audit、发票导入测试矩阵。
+- 关键决策：不改导入行为；使用 240 行合成发票 Excel fixture 锁定当前 contract：同一稳定 identity 只产生一个 confirmable representative，其余 239 行进入 duplicate group 和 skipped count。
+- 文档影响：更新 `tests.md` 的场景覆盖、历史 bug 回归和未测风险；P2/P3 台账记录为 local synthetic evidence。
+- 测试覆盖：新增 `test_preview_bounds_large_invoice_duplicate_group_to_one_confirmable_row`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_service.ImportFileServiceTests.test_preview_bounds_large_invoice_duplicate_group_to_one_confirmable_row -v`；本轮也与银行/ETC 合成导入测试一起运行通过。
+- 未测风险：真实客户发票大文件、历史模板变体、异常编码、真实浏览器上传耗时、真实 worker drain 和下游页面 fresh 仍需 staging/manual smoke。
+- 后续事项：拿到用户批准的真实发票样本后，在 staging 跑文件 preview/confirm/job/read-model smoke，不在仓库保存真实业务文件。
+
+## 2026-06-16 - 发票导入 App Status job domain 闭环
+
+- 目标：关闭发票文件确认后 App Status/job feedback 可能落到泛化导入域的缺口，让用户能从全局状态返回 `/imports/invoices`。
+- 影响范围：`/imports/files/confirm` 的 `file_import` background job source、`app_status_job_registry` 的共享 import fallback、发票导入模块测试矩阵和状态机。
+- 关键决策：具体文件确认 job 使用 `source.affected_domains` / `source.route` 精确报告发票导入页；共享 `import.process.requested` 仍保留多导入域兜底，避免在没有文件类型上下文时伪装成单一页面。
+- 文档影响：更新 `README.md`、`state-machine.md`、`tests.md`，并在 Phase16 GSD 产物记录本次闭环。
+- 测试覆盖：新增/更新 API contract 与 App Status registry 回归，覆盖发票确认 job domain/route 和泛化 import fallback。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_api.ImportFileApiTests.test_confirm_files_imports_only_selected_files_from_session`；扩展后端 187 tests；前端导入页/App Status 27 tests；`bash scripts/verify.sh docs`。
+- 未测风险：真实大文件、真实 Postgres/RabbitMQ/Redis/systemd worker drain、worker crash/retry、下游真实浏览器大数据和导出 smoke。
+- 后续事项：进入 `imports-etc-invoices` phase，确认 ETC 导入 job domain/route 与本页一致闭环。
+
 ## 2026-06-11 - 发票导入测试闭环首轮
 
 - 目标：补齐 `/imports/invoices` 的影响面、七类测试矩阵、状态机、历史 bug 回归库和验证命令。

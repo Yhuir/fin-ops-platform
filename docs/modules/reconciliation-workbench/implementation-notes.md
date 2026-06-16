@@ -27,6 +27,26 @@
 
 ## 历史记录
 
+## 2026-06-16 - server.py boundary 守卫证据
+
+- 目标：收敛 P2/P3 中 `server.py` broad dispatch / transitional delegate 风险，判断是否需要在本轮为关联台、税金抵扣、成本统计相关路径做大范围迁移。
+- 影响范围：平台 runtime boundary guard、关联台 relation command boundary、downstream relation read model、read model refresh gateway；本轮不改业务代码。
+- 关键决策：不在 P2/P3 性能闭环中扩大 `server.py` 重构。现有守卫已覆盖 service 不 import HTTP/auth、不直连 Redis/RabbitMQ、downstream relation read model 必须走 distribution/facade、server active relation repair 必须走 relation command boundary、Workbench write facade 使用显式依赖，以及 read model refresh producer 必须走 scope gateway 边界。
+- 文档影响：更新 `.planning/P2P3-CLOSURE-PLAN.md`，本模块记录守卫证据；长期架构方向不变，`server.py` 仍只应承担 route/dependency wiring 和 HTTP 映射。
+- 测试覆盖：复用 `tests/test_platform_runtime_boundary_guards.py` 中 8 个 boundary guard。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_services_do_not_import_http_auth_boundary_or_parse_cookie_token_headers tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_real_redis_and_rabbitmq_clients_are_confined_to_platform_adapters tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_downstream_relation_read_models_use_workbench_relation_distribution tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_downstream_relation_query_services_do_not_accept_pair_relation_service tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_server_active_relation_repairs_use_relation_command_boundary tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_write_and_matching_services_do_not_import_external_clients_directly tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_workbench_write_facade_uses_granular_constructor_dependencies tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_read_model_refresh_producers_use_scope_gateway_boundary -v`。
+- 未测风险：该证据不能证明 `server.py` 已完成所有长期瘦身；它只证明当前 P2/P3 目标相关的关键边界未回退。后续若做长期重构，需要单独 phase 和更宽回归。
+
+## 2026-06-16 - all-scope groups page 性能护栏证据
+
+- 目标：把 P2/P3 一秒级同步审计中发现的 Workbench all-scope/full-scope 慢查询风险，收敛成首屏 groups API 的本地回归护栏。
+- 影响范围：`PostgresReadModelRepository.get_workbench_groups_page` 查询 contract、关联台测试矩阵、P2/P3 closure ledger；不改变生产数据、不执行 repair 或 deploy。
+- 关键决策：当前首屏 groups API 必须保留 repository page 入口，`page_size` 上限为 200，并使用 SQL `limit/offset`。生产 `pg_stat_statements` 中的历史慢 SQL 继续作为投影/发布/full-scope profiling 风险处理，不能等同于当前首屏 API 无界读取。
+- 文档影响：更新本模块 `tests.md`、read-models `tests.md` 和 `.planning/P2P3-CLOSURE-PLAN.md`。
+- 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_bounds_all_scope_groups_page_query`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_repository_bounds_all_scope_groups_page_query -v`。
+- 未测风险：本地单测不证明真实生产 `workbench_rows/groups/group_rows` 投影和发布路径 P95 <= 1000ms；该部分仍需 staging/生产只读 profiling 和受控 SLO smoke。
+
 ## 2026-06-15 - Matching completed scope source-version 自愈闭环
 
 - 目标：补齐规则版本发布后的后台闭环，确保 196、6868.55 这类历史 completed matching scope 在 `workbench_matching_rules_version` 变化后会自动重新入队并重建候选/decision。

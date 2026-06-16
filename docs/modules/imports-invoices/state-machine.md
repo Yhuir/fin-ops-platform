@@ -17,7 +17,7 @@
 | `preview_ready_with_errors` | 至少一个文件不可识别或存在 file-level error | 可确认其中 `preview_ready` 文件，或重试/重新预览 |
 | `preview_stale` | 后端检测当前 preview 与最新发票事实不一致 | 只能重新预览 |
 | `confirming` | 前端已提交确认，等待同步结果或 job | `queued`、`confirmed`、`error` |
-| `queued` | 确认交给 `file_import` background job | `processing`、`failed`、轮询 |
+| `queued` | 确认交给 `file_import` background job；发票文件确认 job 的 App Status domain 为 `imports_invoices`、route 为 `/imports/invoices` | `processing`、`failed`、轮询 |
 | `processing` | import worker 正在处理确认 | `confirmed`、`failed` |
 | `confirmed` | 选中文件已确认，发票事实写入或已幂等确认 | 下游 read model 仍需 freshness 判断 |
 | `skipped` | 未选中文件或没有可确认 preview batch | 终态，可重新上传 |
@@ -77,4 +77,5 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-16 | 补齐发票确认 job 的 App Status domain/route contract | `file_import` 发票确认不再落到泛化导入页面，跨页状态反馈可回到 `/imports/invoices`；共享 `import.process.requested` 仍作为多导入域兜底 | `tests/test_import_file_api.py::ImportFileApiTests::test_confirm_files_imports_only_selected_files_from_session`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-11 | 首轮补齐发票导入状态机 | 明确 file/session/job/lifecycle/read model 状态边界 | `tests/test_import_*`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |

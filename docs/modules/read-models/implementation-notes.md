@@ -8,7 +8,7 @@
 - read model refresh 入队前由统一 scope policy/gateway 负责 normalize、validate 和 dedupe；`RuntimeQueueRepository` 继续只负责 PostgreSQL durable queue 持久化。
 - 生产旧 runtime 状态的 scope contract 检查/清理由 `ReadModelScopeContractService` 编排，SQL 限定在 `PostgresReadModelScopeContractRepository`，清理后通过 `ReadModelRefreshGateway` 补投规范 replacement scope。
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
-- authenticated HTTP SLO gate 的默认目标是 5 秒内返回，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。
+- authenticated HTTP SLO gate 的当前 P2/P3 默认目标是首屏 API p95 <= 1000ms，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。写操作同步门禁使用 operation-to-fresh p95 <= 1000ms、p99 <= 3000ms；历史 5 秒记录仅作为旧基线，不作为当前 closure 上限。
 - `bank_detail:all` 不是可读 freshness scope，而是 fan-out 控制 scope；真实 readiness 和 downstream dependency 应以具体月份 shard 或明确 read model status 为准。
 
 ## 记录模板
@@ -27,6 +27,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-16 - 事务型 producer 补齐成本统计 scope policy
+
+- 目标：修复外部往来 Postgres 事务写路径绕过 read model scope policy，导致 `turnover_relation_changed` 继续生成 legacy `cost_statistics` scope 的风险。
+- 影响范围：`TurnoverLedgerDirtyOutboxWriter` 事务入队、`TurnoverLedgerWriteUnitOfWork` source version 映射、成本统计 scope contract repair dry-run。
+- 关键决策：非事务 producer 继续走 `ReadModelRefreshGateway`；事务内 producer 在同一事务中复用 `DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(...)` 后再调用 `enqueue_read_model_refresh_in_transaction`。不把 stale 伪装 fresh，不手工改 readiness。
+- 文档影响：更新 read-models、turnover-ledger、cost-statistics 和 P2/P3 closure ledger。
+- 测试覆盖：`tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests::test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction` 保护事务 producer；`tests/test_read_model_scope_contract.py` 继续覆盖生产 legacy row dry-run/apply。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract -v`。
+- 未测风险：生产 cleanup apply、worker drain 到 fresh、authenticated HTTP SLO 仍需发布后受控验证。
+- 后续事项：新增事务型 read model producer 时必须显式复用 scope policy registry 或提供等价 contract 测试。
 
 ## 2026-06-16 - Bank detail fan-out scope 与 downstream dependency 边界
 

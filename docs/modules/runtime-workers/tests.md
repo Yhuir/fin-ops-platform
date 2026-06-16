@@ -38,7 +38,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | Runtime queue ops inspect/requeue/resolve dead-letter | P1 | `tests/test_runtime_queue_ops.py` | covered | resolve 要求 fresh readiness 且无 active dirty scope。 |
 | RabbitMQ transport 下 stale/superseded processing 处理 | P1 | `tests/test_runtime_queue.py`、`tests/test_runtime_queue_ops.py` | covered | 可重新处理的 stale `processing` 释放回 pending；已被更新同 dedupe event 覆盖的旧 `processing` 走 superseded resolution；两者都写 operator audit，不伪造 fresh。 |
 | Runtime state policy / legacy snapshot boundary | P1 | `tests/test_runtime_state_policy.py`、`tests/test_runtime_bootstrap.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | 防止 worker 或生产 bootstrap 回退到 Application/full snapshot。 |
-| 真实 RabbitMQ topology publish/consume | P1 | `tests/test_rabbitmq_integration.py`、`tests/test_rabbitmq_staging_preflight.py` | documented-risk | 需要 `RABBITMQ_TEST_URL`；本地/nightly 默认可 skip。 |
+| 真实 RabbitMQ topology publish/consume | P1 | `tests/test_rabbitmq_integration.py`、`tests/test_rabbitmq_staging_preflight.py` | documented-risk | 需要 `RABBITMQ_TEST_URL`；本地/nightly 默认可 skip；staging preflight 缺 `FIN_OPS_TEST_DATABASE_URL` / `RABBITMQ_TEST_URL` 时返回 `configuration_missing`，不当作实现失败。 |
 | 真实 Postgres migration + queue integration | P1 | `tests/test_runtime_infrastructure_postgres_integration.py` | documented-risk | 需要 `FIN_OPS_TEST_DATABASE_URL`；无环境时 skip。 |
 | 真实 systemd worker drain / 长时间运行 | P2 | `docs/operations/runtime-worker-governance.md` runbook | documented-risk | 需要 staging/生产环境，不作为本地单元测试前置。 |
 
@@ -47,11 +47,11 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_runtime_queue.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_state_policy.py` | Queue 状态流转、scope contract、runtime state cleanup policy 都属于后台业务规则。 |
-| 2. Service-layer tests | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_queue_ops.py` | 覆盖 worker orchestration、repository 写入、monitoring、ops 命令前置条件。 |
+| 2. Service-layer tests | 适用 | `tests/test_runtime_worker.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_queue_ops.py`、`tests/test_rabbitmq_staging_preflight.py` | 覆盖 worker orchestration、repository 写入、monitoring、ops 命令前置条件和 staging preflight 环境门禁。 |
 | 3. API contract tests | 间接适用 | `tests/test_app_health_*`、`tests/test_runtime_monitoring.py` | 本模块自身不暴露普通业务 API；通过 App Health/runtime snapshot 保护响应事实。若改 `/health` 或 `/api/app-health` shape，必须补 API contract test。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_read_model_readiness_reporter.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_app_status_readiness_backfill.py` | 覆盖 read model refresh handler wrapper、dirty scope、readiness convergence。 |
 | 5. Frontend component and interaction tests | 间接适用 | `web/src/test/AppHealth*.test.tsx` | 修改 App Health 展示、loading/stale/error 语义时必须补前端交互测试；纯 worker 内部改动不适用。 |
-| 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_infrastructure_postgres_integration.py`、`tests/test_rabbitmq_integration.py`、各业务模块 smoke | 修改跨模块事件或 worker fan-out 时，至少补一个关键业务流 integration/regression test。 |
+| 6. End-to-end business-flow integration tests | 按需适用 | `tests/test_runtime_infrastructure_postgres_integration.py`、`tests/test_rabbitmq_integration.py`、`tests/test_rabbitmq_staging_preflight.py`、各业务模块 smoke | 修改跨模块事件或 worker fan-out 时，至少补一个关键业务流 integration/regression test；缺真实 staging env 只能证明 preflight contract，不能证明 broker drain。 |
 | 7. Existing feature regression tests | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` | 防止新增 worker/read model/event type 破坏旧 registry、deploy、auth/Application 边界。 |
 
 ## 历史 bug 回归库
@@ -104,6 +104,7 @@ bash scripts/verify.sh docs
 FIN_OPS_TEST_DATABASE_URL=postgresql://... PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_infrastructure_postgres_integration -v
 RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_integration -v
 FIN_OPS_TEST_DATABASE_URL=postgresql://... RABBITMQ_TEST_URL=amqp://... PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_staging_preflight -v
+PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight --json --skip-real-tests
 ```
 
 ## Nightly CI 覆盖

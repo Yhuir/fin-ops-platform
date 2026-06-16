@@ -29,6 +29,39 @@
 
 ## 历史记录
 
+## 2026-06-16 - 首屏 page-size 性能护栏证据
+
+- 目标：补齐 P2/P3 大数据列表本地 synthetic SLO 与前端首屏请求证据，防止销项发票收款情况首屏请求把超大 page size 透传为全量读取。
+- 影响范围：`OutputInvoiceCollectionQueryService.list_rows` 的分页 contract、`OutputInvoiceCollectionsPage` 首屏 rows 请求回归和模块测试矩阵；业务行为不变。
+- 关键决策：保留现有严格上限语义，`page_size=200` 为最大允许页大小，`page_size>200` 返回 `invalid_paging`，不做静默 clamp；前端默认继续使用更保守的 `page_size=20`，页大小选项限制为 20/50/100。
+- 文档影响：更新 `tests.md` 与 P2/P3 closure ledger。
+- 测试覆盖：新增 `OutputInvoiceCollectionQueryServiceTests.test_page_size_limit_protects_first_screen_slo`，用 250 行 synthetic 数据验证 200 行上限、total 保留和超限错误；更新 `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 锁定首屏 `page=1&page_size=20` 和 20/50/100 页大小选项。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_service.OutputInvoiceCollectionQueryServiceTests.test_page_size_limit_protects_first_screen_slo -v`；`npm --prefix web test -- --run src/test/InputInvoiceUsagePage.test.tsx src/test/OutputInvoiceCollectionsPage.test.tsx src/test/OaPendingPaymentsPage.test.tsx`。
+- 未测风险：真实 PostgreSQL EXPLAIN、锁等待、浏览器滚动和导出下载性能仍需 staging/production smoke。
+- 后续事项：如 API 层改变 page size 映射，必须同步保留 `invalid_paging` 或等价 fail-closed contract。
+
+## 2026-06-16 - 正式收据编号并发与跨期证据
+
+- 目标：补齐 P2/P3 中“正式收据编号真实并发和跨月/跨年唯一性缺少本地证据”的缺口，避免编号规则只停留在 documented-risk。
+- 影响范围：`InMemoryOutputInvoiceCollectionLifecycleRepository` 正式收据 mutation/read 路径、销项收款 lifecycle 测试、PostgreSQL migration schema contract 测试。
+- 关键决策：生产 PostgreSQL 路径保持现有 `output_invoice_receipt_number_counters` 原子 upsert 与 `(tenant_id, receipt_no)` / `(tenant_id, idempotency_key)` 唯一索引；本地内存 repository 增加 receipt lock，让并发测试语义与生产编号唯一性方向一致。
+- 文档影响：更新本模块 `tests.md`，并在 `.planning/P2P3-CLOSURE-PLAN.md` 记录 P2P3-017 evidence-added。
+- 测试覆盖：新增 `test_receipt_numbers_are_unique_under_concurrent_creates_and_reset_periods`，覆盖 12 路并发创建、月度 reset、年度 reset、none 不重置序列；新增 `test_output_invoice_receipt_numbering_schema_contract`，锁定 PostgreSQL counter/receipt/idempotency 唯一索引。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_lifecycle.OutputInvoiceCollectionLifecycleTests.test_receipt_numbers_are_unique_under_concurrent_creates_and_reset_periods tests.test_output_invoice_collection_lifecycle.OutputInvoiceCollectionLifecycleTests.test_receipts_are_idempotent_and_history_is_real -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations.PostgresMigrationSqlTests.test_output_invoice_receipt_numbering_schema_contract -v`。
+- 未测风险：未对真实 PostgreSQL 并发锁等待、唯一约束冲突恢复和生产历史样本连续性做压测；该项仍归 staging/production smoke。
+- 后续事项：真实环境压测时采集 `output_invoice_receipt_number_counters` 锁等待、receipt create latency 和唯一约束冲突日志。
+
+## 2026-06-16 - 红蓝票撤销缺失关系失败闭环
+
+- 目标：让 PostgreSQL lifecycle repository 与内存实现保持一致，在撤销不存在或已撤销的红蓝票关系时返回 `relation_not_found`，避免 API 误报成功并触发无效刷新。
+- 影响范围：`PostgresOutputInvoiceCollectionLifecycleRepository.revoke_red_relation`、销项收款 lifecycle 回归测试。
+- 关键决策：保留现有 route/service 边界；只在 repository update 未命中 active relation 时 fail closed。
+- 文档影响：现有状态机已经要求非法/缺失关系失败，本次记录实施闭环，不改变长期业务口径。
+- 测试覆盖：新增 `test_postgres_red_relation_revoke_not_found_fails_closed`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_output_invoice_collection_lifecycle tests.test_output_invoice_collection_api tests.test_output_invoice_collection_service tests.test_invoice_lifecycle_page_integration -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime tests.test_derived_data_lifecycle_service tests.test_runtime_worker_registry tests.test_app_status_overview_service -v`；`cd web && npm test -- --run src/test/OutputInvoiceCollectionsPage.test.tsx src/test/TaxOffsetPage.test.tsx src/test/AppStatusIndicator.test.tsx src/test/domainEvents.test.ts`。
+- 未测风险：未连接真实 PostgreSQL 数据库触发实际 constraint/transaction 行为；由 fake connection 保护未命中 update 的错误语义。
+- 后续事项：真实环境 smoke 时覆盖红蓝票 confirm/delete、worker drain 和页面刷新。
+
 ## 2026-06-11 - 首轮测试闭环
 
 - 目标：完成 `output-invoice-collections` 模块 codebase 影响面分析、七类测试矩阵、状态机和主控依赖图闭环。

@@ -13,7 +13,7 @@
 | API contract | `backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/app/routes_turnover_ledger.py`、`docs/dev/api-contracts.md` | `GET /api/turnover-ledger`、tag-selection、bank-row-tags batch、extra、confirm、withdraw、export-preview/export |
 | Business core | `TurnoverRelationService`、`TurnoverLedgerService`、`TurnoverLedgerExtraService` | 外部往来标签准入、同组一收一支、零差额、同对方、同语义、人工闭环、撤回、extra 校验、内部转账排除 |
 | Write UoW | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、`turnover_ledger_write_adapters.py` | stale precondition、idempotency、relation/extra/settings/bankdetail 写入、dirty/outbox 同事务、rollback、Workbench relation command service 委托 |
-| Read model / worker | `TurnoverLedgerQueryService`、`TurnoverLedgerSqlProjectionBuilder`、`TurnoverLedgerReadModelRefreshService` | fresh/stale/missing/refreshing、source versions、group breakdown、worker complete dirty scope |
+| Read model / worker | `TurnoverLedgerQueryService`、`TurnoverLedgerSqlProjectionBuilder`、`TurnoverLedgerReadModelRefreshService` | fresh/stale/missing/refreshing、source versions、group breakdown、Workbench relation 状态投影、worker complete dirty scope |
 | 跨页面影响 | Workbench pair relation、Bank Details、Cost Statistics、Search、App Status | 手动闭环进入 Workbench active pair relation；撤回/分类变化后下游不能读旧 relation；App Status 不能误判 green |
 | 前端跨页事件 | `web/src/features/domainEvents.ts` | `turnoverRelationUpdated`、`workbenchRelationUpdated`、`turnoverLedgerExtraUpdated` 只触发刷新提示，不替代后端 dirty/outbox |
 
@@ -51,9 +51,9 @@
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_turnover_relation_service.py`、`tests/test_turnover_ledger_service.py`、`tests/test_turnover_ledger_extra_service.py` | 已覆盖四类 family、候选/确定候选、人工闭环、重复/跨对方/非零差额/同方向拒绝、撤回、内部转账排除、extra 字段校验、分组金额和利息。 |
 | 2. Service-layer tests | 适用 | `tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_ledger_api.py`、`tests/test_turnover_workbench_integration.py` | 已覆盖 UoW transaction、rollback、dirty/outbox、stale precondition、idempotency、settings/extra/bankdetail/relation ports、Workbench relation command service 委托、缺 command fail-fast 和 Workbench pair relation。 |
-| 3. API contract tests | 适用 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_read_facade.py` | 已覆盖列表/grouped/tag-selection/bank-row-tags/extra/confirm/withdraw/export、权限、错误、版本冲突、idempotency replay/conflict、stale conflict、relation freshness 诊断、HTML response routing error。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_source_versions.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 stale SQL read model 不伪装 fresh、missing required SQL read model 返回 refreshing、legacy fallback、source versions、projection 保存、worker handler、registry/App Status 登记。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | 已覆盖 API mapper、tag drawer 保存、grouped table、manual closure、提交前 fresh/rebind 最新 flow row versions、刷新后所选流水消失时不发 POST、跨组/非零差额禁用、extra drawer、detail missing error、stale 阻断 manual closure、operation overlay、导出、domain event。 |
+| 3. API contract tests | 适用 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_read_facade.py` | 已覆盖列表/grouped/tag-selection/bank-row-tags/extra/confirm/withdraw/export、权限、错误、版本冲突、idempotency replay/conflict、stale conflict、relation freshness 诊断、导出上限结构化错误、HTML response routing error。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_source_versions.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 stale SQL read model 不伪装 fresh、missing required SQL read model 返回 refreshing、legacy fallback、source versions、projection 保存、Workbench relation fresh 状态写入 grouped payload、Workbench relation non-fresh 不保存半成品、worker handler、registry/App Status 登记。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | 已覆盖 API mapper、tag drawer 保存、grouped table、Workbench relation 状态 chip、manual closure、已关联手工闭环 flow-row toolbar 撤回、提交前 fresh/rebind 最新 flow row versions、刷新后所选流水消失时不发 POST、跨组/非零差额禁用、extra drawer、detail missing error、stale 阻断 manual closure、operation overlay、导出、domain event。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx` | 已覆盖 deterministic 不进入 Workbench、manual zero-difference closure 写 Workbench pair relation、canonical write safety 不通过时不半写入、legacy relation 不污染 Workbench grouping、前端闭环前重刷台账且闭环后刷新关联台可见性。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/domainEvents.test.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、domain event contract。 |
 
@@ -75,7 +75,9 @@
 | relation extra | `test_relation_extra_get_returns_default_structure_and_put_persists`、`test_target_relation_extra_stale_expected_version_rejects_without_save_or_refresh`、`test_relation_extra_outbox_failure_does_not_return_best_effort_success` |
 | Bankdetail tag batch fan-out | `test_turnover_bank_row_tag_batch_refreshes_all_required_scopes`、`test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save` |
 | Workbench 回归 | `test_deterministic_turnover_relation_does_not_group_bank_rows_in_workbench`、`test_bank_only_turnover_manual_closure_rows_remain_open_even_when_linked`、`test_manual_pair_relation_occupied_bank_row_is_not_overridden_by_turnover_relation`、`test_turnover_workbench_pair_port_delegates_manual_closure_withdraw_to_relation_command_service`、`test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure_withdraw`、`test_turnover_closure_and_withdraw_wiring_use_workbench_relation_command_service` |
+| 前端已关联 flow-row toolbar 撤回 | `withdraws a selected linked manual closure from the table toolbar` |
 | Worker / App Status | `test_worker_handler_rebuilds_scope_and_completes_dirty_scope`、`test_domain_registry_covers_frontend_routes`、`test_required_worker_missing_marks_critical_domain_blocked` |
+| Workbench relation 状态投影 | `test_projection_enriches_rows_with_fresh_workbench_relation_context`、`test_projection_does_not_save_when_workbench_relation_context_is_not_fresh`、`maps ledger, detail, confirm, and withdraw responses from snake_case`、`shows Workbench relation feedback from the grouped ledger payload` |
 | `bank_detail` dependency fan-out 不阻塞 all-scope 台账 | `RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope` |
 | fresh missing bank tag rows 不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected`、`BankTransactionTagReadFacadeTests.test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
 | blocking dirty scope 粒度不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
@@ -88,9 +90,14 @@
 | --- | --- |
 | deterministic 被误当作已闭环并进入 Workbench | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py` |
 | grouped 视图把 allocation lot 当真实流水导出或展示 | `tests/test_turnover_ledger_export_service.py`、`web/src/test/TurnoverLedgerPage.test.tsx` |
+| 外部往来 export-preview/export 对超大 group 或展开后超大 flow rows 同步生成预览/XLSX，拖慢 API 线程和内存；或前端下载路径/页面弹窗吞掉后端超限消息 | `tests/test_turnover_ledger_export_service.py::TurnoverLedgerExportServiceTests::test_export_rejects_group_count_above_sync_row_limit`、`tests/test_turnover_ledger_export_service.py::TurnoverLedgerExportServiceTests::test_export_rejects_flattened_flow_rows_above_sync_row_limit`、`tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests::test_export_limit_returns_structured_error`、`web/src/test/TurnoverLedgerApi.test.ts::surfaces backend row-limit messages from failed export downloads`、`web/src/test/TurnoverLedgerPage.test.tsx::shows backend export row-limit messages inside the export dialog` |
 | stale read model 下仍允许确认/撤回/extra 写入 | `web/src/test/TurnoverLedgerPage.test.tsx` stale 写禁用测试，后端 stale precondition 测试 |
 | manual closure 抽屉缓存旧 row version，POST 使用旧 `expected_versions` 被后端拒绝，导致关联台没有生成配对/open 组 | `refreshes the grouped ledger before manual closure and submits latest bank row versions`、`blocks manual closure when a selected flow disappears after the fresh ledger reload` |
+| 已被 `turnover_manual_closure` 关联台关系占用的 flow row 在表格中被选中后，toolbar 仍只提供“确认闭环”，用户无法从当前选择直接撤回 bank-only 手工闭环，且可能误点普通闭环路径 | `withdraws a selected linked manual closure from the table toolbar` |
+| SQL bank detail row 缺 `category_version` 时，转换出的 turnover flow row 没有回退到 `manual_category_version` 或基础 `version`，导致后端 stale precondition 误报“银行流水状态已变化” | `test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_missing`、`test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_versions_missing`、`test_sql_bank_detail_turnover_row_prefers_category_version_over_manual_version` |
+| 关联台撤回或补链后，流水台 grouped payload 仍只显示 turnover 本地状态，无法反馈 Workbench active relation 当前事实；或 Workbench relation read model stale 时发布新的 turnover read model，导致 stale relation 伪装 fresh | `test_projection_enriches_rows_with_fresh_workbench_relation_context`、`test_projection_does_not_save_when_workbench_relation_context_is_not_fresh`、`shows Workbench relation feedback from the grouped ledger payload` |
 | SQL runtime 下闭环写路径读取 legacy import snapshot，而不是 `bank_detail` SQL read model，导致生产已有流水仍报 `unknown_transaction_id` 或 stale，且 Workbench relation 没有写入 | `test_sql_bank_detail_turnover_rows_keep_legacy_source_ids_for_manual_closure` |
+| Postgres 事务写路径绕过 read model scope policy，确认/撤回外部往来时向成本统计投递裸月份或裸 `all`，导致 `cost_statistics` dead-letter 和 App Status failed | `test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction`、`test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear` |
 | 写操作成功后 `turnover_ledger` 仍 refreshing 时页面提前可操作或展示旧分组 | `web/src/test/TurnoverLedgerPage.test.tsx` operation overlay 回归、`web/src/test/OperationBarrierApi.test.ts` |
 | queue/outbox 失败后 API 返回成功导致 read model 永久旧 | `tests/test_turnover_ledger_uow_contract.py` rollback tests |
 | relation extra legacy full snapshot fallback 误吞持久化问题 | `tests/test_turnover_ledger_api.py` dedicated store / no full snapshot fallback tests |
@@ -99,6 +106,7 @@
 | `turnover_ledger:all` 遇到 `bank_detail_read_model_not_fresh` 后自动补投 `bank_detail:all`，与 bank detail 月份 fan-out 互相 bump，页面长期 refreshing 且无数据 | `tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`tests/test_read_model_refresh_gateway.py::ReadModelRefreshGatewayTests::test_bank_detail_all_shard_reason_does_not_bump_active_scope` |
 | fresh `bank_detail` read model 里缺少部分 transaction id 时被误判为 non-fresh，`downstream_bank_tag_read` 持续刷新月份 shard，台账 all scope 永久 pending | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
 | 多个月份中一个 `bank_detail` 月份 pending 时，facade 重刷所有月份，导致已 fresh 月份被快速父重试反复打 pending，台账 all scope 等不到同时 fresh | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
+| 测试使用 `TemporaryDirectory(ignore_cleanup_errors=True)` 掩盖后台 job executor 未关闭，导致外部往来写入链路可能在临时目录释放时仍有异步写入残留 | `tests/test_turnover_ledger_api.py` 已切换为严格 `TemporaryDirectory()`；受影响用例在退出临时目录前调用 `app.shutdown_background_jobs()`；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.test_historical_etc_business_batch_migration_service -v` 覆盖 136 个严格清理回归 |
 
 新增线上或手工发现 bug 时，必须先在本节补复现测试名称，再修实现。
 
@@ -117,7 +125,7 @@
 
 - 真实 PostgreSQL 历史数据上刷新 `turnover_ledger` read model。
 - 真实 RabbitMQ/Redis/systemd worker drain。
-- 浏览器导出 XLSX 文件打开检查。
+- 浏览器导出 XLSX 文件打开检查；本地已覆盖超过 20,000 行同步导出 fail-closed，但不覆盖真实下载/打开耗时。
 - 大数据 grouped table 性能和滚动检查。
 
 ## 模块验证命令
@@ -138,6 +146,12 @@ cd web && npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/Turnover
 
 ```bash
 bash scripts/verify.sh docs
+```
+
+严格临时目录清理验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.test_historical_etc_business_batch_migration_service -v
 ```
 
 ## Nightly CI 覆盖

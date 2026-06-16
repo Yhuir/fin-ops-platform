@@ -55,7 +55,7 @@
 | 动作 | 事实源 / 事件 | 影响 |
 | --- | --- | --- |
 | 文件预览 | `FileImportSession`、`ImportPreviewAuditCounts` | 当前导入页重复审计和 confirm eligibility |
-| 文件确认排队 | `file_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status import worker |
+| 文件确认排队 | `file_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status import worker；发票文件确认的 `file_import` job 必须报告 `affected_domains=["imports_invoices"]` 和 route `/imports/invoices` |
 | 文件确认处理 | `ImportNormalizationService.confirm_import(...)` | input/output invoice facts、source links、duplicate decisions |
 | 发票导入生命周期 | `invoice_import_confirmed` | Workbench、Workbench relation/matching、invoice lifecycle、tax offset、cost statistics、search |
 | 预览过期 | API `409 preview_stale` | 当前导入页必须要求重新预览，不能继续确认旧结果 |

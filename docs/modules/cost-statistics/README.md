@@ -21,7 +21,7 @@
 
 关注项目范围、费用归因、导出 shape 和 cost read model freshness。成本统计 read model refresh scope 必须是 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 或 `all:all`；旧的裸月份/裸 `all` 只能在统一 read model refresh scope gateway 中归一化，不能直接进入 durable queue。生产旧 readiness、dirty scope 或 outbox 中残留的裸 scope 使用 `scripts/check-read-model-scope-contracts.py` 检查和受控清理。
 
-生产刷新由专用 `cost-statistics` RabbitMQ consumer 承担 5s SLO drain；旧 `cost-tax` combined worker 保留为兼容消费者，不再是唯一性能 lane。`cost_statistics` freshness 仍以 PostgreSQL dirty scope/outbox/readiness 为事实源。
+生产刷新由专用 `cost-statistics` RabbitMQ consumer 承担独立性能 lane；旧 `cost-tax` combined worker 保留为兼容消费者，不再是唯一性能 lane。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`cost_statistics` freshness 仍以 PostgreSQL dirty scope/outbox/readiness 为事实源，不能为了达标把 stale 伪装成 fresh。
 
 ## 维护触发器
 

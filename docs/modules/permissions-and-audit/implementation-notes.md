@@ -28,6 +28,28 @@
 
 ## 历史记录
 
+## 2026-06-16 - access tier 聚合矩阵 gate
+
+- 目标：把分散的 readonly/full/admin/denied 权限证据压成一个后端 session contract 聚合测试，降低 17 个页面 P2/P3 推进时权限口径漂移风险。
+- 影响范围：`/api/session/me`、settings access control、`AccessControlService` 动态 provider 组装、默认 admin、权限码用户和未授权用户。
+- 关键决策：不修改权限逻辑；新增 `test_get_session_me_projects_access_tier_matrix_from_settings` 走真实 app 组装后的 `/api/session/me`，同时校验 `read_export_only`、`full_access`、settings admin、默认 admin、permission-code full access、`denied` 的 `access_tier/can_access_app/can_mutate_data/can_admin_access`。
+- 文档影响：更新 `tests.md` 和 P2/P3 closure ledger，把“全角色矩阵缺少单测”收敛为“session contract 已有聚合矩阵；页面级按钮/导出/写入交互仍由各模块和 nightly 覆盖”。
+- 测试覆盖：新增后端 API contract / business core 聚合测试；复跑 auth guard。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_session_api.SessionApiTests.test_get_session_me_projects_access_tier_matrix_from_settings -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_auth_guard -v`。
+- 未测风险：真实 OA 菜单/角色同步、生产 token 过期语义、代理层真实导出下载、生产审计查询/导出仍需 staging/生产 smoke。
+- 后续事项：发现具体页面权限绕过时，先在对应页面模块补最小 regression，再回链本模块矩阵。
+
+## 2026-06-16 - readonly export 路由聚合 smoke
+
+- 目标：补齐 P2/P3 台账中“导出权限 smoke 分散”的本地聚合证据，保证只读导出用户可读/可导出但不能写入或进入 admin 操作。
+- 影响范围：protected API guard、cost statistics export、turnover ledger export、pending invoice export auth pass-through、pending/input invoice rules、turnover tag selection、bank auto-tag reapply、settings data reset。
+- 关键决策：不把缺少 SQL read repository 的 pending export 误判为权限失败；测试只断言 readable/export routes 不返回 `401/403` 或 auth/admin 错误，并对可稳定生成 XLSX 的 cost/turnover 下载断言 content type。
+- 文档影响：更新 `tests.md` 和 P2/P3 closure ledger。
+- 测试覆盖：新增 `test_readonly_export_user_can_export_but_cannot_mutate_or_admin`，覆盖 API contract / existing regression 的 representative smoke。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_auth_guard.AuthGuardTests.test_readonly_export_user_can_export_but_cannot_mutate_or_admin -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_auth_guard -v`。
+- 未测风险：真实浏览器下载、反向代理 `Content-Disposition`/`Access-Control-Expose-Headers`、生产 OA session 和审计导出查询仍需 staging/production smoke。
+- 后续事项：新增页面导出时应加入本聚合 smoke 或对应模块的权限测试。
+
 ## 2026-06-11 - permissions-and-audit 测试闭环首轮
 
 - 目标：补齐权限与审计横切边界的影响面、七类测试矩阵、状态机、验证命令和真实环境风险。

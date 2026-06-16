@@ -1,5 +1,25 @@
 # 批量账务 实施记录
 
+## 2026-06-16 - P2/P3 前端首屏分页接入
+
+- 目标：让批量账务页面实际消费后端显式分页 contract，避免未提交 bucket 首屏一次性拉取大年份范围全部银行/OA 候选。
+- 影响范围：`BatchAccountingPage`、`web/src/features/batchAccounting/api.ts`、`web/src/features/batchAccounting/types.ts`、`web/src/app/styles.css`、`web/src/test/BatchAccountingPage.test.tsx` 和本模块文档。
+- 关键决策：前端固定首屏页大小 200；未提交 bucket 分别发送 `bank_page/bank_page_size` 和 `oa_page/oa_page_size`，银行/OA 独立翻页；已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。切换 bucket 或年份会重置页码和选择，避免旧页选择误提交。
+- 文档影响：更新本模块 `README.md`、`tests.md`、`implementation-notes.md` 和 P2/P3 closure ledger；长期 API contract 仍兼容未传分页参数的旧调用方，本轮无需改长期接口文档。
+- 测试覆盖：新增 `BatchAccountingPage.test.tsx::uses backend pagination for bank and OA first screens`，覆盖 205 行 synthetic bank/OA payload、首屏 200 行、第二页 5 行、不可见旧页行、请求参数包含 `bank_page_size=200` / `oa_page_size=200`；既有页面测试同步断言初始 GET 使用分页参数。
+- 验证命令：`npm --prefix web test -- --run src/test/BatchAccountingPage.test.tsx -t "uses backend pagination"`；`npm --prefix web test -- --run src/test/BatchAccountingPage.test.tsx`。
+- 未测风险：真实生产 PostgreSQL EXPLAIN、真实登录态浏览器渲染耗时、超长文本视觉回归和大 XLSX 下载仍属 P2/P3 staging/manual gate。
+
+## 2026-06-16 - withdraw direct pair fallback 删除
+
+- 目标：删除 `BatchAccountingService.withdraw` 在缺少 `WorkbenchRelationCommandService` 时回退到 `WorkbenchPairRelationService.withdraw_latest_for_row_ids(...)` 的兼容路径，确保批量账务撤回不会绕过统一 relation command boundary。
+- 影响范围：`BatchAccountingService._withdraw_unlocked`、`tests/test_batch_accounting_api.py`、`tests/test_platform_runtime_boundary_guards.py` 和本模块测试矩阵。
+- 关键决策：生产 `Application._batch_accounting_service()` 已注入 `WorkbenchRelationCommandService`；缺少 command service 代表 wiring 错误，应返回 `batch_accounting_relation_command_unavailable`，不能 direct pair mutation。
+- 文档影响：本模块 `tests.md` 增加 withdraw command boundary 回归入口；长期 API/架构口径已要求 withdraw 走 command service，本轮无需改长期事实源。
+- 测试覆盖：新增 `test_withdraw_requires_relation_command_service_without_direct_pair_fallback` 和 `test_batch_accounting_withdraw_has_no_direct_pair_write_fallback`；完整 batch accounting/backend relation boundary/frontend 回归通过。
+- 验证命令：见 Phase 11 verification。
+- 未测风险：真实 PostgreSQL 历史批量账务 relation 和真实 worker drain 仍需 staging 或发布前 smoke。
+
 ## 2026-06-14 - 撤回历史显示归属过滤
 
 - 目标：批量账务撤回复用 Workbench relation history 时，不再把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation。
@@ -20,6 +40,7 @@
 - 批量账务 submit relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`；缺少 command service 时 fail fast，不回退 direct `WorkbenchPairRelationService.replace_with_confirmed_relation(...)`。
 - 提交/撤回成功后的前端 `workbenchRelationUpdated` 只是刷新提示，不替代后端 dirty scope、worker、operation barrier 和 readiness。页面释放全屏操作 overlay 前必须等 `workbench_relation` barrier fresh 并重新加载。
 - 历史 case id collision 修复保留在 service 显式路径和 mutation/repair 语义中，不能重新散落到列表读取。
+- `GET /api/batch-accounting` 支持可选显式分页。未传分页参数的旧调用方仍保持旧 response shape；批量账务前端未提交 bucket 默认带 `bank_page/bank_page_size` 和 `oa_page/oa_page_size`，后端裁剪对应列表并返回 `pagination`，`page_size>200` 返回 `invalid_paging`。
 
 ## 记录模板
 
@@ -37,6 +58,27 @@
 ```
 
 ## 历史记录
+
+## 2026-06-16 - P2/P3 显式分页首屏保护
+
+- 目标：补齐批量账务 P2/P3 大数据首屏本地证据，避免后续大年份范围把全部银行/OA 候选一次性返回给首屏。
+- 影响范围：`BatchAccountingService.build_payload(...)`、`Application._handle_api_batch_accounting(...)`、`tests/test_batch_accounting_api.py`、本模块 README/tests 和 `.planning/P2P3-CLOSURE-PLAN.md`。
+- 关键决策：分页只在请求显式带参数时生效，默认响应保持兼容；通用 `page/page_size` 同时作用于 bank/OA 列表，`bank_*` 和 `oa_*` 支持后续独立分页；submitted bucket 在 bank list 分页时只返回可见 bank row 的 relation payload，避免显式分页仍携带全量关系详情。
+- 文档影响：更新本模块 `README.md`、`tests.md`、`implementation-notes.md` 和 P2/P3 closure ledger。
+- 测试覆盖：新增 `BatchAccountingApiTests.test_unsubmitted_list_explicit_pagination_protects_first_screen_slo`，用 250 行 synthetic bank/OA 候选验证 200 行上限、第二页、summary total 保留和 `invalid_paging`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_explicit_pagination_protects_first_screen_slo -v`。
+- 未测风险：前端默认请求尚未传分页参数，真实浏览器长表格、独立 bank/OA 分页交互和生产 PostgreSQL EXPLAIN 仍需后续 smoke 或 UI 改造。
+
+## 2026-06-16 - relation non-fresh 与 canonical write safety 证据收敛
+
+- 目标：收敛 P2/P3 中“relation non-fresh 与 canonical write safety 文案/旧测试命名未统一”的缺口，确认批量账务不再把普通 relation distribution non-fresh 当作默认写阻断条件。
+- 影响范围：本模块测试矩阵、`workbench-relations` 测试矩阵、`.planning/P2P3-CLOSURE-PLAN.md`；不改变业务代码。
+- 关键决策：保留当前语义：GET/read facade 负责透出 `workbench_relation` freshness 诊断和入队刷新；submit/withdraw 写安全由 `WorkbenchRelationCommandService`、canonical relation、idempotency、owner 状态、权限/session、DB 可写性决定。只有显式 freshness precondition 才让 non-fresh 阻断 mutation。
+- 文档影响：本次只做 P2/P3 closure ledger 和测试入口表述收敛，不改变 API 或长期架构口径。
+- 测试覆盖：复用现有 `test_unsubmitted_list_exposes_relation_read_model_missing_status`、`test_submitted_list_exposes_relation_read_model_stale_status`、`test_submit_delegates_relation_write_to_command_service`、`test_submit_requires_relation_command_service_without_direct_pair_fallback`、`test_withdraw_delegates_relation_write_to_command_service`、`test_withdraw_requires_relation_command_service_without_direct_pair_fallback` 以及 runtime boundary guard。
+- 验证命令：见 `.planning/P2P3-CLOSURE-PLAN.md` 的 P2P3-018 verification commands。
+- 未测风险：真实 worker drain、生产历史半迁移和下游页面最终显示仍需 staging/production smoke；本项只收敛本地语义与测试入口。
+- 后续事项：如果未来 mutation API 显式启用 freshness precondition，必须新增带 `read_model_status` / `read_model_stale_reasons` / `refresh_enqueued` 的 API contract 测试。
 
 ## 2026-06-14 - submit/withdraw 操作后 freshness barrier
 

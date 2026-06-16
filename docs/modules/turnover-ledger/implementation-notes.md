@@ -14,6 +14,72 @@
 - 写路径应优先保持 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` 边界；legacy fallback 只作为兼容风险存在，不能继续扩大。
 - 涉及 Workbench relation 的 manual closure/withdraw 即使经过 legacy fallback facade，也必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation write fallback。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
+- export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
+
+## 2026-06-16 - P2/P3 外部往来同步导出上限
+
+- 目标：收敛外部往来 export-preview/export 大数据同步生成风险，避免超过 20,000 个 group 或展开后超过 20,000 行时继续构造预览/XLSX。
+- 影响范围：`TurnoverLedgerExportService`、turnover export API error mapping、外部往来导出 service/API 测试、模块测试矩阵和 P2/P3 闭环台账。
+- 关键决策：导出上限为 20,000 行；先根据 grouped payload `pagination.total` 拒绝明显超大 group，再根据 formal rows 数拒绝单 group 大量 flow rows。普通参数错误仍保持 `invalid_turnover_ledger_export_request`。
+- 文档影响：更新 `tests.md`、本实施记录和 `.planning/P2P3-CLOSURE-PLAN.md`；产品/API 长期文档未扩展，因为这是性能保护边界。
+- 测试覆盖：新增 `tests/test_turnover_ledger_export_service.py::TurnoverLedgerExportServiceTests::test_export_rejects_group_count_above_sync_row_limit`、`test_export_rejects_flattened_flow_rows_above_sync_row_limit` 和 `tests/test_turnover_ledger_api.py::TurnoverLedgerApiTests::test_export_limit_returns_structured_error`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_export_service.TurnoverLedgerExportServiceTests.test_export_rejects_group_count_above_sync_row_limit tests.test_turnover_ledger_export_service.TurnoverLedgerExportServiceTests.test_export_rejects_flattened_flow_rows_above_sync_row_limit tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_export_limit_returns_structured_error -v`。
+- 未测风险：真实 PostgreSQL grouped query、浏览器下载/打开文件和长表格视觉性能仍需 staging/manual smoke；本地只证明超大同步导出不会继续生成文件。
+
+## 2026-06-16 - P2/P3 严格临时目录清理证据
+
+- 目标：把外部往来 API 测试从 `TemporaryDirectory(ignore_cleanup_errors=True)` 放宽清理切回严格清理，避免后台 job executor 异步写入残留被测试吞掉。
+- 影响范围：`tests/test_turnover_ledger_api.py`；业务实现、API contract、read model scope 和前端行为不变。
+- 关键决策：保留严格 `TemporaryDirectory()`；对会启动后台 job 的用例在临时目录退出前调用 `app.shutdown_background_jobs()`，必要时使用 `try/finally`，不通过放宽 cleanup 隐藏资源边界问题。
+- 文档影响：更新本实施记录、`tests.md` 和 P2/P3 closure ledger；长期业务口径不变。
+- 测试覆盖：`tests.test_turnover_ledger_api` 覆盖外部往来 API、UoW、idempotency、stale precondition、read model refresh 和 Workbench relation 回归；同时运行 `tests.test_historical_etc_business_batch_migration_service` 验证相关历史 ETC migration 严格清理。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.test_historical_etc_business_batch_migration_service -v`，结果 136 tests passed。
+- 未测风险：这只证明本地测试资源释放和后台 job 边界；真实 worker/systemd/RabbitMQ drain 与一秒级生产 SLO 仍需 staging/production gate。
+
+## 2026-06-16 - 已关联手工闭环 flow-row toolbar 撤回
+
+- 目标：补齐外部往来表格选择已关联 `turnover_manual_closure` flow row 后的操作闭环，避免 toolbar 仍只暴露普通“确认闭环”入口。
+- 影响范围：`TurnoverLedgerPage` selection toolbar、`TurnoverLedgerPage.test.tsx`、P2/P3 closure ledger；后端 withdraw API contract 不变。
+- 关键决策：表格 checkbox 仍是 flow-row 选择入口；若当前选择包含已关联 Workbench row，普通“确认闭环”禁用。只有所选 flow rows 全部属于同一个 `turnover_manual_closure` relation 时，toolbar 启用“撤回闭环”，复用现有 `/api/turnover-ledger/relations/{id}/withdraw`，优先等待后端返回的 `freshness_targets`，然后 reload grouped ledger 并发送 turnover/workbench domain events。
+- 文档影响：更新本模块 `tests.md` 和 `.planning/P2P3-CLOSURE-PLAN.md`。
+- 测试覆盖：新增 `web/src/test/TurnoverLedgerPage.test.tsx::withdraws a selected linked manual closure from the table toolbar`；完整 `TurnoverLedgerPage.test.tsx` 继续覆盖抽屉撤回、manual closure、stale 阻断和 operation overlay。
+- 验证命令：`npm --prefix web test -- --run src/test/TurnoverLedgerPage.test.tsx`。
+- 未测风险：未用真实浏览器大数据表格截图验证 toolbar 换行动效；生产真实 withdraw SLO 仍需登录态 mutating scenario 证明。
+
+## 2026-06-16 - Postgres 事务入队补齐成本统计 scope policy
+
+- 目标：阻止外部往来确认/撤回在 PostgreSQL 事务写路径中绕过 `ReadModelRefreshGateway`，继续向 `cost_statistics.read_model.refresh` 投递裸月份或裸 `all`。
+- 影响范围：`TurnoverLedgerDirtyOutboxWriter`、`TurnoverLedgerWriteUnitOfWork`、Postgres facade refresh request、成本统计下游 read model 和 App Status readiness。
+- 关键决策：事务内写入仍使用 `enqueue_read_model_refresh_in_transaction` 保持同一业务事务；在调用前复用 `DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY` 做 normalize/validate。`source_versions` 优先按实际入队 event 的 canonical `scope_key` 记录。
+- 文档影响：更新 turnover-ledger、read-models、cost-statistics 模块记录，并在 P2/P3 closure ledger 登记生产 dry-run 证据。
+- 测试覆盖：新增 `test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction`；更新 `test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear` 断言 Postgres path 入队 `active/all` canonical cost scopes。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract -v`。
+- 未测风险：生产已有 9 条 legacy cost statistics runtime 状态仍需受控 `scripts/check-read-model-scope-contracts.py --apply` 清理；本次未执行生产写入、重启或部署。
+- 后续事项：发布后先 dry-run，再执行批准后的 scope contract repair apply，并复查 `/health/ready`、dirty/outbox/readiness。
+
+## 2026-06-16 - SQL bank detail category version fallback
+
+- 目标：修复外部往来页确认闭环时，SQL bank detail row 缺 `category_version` 但有 `manual_category_version` 或基础 `version` 时，后端 stale precondition 误报“银行流水状态已变化”的问题。
+- 真实原因：`TurnoverLedgerBankRowStalePreconditionPort` 已按 `category_version -> manual_category_version -> version` 判断当前版本，但 `Application._turnover_bank_transaction_row_from_bank_detail(...)` 从 `bank_detail` SQL read model 转换 turnover flow row 时没有把 fallback 后的版本统一输出为 `category_version`。前端刷新后提交的是最新 `categoryVersion`，后端当前 row 却缺该字段，导致 expected/current 比较失败。
+- 影响范围：`bank_detail` SQL read model -> turnover flow row 转换边界；不改变手动闭环业务规则、Workbench relation 写入口、dirty/outbox、operation barrier 或前端提交流。
+- 关键决策：在转换边界统一写出 `category_version`，优先级保持 `category_version -> manual_category_version -> version`，无效值归零；不放宽 stale precondition，不新增 fallback 写路径。
+- 文档影响：更新本实施记录和测试矩阵；长期业务口径不变。
+- 测试覆盖：新增 `test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_missing`、`test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_versions_missing`、`test_sql_bank_detail_turnover_row_prefers_category_version_over_manual_version`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`；`cd web && npm test -- --run src/test/TurnoverLedgerPage.test.tsx src/test/TurnoverLedgerApi.test.ts`。
+- 未测风险：本地自动化覆盖转换和前端 fresh/rebind 回归；真实生产历史数据仍需在发布后通过正常 `bank_detail` / `turnover_ledger` read model refresh 和手工 smoke 验证。
+
+## 2026-06-16 - Workbench relation feedback projection
+
+- 目标：补齐关联台反向影响外部往来款管理页的可见反馈。此前手工闭环会写 Workbench active pair relation 并触发刷新事件，但 turnover grouped payload 没有承载 canonical Workbench relation 状态；关联台侧撤回或补链后，流水台刷新也只能看到 turnover 本地状态。
+- 影响范围：`TurnoverLedgerSqlProjectionBuilder`、standalone worker 依赖注入、`web/src/features/turnoverLedger/api.ts`、`TurnoverLedgerGroupedTable`。
+- 关键决策：
+  - projection 阶段通过 `WorkbenchRelationReadFacade.get_by_row_ids(require_fresh=True)` 读取 fresh 的 relation distribution，把 `workbench_relation_status`、`workbench_relation_case_ids`、`workbench_relation_mode`、`workbench_relation_source`、`workbench_relation_row_ids` 写入 grouped payload。
+  - Workbench relation context 不 fresh 时抛 `workbench_relation_read_model_not_fresh`，不保存半成品 turnover read model，避免 stale relation 被包装成 fresh turnover 数据。
+  - 前端只做 snake_case/camelCase 映射和状态 chip 展示，不把 domain event 或本地 React state 当事实源。
+- 文档影响：更新本模块 README、state-machine、tests 和 implementation notes；长期业务口径不变。
+- 测试覆盖：新增 `test_projection_enriches_rows_with_fresh_workbench_relation_context`、`test_projection_does_not_save_when_workbench_relation_context_is_not_fresh`；更新 `web/src/test/TurnoverLedgerApi.test.ts` 和 `web/src/test/TurnoverLedgerPage.test.tsx`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_read_model_refresh -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v`；`cd web && npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx`。
+- 未测风险：真实/staging 环境仍需验证 worker 顺序和页面可见性：先刷新 `workbench_relation` scope，再刷新 `turnover_ledger`，浏览器在 operation barrier fresh 后应看到 relation chip。
 
 ## 2026-06-16 - Bank detail dependency loop caused empty turnover ledger
 

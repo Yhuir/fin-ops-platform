@@ -11,6 +11,7 @@
 - `requires_invoice` 作为列表 filter 是最终状态桶；支出状态桶包含 `paid_pending_invoice`、`paid_invoiced`、`paid_pending_future_invoice`、`invoice_not_fully_paid`，收入状态桶包含 `income_pending_invoice`、`income_invoiced`。`filter_group` / `matched_rule` 只解释规则命中，不能作为 rows/filter-options/export 的父筛选可见性条件。
 - rows、filter-options、export-preview 和 export 必须先经过 `PendingInvoiceReadModelService` 的 freshness gate；非 fresh 时不能把空 rows 当真实结果。
 - filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
+- export-preview 和 export 通过 `PendingInvoiceReadModelService.all_rows()` 收集当前筛选结果时，超过 20,000 行必须 fail-closed，不能继续分页并同步生成大 XLSX。
 - OA/流水/发票 relation 不是待找发票私有事实；当前页面只通过 attach existing 写入选择已有发票关系，且必须委托 `WorkbenchRelationCommandService`；读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
 - manual invoice 不再是当前待找发票 HTTP/UI 新写入口；历史 `preview_manual_invoice` / `confirm_manual_invoice` 只保留旧 command 恢复和迁移兼容。
 - 收入状态覆盖必须走批量 service/API 边界，先整批校验再一次写 command/audit/finalizer，不能由前端循环单条接口形成半成功。
@@ -32,6 +33,28 @@
 ```
 
 ## 历史记录
+
+## 2026-06-16 - P2/P3 导出全量收集上限
+
+- 目标：收敛待找发票大数据导出风险，避免 export-preview/export 在命中大匹配集时继续按 200 行分页收集并同步生成 XLSX，拖慢 API 线程和内存。
+- 影响范围：`PendingInvoiceReadModelService.all_rows()`、`PendingInvoiceQueryService` 旧 export helper、待找发票 API 回归测试、SQL/runtime 测试矩阵和 P2/P3 闭环台账。
+- 关键决策：与银行明细、进项发票使用情况导出保持同一类 fail-closed 语义；超过 20,000 行返回 `pending_invoice_export_row_limit_exceeded`，错误 details 包含 `total` 和 `limit`，并要求用户缩小筛选范围。
+- 文档影响：更新 `tests.md`、本实施记录和 `.planning/P2P3-CLOSURE-PLAN.md`；产品/API 长期口径未单独扩展，因为这是性能保护边界，不新增用户流程。
+- 测试覆盖：新增 `tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_read_model_service_all_rows_rejects_export_row_limit_before_scanning_more_pages`，验证超限只读第一页；新增 `tests/test_pending_invoice_api.py::PendingInvoiceApiTests::test_export_endpoints_reject_row_limit_before_xlsx_generation`，验证 preview/download API 结构化错误。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime.SearchPendingSqlRuntimeTests.test_pending_invoice_read_model_service_all_rows_rejects_export_row_limit_before_scanning_more_pages tests.test_pending_invoice_api.PendingInvoiceApiTests.test_export_endpoints_reject_row_limit_before_xlsx_generation -v`。
+- 未测风险：真实浏览器下载、文件打开、生产数据 EXPLAIN、网络中断恢复和下载耗时仍需 staging/manual smoke；本地只证明超大匹配集不会继续同步生成 XLSX。
+- 后续事项：继续推进 P2/P3 final gated smoke，收集真实登录态 HTTP/SSE/read model/write evidence。
+
+## 2026-06-16 - P2/P3 首屏分页性能护栏证据
+
+- 目标：补齐待找发票在 P2/P3 一秒级同步推进中的本地首屏有界请求证据，避免 rows API 被页面或调用方当作全量拉取路径。
+- 影响范围：`PendingInvoiceQueryService` service 测试、`PendingInvoicesPage` 前端回归测试、模块测试矩阵和 P2/P3 闭环台账；未改变业务代码、HTTP contract 或页面默认行为。
+- 关键决策：页面默认首屏保持 `page=1&page_size=50`，用户控件限制为 25/50/100；service 对异常大的 `page_size` 继续按既有 contract 夹到 200，而不是改成 `invalid_paging`，避免改变老调用方语义。
+- 文档影响：更新 `tests.md` 和本实施记录；长期 API/产品文档不变，因为本轮只补测试证据。
+- 测试覆盖：新增 `tests/test_pending_invoice_service.py::PendingInvoiceQueryServiceTests::test_page_size_limit_protects_first_screen_slo`；更新 `web/src/test/PendingInvoicesPage.test.tsx` 断言首屏 rows 请求和页大小选项。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service.PendingInvoiceQueryServiceTests.test_page_size_limit_protects_first_screen_slo -v`；`npm --prefix web test -- --run src/test/PendingInvoicesPage.test.tsx`。
+- 未测风险：本地合成数据不验证真实 PostgreSQL EXPLAIN、索引选择、锁等待、浏览器长表滚动或大文件导出下载；这些仍属于 staging/生产 smoke。
+- 后续事项：P2/P3 闭环继续处理成本统计首屏/导出性能证据和真实登录态 HTTP SLO。
 
 ## 2026-06-15 - 修复 requires_invoice 状态桶筛空
 

@@ -151,6 +151,7 @@ extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `tu
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
 | operation pending | tag-selection、extra、confirm、withdraw 成功后显示全屏 overlay，等待 `turnover_ledger` operation barrier fresh，再 reload grouped ledger | operation overlay / page tests |
+| workbench relation feedback | grouped payload 中的 flow row 展示 `workbench_relation_status`：`linked` 显示关联台已关联/手工闭环，`candidate` 显示候选，`unlinked` 显示未关联；这些字段来自后端 projection，不来自前端本地事件 | API mapper / page tests |
 
 前端跨页事件：
 
@@ -197,6 +198,8 @@ job.outbox_events / job.read_model_dirty_scopes
   -> turnover-ledger worker consumes turnover_ledger.read_model.refresh
   -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
   -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
+  -> WorkbenchRelationReadFacade.get_by_row_ids(require_fresh=True)
+  -> fresh relation distribution enriches grouped payload; non-fresh relation context fails without saving
   -> save_turnover_ledger_rows
   -> complete dirty scope and readiness
 ```
@@ -215,3 +218,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |
 | 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `turnover_ledger` barrier fresh 并 reload，避免旧 grouped payload 暴露给用户 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
 | 2026-06-15 | manual closure 提交前刷新并重绑定所选 flow rows | 防止抽屉缓存旧 `categoryVersion` 导致后端 stale precondition 拒绝，也防止刷新后流水消失时误发 POST | `web/src/test/TurnoverLedgerPage.test.tsx` fresh-rebind/stale tests |
+| 2026-06-16 | grouped payload 投影 Workbench relation 状态 | 关联台反向变化可通过 fresh `workbench_relation` read model 反馈到流水台；relation 不 fresh 时不发布新的 turnover read model | `tests/test_turnover_ledger_read_model_refresh.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |

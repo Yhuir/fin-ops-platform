@@ -14,7 +14,7 @@
 | 确认/持久化 | confirm 持久化、重复跳过、selected bank mapping 字段保留、导入跨重启持久化、batch revert/download | `tests/test_import_service.py`、`tests/test_import_formalization_api.py` |
 | Import worker / queue | idempotency key、small RabbitMQ envelope、unknown processor failure、registered processor success、worker check、RabbitMQ confirm queue | `tests/test_import_job_queue.py`、`tests/test_runtime_worker_registry.py` |
 | 下游 fan-out | bank import confirmed -> bank detail/balance、Workbench/relation/matching、invoice lifecycle、cost/search | `tests/test_derived_data_lifecycle_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bank_details_sql_runtime.py` |
-| App Status/App Health | imports bank domain route、import worker/job、file import explicit affected domain、global status plane | `tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
+| App Status/App Health | imports bank domain route、import worker/job、file import explicit affected domain、generic import job fallback 不误指发票页、global status plane | `tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 
 ## 关键场景覆盖
 
@@ -25,6 +25,7 @@
 | 前端把 `preview_stale` 映射为“重新预览”提示 | covered | `file import confirm maps preview_stale to the refresh preview message` |
 | 损坏文件作为文件级错误，不中断整批预览 | covered | `test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch`、`test_preview_marks_corrupt_excel_as_file_level_error_instead_of_raising` |
 | 银行流水模板识别与真实银行 Excel 文本字段保留 | covered | `test_preview_files_recognizes_bank_statement_templates`、`test_bank_file_parsers_preserve_real_excel_text_field_contracts` |
+| 240 行合成银行流水同文件重复组只产生一个可确认代表，其余进入 duplicate audit | covered | `test_preview_bounds_large_bank_duplicate_group_to_one_confirmable_row` |
 | 选择银行映射持久化，检测账号冲突，银行别名/简称/法定名称不误报 | covered | `test_preview_persists_selected_bank_mapping_and_marks_conflict_against_detected_account`、`test_preview_does_not_mark_bank_*_as_conflict_when_last4_matches` |
 | preview stale 时拒绝 confirm | covered | `test_confirm_session_rejects_stale_preview_when_existing_records_change`、`test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
 | confirm 只导入 selected files | covered | `test_confirm_files_imports_only_selected_files_from_session` |
@@ -53,13 +54,14 @@
 | 损坏文件 | 单个损坏 Excel 不能中断整批预览 | covered |
 | 原始文本列 | 银行流水导入必须保留摘要、备注、用途等原始文本列，不影响 identity | covered |
 | RabbitMQ confirm | 异步 confirm 只能传小 envelope，processor 由 worker 拉取事实 | covered |
-| App Status job mapping | `imports_bank_transactions` domain 声明 `import.process.requested`，但 job registry 的该 job 当前只映射 `imports_invoices` | P1 documented-risk |
+| App Status job mapping | 银行流水文件确认必须写入 `imports_bank_transactions` affected domain；generic `file_import` / `import.process.requested` fallback 不能误指发票页 | fixed 2026-06-16 |
+| 大重复组 | 合成 240 行同文件银行流水重复组必须只产生一个 confirmable representative，避免大文件 preview 把重复项全部当作可确认 | fixed 2026-06-16 |
 
 ## 关键 Smoke Flows
 
-1. 上传银行流水 XLS/XLSX -> 为每个文件选择银行账户 -> 预览成功 -> 展示 audit counts、重复组和跳过明细。
+1. 上传银行流水 XLS/XLSX -> 为每个文件选择银行账户 -> 预览成功 -> 展示 audit counts、重复组和跳过明细；240 行合成重复组本地回归只允许一个 confirmable representative。
 2. 预览后底层数据变化 -> 确认返回 `preview_stale` -> 前端提示重新预览，不创建导入 job。
-3. 确认可导入文件 -> 创建 background `file_import` job / import worker event -> worker confirm -> Workbench matching 入队 -> 银行明细和关联台后续 fresh。
+3. 确认可导入银行流水文件 -> 创建 background `file_import` job，`affected_domains=["imports_bank_transactions"]`、`route="/imports/bank-transactions"` -> import worker event -> worker confirm -> Workbench matching 入队 -> 银行明细和关联台后续 fresh。
 4. 损坏文件 + 正常文件混合上传 -> 损坏文件显示 file-level error -> 正常文件仍可确认。
 5. 导入完成后进入银行明细和关联台，确认 `bank_detail`、`bank_account_balance`、`workbench` / `workbench_relation` 不显示 stale 为 fresh。
 
@@ -98,6 +100,6 @@ Nightly CI 通过 `scripts/verify.sh` 执行后端、前端和文档校验。银
 ## 未测风险
 
 - 真实银行多模板大文件、加密/损坏/超大 Excel、边界编码和历史生产文件样本仍需 staging smoke。
+- 本地已覆盖 240 行合成 ICBC 重复组；它不替代真实银行多模板、加密文件、异常编码、超大 Excel 内存/耗时和历史生产样本 smoke。
 - 真实 PostgreSQL + RabbitMQ + Redis + systemd import worker drain、job retry、worker crash/restart、幂等重复确认仍需环境验证。
-- `import.process.requested` 在 App Status background job registry 当前只映射 `imports_invoices`，但 `imports_bank_transactions` domain 也声明该 job type；本轮记录为 P1 documented-risk，后续改 App Status 时应补 job affected domain 回归。
 - 下游页面最终展示依赖银行明细、关联台、成本统计等模块自己的 fresh/read model 回归；本模块只证明 fan-out 入口和关键 contract。

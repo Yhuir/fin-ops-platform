@@ -26,6 +26,27 @@
 
 ## 历史记录
 
+## 2026-06-16 - P2/P3 一秒级 SLO 门禁口径
+
+- 目标：把 runtime worker/read model 当前维护口径从历史 5 秒基线收紧到 17 页面 P2/P3 closure 的一秒级门禁，避免后续无人值守流程继续按旧阈值验收。
+- 影响范围：runtime worker、read model SLO 工具、页面首屏 API 和写操作 operation-to-fresh gate；不改历史 5 秒运行记录。
+- 关键决策：首屏 API 与 direct read model refresh 默认按 p95 <= 1000ms 验收；写操作同步链路同时要求 p95 <= 1000ms、p99 <= 3000ms。缺少 Postgres/RabbitMQ/env/auth/scenario 时应返回结构化 gated 状态，而不是把门禁误判为通过。
+- 文档影响：同步更新 runtime-workers、read-models、cost-statistics、pending-invoices、tax-offset 和 runtime worker governance 当前边界。
+- 测试覆盖：`tests/test_slo_tool_defaults.py` 锁定 SLO 工具默认阈值；`tests/test_rabbitmq_staging_preflight.py`、`tests/test_write_operation_scenario_discovery.py`、`tests/test_write_operation_e2e_smoke.py` 覆盖缺 env/input 时的结构化门禁状态。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_slo_tool_defaults tests.test_rabbitmq_staging_preflight tests.test_write_operation_scenario_discovery tests.test_write_operation_e2e_smoke -v`；`bash scripts/verify.sh docs`。
+- 未测风险：真实生产/staging worker drain、RabbitMQ transport、authenticated API 和受控写场景仍需真实环境 gate；不能用本地 mock 或 unauthenticated shell smoke 宣称完成。
+
+## 2026-06-16 - RabbitMQ staging preflight 缺环境结构化门禁
+
+- 目标：让无人值守 P2/P3 workflow 在缺少 `FIN_OPS_TEST_DATABASE_URL` 或 `RABBITMQ_TEST_URL` 时得到可分流的 `configuration_missing` 状态，而不是把 staging 环境缺失当作普通实现失败。
+- 影响范围：`run_rabbitmq_staging_preflight` CLI 顶层状态、`tests/test_rabbitmq_staging_preflight.py`、runtime-workers/app-health 测试矩阵和 P2/P3 闭环台账；不改变已有 RabbitMQ topology、dispatcher、consumer 或 worker 检查命令。
+- 关键决策：`env.required` check 仍保留为 `fail` 详情，顶层 report 在缺必需 env 时升级为 `status=configuration_missing`、`error=staging_preflight_environment_missing`、`required_env=[...]`，退出码为 2；真实命令失败仍保持 `status=fail` 和退出码 1。
+- 文档影响：更新本模块 `tests.md`、app-health-operations 测试矩阵和 P2/P3 closure ledger。
+- 测试覆盖：`tests/test_rabbitmq_staging_preflight.py::RabbitMqStagingPreflightTests::test_missing_env_returns_configuration_missing_before_running_commands`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_rabbitmq_staging_preflight -v`；`PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.run_rabbitmq_staging_preflight --json --skip-real-tests`。
+- 未测风险：本地只证明 preflight contract；真实 RabbitMQ broker、queue depth、consumer count、DLQ 和 systemd long-run drain 仍需要 staging/生产环境。
+- 后续事项：具备 staging URL 后运行 preflight 不带 `--skip-real-tests`，再根据失败项分别处理 topology、dispatcher、worker 或 broker 权限问题。
+
 ## 2026-06-16 - Bank detail dependency loop guards
 
 - 目标：修复外部往来款管理和免 OA 银行流水批次在生产长期显示“同步中”、页面无数据的问题。
@@ -181,7 +202,7 @@
 - 影响范围：`RuntimeQueueSettings`、`RabbitMqConsumer.consume_forever(...)`、`deploy/oa/env/fin-ops.rabbitmq-worker.env.example`；不改变 outbox/dirty/readiness 事实源，也不改变 RabbitMQ envelope 合约。
 - 关键决策：新增 `RABBITMQ_CONSUMER_POSTGRES_DRAIN_INTERVAL_SECONDS`，默认 1s。RabbitMQ consumer 独立按该间隔调用 `RuntimeWorker.run_once()` 扫 PostgreSQL durable queue；heartbeat 仍低频记录，避免把 idle heartbeat 写成 1s 噪声。这样 RabbitMQ publish 失败或 envelope 丢失时，PostgreSQL fallback 仍能满足 5s SLO。
 - 测试覆盖：`RabbitMqRuntimeTests.test_consumer_drains_postgres_queue_on_short_interval_independent_of_heartbeat`、`RabbitMqRuntimeTests.test_runtime_queue_settings_parses_consumer_postgres_drain_interval`。
-- 生产验证：发布后重启 RabbitMQ worker，确认 `read_model_slo_smoke --apply --target-ms 5000` 在 RabbitMQ publish 重试场景下仍能通过。
+- 生产验证：该历史阶段发布后重启 RabbitMQ worker，并以当时的 `read_model_slo_smoke --apply --target-ms 5000` 验证 RabbitMQ publish 重试场景；当前 P2/P3 closure 复跑必须使用 `--target-ms 1000`，不能沿用历史 5 秒阈值作为通过标准。
 
 ## 2026-06-13 - Workbench relation fan-out priority
 

@@ -34,7 +34,7 @@
 | 账户余额独立 read model | P0 | `tests/test_bank_account_balance_read_model.py`、`web/src/test/BankDetailsPage.test.tsx` | covered | latest balance、CNY 别名、日期筛选只影响 count、不从 detail rows 聚合、不用 stale 覆盖 fresh。 |
 | 关系标签投影 | P0 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py` | covered | relation distribution row、OA/invoice-only 边界、失败降级、不读 legacy candidate matches。 |
 | API route contract | P0 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | covered | stale rows 仍 200；refreshing 空 payload 才 202；权限、错误 envelope、导出 facade。 |
-| 导出 | P1 | `tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx` | covered | 多 sheet、筛选转发、空结果、分页、公式转义、错误映射、filename。 |
+| 导出 | P1 | `tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx` | covered | 多 sheet、筛选转发、空结果、分页、公式转义、错误映射、filename、超过 20,000 行上限时页面展示行动建议。 |
 | 前端列表/筛选/分页/search | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | covered | 默认日期、账户切换、关键词、分类 counts、分页、表格中文标签。 |
 | 前端 drawer、规则保存、重应用 | P1 | `web/src/test/BankDetailsPage.test.tsx` | covered | 保存/重应用后只刷新交易，不重取账户余额；事件广播和反馈状态。 |
 | 前端 stale/refreshing/error/abort | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | covered | 保留旧 rows、隐藏 read model 细节、unmount 清理 timer、abort 不报错。 |
@@ -61,6 +61,7 @@
 | 长期 | 前端用全量标签字典确认非当前候选，导致伪造分类。 | `tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetailsPage.test.tsx` | covered |
 | 长期 | 人工分类绕过自动候选/内部往来确定性结果。 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_transaction_category_service.py` | covered |
 | 长期 | 银行原始字段跨银行 fallback，导出或表格展示错误语义。 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts` | covered |
+| 2026-06-16 | 银行明细导出超过 20,000 行时后端返回 `bank_detail_export_row_limit_exceeded`，前端若吞掉错误会误导用户以为下载失败且无缩小范围建议。 | `web/src/test/BankDetailsApi.test.ts::maps bank detail export row-limit errors to actionable messages`、`web/src/test/BankDetailsPage.test.tsx::shows backend export row-limit messages without starting a download` | covered |
 | 长期 | 标签/分类写入成功但 dirty/outbox 或审计半写入。 | `tests/test_bankdetail_write_uow_contract.py`、`tests/test_bank_details_sql_runtime.py` | covered |
 | 长期 | 关联台关系变更后银行明细 relation tag 不刷新。 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/src/test/BankDetailsPage.test.tsx` | covered |
 | 2026-06-15 | 自动标签配置被历史 settings 保存污染成只有 label 的 custom/system 定义，导致文件恢复生成新 code、旧确认记录缺外部往来 action。 | `tests/test_bank_transaction_category_service.py`、`tests/test_bank_details_sql_runtime.py` | covered |

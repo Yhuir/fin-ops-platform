@@ -8,6 +8,7 @@
 - 成本统计 read model refresh scope 只允许 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 和 `all:all`；旧裸月份/裸 `all` 必须在统一 read model refresh gateway 中归一化，不能直接进入 durable queue。
 - 生产库中已有的成本统计 legacy/invalid runtime scope 通过 `scripts/check-read-model-scope-contracts.py` 检查；`--apply` 删除旧状态，并补投可归一化的规范 replacement scope。
 - 成本税务 projection 中的发票输入必须来自 canonical invoice facts；OA 附件正式发票先 promotion 到 Invoice repository / `app.invoices`，不能从 `app.oa_attachment_invoice_cache` 直接拼计划或成本税务输入项。
+- 成本统计 export-preview/export 是同步生成路径；time、month、project、expense_type 导出超过 20,000 行时必须返回 `cost_statistics_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 - 2026-06-11 测试闭环审计确认：现有 P0/P1 覆盖成本归因、API/导出、SQL read model、parent/shard readiness、scope gateway、App Status 和前端交互；本轮不新增重复代码测试，主要补齐模块测试矩阵和状态机文档。
 
 ## 记录模板
@@ -26,6 +27,50 @@
 ```
 
 ## 历史记录
+
+## 2026-06-16 - 成本统计导出错误反馈闭环
+
+- 目标：确保成本统计同步导出被后端行数上限拒绝时，前端下载路径解析结构化错误并在导出中心展示具体原因。
+- 影响范围：`web/src/features/cost-statistics/api.ts`、`web/src/pages/CostStatisticsPage.tsx`、成本统计前端 API/page 测试和 P2/P3 闭环台账。
+- 关键决策：非 2xx 下载响应先读取 `message` / nested `error.message` / `error`，HTML fallback 仍按代理配置错误处理；页面导出和预览 catch 保留后端消息，不再统一覆盖成泛化失败。
+- 文档影响：更新 `tests.md`、本实施记录和 `.planning/P2P3-CLOSURE-PLAN.md`；长期产品/API 文档不变。
+- 测试覆盖：新增 `web/src/test/CostStatisticsApi.test.ts::surfaces backend row-limit messages from failed export downloads`；新增 `web/src/test/CostStatisticsPage.test.tsx::shows backend export failure messages inside the export center`。
+- 验证命令：`npm run test -- --run src/test/CostStatisticsApi.test.ts src/test/CostStatisticsPage.test.tsx src/test/TurnoverLedgerApi.test.ts src/test/PendingInvoicesApi.test.ts`。
+- 未测风险：真实浏览器下载、代理错误页面、生产网络中断和大文件打开仍需 staging/manual smoke。
+- 后续事项：如业务需要超过 20,000 行导出，应改异步导出任务并补任务进度/下载链接闭环。
+
+## 2026-06-16 - P2/P3 成本统计同步导出上限
+
+- 目标：收敛成本统计 time/project/expense_type 大数据 export-preview/export 的同步生成风险，避免大匹配集继续构造预览 rows 或 XLSX。
+- 影响范围：`CostStatisticsService`、`CostStatisticsApiRoutes`、成本统计 service/API 测试、模块测试矩阵和 P2/P3 闭环台账。
+- 关键决策：导出上限为 20,000 行；超过上限返回 `cost_statistics_export_row_limit_exceeded`，details 包含 `view`、`total` 和 `limit`。transaction 单笔详情不使用该上限。
+- 文档影响：更新 `tests.md`、本实施记录和 `.planning/P2P3-CLOSURE-PLAN.md`；产品/API 长期文档未扩展，因为这是性能保护边界。
+- 测试覆盖：新增 `tests/test_cost_statistics_service.py::CostStatisticsServiceTests::test_export_preview_and_download_reject_large_time_export_before_workbook_generation`；新增 `tests/test_cost_statistics_api.py::CostStatisticsApiTests::test_cost_statistics_export_limit_returns_structured_error`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_service.CostStatisticsServiceTests.test_export_preview_and_download_reject_large_time_export_before_workbook_generation tests.test_cost_statistics_api.CostStatisticsApiTests.test_cost_statistics_export_limit_returns_structured_error -v`。
+- 未测风险：真实 PostgreSQL EXPLAIN、生产数据分布、浏览器下载/打开文件和视觉性能仍需 staging/manual smoke；本地只证明超大匹配集不会继续同步生成预览或 XLSX。
+- 后续事项：继续执行 authenticated HTTP/SSE/read model final gate；若真实用户需要超过 20,000 行导出，应另设异步导出任务而不是放宽同步路径。
+
+## 2026-06-16 - P2/P3 首屏 SLO 与父 scope 有界聚合证据
+
+- 目标：复核成本统计在 P2/P3 一秒级推进中的真实性能护栏，避免把该页误按普通 rows 分页列表处理。
+- 影响范围：`tests/test_http_slo_probe.py`、成本统计测试矩阵和 P2/P3 闭环台账；未改变成本统计业务代码、API contract 或页面行为。
+- 关键决策：成本统计页面首屏事实源是 explorer/summary 聚合 read model，不是可追加 `page_size` 的 rows 列表；本地证据应锁定认证态 SLO 探针覆盖 `/api/cost-statistics/explorer` 与 `/api/cost-statistics`，并复用 SQL runtime 中父 scope 从已物化月份 shard 聚合、不读 Workbench 全量 payload 的测试。
+- 文档影响：更新 `tests.md` 和本实施记录；长期产品/API 文档不变。
+- 测试覆盖：更新 `tests/test_http_slo_probe.py::HttpSloProbeTests::test_default_probes_cover_page_domains_and_known_slow_endpoints`，显式断言成本统计 explorer/summary 默认探针；沿用 `tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_http_slo_probe.HttpSloProbeTests.test_default_probes_cover_page_domains_and_known_slow_endpoints -v`。
+- 未测风险：未连接真实 PostgreSQL 执行 EXPLAIN、pg_stat 或生产旧 scope `--apply`；真实登录态 p95/p99、worker drain、导出耗时和浏览器下载仍需 staging/生产 smoke。
+- 后续事项：生产 scope contract repair 获批后，复跑认证态 HTTP SLO 和 cost-statistics App Status。
+
+## 2026-06-16 - 外部往来 Postgres 写路径补齐成本统计 scope contract
+
+- 目标：补齐 `turnover_relation_changed` 下游对成本统计的事务内入队 contract，避免再次产生裸月份/裸 `all` 的 `cost_statistics.read_model.refresh`。
+- 影响范围：外部往来确认/撤回后的成本统计 dirty scope、outbox、readiness，以及生产 scope contract repair。
+- 关键决策：成本统计 canonical scope 仍只允许 `active:YYYY-MM`、`all:YYYY-MM`、`active:all`、`all:all`；事务入队路径在写入 durable queue 前归一化，不改变 worker projection contract。
+- 文档影响：更新成本统计、read-models、turnover-ledger 和 P2/P3 closure ledger。
+- 测试覆盖：新增 turnover Postgres dirty outbox writer 回归；保留 `tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py` 的成本统计 scope policy/repair 覆盖。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker_read_model_refresh_scopes tests.test_read_model_scope_contract -v`。
+- 未测风险：生产现存 legacy rows 只完成 dry-run 取证，未执行 `--apply`；一秒级 worker drain 需在发布和 cleanup 后复测。
+- 后续事项：批准后执行 production scope contract repair，再复查 cost-statistics App Status 和 write-operation SLO。
 
 ## 2026-06-13 - 成本税务发票输入收敛到 canonical invoice facts
 

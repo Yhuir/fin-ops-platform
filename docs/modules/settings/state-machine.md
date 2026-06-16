@@ -94,3 +94,4 @@
 | 2026-06-10 | 新增 OA 申请人凭据管理后端状态 | 设置页新增独立凭据事实源，admin-only，状态为 `已配置/未配置` | `tests.test_oa_applicant_credentials_service`、`tests.test_oa_applicant_credentials_api`、`tests.test_postgres_oa_applicant_credentials_repository`、`tests.test_postgres_migrations` |
 | 2026-06-10 | 落地 OA申请人凭据设置页 UI | 管理员可在设置页维护目标申请人凭据；保存走独立凭据 API；普通 settings save 不包含密码 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-11 | 补齐 settings 测试闭环状态机 | 将项目、权限、规则、OA 凭据、data reset 和 read model/worker fan-out 纳入同一维护边界 | `tests.test_app_settings_service`、`tests.test_settings_data_reset_service`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |
+| 2026-06-16 | 统一 settings mutation API 权限 gate | 项目同步/新增/删除和 OA 手动导入 mutation 必须校验 `can_mutate_data`；有 OA session 时 actor 来自 session，不接受 body 伪造 | `tests.test_workbench_settings_sync_api`、`tests.test_oa_manual_import_api` |

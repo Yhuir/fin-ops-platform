@@ -36,7 +36,7 @@
 | 状态 | 含义 | 允许流转 |
 | --- | --- | --- |
 | `confirming` | 前端提交 `/api/etc/import/confirm` | `queued`、`error` |
-| `queued` | `etc_invoice_import` background job 创建 | `processing`、`failed`、可轮询 |
+| `queued` | `etc_invoice_import` background job 创建；App Status domain 为 `imports_etc_invoices` + `etc_tickets`、route 为 `/imports/etc-invoices`，source 保留 `task_id` | `processing`、`failed`、可轮询 |
 | `processing` | `etc_invoice_import.confirm` processor 正在写入 | `succeeded`、`partial_success`、`failed` |
 | `succeeded` | 所有匹配发票导入成功，task 标记 imported | downstream refreshing |
 | `partial_success` | 部分 item 失败，task 标记 import failed 可重试 | 保留错误，允许重试 |
@@ -99,4 +99,5 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-16 | 补齐 ETC 导入 confirm job 的 App Status metadata contract | `etc_invoice_import` job source 保留 task/domain/route，导入页和 ETC 票据页都能被全局状态标记为受影响域 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-11 | 首轮补齐 ETC 发票导入状态机 | 明确 task/zip preview/confirm job/business batch/read model 状态边界 | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |

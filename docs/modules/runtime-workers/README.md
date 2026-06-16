@@ -21,6 +21,8 @@
 
 Worker 不得依赖 Application、app.server、app.auth 或 HTTP response。Worker lifecycle 触发 read model refresh 时必须通过统一 refresh gateway 入队，由 registry/policy 先完成 scope normalize、validate 和 dedupe，避免 worker 直接投递过期或非法 scope contract。
 
+当前 P2/P3 closure 的性能门禁是首屏 API 或 direct refresh p95 <= 1000ms；写操作 operation-to-fresh 还要求 p99 <= 3000ms。历史 5 秒 SLO 记录是旧基线，不是当前验收上限。Worker 优化必须保留 PostgreSQL durable queue、dirty scope、outbox 和 readiness 事实源，不得通过跳过 freshness 或缓存 stale payload 达标。
+
 ## 维护触发器
 
 发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：

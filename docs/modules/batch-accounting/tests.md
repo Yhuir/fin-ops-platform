@@ -20,6 +20,7 @@
 | 场景 | 当前状态 | 保护入口 |
 | --- | --- | --- |
 | unsubmitted 列表优先走 SQL read model loader，按 bank/oa 年份独立筛选 | covered | `test_unsubmitted_list_uses_sql_read_model_loader_when_available`、`test_unsubmitted_list_uses_independent_bank_and_oa_years` |
+| unsubmitted 列表显式分页首屏保护 | covered | `test_unsubmitted_list_explicit_pagination_protects_first_screen_slo`、`BatchAccountingPage.test.tsx::uses backend pagination for bank and OA first screens` |
 | GET 列表只读，不触发 legacy repair | covered | `test_unsubmitted_list_does_not_run_legacy_relation_repair` |
 | 未提交列表排除已经被其他关系占用的银行行 | covered | `test_unsubmitted_list_excludes_bank_rows_already_linked_elsewhere` |
 | relation read model missing/stale 透传到 API 和页面，列表通过 freshness 边界入队刷新，页面不能把非 fresh 空关系当真实空；写操作阻断由 canonical write safety 决定 | covered | `test_unsubmitted_list_exposes_relation_read_model_missing_status`、`test_submitted_list_exposes_relation_read_model_stale_status`、`test_unsubmitted_list_requires_fresh_relation_read_model_to_enqueue_missing_refresh`、`test_submitted_list_requires_fresh_relation_read_model_to_enqueue_stale_refresh`、canonical command service / version conflict / rollback tests |
@@ -27,7 +28,7 @@
 | 提交通过 relation command service 写入 batch relation、当前 invoice rows、历史备注，且失败回滚；缺 command service 时 fail fast，不 direct pair fallback | covered | `test_submit_creates_batch_accounting_relation_with_current_invoice_rows`、`test_submit_amount_mismatch_with_note_persists_relation_and_history`、`test_submit_delegates_relation_write_to_command_service`、`test_submit_requires_relation_command_service_without_direct_pair_fallback`、`test_submit_rolls_back_relation_when_pair_relation_persist_scheduling_fails` |
 | 旧 case_id collision repair 通过 relation command service 恢复合法 batch relation，缺 command service 时 fail fast，不覆盖当前非 batch relation | covered | `test_repair_legacy_case_id_collision_*`、`test_batch_accounting_repair_has_no_direct_pair_write_fallback` |
 | submitted 列表来自 active batch relation，并按 relation distribution 归桶 | covered | `test_submitted_list_is_derived_from_active_batch_accounting_relations`、`test_submitted_list_relation_bucket_uses_workbench_relation_distribution` |
-| 撤回恢复旧 OA invoice snapshot、保留历史说明、要求撤回原因且只能撤回 batch relation | covered | `test_withdraw_restores_previous_oa_invoice_snapshot`、`test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes`、`test_withdraw_requires_reason_and_batch_accounting_relation` |
+| 撤回恢复旧 OA invoice snapshot、保留历史说明、要求撤回原因且只能撤回 batch relation；缺 command service 时 fail fast，不 direct pair fallback | covered | `test_withdraw_restores_previous_oa_invoice_snapshot`、`test_withdraw_mismatch_batch_preserves_submit_and_withdraw_notes`、`test_withdraw_requires_reason_and_batch_accounting_relation`、`test_withdraw_delegates_relation_write_to_command_service`、`test_withdraw_requires_relation_command_service_without_direct_pair_fallback`、`test_batch_accounting_withdraw_has_no_direct_pair_write_fallback` |
 | 前端提交/撤回后广播 `workbenchRelationUpdated`，选中行和差额说明在刷新/bucket/选择变化时正确清理 | covered | `BatchAccountingPage.test.tsx` |
 | 前端提交/撤回后显示全屏 operation overlay，等待 `workbench_relation` barrier fresh 后再 reload 和释放 | covered | `BatchAccountingPage.test.tsx`、operation overlay/API tests |
 
@@ -37,7 +38,7 @@
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_batch_accounting_api.py` | 覆盖金额差异说明、合法银行/OA 行、active relation 排除、version conflict、撤回原因、legacy collision repair。后续如改匹配/金额/状态规则，必须继续补。 |
 | 2. Service-layer tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `BatchAccountingService` 与 relation command service、relation facade、提交失败回滚、历史关系 command 恢复，以及 submit/withdraw 的 canonical write safety。 |
-| 3. API contract tests | 适用 | `tests/test_batch_accounting_api.py` | 覆盖 GET/submit/withdraw 的成功 shape、错误码、freshness 字段、summary/relations/mutation result；read model non-fresh 由 GET/facade 透出诊断，mutation 默认不因普通 distribution 追赶中被拒。 |
+| 3. API contract tests | 适用 | `tests/test_batch_accounting_api.py` | 覆盖 GET/submit/withdraw 的成功 shape、显式分页 `pagination` / `invalid_paging`、错误码、freshness 字段、summary/relations/mutation result；read model non-fresh 由 GET/facade 透出诊断，mutation 默认不因普通 distribution 追赶中被拒。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 `workbench_relation` facade、projection、non-fresh enqueue、worker registry 和 App Status 绑定；批量账务列表读取必须通过 facade `require_fresh` 触发入队。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | 覆盖 loading/empty/error、freshness 诊断、刷新未入队提示、筛选、搜索、选择、提交、撤回、operation overlay、CSS/组件契约和侧栏入口；普通 non-fresh 不应全局禁用具备 canonical write safety 的操作。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/domainEvents.test.ts` | 覆盖 submit -> Workbench relation -> submitted list / Workbench projection、withdraw -> snapshot restore、前端刷新事件。真实 worker drain 仍是 documented-risk。 |
@@ -50,10 +51,12 @@
 | Legacy case id collision | 历史批量账务关系被同 case_id 覆盖后，可通过 relation command service 从历史合法 relation 恢复；已撤回或当前非 batch relation 不恢复 | covered |
 | Relation read model non-fresh | missing/stale 不能被解释成“无关联，可提交”；列表读取必须入队刷新，submit/withdraw 默认由 canonical write safety、owner 状态、权限/session、DB 可写性决定 | covered |
 | Submit command boundary | submit 缺少 relation command service 时不能 direct 写 pair service，必须返回结构化错误 | covered |
+| Withdraw command boundary | withdraw 缺少 relation command service 时不能 direct 写 pair service，必须返回结构化错误 | covered |
 | Mismatch note | 金额不一致必须填写非空说明；切换银行、bucket、OA 选择时清空旧说明 | covered |
 | Submit rollback | pair relation 持久化或调度失败不能留下半写入关系 | covered |
 | Withdraw history | 撤回差额批量账务时保留提交和撤回备注；不把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation | covered |
 | Operation-to-fresh closure | submit/withdraw 后不靠前端事件假装完成，必须等 `workbench_relation` barrier fresh 并重新加载页面 | covered |
+| First-screen page-size guard | 显式请求分页时 `page_size=200` 是上限，`bank_rows` / `oa_rows` 有界返回，summary total 保留，`page_size>200` 返回结构化 `invalid_paging`；前端未提交 bucket 首屏发送 `bank_page_size=200` / `oa_page_size=200` 并独立翻页 | covered |
 
 ## 关键 Smoke Flows
 
@@ -61,7 +64,8 @@
 2. 金额不一致 -> 空说明被拒 -> 填写说明提交 -> 关联台/银行明细/成本统计下游通过 relation read model 看到关系标签。
 3. submitted bucket -> 填写撤回原因 -> 撤回 -> relation read model refresh -> 原银行/OA 行回到可处理状态。
 4. `workbench_relation` missing/stale -> API 透出 freshness 并经 facade/gateway 入队刷新 -> 页面显示 warning/reason/scope，但不因普通 read model non-fresh 全局禁用具备 canonical write safety 的操作 -> worker 刷新后恢复。
-5. submit/withdraw -> 全屏 overlay -> `workbench_relation` operation barrier fresh -> 重新加载当前 bucket -> overlay 释放。
+5. 显式 `page/page_size` -> `bank_rows` / `oa_rows` 有界返回、summary 仍保留完整命中数量，超限页大小 fail closed。
+6. submit/withdraw -> 全屏 overlay -> `workbench_relation` operation barrier fresh -> 重新加载当前 bucket -> overlay 释放。
 
 ## 现有验证命令
 
@@ -85,6 +89,16 @@ cd web && npm test -- --run \
 bash scripts/verify.sh docs
 ```
 
+P2/P3 首屏分页目标验证：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest \
+  tests.test_batch_accounting_api.BatchAccountingApiTests.test_unsubmitted_list_explicit_pagination_protects_first_screen_slo \
+  -v
+
+npm --prefix web test -- --run src/test/BatchAccountingPage.test.tsx
+```
+
 ## Nightly CI 覆盖
 
 Nightly CI 通过 `scripts/verify.sh` 执行后端、前端和文档校验。批量账务的窄范围回归命令应在本地模块变更时优先运行；跨模块改动再升级为 `scripts/verify.sh backend` / `scripts/verify.sh web`。
@@ -93,5 +107,5 @@ Nightly CI 通过 `scripts/verify.sh` 执行后端、前端和文档校验。批
 
 - 真实 PostgreSQL 历史数据中批量账务 legacy relation / 半迁移 / 重复 case id 的全量回放仍需 staging 或生产前 dry-run。
 - 真实 RabbitMQ/Redis/systemd `workbench-relation` worker drain、App Status readiness 收敛和长时间队列重试仍需环境 smoke。
-- 大年份范围、超长 OA 描述、长备注和高行数表格的真实浏览器性能/视觉回归未由当前单元测试完全证明。
+- 大年份范围、超长 OA 描述、长备注和高行数表格的真实浏览器性能/视觉回归未由当前单元测试完全证明；当前前端分页接入由 Vitest 证明请求参数和可见行边界，仍需要真实登录态浏览器 smoke 采集实际渲染耗时。
 - 关联台、银行明细、成本统计、搜索等下游页面对同一 relation read model 的最终显示仍由对应模块回归继续保护。

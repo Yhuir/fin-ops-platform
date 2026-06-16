@@ -28,6 +28,28 @@
 
 ## 历史记录
 
+## 2026-06-16 - 银行流水导入合成大重复组守护
+
+- 目标：为 P2/P3 大文件导入风险补本地可重复证据，避免银行流水同文件大重复组在 preview audit 中被全部当作可确认行。
+- 影响范围：`FileImportService.preview_files`、ICBC Excel parser、import preview duplicate audit、银行流水导入测试矩阵。
+- 关键决策：不改导入行为；使用 240 行合成 ICBC Excel fixture 锁定当前 contract：同一稳定 identity 只产生一个 confirmable representative，其余 239 行进入同文件重复组和 skipped count。
+- 文档影响：更新 `tests.md` 的关键场景、历史 bug 回归和未测风险；P2/P3 台账记录为 local synthetic evidence。
+- 测试覆盖：新增 `test_preview_bounds_large_bank_duplicate_group_to_one_confirmable_row`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_service.ImportFileServiceTests.test_preview_bounds_large_bank_duplicate_group_to_one_confirmable_row -v`；本轮也与发票/ETC 合成导入测试一起运行通过。
+- 未测风险：真实银行多模板大文件、加密/损坏 Excel、异常编码、历史生产样本、真实 worker drain 和浏览器上传耗时仍需 staging/manual smoke。
+- 后续事项：拿到用户批准的真实银行样本后，在 staging 跑文件 preview/confirm/job/read-model smoke，不在本地 fixture 中保存真实业务文件。
+
+## 2026-06-16 - 银行流水导入 App Status job 域修复
+
+- 目标：修复银行流水文件确认后 `file_import` background job 在 App Status 中误归到发票导入页的风险。
+- 影响范围：`/imports/files/confirm` 创建 background job 的 `source.affected_domains` / `source.route`，以及 `file_import` / `import.process.requested` generic registry fallback。
+- 关键决策：精确场景由 confirm route 根据 selected files 的 `BatchType` 写入具体 domain 和 route；generic fallback 覆盖全部导入域并跳转 App Health，避免无 source 旧 job 误指某一个导入页。
+- 文档影响：更新 `tests.md` 的历史 bug 回归库、关键 smoke flow 和 App Status 影响面；`state-machine.md` 记录 queued 状态的 domain contract。
+- 测试覆盖：新增 `test_confirm_bank_transaction_file_job_reports_bank_import_domain`、`test_generic_import_job_defaults_cover_all_import_domains_without_wrong_invoice_route`、`test_background_job_registry_file_import_default_does_not_point_bank_import_to_invoice_page`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_api.ImportFileApiTests.test_confirm_bank_transaction_file_job_reports_bank_import_domain tests.test_app_status_overview_service.AppStatusRuntimeRepositoryTests.test_generic_import_job_defaults_cover_all_import_domains_without_wrong_invoice_route tests.test_app_status_overview_service.AppStatusRuntimeRepositoryTests.test_background_job_registry_file_import_default_does_not_point_bank_import_to_invoice_page -v`；模块后端 181 tests；前端导入/App Status 27 tests。
+- 未测风险：真实 import worker/RabbitMQ/Redis/systemd drain 与生产历史 job source 仍需 staging/生产 smoke。
+- 后续事项：共享导入新增 batch type 时必须同步 file import domain mapping、App Status registry 和前端 route。
+
 ## 2026-06-11 - 首轮测试闭环文档化
 
 - 目标：用 CodeGraph 审计银行流水导入页面、共享导入组件、API mapper、后端 import endpoints、service/job queue、parser/normalizer/persistence、dirty scope/lifecycle、App Status 和测试入口。

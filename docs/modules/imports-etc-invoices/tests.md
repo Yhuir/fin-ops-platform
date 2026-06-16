@@ -22,6 +22,7 @@
 - ETC 导入页只接受 `.zip`，非 zip 文件在前端拒绝，后端也返回 `invalid_etc_import_request`。
 - 没有 ready reconciliation task 时不得预览；unavailable task 必须展示 blocker。
 - zip preview 必须根据 confirmed reconciliation task 过滤发票，展示 audit counts、missing requirements 和 filter status。
+- 120 张合成 ETC 发票混合 zip preview 必须把有效发票、同包重复 XML、malformed XML file-level failure 分开计数，且 preview 不持久化发票记录。
 - task reopen、task version/hash 变化、canonical invoice 变化或 import session 变化后，confirm 必须返回 `stale_reconciliation_task_preview` 或 `preview_stale`。
 - confirm 必须创建 `etc_invoice_import` background job，并能在 import-job worker 模式下以 `etc_invoice_import.confirm` processor 异步处理。
 - confirm job 必须创建/复用 task-scoped business batch，导入匹配发票，写入 task import status，失败时 mark import failed。
@@ -51,13 +52,16 @@
 | task/hash 变化后 confirm 未提示重新预览 | `web/src/test/EtcApi.test.ts` stale reconciliation preview test、`web/src/test/ImportCenterPage.test.tsx` stale task preview test |
 | canonical invoice 变化后旧 preview 可确认 | `tests/test_etc_backend.py::EtcApiTests::test_etc_import_confirm_returns_preview_stale_when_canonical_invoice_changes_after_preview` |
 | confirm 重复请求产生重复导入 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_repeated_session_returns_same_job_without_duplicate_import` |
+| ETC confirm job 缺少 App Status task/domain/route metadata | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously` 断言 `affected_domains=["imports_etc_invoices","etc_tickets"]`、route `/imports/etc-invoices` 和 `source.task_id`；`tests/test_app_status_overview_service.py` 覆盖 registry/payload fallback |
 | partial success 被当作完整成功 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_job_partial_success_when_some_items_fail` |
+| 混合 zip 中有效发票、重复 XML 和坏 XML 未分离计数 | `tests/test_etc_backend.py::EtcServiceTests::test_preview_large_mixed_zip_keeps_valid_invoices_duplicates_and_failures_separate` |
 | manual invoice 与 ETC import canonical 重复 | `tests/test_etc_backend.py::EtcApiTests::test_etc_import_syncs_to_canonical_invoices_and_dedupes_manual_invoice` |
 | 已提交 ETC business batch 删除后 summary/relation 未释放 | `tests/test_etc_backend.py::EtcApiTests::test_submitted_etc_business_batch_delete_releases_summary_and_deletes_local_task`、`tests/test_etc_backend.py::EtcApiTests::test_submitted_etc_business_batch_delete_cancels_summary_relation_without_restoring_oa_bank_pair` |
 
 ## 关键 smoke flows
 
 - ETC 对账任务创建 -> 上传信用卡账单/票根/补充凭证 -> 确认 task -> `/imports/etc-invoices` 选择 ready task -> 上传 zip -> preview -> confirm -> import worker/job 完成 -> task imported -> ETC business batch imported。
+- 120 张合成 ETC 发票 + PDF + duplicate XML + malformed XML -> preview summary 分别报告 imported / duplicatesSkipped / failed，且 list invoices 仍为空。
 - ETC import confirm -> canonical invoice sync -> `etc_import_confirmed` -> 关联台 open 区散票/summary、税金抵扣、成本统计刷新。
 - task 被 reopen 或 source file 删除 -> 旧 zip preview invalidated -> confirm 返回 stale -> 前端清空 preview 并要求重新预览。
 - business batch 创建 OA 草稿 -> 用户手工确认 submitted -> 关联台展示 folded `etc_invoice_summary`；删除 submitted batch -> summary 释放、relation 取消、散票回到未配对。
@@ -96,7 +100,8 @@ bash scripts/verify.sh docs
 
 ## 未测风险
 
-- 真实票根网 zip、PDF/XML 混合包、超大 zip、异常编码、重复票号和缺失附件样本未由本地 fixture 完全覆盖。
+- 本地已覆盖 120 张合成 ETC 发票、PDF、同包重复 XML 和 malformed XML preview 分离计数；真实票根网 zip、PDF/XML/TXT 混合包、超大 zip、异常编码、重复票号和缺失附件样本仍需 staging/manual smoke。
 - 真实对象存储、Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、RabbitMQ wakeup 未由本地单测完全证明。
 - 真实 OA 草稿创建、人工提交确认、Nginx `/api/` 和 `/fin-ops-api/` 代理路径仍需发布后 smoke。
 - 大数据 ETC business batch 列表、长任务源文件、真实浏览器导出/删除/网络恢复仍是 `documented-risk`。
+- 共享 `import.process.requested` 仍是多导入域 fallback；具体 ETC confirm job 通过 `etc_invoice_import.source` 精确指向 ETC 导入页和 ETC 票据域。

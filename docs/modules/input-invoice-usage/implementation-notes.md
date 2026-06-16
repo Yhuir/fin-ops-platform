@@ -34,6 +34,17 @@
 
 ## 历史记录
 
+## 2026-06-16 - 首屏 page-size 性能护栏证据
+
+- 目标：补齐 P2/P3 大数据列表本地 synthetic SLO 与前端首屏请求证据，防止进项发票使用情况首屏请求把超大 page size 透传为全量读取。
+- 影响范围：`InputInvoiceUsageQueryService.list_rows` 的分页 contract、`InputInvoiceUsagePage` 首屏 rows 请求回归和模块测试矩阵；业务行为不变。
+- 关键决策：保留现有严格上限语义，`page_size=200` 为最大允许页大小，`page_size>200` 返回 `invalid_paging`，不做静默 clamp；前端默认继续使用更保守的 `page_size=20`，页大小选项限制为 20/50/100。
+- 文档影响：更新 `tests.md` 与 P2/P3 closure ledger。
+- 测试覆盖：新增 `InputInvoiceUsageQueryServiceTests.test_page_size_limit_protects_first_screen_slo`，用 250 行 synthetic 数据验证 200 行上限、total 保留和超限错误；更新 `web/src/test/InputInvoiceUsagePage.test.tsx` 锁定首屏 `page=1&page_size=20` 和 20/50/100 页大小选项。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_service.InputInvoiceUsageQueryServiceTests.test_page_size_limit_protects_first_screen_slo -v`；`npm --prefix web test -- --run src/test/InputInvoiceUsagePage.test.tsx src/test/OutputInvoiceCollectionsPage.test.tsx src/test/OaPendingPaymentsPage.test.tsx`。
+- 未测风险：真实 PostgreSQL EXPLAIN、锁等待、浏览器滚动和导出下载性能仍需 staging/production smoke。
+- 后续事项：如 API 层改变 page size 映射，必须同步保留 `invalid_paging` 或等价 fail-closed contract。
+
 ## 2026-06-12 - 统一 relation candidate 展示与 `+N` 详情闭环
 
 - 目标：让进项发票使用情况页面和关联台使用同一 relation 读事实源，展示 linked 与未配对 candidate 关系，并修复点击 `+N` 详情后长期 loading。
