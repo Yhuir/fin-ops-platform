@@ -149,7 +149,8 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_command_service: object | None = None,
         no_oa_snapshot: dict[str, object] | None = None,
-        ) -> tuple[NoOaBankBatchApplicationService, NoOaBankBatchService, RecordingNoOaRelationCommandService]:
+        workbench_sql_read_repository: object | None = None,
+    ) -> tuple[NoOaBankBatchApplicationService, NoOaBankBatchService, RecordingNoOaRelationCommandService]:
         categories = no_oa_categories(rows)
         pair_service = pair_relation_service or WorkbenchPairRelationService()
         command_service = (
@@ -187,6 +188,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             state_store=None,
             relation_facade=EmptyWorkbenchRelationFacade(),
             relation_command_service=command_service,
+            workbench_sql_read_repository=workbench_sql_read_repository,
         )
         return service, no_oa_service, command_service
 
@@ -249,6 +251,54 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "page_size must be <= 200") as context:
             service.list_batches_payload({"page": ["1"], "page_size": ["201"]})
         self.assertEqual(getattr(context.exception, "error_code", ""), "invalid_paging")
+
+    def test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted(self) -> None:
+        class ReadRepository:
+            def __init__(self) -> None:
+                self.rows: list[dict[str, object]] = []
+
+            def list_no_oa_bank_batch_rows(self, _filters: dict[str, object]) -> list[dict[str, object]]:
+                return deepcopy(self.rows)
+
+        repository = ReadRepository()
+        service, _no_oa_service, _relation_command = self._application_service(
+            rows=[],
+            selected_tag_codes=["fee"],
+            workbench_sql_read_repository=repository,
+        )
+        repository.rows = [
+            {
+                "batch_id": "batch-stale-but-linked",
+                "batch_type": "fee",
+                "batch_label": "手续费",
+                "scope_month": "2026-03",
+                "account_key": "CCB:8106",
+                "status": "stale",
+                "status_bucket": "submitted",
+                "row_count": 2,
+                "total_amount": "86.00",
+                "blocked_reason": "源流水或分类已变化，需要复核后处理。",
+                "can_submit": False,
+                "can_withdraw": True,
+                "version": 4,
+                "source_versions": service.no_oa_bank_batch_source_versions(),
+            }
+        ]
+
+        payload = service.list_batches_payload({"bucket": ["submitted"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertEqual(payload["summary"]["stale_count"], 0)
+        self.assertEqual(payload["summary"]["categories"][0]["submitted"], 1)
+        self.assertEqual(payload["summary"]["categories"][0]["stale"], 0)
+        batch = payload["batches"][0]
+        self.assertEqual(batch["status"], "submitted")
+        self.assertEqual(batch["status_bucket"], "submitted")
+        self.assertEqual(batch["relation_backed_status"], "stale")
+        self.assertEqual(batch["blocked_reason"], "")
+        self.assertEqual(batch["can_submit"], False)
+        self.assertEqual(batch["can_withdraw"], True)
 
     def test_withdraw_batch_delegates_relation_cancel_to_command_service(self) -> None:
         rows = [no_oa_bank_row("fee-1", category_code="fee", debit_amount="3.00")]

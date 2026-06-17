@@ -200,6 +200,48 @@ describe("no OA bank batch API", () => {
     expect(payload.pagination).toEqual({ page: 2, pageSize: 50, total: 125 });
   });
 
+  test("maps relation-backed stale batches as submitted", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({
+        summary: {
+          draft_count: 0,
+          submitted_count: 1,
+          withdrawn_count: 0,
+          conflict_count: 0,
+          stale_count: 0,
+          total_amount: "86.00",
+          categories: [],
+        },
+        batches: [
+          {
+            batch_id: "batch-stale-submitted",
+            batch_type: "fee",
+            batch_label: "手续费",
+            scope_month: "2026-03",
+            status: "stale",
+            status_bucket: "submitted",
+            blocked_reason: "源流水或分类已变化，需要复核后处理。",
+            can_submit: true,
+            can_withdraw: true,
+            version: 4,
+          },
+        ],
+      }), { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+
+    const payload = await fetchNoOaBankBatches({ bucket: "submitted" });
+
+    expect(payload.batches[0]).toMatchObject({
+      batchId: "batch-stale-submitted",
+      status: "submitted",
+      statusBucket: "submitted",
+      blockedReason: "",
+      canSubmit: false,
+      canWithdraw: true,
+    });
+  });
+
   test("maps batch detail rows", async () => {
     vi.stubGlobal(
       "fetch",

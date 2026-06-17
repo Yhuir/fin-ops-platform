@@ -270,6 +270,26 @@ describe("Input invoice usage workflow drawers", () => {
               totalWithTax: "88.00",
               paymentStatus: { label: "未付" },
             }],
+            rejectedInvoices: [{
+              invoiceId: "inv-linked-backend",
+              invoiceNo: "INV-LINKED-BACKEND",
+              sellerName: "已关联后端供应商",
+              invoiceDate: "2026-05-21",
+              totalWithTax: "66.00",
+              paymentStatus: { label: "已关联 OA" },
+              reasonCode: "already_has_active_oa",
+              reason: "发票已有 active OA 关系",
+            }],
+          }],
+          rejectedInvoices: [{
+            invoiceId: "inv-linked-backend",
+            invoiceNo: "INV-LINKED-BACKEND",
+            sellerName: "已关联后端供应商",
+            invoiceDate: "2026-05-21",
+            totalWithTax: "66.00",
+            paymentStatus: { label: "已关联 OA" },
+            reasonCode: "already_has_active_oa",
+            reason: "发票已有 active OA 关系",
           }],
           canCreateDraft: true,
           nextAction: "create_oa_draft",
@@ -335,6 +355,17 @@ describe("Input invoice usage workflow drawers", () => {
     expect(preview.invoiceRows?.[0].invoiceId).toBe("inv-backend-1");
     expect(preview.targetApplicants).toEqual([{ code: "chen_xiuyun", name: "陈秀云" }]);
     expect(preview.groups[0].invoiceRows?.[0].paymentStatusLabel).toBe("未付");
+    expect(preview.rejectedInvoices[0]).toMatchObject({
+      invoiceId: "inv-linked-backend",
+      invoiceNumber: "INV-LINKED-BACKEND",
+      displayNo: "INV-LINKED-BACKEND",
+      sellerName: "已关联后端供应商",
+      issueDate: "2026-05-21",
+      totalWithTax: "66.00",
+      paymentStatusLabel: "已关联 OA",
+      reasonCode: "already_has_active_oa",
+    });
+    expect(preview.groups[0].rejectedInvoices?.[0].paymentStatusLabel).toBe("已关联 OA");
     expect(batch.invoiceIds).toEqual(["inv-backend-1"]);
     expect(batch.invoiceRows[0].displayNo).toBe("SD-BACKEND-1");
     expect(batch.previewSummary?.totalWithTax).toBe("88.00");
@@ -541,6 +572,130 @@ describe("Input invoice usage workflow drawers", () => {
     })));
     expect(await screen.findByText("已进入已提交历史。")).toBeInTheDocument();
     expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
+  });
+
+  test("OA reverse draft confirmation stays open across parent rerenders until the user decides", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn(() => Promise.resolve({
+      ...previewPayload,
+      canCreateDraft: true,
+      nextAction: "create_oa_draft",
+      permissions: { canCreateDraft: true },
+    }));
+    const createDraftFromSelection = vi.fn(() => Promise.resolve({
+      batchId: "oa_reverse_batch_persistent_dialog",
+      version: 2,
+      status: "oa_draft_created",
+      invoiceIds: ["inv-001", "inv-002"],
+      selectedInvoiceIds: ["inv-001", "inv-002"],
+      totalWithTax: "99.72",
+      targetApplicantCode: "chen_xiuyun",
+      targetApplicantName: "陈秀云",
+      invoiceRows: [],
+      invoices: [],
+      rejectedInvoices: [],
+      oaDraftId: "oa-draft-persistent",
+      oaDraftUrl: "https://oa.example.test/draft/persistent",
+      canConfirmSubmission: true,
+    }));
+    const props = {
+      open: true,
+      sourceFilters: [] as unknown[],
+      loadPreview,
+      createDraftFromSelection,
+      manualStatus: vi.fn(),
+      onClose: () => undefined,
+    };
+    const { rerender } = render(
+      <OaReverseWorkspaceDrawer
+        {...props}
+        selectedInvoiceIds={[]}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
+    expect(await screen.findByRole("dialog", { name: "OA 草稿提交确认" })).toBeInTheDocument();
+
+    rerender(
+      <OaReverseWorkspaceDrawer
+        {...props}
+        selectedInvoiceIds={[]}
+      />,
+    );
+
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(2));
+    const confirmDialog = screen.getByRole("dialog", { name: "OA 草稿提交确认" });
+    expect(within(confirmDialog).getByRole("button", { name: "已提交 OA" })).toBeInTheDocument();
+    expect(within(confirmDialog).getByRole("button", { name: "未提交 OA" })).toBeInTheDocument();
+
+    rerender(
+      <OaReverseWorkspaceDrawer
+        {...props}
+        sourceFilters={[{ field: "payment_status", operator: "equals", value: "pending" }]}
+        selectedInvoiceIds={[]}
+      />,
+    );
+
+    await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("dialog", { name: "OA 草稿提交确认" })).toBeInTheDocument();
+  });
+
+  test("OA reverse drawer marks linked OA invoices as disabled and filters by OA relation status", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn(() => Promise.resolve({
+      ...previewPayload,
+      canCreateDraft: true,
+      nextAction: "create_oa_draft",
+      permissions: { canCreateDraft: true },
+      groups: [{
+        ...previewPayload.groups[0],
+        invoiceCount: 1,
+        totalWithTax: "49.86",
+        invoiceRows: previewPayload.groups[0].invoiceRows?.filter((invoice) => invoice.invoiceId === "inv-001"),
+        candidateInvoiceIds: ["inv-001"],
+        rejectedInvoices: [{
+          invoiceId: "inv-linked-oa",
+          invoiceNumber: "SD-INV-LINKED",
+          sellerName: "已关联供应商",
+          issueDate: "2026-05-03",
+          totalWithTax: "68.00",
+          paymentStatusLabel: "待处理",
+          reasonCode: "already_has_active_oa",
+          reason: "发票已有 active OA 关系",
+        }],
+      }],
+    }));
+
+    render(
+      <OaReverseWorkspaceDrawer
+        open
+        sourceFilters={[]}
+        selectedInvoiceIds={["inv-001", "inv-linked-oa"]}
+        loadPreview={loadPreview}
+        createDraftFromSelection={vi.fn()}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
+    expect(screen.getByText("SD-INV-LINKED")).toBeInTheDocument();
+    expect(screen.getByText("未关联oa")).toBeInTheDocument();
+    expect(screen.getByText("已关联oa")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "已关联 OA 发票 SD-INV-LINKED 不可选择" })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).toBeChecked();
+      expect(screen.getByText((_content, node) => node?.textContent === "已选 1 张")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "筛选 OA 关联状态" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "已经关联oa" }));
+    expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
+    expect(screen.getByText("SD-INV-LINKED")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "筛选 OA 关联状态" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "未关联oa" }));
+    expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
+    expect(screen.queryByText("SD-INV-LINKED")).not.toBeInTheDocument();
   });
 
   test("OA reverse drawer lets the backend target applicant list drive preview and batch target", async () => {

@@ -41,6 +41,11 @@ const turnoverBankRows = {
   income: "turnover-bank-income-1000",
 } as const;
 
+const turnoverBankRowVersions = {
+  [turnoverBankRows.expense]: 1,
+  [turnoverBankRows.income]: 2,
+} as const;
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
     status,
@@ -2518,8 +2523,8 @@ function turnoverFlowRow(
 function turnoverLedgerPayload(relationClosed: boolean) {
   const summaryRow = turnoverSummaryRow(relationClosed);
   const flowRows = [
-    turnoverFlowRow(turnoverBankRows.expense, "expense", relationClosed, 1),
-    turnoverFlowRow(turnoverBankRows.income, "income", relationClosed, 2),
+    turnoverFlowRow(turnoverBankRows.expense, "expense", relationClosed, turnoverBankRowVersions[turnoverBankRows.expense]),
+    turnoverFlowRow(turnoverBankRows.income, "income", relationClosed, turnoverBankRowVersions[turnoverBankRows.income]),
   ];
   return {
     summary: {
@@ -2572,6 +2577,50 @@ function turnoverLedgerPayload(relationClosed: boolean) {
     read_model_status: "fresh",
     read_model_stale_reasons: [],
   };
+}
+
+function parseJsonBody(postData: string | null): Record<string, unknown> {
+  if (!postData) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(postData);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function turnoverClosureExpectedVersions() {
+  return Object.fromEntries(
+    Object.entries(turnoverBankRowVersions).map(([rowId, version]) => [
+      `turnover_bank_row:${rowId}`,
+      version,
+    ]),
+  );
+}
+
+function turnoverClosureRequestConflict(body: Record<string, unknown>) {
+  const bankRowIds = Array.isArray(body.bank_row_ids) ? body.bank_row_ids.map(String) : [];
+  const expectedRowIds = [turnoverBankRows.expense, turnoverBankRows.income];
+  if (JSON.stringify(bankRowIds) !== JSON.stringify(expectedRowIds)) {
+    return {
+      error: "invalid_bank_row_ids",
+      message: "bank_row_ids must match the current turnover closure selection.",
+    };
+  }
+  const expectedVersions = body.expected_versions && typeof body.expected_versions === "object" && !Array.isArray(body.expected_versions)
+    ? body.expected_versions as Record<string, unknown>
+    : {};
+  if (JSON.stringify(expectedVersions) !== JSON.stringify(turnoverClosureExpectedVersions())) {
+    return {
+      error: "turnover_relation_conflict",
+      message: "银行流水状态已变化，请刷新后重试。",
+    };
+  }
+  return null;
 }
 
 function turnoverClosureMutationPayload() {
@@ -3452,6 +3501,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/turnover-ledger/closures/confirm") {
+      const conflict = turnoverClosureRequestConflict(parseJsonBody(request.postData()));
+      if (conflict) {
+        return json(route, conflict, 409);
+      }
       turnoverClosureConfirmed = true;
       return json(route, turnoverClosureMutationPayload());
     }

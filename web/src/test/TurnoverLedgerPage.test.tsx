@@ -602,8 +602,12 @@ function groupedPayload(family: string, overrides: Record<string, unknown> = {})
   };
 }
 
-function groupedPayloadWithFlowCategoryVersions(family: string, versionsByBankRowId: Record<string, number>) {
-  const payload = cloneJson(groupedPayload(family));
+function groupedPayloadWithFlowCategoryVersions(
+  family: string,
+  versionsByBankRowId: Record<string, number>,
+  overrides: Record<string, unknown> = {},
+) {
+  const payload = cloneJson(groupedPayload(family, overrides));
   for (const group of payload.groups) {
     group.flow_rows = (group.flow_rows ?? []).map((row: Record<string, unknown>) => {
       const bankRowId = String(row.source_bank_row_id ?? "");
@@ -1291,6 +1295,33 @@ describe("Turnover ledger page", () => {
     window.removeEventListener("workbenchRelationUpdated", workbenchListener);
   });
 
+  test("omits closure expected versions when refreshed flow rows do not expose bank row versions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch();
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(page).getByRole("button", { name: "确认闭环" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+      });
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.[1]?.body))).not.toHaveProperty("expected_versions");
+    });
+  });
+
   test("confirms a manual zero-difference turnover closure from three same-group flow rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
@@ -1415,6 +1446,47 @@ describe("Turnover ledger page", () => {
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-100000" }));
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-expense-300000" }));
+    await user.click(within(page).getByRole("button", { name: "确认闭环" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    expect((await screen.findAllByText("所选流水已刷新，请重新选择后再确认闭环。")).length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/turnover-ledger").length).toBeGreaterThanOrEqual(2);
+    });
+    expect(fetchMock.mock.calls.some(([input, init]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+    })).toBe(false);
+  });
+
+  test("blocks manual closure submit when the fresh ledger reload is still stale", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installTurnoverLedgerFetch({
+      groupedPayloads: [
+        groupedPayloadWithFlowCategoryVersions("all", {
+          "bank-company-expense-1000": 8,
+          "bank-company-income-1000": 9,
+        }),
+        groupedPayloadWithFlowCategoryVersions("all", {
+          "bank-company-expense-1000": 8,
+          "bank-company-income-1000": 9,
+        }, {
+          read_model_status: "stale",
+          read_model_stale_reasons: ["source_version_mismatch"],
+        }),
+      ],
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
     await user.click(within(page).getByRole("button", { name: "确认闭环" }));
 
     const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });

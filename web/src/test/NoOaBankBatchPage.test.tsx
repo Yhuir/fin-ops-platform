@@ -970,6 +970,38 @@ describe("NoOaBankBatchPage", () => {
     }
   });
 
+  test("presents relation-backed stale batches as submitted without review prompts", async () => {
+    const user = userEvent.setup();
+    const payload = {
+      ...listPayload,
+      batches: listPayload.batches.map((batch) => (
+        batch.batch_id === "batch-submitted-salary"
+          ? {
+            ...batch,
+            status: "stale",
+            status_bucket: "submitted",
+            blocked_reason: "源流水或分类已变化，需要复核后处理。",
+            can_submit: false,
+            can_withdraw: true,
+          }
+          : batch
+      )),
+    };
+    installFetchMock(payload);
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "已提交 1" }));
+    await user.click(await screen.findByRole("button", { name: "人工成本 1批 · 8条" }));
+    await user.click(await screen.findByRole("button", { name: "工资 1批 · 8条" }));
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    expect(within(transactionRegion).getByText("已提交")).toBeInTheDocument();
+    expect(within(transactionRegion).getByRole("button", { name: "撤回批次" })).toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("需复核")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("分类已变更，需复核")).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByText("源流水或分类已变化，需要复核后处理。")).not.toBeInTheDocument();
+  });
+
   test("shows withdrawn history as read-only", async () => {
     const user = userEvent.setup();
     installFetchMock();

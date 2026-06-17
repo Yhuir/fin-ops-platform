@@ -1181,6 +1181,12 @@ textarea {
   color: var(--fp-warning);
 }
 
+.input-invoice-usage-rules-tag--success {
+  border-color: color-mix(in srgb, var(--fp-success) 35%, var(--fp-border));
+  background: var(--fp-success-soft);
+  color: var(--fp-success);
+}
+
 .input-invoice-usage-rules-table-shell,
 .input-invoice-usage-rules-section {
   border: 1px solid var(--fp-border);
@@ -1537,6 +1543,71 @@ textarea {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 800;
+}
+
+.input-invoice-usage-oa-filter-header {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.input-invoice-usage-oa-filter-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.input-invoice-usage-oa-filter-trigger {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--fp-space-1);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-xs);
+  background: var(--fp-surface);
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-label);
+  font-weight: 800;
+  padding: 0 var(--fp-space-2);
+}
+
+.input-invoice-usage-oa-filter-panel {
+  position: absolute;
+  top: calc(100% + var(--fp-space-1));
+  right: 0;
+  z-index: 12;
+  display: grid;
+  min-width: 148px;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
+  box-shadow: var(--fp-shadow-popover);
+  padding: var(--fp-space-1);
+}
+
+.input-invoice-usage-oa-filter-item {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: var(--fp-space-1);
+  align-items: center;
+  border: 0;
+  border-radius: var(--fp-radius-xs);
+  background: transparent;
+  color: var(--fp-text-primary);
+  font-size: var(--fp-text-body);
+  text-align: left;
+  padding: var(--fp-space-2);
+}
+
+.input-invoice-usage-oa-filter-item:hover {
+  background: var(--fp-surface-muted);
+}
+
+.input-invoice-usage-oa-filter-mark {
+  color: var(--fp-primary);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
 }
 
 .input-invoice-usage-oa-form {

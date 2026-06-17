@@ -224,12 +224,18 @@ export type InputInvoiceUsageOaReversePreviewResponse = {
     rejectedInvoices?: Array<{
       invoiceId: string;
       invoiceNumber?: string | null;
+      displayNo?: string | null;
+      sellerName?: string | null;
+      issueDate?: string | null;
+      totalWithTax?: string | null;
+      paymentStatusLabel?: string | null;
       reasonCode?: string | null;
       reason: string;
     }>;
   }>;
   invoiceRows?: InputInvoiceUsageOaReverseInvoice[];
   candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
+  rejectedInvoices?: InputInvoiceUsageOaReverseRejectedInvoice[];
   warnings?: string[];
   canCreateDraft?: boolean;
   nextAction?: string;
@@ -261,6 +267,11 @@ export type InputInvoiceUsageOaReverseInvoice = {
 export type InputInvoiceUsageOaReverseRejectedInvoice = {
   invoiceId: string;
   invoiceNumber?: string | null;
+  displayNo?: string | null;
+  sellerName?: string | null;
+  issueDate?: string | null;
+  totalWithTax?: string | null;
+  paymentStatusLabel?: string | null;
   reasonCode?: string | null;
   reason: string;
 };

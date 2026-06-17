@@ -128,7 +128,7 @@ export type TurnoverLedgerGroupedRow = {
   categorySubLabel: string;
   categoryThirdLabel: string;
   categoryLabelPath: string[];
-  categoryVersion: number;
+  categoryVersion: number | null;
   counterpartyBankName: string;
   bankAccountLabels: string[];
   summaryText: string;

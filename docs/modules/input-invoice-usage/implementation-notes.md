@@ -15,6 +15,8 @@
 - OA reverse evidence detected 后的 OA/发票 relation 写入必须通过 `WorkbenchRelationCommandService.confirm_relation(...)`，relation mode 为 `input_invoice_oa_reverse`；relation read model 不 fresh 或 command service 缺失时 fail fast，不先推进本地 batch。
 - 关联台未配对区 open/proposed 候选必须通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面展示；页面不能直接读取关联台候选表。candidate 只展示关系证据，不参与支付状态或 confirmed relation 判断。
 - `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
+- `以发票反提 OA` 的草稿提交确认弹窗一旦打开，必须保持到用户选择 `已提交 OA` 或 `未提交 OA`；父页面重渲染和 preview reload 不能清空当前草稿 batch。
+- OA reverse preview 中已有 active OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选，并支持 `全部/已经关联oa/未关联oa` 表头筛选。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
 
 ## 记录模板
@@ -33,6 +35,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-17 - OA reverse 确认弹窗持久化与 OA 关联状态筛选
+
+- 目标：修复 `以发票反提 OA` 创建草稿后提交确认弹窗自动消失的问题，并让已有 OA 关联的发票在反提清单中可见、不可选、可筛选。
+- 影响范围：`OaReverseWorkspaceDrawer`、OA reverse preview rejected invoice contract、前端 API mapper/types、样式、service preview display rows、模块/API 文档和测试矩阵。
+- 关键决策：弹窗消失的真实原因是父页面异步刷新导致重渲染，drawer 每次收到新的内联 `selectedInvoiceIds={[]}` 数组都会重建 preview request，preview reload 成功后执行 `setBatch(null)`，从而卸载确认弹窗。修复时稳定 selected invoice ids，并在确认弹窗打开后禁止 preview reload 清空当前 batch。
+- 文档影响：更新本实施记录、`state-machine.md`、`tests.md`、`oa-reverse-design.md` 和 `docs/dev/api-contracts.md`。
+- 测试覆盖：新增/更新 `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` 覆盖确认弹窗跨重渲染/preview reload 保持、linked OA disabled row 和筛选菜单；更新 `tests/test_input_invoice_usage_oa_reverse_service.py` 覆盖 active OA rejected row 保留展示字段。
+- 验证命令：本轮最终说明列出实际执行命令。
+- 未测风险：真实 OA 草稿页面人工提交仍需 staging/发布前 smoke；本修复覆盖 FinOps 内部 drawer 状态、preview contract 和 API mapper。
 
 ## 2026-06-17 - Browser e2e 覆盖 OA reverse 子集草稿闭环
 

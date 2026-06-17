@@ -69,7 +69,7 @@ const STATUS_META: Record<NoOaBankBatchStatus, { label: string; color: "default"
   submitted: { label: "已提交", color: "success" },
   withdrawn: { label: "已撤回", color: "default" },
   conflict: { label: "冲突", color: "error" },
-  stale: { label: "需复核", color: "primary" },
+  stale: { label: "待提交", color: "warning" },
 };
 
 function currentMonth() {
@@ -265,13 +265,6 @@ function formatCountMeta(batchCount: number, rowCount: number) {
     return "暂无";
   }
   return `${batchCount}批 · ${rowCount}条`;
-}
-
-function batchNoticeText(batch: NoOaBankBatch, reason: string) {
-  if (batch.status === "stale") {
-    return "分类已变更，需复核";
-  }
-  return reason;
 }
 
 function relationContextLabels(row: NoOaBankBatchDetailRow) {
@@ -1125,7 +1118,9 @@ export default function NoOaBankBatchPage() {
               const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
               const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
-              const blockingReason = batch.blockedReason || batch.conflictReason;
+              const blockingReason = batch.status === "conflict"
+                ? (batch.blockedReason || batch.conflictReason)
+                : "";
               return (
                 <section
                   className={cx(
@@ -1206,7 +1201,7 @@ export default function NoOaBankBatchPage() {
                         )}
                         role="alert"
                       >
-                        {batchNoticeText(batch, blockingReason)}
+                        {blockingReason}
                       </div>
                     ) : null}
                     {selected && detailErrors[batch.batchId] ? (

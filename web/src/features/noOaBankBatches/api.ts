@@ -255,6 +255,10 @@ function countMap(value: Record<string, unknown> | null | undefined): NoOaBankBa
 }
 
 function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
+  const rawStatus = text(batch.status);
+  const rawStatusBucket = text(batch.status_bucket ?? batch.statusBucket);
+  const rawCanWithdraw = Boolean(batch.can_withdraw ?? batch.canWithdraw);
+  const relationBackedStale = rawStatus === "stale" && (rawStatusBucket === "submitted" || rawCanWithdraw);
   const mapped: NoOaBankBatch = {
     batchId: text(batch.batch_id ?? batch.batchId),
     batchType: text(batch.batch_type ?? batch.batchType),
@@ -263,8 +267,8 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     accountKey: text(batch.account_key ?? batch.accountKey),
     bankName: text(batch.bank_name ?? batch.bankName),
     accountLast4: text(batch.account_last4 ?? batch.accountLast4),
-    status: text(batch.status),
-    statusBucket: text(batch.status_bucket ?? batch.statusBucket),
+    status: relationBackedStale ? "submitted" : rawStatus,
+    statusBucket: relationBackedStale ? "submitted" : rawStatusBucket,
     rowCount: numberValue(batch.row_count ?? batch.rowCount),
     totalAmount: text(batch.total_amount ?? batch.totalAmount, "0.00"),
     submittedBy: text(batch.submitted_by ?? batch.submittedBy),
@@ -272,11 +276,11 @@ function mapBatch(batch: ApiNoOaBankBatch = {}): NoOaBankBatch {
     withdrawnBy: text(batch.withdrawn_by ?? batch.withdrawnBy),
     withdrawnAt: text(batch.withdrawn_at ?? batch.withdrawnAt) || null,
     conflictReason: text(batch.conflict_reason ?? batch.conflictReason),
-    blockedReason: text(batch.blocked_reason ?? batch.blockedReason),
+    blockedReason: relationBackedStale ? "" : text(batch.blocked_reason ?? batch.blockedReason),
     tagCounts: countMap(batch.tag_counts ?? batch.tagCounts),
     directionCounts: countMap(batch.direction_counts ?? batch.directionCounts),
-    canSubmit: Boolean(batch.can_submit ?? batch.canSubmit),
-    canWithdraw: Boolean(batch.can_withdraw ?? batch.canWithdraw),
+    canSubmit: relationBackedStale ? false : Boolean(batch.can_submit ?? batch.canSubmit),
+    canWithdraw: relationBackedStale || rawCanWithdraw,
     version: nullableNumberValue(batch.version),
   };
   const primaryLabel = text(batch.category_primary_label ?? batch.categoryPrimaryLabel);

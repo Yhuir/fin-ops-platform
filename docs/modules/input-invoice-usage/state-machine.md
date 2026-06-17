@@ -68,8 +68,9 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 - stale/refreshing：API 返回 `read_model_status=refreshing` 时，页面不展示旧 rows，保持刷新提示/轮询语义；服务端应入队对应 scope 的 read model refresh。
 - permission disabled/hidden：列表读取无独立权限状态；OA 反提、支付规则保存等 mutation 能力按对应接口权限和前端按钮状态控制。
 - oa reverse pending tab：`待处理` 页签展示目标 OA 申请人、候选发票和 `创建 OA 草稿` 主动作；不展示 `创建本地批次`。
+- oa reverse candidate relation：候选发票清单必须展示 OA 关联状态。可反提发票展示 `未关联oa` chip 并可勾选；已有 active OA 关系的发票展示 `已关联oa` chip、禁用勾选，且不能进入创建草稿 payload。表头提供 drawer 内局部筛选：`全部`、`已经关联oa`、`未关联oa`。
 - oa reverse submitted tab：`已提交` 页签展示用户确认过的已提交历史，只显示申请人、时间、金额和发票摘要等业务字段。
-- oa reverse confirmation：OA 草稿创建成功后显示确认弹窗，用户只能选择 `已提交 OA` 或 `未提交 OA`。
+- oa reverse confirmation：OA 草稿创建成功后显示确认弹窗，用户只能选择 `已提交 OA` 或 `未提交 OA`。弹窗打开后不能因为页面刷新、父组件重渲染或 preview reload 自动消失；只有用户完成二选一、本地状态流转或关闭整个工作流时才可结束。
 
 ## Read Model / Worker 状态
 
@@ -96,3 +97,4 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 | 2026-06-12 | 收口 OA reverse relation 写入口 | OA reverse batch 不作为 relation 事实源；evidence detected 后通过 `WorkbenchRelationCommandService` 写 `input_invoice_oa_reverse`，non-fresh 时 fail fast 且不保存 detected batch | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` |
 | 2026-06-12 | 接入 unified relation candidate 和单行详情 | 关联台未配对 candidate 通过 `WorkbenchRelationReadFacade` 进入页面展示；candidate 不参与支付状态；`+N` 详情优先读取 SQL read model 单行 payload，避免全量 live rebuild 卡在加载态 | `tests/test_workbench_relation_sql_projection.py`、`tests/test_workbench_relation_read_facade.py`、`tests/test_input_invoice_usage_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/InputInvoiceUsagePage.test.tsx` |
 | 2026-06-17 | 补真实 Chromium OA reverse 子集草稿 smoke | Browser e2e 覆盖 rows 首屏、`以发票反提 OA` drawer、取消候选子集、子集 preview hash、创建 OA 草稿、`已提交 OA` 和 submitted history，防止页面维护破坏完整浏览器流 | `web/e2e/input-invoice-usage-flow.spec.ts`、`cd web && npm run e2e:smoke` |
+| 2026-06-17 | 固化 OA reverse 确认弹窗和 OA 关联状态 UI | 草稿创建后的确认弹窗必须等待用户二选一；已有 active OA 关系的发票在反提清单中展示 `已关联oa`、不可勾选，并支持 OA 关联状态筛选 | `web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`tests/test_input_invoice_usage_oa_reverse_service.py` |

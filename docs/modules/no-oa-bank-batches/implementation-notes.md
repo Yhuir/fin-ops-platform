@@ -15,6 +15,32 @@
 - no-OA submit/withdraw 的长期目标是 facts/audit/dirty/outbox 同事务；当前目标契约由 `tests/test_bankdetail_write_uow_contract.py` 保护，真实收敛前保持 `documented-risk`。
 - `GET /api/no-oa-bank-batches` 支持可选显式分页 `page/page_size` 或 `pageSize`；只有请求带分页参数时才裁剪 `batches` 并返回 `pagination`，旧调用方不带分页参数时保持原 shape。no-OA 前端默认以 `page=1&page_size=200` 读取列表并渲染分页控件；切换月份、状态 bucket 或页码时必须清空选择、详情缓存和详情错误。`page_size` 上限为 200，超限必须 fail closed 为 `invalid_paging`。
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
+- relation-backed 的旧 `stale/category drift` 只作为内部兼容状态。只要 SQL read model payload 仍属于 submitted bucket 或可撤回，API/前端必须按 `submitted` 呈现、保留撤回入口，并清除复核类 blocked reason；页面不得显示“分类已变更，需复核”。
+
+## 2026-06-17 - relation-backed stale 可见状态收敛
+
+- 目标：修复免 OA 流水批量处理页面在已提交 bucket 中显示“分类已变更，需复核”的误导状态；已提交批次按已提交展示并可撤回，未提交 draft 继续按未提交提交。
+- 影响范围：`NoOaBankBatchApplicationService.summary/resolve_labels(...)`、`web/src/features/noOaBankBatches/api.ts`、`web/src/pages/NoOaBankBatchPage.tsx`、no-OA application/API/page tests。
+- 关键决策：
+  - 不改 persisted batch fact，不新增 relation 写路径；只在 API 出口和前端 DTO mapper 做用户可见投影。
+  - `status=stale` 且 `status_bucket=submitted` 或 `can_withdraw=true` 时，对页面投影为 `status=submitted,status_bucket=submitted,can_withdraw=true,can_submit=false`，并清空复核类 blocked reason。
+  - 真实 `conflict` 仍显示阻断提示且不可提交；这次不把 conflict 伪装成未提交。
+  - 关联台 paired/open 闭环沿用既有 integration tests：提交后进入 paired，撤回后回到 open/unmatched。
+- 测试覆盖：
+  - `NoOaBankBatchApplicationServiceTests.test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`
+  - `web/src/test/NoOaBankBatchApi.test.ts::maps relation-backed stale batches as submitted`
+  - `web/src/test/NoOaBankBatchPage.test.tsx::presents relation-backed stale batches as submitted without review prompts`
+  - `NoOaBankBatchWorkbenchIntegrationTests.test_no_oa_salary_batch_relation_pairs_then_cancel_returns_to_open`
+  - `NoOaBankBatchWorkbenchIntegrationTests.test_no_oa_internal_transfer_relation_groups_bank_rows_until_cancelled`
+- 七类测试覆盖：
+  - Business core unit tests：本轮未改 no-OA 批次状态转换或 relation command payload。
+  - Service-layer tests：适用，覆盖 SQL read model stale/submitted projection 与 summary 计数。
+  - API contract tests：适用，前端 API mapper 覆盖旧 payload 兼容；HTTP route shape 未变。
+  - Read model/cache/background job tests：本轮未改 worker/dirty scope；既有 stale SQL source version 和 Workbench integration 保护。
+  - Frontend component and interaction tests：适用，覆盖不显示复核提示、显示已提交和撤回按钮。
+  - End-to-end business-flow integration tests：适用，复用 no-OA submit -> Workbench paired、withdraw -> open 的后端 integration。
+  - Existing feature regression tests：适用，保留 conflict 阻断、read-only 门禁、operation overlay、分页和旧 API mapper 回归。
+- 未测风险：真实生产历史中无 active relation 的旧 stale 行如何清理仍需数据巡检；真实 worker drain 和大数据月份仍按既有 staging/生产 smoke 覆盖。
 
 ## 2026-06-17 - read-only 写入口权限门禁
 

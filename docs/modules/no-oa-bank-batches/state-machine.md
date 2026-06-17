@@ -44,7 +44,7 @@
 | `submitted` | 已提交免 OA 批次并写入 Workbench pair relation | 可撤回 |
 | `withdrawn` | 已撤回批次 | 只读；如果源流水仍 current，可重新生成 draft |
 | `conflict` | 规则/金额/内部往来配对不唯一或不完整 | 不可提交，需人工处理底层分类/关系 |
-| `stale` | 已提交批次的源流水或分类漂移 | 不可撤回或需复核；active relation 应被清理 |
+| `stale` | 已提交批次的源流水或分类漂移内部兼容状态 | 如果仍有 active no-OA relation，API/页面必须投影为 `submitted` 并允许撤回；不得向用户显示“分类已变更，需复核”提示。无 active relation 的旧漂移批次不作为已提交展示，后续由 refresh/repair 生成新的 draft 或保留只读历史 |
 | `superseded` | 历史单行批次被合并替代 | 只作为迁移/兼容状态 |
 
 候选生成规则：
@@ -138,6 +138,7 @@ submitted no-OA batch
 | selection guard | 只允许一个银行账户区域的 rows 同时被选择 | `prevents selecting rows from another bank before clearing the current bank region` |
 | internal transfer action | internal_transfer draft 走 batch submit endpoint，不走 selected rows submit | `submits internal transfer draft batches through the batch endpoint` |
 | operation pending | submit-selection、submit、withdraw、tag-selection 保存成功后显示全屏 overlay，等待 `no_oa_bank_batch` operation barrier fresh，再 reload list/detail/tag selection | operation overlay / page tests |
+| relation-backed stale projection | SQL read model 返回 `status=stale` 且 `status_bucket=submitted` 或 `can_withdraw=true` 时，list/detail/mutation payload 和前端 mapper 对用户投影为 `submitted`，清空复核类阻断提示，仍显示撤回入口 | `test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`presents relation-backed stale batches as submitted without review prompts` |
 | withdrawn history | 历史 bucket 只读，不显示提交/撤回动作 | `shows withdrawn history as read-only` |
 
 前端跨页事件：
@@ -212,3 +213,4 @@ job.outbox_events / job.read_model_dirty_scopes
 | 2026-06-14 | submit/withdraw/tag-selection 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `no_oa_bank_batch` barrier fresh 并 reload，避免旧批次/旧候选暴露给用户 | `web/src/test/NoOaBankBatchPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |
 | 2026-06-17 | Browser e2e 补齐选择提交/撤回/历史只读闭环 | 真实 Chromium 保护未提交选择、`submit-selection` 请求体、operation barrier、已提交 bucket 撤回 dialog、withdraw 请求体和历史只读状态 | `cd web && npx playwright test e2e/no-oa-bank-batches-flow.spec.ts` |
 | 2026-06-17 | read-only 写入口门禁接入权限矩阵 | `read_export_only` 用户可查看批次和标签范围，但不能提交、撤回、批量勾选或保存 tag selection；权限矩阵归 `permissions-and-audit` 统一覆盖 | `cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`、`cd web && npm test -- --run src/test/NoOaBankBatchPage.test.tsx` |
+| 2026-06-17 | relation-backed stale 用户可见状态收敛 | SQL read model 中仍有 active no-OA relation 的旧 `stale` 批次按已提交展示并可撤回；页面不显示“分类已变更，需复核”提示 | `tests/test_no_oa_bank_batch_application_service.py::NoOaBankBatchApplicationServiceTests::test_sql_read_model_relation_backed_stale_batch_is_presented_as_submitted`、`web/src/test/NoOaBankBatchPage.test.tsx` |

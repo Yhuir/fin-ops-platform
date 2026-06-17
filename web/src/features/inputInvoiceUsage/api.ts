@@ -576,9 +576,26 @@ function mapOaReverseInvoice(rawValue: unknown) {
 
 function mapRejectedInvoice(rawValue: unknown) {
   const raw = objectValue(rawValue);
+  const displayNo = stringValue(
+    camelOrSnake(raw, "displayNo", "display_no")
+      ?? camelOrSnake(raw, "invoiceNumber", "invoice_number")
+      ?? camelOrSnake(raw, "invoiceNo", "invoice_no")
+      ?? raw.id,
+  );
+  const paymentStatus = objectValue(camelOrSnake(raw, "paymentStatus", "payment_status"));
   return {
     invoiceId: stringValue(camelOrSnake(raw, "invoiceId", "invoice_id") ?? raw.id),
-    invoiceNumber: stringValue(camelOrSnake(raw, "invoiceNumber", "invoice_number") ?? camelOrSnake(raw, "invoiceNo", "invoice_no")),
+    invoiceNumber: stringValue(camelOrSnake(raw, "invoiceNumber", "invoice_number") ?? camelOrSnake(raw, "invoiceNo", "invoice_no") ?? displayNo),
+    displayNo,
+    sellerName: stringValue(camelOrSnake(raw, "sellerName", "seller_name")),
+    issueDate: stringValue(camelOrSnake(raw, "issueDate", "issue_date") ?? camelOrSnake(raw, "invoiceDate", "invoice_date")),
+    totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
+    paymentStatusLabel: stringValue(
+      camelOrSnake(raw, "paymentStatusLabel", "payment_status_label")
+        ?? camelOrSnake(raw, "statusLabel", "status_label")
+        ?? paymentStatus.label
+        ?? raw.status,
+    ),
     reasonCode: stringValue(camelOrSnake(raw, "reasonCode", "reason_code")),
     reason: stringValue(raw.reason),
   };
@@ -627,6 +644,7 @@ function mapOaReversePreviewResponse(payload: unknown): InputInvoiceUsageOaRever
     groups,
     invoiceRows: topLevelCandidates,
     candidateInvoices: topLevelCandidates,
+    rejectedInvoices: arrayValue(camelOrSnake(raw, "rejectedInvoices", "rejected_invoices")).map(mapRejectedInvoice),
     warnings: arrayValue(raw.warnings).map(stringValue),
     canCreateDraft: booleanValue(camelOrSnake(raw, "canCreateDraft", "can_create_draft")),
     nextAction: stringValue(camelOrSnake(raw, "nextAction", "next_action")),

@@ -200,10 +200,11 @@ function closureExpectedVersions(rows: TurnoverLedgerGroupedRow[]) {
   const expectedVersions: Record<string, unknown> = {};
   rows.forEach((row) => {
     const bankRowId = flowBankRowId(row);
-    if (!bankRowId || !Number.isFinite(row.categoryVersion)) {
+    const categoryVersion = row.categoryVersion;
+    if (!bankRowId || typeof categoryVersion !== "number" || !Number.isFinite(categoryVersion)) {
       return;
     }
-    expectedVersions[`turnover_bank_row:${bankRowId}`] = row.categoryVersion;
+    expectedVersions[`turnover_bank_row:${bankRowId}`] = categoryVersion;
   });
   return Object.keys(expectedVersions).length > 0 ? expectedVersions : undefined;
 }
@@ -550,6 +551,11 @@ export default function TurnoverLedgerPage() {
           await waitForOperationFreshness(operationBarrierTargetsFromMonths("turnover_ledger", [], "all"));
           setMessage("正在刷新往来款台账...");
           const freshLedger = await reloadLedgerAfterMutation();
+          if ((cleanText(freshLedger.readModelStatus) || "fresh") !== "fresh") {
+            setClosureSelection(null);
+            setClosureDrawerOpen(false);
+            throw new Error(CLOSURE_SELECTION_STALE_MESSAGE);
+          }
           const freshRows = freshClosureRowsFromLedger(freshLedger, currentSelection, bankRowIds);
           const freshPreview = freshRows ? buildClosurePreview(freshRows) : null;
           if (!freshRows || !freshPreview?.canConfirm) {

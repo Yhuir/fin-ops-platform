@@ -327,7 +327,7 @@ class InputInvoiceUsageOaReverseService:
         for row in rows:
             rejection = self._candidate_rejection(row)
             if rejection is not None:
-                rejected.append(rejection)
+                rejected.append({**self._invoice_display_row(row), **rejection})
                 continue
             candidate_rows.append(row)
 
@@ -788,7 +788,12 @@ class InputInvoiceUsageOaReverseService:
         invoice_id = str(row.get("invoiceId") or "")
         oa_payload = row.get("oa") if isinstance(row.get("oa"), dict) else {}
         if int(oa_payload.get("relationCount") or 0) > 0:
-            return {"invoiceId": invoice_id, "reasonCode": "already_has_active_oa", "reason": "发票已有 active OA 关系"}
+            return {
+                "invoiceId": invoice_id,
+                "reasonCode": "already_has_active_oa",
+                "reason": "发票已有 active OA 关系",
+                "oaRelationStatus": "linked",
+            }
         return None
 
     @staticmethod
@@ -809,6 +814,7 @@ class InputInvoiceUsageOaReverseService:
                 "label": str(payment_status.get("label") or ""),
                 "reason": str(payment_status.get("reason") or ""),
             },
+            "oaRelationStatus": "unlinked",
         }
 
     @staticmethod

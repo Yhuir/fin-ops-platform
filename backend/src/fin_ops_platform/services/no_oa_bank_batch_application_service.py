@@ -662,12 +662,13 @@ class NoOaBankBatchApplicationService:
             }
         total_amount = Decimal("0.00")
         for batch in batches:
-            status = str(batch.get("status") or "").strip()
+            presented_batch = self._presentation_batch(batch if isinstance(batch, dict) else {})
+            status = str(presented_batch.get("status") or "").strip()
             if status in counts:
                 counts[status] += 1
-            batch_type = str(batch.get("batch_type") or "").strip()
+            batch_type = str(presented_batch.get("batch_type") or "").strip()
             try:
-                amount = Decimal(str(batch.get("total_amount") or "0").replace(",", ""))
+                amount = Decimal(str(presented_batch.get("total_amount") or "0").replace(",", ""))
             except Exception:
                 amount = Decimal("0.00")
             total_amount += amount
@@ -698,7 +699,7 @@ class NoOaBankBatchApplicationService:
         for batch in list(batches or []):
             if not isinstance(batch, dict):
                 continue
-            next_batch = dict(batch)
+            next_batch = self._presentation_batch(batch)
             batch_type = str(next_batch.get("batch_type") or "").strip()
             if batch_type:
                 definition = self.bank_transaction_tag_definition_current(batch_type)
@@ -717,6 +718,22 @@ class NoOaBankBatchApplicationService:
                 ]
             resolved.append(next_batch)
         return resolved
+
+    @staticmethod
+    def _presentation_batch(batch: dict[str, object]) -> dict[str, object]:
+        next_batch = dict(batch)
+        status = str(next_batch.get("status") or "").strip()
+        status_bucket = str(next_batch.get("status_bucket") or next_batch.get("statusBucket") or "").strip()
+        raw_can_withdraw = next_batch.get("can_withdraw", next_batch.get("canWithdraw"))
+        can_withdraw = raw_can_withdraw is True or str(raw_can_withdraw).strip().lower() == "true"
+        if status == "stale" and (status_bucket == "submitted" or can_withdraw):
+            next_batch["relation_backed_status"] = "stale"
+            next_batch["status"] = "submitted"
+            next_batch["status_bucket"] = "submitted"
+            next_batch["can_submit"] = False
+            next_batch["can_withdraw"] = True
+            next_batch["blocked_reason"] = ""
+        return next_batch
 
     def no_oa_bank_batch_source_versions(self) -> dict[str, object]:
         no_oa_selection = self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()

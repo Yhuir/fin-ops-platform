@@ -28,6 +28,8 @@ test.describe("turnover ledger browser flow", () => {
     await drawer.getByRole("button", { name: "确定" }).click();
 
     await expect(page.getByText("外部往来闭环已确认")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "操作失败" })).toHaveCount(0);
+    await expect(page.getByText("银行流水状态已变化，请刷新后重试。")).toHaveCount(0);
     expect(api.count("POST /api/turnover-ledger/closures/confirm")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     await expect(page.getByText("已闭环 · 2笔")).toBeVisible();

@@ -123,7 +123,9 @@ type ApiTurnoverLedgerGroupedRow = {
   category_sub_label?: string | null;
   category_third_label?: string | null;
   category_label_path?: string[];
-  category_version?: number | null;
+  category_version?: number | string | null;
+  manual_category_version?: number | string | null;
+  version?: number | string | null;
   counterparty_bank_name?: string | null;
   bank_account_labels?: string[];
   summary_text?: string | null;
@@ -389,12 +391,20 @@ function moneyNumber(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function numberValue(value: number | null | undefined) {
-  return Number.isFinite(value) ? Number(value) : 0;
+function numberValue(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function nullableNumberValue(value: number | null | undefined) {
-  return Number.isFinite(value) ? Number(value) : null;
+function nullableNumberValue(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function stringList(value: string[] | undefined) {
@@ -580,7 +590,7 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     categorySubLabel: text(row.category_sub_label),
     categoryThirdLabel: text(row.category_third_label),
     categoryLabelPath: stringList(row.category_label_path),
-    categoryVersion: numberValue(row.category_version),
+    categoryVersion: nullableNumberValue(row.category_version ?? row.manual_category_version ?? row.version),
     counterpartyBankName: text(row.counterparty_bank_name),
     bankAccountLabels: stringList(row.bank_account_labels),
     summaryText: text(row.summary_text),

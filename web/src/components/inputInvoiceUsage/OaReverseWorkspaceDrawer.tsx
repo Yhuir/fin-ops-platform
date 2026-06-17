@@ -1,4 +1,5 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { Filter } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import type {
@@ -30,8 +31,21 @@ export type OaReversePreviewGroup = {
 export type OaReverseRejectedInvoice = {
   invoiceId: string;
   invoiceNumber?: string | null;
+  displayNo?: string | null;
+  sellerName?: string | null;
+  issueDate?: string | null;
+  totalWithTax?: string | null;
+  paymentStatusLabel?: string | null;
   reasonCode?: string | null;
   reason: string;
+};
+
+type OaRelationFilter = "all" | "linked" | "unlinked";
+
+type OaReverseDisplayInvoice = InputInvoiceUsageOaReverseInvoice & {
+  oaRelationStatus: "linked" | "unlinked";
+  selectable: boolean;
+  rejectedReason?: string | null;
 };
 
 export type OaReversePreviewPayload = {
@@ -46,6 +60,7 @@ export type OaReversePreviewPayload = {
   groups: OaReversePreviewGroup[];
   invoiceRows?: InputInvoiceUsageOaReverseInvoice[];
   candidateInvoices?: InputInvoiceUsageOaReverseInvoice[];
+  rejectedInvoices?: OaReverseRejectedInvoice[];
   warnings?: string[];
   canCreateDraft?: boolean;
   nextAction?: string;
@@ -93,11 +108,23 @@ export default function OaReverseWorkspaceDrawer({
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [targetApplicantCode, setTargetApplicantCode] = useState<string | null>(null);
   const [targetApplicantMenuOpen, setTargetApplicantMenuOpen] = useState(false);
+  const [oaRelationFilter, setOaRelationFilter] = useState<OaRelationFilter>("all");
+  const [oaRelationFilterMenuOpen, setOaRelationFilterMenuOpen] = useState(false);
+  const confirmationOpenRef = useRef(false);
   const targetApplicantLabelId = useId();
-  const request = useMemo(
-    () => ({ sourceFilters, selectedInvoiceIds, targetApplicantCode }),
-    [sourceFilters, selectedInvoiceIds, targetApplicantCode],
+  const selectedInvoiceIdsKey = selectedInvoiceIds.join("\n");
+  const normalizedSelectedInvoiceIds = useMemo(
+    () => (selectedInvoiceIdsKey ? selectedInvoiceIdsKey.split("\n") : []),
+    [selectedInvoiceIdsKey],
   );
+  const request = useMemo(
+    () => ({ sourceFilters, selectedInvoiceIds: normalizedSelectedInvoiceIds, targetApplicantCode }),
+    [sourceFilters, normalizedSelectedInvoiceIds, targetApplicantCode],
+  );
+
+  useEffect(() => {
+    confirmationOpenRef.current = confirmationOpen;
+  }, [confirmationOpen]);
 
   useEffect(() => {
     if (!open) {
@@ -115,6 +142,8 @@ export default function OaReverseWorkspaceDrawer({
       setSelectedCandidateIds([]);
       setTargetApplicantCode(null);
       setTargetApplicantMenuOpen(false);
+      setOaRelationFilter("all");
+      setOaRelationFilterMenuOpen(false);
       return undefined;
     }
 
@@ -125,8 +154,10 @@ export default function OaReverseWorkspaceDrawer({
       .then((payload) => {
         if (active) {
           setPreview(payload);
-          setBatch(null);
-          setFeedback(null);
+          if (!confirmationOpenRef.current) {
+            setBatch(null);
+            setFeedback(null);
+          }
         }
       })
       .catch((reason: unknown) => {
@@ -146,9 +177,14 @@ export default function OaReverseWorkspaceDrawer({
   }, [loadPreview, open, request]);
 
   const candidateInvoices = useMemo(() => (preview ? invoicesFromPreview(preview) : []), [preview]);
-  const candidateIdsKey = candidateInvoices.map((invoice) => invoice.invoiceId).join("\n");
+  const selectableCandidateInvoices = useMemo(() => candidateInvoices.filter((invoice) => invoice.selectable), [candidateInvoices]);
+  const visibleCandidateInvoices = useMemo(
+    () => candidateInvoices.filter((invoice) => oaRelationFilter === "all" || invoice.oaRelationStatus === oaRelationFilter),
+    [candidateInvoices, oaRelationFilter],
+  );
+  const candidateIdsKey = selectableCandidateInvoices.map((invoice) => invoice.invoiceId).join("\n");
   useEffect(() => {
-    setSelectedCandidateIds(candidateInvoices.map((invoice) => invoice.invoiceId));
+    setSelectedCandidateIds(selectableCandidateInvoices.map((invoice) => invoice.invoiceId));
   }, [candidateIdsKey]);
   const selectedCandidateIdSet = useMemo(() => new Set(selectedCandidateIds), [selectedCandidateIds]);
   const targetApplicants = preview?.targetApplicants ?? [];
@@ -201,7 +237,9 @@ export default function OaReverseWorkspaceDrawer({
           targetApplicantCode: resolvedTargetApplicantCode || null,
         });
         setPreview(refreshedPreview);
-        const refreshedCandidateIds = invoicesFromPreview(refreshedPreview).map((invoice) => invoice.invoiceId);
+        const refreshedCandidateIds = invoicesFromPreview(refreshedPreview)
+          .filter((invoice) => invoice.selectable)
+          .map((invoice) => invoice.invoiceId);
         setSelectedCandidateIds(refreshedCandidateIds);
         if (!refreshedPreview.previewId || !refreshedPreview.previewHash || refreshedCandidateIds.length === 0) {
           throw new Error(refreshedPreview.unavailableReason || "当前选择没有可创建 OA 草稿的候选发票。");
@@ -394,7 +432,7 @@ export default function OaReverseWorkspaceDrawer({
                     <div className="input-invoice-usage-oa-actions">
                       <button
                         className="input-invoice-usage-button"
-                        onClick={() => setSelectedCandidateIds(candidateInvoices.map((invoice) => invoice.invoiceId))}
+                        onClick={() => setSelectedCandidateIds(selectableCandidateInvoices.map((invoice) => invoice.invoiceId))}
                         type="button"
                       >
                         全选候选
@@ -414,25 +452,73 @@ export default function OaReverseWorkspaceDrawer({
                           <th scope="col">销方</th>
                           <th scope="col">开票日期</th>
                           <th scope="col">价税合计</th>
+                          <th scope="col">
+                            <div className="input-invoice-usage-oa-filter-header">
+                              <span>OA 关联</span>
+                              <div className="input-invoice-usage-oa-filter-menu">
+                                <button
+                                  aria-expanded={oaRelationFilterMenuOpen}
+                                  aria-haspopup="menu"
+                                  aria-label="筛选 OA 关联状态"
+                                  className="input-invoice-usage-oa-filter-trigger"
+                                  onClick={() => setOaRelationFilterMenuOpen((current) => !current)}
+                                  type="button"
+                                >
+                                  <Filter aria-hidden="true" size={14} />
+                                  <span>{oaRelationFilterLabel(oaRelationFilter)}</span>
+                                </button>
+                                {oaRelationFilterMenuOpen ? (
+                                  <div className="input-invoice-usage-oa-filter-panel" role="menu">
+                                    {OA_RELATION_FILTER_OPTIONS.map((option) => (
+                                      <button
+                                        aria-checked={oaRelationFilter === option.value}
+                                        className="input-invoice-usage-oa-filter-item"
+                                        key={option.value}
+                                        onClick={() => {
+                                          setOaRelationFilter(option.value);
+                                          setOaRelationFilterMenuOpen(false);
+                                        }}
+                                        role="menuitemradio"
+                                        type="button"
+                                      >
+                                        <span aria-hidden="true" className="input-invoice-usage-oa-filter-mark">
+                                          {oaRelationFilter === option.value ? "●" : ""}
+                                        </span>
+                                        <span>{option.label}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </th>
                           <th scope="col">状态</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {candidateInvoices.map((invoice) => (
+                        {visibleCandidateInvoices.map((invoice) => (
                           <tr key={invoice.invoiceId}>
                             <td className="input-invoice-usage-oa-table__select">
                               <input
-                                aria-label={`选择候选发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}`}
+                                aria-label={
+                                  invoice.selectable
+                                    ? `选择候选发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}`
+                                    : `已关联 OA 发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId} 不可选择`
+                                }
                                 checked={selectedCandidateIdSet.has(invoice.invoiceId)}
+                                disabled={!invoice.selectable}
                                 onChange={(event) => {
                                   setSelectedCandidateIds((current) => {
+                                    if (!invoice.selectable) {
+                                      return current;
+                                    }
                                     const next = new Set(current);
                                     if (event.target.checked) {
                                       next.add(invoice.invoiceId);
                                     } else {
                                       next.delete(invoice.invoiceId);
                                     }
-                                    return candidateInvoices
+                                    return selectableCandidateInvoices
                                       .map((candidate) => candidate.invoiceId)
                                       .filter((invoiceId) => next.has(invoiceId));
                                   });
@@ -444,12 +530,23 @@ export default function OaReverseWorkspaceDrawer({
                             <td>{invoice.sellerName || "-"}</td>
                             <td>{invoice.issueDate || "-"}</td>
                             <td className="input-invoice-usage-oa-table__amount">{invoice.totalWithTax || "-"}</td>
+                            <td>
+                              <span
+                                className={
+                                  invoice.oaRelationStatus === "linked"
+                                    ? "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning"
+                                    : "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success"
+                                }
+                              >
+                                {invoice.oaRelationStatus === "linked" ? "已关联oa" : "未关联oa"}
+                              </span>
+                            </td>
                             <td>{invoice.paymentStatusLabel || "候选"}</td>
                           </tr>
                         ))}
-                        {candidateInvoices.length === 0 ? (
+                        {visibleCandidateInvoices.length === 0 ? (
                           <tr>
-                            <td colSpan={6}>当前预览未返回候选发票。</td>
+                            <td colSpan={7}>当前筛选下暂无发票。</td>
                           </tr>
                         ) : null}
                       </tbody>
@@ -494,30 +591,68 @@ export default function OaReverseWorkspaceDrawer({
   );
 }
 
+const OA_RELATION_FILTER_OPTIONS: Array<{ value: OaRelationFilter; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "linked", label: "已经关联oa" },
+  { value: "unlinked", label: "未关联oa" },
+];
+
+function oaRelationFilterLabel(value: OaRelationFilter) {
+  return OA_RELATION_FILTER_OPTIONS.find((option) => option.value === value)?.label ?? "全部";
+}
+
 function invoicesFromPreview(preview: OaReversePreviewPayload) {
-  const byId = new Map<string, InputInvoiceUsageOaReverseInvoice>();
+  const byId = new Map<string, OaReverseDisplayInvoice>();
+  const putSelectable = (invoice: InputInvoiceUsageOaReverseInvoice) => {
+    byId.set(invoice.invoiceId, {
+      ...invoice,
+      oaRelationStatus: "unlinked",
+      selectable: true,
+    });
+  };
+  const putLinkedRejected = (invoice: OaReverseRejectedInvoice, targetApplicantName?: string) => {
+    const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId;
+    byId.set(invoice.invoiceId, {
+      invoiceId: invoice.invoiceId,
+      invoiceNumber: String(invoice.invoiceNumber || invoiceNumber || ""),
+      displayNo: String(invoice.displayNo || invoiceNumber || invoice.invoiceId),
+      sellerName: String(invoice.sellerName || ""),
+      issueDate: String(invoice.issueDate || ""),
+      totalWithTax: String(invoice.totalWithTax || ""),
+      paymentStatusLabel: String(invoice.paymentStatusLabel || "候选"),
+      targetApplicantName,
+      oaRelationStatus: "linked",
+      selectable: false,
+      rejectedReason: invoice.reason,
+    });
+  };
   for (const invoice of preview.candidateInvoices ?? []) {
-    byId.set(invoice.invoiceId, invoice);
+    putSelectable(invoice);
   }
   for (const invoice of preview.invoiceRows ?? []) {
-    byId.set(invoice.invoiceId, invoice);
+    putSelectable(invoice);
+  }
+  for (const invoice of preview.rejectedInvoices ?? []) {
+    if (invoice.reasonCode === "already_has_active_oa") {
+      putLinkedRejected(invoice, preview.targetApplicantName);
+    }
   }
   for (const group of preview.groups) {
     for (const invoice of group.invoiceRows ?? []) {
-      byId.set(invoice.invoiceId, {
+      putSelectable({
         ...invoice,
         targetApplicantName: invoice.targetApplicantName || group.targetApplicantName,
       });
     }
     for (const invoice of group.candidateInvoices ?? []) {
-      byId.set(invoice.invoiceId, {
+      putSelectable({
         ...invoice,
         targetApplicantName: invoice.targetApplicantName || group.targetApplicantName,
       });
     }
     for (const invoiceId of group.candidateInvoiceIds ?? []) {
       if (!byId.has(invoiceId)) {
-        byId.set(invoiceId, {
+        putSelectable({
           invoiceId,
           invoiceNumber: invoiceId,
           displayNo: invoiceId,
@@ -528,6 +663,12 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
           targetApplicantName: group.targetApplicantName,
         });
       }
+    }
+    for (const invoice of group.rejectedInvoices ?? []) {
+      if (invoice.reasonCode !== "already_has_active_oa") {
+        continue;
+      }
+      putLinkedRejected(invoice, group.targetApplicantName);
     }
   }
   return Array.from(byId.values());
