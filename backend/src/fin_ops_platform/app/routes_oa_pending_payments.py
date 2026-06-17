@@ -4,6 +4,7 @@ from http import HTTPStatus
 from typing import Any
 
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
+from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 
 
@@ -13,9 +14,11 @@ class OaPendingPaymentApiRoutes:
         query_service: OaPendingPaymentQueryService,
         *,
         read_model_service: OaPendingPaymentReadModelService | None = None,
+        command_service: OaPendingPaymentCommandService | None = None,
     ) -> None:
         self._query_service = query_service
         self._read_model_service = read_model_service
+        self._command_service = command_service
 
     def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
         if self._read_model_service is not None:
@@ -31,6 +34,7 @@ class OaPendingPaymentApiRoutes:
             filters=query.get("filters", [None])[0],
             sort_field=query.get("sort_field", ["bank_trade_time"])[0],
             sort_direction=query.get("sort_direction", ["desc"])[0],
+            view_mode=query.get("view_mode", [None])[0],
         )
         return HTTPStatus.OK, payload
 
@@ -43,6 +47,7 @@ class OaPendingPaymentApiRoutes:
             trade_date_from=query.get("trade_date_from", [None])[0],
             trade_date_to=query.get("trade_date_to", [None])[0],
             filters=query.get("filters", [None])[0],
+            view_mode=query.get("view_mode", [None])[0],
         )
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
@@ -64,6 +69,11 @@ class OaPendingPaymentApiRoutes:
         if self._read_model_service is not None:
             return self._read_model_service.relation_details(row_id, kind=query.get("kind", [""])[0])
         return self._query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
+
+    def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        if self._command_service is None:
+            raise RuntimeError("OA pending payment command service is not configured.")
+        return self._command_service.confirm_paid(payload, actor_id=actor_id)
 
 
 def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:

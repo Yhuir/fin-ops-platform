@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from http import HTTPStatus
 import json
 from pathlib import Path
 import tempfile
@@ -91,6 +92,23 @@ class FakeRelationFacade:
         }
 
 
+class FakeCommandService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict[str, Any], str]] = []
+
+    def confirm_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
+        self.calls.append((dict(payload), actor_id))
+        return {
+            "success": True,
+            "action": "oa_pending_payment_confirm_paid",
+            "oaRowId": payload.get("oa_row_id") or payload.get("oaRowId"),
+            "bankTransactionIds": [payload.get("bank_transaction_id") or payload.get("bankTransactionId")],
+            "paymentStatus": {"code": "paid", "label": "已支付", "reason": "支出流水合计等于OA金额"},
+            "oaPaymentWriteback": {"code": "written", "label": "已写回", "flowId": "proc-api"},
+            "readModelRefresh": {"scopeKeys": ["2026-05", "all"], "enqueued": True},
+        }
+
+
 class OaPendingPaymentApiTests(unittest.TestCase):
     def test_rows_filter_options_and_detail_routes_delegate_to_module_route_facade(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -152,6 +170,33 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(json.loads(relation_response.body)["kind"], "bank")
         self.assertEqual(json.loads(oa_relation_response.body)["kind"], "oa")
 
+    def test_confirm_paid_route_delegates_to_command_service_with_write_actor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            service = OaPendingPaymentQueryService(
+                import_service=ImportNormalizationService(),
+                oa_projection=StaticOAProjection([]),
+            )
+            command_service = FakeCommandService()
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(
+                service,
+                command_service=command_service,
+            )
+            app._workbench_write_auth_context = lambda _headers: ("tester", "default")  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/oa-pending-payments/confirm-paid",
+                body=json.dumps({"oa_row_id": "oa-api", "bank_transaction_id": "bank-api"}),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["paymentStatus"]["code"], "paid")
+        self.assertEqual(payload["oaPaymentWriteback"]["label"], "已写回")
+        self.assertEqual(command_service.calls, [({"oa_row_id": "oa-api", "bank_transaction_id": "bank-api"}, "tester")])
+
     def test_candidate_bank_relation_is_visible_without_marking_oa_paid(self) -> None:
         bank = BankTransaction(
             id="bank-candidate",
@@ -186,6 +231,25 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(row["bankTransaction"]["summaries"][0]["relationStatus"], "candidate")
         self.assertEqual(row["bankTransaction"]["paidTotal"], "0.00")
         self.assertNotEqual(row["paymentStatus"]["code"], "paid")
+
+    def test_rows_route_passes_in_progress_view_mode_to_query_service(self) -> None:
+        service = OaPendingPaymentQueryService(
+            import_service=ImportNormalizationService(),
+            oa_projection=StaticOAProjection([
+                self._oa("oa-completed", "张三", "100.00", workflow_status="completed"),
+                self._oa("oa-progress", "李四", "120.00", workflow_status="in_progress"),
+            ]),
+        )
+        routes = OaPendingPaymentApiRoutes(service)
+
+        status, payload = routes.rows({"view_mode": ["in_progress"], "page": ["1"], "page_size": ["20"]})
+        filter_status, filter_payload = routes.filter_options({"view_mode": ["in_progress"]})
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual([row["oa"]["id"] for row in payload["rows"]], ["oa-progress"])
+        self.assertEqual(payload["viewMode"], "in_progress")
+        self.assertEqual(filter_status, HTTPStatus.OK)
+        self.assertEqual(filter_payload["context"]["viewMode"], "in_progress")
 
     def test_routes_return_structured_validation_and_not_found_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -388,6 +452,77 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "oa-payment-row-api")
         self.assertEqual(queue.refreshes, [])
 
+    def test_production_rows_passes_view_mode_to_sql_read_repository(self) -> None:
+        queue = QueueRecorder()
+        seen_kwargs: dict[str, object] = {}
+
+        class OaRepo:
+            def list_oa_pending_payment_rows(self, **kwargs: object) -> dict[str, object]:
+                seen_kwargs.update(kwargs)
+                return {
+                    "rows": [_read_model_row()],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 1},
+                    "summary": {"rowCount": 1},
+                    "refresh_status": "fresh",
+                    "source_versions": oa_pending_payment_source_versions(),
+                }
+
+        routes = _read_model_routes(repository=OaRepo(), queue=queue, query_service=_empty_query_service())
+
+        status, payload = routes.rows({"view_mode": ["in_progress"], "page": ["1"], "page_size": ["50"]})
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(seen_kwargs["view_mode"], "in_progress")
+        self.assertEqual(payload["viewMode"], "in_progress")
+
+    def test_legacy_application_rebuild_includes_completed_and_in_progress_rows(self) -> None:
+        class RecordingRepository:
+            def __init__(self) -> None:
+                self.saved: dict[str, object] | None = None
+
+            def save_oa_pending_payment_rows(self, **kwargs: object) -> None:
+                self.saved = dict(kwargs)
+
+        class RecordingService:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_rows(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                view_mode = str(kwargs.get("view_mode") or "completed")
+                return {
+                    "rows": [
+                        {
+                            "id": f"row-{view_mode}",
+                            "oa": {"id": f"oa-{view_mode}", "workflowStatus": view_mode},
+                            "paymentStatus": {"code": "unpaid", "label": "未支付"},
+                            "bankTransaction": {},
+                            "invoice": {},
+                        }
+                    ],
+                    "pagination": {"page": kwargs.get("page"), "pageSize": kwargs.get("page_size"), "total": 1},
+                }
+
+        app = object.__new__(Application)
+        repository = RecordingRepository()
+        service = RecordingService()
+        app._oa_pending_payment_sql_read_repository = repository
+        app._oa_pending_payment_service = lambda: service  # type: ignore[method-assign]
+
+        result = app.rebuild_oa_pending_payment_read_model_scope("2026-05")
+
+        self.assertEqual(result["scope_key"], "2026-05")
+        self.assertEqual(result["row_count"], 2)
+        self.assertEqual([call["view_mode"] for call in service.calls], ["completed", "in_progress"])
+        self.assertIsNotNone(repository.saved)
+        assert repository.saved is not None
+        self.assertEqual(repository.saved["scope_key"], "2026-05")
+        self.assertEqual(repository.saved["source_versions"], oa_pending_payment_source_versions())
+        self.assertEqual(
+            [row["oa"]["workflowStatus"] for row in repository.saved["rows"]],  # type: ignore[index]
+            ["completed", "in_progress"],
+        )
+
     def test_read_endpoints_require_fin_ops_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -533,6 +668,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertIn("bank_account", OA_PENDING_PAYMENT_FILTER_FIELDS)
         self.assertIn("bank_direction", OA_PENDING_PAYMENT_FILTER_FIELDS)
+        self.assertEqual(record["oa_workflow_status"], "completed")
         self.assertEqual(record["bank_account"], "建设银行 1234")
         self.assertEqual(record["bank_direction"], "outflow")
 
@@ -543,6 +679,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         amount: str,
         *,
         detail_fields: dict[str, object] | None = None,
+        workflow_status: str | None = "completed",
     ) -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
@@ -558,6 +695,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             relation_code="",
             relation_label="",
             relation_tone="",
+            workflow_status=workflow_status,
             detail_fields=detail_fields or {},
             project_name_display="API项目",
         )
@@ -665,6 +803,7 @@ def _read_model_row() -> dict[str, object]:
             "applicationTime": "2026-05-20",
             "amount": "100.00",
             "month": "2026-05",
+            "workflowStatus": "completed",
             "reason": "API测试",
             "counterpartyName": "API供应商",
             "detailAvailable": True,
@@ -679,6 +818,7 @@ def _read_model_row() -> dict[str, object]:
                     "projectName": "API项目",
                     "applicationTime": "2026-05-20",
                     "amount": "100.00",
+                    "workflowStatus": "completed",
                     "relationCaseId": "case-api",
                 }
             ],

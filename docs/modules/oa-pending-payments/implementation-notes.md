@@ -9,8 +9,14 @@
 - Workbench active relation 是 OA/支出流水/进项发票关联关系的唯一事实源；多 OA、流水或发票在同一 relation 中必须聚合成一条核对行，并通过 `relationCount`/`summaries` 展开详情。
 - `paymentStatus` 由 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` 判定，前端不得按金额字段自行推断。
 - `paymentStatus` 不输出 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计进入 `pending_review`，多 OA 合并付款先按 relation group 合计后再判定。
+- `/oa-pending-payments` 通过 `view_mode=completed|in_progress` 承载同一页面的两类 OA：completed 是原待付款核对，in_progress 只展示 OA 系统仍进行中的支付申请/日常报销。
+- 进行中 OA 的候选流水不能自动写回；必须由用户点击“确认已支付”，后端校验 workflow/outflow/金额/flow_id 后确认 Workbench relation，并写回 OA MySQL `t_payment_simple.pay_status=1`。
+- OA MySQL `t_payment_simple.flow_id` 使用 OA Mongo `form_data._id`。该结论来自 2026-06-17 服务器实机脱敏验证：现有 `t_payment_simple.flow_id` 为 24 位 ObjectId 形态，能匹配 Mongo `_id`，未匹配 Flowable `PROC_INST_ID_`；流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为最终写回 ID。
 - 生产 rows、filter-options 和 detail 必须走 `OaPendingPaymentReadModelService` 的 freshness/source-version gate；非 fresh 返回 refreshing/unavailable 并入队 `oa_pending_payment.read_model.refresh`，不能 live scan。
 - `invoice-usage-collection` worker 同时负责 `input_invoice_usage`、`output_invoice_collection` 和 `oa_pending_payment` read model；OA all scope 只 fan-out month shards，不同步重建全量历史。
+- `invoice-usage-collection` refresh handler 必须在 rebuild/fan-out 前校验 event source_version 是否仍为当前 dirty scope；旧事件只能返回 `skipped/stale_source_version`，不能覆盖较新的 read model。
+- OA pending `all` scope 的 source version 判定优先从 `read_model.oa_pending_payment_rows` 的实际行聚合；只有完全没有实际行时才退回 scope 表，避免历史空月份 scope 把默认视图误判为 stale。
+- 运行时闭环必须同时更新/重启服务器 `invoice-usage-collection` worker；本地代码和手工 rebuild 可证明当前源码正确，但旧服务器 worker 仍会把 scope 覆盖回旧 `oa-pending-payment:v1`/空 workflow status。
 - pending invoice rules 对 OA 待付款的刷新当前由执行层 workbench invalidation 间接入队 invoice usage collection，已有 `tests/test_pending_invoice_api.py` 回归保护；dry-run plan 的 domain 名称不直观，暂记为 documented-risk。
 
 ## 记录模板
@@ -29,6 +35,29 @@
 ```
 
 ## 历史记录
+
+## 2026-06-17 - OA pending read model runtime freshness 闭环
+
+- 目标：修复 Phase 08 runtime smoke 中发现的默认 `all` 视图持续 `refreshing`、手工 v3 rebuild 后又被旧刷新路径写回 v1/空 workflow status 的问题。
+- 影响范围：`InvoiceUsageCollectionReadModelRefreshService`、`PostgresReadModelRepository.list_oa_pending_payment_rows`、`Application.rebuild_oa_pending_payment_read_model_scope` 兼容路径、SQL runtime 测试、生产发布/worker 运维。
+- 关键决策：刷新事件处理前复用 durable queue 的 `read_model_refresh_is_current` guard；stale event 不 rebuild、不 complete dirty scope；OA pending `all` freshness 优先从实际 rows 的 `source_versions` 聚合，历史空 scope 不参与有行视图的新鲜度证明。
+- 文档影响：更新本模块 implementation-notes、tests、state-machine；生产发布仍按 `scripts/deploy-oa.sh`，不能手工绕过 release/worker helper。
+- 测试覆盖：新增/更新 `tests/test_invoice_usage_collection_sql_runtime.py::test_oa_refresh_handler_skips_stale_source_version_before_rebuild`、`test_oa_repository_all_scope_aggregates_monthly_scope_source_versions`，以及 `tests/test_oa_pending_payment_api.py::test_legacy_application_rebuild_includes_completed_and_in_progress_rows`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime tests.test_oa_pending_payment_api tests.test_oa_pending_payment_service tests.test_oa_payment_status_service tests.test_oa_pending_payment_command_service tests.test_oa_projection_sql_runtime tests.test_mongo_oa_adapter -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations tests.test_platform_runtime_boundary_guards -v`；`cd web && npm test -- OaPendingPaymentsPage.test.tsx --run`；`cd web && npm run build`；本地 Playwright 打开 `/oa-pending-payments` 并切换“进行中 OA”。
+- 运行时证据：当前源码 rebuild 后 7 个活跃月份 scope 均写入 `oa-pending-payment:v3` / `2026-06-17-workflow-status-v1`；HTTP smoke 显示 `view_mode=in_progress` fresh 且 total=0、`view_mode=completed` fresh 且 total=210。当前 OA projection 没有 `in_progress` 行，因此页面空表是事实数据，不是未加载。
+- 未测风险：生产服务器 heartbeat 显示 `invoice-usage-collection` worker 仍在运行旧部署；未完成 release activate 前，服务器 worker 可能继续用旧逻辑覆盖 read model。由于当前工作树包含未提交 Phase 08 改动，`scripts/deploy-oa.sh` 标准发布会拒绝 dirty worktree，必须先提交/发布/重启 worker 后再做生产 smoke。
+- 后续事项：完成干净 release 发布后，重跑 `oa_pending_payment:all` refresh，确认 worker heartbeat 更新时间、scope source versions、HTTP rows/filter-options 和页面空态/数据态一致。
+
+## 2026-06-17 - 进行中 OA 支付确认与 OA 写回
+
+- 目标：在 OA 待付款核对页新增 `已完成 OA / 进行中 OA` 切换，把进行中支付申请/日常报销拉入三列视图，并支持候选流水确认后写回 OA 支付状态。
+- 影响范围：OA Mongo adapter/projection、OA pending payment query/read model/service/API、OA MySQL payment status adapter、Workbench relation confirm command、`OaPendingPaymentsPage`/table/API types/styles、模块/产品/API 文档和相关测试。
+- 关键决策：继续复用 Workbench relation 作为关联事实源；candidate relation 只展示证据和确认按钮，不直接判定 `paid` 或写回；confirm-paid 后端负责金额相等、outflow、workflow_status、flow_id 和 relation command 校验，页面只提交用户确认。
+- 文档影响：更新本模块 README、state-machine、tests、implementation-notes，并同步 `docs/product-specs/invoice-lifecycle.md`、`docs/dev/api-contracts.md` 和 `docs/app-architecture/pages.md`。
+- 测试覆盖：新增/更新 `tests/test_oa_payment_status_service.py`、`tests/test_mongo_oa_adapter.py`、`tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_oa_pending_payment_api.py` 和 `web/src/test/OaPendingPaymentsPage.test.tsx`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_payment_status_service tests.test_mongo_oa_adapter.MongoOAAdapterTests.test_list_application_records_maps_payment_requests_and_reimbursement_details tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_external_oa_mysql_client_is_confined_to_role_sync_adapter tests.test_platform_runtime_boundary_guards.PlatformRuntimeBoundaryGuardTests.test_raw_postgres_sql_in_services_is_classified_by_platform_boundary -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_service tests.test_oa_pending_payment_command_service tests.test_oa_pending_payment_api -v`；`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`；`cd web && npm run build`。
+- 未测风险：未连接真实 OA MySQL/Mongo，不覆盖真实网络超时、账号权限、生产锁等待、真实 OA 字段变体和 worker drain；需要 staging 用真实进行中 OA、候选流水和 `t_payment_simple` 样本 smoke。
+- 后续事项：部署前配置 `FIN_OPS_OA_PAYMENT_STATUS_*` 环境变量并在 staging 验证 `flow_id` 解析命中率、confirm-paid 审计链和 2 秒目标 refresh。
 
 ## 2026-06-17 - OA待付款Browser e2e闭环
 

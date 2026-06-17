@@ -718,7 +718,7 @@ class MongoOAAdapter(OAAdapter):
                 return sorted(months)
             for document in documents:
                 data = self._document_data(document)
-                if not self._should_include_document(form_type, data):
+                if not self._should_include_projection_document(form_type, data):
                     continue
                 derived_month = self._derive_month(data, document)
                 if MONTH_RE.match(derived_month):
@@ -858,7 +858,7 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
     ) -> OAApplicationRecord | None:
         data = self._document_data(document)
-        if not self._should_include_document(OA_IMPORT_FORM_TYPE_PAYMENT, data):
+        if not self._should_include_projection_document(OA_IMPORT_FORM_TYPE_PAYMENT, data):
             return None
         amount = self._first_text(data, "amount")
         applicant = self._first_text(data, "userName", "applicant")
@@ -874,6 +874,7 @@ class MongoOAAdapter(OAAdapter):
         expense_content = reason
         etc_metadata = detect_etc_batch_metadata(data)
         completed_at = self._datetime_string(document.get("modifiedTime"))
+        workflow_status = self.canonical_process_status(data)
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
             month=self._derive_month(data, document),
@@ -888,6 +889,7 @@ class MongoOAAdapter(OAAdapter):
             relation_code="pending_match",
             relation_label="待找流水与发票",
             relation_tone="warn",
+            workflow_status=workflow_status or None,
             expense_type=expense_type,
             expense_content=expense_content,
             source=etc_metadata.get("source"),
@@ -898,6 +900,9 @@ class MongoOAAdapter(OAAdapter):
             detail_fields={
                 "OA单号": self._payment_form_no(data, document),
                 "表单ID": self._settings.payment_request_form_id,
+                "流程实例ID": self._first_text(data, "processId"),
+                "流程请求ID": self._first_text(data, "flowRequestId"),
+                "Mongo文档ID": self._document_id(document),
                 "申请日期": self._first_text(data, "applicationDate", "ApplicationDate"),
                 "审批完成时间": completed_at or "—",
                 "收款账号": self._first_text(data, "payeeAccount"),
@@ -916,7 +921,7 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
     ) -> list[OAApplicationRecord]:
         data = self._document_data(document)
-        if not self._should_include_document(OA_IMPORT_FORM_TYPE_EXPENSE, data):
+        if not self._should_include_projection_document(OA_IMPORT_FORM_TYPE_EXPENSE, data):
             return []
         applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
         if not applicant:
@@ -1070,6 +1075,9 @@ class MongoOAAdapter(OAAdapter):
         detail_fields = {
             "OA单号": self._expense_form_no(data, document),
             "表单ID": self._settings.expense_claim_form_id,
+            "流程实例ID": self._first_text(data, "processId"),
+            "流程请求ID": self._first_text(data, "flowRequestId"),
+            "Mongo文档ID": self._document_id(document),
             "申请日期": self._first_text(data, "ApplicationDate", "applicationDate"),
             "审批完成时间": self._datetime_string(document.get("modifiedTime")) or "—",
             "流程状态": self._form_status(data),
@@ -1113,6 +1121,7 @@ class MongoOAAdapter(OAAdapter):
                 relation_code="pending_match",
                 relation_label="待找流水与发票",
                 relation_tone="warn",
+                workflow_status=self.canonical_process_status(data) or None,
                 expense_type=expense_type_summary,
                 expense_content=expense_content_summary,
                 detail_fields=detail_fields,
@@ -3030,6 +3039,12 @@ class MongoOAAdapter(OAAdapter):
         return (
             clean_string(form_type) in set(settings["form_types"])
             and self._canonical_status_key(data) in set(settings["statuses"])
+        )
+
+    def _should_include_projection_document(self, form_type: str, data: dict[str, Any]) -> bool:
+        return (
+            self._should_include_form_type(form_type)
+            and self._canonical_status_key(data) in {OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS}
         )
 
     @staticmethod

@@ -36,6 +36,7 @@ class OaPendingPaymentReadModelService:
 
     def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         scope_key = self._scope_key_from_query(query)
+        view_mode = OaPendingPaymentQueryService._parse_view_mode(query.get("view_mode", [None])[0])
         list_rows = getattr(self._repository, "list_oa_pending_payment_rows", None)
         if not callable(list_rows):
             self._enqueue_refresh(scope_key, reason="api_sql_repository_unavailable")
@@ -51,6 +52,7 @@ class OaPendingPaymentReadModelService:
                 sort_direction=query.get("sort_direction", ["desc"])[0],
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
+                view_mode=view_mode,
             )
         except ValueError as exc:
             raise OaPendingPaymentError("invalid_oa_pending_payment_query", str(exc)) from exc
@@ -80,6 +82,7 @@ class OaPendingPaymentReadModelService:
         result["filterConfig"] = self._query_service._filter_config()
         result["appliedFilters"] = {"filters": parsed_filters}
         result["sort"] = {"field": sort_field, "direction": sort_direction}
+        result["viewMode"] = view_mode
         result["read_model_status"] = "fresh"
         result["readModelStatus"] = "fresh"
         result["read_model_scope_key"] = scope_key
@@ -114,6 +117,7 @@ class OaPendingPaymentReadModelService:
             "rows": rows,
             "pagination": {"page": 1, "pageSize": page_size, "total": total},
             "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
+            "viewMode": first_payload.get("viewMode"),
             "read_model_status": "fresh",
             "readModelStatus": "fresh",
             "read_model_scope_key": first_payload.get("read_model_scope_key"),
@@ -130,6 +134,7 @@ class OaPendingPaymentReadModelService:
             trade_date_from=query.get("trade_date_from", [None])[0],
             trade_date_to=query.get("trade_date_to", [None])[0],
             filters=query.get("filters", [None])[0],
+            view_mode=query.get("view_mode", [None])[0],
         )
         payload["read_model_status"] = "fresh"
         payload["readModelStatus"] = "fresh"

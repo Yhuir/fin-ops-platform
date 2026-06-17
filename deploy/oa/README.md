@@ -132,6 +132,13 @@ FIN_OPS_OA_LOGIN_REQUEST_TIMEOUT_MS=5000
 FIN_OPS_OA_SESSION_CACHE_TTL_SECONDS=30
 FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY=<root-only long random secret>
 FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY=<OA login public key PEM or base64 DER>
+FIN_OPS_OA_PAYMENT_STATUS_ENABLED=0
+FIN_OPS_OA_PAYMENT_STATUS_HOST=127.0.0.1
+FIN_OPS_OA_PAYMENT_STATUS_PORT=3306
+FIN_OPS_OA_PAYMENT_STATUS_DATABASE=smart_oa
+FIN_OPS_OA_PAYMENT_STATUS_USERNAME=<least-privilege mysql user>
+FIN_OPS_OA_PAYMENT_STATUS_PASSWORD=<least-privilege mysql password>
+FIN_OPS_OA_PAYMENT_STATUS_CONNECT_TIMEOUT_SECONDS=5
 FIN_OPS_ALLOWED_USERNAMES=YNSYLP005
 FIN_OPS_READONLY_EXPORT_USERNAMES=
 FIN_OPS_ADMIN_USERNAMES=YNSYLP005
@@ -151,6 +158,7 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `FIN_OPS_OA_APPLICANT_CREDENTIAL_KEY` 用于 PostgreSQL `pgcrypto` 加密/解密目标 OA 申请人密码，必须放在 root-only secret env，且上线后保持稳定，轮换前需要先设计迁移方案
 - `FIN_OPS_OA_LOGIN_RSA_PUBLIC_KEY` 是 OA 登录接口使用的 RSA 公钥，可配置 PEM 或 base64 DER；后端登录目标申请人前会用该公钥加密密码，不发送明文密码
 - 服务器 runtime 必须能执行 `openssl`，用于目标申请人登录密码 RSA 加密；缺失时 `创建 OA 草稿` 会返回目标 OA 登录不可用
+- `FIN_OPS_OA_PAYMENT_STATUS_*` 用于进行中 OA “确认已支付”写回 OA MySQL `t_payment_simple`。2026-06-17 实机验证显示 `t_payment_simple.flow_id` 对应 OA Mongo `form_data._id`，不是 Flowable `PROC_INST_ID_`。应用正常运行时直接通过 MySQL 连接写回，不需要 SSH 登录 OA 服务器；如果 MySQL 只允许服务器本机访问，应将 app 部署在可访问该 MySQL 的同机/内网，或配置受控隧道/专用网络。未启用时页面仍可读取 OA 待付款数据，但 confirm-paid 会返回写回未配置。
 - `FIN_OPS_ALLOWED_USERNAMES / FIN_OPS_READONLY_EXPORT_USERNAMES / FIN_OPS_ADMIN_USERNAMES`
   是启动期兜底配置，真实长期口径仍以 app 设置持久化为准
 - `FIN_OPS_PROMETHEUS_BEARER_TOKEN` 用于 `/metrics` Prometheus scrape；未配置时 `/metrics`

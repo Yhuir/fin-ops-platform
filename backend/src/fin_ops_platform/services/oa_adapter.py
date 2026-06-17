@@ -27,6 +27,7 @@ class OAApplicationRecord:
     relation_code: str
     relation_label: str
     relation_tone: str
+    workflow_status: str | None = None
     expense_type: str | None = None
     expense_content: str | None = None
     detail_fields: dict[str, Any] = field(default_factory=dict)

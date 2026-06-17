@@ -679,12 +679,37 @@ Workbench row payload 可包含可选对象身份字段：`object_identity`、`o
 契约要求：
 
 - rows、filter-options 和详情接口使用同一 SQL read model 或同一 query service 事实源。
+- rows 和 filter-options 接受 `view_mode=completed|in_progress`，默认 `completed`。`completed` 只返回已完成或历史未知 workflow status 的 OA；`in_progress` 只返回 `oa.workflowStatus=in_progress` 的 OA。
 - 响应必须表达 `read_model_status`、stale/refreshing 详情和必要的 refresh job。
-- rows 中 `oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
+- rows 中 `oa` 必须携带 `workflowStatus`；`oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
 - `paymentStatus` 不返回 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计时返回 `pending_review`，多 OA 合并付款按 relation group 合计后判定。
+- rows 可返回 `oaPaymentWriteback`，用于表达 OA MySQL `t_payment_simple` 写回状态。`oaPaymentWriteback.code` 至少支持 `written` / `not_written`，`syncStatus` 表达 `ready`、`unavailable`、`flow_id_missing` 或 `not_required` 等同步语义。
 - 详情接口返回 OA、付款流水、发票、候选关系和异常原因；`/rows/{row_id}/relation-details` 支持 `kind=oa|bank|invoice`。
 - `filterConfig`/`filter-options` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
 - 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
+
+### 进行中 OA 确认已支付
+
+`POST /api/oa-pending-payments/confirm-paid`
+
+请求 body：
+
+```json
+{
+  "oa_row_id": "oa-row-id",
+  "bank_transaction_id": "bank-transaction-id",
+  "idempotency_key": "optional-client-generated-key"
+}
+```
+
+契约要求：
+
+- 后端必须用写权限校验 actor，不接受前端仅隐藏按钮作为权限事实。
+- 只允许 `workflowStatus=in_progress` 的 OA；非进行中 OA 返回业务冲突。
+- 若传入 `bank_transaction_id`，必须先校验银行流水存在、方向为支出、支出合计等于 OA 金额，再调用 Workbench relation confirm。
+- 若未传 `bank_transaction_id`，必须存在唯一 active bank relation，且同样通过金额/方向校验。
+- 写回前必须解析到 OA Mongo 文档 ID，并将 `t_payment_simple.flow_id` 对应记录写成 `pay_status=1`；缺记录时可插入一条已支付记录。Flowable 流程实例 ID 和流程请求 ID 不作为 `t_payment_simple.flow_id` 写回 key。
+- 成功响应返回 `success`、`paymentStatus`、`oaPaymentWriteback`、`relation` 和 `readModelRefresh`；refresh 至少覆盖 Workbench 与 `oa_pending_payment`，目标刷新窗口为 2 秒级。
 
 ### 工作台 row detail
 

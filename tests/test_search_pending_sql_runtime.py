@@ -36,7 +36,7 @@ def _pending_invoice_expected_source_versions() -> dict[str, object]:
         "pending_output_invoice_tag_groups_version": 1,
         "bank_auto_tag_rules_version": 1,
         "oa_attachment_invoice_parser_version": "2026-05-28-attachment-status-v1:2026-05-11-evidence-v1",
-        "oa_projection_sync_version": "2026-05-28-scope-replace-v1",
+        "oa_projection_sync_version": "2026-06-17-workflow-status-v1",
         "bank_detail_source_versions": {},
     }
 

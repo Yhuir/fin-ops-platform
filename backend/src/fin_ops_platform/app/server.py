@@ -202,7 +202,9 @@ from fin_ops_platform.services.oa_pending_payment_service import (
     OaPendingPaymentError,
     OaPendingPaymentQueryService,
 )
+from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
+from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
 from fin_ops_platform.services.output_invoice_collection_lifecycle_service import (
     InMemoryOutputInvoiceCollectionLifecycleRepository,
     OutputInvoiceCollectionLifecycleService,
@@ -1828,6 +1830,8 @@ class Application:
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_oa_pending_payments_relation_details(row_id, query, headers)
+        if method == "POST" and route_path == "/api/oa-pending-payments/confirm-paid":
+            return self._handle_api_oa_pending_payments_confirm_paid(body, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/rows":
             return self._handle_api_output_invoice_collections_rows(query, headers)
         if method == "GET" and route_path == "/api/output-invoice-collections/filter-options":
@@ -9382,6 +9386,7 @@ class Application:
             import_service=self._import_service,
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=getattr(self, "_workbench_query_service", None),
+            payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
@@ -9395,9 +9400,40 @@ class Application:
         routes = OaPendingPaymentApiRoutes(
             self._oa_pending_payment_service(),
             read_model_service=self._oa_pending_payment_read_model_service(),
+            command_service=self._oa_pending_payment_command_service(),
         )
         self._oa_pending_payment_api_routes = routes
         return routes
+
+    def _oa_payment_status_repository(self):
+        override = getattr(self, "_oa_payment_status_repository_override", None)
+        if override is not None:
+            return override
+        repository = getattr(self, "_oa_payment_status_repository_instance", None)
+        if repository is not None:
+            return repository
+        repository = MySQLOAPaymentStatusRepository.from_environment()
+        self._oa_payment_status_repository_instance = repository
+        return repository
+
+    def _oa_pending_payment_command_service(self) -> OaPendingPaymentCommandService:
+        override = getattr(self, "_oa_pending_payment_command_service_override", None)
+        if override is not None:
+            return override
+        service = getattr(self, "_oa_pending_payment_command_service_instance", None)
+        if isinstance(service, OaPendingPaymentCommandService):
+            return service
+        service = OaPendingPaymentCommandService(
+            import_service=self._import_service,
+            oa_projection=getattr(self, "_workbench_query_service", None),
+            relation_command_service=self._workbench_relation_command_service(),
+            payment_status_repository=self._oa_payment_status_repository(),
+            lifecycle_policy=self._invoice_lifecycle_policy(),
+            enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh,
+            enqueue_oa_pending_payment_refresh=self._enqueue_oa_pending_payment_read_model_refresh,
+        )
+        self._oa_pending_payment_command_service_instance = service
+        return service
 
     def _oa_pending_payment_read_model_service(self) -> OaPendingPaymentReadModelService | None:
         if not self._requires_sql_read_model_runtime():
@@ -9478,6 +9514,35 @@ class Application:
         except OaPendingPaymentError as exc:
             return self._oa_pending_payment_error_response(exc)
         return self._json_response(self._oa_pending_payment_sql_payload_status(payload), payload)
+
+    def _handle_api_oa_pending_payments_confirm_paid(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        auth_context = self._workbench_write_auth_context(headers)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, _tenant_id = auth_context
+        try:
+            result = self._oa_pending_payment_routes().confirm_paid(payload, actor_id=actor_id)
+        except OaPendingPaymentError as exc:
+            return self._oa_pending_payment_error_response(exc)
+        except RuntimeError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": {
+                        "code": "oa_pending_payment_command_unavailable",
+                        "message": str(exc),
+                        "details": {},
+                    }
+                },
+            )
+        return self._json_response(HTTPStatus.OK, result)
 
     @staticmethod
     def _oa_pending_payment_sql_payload_status(payload: dict[str, object]) -> HTTPStatus:
@@ -17021,6 +17086,12 @@ class Application:
         return {"scope_key": month, "row_count": len(rows), "source_versions": source_versions}
 
     def _oa_pending_payment_live_rows(self, *, month: str | None) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for view_mode in ("completed", "in_progress"):
+            rows.extend(self._oa_pending_payment_live_rows_for_view(month=month, view_mode=view_mode))
+        return rows
+
+    def _oa_pending_payment_live_rows_for_view(self, *, month: str | None, view_mode: str) -> list[dict[str, object]]:
         page_size = 200
         page = 1
         rows: list[dict[str, object]] = []
@@ -17032,6 +17103,7 @@ class Application:
                 month=month,
                 sort_field="bank_trade_time",
                 sort_direction="desc",
+                view_mode=view_mode,
             )
             page_rows = [row for row in list(payload.get("rows") or []) if isinstance(row, dict)]
             rows.extend(page_rows)

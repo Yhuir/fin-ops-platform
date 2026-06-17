@@ -22,15 +22,26 @@
 - `web/src/features/oaPendingPayments/api.ts`
 - `backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_service.py`
+- `backend/src/fin_ops_platform/services/oa_pending_payment_command_service.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py`
 - `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_details.py`
+- `backend/src/fin_ops_platform/services/oa_payment_status_service.py`
+- `backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
 - `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`
 - `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`
 - `backend/src/fin_ops_platform/services/invoice_usage_collection_source_versions.py`
 
 ## 当前边界
 
-关注 OA 单据、支出银行流水、进项发票、Workbench relation、SQL read model、invoice lifecycle 分发、详情 drawer 和异常反馈。OA 待付款以 OA 申请为主行，`paymentStatus` 由 `InvoiceLifecyclePolicy` 或等价 lifecycle read boundary 判定；页面不得自行定义付款状态。
+关注 OA 单据、支出银行流水、进项发票、Workbench relation、SQL read model、invoice lifecycle 分发、OA MySQL 支付状态写回、详情 drawer 和异常反馈。OA 待付款以 OA 申请为主行，`paymentStatus` 由 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` 或等价 lifecycle read boundary 判定；页面不得自行定义付款状态。
+
+页面支持 `view_mode=completed|in_progress`：
+
+- `completed` 是原 OA 待付款视图，只展示已完成或历史未带 workflow status 的 OA，并继续展示 OA、支付状态、支出流水和进项发票 relation 证据。
+- `in_progress` 只展示 OA 系统仍为进行中的支付申请/日常报销。表格主体为 OA、支付状态、流水三列；候选流水只作为证据展示，必须由用户点击“确认已支付”后才允许确认 relation 并写回 OA MySQL。
+- OA 投影/read model 的统一事实源必须同时保留 `completed` 和 `in_progress`，再由 `view_mode` 过滤；设置页的手工搜索/导入状态筛选不能把进行中 OA 从本页面事实源中过滤掉。
+- 进行中 OA 视图中的 OA 写回状态来自 `t_payment_simple.flow_id`。2026-06-17 实机验证显示该字段对应 OA Mongo `form_data._id`，平台用 Mongo OA detail fields 中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀解析；流程实例 ID 和流程请求 ID 只保留为详情/诊断字段。
+- 应用正常运行时通过 MySQL 连接配置写回 OA 支付状态，不要求应用进程登录服务器 SSH；SSH 只属于人工运维/排障通道。
 
 生产读路径必须先经过 `OaPendingPaymentReadModelService` 的 freshness/source-version gate。rows、filter-options、OA detail、bank detail、invoice detail 和 relation detail 在 read model missing/stale/source mismatch 时只能返回 refreshing/unavailable 语义并入队 `oa_pending_payment.read_model.refresh`，不能同步 live scan 旧事实并伪装 fresh。
 

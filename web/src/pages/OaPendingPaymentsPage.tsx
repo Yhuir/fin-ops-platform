@@ -8,6 +8,7 @@ import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/Input
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import {
+  confirmOaPendingPaymentPaid,
   fetchOaPendingPaymentDetail,
   fetchOaPendingPaymentFilterOptions,
   fetchOaPendingPaymentRows,
@@ -22,6 +23,7 @@ import type {
   OaPendingPaymentRow,
   OaPendingPaymentSortDirection,
   OaPendingPaymentSummary,
+  OaPendingPaymentViewMode,
 } from "../features/oaPendingPayments/types";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
 
@@ -35,6 +37,7 @@ const initialQuery: OaPendingPaymentQuery = {
   filters: [],
   sortField: "",
   sortDirection: "",
+  viewMode: "completed",
 };
 
 function filterOptionsByField(fields: Array<OaPendingPaymentFieldConfig & { options?: OaPendingPaymentFilterOption[] }>) {
@@ -59,6 +62,8 @@ export default function OaPendingPaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [confirmingRowIds, setConfirmingRowIds] = useState<Set<string>>(() => new Set());
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const requestIdRef = useRef(0);
@@ -80,6 +85,7 @@ export default function OaPendingPaymentsPage() {
         tradeDateFrom: query.tradeDateFrom,
         tradeDateTo: query.tradeDateTo,
         filters: query.filters,
+        viewMode: query.viewMode,
         signal,
       }),
     ])
@@ -146,6 +152,41 @@ export default function OaPendingPaymentsPage() {
     setQuery((current) => ({ ...current, page: 1, filters: current.filters.filter((filter) => filter.field !== field) }));
   }, []);
 
+  const handleViewModeChange = useCallback((viewMode: OaPendingPaymentViewMode) => {
+    setQuery((current) => ({ ...current, page: 1, viewMode }));
+  }, []);
+
+  const handleConfirmPaid = useCallback((row: OaPendingPaymentRow) => {
+    const oaRowId = row.oa.primaryOaId || row.oa.id;
+    const bankTransactionId = confirmBankTransactionId(row);
+    if (!oaRowId) {
+      setError("OA 行缺少可确认的 OA ID。");
+      return;
+    }
+    setConfirmingRowIds((current) => new Set(current).add(row.id));
+    setFeedback(null);
+    setError(null);
+    confirmOaPendingPaymentPaid({
+      oaRowId,
+      bankTransactionId: bankTransactionId || undefined,
+      idempotencyKey: `oa-pending-paid-${oaRowId}-${bankTransactionId || "active"}-${Date.now()}`,
+    })
+      .then((payload) => {
+        setFeedback(payload.oaPaymentWriteback?.label === "已写回" ? "已确认支付并写回 OA。" : "已确认支付，等待 OA 写回状态刷新。");
+        loadRows("refresh");
+      })
+      .catch((caught: unknown) => {
+        setError(caught instanceof Error ? caught.message : "确认已支付失败。");
+      })
+      .finally(() => {
+        setConfirmingRowIds((current) => {
+          const next = new Set(current);
+          next.delete(row.id);
+          return next;
+        });
+      });
+  }, [loadRows]);
+
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
   const saveExpensePendingInvoiceRules = useCallback(
@@ -177,6 +218,22 @@ export default function OaPendingPaymentsPage() {
               className="oa-pending-payments-query"
               left={(
                 <div className="oa-pending-payments-query__grid">
+                  <div className="oa-pending-payments-view-toggle" aria-label="OA流程状态视图">
+                    <button
+                      className={query.viewMode === "completed" ? "oa-pending-payments-view-toggle__button oa-pending-payments-view-toggle__button--active" : "oa-pending-payments-view-toggle__button"}
+                      onClick={() => handleViewModeChange("completed")}
+                      type="button"
+                    >
+                      已完成 OA
+                    </button>
+                    <button
+                      className={query.viewMode === "in_progress" ? "oa-pending-payments-view-toggle__button oa-pending-payments-view-toggle__button--active" : "oa-pending-payments-view-toggle__button"}
+                      onClick={() => handleViewModeChange("in_progress")}
+                      type="button"
+                    >
+                      进行中 OA
+                    </button>
+                  </div>
                   <label className="oa-pending-payments-field">
                     <span>月份</span>
                     <input
@@ -191,6 +248,11 @@ export default function OaPendingPaymentsPage() {
             {error ? (
               <div className="oa-pending-payments-alert" role="alert">
                 {error}
+              </div>
+            ) : null}
+            {feedback ? (
+              <div className="oa-pending-payments-alert oa-pending-payments-alert--success" role="status">
+                {feedback}
               </div>
             ) : null}
             {loading ? (
@@ -219,6 +281,8 @@ export default function OaPendingPaymentsPage() {
                   onPageChange={(page) => setQuery((current) => ({ ...current, page }))}
                   onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
                   onOpenDetail={setDetailTarget}
+                  onConfirmPaid={handleConfirmPaid}
+                  confirmingRowIds={confirmingRowIds}
                 />
               </>
             )}
@@ -242,6 +306,14 @@ export default function OaPendingPaymentsPage() {
       />
     </>
   );
+}
+
+function confirmBankTransactionId(row: OaPendingPaymentRow): string {
+  if (row.bankTransaction.primaryBankTransactionId) {
+    return row.bankTransaction.primaryBankTransactionId;
+  }
+  const firstSummary = row.bankTransaction.summaries?.find((summary) => summary.bankTransactionId);
+  return firstSummary?.bankTransactionId ?? "";
 }
 
 function normalizeFilterValue(filter: {

@@ -17,7 +17,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 
 
-OA_PROJECTION_SYNC_VERSION = "2026-05-28-scope-replace-v1"
+OA_PROJECTION_SYNC_VERSION = "2026-06-17-workflow-status-v1"
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -45,17 +45,18 @@ class PostgresOAProjectionRepository:
                 application_row = connection.fetch_one(
                     """
                     insert into app.oa_applications(
-                        oa_source_id, form_id, row_id, form_type, workflow_no, status,
+                        oa_source_id, form_id, row_id, form_type, workflow_no, status, workflow_status,
                         applicant, application_date, project_name, amount, currency,
                         scope_month, normalized_payload, raw_payload, synced_at
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s, %s, %s::date, %s, %s, now())
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s, %s, %s::date, %s, %s, now())
                     on conflict (row_id) do update set
                         oa_source_id = excluded.oa_source_id,
                         form_id = excluded.form_id,
                         form_type = excluded.form_type,
                         workflow_no = excluded.workflow_no,
                         status = excluded.status,
+                        workflow_status = excluded.workflow_status,
                         applicant = excluded.applicant,
                         application_date = excluded.application_date,
                         project_name = excluded.project_name,
@@ -75,6 +76,7 @@ class PostgresOAProjectionRepository:
                         record.apply_type,
                         record.case_id,
                         record.section,
+                        text(record.workflow_status),
                         record.applicant,
                         month_start(record.month),
                         record.project_name,
@@ -499,7 +501,7 @@ class PostgresOAProjectionRepository:
             return self.list_all_application_records()
         rows = self._connection.fetch_all(
             """
-            select row_id, normalized_payload, raw_payload
+            select row_id, workflow_status, normalized_payload, raw_payload
             from app.oa_applications
             where scope_month = %s::date
             order by row_id
@@ -511,7 +513,7 @@ class PostgresOAProjectionRepository:
     def list_all_application_records(self) -> list[OAApplicationRecord]:
         rows = self._connection.fetch_all(
             """
-            select row_id, normalized_payload, raw_payload
+            select row_id, workflow_status, normalized_payload, raw_payload
             from app.oa_applications
             order by scope_month, row_id
             """
@@ -524,7 +526,7 @@ class PostgresOAProjectionRepository:
             return []
         rows = self._connection.fetch_all(
             """
-            select row_id, normalized_payload, raw_payload
+            select row_id, workflow_status, normalized_payload, raw_payload
             from app.oa_applications
             where row_id = any(%s)
             order by row_id
@@ -627,7 +629,7 @@ class PostgresOAProjectionRepository:
         )
         documents = self._connection.fetch_all(
             """
-            select row_id, form_id, form_type, workflow_no, status, applicant, project_name, amount, scope_month
+            select row_id, form_id, form_type, workflow_no, status, workflow_status, applicant, project_name, amount, scope_month
             from app.oa_applications
             order by scope_month desc nulls last, row_id
             limit 100
@@ -658,6 +660,7 @@ class PostgresOAProjectionRepository:
                     "form_type": text(row.get("form_type")),
                     "form_no": text(row.get("workflow_no")),
                     "status": text(row.get("status")),
+                    "workflow_status": text(row.get("workflow_status")),
                     "applicant": text(row.get("applicant")),
                     "project_name": text(row.get("project_name")),
                     "amount": decimal_text(row.get("amount")),
@@ -786,6 +789,9 @@ class PostgresOAProjectionRepository:
             payload = row_payload(row, "normalized_payload", "payload", "raw_payload")
             if not isinstance(payload, dict):
                 continue
+            if "workflow_status" not in payload and text(row.get("workflow_status")):
+                payload = dict(payload)
+                payload["workflow_status"] = text(row.get("workflow_status"))
             records.append(cls._record_from_payload(payload, row_id=text(row.get("row_id"))))
         return records
 

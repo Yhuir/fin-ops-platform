@@ -1068,6 +1068,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_external_oa_mysql_client_is_confined_to_role_sync_adapter(self) -> None:
         allowed_paths = {
+            "backend/src/fin_ops_platform/services/oa_payment_status_service.py",
             "backend/src/fin_ops_platform/services/oa_role_sync_service.py",
         }
         violations: list[str] = []
@@ -1198,6 +1199,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/cutover_preflight.py",
             "backend/src/fin_ops_platform/services/file_object_migration.py",
             "backend/src/fin_ops_platform/services/import_job_queue.py",
+            "backend/src/fin_ops_platform/services/oa_payment_status_service.py",
             "backend/src/fin_ops_platform/services/oa_role_sync_service.py",
             "backend/src/fin_ops_platform/services/operations_dashboard.py",
             "backend/src/fin_ops_platform/services/postgres_connection.py",

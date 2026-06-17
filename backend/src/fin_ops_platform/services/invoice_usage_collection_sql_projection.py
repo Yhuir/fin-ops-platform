@@ -130,6 +130,20 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             filters=[],
             sort_field="bank_trade_time",
             sort_direction="desc",
+            view_mode="completed",
+        )
+        rows.extend(
+            service._filtered_sorted_rows(
+                context=context,
+                month=normalized_scope_key,
+                keyword=None,
+                trade_date_from=None,
+                trade_date_to=None,
+                filters=[],
+                sort_field="bank_trade_time",
+                sort_direction="desc",
+                view_mode="in_progress",
+            )
         )
         source_versions = oa_pending_payment_source_versions()
         if self._workbench_relation_read_facade.last_source_versions:

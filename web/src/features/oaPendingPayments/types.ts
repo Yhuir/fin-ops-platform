@@ -1,4 +1,5 @@
 export type OaPendingPaymentSortDirection = "asc" | "desc";
+export type OaPendingPaymentViewMode = "completed" | "in_progress";
 
 export type OaPendingPaymentFilterOperator = "contains" | "equals" | "in" | "between";
 
@@ -32,6 +33,7 @@ export type OaPendingPaymentOaSummary = {
   applicationTime: string;
   amount: string;
   detailAvailable: boolean;
+  workflowStatus?: string;
   relationCount?: number;
   relationStatus?: string;
   relationSource?: string;
@@ -61,6 +63,13 @@ export type OaPendingPaymentStatus = {
   label: string;
   reason: string;
   severity?: "success" | "warning" | "error" | "info" | string;
+};
+
+export type OaPendingPaymentWritebackStatus = {
+  code: "written" | "not_written" | string;
+  label: string;
+  flowIds?: string[];
+  syncStatus?: string;
 };
 
 export type OaPendingPaymentBankTransaction = {
@@ -144,6 +153,7 @@ export type OaPendingPaymentRow = {
   id: string;
   oa: OaPendingPaymentOaSummary;
   paymentStatus: OaPendingPaymentStatus;
+  oaPaymentWriteback?: OaPendingPaymentWritebackStatus;
   bankTransaction: OaPendingPaymentBankTransaction;
   invoice: OaPendingPaymentInvoice;
 };
@@ -166,6 +176,8 @@ export type OaPendingPaymentRowsResponse = {
   read_model_scope_key?: string;
   sourceVersions?: Record<string, unknown>;
   source_versions?: Record<string, unknown>;
+  viewMode?: OaPendingPaymentViewMode;
+  view_mode?: OaPendingPaymentViewMode;
 };
 
 export type OaPendingPaymentFilterOptionsResponse = {
@@ -176,6 +188,8 @@ export type OaPendingPaymentFilterOptionsResponse = {
   read_model_scope_key?: string;
   sourceVersions?: Record<string, unknown>;
   source_versions?: Record<string, unknown>;
+  viewMode?: OaPendingPaymentViewMode;
+  view_mode?: OaPendingPaymentViewMode;
 };
 
 export type OaPendingPaymentQuery = {
@@ -188,6 +202,27 @@ export type OaPendingPaymentQuery = {
   filters: OaPendingPaymentFilter[];
   sortField: string;
   sortDirection: OaPendingPaymentSortDirection | "";
+  viewMode: OaPendingPaymentViewMode;
+};
+
+export type ConfirmOaPendingPaymentPaidRequest = {
+  oaRowId: string;
+  bankTransactionId?: string;
+  idempotencyKey?: string;
+};
+
+export type ConfirmOaPendingPaymentPaidResponse = {
+  success: boolean;
+  action?: string;
+  oaRowId?: string;
+  bankTransactionIds?: string[];
+  paymentStatus?: OaPendingPaymentStatus;
+  oaPaymentWriteback?: OaPendingPaymentWritebackStatus;
+  readModelRefresh?: {
+    scopeKeys?: string[];
+    enqueued?: boolean;
+    targetSeconds?: number;
+  };
 };
 
 export type OaPendingPaymentDetailTarget = {

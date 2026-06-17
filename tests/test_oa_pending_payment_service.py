@@ -7,6 +7,7 @@ from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
 from fin_ops_platform.services.oa_pending_payment_service import (
     OaPendingPaymentError,
     OaPendingPaymentQueryService,
@@ -26,6 +27,24 @@ class StaticOAProjection:
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
         wanted = {str(row_id) for row_id in row_ids}
         return [record for record in self.records if record.id in wanted]
+
+
+class FakePaymentStatusRepository:
+    def __init__(self, *, flow_ids: dict[str, str], paid_flow_ids: set[str]) -> None:
+        self.flow_ids = dict(flow_ids)
+        self.paid_flow_ids = set(paid_flow_ids)
+        self.resolved_records: list[str] = []
+
+    def resolve_flow_id(self, record: OAApplicationRecord) -> str | None:
+        self.resolved_records.append(record.id)
+        return self.flow_ids.get(record.id)
+
+    def get_payment_status(self, flow_id: str) -> OAPaymentStatusRecord | None:
+        pay_status = PAY_STATUS_PAID if flow_id in self.paid_flow_ids else PAY_STATUS_PENDING
+        return OAPaymentStatusRecord(flow_id=flow_id, pay_status=pay_status)
+
+    def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord:
+        return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PAID)
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
@@ -55,6 +74,8 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         row = payload["rows"][0]
         self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["oaPaymentWriteback"]["code"], "not_written")
+        self.assertEqual(row["oaPaymentWriteback"]["label"], "未写回")
         self.assertNotIn(row["paymentStatus"]["code"], {"overpaid", "merged_paid"})
         self.assertEqual(row["oa"]["amount"], "4450.00")
         self.assertEqual(row["oa"]["relationCount"], 3)
@@ -67,6 +88,31 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["invoice"]["relationCount"], 1)
         self.assertEqual(payload["summary"]["oaAmountTotal"], "4450.00")
         self.assertEqual(payload["summary"]["bankPaidTotal"], "4450.00")
+
+    def test_paid_row_reads_oa_payment_status_writeback_state(self) -> None:
+        bank = self._bank("bank-paid", "100.00")
+        pair_service = WorkbenchPairRelationService()
+        self._relation(pair_service, "case-paid", ["oa-paid", bank.id], matched=True)
+        payment_repository = FakePaymentStatusRepository(
+            flow_ids={"oa-paid": "proc-paid"},
+            paid_flow_ids={"proc-paid"},
+        )
+        service = self._service(
+            oa_records=[
+                self._oa("oa-paid", "张三", "100.00"),
+            ],
+            transactions=[bank],
+            pair_service=pair_service,
+            payment_repository=payment_repository,
+        )
+
+        row = service.list_rows(page_size=20)["rows"][0]
+
+        self.assertEqual(row["paymentStatus"]["code"], "paid")
+        self.assertEqual(row["oaPaymentWriteback"]["code"], "written")
+        self.assertEqual(row["oaPaymentWriteback"]["label"], "已写回")
+        self.assertEqual(row["oaPaymentWriteback"]["flowIds"], ["proc-paid"])
+        self.assertEqual(payment_repository.resolved_records, ["oa-paid"])
 
     def test_grouped_multiple_oa_and_multiple_banks_are_not_marked_overpaid(self) -> None:
         bank_first = self._bank("bank-group-first", "21966.70")
@@ -177,6 +223,30 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(field_error.exception.error_code, "invalid_filter_field")
         self.assertEqual(sort_error.exception.error_code, "invalid_sort_field")
+
+    def test_view_mode_filters_completed_and_in_progress_oa_records(self) -> None:
+        service = self._service(
+            oa_records=[
+                self._oa("oa-completed", "张三", "30.00", workflow_status="completed"),
+                self._oa("oa-legacy", "李四", "40.00", workflow_status=None),
+                self._oa("oa-progress", "王五", "50.00", workflow_status="in_progress"),
+            ]
+        )
+
+        default_payload = service.list_rows(page_size=20)
+        progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
+        filter_payload = service.filter_options(view_mode="in_progress")
+
+        self.assertEqual([row["oa"]["id"] for row in default_payload["rows"]], ["oa-completed", "oa-legacy"])
+        self.assertEqual(default_payload["viewMode"], "completed")
+        self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress"])
+        self.assertEqual(progress_payload["rows"][0]["oa"]["workflowStatus"], "in_progress")
+        self.assertEqual(progress_payload["viewMode"], "in_progress")
+        self.assertEqual(filter_payload["context"]["viewMode"], "in_progress")
+
+        with self.assertRaises(OaPendingPaymentError) as context:
+            service.list_rows(view_mode="bad")
+        self.assertEqual(context.exception.error_code, "invalid_view_mode")
 
     def test_page_size_limit_protects_first_screen_slo(self) -> None:
         service = self._service(
@@ -290,6 +360,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         transactions: list[BankTransaction] | None = None,
         invoices: list[Invoice] | None = None,
         pair_service: WorkbenchPairRelationService | None = None,
+        payment_repository: FakePaymentStatusRepository | None = None,
     ) -> OaPendingPaymentQueryService:
         projection = StaticOAProjection(oa_records)
         return OaPendingPaymentQueryService(
@@ -304,6 +375,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
                 oa_projection=projection,
             ),
             oa_projection=projection,
+            payment_status_repository=payment_repository,
         )
 
     @staticmethod
@@ -314,6 +386,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         *,
         project_name: str = "测试项目",
         apply_type: str = "报销",
+        workflow_status: str | None = "completed",
         detail_fields: dict[str, object] | None = None,
     ) -> OAApplicationRecord:
         return OAApplicationRecord(
@@ -330,6 +403,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
             relation_code="",
             relation_label="",
             relation_tone="",
+            workflow_status=workflow_status,
             detail_fields=detail_fields or {},
             project_name_display=project_name,
         )

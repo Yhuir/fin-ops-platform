@@ -135,6 +135,7 @@ INPUT_INVOICE_USAGE_FILTER_FIELDS = {
     "payment_status": ("payment_status", "text", {"in"}),
     "oa_applicant": ("oa_applicant", "text", {"contains", "in"}),
     "oa_application_type": ("oa_application_type", "text", {"equals", "in"}),
+    "oa_workflow_status": ("oa_workflow_status", "text", {"equals", "in"}),
     "oa_project_name": ("oa_project_name", "text", {"contains", "in"}),
     "bank_counterparty_name": ("bank_counterparty_name", "text", {"contains", "in"}),
     "bank_trade_time": ("bank_trade_time", "date", {"between", "equals"}),
@@ -1363,12 +1364,16 @@ class PostgresReadModelRepository:
         sort_direction: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
+        view_mode: str | None = None,
     ) -> dict[str, Any] | None:
         scope_key = _invoice_relation_scope_key(month)
         page_number = max(int_value(page, 1), 1)
         page_limit = min(max(int_value(page_size, 50), 1), 200)
         where: list[str] = []
         params: list[Any] = []
+        view_mode_clause = _oa_pending_payment_view_mode_clause(view_mode)
+        if view_mode_clause:
+            where.append(view_mode_clause)
         if scope_key != "all":
             where.append("scope_key = %s")
             params.append(scope_key)
@@ -1399,11 +1404,7 @@ class PostgresReadModelRepository:
         total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
         refresh_status = self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key)
         scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key=scope_key)
-        source_versions = (
-            scope_row.get("source_versions")
-            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
-            else {}
-        )
+        source_versions = self._oa_pending_payment_scope_source_versions(scope_key=scope_key, scope_row=scope_row)
         if total == 0:
             if scope_row is None:
                 return None
@@ -1444,6 +1445,29 @@ class PostgresReadModelRepository:
             "read_model_scope_key": scope_key,
         }
 
+    def _oa_pending_payment_scope_source_versions(
+        self,
+        *,
+        scope_key: str,
+        scope_row: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if scope_key == "all":
+            rows = self._connection.fetch_all(
+                """
+                select distinct scope_key, source_versions
+                from read_model.oa_pending_payment_rows
+                where scope_key <> 'all'
+                order by scope_key desc
+                """
+            )
+            if rows:
+                return self._common_source_versions([dict(row) for row in rows if isinstance(row, dict)])
+        return (
+            scope_row.get("source_versions")
+            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
+            else {}
+        )
+
     def save_oa_pending_payment_rows(
         self,
         *,
@@ -1467,7 +1491,7 @@ class PostgresReadModelRepository:
                     """
                     insert into read_model.oa_pending_payment_rows(
                         row_id, scope_key, scope_month, oa_id, oa_applicant, oa_application_type,
-                        oa_project_name, oa_amount, payment_status, payment_status_label,
+                        oa_workflow_status, oa_project_name, oa_amount, payment_status, payment_status_label,
                         bank_transaction_id, bank_trade_time, bank_amount, bank_paid_total, bank_name, bank_account, bank_direction,
                         bank_counterparty_name, bank_summary, invoice_id, invoice_no,
                         invoice_date, seller_name, invoice_total_with_tax, searchable_text,
@@ -1475,7 +1499,7 @@ class PostgresReadModelRepository:
                     )
                     values (
                         %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_applicant)s,
-                        %(oa_application_type)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
+                        %(oa_application_type)s, %(oa_workflow_status)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
                         %(payment_status_label)s, %(bank_transaction_id)s, %(bank_trade_time)s::timestamptz,
                         %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_account)s, %(bank_direction)s,
                         %(bank_counterparty_name)s, %(bank_summary)s,
@@ -1488,6 +1512,7 @@ class PostgresReadModelRepository:
                         oa_id = excluded.oa_id,
                         oa_applicant = excluded.oa_applicant,
                         oa_application_type = excluded.oa_application_type,
+                        oa_workflow_status = excluded.oa_workflow_status,
                         oa_project_name = excluded.oa_project_name,
                         oa_amount = excluded.oa_amount,
                         payment_status = excluded.payment_status,
@@ -8061,6 +8086,15 @@ def _invoice_relation_filter_clauses(
     return clauses
 
 
+def _oa_pending_payment_view_mode_clause(view_mode: str | None) -> str:
+    normalized = text(view_mode) or "completed"
+    if normalized == "in_progress":
+        return "oa_workflow_status = 'in_progress'"
+    if normalized != "completed":
+        raise ValueError("view_mode must be completed or in_progress")
+    return "(oa_workflow_status is null or oa_workflow_status = '' or oa_workflow_status = 'completed')"
+
+
 def _invoice_relation_order_sql(
     *,
     sort_field: str | None,
@@ -8218,6 +8252,7 @@ def _oa_pending_payment_read_model_record(row: dict[str, Any], scope_key: str) -
         "oa_id": text(oa.get("id")),
         "oa_applicant": text(oa.get("applicantName")),
         "oa_application_type": text(oa.get("applicationType")),
+        "oa_workflow_status": text(oa.get("workflowStatus")),
         "oa_project_name": text(oa.get("projectName")),
         "oa_amount": decimal_text(oa.get("amount")),
         "payment_status": text(payment.get("code")),

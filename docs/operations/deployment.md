@@ -128,7 +128,7 @@ release 目录会占用磁盘。默认保留最近 8 个 release，同时永远�
 - `deploy/oa/env/fin-ops.worker.file-migration.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
-生产 secret 只能放在 `/etc/fin-ops/*.env` 这类 root-only `EnvironmentFile` 中。`RABBITMQ_URL`、`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、Redis、MinIO/S3、OA role sync 密码都不能写入 systemd inline `Environment=` 或仓库文件。migrator DSN 应单独放在 `/etc/fin-ops/fin-ops.postgres-migrator.env`，仅在执行 schema migration 时手动加载，不要加入 API/worker unit。
+生产 secret 只能放在 `/etc/fin-ops/*.env` 这类 root-only `EnvironmentFile` 中。`RABBITMQ_URL`、`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、Redis、MinIO/S3、OA role sync 密码、OA payment status MySQL 密码都不能写入 systemd inline `Environment=` 或仓库文件。migrator DSN 应单独放在 `/etc/fin-ops/fin-ops.postgres-migrator.env`，仅在执行 schema migration 时手动加载，不要加入 API/worker unit。
 
 最小生产正确性不需要 RabbitMQ，也不应依赖人工长期手动启动。标准 release 发布会自动运行：
 

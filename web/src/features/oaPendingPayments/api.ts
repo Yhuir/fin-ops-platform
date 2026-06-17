@@ -7,18 +7,20 @@ import type {
   OaPendingPaymentQuery,
   OaPendingPaymentRowsResponse,
   OaPendingPaymentSortDirection,
+  ConfirmOaPendingPaymentPaidRequest,
+  ConfirmOaPendingPaymentPaidResponse,
 } from "./types";
 
 type FetchRowsRequest = Pick<
   OaPendingPaymentQuery,
-  "page" | "pageSize" | "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters" | "sortField" | "sortDirection"
+  "page" | "pageSize" | "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters" | "sortField" | "sortDirection" | "viewMode"
 > & {
   signal?: AbortSignal;
 };
 
 type FetchFilterOptionsRequest = Pick<
   OaPendingPaymentQuery,
-  "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters"
+  "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters" | "viewMode"
 > & {
   signal?: AbortSignal;
 };
@@ -72,6 +74,20 @@ export async function fetchOaPendingPaymentDetail(
   );
 }
 
+export async function confirmOaPendingPaymentPaid(
+  request: ConfirmOaPendingPaymentPaidRequest,
+): Promise<ConfirmOaPendingPaymentPaidResponse> {
+  return apiRequestJson<ConfirmOaPendingPaymentPaidResponse>("/api/oa-pending-payments/confirm-paid", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      oa_row_id: request.oaRowId,
+      bank_transaction_id: request.bankTransactionId,
+      idempotency_key: request.idempotencyKey,
+    }),
+  });
+}
+
 function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
   params.set("page", String(request.page));
   params.set("page_size", String(request.pageSize));
@@ -98,6 +114,7 @@ function appendContextQuery(params: URLSearchParams, request: FetchFilterOptions
   if (request.filters.length > 0) {
     params.set("filters", encodeFilters(request.filters));
   }
+  params.set("view_mode", request.viewMode);
 }
 
 function encodeFilters(filters: OaPendingPaymentFilter[]) {

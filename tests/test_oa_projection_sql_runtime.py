@@ -29,6 +29,7 @@ def oa_record(row_id: str = "oa-pay-001", month: str = "2026-05") -> OAApplicati
         relation_code="pending_match",
         relation_label="待找流水与发票",
         relation_tone="warn",
+        workflow_status="completed",
         detail_fields={"申请日期": f"{month}-02"},
     )
 
@@ -174,6 +175,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual([record.id for record in records], ["oa-pay-001"])
         self.assertEqual(records[0].project_name, "玉烟维护项目")
+        self.assertEqual(records[0].workflow_status, "completed")
 
     def test_postgres_oa_projection_repository_writes_structured_items_and_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -189,6 +191,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(count, 1)
         executed_sql = "\n".join(sql for sql, _params in connection.executed)
         self.assertIn("insert into app.oa_applications", executed_sql)
+        self.assertIn("workflow_status", executed_sql)
         self.assertIn("returning id::text as application_id", executed_sql)
         self.assertIn("delete from app.oa_application_items", executed_sql)
         self.assertIn("insert into app.oa_application_items", executed_sql)
@@ -198,6 +201,8 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         attachment_inserts = [params for sql, params in connection.executed if "insert into app.oa_attachments" in sql]
         self.assertEqual(len(item_insert), 1)
         self.assertEqual(len(attachment_inserts), 2)
+        app_insert = [params for sql, params in connection.executed if "insert into app.oa_applications" in sql]
+        self.assertEqual(app_insert[0][6], "completed")
 
     def test_postgres_oa_projection_repository_writes_attachment_files_as_structured_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository

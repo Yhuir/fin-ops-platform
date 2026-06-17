@@ -25,6 +25,19 @@ class InvoiceUsageCollectionReadModelRefreshService:
         if event.event_type == "input_invoice_usage.read_model.refresh":
             if scope_type != "input_invoice_usage" or not scope_key:
                 raise ValueError("Input invoice usage refresh requires scope_type='input_invoice_usage' and scope_key.")
+            source_version = event.source_version or event.payload.get("source_version")
+            if not self._event_source_version_is_current(
+                event,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                source_version=source_version,
+            ):
+                return {
+                    "scope_key": scope_key,
+                    "skipped": True,
+                    "skip_reason": "stale_source_version",
+                    "source_version": source_version,
+                }
             if _invoice_scope_requires_expansion(scope_key):
                 shard_result = self._enqueue_scope_shards(
                     event,
@@ -40,6 +53,19 @@ class InvoiceUsageCollectionReadModelRefreshService:
         elif event.event_type == "output_invoice_collection.read_model.refresh":
             if scope_type != "output_invoice_collection" or not scope_key:
                 raise ValueError("Output invoice collection refresh requires scope_type='output_invoice_collection' and scope_key.")
+            source_version = event.source_version or event.payload.get("source_version")
+            if not self._event_source_version_is_current(
+                event,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                source_version=source_version,
+            ):
+                return {
+                    "scope_key": scope_key,
+                    "skipped": True,
+                    "skip_reason": "stale_source_version",
+                    "source_version": source_version,
+                }
             if _invoice_scope_requires_expansion(scope_key):
                 shard_result = self._enqueue_scope_shards(
                     event,
@@ -55,6 +81,19 @@ class InvoiceUsageCollectionReadModelRefreshService:
         elif event.event_type == "oa_pending_payment.read_model.refresh":
             if scope_type != "oa_pending_payment" or not scope_key:
                 raise ValueError("OA pending payment refresh requires scope_type='oa_pending_payment' and scope_key.")
+            source_version = event.source_version or event.payload.get("source_version")
+            if not self._event_source_version_is_current(
+                event,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                source_version=source_version,
+            ):
+                return {
+                    "scope_key": scope_key,
+                    "skipped": True,
+                    "skip_reason": "stale_source_version",
+                    "source_version": source_version,
+                }
             if _invoice_scope_requires_expansion(scope_key):
                 shard_result = self._enqueue_scope_shards(
                     event,
@@ -108,6 +147,26 @@ class InvoiceUsageCollectionReadModelRefreshService:
                 scope_key=scope_key,
                 source_version=event.source_version,
             )
+
+    def _event_source_version_is_current(
+        self,
+        event: RuntimeQueueEvent,
+        *,
+        scope_type: str,
+        scope_key: str,
+        source_version: object,
+    ) -> bool:
+        is_current = getattr(self._queue_repository, "read_model_refresh_is_current", None)
+        if not callable(is_current):
+            return True
+        return bool(
+            is_current(
+                tenant_id=event.tenant_id,
+                scope_type=scope_type,
+                scope_key=scope_key,
+                source_version=source_version,
+            )
+        )
 
 
 def _invoice_scope_requires_expansion(scope_key: str) -> bool:

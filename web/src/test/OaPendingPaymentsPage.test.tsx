@@ -25,6 +25,7 @@ const rowsPayload = {
         applicationTime: "2026-01-03",
         amount: "10000.00",
         detailAvailable: true,
+        workflowStatus: "completed",
       },
       paymentStatus: {
         code: "partially_paid",
@@ -79,6 +80,7 @@ const rowsPayload = {
         applicationTime: "2026-01-20 02:51:26",
         amount: "4450.00",
         detailAvailable: true,
+        workflowStatus: "completed",
         relationCount: 3,
         hasMultiple: true,
         detailMode: "list",
@@ -116,6 +118,12 @@ const rowsPayload = {
         code: "paid",
         label: "已支付",
         reason: "关联台配对组内支出流水合计等于 OA 合计金额",
+      },
+      oaPaymentWriteback: {
+        code: "written",
+        label: "已写回",
+        flowIds: ["proc-group-001"],
+        syncStatus: "ready",
       },
       bankTransaction: {
         primaryBankTransactionId: "bank-002",
@@ -215,6 +223,7 @@ const rowsPayload = {
         applicationTime: "2026-01-05",
         amount: "18200.00",
         detailAvailable: true,
+        workflowStatus: "completed",
       },
       paymentStatus: {
         code: "paid",
@@ -268,6 +277,7 @@ const rowsPayload = {
         applicationTime: "2026-05-23",
         amount: "977.00",
         detailAvailable: true,
+        workflowStatus: "completed",
       },
       paymentStatus: {
         code: "unpaid",
@@ -318,12 +328,14 @@ const rowsPayload = {
       id: "oa-payment-row-candidate",
       oa: {
         id: "oa-candidate",
+        primaryOaId: "oa-candidate",
         applicantName: "候选付款人",
         applicationType: "支付申请",
         projectName: "候选流水展示项目",
         applicationTime: "2026-05-24",
         amount: "977.00",
         detailAvailable: true,
+        workflowStatus: "in_progress",
       },
       paymentStatus: {
         code: "unpaid",
@@ -445,7 +457,7 @@ function installOaPendingPaymentsFetch(overrides?: {
   rowsPayload?: Record<string, unknown>;
   detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
 }) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const detailPayload = overrides?.detailPayloads?.[url.pathname];
     if (detailPayload) {
@@ -462,6 +474,20 @@ function installOaPendingPaymentsFetch(overrides?: {
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.pathname === "/api/oa-pending-payments/confirm-paid") {
+      return new Response(JSON.stringify({
+        success: true,
+        action: "confirm_paid",
+        oaRowId: "oa-candidate",
+        bankTransactionIds: ["bank-candidate-004"],
+        paymentStatus: { code: "paid", label: "已支付", reason: "已确认支出流水" },
+        oaPaymentWriteback: { code: "written", label: "已写回", flowIds: ["proc-candidate"], syncStatus: "ready" },
+        readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+      }), {
+        status: init?.method === "POST" ? 200 : 405,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.pathname === "/api/oa-pending-payments/filter-options") {
       return new Response(JSON.stringify({
         fields: [
@@ -472,6 +498,14 @@ function installOaPendingPaymentsFetch(overrides?: {
             sortable: true,
             operators: ["in"],
             options: [{ value: "张三", label: "张三", count: 1 }],
+          },
+          {
+            field: "oa_application_type",
+            label: "类型",
+            mode: "enum_multi",
+            sortable: false,
+            operators: ["in"],
+            options: [{ value: "报销", label: "报销", count: 1 }],
           },
           {
             field: "payment_status",
@@ -612,6 +646,13 @@ function rulesRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetc
     .filter((url) => url.pathname === "/api/pending-invoices/rules");
 }
 
+function confirmPaidRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+    return url.pathname === "/api/oa-pending-payments/confirm-paid";
+  });
+}
+
 function readWebSource(path: string) {
   return readFileSync(resolve(path), "utf8");
 }
@@ -675,10 +716,13 @@ describe("OA pending payments page", () => {
     const detailButton = cssRule(styles, ".oa-pending-payments-detail-button");
     const sortButton = cssRule(styles, ".oa-pending-payments-sort-button");
     const paginationButton = cssRule(styles, ".oa-pending-payments-pagination-actions button");
+    const viewToggle = cssRule(styles, ".oa-pending-payments-view-toggle");
+    const confirmButton = cssRule(styles, ".oa-pending-payments-confirm-paid-button");
+    const writebackLine = cssRule(styles, ".oa-pending-payments-writeback-line");
+    const successAlert = cssRule(styles, ".oa-pending-payments-alert--success");
     const groupOa = cssRule(styles, ".oa-pending-payments-table-group-header--oa");
     const groupStatus = cssRule(styles, ".oa-pending-payments-table-group-header--status");
     const groupBank = cssRule(styles, ".oa-pending-payments-table-group-header--bank");
-    const groupInvoice = cssRule(styles, ".oa-pending-payments-table-group-header--invoice");
 
     expect(button).toContain("var(--motion-fast)");
     expect(button).toContain("var(--ease-out-quart)");
@@ -689,10 +733,13 @@ describe("OA pending payments page", () => {
     expect(detailButton).toContain("var(--motion-fast)");
     expect(sortButton).toContain("var(--motion-fast)");
     expect(paginationButton).toContain("var(--motion-fast)");
+    expect(viewToggle).toContain("display: inline-flex");
+    expect(confirmButton).toContain("var(--fp-success");
+    expect(writebackLine).toContain("flex-wrap: wrap");
+    expect(successAlert).toContain("var(--fp-success-soft)");
     expect(groupOa).toContain("color-mix(in srgb, var(--fp-surface-muted)");
     expect(groupStatus).toContain("color-mix(in srgb, var(--fp-warning-soft)");
     expect(groupBank).toContain("color-mix(in srgb, var(--fp-primary-soft)");
-    expect(groupInvoice).toContain("color-mix(in srgb, var(--fp-success-soft)");
   });
 
   test("keeps bank amount and direction chip in a non-overlapping layout slot", async () => {
@@ -703,16 +750,14 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("张三");
     const row = within(page).getByRole("row", { name: /张三/ });
-    const bankDetailButton = within(row).getByRole("button", { name: "查看流水 张三 详情" });
-    const bankAmountLayout = bankDetailButton.closest(".oa-pending-payments-bank-amount-cell");
-    const amountLine = bankDetailButton.closest(".oa-pending-payments-bank-amount-line");
+    const bankCell = row.querySelector(".oa-pending-payments-table-cell--bank") as HTMLElement;
+    const amountLine = bankCell.querySelector(".oa-pending-payments-bank-amount-line");
 
-    expect(bankAmountLayout).not.toBeNull();
+    expect(bankCell).not.toBeNull();
     expect(amountLine).not.toBeNull();
-    expect(bankAmountLayout).toContainElement(amountLine);
     expect(amountLine).toContainElement(within(row).getAllByText("10000.00")[1]);
     expect(within(amountLine as HTMLElement).getByText("支出").closest(".finance-direction-tag")).not.toBeNull();
-    expect(bankAmountLayout).toContainElement(within(row).getByText("建设银行 1234"));
+    expect(amountLine).toContainElement(within(row).getByText("建设银行 1234"));
 
     const styles = readWebSource("src/app/styles.css");
     const amountLineStyles = cssRule(styles, ".oa-pending-payments-bank-amount-line");
@@ -723,7 +768,7 @@ describe("OA pending payments page", () => {
 
     expect(amountLineStyles).toContain("display: flex");
     expect(amountLineStyles).toContain("flex-wrap: wrap");
-    expect(amountLineStyles).toContain("justify-content: flex-end");
+    expect(amountLineStyles).toContain("justify-content: flex-start");
     expect(nonShrinkingChildren).toContain("flex: 0 0 auto");
   });
 
@@ -737,16 +782,14 @@ describe("OA pending payments page", () => {
 
     const paidRow = within(page).getByRole("row", { name: /张三/ });
     const paidCells = paidRow.querySelectorAll(".oa-pending-payments-table-cell");
-    const projectCell = paidCells[1] as HTMLElement;
+    const projectCell = paidCells[0] as HTMLElement;
     expect(within(projectCell).getByText("红河卷烟厂能源管理系统运维服务")).toBeInTheDocument();
     expect(within(projectCell).getByText("2026-01-03")).toHaveClass("oa-pending-payments-table-tag");
 
     const missingBankRow = within(page).getByRole("row", { name: /杨丽萍/ });
     const missingBankCells = missingBankRow.querySelectorAll(".oa-pending-payments-table-cell");
-    expect(within(missingBankCells[1] as HTMLElement).getByText("2026-05-23")).toHaveClass("oa-pending-payments-table-tag");
-    expect(missingBankCells[4]?.textContent?.trim()).toBe("-");
-    expect(missingBankCells[5]?.textContent?.trim()).toBe("-");
-    expect(missingBankCells[6]?.textContent?.trim()).toBe("-");
+    expect(within(missingBankCells[0] as HTMLElement).getByText("2026-05-23")).toHaveClass("oa-pending-payments-table-tag");
+    expect(missingBankCells[2]?.textContent?.trim()).toBe("-");
     expect(within(missingBankRow).queryByText("交易时间为空")).not.toBeInTheDocument();
     expect(within(missingBankRow).queryByText("0.00")).not.toBeInTheDocument();
     expect(missingBankRow.querySelector(".finance-direction-tag")).toBeNull();
@@ -771,17 +814,21 @@ describe("OA pending payments page", () => {
     const initialRowsRequest = rowsRequests(fetchMock)[0];
     expect(initialRowsRequest.searchParams.get("page")).toBe("1");
     expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
+    expect(initialRowsRequest.searchParams.get("view_mode")).toBe("completed");
     expect(within(page).getByRole("heading", { name: "OA 待付款核对" })).toBeInTheDocument();
     expect(await within(page).findByRole("table", { name: "OA待付款核对表格" })).toBeInTheDocument();
 
     const groupHeader = within(page).getAllByRole("row")[0];
-    for (const label of ["OA情况", "支付状态", "支出流水", "发票情况"]) {
+    for (const label of ["OA", "支付状态", "流水"]) {
       expect(within(groupHeader).getByRole("columnheader", { name: label })).toBeInTheDocument();
     }
+    expect(within(groupHeader).queryByRole("columnheader", { name: "发票情况" })).not.toBeInTheDocument();
     expect(within(groupHeader).queryByRole("columnheader", { name: "凭证信息" })).not.toBeInTheDocument();
-    for (const label of ["OA申请人", "项目名称", "金额", "支付状态", "对方户名/交易时间", "金额/账户", "摘要/备注", "发票号码/发票方", "价税合计"]) {
+    for (const label of ["OA", "支付状态", "流水"]) {
       expect(within(page).getAllByText(label).length).toBeGreaterThan(0);
     }
+    expect(within(page).queryByText("发票号码/发票方")).not.toBeInTheDocument();
+    expect(within(page).queryByText("价税合计")).not.toBeInTheDocument();
     expect(within(page).queryByRole("columnheader", { name: "日期" })).not.toBeInTheDocument();
     expect(within(page).queryByText("交易开始")).not.toBeInTheDocument();
     expect(within(page).queryByText("交易结束")).not.toBeInTheDocument();
@@ -793,33 +840,30 @@ describe("OA pending payments page", () => {
     expect(Array.from((within(page).getByLabelText("每页") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["20", "50", "100"]);
     expect(await within(page).findByText("张三")).toBeInTheDocument();
     expect(within(page).getByText("报销")).toBeInTheDocument();
+    expect(within(page).getAllByText("已完成").length).toBeGreaterThan(0);
     expect(within(page).getAllByText("支付少了").some((element) => element.closest(".oa-pending-payment-status-cell"))).toBe(true);
-    expect(within(page).getByText("26532000000123456789")).toBeInTheDocument();
-    expect(within(page).getAllByText("进").some((element) => element.classList.contains("oa-pending-payments-invoice-type-chip"))).toBe(true);
-    expect(within(page).getByText("2026-01-08")).toBeInTheDocument();
+    expect(within(page).queryByText("26532000000123456789")).not.toBeInTheDocument();
+    expect(within(page).queryByText("2026-01-08")).not.toBeInTheDocument();
     expect(within(page).queryByText("进项发票方名称")).not.toBeInTheDocument();
     expect(within(page).getByText("建设银行 1234")).toBeInTheDocument();
     const groupedRow = within(page).getByRole("row", { name: /刘际涛/ });
     const groupedCells = groupedRow.querySelectorAll(".oa-pending-payments-table-cell");
+    expect(groupedCells[0]).toHaveTextContent("4450.00");
+    expect(groupedCells[0]).toHaveTextContent("+2");
+    expect(groupedCells[1]).toHaveTextContent("已写回");
     expect(groupedCells[2]).toHaveTextContent("4450.00");
-    expect(groupedCells[2]).toHaveTextContent("+2");
-    expect(groupedCells[5]).toHaveTextContent("4450.00");
-    expect(groupedCells[5]).toHaveTextContent("+1");
-    expect(groupedCells[8]).toHaveTextContent("4450.00");
-    expect(groupedCells[8]).toHaveTextContent("+1");
-    expect(groupedCells[5]).not.toHaveTextContent("3000.00");
+    expect(groupedCells[2]).toHaveTextContent("+1");
+    expect(groupedCells[2]).not.toHaveTextContent("3000.00");
     expect(within(page).getByText(/补充住宿费/)).toBeInTheDocument();
     expect(within(page).getByText(/补充流水备注/)).toBeInTheDocument();
     const noInvoiceRow = within(page).getByRole("row", { name: /王五/ });
-    const noInvoiceCell = noInvoiceRow.querySelector(".oa-pending-payments-empty-invoice-cell");
-    expect(noInvoiceCell).not.toBeNull();
-    expect(noInvoiceCell).toHaveTextContent("-");
-    expect(within(noInvoiceRow).queryByText("进")).not.toBeInTheDocument();
+    expect(noInvoiceRow.querySelector(".oa-pending-payments-empty-invoice-cell")).toBeNull();
     expect(within(noInvoiceRow).queryByText("开票日期为空")).not.toBeInTheDocument();
     expect(within(noInvoiceRow).queryByRole("button", { name: /查看发票/ })).not.toBeInTheDocument();
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     expect(within(candidateRow).getByText("候选")).toBeInTheDocument();
-    expect(within(candidateRow).getByText("未支付")).toBeInTheDocument();
+    expect(within(candidateRow).getByText("待支付")).toBeInTheDocument();
+    expect(within(candidateRow).getByRole("button", { name: "确认已支付" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 
     const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
@@ -829,7 +873,7 @@ describe("OA pending payments page", () => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("keyword")).toBe("张三");
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 OA申请人" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 OA" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "OA申请人：张三 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -859,7 +903,7 @@ describe("OA pending payments page", () => {
       expect(filters).toContainEqual({ field: "payment_status", operator: "in", values: ["partially_paid"] });
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 项目名称" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 OA" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "项目名称：红河卷烟厂能源管理系统运维服务 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -867,7 +911,7 @@ describe("OA pending payments page", () => {
       expect(filters).toContainEqual({ field: "oa_project_name", operator: "in", values: ["红河卷烟厂能源管理系统运维服务"] });
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 对方户名/交易时间" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 流水" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "对方户名：中招国际招标有限公司云南分公司 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -879,7 +923,7 @@ describe("OA pending payments page", () => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("sort_field")).toBe("bank_trade_time");
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 金额/账户" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 流水" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "银行账户：建设银行 1234 1" }));
     await user.click(screen.getByRole("menuitemcheckbox", { name: "收支：支出 2" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
@@ -889,20 +933,42 @@ describe("OA pending payments page", () => {
       expect(filters).toContainEqual({ field: "bank_direction", operator: "in", values: ["outflow"] });
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 发票号码/发票方" }));
-    await user.click(await screen.findByRole("menuitemcheckbox", { name: "发票方：云南恒昆机电设备有限公司 1" }));
-    await user.click(screen.getByRole("button", { name: "应用筛选" }));
+    expect(within(page).queryByRole("button", { name: "筛选 发票号码/发票方" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: "开票日期 排序" })).not.toBeInTheDocument();
+  });
+
+  test("switches to in-progress OA view and confirms candidate bank payment", async () => {
+    const fetchMock = installOaPendingPaymentsFetch();
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("候选付款人");
+
+    await user.click(within(page).getByRole("button", { name: "进行中 OA" }));
     await waitFor(() => {
-      const filters = JSON.parse(decodeURIComponent(rowsRequests(fetchMock).at(-1)?.searchParams.get("filters") ?? "[]"));
-      expect(filters).toContainEqual({ field: "seller_name", operator: "in", values: ["云南恒昆机电设备有限公司"] });
+      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
-    await user.click(within(page).getByRole("button", { name: "开票日期 排序" }));
+
+    const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
+    expect(within(candidateRow).getByText("进行中")).toBeInTheDocument();
+    await user.click(within(candidateRow).getByRole("button", { name: "确认已支付" }));
+
+    await waitFor(() => expect(confirmPaidRequests(fetchMock)).toHaveLength(1));
+    const [, init] = confirmPaidRequests(fetchMock)[0];
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      oa_row_id: "oa-candidate",
+      bank_transaction_id: "bank-candidate-004",
+    });
+    expect(await within(page).findByText("已确认支付并写回 OA。")).toBeInTheDocument();
     await waitFor(() => {
-      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("sort_field")).toBe("invoice_date");
+      expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
   });
 
-  test("opens OA, bank, invoice, relation drawers and reuses pending invoice rules endpoint", async () => {
+  test("opens OA, bank, relation drawers and reuses pending invoice rules endpoint", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
 
@@ -917,20 +983,12 @@ describe("OA pending payments page", () => {
     expect(await screen.findByRole("heading", { name: "支出流水详情" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
-    await user.click(within(page).getByRole("button", { name: "查看发票 张三 详情" }));
-    expect(await screen.findByRole("heading", { name: "发票详情" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
     await user.click(within(page).getByRole("button", { name: "查看刘际涛关联OA 3 条" }));
     expect(await screen.findByRole("heading", { name: "OA关联明细" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "查看刘际涛关联流水 2 条" }));
     expect(await screen.findByRole("heading", { name: "支出流水关联明细" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
-
-    await user.click(within(page).getByRole("button", { name: "查看刘际涛关联发票 2 张" }));
-    expect(await screen.findByRole("heading", { name: "发票关联明细" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
@@ -947,8 +1005,8 @@ describe("OA pending payments page", () => {
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/invoices/inv-001/detail";
-    })).toBe(true);
+      return url.pathname.startsWith("/api/oa-pending-payments/invoices/");
+    })).toBe(false);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "oa";
@@ -960,7 +1018,7 @@ describe("OA pending payments page", () => {
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "invoice";
-    })).toBe(true);
+    })).toBe(false);
   });
 
   test("keeps pending invoice rules drawer stable during parent query refresh", async () => {

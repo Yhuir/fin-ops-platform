@@ -417,8 +417,12 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(payment.applicant, "刘际涛")
         self.assertEqual(payment.project_name, "云南溯源科技")
         self.assertEqual(payment.apply_type, "支付申请")
+        self.assertEqual(payment.workflow_status, "completed")
         self.assertEqual(payment.counterparty_name, "中国电信股份有限公司昆明分公司")
         self.assertEqual(payment.reason, "托收电话费及宽带")
+        self.assertEqual(payment.detail_fields["流程实例ID"], "proc-2047")
+        self.assertEqual(payment.detail_fields["流程请求ID"], "2047")
+        self.assertEqual(payment.detail_fields["Mongo文档ID"], "payment-doc-1")
         self.assertEqual(payment.detail_fields["收款账号"], "2502013009022108588")
 
         reimbursement = next(record for record in records if record.id == "oa-exp-exp-001")
@@ -426,6 +430,10 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.project_name_display, "多个项目")
         self.assertEqual(reimbursement.project_names, ["云南溯源科技", "玉烟维护项目"])
         self.assertEqual(reimbursement.apply_type, "日常报销")
+        self.assertEqual(reimbursement.workflow_status, "completed")
+        self.assertEqual(reimbursement.detail_fields["流程实例ID"], "exp-001")
+        self.assertEqual(reimbursement.detail_fields["流程请求ID"], "")
+        self.assertEqual(reimbursement.detail_fields["Mongo文档ID"], "expense-doc-1")
         self.assertEqual(reimbursement.amount, "139")
         self.assertEqual(reimbursement.amount_source, "detail_sum")
         self.assertEqual(reimbursement.reason, "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
@@ -610,7 +618,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([record.id for record in records], ["oa-pay-2047", "oa-pay-2048"])
         self.assertEqual(adapter.get_read_status().code, "ready")
 
-    def test_list_application_records_applies_oa_import_form_type_and_status_filters(self) -> None:
+    def test_list_application_records_applies_form_type_filter_and_keeps_in_progress_projection(self) -> None:
         adapter = CountingStubMongoOAAdapter(
             form_documents={
                 "2": [
@@ -680,7 +688,11 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         records = adapter.list_application_records("2026-03")
 
-        self.assertEqual([record.id for record in records], ["oa-pay-2047"])
+        self.assertEqual([record.id for record in records], ["oa-pay-2047", "oa-pay-2048"])
+        self.assertEqual(
+            {record.id: record.workflow_status for record in records},
+            {"oa-pay-2047": "completed", "oa-pay-2048": "in_progress"},
+        )
         self.assertEqual(records[0].apply_type, "支付申请")
         self.assertEqual(adapter.form_load_calls, [("2", "2026-03")])
 
@@ -2404,7 +2416,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(counterparties[0]["name"], "中国电信股份有限公司昆明分公司")
         self.assertEqual(documents[0]["project_name"], "云南溯源科技")
 
-    def test_only_completed_oa_rows_are_returned(self) -> None:
+    def test_completed_and_in_progress_oa_rows_are_projected(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
                 "2": [
@@ -2447,12 +2459,15 @@ class MongoOAAdapterTests(unittest.TestCase):
         )
 
         records = adapter.list_application_records("2026-03")
+        progress_records = adapter.list_application_records("2026-04")
         documents = adapter.fetch_documents("payment_requests")
         months = adapter.list_available_months()
 
         self.assertEqual([record.id for record in records], ["oa-pay-2047"])
+        self.assertEqual([record.id for record in progress_records], ["oa-pay-2048"])
+        self.assertEqual(progress_records[0].workflow_status, "in_progress")
         self.assertEqual([document["external_id"] for document in documents], ["2047"])
-        self.assertEqual(months, ["2026-03"])
+        self.assertEqual(months, ["2026-03", "2026-04"])
 
     def test_import_settings_filter_form_types_and_statuses(self) -> None:
         adapter = StubMongoOAAdapter(
@@ -2529,7 +2544,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([document["external_id"] for document in expense_documents], ["3001", "3002"])
         self.assertEqual(months, ["2026-03"])
 
-    def test_list_application_records_by_row_ids_skips_non_completed_rows(self) -> None:
+    def test_list_application_records_by_row_ids_keeps_completed_and_in_progress_rows(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
                 "2": [
@@ -2573,7 +2588,11 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         records = adapter.list_application_records_by_row_ids(["oa-pay-2047", "oa-pay-2048"])
 
-        self.assertEqual([record.id for record in records], ["oa-pay-2047"])
+        self.assertEqual([record.id for record in records], ["oa-pay-2047", "oa-pay-2048"])
+        self.assertEqual(
+            {record.id: record.workflow_status for record in records},
+            {"oa-pay-2047": "completed", "oa-pay-2048": "in_progress"},
+        )
 
     def test_form_status_normalizes_real_mongo_completed_and_in_progress_values(self) -> None:
         self.assertEqual(MongoOAAdapter._form_status({"status": "APPROVED", "processStatus": "已完成"}), "已完成")
@@ -2585,6 +2604,66 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(MongoOAAdapter.canonical_process_status({"processStatus": "1"}), "in_progress")
         self.assertEqual(MongoOAAdapter.canonical_process_status({"processStatus": "进行中"}), "in_progress")
         self.assertEqual(MongoOAAdapter.canonical_process_status({"processStatus": 1}), "in_progress")
+
+    def test_list_application_records_projects_in_progress_workflow_status(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-in-progress",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "fromTitle": "支付申请",
+                            "amount": "199",
+                            "beneficiary": "昆明供应商",
+                            "cause": "材料预付款",
+                            "projectName": "6486ca70cd6cae5d4e2b0b48",
+                            "flowRequestId": "2047",
+                            "processStatus": "1",
+                        },
+                    }
+                ],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "胡瑢",
+                            "titleName": "日常报销",
+                            "processId": "exp-progress-001",
+                            "processStatus": "进行中",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailProjectName": "6486ca70cd6cae5d4e2b0b48",
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[
+                {"_id": "6486ca70cd6cae5d4e2b0b48", "data": {"name": "云南溯源科技", "code": "YNSY"}},
+            ],
+        )
+        adapter.set_import_filter_provider(
+            lambda: {"form_types": ["payment_request", "expense_claim"], "statuses": ["completed"]}
+        )
+
+        records = adapter.list_application_records("2026-03")
+
+        self.assertEqual(
+            {record.id: record.workflow_status for record in records},
+            {
+                "oa-pay-2047": "in_progress",
+                "oa-exp-exp-progress-001": "in_progress",
+            },
+        )
 
     def test_list_application_records_uses_month_cache(self) -> None:
         adapter = CountingStubMongoOAAdapter(
