@@ -605,6 +605,57 @@ describe("Bank details page", () => {
     }
   });
 
+  test("does not report saved automatic tag rules as failed when post-save freshness sync is blocked", async () => {
+    const user = userEvent.setup();
+    const baseFetchMock = installMockApiFetch();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      if (url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { targets?: Array<Record<string, unknown>> };
+        const requestedTarget = body.targets?.[0] ?? { read_model_key: "bank_detail", scope_key: "2026-05" };
+        const blockedTarget = {
+          read_model_key: String(requestedTarget.read_model_key ?? "bank_detail"),
+          scope_type: "snapshot",
+          scope_key: String(requestedTarget.scope_key ?? "2026-05"),
+          status: "blocked",
+          fresh: false,
+          blocking: true,
+          raw_status: "failed",
+          reason: "read_model_dirty_scope_failed",
+          last_error: "bank_detail_refresh_pending",
+        };
+        return new Response(JSON.stringify({
+          status: "blocked",
+          fresh: false,
+          targets: [blockedTarget],
+          blocked_targets: [blockedTarget],
+          refreshing_targets: [],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return baseFetchMock(input, init);
+    }) as ReturnType<typeof installMockApiFetch>;
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    await user.click(within(page).getByRole("button", { name: /自动标签规则/ }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "同步阻断测试");
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      const saveCall = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/bank-details/auto-tag-rules" && init?.method === "PUT";
+      });
+      expect(saveCall).toBeDefined();
+    });
+    expect(await screen.findByText("规则已保存，后台同步尚未完成，请稍后刷新。")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
+  });
+
   test("reapplying automatic tag rules refreshes bank details without saving changes", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({

@@ -152,6 +152,17 @@
 - 验证命令：见本轮最终执行记录。
 - 未测风险：未对真实生产历史 `app.oa_attachment_invoice_cache` 做全量 backfill/dry-run；发布前应对存量 OA 附件正式发票做只读抽样，确认 canonical `app.invoices.source_links` 已补齐。
 
+## 2026-06-18 - Workbench all 聚合等待 parent shard 收敛
+
+- 目标：修复关联台确认关联已写入成功后，前端刷新弹出 `workbench_all_scope_parent_inconsistent: generation_metadata_actual_mismatch ... active_relation_open_membership count=4` 的问题。
+- 影响范围：`WorkbenchReadModelRefreshService` 的 `workbench:all` aggregate-only refresh、runtime worker dependency-not-fresh defer、确认关联后 Workbench month/all 后台追赶链路。
+- 根因：确认 OA 与两组已闭环外部往来银行流水时，canonical relation 已从旧 `turnover_manual_closure` case 升级为新的确认关系；同一事务也入队受影响月份 Workbench shard 与 `all` aggregate。旧 handler 对携带 `parent_scope_keys` 的 all aggregate 直接从当前 active month generation 聚合，没有先确认 parent month dirty scope 是否仍 pending/processing，于是用“旧月度 generation + 新 canonical relation”做 consistency 校验并把暂态不一致发布成 failed all generation。
+- 关键决策：all aggregate 如果声明了 `parent_scope_keys`，必须先通过 durable dirty scope 判断这些 parent `workbench` scope 是否仍 active；仍在 pending/processing 时抛 `workbench_read_model_not_fresh`，交给 runtime worker 的短延迟 defer 机制重试。真正没有 active parent refresh 的 generation inconsistency 仍保持 failed，不吞掉坏投影。
+- 附带修复：撤回 active relation 但没有历史 relation 快照时，提交路径先使用命令结果、预览和 active relation 的 affected row ids 推导 refresh scope；只有仍推不出时才解析 rows，避免写入已完成后因 scope 反推失败把请求误报为 400/500。
+- 测试覆盖：新增 `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing`；补齐 Workbench v2 API mismatch 请求备注合同，并覆盖 `test_withdraw_link_without_history_falls_back_to_cancelling_active_relation`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api -q`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_repository tests.test_runtime_worker tests.test_turnover_workbench_integration tests.test_workbench_turnover_grouping tests.test_workbench_auth_context_idempotency -q`；`npm --prefix web test -- --run src/test/WorkbenchSelection.test.tsx src/test/OperationBarrierApi.test.ts src/test/GlobalOperationOverlayContext.test.tsx`。
+- 未测风险：未连接真实生产 PostgreSQL 回放用户截图中的具体 case；发布后如仍存在旧 failed `workbench:all` outbox/generation，需要按 runtime worker runbook requeue/归档已覆盖历史 failure，并重跑 Workbench display audit。
+
 ## 2026-06-12 - 关联台撤回 preview 分组与后台刷新交互收敛
 
 - 目标：修复撤回 preview “操作后”三栏仍按旧 `case_id` 合并的问题；提交成功后先做本地 optimistic update，后台刷新期间只锁定刚操作 row/group，避免全页面不可操作。

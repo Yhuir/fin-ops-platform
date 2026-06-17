@@ -60,6 +60,8 @@ const BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS = 20;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
+const AUTO_TAG_RULE_SAVE_SYNC_WARNING = "规则已保存，后台同步尚未完成，请稍后刷新。";
+const AUTO_TAG_RULE_REAPPLY_SYNC_WARNING = "已提交重新应用，后台同步尚未完成，请稍后刷新。";
 const FEATURED_CATEGORY_CODES: BankTransactionCategoryCode[] = [
   "fee",
   "salary",
@@ -2255,6 +2257,14 @@ export default function BankDetailsPage() {
     setRulesFeedback(feedback.fresh);
   }, [publishAutoTagRulesSaved]);
 
+  const handleAutoTagRulesSavedWithPendingSync = useCallback((payload: BankAutoTagRulesResponse, message: string) => {
+    publishAutoTagRulesSaved(payload);
+    rulesRefreshPendingRef.current = false;
+    setRulesRefreshStatus("refreshing");
+    setRulesFeedback(message);
+    setRefreshToken((current) => current + 1);
+  }, [publishAutoTagRulesSaved]);
+
   const waitForCurrentBankDetailRulesRefresh = useCallback(async (setMessage: (message: string) => void) => {
     const scopeKeys = bankDetailOperationScopeKeys(rows, dateFilter);
     setMessage("正在等待银行明细读模型同步...");
@@ -2268,7 +2278,12 @@ export default function BankDetailsPage() {
       loadingMessage: "正在保存自动标签规则...",
       action: async ({ setMessage }) => {
         const payload = await saveBankAutoTagRules(request);
-        await waitForCurrentBankDetailRulesRefresh(setMessage);
+        try {
+          await waitForCurrentBankDetailRulesRefresh(setMessage);
+        } catch {
+          handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_SAVE_SYNC_WARNING);
+          return payload;
+        }
         handleAutoTagRulesSavedAfterRefresh(payload);
         return payload;
       },
@@ -2278,14 +2293,19 @@ export default function BankDetailsPage() {
       return result.value;
     }
     throw result.error;
-  }, [handleAutoTagRulesSavedAfterRefresh, runOperation, waitForCurrentBankDetailRulesRefresh]);
+  }, [handleAutoTagRulesSavedAfterRefresh, handleAutoTagRulesSavedWithPendingSync, runOperation, waitForCurrentBankDetailRulesRefresh]);
 
   const reapplyAutoTagRulesWithRefresh = useCallback(async () => {
     const result = await runOperation({
       loadingMessage: "正在重新应用自动标签规则...",
       action: async ({ setMessage }) => {
         const payload = await reapplyBankAutoTagRules();
-        await waitForCurrentBankDetailRulesRefresh(setMessage);
+        try {
+          await waitForCurrentBankDetailRulesRefresh(setMessage);
+        } catch {
+          handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_REAPPLY_SYNC_WARNING);
+          return payload;
+        }
         handleAutoTagRulesSavedAfterRefresh(payload);
         return payload;
       },
@@ -2295,7 +2315,7 @@ export default function BankDetailsPage() {
       return result.value;
     }
     throw result.error;
-  }, [handleAutoTagRulesSavedAfterRefresh, runOperation, waitForCurrentBankDetailRulesRefresh]);
+  }, [handleAutoTagRulesSavedAfterRefresh, handleAutoTagRulesSavedWithPendingSync, runOperation, waitForCurrentBankDetailRulesRefresh]);
 
   const handleMonthChange = (value: string) => {
     if (!value) {
@@ -2330,7 +2350,11 @@ export default function BankDetailsPage() {
           </div>
         ) : null}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
-        {rulesFeedback ? <StatePanel tone="success" compact>{rulesFeedback}</StatePanel> : null}
+        {rulesFeedback ? (
+          <StatePanel tone={rulesRefreshStatus === "refreshing" ? "warning" : "success"} compact>
+            {rulesFeedback}
+          </StatePanel>
+        ) : null}
         {!loading && !readModelNeedsRefresh && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}

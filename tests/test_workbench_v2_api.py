@@ -4283,6 +4283,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                     "case_id": "CASE-API-202603-001",
+                    "note": "unified result regression covers documented mismatch path",
                 }
             ),
         )
@@ -4521,6 +4522,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                     "case_id": "CASE-PAIR-ONLY-001",
+                    "note": "pair relation regression covers documented mismatch path",
                 }
             ),
         )
@@ -4615,6 +4617,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                     "case_id": "CASE-PAIR-PERSIST-FAIL",
+                    "note": "persistence failure regression covers documented mismatch path",
                 }
             ),
         )
@@ -4770,6 +4773,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                         "month": "2026-03",
                         "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                         "case_id": "CASE-HOT-READMODEL-001",
+                        "note": "read model invalidation regression covers documented mismatch path",
                     }
                 ),
             )
@@ -4981,6 +4985,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                     "case_id": "CASE-FAST-CONFIRM-001",
+                    "note": "fast confirm regression covers documented mismatch path",
                 }
             )
 
@@ -5468,6 +5473,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                     "case_id": "CASE-ASYNC-PERSIST-001",
+                    "note": "async persist regression allows documented mismatch path",
                 }
             )
 
@@ -5662,6 +5668,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                         "month": "2026-03",
                         "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                         "case_id": "CASE-TIMING-CONFIRM-001",
+                        "note": "timing regression covers documented mismatch path",
                     }
                 ),
             )
@@ -5726,6 +5733,7 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": [oa_row["id"], bank_row["id"], invoice_row["id"]],
                     "case_id": "CASE-SINGLE-REBUILD-001",
+                    "note": "cache rebuild regression covers documented mismatch path",
                 }
             )
 

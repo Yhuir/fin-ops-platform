@@ -5246,6 +5246,68 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 1147)])
         self.assertEqual(result["active_generation_id"], "gen-all-clean")
 
+    def test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing(self) -> None:
+        class FakeBuilder:
+            def refresh_workbench_all_scope_from_active_shards(
+                self,
+                scope_key: str,
+                *,
+                source_version: object = None,
+            ) -> dict[str, object]:
+                raise AssertionError(f"parent scope should refresh before aggregate {scope_key}:{source_version}")
+
+        class FakeQueue:
+            def __init__(self) -> None:
+                self.active_checks: list[tuple[str, str, str]] = []
+                self.completed: list[tuple[str, str, str, object]] = []
+
+            def read_model_refresh_is_active(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+            ) -> bool:
+                self.active_checks.append((tenant_id, scope_type, scope_key))
+                return scope_key == "2026-02"
+
+            def complete_read_model_refresh(
+                self,
+                *,
+                tenant_id: str,
+                scope_type: str,
+                scope_key: str,
+                source_version: object = None,
+            ) -> None:
+                self.completed.append((tenant_id, scope_type, scope_key, source_version))
+
+        queue = FakeQueue()
+        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-all-aggregate-parent-refreshing",
+            tenant_id="tenant-a",
+            event_type="workbench.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="workbench",
+            scope_key="all",
+            dedupe_key=None,
+            payload={
+                "scope_key": "all",
+                "aggregate_only": True,
+                "source_version": 1148,
+                "parent_scope_keys": ["2026-02"],
+            },
+            attempts=1,
+            status="processing",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "workbench_read_model_not_fresh"):
+            service.handle_runtime_event(event)
+
+        self.assertEqual(queue.active_checks, [("tenant-a", "workbench", "2026-02")])
+        self.assertEqual(queue.completed, [])
+
     def test_workbench_refresh_handler_enqueues_low_priority_all_aggregate_after_month_publish(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(

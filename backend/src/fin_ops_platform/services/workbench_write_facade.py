@@ -954,6 +954,45 @@ class WorkbenchWriteFacade:
             *self._scope_keys_for_row_ids(month=month, row_ids=row_ids, month_scope=month_scope or ""),
         ])
 
+    def _withdraw_changed_scope_keys(
+        self,
+        *,
+        month: str,
+        active_relation: dict[str, object],
+        preview: dict[str, object],
+        affected_row_ids: list[str],
+    ) -> list[str]:
+        changed_scope_keys = self._normalize_operation_scope_keys(
+            list(preview.get("affected_months") or preview.get("read_model_scope_keys") or [])
+        )
+        if changed_scope_keys:
+            return changed_scope_keys
+
+        month_scope = str(active_relation.get("month_scope") or "")
+        changed_scope_keys = self._operation_scope_keys_for_rows_and_row_ids(
+            month=month,
+            rows=[],
+            row_ids=affected_row_ids,
+            month_scope=month_scope,
+        )
+        if changed_scope_keys:
+            return changed_scope_keys
+
+        try:
+            rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
+                active_relation=active_relation,
+                after_relations=list(preview.get("after_relations") or []),
+                month=month,
+            )
+        except (TypeError, ValueError, IndexError):
+            return []
+        return self._operation_scope_keys_for_rows_and_row_ids(
+            month=month,
+            rows=rows,
+            row_ids=affected_row_ids,
+            month_scope=month_scope,
+        )
+
     @staticmethod
     def _operation_freshness_targets(scope_keys: list[str]) -> list[dict[str, str]]:
         return [
@@ -1535,21 +1574,15 @@ class WorkbenchWriteFacade:
             )
         changed_case_ids = list(result.get("changed_case_ids") or [case_id])
         affected_row_ids = list(result.get("affected_row_ids") or row_ids)
-        changed_scope_keys = self._normalize_operation_scope_keys(
-            list(result.get("affected_months") or result.get("read_model_scope_keys") or [])
+        changed_scope_keys = self._withdraw_changed_scope_keys(
+            month=month,
+            active_relation=active_relation,
+            preview={
+                **preview,
+                "affected_months": result.get("affected_months") or result.get("read_model_scope_keys") or [],
+            },
+            affected_row_ids=affected_row_ids,
         )
-        if not changed_scope_keys:
-            rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
-                active_relation=active_relation,
-                after_relations=list(preview.get("after_relations") or []),
-                month=month,
-            )
-            changed_scope_keys = self._operation_scope_keys_for_rows_and_row_ids(
-                month=month,
-                rows=rows,
-                row_ids=affected_row_ids,
-                month_scope=str(active_relation.get("month_scope") or ""),
-            )
         schedule_started_at = monotonic()
         try:
             self._schedule_pair_relation_persist(
@@ -1653,21 +1686,12 @@ class WorkbenchWriteFacade:
     ) -> WorkbenchWriteResult:
         action_name = "withdraw_link"
         affected_row_ids = list(preview.get("affected_row_ids") or active_relation.get("row_ids") or row_ids)
-        changed_scope_keys = self._normalize_operation_scope_keys(
-            list(preview.get("affected_months") or preview.get("read_model_scope_keys") or [])
+        changed_scope_keys = self._withdraw_changed_scope_keys(
+            month=month,
+            active_relation=active_relation,
+            preview=preview,
+            affected_row_ids=affected_row_ids,
         )
-        if not changed_scope_keys:
-            rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
-                active_relation=active_relation,
-                after_relations=list(preview.get("after_relations") or []),
-                month=month,
-            )
-            changed_scope_keys = self._operation_scope_keys_for_rows_and_row_ids(
-                month=month,
-                rows=rows,
-                row_ids=affected_row_ids,
-                month_scope=str(active_relation.get("month_scope") or ""),
-            )
         previous_pair_snapshot = self._pair_relation_service.snapshot()
         relation_refresh_metadata = self._relation_refresh_metadata(
             relation=active_relation,

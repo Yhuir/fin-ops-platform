@@ -41,7 +41,7 @@
 - `failed`：worker 或 rebuild 失败，readiness 记录 last error；App Status 可升级 busy/blocked。
 - `unavailable`：依赖、runtime snapshot 或 critical worker 不可用；App Status blocked，不得解释为 ready。
 
-依赖未 fresh 不是 fresh，也不是普通失败：当 downstream refresh handler 读取 source read model 时遇到 `*_read_model_not_fresh`，runtime worker 会短延迟 defer 该 outbox event，等待 source projection/readiness 真实收敛后再处理；readiness reporter 必须记录为 `refreshing` 并保留 last_error 诊断，不能写 `failed` blocker，也不得因为 defer 把页面标为已同步。
+依赖未 fresh 不是 fresh，也不是普通失败：当 downstream refresh handler 读取 source read model 时遇到 `*_read_model_not_fresh`，runtime worker 会短延迟 defer 该 outbox event，等待 source projection/readiness 真实收敛后再处理；readiness reporter 必须记录为 `refreshing` 并保留 last_error 诊断，不能写 `failed` blocker，也不得因为 defer 把页面标为已同步。Workbench `all` aggregate-only refresh 携带 `parent_scope_keys` 时同样适用：parent month shard 仍 pending/processing 时返回 `workbench_read_model_not_fresh`，等待 parent active generation 收敛后再聚合。
 
 ## refresh 触发来源
 
@@ -81,6 +81,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-18 | Workbench `all` aggregate-only refresh 在 parent month scope 仍 active 时走 dependency-not-fresh defer | 避免 relation 写入后的暂态“旧 month generation + 新 canonical relation”被误写为 failed all generation；真正 parent 不一致仍 fail closed | `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing tests.test_runtime_worker -v` |
 | 2026-06-17 | read model 查询 freshness contract fail-closed，并纳管 legacy direct fresh/direct mismatch 路径 | `ReadModelQueryGateway` 必须传 expected schema/source；actual schema/source metadata 缺失时不能 fresh；自管 read model service 禁止空 source version provider；所有直接写 fresh 或直接比较 source version 的 legacy 入口必须通过静态架构 guard 分类 | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_query_gateway tests.test_read_model_architecture_guards -v` |
 | 2026-06-14 | 依赖未 fresh 的 readiness 记录从 failed 收敛为 refreshing | 下游 read model 等待 Bankdetail/Workbench relation 等依赖时不污染 App Status blocker；仍保留 last_error 诊断和真实 retry/defer | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_readiness_reporter tests.test_runtime_worker tests.test_runtime_queue tests.test_read_model_refresh_gateway -v` |
 | 2026-06-13 | 依赖未 fresh 的 outbox event 短延迟 defer | downstream read model 不再因普通 60s retry 放大失败长尾；freshness 事实源不变 | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_defer_event_delays_dependency_retry_without_failure_or_dead_letter -v` |

@@ -33,6 +33,13 @@ class WorkbenchReadModelRefreshService:
         aggregate_only = scope_key == "all" and _truthy(event.payload.get("aggregate_only"))
         parent_scope_keys = event.payload.get("parent_scope_keys")
         aggregate_from_parent_shards = aggregate_only and isinstance(parent_scope_keys, list) and bool(parent_scope_keys)
+        if aggregate_from_parent_shards:
+            active_parent_scope_keys = self._active_parent_scope_keys(event.tenant_id, parent_scope_keys)
+            if active_parent_scope_keys:
+                raise RuntimeError(
+                    "workbench_read_model_not_fresh: "
+                    f"parent_scope_keys={','.join(active_parent_scope_keys)}"
+                )
         if not aggregate_from_parent_shards and not self._event_source_version_is_current(
             event,
             scope_key=scope_key,
@@ -176,11 +183,33 @@ class WorkbenchReadModelRefreshService:
             )
         )
 
+    def _active_parent_scope_keys(self, tenant_id: str, parent_scope_keys: list[Any]) -> list[str]:
+        is_active = getattr(self._queue_repository, "read_model_refresh_is_active", None)
+        if not callable(is_active):
+            return []
+        active_scope_keys: list[str] = []
+        for scope_key in _normalized_parent_scope_keys(parent_scope_keys):
+            if is_active(tenant_id=tenant_id, scope_type="workbench", scope_key=scope_key):
+                active_scope_keys.append(scope_key)
+        return active_scope_keys
+
 
 def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _normalized_parent_scope_keys(parent_scope_keys: list[Any]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in parent_scope_keys:
+        scope_key = str(item or "").strip()
+        if not scope_key or scope_key in seen:
+            continue
+        seen.add(scope_key)
+        normalized.append(scope_key)
+    return normalized
 
 
 def _all_scope_aggregate_published(payload: dict[str, Any]) -> bool:

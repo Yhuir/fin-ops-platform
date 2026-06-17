@@ -103,6 +103,16 @@
 - 未测风险：未连接真实生产 PostgreSQL 重新采集 enqueue-to-fresh p95；priority 不能保证跨 lane 的完整依赖顺序。
 - 后续事项：补 dependency-aware scheduler/deferral，并运行 `sync_slo_baseline` / `runtime_sync_closure_gate` 对比优化前后指标。
 
+## 2026-06-18 - Workbench all parent shard dependency defer
+
+- 目标：修复 Workbench `all` aggregate-only refresh 在 parent month shard 尚未完成刷新时，把暂态 active generation consistency mismatch 写成 failed all generation 的问题。
+- 影响范围：`WorkbenchReadModelRefreshService`、`RuntimeWorker` dependency-not-fresh defer、Workbench read model dirty/outbox 依赖顺序。
+- 根因：relation 写入会同时入队受影响月份 `workbench` shard 和 `workbench:all` aggregate；all aggregate 事件携带 `parent_scope_keys`，但 handler 没有检查这些 parent scope 是否仍 pending/processing。用户确认 OA + 两组已闭环外部往来时，新的 canonical relation 已提交，而旧 month generation 仍展示旧 turnover closure open rows，all 聚合的 parent consistency 因 `active_relation_open_membership` 报错。
+- 关键决策：`parent_scope_keys` 是依赖声明，不只是诊断字段。handler 在调用 aggregate builder 前先查 `RuntimeQueueRepository.read_model_refresh_is_active(...)`；仍 active 时抛 `workbench_read_model_not_fresh`，由 worker defer，不写 failed readiness/generation。parent 已不 active 但 consistency 仍失败时继续 fail closed。
+- 测试覆盖：新增 `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing`，并用 `tests.test_runtime_worker` 保护 `*_read_model_not_fresh` defer。
+- 验证命令：见关联台模块 2026-06-18 实施记录。
+- 未测风险：未在真实生产 PostgreSQL 上执行截图 case 回放；发布后若已有旧 failed all aggregate，需要按 runtime worker governance requeue 或归档已覆盖历史 failure。
+
 ## 2026-06-13 - authenticated HTTP SLO fresh gate 收紧
 
 - 目标：让全 app 页面“5 秒内已同步”的验收不再只看 HTTP 200/202 和耗时，而是检查真实 read model freshness。

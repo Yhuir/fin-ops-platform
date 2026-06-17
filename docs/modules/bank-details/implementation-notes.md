@@ -5,7 +5,7 @@
 
 ## 当前决策
 
-- 银行明细本轮不新增代码测试；现有测试已经覆盖 P0 的自动标签规则、候选确认、人工补分类、read model freshness、账户余额独立 read model、relation tag 投影、API contract 和前端交互。缺口主要是模块文档未矩阵化，以及真实基础设施/真实历史数据 smoke。
+- 银行明细测试覆盖 P0 的自动标签规则、候选确认、人工补分类、read model freshness、账户余额独立 read model、relation tag 投影、API contract 和前端交互；真实基础设施/真实历史数据 smoke 仍归入发布验证风险。
 - 账户余额 read model 与银行明细 rows read model 必须保持独立。标签规则保存、重应用、关键字/分类/日期筛选不能用 stale account payload 覆盖已有 fresh balance。
 - 银行明细前端 domain event 只负责刷新提示和 refetch；跨页面一致性的事实源仍是后端 dirty scope、outbox、worker 和 read model freshness。
 - 银行明细对 no-OA、turnover ledger、pending/search、cost/tax、workbench relation 的 fan-out 在本模块记录上游影响；具体下游页面的 UI/业务流回归由各模块轮次继续补齐。
@@ -26,6 +26,16 @@
 ```
 
 ## 历史记录
+
+## 2026-06-18 - 自动标签规则保存后置同步误报失败
+
+- 目标：修复银行明细自动标签规则点击保存后，规则已经成功保存，但后置 `bank_detail` read model 同步 blocked/timeout 时全局弹出“操作失败”的问题。
+- 影响范围：`BankDetailsPage` 保存/重新应用自动标签规则的前端 operation flow；不改变自动标签规则 PUT/POST API、后端写入事务、dirty/outbox 或 read model worker。
+- 关键决策：PUT/POST 返回成功之前的错误仍是保存失败；PUT/POST 成功之后的 `operation-barrier` 或交易重读失败，只能降级为“规则已保存，后台同步尚未完成，请稍后刷新。”，不得再通过 `GlobalOperationOverlayProvider` 渲染成“操作失败”。成功后仍发布标签版本事件并触发页面刷新尝试。
+- 文档影响：更新 bank-details 实施记录与测试矩阵；长期 API contract 不变。
+- 测试覆盖：新增 `web/src/test/BankDetailsPage.test.tsx::does not report saved automatic tag rules as failed when post-save freshness sync is blocked`，并跑完整 BankDetailsApi/BankDetailsPage 前端回归。
+- 验证命令：`cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx`。
+- 未测风险：Vitest 只模拟 operation barrier blocked；真实生产 worker drain、历史数据刷新耗时和网络抖动仍需发布后用浏览器保存一次规则做 smoke。
 
 ## 2026-06-17 - 待分类标签选择面板防裁剪
 
