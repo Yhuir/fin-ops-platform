@@ -2737,6 +2737,7 @@ class PostgresReadModelRepository:
         row_ids: list[str],
         *,
         tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
     ) -> dict[str, Any] | None:
         normalized_ids = _dedupe_preserve_order(text(row_id) for row_id in list(row_ids or []))
         if not normalized_ids:
@@ -2761,6 +2762,15 @@ class PostgresReadModelRepository:
             (tenant_id, normalized_ids, normalized_ids),
         )
         if not rows:
+            scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys_hint or []))
+            if scope_keys:
+                return self._workbench_relation_payload_from_rows(
+                    rows=[],
+                    groups=[],
+                    scope_keys=scope_keys,
+                    tenant_id=tenant_id,
+                    fallback_source_versions={},
+                )
             return None
         returned_ids = {text(row.get("row_id")) for row in rows if text(row.get("row_id"))}
         if len(returned_ids) < len(normalized_ids):
@@ -2852,6 +2862,7 @@ class PostgresReadModelRepository:
         group_ids: list[str],
         *,
         tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
     ) -> dict[str, Any] | None:
         normalized_ids = _dedupe_preserve_order(text(group_id) for group_id in list(group_ids or []))
         if not normalized_ids:
@@ -2876,6 +2887,15 @@ class PostgresReadModelRepository:
             (tenant_id, normalized_ids, normalized_ids),
         )
         if not groups:
+            scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys_hint or []))
+            if scope_keys:
+                return self._workbench_relation_payload_from_rows(
+                    rows=[],
+                    groups=[],
+                    scope_keys=scope_keys,
+                    tenant_id=tenant_id,
+                    fallback_source_versions={},
+                )
             return None
         scope_keys = _dedupe_preserve_order(text(group.get("scope_key")) for group in groups)
         return self._workbench_relation_payload_from_rows(

@@ -122,6 +122,23 @@
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_relation_read_facade tests.test_workbench_relation_sql_projection -q`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_api tests.test_invoice_usage_collection_sql_runtime -q`
 
+## 2026-06-17 - fresh scope 空 row 查询不伪装 missing
+
+目标：修复生产 worker drain 中发现的循环 defer：下游 read model 按 row id 读取 `workbench_relation`，当请求 row 在 fresh scope 中没有任何 relation row 时，repository 返回 `None`，facade 将其误判为 `missing` 并不断补投 `workbench_relation` refresh。
+
+结论：
+
+- `scope` 本身仍是 freshness 事实源；只有 hinted scope fresh 时，空 row/group 查询才返回 fresh empty context。
+- `WorkbenchRelationReadFacade.get_by_row_ids(...)` 与 `relation_groups_by_ids(...)` 必须把 `scope_keys_hint` 传给 repository；repository 在 rows/groups 全空时用 scope readiness 生成 payload，而不是直接返回 `None`。
+- fresh empty context 表示“这个 row/group 在当前 fresh distribution 中没有关系上下文”，调用方按 unlinked/无关系处理；它不能作为 confirmed relation fact，也不能绕过 stale/missing scope。
+- 如果没有 scope hint，或 hinted scope 本身 missing/stale/refreshing，仍按 non-fresh 返回并入队刷新。
+
+验证：
+
+- `PYTHONPATH=backend/src pytest -q tests/test_workbench_relation_read_facade.py`
+- 生产 `read_model_slo_smoke --apply --target-ms 10000` 覆盖 15 个 App Status read model scope，全部重新处理到 `done/fresh`。
+- 生产 facade probe：fresh `2026-03` scope 下不存在的 row id 返回 `status=fresh`、`rows=[]`、`refresh_enqueued=false`。
+
 ## 2026-06-12 Phase 7O Downstream candidate closure
 
 目标：把 `WorkbenchRelationReadFacade` 分发的 `relation_status='candidate'` 显式传递到各下游页面，同时保持所有业务金额、状态、占用和冲突判断只使用 `linked`。

@@ -60,7 +60,7 @@ class WorkbenchRelationReadFacade:
                 reason=reason,
                 stale_reasons=["repository_method_unavailable"],
             )
-        payload = reader(normalized_ids, tenant_id=self._tenant_id)
+        payload = reader(normalized_ids, tenant_id=self._tenant_id, scope_keys_hint=fallback_scope_keys)
         result = self._result_from_repository_payload(
             payload,
             require_fresh=require_fresh,
@@ -159,7 +159,7 @@ class WorkbenchRelationReadFacade:
                 reason=reason,
                 stale_reasons=["repository_method_unavailable"],
             )
-        payload = reader(normalized_ids, tenant_id=self._tenant_id)
+        payload = reader(normalized_ids, tenant_id=self._tenant_id, scope_keys_hint=fallback_scope_keys)
         result = self._result_from_repository_payload(
             payload,
             require_fresh=require_fresh,

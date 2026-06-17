@@ -29,8 +29,11 @@ class FakeRelationRepository:
         row_ids: list[str],
         *,
         tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
     ) -> dict[str, object] | None:
-        self.row_id_calls.append({"row_ids": list(row_ids), "tenant_id": tenant_id})
+        self.row_id_calls.append(
+            {"row_ids": list(row_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])}
+        )
         return self.payload
 
     def list_workbench_relation_rows(
@@ -56,8 +59,11 @@ class FakeRelationRepository:
         group_ids: list[str],
         *,
         tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
     ) -> dict[str, object] | None:
-        self.group_calls.append({"group_ids": list(group_ids), "tenant_id": tenant_id})
+        self.group_calls.append(
+            {"group_ids": list(group_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])}
+        )
         return self.payload
 
 
@@ -65,6 +71,9 @@ class PartialFreshRelationConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
         normalized = " ".join(sql.lower().split())
         if "from read_model.workbench_relation_rows" in normalized:
+            requested_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            if "txn-present" not in requested_ids:
+                return []
             return [
                 {
                     "row_id": "txn-present",
@@ -146,6 +155,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["linked_input_invoices"][1]["invoice_no"], "INV-002")
         self.assertEqual(payload["rows"][1]["relation_status"], "unlinked")
         self.assertEqual(queue.refreshes, [])
+        self.assertEqual(repository.row_id_calls[0]["scope_keys_hint"], [])
 
     def test_repository_treats_missing_row_in_fresh_scope_as_unlinked_context(self) -> None:
         repository = PostgresReadModelRepository(PartialFreshRelationConnection())
@@ -157,6 +167,39 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual([row["row_id"] for row in payload["rows"]], ["txn-present"])
         self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
+
+    def test_repository_treats_empty_rows_in_fresh_hinted_scope_as_fresh_empty_context(self) -> None:
+        repository = PostgresReadModelRepository(PartialFreshRelationConnection())
+
+        payload = repository.get_workbench_relation_rows_by_ids(["txn-missing"], scope_keys_hint=["2026-03"])
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["groups"], [])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
+
+    def test_facade_passes_scope_hint_for_empty_relation_context(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "read_model_status": "fresh",
+                "rows": [],
+                "groups": [],
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "read_model_scope_keys": ["2026-03"],
+            }
+        )
+        queue = QueueRecorder()
+        facade = WorkbenchRelationReadFacade(read_model_repository=repository, queue_repository=queue)
+
+        payload = facade.get_by_row_ids(["txn-missing"], month_hint="2026-03")
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["rows"], [])
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(repository.row_id_calls[0]["scope_keys_hint"], ["2026-03"])
 
     def test_non_fresh_result_enqueues_refresh_when_required(self) -> None:
         repository = FakeRelationRepository(
