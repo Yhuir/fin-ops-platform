@@ -5277,6 +5277,12 @@ textarea {
   background: var(--fp-surface-muted);
 }
 
+.turnover-ledger-chip--closure {
+  border-color: color-mix(in srgb, var(--fp-success) 42%, var(--fp-border));
+  background: color-mix(in srgb, var(--fp-success) 18%, var(--fp-surface));
+  color: var(--fp-success-strong);
+}
+
 .turnover-ledger-chip--family {
   color: var(--fp-text-primary);
 }

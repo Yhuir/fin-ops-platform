@@ -99,6 +99,63 @@ class FakeGroupedLedgerService:
         }
 
 
+class FakeTwoFlowGroupedLedgerService:
+    def list_grouped_ledger(self, *, page: int = 1, page_size: int = 200, **_kwargs: object) -> dict[str, object]:
+        if page > 1:
+            return {"groups": [], "pagination": {"page": page, "page_size": page_size, "total": 1}}
+        return {
+            "groups": [
+                {
+                    "group_id": "counterparty:personal:刘涵静",
+                    "counterparty_name": "刘涵静",
+                    "family": "personal",
+                    "family_label": "个人往来",
+                    "pending_direction": "closed",
+                    "pending_direction_label": "已闭合",
+                    "pending_amount": "0.00",
+                    "pending_repayment_amount": "0.00",
+                    "pending_collection_amount": "0.00",
+                    "closed_amount": "240000.00",
+                    "summary_row": {
+                        "row_kind": "summary",
+                        "relation_id": "rel-workbench-cash",
+                        "borrow_amount": "240000.00",
+                        "repayment_amount": "240000.00",
+                        "balance_amount": "0.00",
+                        "bank_account_labels": ["建行 8106"],
+                    },
+                    "flow_rows": [
+                        {
+                            "row_kind": "flow",
+                            "relation_id": "rel-workbench-cash",
+                            "flow_id": "bank-income-240000",
+                            "source_bank_row_id": "bank-income-240000",
+                            "flow_direction": "income",
+                            "flow_amount": "240000.00",
+                            "borrow_amount": "240000.00",
+                            "repayment_amount": "0.00",
+                            "bank_row_ids": ["bank-income-240000"],
+                        },
+                        {
+                            "row_kind": "flow",
+                            "relation_id": "rel-workbench-cash",
+                            "flow_id": "bank-expense-240000",
+                            "source_bank_row_id": "bank-expense-240000",
+                            "flow_direction": "expense",
+                            "flow_amount": "240000.00",
+                            "borrow_amount": "0.00",
+                            "repayment_amount": "240000.00",
+                            "bank_row_ids": ["bank-expense-240000"],
+                        },
+                    ],
+                    "allocation_lots": [],
+                    "lot_rows": [],
+                }
+            ],
+            "pagination": {"page": page, "page_size": page_size, "total": 1},
+        }
+
+
 class NonFreshLedgerService:
     def list_grouped_ledger(self, **_kwargs: object) -> dict[str, object]:
         raise RuntimeError("bank_detail_read_model_not_fresh")
@@ -201,11 +258,73 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(row["workbench_relation_mode"], "turnover_manual_closure")
         self.assertEqual(row["workbench_relation_source"], "manual")
         self.assertEqual(row["workbench_relation_row_ids"], ["txn-out-collected", "txn-repayment-001"])
+        self.assertFalse(row["linked_oa"])
+        self.assertFalse(row["linked_invoice"])
+        self.assertTrue(row["cash_closure_linked"])
+        self.assertEqual(row["cash_closure_case_id"], "case-turnover-001")
+        self.assertEqual(row["cash_closure_source"], "turnover_ledger")
         self.assertEqual(row["source_versions"]["workbench_relation_source_versions"], {"workbench_relation_schema_version": "test"})
         flow = row["flow_rows"][0]
         self.assertEqual(flow["workbench_relation_status"], "linked")
         self.assertEqual(flow["workbench_relation_case_ids"], ["case-turnover-001"])
         self.assertEqual(flow["workbench_relation_mode"], "turnover_manual_closure")
+        self.assertTrue(flow["cash_closure_linked"])
+        self.assertEqual(flow["cash_closure_case_id"], "case-turnover-001")
+        self.assertNotIn("__workbench_relation_details", flow)
+
+    def test_projection_marks_workbench_bank_pair_as_cash_closure_when_group_zeroes_out(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        relation_facade = FakeWorkbenchRelationFacade(
+            {
+                "status": "fresh",
+                "rows": [
+                    {
+                        "row_id": "bank-income-240000",
+                        "row_type": "bank_transaction",
+                        "relation_status": "linked",
+                        "group_ids": ["case-workbench-cash-1"],
+                    },
+                    {
+                        "row_id": "bank-expense-240000",
+                        "row_type": "bank_transaction",
+                        "relation_status": "linked",
+                        "group_ids": ["case-workbench-cash-1"],
+                    },
+                ],
+                "groups": [
+                    {
+                        "group_id": "case-workbench-cash-1",
+                        "relation_status": "linked",
+                        "relation_source": "manual",
+                        "payload": {
+                            "relation_mode": "manual_confirmed",
+                            "row_ids": ["bank-income-240000", "bank-expense-240000"],
+                            "row_types": ["bank", "bank"],
+                        },
+                    }
+                ],
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "read_model_scope_keys": ["2026-03"],
+            }
+        )
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=FakeTwoFlowGroupedLedgerService(),  # type: ignore[arg-type]
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
+            workbench_relation_read_facade=relation_facade,
+        )
+
+        builder.rebuild_turnover_ledger_read_model_scope("all", source_version=13)
+
+        rows = list((repository.saved_payload or {}).get("rows") or [])
+        row = rows[0]
+        self.assertTrue(row["cash_closure_linked"])
+        self.assertEqual(row["cash_closure_case_id"], "case-workbench-cash-1")
+        self.assertEqual(row["cash_closure_source"], "workbench_relation")
+        flow_rows = row["flow_rows"]
+        self.assertEqual([flow["cash_closure_linked"] for flow in flow_rows], [True, True])
+        self.assertEqual([flow["cash_closure_case_id"] for flow in flow_rows], ["case-workbench-cash-1", "case-workbench-cash-1"])
+        self.assertNotIn("__workbench_relation_details", row)
 
     def test_projection_does_not_save_when_workbench_relation_context_is_not_fresh(self) -> None:
         repository = FakeTurnoverReadRepository()

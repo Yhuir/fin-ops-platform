@@ -32,19 +32,18 @@ test.describe("turnover ledger browser flow", () => {
     await expect(page.getByText("银行流水状态已变化，请刷新后重试。")).toHaveCount(0);
     expect(api.count("POST /api/turnover-ledger/closures/confirm")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
-    await expect(page.getByText("已闭环 · 2笔")).toBeVisible();
-    await expect(table.getByText("已闭环").first()).toBeVisible();
+    await expect(page.getByText("收支闭环").first()).toBeVisible();
 
     const barrierCallsBeforeWithdraw = api.count("POST /api/operation-barrier/status");
     await table.getByRole("checkbox", { name: "选择流水 turnover-bank-expense-1000" }).check();
     await expect(page.getByRole("button", { name: "撤回闭环" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "确认闭环" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "确认闭环" })).toHaveCount(0);
     await page.getByRole("button", { name: "撤回闭环" }).click();
 
     await expect(page.getByText("外部往来闭环已撤回")).toBeVisible();
     expect(api.count("POST /api/turnover-ledger/relations/turnover_rel_e2e_closure/withdraw")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
-    await expect(page.getByText("已闭环 · 2笔")).toHaveCount(0);
-    await expect(table.getByText("未闭环").first()).toBeVisible();
+    await expect(page.getByText("收支闭环")).toHaveCount(0);
+    await expect(table.getByText("未闭环")).toHaveCount(0);
   });
 });

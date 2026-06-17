@@ -1188,6 +1188,87 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(context.exception.error_code, "workbench_relation_command_unavailable")
 
+    def test_turnover_workbench_pair_port_delegates_cash_closure_withdraw_to_relation_command_service(self) -> None:
+        module = self._write_adapters_module()
+
+        class BlockingPairService:
+            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
+                raise AssertionError("cash closure withdraw must not read active relation from pair service.")
+
+            def list_active_relations(self) -> list[dict[str, object]]:
+                raise AssertionError("cash closure withdraw must not list pair service relations.")
+
+            def cancel_relation(self, _case_id: str) -> dict[str, object]:
+                raise AssertionError("cash closure withdraw must delegate to WorkbenchRelationCommandService.")
+
+        class RecordingRelationCommandService:
+            def __init__(self) -> None:
+                self.withdraw_calls: list[dict[str, object]] = []
+
+            def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+                self.withdraw_calls.append(dict(kwargs))
+                return {
+                    "relation": {
+                        "case_id": str(kwargs["case_id"]),
+                        "status": "cancelled",
+                    },
+                    "affected_months": ["2026-02"],
+                    "affected_row_ids": ["bank-income-1", "bank-expense-1"],
+                    "restored_relations": [
+                        {"case_id": "case-oa-restore", "row_ids": ["oa-1", "bank-income-1"]},
+                    ],
+                }
+
+        command = RecordingRelationCommandService()
+        port = module.TurnoverLedgerWorkbenchPairPort(
+            pair_relation_service=BlockingPairService(),
+            relation_command_service_factory=lambda transaction: command,
+        )
+
+        relation = port.withdraw_cash_closure_case(
+            case_id="case-workbench-cash-1",
+            actor_id="finance-user",
+            note="withdraw cash closure",
+            transaction=object(),
+        )
+
+        self.assertEqual(relation["case_id"], "case-workbench-cash-1")
+        self.assertEqual(relation["status"], "cancelled")
+        self.assertEqual(relation["affected_months"], ["2026-02"])
+        self.assertEqual(relation["affected_row_ids"], ["bank-income-1", "bank-expense-1"])
+        self.assertEqual(relation["restored_relations"][0]["case_id"], "case-oa-restore")
+        self.assertEqual(len(command.withdraw_calls), 1)
+        call = command.withdraw_calls[0]
+        self.assertEqual(call["case_id"], "case-workbench-cash-1")
+        self.assertEqual(call["actor_id"], "finance-user")
+        self.assertEqual(call["reason"], "withdraw cash closure")
+        self.assertEqual(call["history_operation_type"], "turnover_cash_closure_withdraw")
+
+    def test_turnover_workbench_pair_port_requires_relation_command_service_for_cash_closure_withdraw(self) -> None:
+        module = self._write_adapters_module()
+
+        class BlockingPairService:
+            def get_active_relation_by_case_id(self, _case_id: str) -> dict[str, object] | None:
+                raise AssertionError("cash closure withdraw must not fallback to pair relation reads.")
+
+            def list_active_relations(self) -> list[dict[str, object]]:
+                raise AssertionError("cash closure withdraw must not fallback to pair relation reads.")
+
+            def cancel_relation(self, _case_id: str) -> dict[str, object]:
+                raise AssertionError("cash closure withdraw must not fallback to pair relation writes.")
+
+        port = module.TurnoverLedgerWorkbenchPairPort(pair_relation_service=BlockingPairService())
+
+        with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+            port.withdraw_cash_closure_case(
+                case_id="case-workbench-cash-1",
+                actor_id="finance-user",
+                note="withdraw cash closure",
+                transaction=object(),
+            )
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_command_unavailable")
+
     def _build_uow(
         self,
         *,

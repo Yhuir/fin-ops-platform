@@ -653,6 +653,52 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("rows", payload)
         self.assertNotIn("rows", payload["groups"][0])
 
+    def test_turnover_cash_closure_withdraw_route_uses_closure_boundary(self) -> None:
+        class FakeClosureBoundary:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def withdraw_cash_closure_case_from_request(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                return {
+                    "status": "withdrawn",
+                    "workbench_pair_relation": {
+                        "case_id": kwargs["cash_closure_case_id"],
+                        "relation_mode": "manual_confirmed",
+                    },
+                    "affected_months": ["2026-05"],
+                    "freshness_targets": [
+                        {"read_model_key": "turnover_ledger", "scope_key": "all"},
+                        {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+                        {"read_model_key": "workbench", "scope_key": "2026-05"},
+                        {"read_model_key": "workbench", "scope_key": "all"},
+                    ],
+                }
+
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            boundary = FakeClosureBoundary()
+            app._turnover_ledger_closure_request_boundary_facade = lambda: boundary  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/withdraw",
+                body=json.dumps({
+                    "cash_closure_case_id": "case-workbench-cash-1",
+                    "note": "撤回关联台闭环",
+                    "idempotency_key": "withdraw-cash-1",
+                }),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["status"], "withdrawn")
+        self.assertEqual(payload["workbench_pair_relation"]["case_id"], "case-workbench-cash-1")
+        self.assertEqual(payload["freshness_targets"][1], {"read_model_key": "workbench_relation", "scope_key": "2026-05"})
+        self.assertEqual(boundary.calls[0]["cash_closure_case_id"], "case-workbench-cash-1")
+        self.assertEqual(boundary.calls[0]["note"], "撤回关联台闭环")
+        self.assertEqual(boundary.calls[0]["idempotency_key"], "withdraw-cash-1")
+
     def test_confirmed_external_turnover_rule_enters_ledger_with_default_selection(self) -> None:
         with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(

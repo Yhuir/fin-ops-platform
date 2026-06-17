@@ -27,6 +27,7 @@ import {
   fetchTurnoverRelationExtra,
   saveTurnoverLedgerTagSelection,
   saveTurnoverRelationExtra,
+  withdrawTurnoverClosure,
   withdrawTurnoverRelation,
 } from "../features/turnoverLedger/api";
 import type {
@@ -162,19 +163,6 @@ function relationIdForRow(row: TurnoverLedgerGroupedRow) {
   return row.relationId || row.parentRelationId || "";
 }
 
-function turnoverManualClosureRelationId(row: TurnoverLedgerGroupedRow) {
-  const relationId = relationIdForRow(row);
-  if (relationId) {
-    return relationId;
-  }
-  const caseId = row.workbenchRelationCaseIds.find((item) => item.startsWith("turnover:"));
-  return caseId ? caseId.slice("turnover:".length) : "";
-}
-
-function isTurnoverManualClosureLinkedRow(row: TurnoverLedgerGroupedRow) {
-  return row.workbenchRelationStatus === "linked" && row.workbenchRelationMode === "turnover_manual_closure";
-}
-
 function isFlowRow(row: TurnoverLedgerGroupedRow) {
   return row.rowKind === "flow";
 }
@@ -194,6 +182,18 @@ function moneyCents(value: number) {
 
 function flowBankRowId(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
+}
+
+function cashClosureCaseIdForRow(row: TurnoverLedgerGroupedRow) {
+  return cleanText(row.cashClosureCaseId);
+}
+
+function cashClosureRelationIdForRow(row: TurnoverLedgerGroupedRow) {
+  return cleanText(row.cashClosureRelationId);
+}
+
+function isCashClosureLinkedRow(row: TurnoverLedgerGroupedRow) {
+  return Boolean(row.cashClosureLinked);
 }
 
 function closureExpectedVersions(rows: TurnoverLedgerGroupedRow[]) {
@@ -389,25 +389,39 @@ export default function TurnoverLedgerPage() {
     [selectedClosureRows],
   );
   const closurePreview = useMemo(() => buildClosurePreview(selectedClosureRows), [selectedClosureRows]);
-  const selectedRowsContainTurnoverClosure = selectedClosureRows.some(isTurnoverManualClosureLinkedRow);
-  const selectedManualClosureRelationId = useMemo(() => {
-    if (selectedClosureRows.length === 0 || selectedClosureRows.some((row) => !isTurnoverManualClosureLinkedRow(row))) {
+  const selectedRowsContainCashClosure = selectedClosureRows.some(isCashClosureLinkedRow);
+  const selectedRowsContainOpenClosureCandidate = selectedClosureRows.some((row) => !isCashClosureLinkedRow(row));
+  const selectedRowsAllCashClosure = selectedClosureRows.length > 0
+    && selectedRowsContainCashClosure
+    && !selectedRowsContainOpenClosureCandidate;
+  const selectedCashClosureCaseId = useMemo(() => {
+    if (!selectedRowsAllCashClosure) {
       return "";
     }
-    const relationIds = new Set(selectedClosureRows.map(turnoverManualClosureRelationId).filter(Boolean));
+    const caseIds = new Set(selectedClosureRows.map(cashClosureCaseIdForRow).filter(Boolean));
+    return caseIds.size === 1 ? Array.from(caseIds)[0] : "";
+  }, [selectedClosureRows, selectedRowsAllCashClosure]);
+  const selectedCashClosureRelationId = useMemo(() => {
+    if (!selectedRowsAllCashClosure) {
+      return "";
+    }
+    const relationIds = new Set(selectedClosureRows.map(cashClosureRelationIdForRow).filter(Boolean));
     return relationIds.size === 1 ? Array.from(relationIds)[0] : "";
-  }, [selectedClosureRows]);
-  const canWithdrawSelectedManualClosure = Boolean(
+  }, [selectedClosureRows, selectedRowsAllCashClosure]);
+  const canWithdrawSelectedCashClosure = Boolean(
     canMutateData
       && !readModelNeedsRefresh
-      && selectedManualClosureRelationId
+      && selectedRowsAllCashClosure
+      && selectedCashClosureCaseId
       && !closureSubmitting
       && !mutatingRelation,
   );
   const canOpenClosureDrawer = canMutateData
     && !readModelNeedsRefresh
     && selectedClosureRows.length >= 2
-    && !selectedRowsContainTurnoverClosure;
+    && !selectedRowsContainCashClosure;
+  const closureActionLabel = selectedRowsAllCashClosure ? "撤回闭环" : "确认闭环";
+  const canRunClosurePrimaryAction = selectedRowsAllCashClosure ? canWithdrawSelectedCashClosure : canOpenClosureDrawer;
 
   const loadTagSelection = useCallback((signal?: AbortSignal) => {
     setTagLoading(true);
@@ -513,6 +527,12 @@ export default function TurnoverLedgerPage() {
       return;
     }
     setClosureSelection((current) => {
+      const nextIsCashClosure = isCashClosureLinkedRow(row);
+      const nextCashClosureCaseId = cashClosureCaseIdForRow(row);
+      if (nextIsCashClosure && !nextCashClosureCaseId) {
+        setToast({ severity: "error", message: "这组闭环缺少关联台 case ID，请刷新后重试" });
+        return current;
+      }
       if (!current) {
         return {
           groupId: group.groupId,
@@ -528,6 +548,19 @@ export default function TurnoverLedgerPage() {
       if (exists) {
         const rows = current.rows.filter((item) => flowBankRowId(item) !== rowId);
         return rows.length > 0 ? { ...current, rows } : null;
+      }
+      const currentHasCashClosure = current.rows.some(isCashClosureLinkedRow);
+      const currentHasOpenClosureCandidate = current.rows.some((item) => !isCashClosureLinkedRow(item));
+      if ((currentHasCashClosure && !nextIsCashClosure) || (currentHasOpenClosureCandidate && nextIsCashClosure)) {
+        setToast({ severity: "error", message: "不能同时选择已闭环和未闭环流水" });
+        return current;
+      }
+      if (currentHasCashClosure && nextIsCashClosure) {
+        const currentCaseIds = new Set(current.rows.map(cashClosureCaseIdForRow).filter(Boolean));
+        if (currentCaseIds.size !== 1 || !currentCaseIds.has(nextCashClosureCaseId)) {
+          setToast({ severity: "error", message: "一次只能撤回一组收支闭环流水" });
+          return current;
+        }
       }
       return { ...current, rows: [...current.rows, row] };
     });
@@ -739,18 +772,21 @@ export default function TurnoverLedgerPage() {
     }
   };
 
-  const handleWithdrawSelectedManualClosure = async () => {
-    if (!selectedManualClosureRelationId || !canWithdrawSelectedManualClosure) {
+  const handleWithdrawSelectedCashClosure = async () => {
+    if (!selectedCashClosureCaseId || !canWithdrawSelectedCashClosure) {
       return;
     }
-    const relationId = selectedManualClosureRelationId;
+    const relationId = selectedCashClosureRelationId;
+    const cashClosureCaseId = selectedCashClosureCaseId;
     const affectedRowIds = selectedClosureRows.map(flowBankRowId).filter(Boolean);
     const result = await runOperation({
       loadingMessage: "正在撤回外部往来闭环...",
       action: async ({ setMessage }) => {
         setMutatingRelation(true);
         try {
-          const mutationResult = await withdrawTurnoverRelation({ relationId });
+          const mutationResult = relationId
+            ? await withdrawTurnoverRelation({ relationId })
+            : await withdrawTurnoverClosure({ cashClosureCaseId });
           setClosureSelection(null);
           setClosureDrawerOpen(false);
           setMessage("正在等待往来款台账和关联台读模型同步...");
@@ -770,18 +806,18 @@ export default function TurnoverLedgerPage() {
     });
     if (result.status === "success") {
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        relationId: result.value.relationId || relationId,
+        relationId: result.value.relationId || relationId || cashClosureCaseId,
         affectedRowIds,
         affectedMonths: result.value.affectedMonths,
-        action: "manual_closure_withdraw",
-        source: "turnover_manual_closure",
+        action: "cash_closure_withdraw",
+        source: "turnover_cash_closure",
       });
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, {
-        relationId: result.value.workbenchPairRelationId || `turnover:${relationId}`,
+        relationId: result.value.workbenchPairRelationId || cashClosureCaseId,
         affectedRowIds,
         affectedMonths: result.value.affectedMonths,
-        action: "turnover_manual_closure_withdraw",
-        source: "turnover_manual_closure",
+        action: "cash_closure_withdraw",
+        source: "turnover_cash_closure",
       });
       setToast({ severity: "success", message: "外部往来闭环已撤回" });
     } else {
@@ -936,23 +972,19 @@ export default function TurnoverLedgerPage() {
                   </span>
                 ) : null}
                 <button
-                  className="turnover-ledger-button"
-                  disabled={!canOpenClosureDrawer}
-                  onClick={() => setClosureDrawerOpen(true)}
+                  className={`turnover-ledger-button${selectedRowsAllCashClosure ? " turnover-ledger-button--warning" : ""}`}
+                  disabled={!canRunClosurePrimaryAction}
+                  onClick={() => {
+                    if (selectedRowsAllCashClosure) {
+                      void handleWithdrawSelectedCashClosure();
+                      return;
+                    }
+                    setClosureDrawerOpen(true);
+                  }}
                   type="button"
                 >
-                  确认闭环
+                  {closureActionLabel}
                 </button>
-                {selectedRowsContainTurnoverClosure ? (
-                  <button
-                    className="turnover-ledger-button turnover-ledger-button--warning"
-                    disabled={!canWithdrawSelectedManualClosure}
-                    onClick={() => void handleWithdrawSelectedManualClosure()}
-                    type="button"
-                  >
-                    撤回闭环
-                  </button>
-                ) : null}
                 <button className="turnover-ledger-button turnover-ledger-button--primary" onClick={handleOpenExport} type="button">
                   <Download aria-hidden="true" size={16} strokeWidth={2.2} />
                   下载表格

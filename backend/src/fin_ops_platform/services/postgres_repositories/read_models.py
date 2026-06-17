@@ -10536,6 +10536,7 @@ def _workbench_relation_row_payload(row: dict[str, Any]) -> dict[str, Any]:
 def _workbench_relation_group_payload(row: dict[str, Any]) -> dict[str, Any]:
     payload = _read_model_payload(row)
     base = dict(payload) if isinstance(payload, dict) else {}
+    relation_payload = base.get("payload") if isinstance(base.get("payload"), dict) else base
     return {
         "group_id": text(base.get("group_id") or row.get("group_id")) or "",
         "scope_key": text(base.get("scope_key") or row.get("scope_key")),
@@ -10553,7 +10554,7 @@ def _workbench_relation_group_payload(row: dict[str, Any]) -> dict[str, Any]:
         "output_invoice_ids": text_list(
             base.get("output_invoice_ids") if "output_invoice_ids" in base else row.get("output_invoice_ids")
         ),
-        "payload": base.get("payload") if isinstance(base.get("payload"), dict) else {},
+        "payload": relation_payload,
     }
 
 

@@ -13,9 +13,23 @@
 - `readModelStatus !== "fresh"` 时前端必须显示诊断并避免把旧 grouped payload 当作最终业务结论；manual closure 这类依赖页面所选 flow row versions 的写操作必须先阻断或等待 fresh 后重新加载并重绑定，后端 stale precondition、canonical write safety、权限/session、DB 和 idempotency/version 继续作为最终兜底。写 API 成功后必须用全屏 operation overlay 等待 `turnover_ledger` barrier fresh 并重新加载。
 - 写路径应优先保持 `TurnoverLedgerWriteFacade` / `TurnoverLedgerWriteUnitOfWork` 边界；legacy fallback 只作为兼容风险存在，不能继续扩大。
 - 涉及 Workbench relation 的 manual closure/withdraw 即使经过 legacy fallback facade，也必须通过 `WorkbenchRelationCommandService`；缺 command service 时 fail fast，不允许 direct pair relation write fallback。
-- 外部往来闭环和 OA/业务单据关联是两个不同事实：OA/业务单据关联 chip 只展示，不参与“确认闭环/撤回闭环”的决定链路；每条 flow row 单独展示“已闭环/未闭环”chip。确认闭环可合并所选银行流水已有的 OA-bank active relation；撤回闭环只撤回 `turnover_manual_closure`，并恢复确认前的 OA-bank relation。
+- 外部往来闭环和 OA/发票关联是两个不同事实：OA/发票关联 chip 只展示，不参与“确认闭环/撤回闭环”的决定链路；前端只展示正向 chip，“已关联 OA”“已关联 发票”“收支闭环”。未闭环不显示 chip。确认闭环可合并所选银行流水已有的 OA-bank active relation；撤回闭环只撤回同一 `cash_closure_case_id` 的 Workbench active case，并恢复确认前的 OA-bank relation。
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
+
+## 2026-06-17 - 收支闭环 chip 与关联台撤回链路统一
+
+- 目标：外部往来款管理不再显示“已关联业务单据”“未闭环”“部分已闭环”“候选关联”等旧 chip；只显示正向事实 chip：“已关联 OA”“已关联 发票”“收支闭环”。已经在关联台形成同一组银行收支闭环的流水，在外部往来页也应显示“收支闭环”，并可从同一组流水直接撤回。
+- 影响范围：`TurnoverLedgerSqlProjectionBuilder` grouped projection、外部往来写 facade/request boundary、`server.py` turnover closure withdraw route、前端 turnover ledger API mapper、grouped table、toolbar 选择逻辑、e2e fixtures、模块/API 文档。
+- 关键决策：
+  - chip 事实源收敛到后端 projection 字段：`linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id/source/relation_id`。前端不得再从 `workbench_relation_status/mode` 或 row id 规则推断泛化业务单据 chip 或负向闭环 chip。
+  - `cash_closure_linked=true` 的来源包括外部往来页创建的 `turnover_manual_closure`，以及关联台已经把同一往来组银行收入/支出配成同一个零差额 Workbench case 的关系；后者只在 Workbench relation read model fresh 且 relation 内 bank rows 可完整落回当前 group 时投影。
+  - toolbar 使用单个主按钮：未闭环选择显示“确认闭环”；全部选择同一 `cash_closure_case_id` 且 `cash_closure_linked=true` 时显示“撤回闭环”。同次选择禁止混合已闭环/未闭环，也禁止跨多个 closure case 撤回。
+  - 外部往来本页创建的 `turnover_manual_closure` 保留既有 `/api/turnover-ledger/relations/{relation_id}/withdraw`；关联台来源的 `cash_closure_case_id` 通过新增 `/api/turnover-ledger/closures/withdraw`，经 `TurnoverLedgerWriteFacade`、`TurnoverLedgerWorkbenchPairPort` 委托 `WorkbenchRelationCommandService.withdraw_relation(case_id=...)`，不直接改 pair snapshot。
+- 文档影响：更新 `README.md`、`state-machine.md`、`tests.md`、本实施记录、`docs/dev/api-contracts.md` 和 `docs/dev/testing-closure-dependency-map.md`。
+- 测试覆盖：新增/更新 `test_projection_marks_workbench_bank_pair_as_cash_closure_when_group_zeroes_out`、`test_turnover_cash_closure_withdraw_route_uses_closure_boundary`、`test_turnover_workbench_pair_port_delegates_cash_closure_withdraw_to_relation_command_service`、`test_turnover_workbench_pair_port_requires_relation_command_service_for_cash_closure_withdraw`、`withdrawTurnoverClosure` API mapper 测试、`withdraws a selected linked manual closure from the table toolbar`、`shows Workbench relation feedback from the grouped ledger payload` 和 `web/e2e/turnover-ledger-flow.spec.ts`。
+- 验证命令：`pytest tests/test_turnover_ledger_read_model_refresh.py tests/test_turnover_ledger_api.py tests/test_workbench_relation_read_facade.py -q`；`cd web && npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx`；`cd web && npx playwright test e2e/turnover-ledger-flow.spec.ts`；`cd web && npm run build`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：本地 e2e 使用 mock 后端和小样本，不能证明真实生产历史 Workbench relation 分布中所有半迁移 case 都能被投影为同组零差额闭环；发布后仍需对真实数据执行 worker drain/requeue，并用实际页面选择同一组闭环流水 smoke 一次。
 
 ## 2026-06-17 - bank detail tag facade 版本字段透传修复
 
@@ -56,7 +70,7 @@
   - `turnover_manual_closure` 可以包含 `oa` + `bank` rows，但外部往来页只能合并 row types 子集为 `{oa, bank}` 且实际包含 OA 的既有 relation；包含 `invoice`、纯 bank-only 既有 relation、已有 `turnover_manual_closure` 或其他 row type 时拒绝并要求按对应 owner 先处理。
   - 确认闭环使用 `confirm_relation(..., replace_existing=True, before_relations=...)` 替换既有 OA-bank relation，并在 metadata 中保留本次选择的 `turnover_closure_bank_row_ids`。
   - 撤回闭环使用 `withdraw_relation`，底层 `WorkbenchPairRelationService` 识别 `turnover_manual_closure_confirm` 历史并恢复被标记为 `restorable_on_withdraw` 的 OA-bank relation；不再使用普通 `cancel_relation` 作为外部往来撤回语义。
-  - 前端 group chip 只统计闭环关系；行内 chip 拆成“已关联 OA/已关联业务单据”和“已闭环/未闭环”。OA/业务单据 chip 仅展示，不禁用确认闭环，也不显示撤回闭环。
+  - 前端 group chip 只统计闭环关系；行内 chip 只保留正向事实：“已关联 OA”“已关联 发票”“收支闭环”。OA/发票 chip 仅展示，不禁用确认闭环，也不显示撤回闭环。
 - 文档影响：更新 `README.md`、`state-machine.md`、`tests.md`、本实施记录和 `docs/modules/workbench-relations/state-machine.md`；长期产品口径不新增独立文档。
 - 测试覆盖：新增/更新 `test_turnover_manual_closure_merges_existing_oa_bank_relations`、`test_turnover_manual_closure_rejects_rows_already_in_turnover_closure`、`test_turnover_workbench_pair_port_withdraw_restores_merged_oa_bank_relations`、`test_withdraw_restores_previous_relations_from_turnover_manual_closure_history`、`test_manual_closure_merges_existing_oa_bank_relations_and_withdraw_restores_them`、`allows manual closure confirmation when selected rows are only linked to OA`、`shows Workbench relation feedback from the grouped ledger payload`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_pair_relation_service tests.test_workbench_relation_command_service tests.test_turnover_ledger_uow_contract tests.test_turnover_workbench_integration -v`；`cd web && npm test -- --run src/test/TurnoverLedgerPage.test.tsx`。

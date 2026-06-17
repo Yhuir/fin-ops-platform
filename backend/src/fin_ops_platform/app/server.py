@@ -1949,6 +1949,8 @@ class Application:
             return self._handle_api_turnover_ledger_confirm(body, headers)
         if method == "POST" and route_path == "/api/turnover-ledger/closures/confirm":
             return self._handle_api_turnover_ledger_closure_confirm(body, headers)
+        if method == "POST" and route_path == "/api/turnover-ledger/closures/withdraw":
+            return self._handle_api_turnover_ledger_closure_withdraw(body, headers)
         if method == "POST" and route_path.startswith("/api/turnover-ledger/relations/") and route_path.endswith("/withdraw"):
             relation_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_turnover_ledger_withdraw(relation_id, body, headers)
@@ -14157,6 +14159,43 @@ class Application:
                 tenant_id=tenant_id_for_session(session_response),
                 note=str(payload.get("note")) if payload.get("note") is not None else None,
                 expected_versions=expected_versions,
+                idempotency_key=idempotency_key,
+            )
+        except TurnoverRelationValidationError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except TurnoverLedgerWritePreconditionError as exc:
+            return self._json_response(
+                exc.status_code,
+                self._turnover_write_precondition_error_payload(exc),
+            )
+        except (WorkbenchIdempotencyKeyConflict, WorkbenchIdempotencyInProgress, WorkbenchIdempotencyFailed) as exc:
+            return self._json_response(HTTPStatus.CONFLICT, exc.to_response_payload())
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_turnover_ledger_closure_withdraw(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Response:
+        session_response = self._turnover_mutation_session(headers)
+        if isinstance(session_response, Response):
+            return session_response
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        cash_closure_case_id = str(payload.get("cash_closure_case_id") or payload.get("cashClosureCaseId") or "").strip()
+        actor = session_response.identity.username or session_response.identity.user_id or "web_finance_user"
+        facade = self._turnover_ledger_closure_request_boundary_facade()
+        idempotency_key = str(payload.get("idempotency_key") or payload.get("idempotencyKey") or "").strip() or None
+        try:
+            result = facade.withdraw_cash_closure_case_from_request(
+                cash_closure_case_id=cash_closure_case_id,
+                actor_id=actor,
+                tenant_id=tenant_id_for_session(session_response),
+                note=str(payload.get("note")) if payload.get("note") is not None else None,
                 idempotency_key=idempotency_key,
             )
         except TurnoverRelationValidationError as exc:

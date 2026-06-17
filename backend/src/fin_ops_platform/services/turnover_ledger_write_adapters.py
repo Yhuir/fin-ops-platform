@@ -1079,6 +1079,35 @@ class TurnoverLedgerClosureLegacyFallbackFacade:
             "affected_months": list(affected_months or []),
         }
 
+    def withdraw_cash_closure_case(
+        self,
+        *,
+        cash_closure_case_id: str,
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        _ = tenant_id, idempotency_key
+        pair_relation = self._pair_port.withdraw_cash_closure_case(
+            case_id=cash_closure_case_id,
+            actor_id=actor_id,
+            note=note,
+            transaction=SimpleNamespace(),
+        )
+        affected_months = [
+            str(month)
+            for month in list(pair_relation.get("affected_months") or [])
+            if str(month).strip()
+        ]
+        self._after_mutation(list(affected_months))
+        return {
+            "relation_id": "",
+            "status": "withdrawn",
+            "workbench_pair_relation": dict(pair_relation or {}),
+            "affected_months": list(affected_months),
+        }
+
 
 def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -> list[dict[str, str]]:
     normalized_months: list[str] = []
@@ -1176,6 +1205,42 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(
             affected_months
         )
+        return payload
+
+    def withdraw_cash_closure_case_from_request(
+        self,
+        *,
+        cash_closure_case_id: str,
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        normalized_case_id = str(cash_closure_case_id or "").strip()
+        if not normalized_case_id:
+            raise TurnoverRelationValidationError(
+                "invalid_cash_closure_case_id",
+                "cash_closure_case_id is required.",
+            )
+        withdraw = getattr(self._facade, "withdraw_cash_closure_case", None)
+        if not callable(withdraw):
+            raise RuntimeError("turnover ledger cash closure withdraw facade is not configured.")
+        withdraw_kwargs = {
+            "cash_closure_case_id": normalized_case_id,
+            "actor_id": actor_id,
+            "tenant_id": tenant_id,
+            "note": note,
+        }
+        if idempotency_key:
+            withdraw_kwargs["idempotency_key"] = idempotency_key
+        payload = dict(withdraw(**withdraw_kwargs) or {})
+        affected_months = [
+            str(month)
+            for month in list(payload.get("affected_months") or [])
+            if str(month).strip()
+        ]
+        payload["affected_months"] = affected_months
+        payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(affected_months)
         return payload
 
 
@@ -1932,6 +1997,66 @@ class TurnoverLedgerWorkbenchPairPort:
             row_ids=bank_row_ids,
             action="turnover_manual_closure_withdraw",
         )
+
+    def withdraw_cash_closure_case(
+        self,
+        *,
+        case_id: str,
+        actor_id: str,
+        note: str | None,
+        transaction: Any,
+    ) -> dict[str, object]:
+        normalized_case_id = str(case_id or "").strip()
+        if not normalized_case_id:
+            raise TurnoverLedgerWritePreconditionError(
+                error_code="invalid_cash_closure_case_id",
+                message="cash_closure_case_id is required.",
+            )
+        relation_command_service = self._relation_command_service(transaction)
+        if relation_command_service is None:
+            raise self._command_unavailable_error(
+                case_id=normalized_case_id,
+                row_ids=[],
+                action="cash_closure_withdraw",
+            )
+        try:
+            result = relation_command_service.withdraw_relation(
+                case_id=normalized_case_id,
+                actor_id=actor_id,
+                reason=note,
+                history_operation_type="turnover_cash_closure_withdraw",
+            )
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="cash_closure_relation_not_found",
+                    message="收支闭环关系已变化，请刷新后重试。",
+                    payload=exc.payload,
+                ) from exc
+            raise self._command_precondition_error(exc) from exc
+        relation_result = dict(
+            result.get("relation")
+            if isinstance(result, dict) and isinstance(result.get("relation"), dict)
+            else result or {}
+        )
+        if isinstance(result, dict):
+            relation_result["affected_months"] = [
+                str(month)
+                for month in list(result.get("affected_months") or [])
+                if str(month).strip()
+            ]
+            relation_result["affected_row_ids"] = [
+                str(row_id)
+                for row_id in list(result.get("affected_row_ids") or [])
+                if str(row_id).strip()
+            ]
+            if isinstance(result.get("restored_relations"), list):
+                relation_result["restored_relations"] = [
+                    dict(item)
+                    for item in list(result.get("restored_relations") or [])
+                    if isinstance(item, dict)
+                ]
+        return relation_result
 
     @staticmethod
     def _active_relations_for_row_ids_from_command(

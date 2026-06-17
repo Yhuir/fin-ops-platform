@@ -67,71 +67,32 @@ function categoryChipLabels(row: TurnoverLedgerGroupedRow) {
   return fallback === "-" ? [] : [fallback];
 }
 
-function isTurnoverManualClosureLinkedRow(row: TurnoverLedgerGroupedRow) {
-  return row.workbenchRelationStatus === "linked" && row.workbenchRelationMode === "turnover_manual_closure";
-}
-
-function hasOaWorkbenchRelation(row: TurnoverLedgerGroupedRow) {
-  if (row.workbenchRelationMode.includes("oa")) {
-    return true;
-  }
-  return row.workbenchRelationRowIds.some((rowId) => /^oa(?:[-_:]|$)/i.test(rowId.trim()));
-}
-
-function workbenchDocumentRelationLabel(row: TurnoverLedgerGroupedRow) {
-  const status = row.workbenchRelationStatus;
-  if (!status) {
-    return "";
-  }
-  if (status === "linked") {
-    if (row.workbenchRelationMode === "turnover_manual_closure" && !hasOaWorkbenchRelation(row)) {
-      return "";
-    }
-    return hasOaWorkbenchRelation(row) ? "已关联 OA" : "已关联业务单据";
-  }
-  if (status === "candidate") {
-    return "候选关联";
-  }
-  if (status === "mixed") {
-    return "多种关联状态";
-  }
-  return "";
-}
-
-function workbenchClosureRelationLabel(row: TurnoverLedgerGroupedRow) {
-  return isTurnoverManualClosureLinkedRow(row) ? "已闭环" : "未闭环";
-}
+type RelationChip = {
+  label: string;
+  tone: "outline" | "closure";
+};
 
 function workbenchRelationChips(row: TurnoverLedgerGroupedRow, isFlow: boolean) {
-  const labels: string[] = [];
-  const documentLabel = workbenchDocumentRelationLabel(row);
-  if (documentLabel) {
-    labels.push(documentLabel);
+  const chips: RelationChip[] = [];
+  if (row.linkedOa) {
+    chips.push({ label: "已关联 OA", tone: "outline" });
   }
-  if (isFlow) {
-    labels.push(workbenchClosureRelationLabel(row));
+  if (row.linkedInvoice) {
+    chips.push({ label: "已关联 发票", tone: "outline" });
   }
-  return labels;
+  if (isFlow && row.cashClosureLinked) {
+    chips.push({ label: "收支闭环", tone: "closure" });
+  }
+  return chips;
 }
 
 function workbenchRelationGroupLabel(group: TurnoverLedgerGroup) {
   const rows = runtimeGroup(group).flowRows ?? [];
   if (rows.length === 0) {
     const summaryRow = runtimeGroup(group).summaryRow;
-    return summaryRow && isTurnoverManualClosureLinkedRow(summaryRow) ? "已闭环" : "";
+    return summaryRow?.cashClosureLinked ? "收支闭环" : "";
   }
-  const closedRows = rows.filter(isTurnoverManualClosureLinkedRow);
-  if (closedRows.length === rows.length) {
-    return `已闭环 · ${closedRows.length}笔`;
-  }
-  if (closedRows.length > 0) {
-    return `部分已闭环 ${closedRows.length}/${rows.length}`;
-  }
-  const candidateRows = rows.filter((row) => row.workbenchRelationStatus === "candidate");
-  if (candidateRows.length > 0) {
-    return `候选关联 ${candidateRows.length}/${rows.length}`;
-  }
-  return "";
+  return rows.some((row) => row.cashClosureLinked) ? "收支闭环" : "";
 }
 
 function directionKey(direction: TurnoverLedgerDirection | null | undefined): "income" | "expense" | "neutral" {
@@ -448,13 +409,13 @@ function RowCells({
       <td>
         <span className="turnover-ledger-cell-stack">
           <span>{formatNullable(isFlow ? row.repaymentRemark : "")}</span>
-          {relationChips.map((label) => (
+          {relationChips.map((chip) => (
             <span
-              className="turnover-ledger-chip turnover-ledger-chip--outline turnover-ledger-chip--compact"
-              key={label}
-              title={row.workbenchRelationCaseIds.join("、")}
+              className={`turnover-ledger-chip turnover-ledger-chip--compact ${chip.tone === "closure" ? "turnover-ledger-chip--closure" : "turnover-ledger-chip--outline"}`}
+              key={chip.label}
+              title={[row.cashClosureCaseId, ...row.workbenchRelationCaseIds].filter(Boolean).join("、")}
             >
-              {label}
+              {chip.label}
             </span>
           ))}
         </span>

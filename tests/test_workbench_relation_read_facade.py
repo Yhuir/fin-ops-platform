@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.workbench_relation_distribution_mapper import (
+    relation_dicts_from_distribution_payload,
     relation_dicts_by_row_id_from_distribution_payload,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -110,6 +111,74 @@ class PartialFreshRelationConnection:
         return None
 
 
+class RelationGroupPayloadConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_relation_rows" in normalized:
+            return [
+                {
+                    "row_id": "txn-batch-1",
+                    "row_type": "bank_transaction",
+                    "scope_key": "2026-01",
+                    "scope_month": "2026-01-01",
+                    "relation_status": "linked",
+                    "group_ids": ["CASE-BATCH-1"],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                    "source_versions": {"workbench_relation_schema_version": "test"},
+                    "payload": {"row_id": "txn-batch-1", "row_type": "bank_transaction"},
+                    "raw_payload": {},
+                }
+            ]
+        if "from read_model.workbench_relation_groups" in normalized:
+            return [
+                {
+                    "group_id": "CASE-BATCH-1",
+                    "scope_key": "2026-01",
+                    "scope_month": "2026-01-01",
+                    "relation_source": "manual",
+                    "relation_kind": "oa_bank",
+                    "relation_status": "linked",
+                    "oa_row_ids": ["oa-batch-1"],
+                    "bank_transaction_ids": ["txn-batch-1"],
+                    "input_invoice_ids": [],
+                    "output_invoice_ids": [],
+                    "source_versions": {"workbench_relation_schema_version": "test"},
+                    "payload": {
+                        "group_id": "CASE-BATCH-1",
+                        "relation_mode": "manual_confirmed",
+                        "relation_status": "linked",
+                        "row_ids": ["txn-batch-1", "oa-batch-1"],
+                        "row_types": ["bank", "oa"],
+                        "special_metadata": {
+                            "source": "batch_accounting",
+                            "bank_row_id": "txn-batch-1",
+                            "oa_row_ids": ["oa-batch-1"],
+                            "year": "2026",
+                        },
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
+        normalized = " ".join(sql.lower().split())
+        if "from read_model.workbench_relation_scopes" in normalized:
+            return {
+                "scope_key": "2026-01",
+                "row_count": 1,
+                "group_count": 1,
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "cache_status": "fresh",
+            }
+        if "from job.read_model_dirty_scopes" in normalized:
+            return None
+        return None
+
+
 class WorkbenchRelationReadFacadeTests(unittest.TestCase):
     def test_get_by_row_ids_returns_fresh_linked_and_unlinked_contexts(self) -> None:
         repository = FakeRelationRepository(
@@ -179,6 +248,20 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["groups"], [])
         self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
+
+    def test_repository_preserves_relation_group_payload_for_distribution_mapping(self) -> None:
+        repository = PostgresReadModelRepository(RelationGroupPayloadConnection())
+
+        payload = repository.list_workbench_relation_rows(month="2026-01", row_types=["bank_transaction"])
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["groups"][0]["payload"]["special_metadata"]["source"], "batch_accounting")
+        relation = relation_dicts_from_distribution_payload(payload)[0]
+        self.assertEqual(relation["case_id"], "CASE-BATCH-1")
+        self.assertEqual(relation["status"], "active")
+        self.assertEqual(relation["special_metadata"]["bank_row_id"], "txn-batch-1")
 
     def test_facade_passes_scope_hint_for_empty_relation_context(self) -> None:
         repository = FakeRelationRepository(

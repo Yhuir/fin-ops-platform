@@ -910,6 +910,22 @@ function installTurnoverLedgerFetch(options: {
         ],
       });
     }
+    if (url.pathname === "/api/turnover-ledger/closures/withdraw" && method === "POST") {
+      return Response.json({
+        status: "withdrawn",
+        workbench_pair_relation: {
+          case_id: "case-workbench-cash-1",
+          relation_mode: "manual_confirmed",
+        },
+        affected_months: ["2026-05"],
+        freshness_targets: [
+          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "workbench_relation", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "all" },
+        ],
+      });
+    }
     const withdrawMatch = url.pathname.match(/^\/api\/turnover-ledger\/relations\/([^/]+)\/withdraw$/);
     if (withdrawMatch && method === "POST") {
       const relationId = decodeURIComponent(withdrawMatch[1]);
@@ -1562,16 +1578,20 @@ describe("Turnover ledger page", () => {
     expect(within(drawer).getByRole("button", { name: "确定" })).toBeDisabled();
   });
 
-  test("withdraws a selected linked manual closure from the table toolbar", async () => {
+  test("withdraws a selected workbench cash closure from the table toolbar", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch({
       groupedPayloads: [
         groupedPayloadWithWorkbenchRelation("all", "bank-jia-income-200000", {
           workbench_relation_status: "linked",
-          workbench_relation_case_ids: ["turnover:rel-jiaxiaohua"],
-          workbench_relation_mode: "turnover_manual_closure",
+          workbench_relation_case_ids: ["case-workbench-cash-1"],
+          workbench_relation_mode: "manual_confirmed",
           workbench_relation_source: "manual",
           workbench_relation_row_ids: ["bank-jia-income-200000", "bank-jia-expense-300000"],
+          cash_closure_linked: true,
+          cash_closure_case_id: "case-workbench-cash-1",
+          cash_closure_source: "workbench_relation",
+          cash_closure_relation_id: "",
         }),
         groupedPayload("all"),
       ],
@@ -1589,7 +1609,7 @@ describe("Turnover ledger page", () => {
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-jia-income-200000" }));
 
     expect(within(page).getByText("已选 1 笔")).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "确认闭环" })).toBeDisabled();
+    expect(within(page).queryByRole("button", { name: "确认闭环" })).not.toBeInTheDocument();
     const withdrawButton = within(page).getByRole("button", { name: "撤回闭环" });
     expect(withdrawButton).toBeEnabled();
     await user.click(withdrawButton);
@@ -1597,7 +1617,8 @@ describe("Turnover ledger page", () => {
     await waitFor(() => {
       const withdrawRequest = fetchMock.mock.calls.find(([input, init]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/turnover-ledger/relations/rel-jiaxiaohua/withdraw" && init?.method === "POST";
+        return url.pathname === "/api/turnover-ledger/closures/withdraw" && init?.method === "POST"
+          && JSON.parse(String(init?.body)).cash_closure_case_id === "case-workbench-cash-1";
       });
       expect(withdrawRequest).toBeDefined();
     });
@@ -1620,12 +1641,12 @@ describe("Turnover ledger page", () => {
     });
     await waitFor(() => {
       expectCustomEventDetailContaining(turnoverListener, {
-        relationId: "rel-jiaxiaohua",
-        action: "manual_closure_withdraw",
+        relationId: "case-workbench-cash-1",
+        action: "cash_closure_withdraw",
       });
       expectCustomEventDetailContaining(workbenchListener, {
-        relationId: "turnover:rel-jiaxiaohua",
-        action: "turnover_manual_closure_withdraw",
+        relationId: "case-workbench-cash-1",
+        action: "cash_closure_withdraw",
       });
     });
     window.removeEventListener("turnoverRelationUpdated", turnoverListener);
@@ -1642,6 +1663,7 @@ describe("Turnover ledger page", () => {
           workbench_relation_mode: "manual_confirmed",
           workbench_relation_source: "manual",
           workbench_relation_row_ids: ["oa-company-1", "bank-company-expense-1000"],
+          linked_oa: true,
         }),
       ],
     });
@@ -1654,7 +1676,7 @@ describe("Turnover ledger page", () => {
 
     const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-company-1-/);
     expect(within(flowRows[0]).getByText("已关联 OA")).toBeInTheDocument();
-    expect(within(flowRows[0]).getByText("未闭环")).toBeInTheDocument();
+    expect(within(flowRows[0]).queryByText("未闭环")).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "撤回闭环" })).not.toBeInTheDocument();
 
     await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
@@ -1820,6 +1842,10 @@ describe("Turnover ledger page", () => {
           workbench_relation_mode: "turnover_manual_closure",
           workbench_relation_source: "manual",
           workbench_relation_row_ids: ["bank-jia-income-200000", "bank-jia-expense-300000"],
+          cash_closure_linked: true,
+          cash_closure_case_id: "turnover:rel-jiaxiaohua",
+          cash_closure_source: "turnover_ledger",
+          cash_closure_relation_id: "rel-jiaxiaohua",
         }),
       ],
     });
@@ -1829,14 +1855,15 @@ describe("Turnover ledger page", () => {
     const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
     const groupCell = within(table).getByTestId("turnover-group-cell-counterparty:personal:jiaxiaohua");
 
-    expect(within(groupCell).getByText("部分已闭环 1/3")).toBeInTheDocument();
+    expect(within(groupCell).getByText("收支闭环")).toBeInTheDocument();
+    expect(within(groupCell).queryByText(/部分已闭环/)).not.toBeInTheDocument();
     expect(within(groupCell).queryByText("部分已关联 1/3")).not.toBeInTheDocument();
     await user.click(within(groupCell).getByRole("button", { name: "展开 贾小花 流水明细" }));
 
     const flowRows = within(table).getAllByTestId(/^turnover-flow-row-rel-jiaxiaohua-/);
-    expect(within(flowRows[0]).getByText("已闭环")).toBeInTheDocument();
-    expect(within(flowRows[1]).getByText("未闭环")).toBeInTheDocument();
-    expect(within(flowRows[2]).getByText("未闭环")).toBeInTheDocument();
+    expect(within(flowRows[0]).getByText("收支闭环")).toBeInTheDocument();
+    expect(within(flowRows[1]).queryByText("未闭环")).not.toBeInTheDocument();
+    expect(within(flowRows[2]).queryByText("未闭环")).not.toBeInTheDocument();
     expect(within(flowRows[0]).queryByText("关联台手工闭环")).not.toBeInTheDocument();
   });
 

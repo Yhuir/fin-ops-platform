@@ -25,6 +25,7 @@ import type {
   TurnoverLedgerTagSelection,
   TurnoverRelationDetail,
   TurnoverRelationMutationResponse,
+  WithdrawTurnoverClosureRequest,
   WithdrawTurnoverRelationRequest,
 } from "./types";
 import { apiFetch, apiRequestJson } from "../apiClient";
@@ -146,6 +147,12 @@ type ApiTurnoverLedgerGroupedRow = {
   workbench_relation_mode?: string | null;
   workbench_relation_source?: string | null;
   workbench_relation_row_ids?: string[];
+  linked_oa?: boolean | null;
+  linked_invoice?: boolean | null;
+  cash_closure_linked?: boolean | null;
+  cash_closure_case_id?: string | null;
+  cash_closure_source?: string | null;
+  cash_closure_relation_id?: string | null;
 };
 
 type ApiTurnoverLedgerTagDefinition = {
@@ -631,6 +638,12 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     workbenchRelationMode: text(row.workbench_relation_mode),
     workbenchRelationSource: text(row.workbench_relation_source),
     workbenchRelationRowIds: stringList(row.workbench_relation_row_ids),
+    linkedOa: Boolean(row.linked_oa),
+    linkedInvoice: Boolean(row.linked_invoice),
+    cashClosureLinked: Boolean(row.cash_closure_linked),
+    cashClosureCaseId: text(row.cash_closure_case_id),
+    cashClosureSource: text(row.cash_closure_source),
+    cashClosureRelationId: text(row.cash_closure_relation_id),
   };
 }
 
@@ -1088,6 +1101,28 @@ export async function withdrawTurnoverRelation({
         "Content-Type": "application/json",
       },
       body: JSON.stringify(note ? { note } : {}),
+      signal,
+    },
+  );
+  return mapMutation(payload);
+}
+
+export async function withdrawTurnoverClosure({
+  cashClosureCaseId,
+  note,
+  signal,
+}: WithdrawTurnoverClosureRequest): Promise<TurnoverRelationMutationResponse> {
+  const payload = await requestJson<ApiTurnoverRelationMutationResponse>(
+    "/api/turnover-ledger/closures/withdraw",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        cash_closure_case_id: cashClosureCaseId,
+        ...(note ? { note } : {}),
+      }),
       signal,
     },
   );

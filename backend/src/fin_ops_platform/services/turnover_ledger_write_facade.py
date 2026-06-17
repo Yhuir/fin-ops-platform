@@ -459,6 +459,88 @@ class TurnoverLedgerWriteFacade:
 
         return self._uow.run(command, handler)
 
+    def withdraw_cash_closure_case(
+        self,
+        *,
+        cash_closure_case_id: str,
+        actor_id: str,
+        tenant_id: str,
+        note: str | None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        normalized_case_id = str(cash_closure_case_id or "").strip()
+        normalized_idempotency_key = str(idempotency_key or "").strip()
+        action_name = "turnover_cash_closure_withdraw" if normalized_idempotency_key else "cash_closure_withdraw"
+        command_payload = {
+            "cash_closure_case_id": normalized_case_id,
+            "note": note,
+        }
+        request_fingerprint = ""
+        if normalized_idempotency_key:
+            request_fingerprint = workbench_request_fingerprint(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action_name=action_name,
+                payload=dict(command_payload),
+            )
+        refresh_scope_keys = ["all"]
+        command = TurnoverLedgerWriteCommand(
+            action_name=action_name,
+            scope_keys=["all"],
+            refresh_requests=[
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": ["all"],
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "workbench",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+                {
+                    "scope_type": "search",
+                    "scope_keys": refresh_scope_keys,
+                    "reason": "turnover_relation_changed",
+                },
+            ],
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            idempotency_key=normalized_idempotency_key,
+            request_fingerprint=request_fingerprint,
+            payload=command_payload,
+        )
+
+        def handler(context: Any) -> dict[str, object]:
+            workbench_pair_port = getattr(context, "workbench_pair_port", None)
+            withdraw_pair = getattr(workbench_pair_port, "withdraw_cash_closure_case", None)
+            if not callable(withdraw_pair):
+                raise RuntimeError("turnover cash closure withdraw requires workbench pair port.")
+            pair_relation = withdraw_pair(
+                case_id=normalized_case_id,
+                actor_id=actor_id,
+                note=note,
+                transaction=context.transaction,
+            )
+            return {
+                "relation_id": "",
+                "status": "withdrawn",
+                "workbench_pair_relation": dict(pair_relation or {}),
+                "affected_months": list((pair_relation or {}).get("affected_months") or []),
+            }
+
+        return self._uow.run(command, handler)
+
     def update_tag_selection(
         self,
         *,

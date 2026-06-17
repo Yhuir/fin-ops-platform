@@ -128,7 +128,7 @@
 
 当前 Browser e2e：
 
-- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前触发 `turnover_ledger:all` fresh gate 与 grouped reload/rebind，写成功后等待后端 `turnover_ledger` / `workbench_relation` / `workbench` operation barrier，再从已闭环 flow row toolbar 撤回并验证 grouped payload 恢复未闭环。
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前触发 `turnover_ledger:all` fresh gate 与 grouped reload/rebind，写成功后等待后端 `turnover_ledger` / `workbench_relation` / `workbench` operation barrier，再从“收支闭环” flow row toolbar 撤回并验证 grouped payload 移除闭环 chip。
 
 ## 模块细化：no-oa-bank-batches
 

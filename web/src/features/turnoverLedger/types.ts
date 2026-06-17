@@ -149,6 +149,12 @@ export type TurnoverLedgerGroupedRow = {
   workbenchRelationMode: string;
   workbenchRelationSource: string;
   workbenchRelationRowIds: string[];
+  linkedOa: boolean;
+  linkedInvoice: boolean;
+  cashClosureLinked: boolean;
+  cashClosureCaseId: string;
+  cashClosureSource: string;
+  cashClosureRelationId: string;
   counterpartyName?: string;
   familyLabel?: string;
 };
@@ -351,6 +357,12 @@ export type ConfirmTurnoverClosureRequest = ConfirmTurnoverRelationRequest & {
 
 export type WithdrawTurnoverRelationRequest = {
   relationId: string;
+  note?: string;
+  signal?: AbortSignal;
+};
+
+export type WithdrawTurnoverClosureRequest = {
+  cashClosureCaseId: string;
   note?: string;
   signal?: AbortSignal;
 };

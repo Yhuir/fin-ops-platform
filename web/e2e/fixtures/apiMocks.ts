@@ -2461,6 +2461,10 @@ function turnoverSummaryRow(relationClosed: boolean) {
     workbench_relation_mode: relationClosed ? "turnover_manual_closure" : "",
     workbench_relation_source: relationClosed ? "manual" : "",
     workbench_relation_row_ids: relationClosed ? [turnoverBankRows.expense, turnoverBankRows.income] : [],
+    cash_closure_linked: relationClosed,
+    cash_closure_case_id: relationClosed ? "turnover:turnover_rel_e2e_closure" : "",
+    cash_closure_source: relationClosed ? "turnover_ledger" : "",
+    cash_closure_relation_id: relationClosed ? "turnover_rel_e2e_closure" : "",
   };
 }
 
@@ -2517,6 +2521,10 @@ function turnoverFlowRow(
     workbench_relation_mode: relationClosed ? "turnover_manual_closure" : "",
     workbench_relation_source: relationClosed ? "manual" : "",
     workbench_relation_row_ids: relationClosed ? [turnoverBankRows.expense, turnoverBankRows.income] : [],
+    cash_closure_linked: relationClosed,
+    cash_closure_case_id: relationClosed ? "turnover:turnover_rel_e2e_closure" : "",
+    cash_closure_source: relationClosed ? "turnover_ledger" : "",
+    cash_closure_relation_id: relationClosed ? "turnover_rel_e2e_closure" : "",
   };
 }
 

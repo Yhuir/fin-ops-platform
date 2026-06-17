@@ -13,6 +13,7 @@ import {
   saveTurnoverLedgerTagSelection,
   saveTurnoverBankRowTags,
   saveTurnoverRelationExtra,
+  withdrawTurnoverClosure,
   withdrawTurnoverRelation,
 } from "../features/turnoverLedger/api";
 
@@ -372,6 +373,49 @@ describe("turnover ledger API", () => {
     });
   });
 
+  test("withdraws a workbench-origin turnover cash closure through the closure endpoint", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      expect(url.pathname).toBe("/api/turnover-ledger/closures/withdraw");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        cash_closure_case_id: "case-workbench-cash-1",
+        note: "撤回关联台闭环",
+      });
+      return Response.json({
+        status: "withdrawn",
+        workbench_pair_relation: {
+          case_id: "case-workbench-cash-1",
+          relation_mode: "manual_confirmed",
+        },
+        affected_months: ["2026-05"],
+        freshness_targets: [
+          { read_model_key: "turnover_ledger", scope_key: "all" },
+          { read_model_key: "workbench_relation", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "2026-05" },
+          { read_model_key: "workbench", scope_key: "all" },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(withdrawTurnoverClosure({
+      cashClosureCaseId: "case-workbench-cash-1",
+      note: "撤回关联台闭环",
+    })).resolves.toMatchObject({
+      status: "withdrawn",
+      affectedMonths: ["2026-05"],
+      workbenchPairRelationId: "case-workbench-cash-1",
+      workbenchRelationMode: "manual_confirmed",
+      freshnessTargets: [
+        { readModelKey: "turnover_ledger", scopeKey: "all" },
+        { readModelKey: "workbench_relation", scopeKey: "2026-05" },
+        { readModelKey: "workbench", scopeKey: "2026-05" },
+        { readModelKey: "workbench", scopeKey: "all" },
+      ],
+    });
+  });
+
   test("reports HTML API responses as a routing problem instead of a JSON parse error", async () => {
     vi.stubGlobal(
       "fetch",
@@ -528,6 +572,12 @@ describe("turnover ledger API", () => {
                   workbench_relation_mode: "turnover_manual_closure",
                   workbench_relation_source: "manual",
                   workbench_relation_row_ids: ["bank_001", "bank_002", "bank_003"],
+                  linked_oa: true,
+                  linked_invoice: true,
+                  cash_closure_linked: true,
+                  cash_closure_case_id: "case-turnover-001",
+                  cash_closure_source: "workbench_relation",
+                  cash_closure_relation_id: "",
                 },
               ],
               allocation_lots: [
@@ -687,6 +737,12 @@ describe("turnover ledger API", () => {
       workbenchRelationMode: "turnover_manual_closure",
       workbenchRelationSource: "manual",
       workbenchRelationRowIds: ["bank_001", "bank_002", "bank_003"],
+      linkedOa: true,
+      linkedInvoice: true,
+      cashClosureLinked: true,
+      cashClosureCaseId: "case-turnover-001",
+      cashClosureSource: "workbench_relation",
+      cashClosureRelationId: "",
     });
     expect(ledger.groups[0].allocationLots).toHaveLength(1);
     expect(ledger.groups[0].allocationLots[0]).toMatchObject({
