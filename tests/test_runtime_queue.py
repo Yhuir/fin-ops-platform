@@ -1238,6 +1238,42 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("status in ('pending', 'processing')", normalized_sql)
         self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04"))
 
+    def test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope(self) -> None:
+        class DirectFetchConnection:
+            def __init__(self, row: dict[str, object] | None) -> None:
+                self.row = row
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+                self.calls.append((sql, params))
+                return self.row
+
+        stale_connection = DirectFetchConnection({"exists": 1})
+        stale_repository = RuntimeQueueRepository(stale_connection)
+
+        self.assertFalse(
+            stale_repository.read_model_refresh_is_fresh(
+                tenant_id="tenant-a",
+                scope_type="workbench",
+                scope_key="2026-04",
+            )
+        )
+
+        sql, params = stale_connection.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("from job.read_model_dirty_scopes", normalized_sql)
+        self.assertIn("status in ('pending', 'processing', 'failed')", normalized_sql)
+        self.assertEqual(params, ("tenant-a", "workbench", "2026-04"))
+
+        fresh_repository = RuntimeQueueRepository(DirectFetchConnection(None))
+        self.assertTrue(
+            fresh_repository.read_model_refresh_is_fresh(
+                tenant_id="tenant-a",
+                scope_type="workbench",
+                scope_key="2026-04",
+            )
+        )
+
     def test_resolve_dead_letter_event_marks_done_with_operator_resolution(self) -> None:
         transaction = FakeTransaction(rows=[{"id": "event-1"}])
         repository = RuntimeQueueRepository(FakeConnection(transaction))

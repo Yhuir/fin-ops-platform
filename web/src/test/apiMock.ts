@@ -18,6 +18,8 @@ type MockFetchHandler = (request: {
 
 type MockApiOptions = {
   workbenchErrorMonths?: string[];
+  workbenchRefreshStatus?: Record<string, unknown>;
+  workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costRefreshingMonths?: string[];
@@ -4440,6 +4442,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailPostSaveAccountRequestCount = 0;
   let bankDetailPostSaveTransactionRequestCount = 0;
   let workbenchWriteActionCount = 0;
+  let workbenchRefreshStatusIndex = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
   const ignoredRowStore = createIgnoredRowStore();
   const taxOffsetStateStore = createTaxOffsetStateStore();
@@ -4674,6 +4677,26 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           groups: groups.slice(offset, offset + pageSize),
           read_model_status: "fresh",
         },
+      };
+    },
+    "/api/workbench/refresh-status": ({ url }) => {
+      const month = url.searchParams.get("month") ?? "all";
+      const statusSequence = options.workbenchRefreshStatusSequence ?? [];
+      if (statusSequence.length > 0) {
+        const status = statusSequence[Math.min(workbenchRefreshStatusIndex, statusSequence.length - 1)];
+        workbenchRefreshStatusIndex += 1;
+        return { body: cloneJson(status) };
+      }
+      return {
+        body: options.workbenchRefreshStatus
+          ? cloneJson(options.workbenchRefreshStatus)
+          : {
+              scope_key: month,
+              read_model_status: "fresh",
+              generated_at: "2026-05-22T09:30:00+08:00",
+              dirty_scopes: [],
+              retryable: false,
+            },
       };
     },
     "/api/oa-sync/status": () => {

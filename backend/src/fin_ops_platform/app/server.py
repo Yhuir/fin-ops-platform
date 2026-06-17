@@ -3987,13 +3987,14 @@ class Application:
             for scope in dirty_scopes
             if isinstance(scope, dict)
         }
+        has_active_dirty_scope = bool(dirty_statuses.intersection({"pending", "processing", "queued", "running"}))
         raw_status = str(payload.get("read_model_status") or payload.get("status") or fallback_status).strip().lower()
-        if dirty_statuses.intersection({"failed", "dead_lettered"}):
+        if has_active_dirty_scope:
+            read_model_status = "refreshing"
+        elif dirty_statuses.intersection({"failed", "dead_lettered"}):
             read_model_status = "failed"
         elif raw_status in {"failed", "error"}:
             read_model_status = "failed"
-        elif dirty_statuses.intersection({"pending", "processing", "queued", "running"}):
-            read_model_status = "refreshing"
         elif raw_status in {"refreshing", "rebuilding", "pending", "processing", "queued", "running"}:
             read_model_status = "refreshing"
         elif raw_status in {"stale", "dirty"}:
@@ -4013,6 +4014,8 @@ class Application:
                 ),
                 None,
             )
+        if read_model_status == "refreshing":
+            last_error = None
         read_model_version = (
             payload.get("active_generation_id")
             or payload.get("read_model_version")

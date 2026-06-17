@@ -40,6 +40,12 @@ class WorkbenchReadModelRefreshService:
                     "workbench_read_model_not_fresh: "
                     f"parent_scope_keys={','.join(active_parent_scope_keys)}"
                 )
+            stale_parent_scope_keys = self._stale_parent_scope_keys(event.tenant_id, parent_scope_keys)
+            if stale_parent_scope_keys:
+                raise RuntimeError(
+                    "workbench_read_model_not_fresh: "
+                    f"parent_scope_keys={','.join(stale_parent_scope_keys)}"
+                )
         if not aggregate_from_parent_shards and not self._event_source_version_is_current(
             event,
             scope_key=scope_key,
@@ -192,6 +198,16 @@ class WorkbenchReadModelRefreshService:
             if is_active(tenant_id=tenant_id, scope_type="workbench", scope_key=scope_key):
                 active_scope_keys.append(scope_key)
         return active_scope_keys
+
+    def _stale_parent_scope_keys(self, tenant_id: str, parent_scope_keys: list[Any]) -> list[str]:
+        is_fresh = getattr(self._queue_repository, "read_model_refresh_is_fresh", None)
+        if not callable(is_fresh):
+            return []
+        stale_scope_keys: list[str] = []
+        for scope_key in _normalized_parent_scope_keys(parent_scope_keys):
+            if not is_fresh(tenant_id=tenant_id, scope_type="workbench", scope_key=scope_key):
+                stale_scope_keys.append(scope_key)
+        return stale_scope_keys
 
 
 def _truthy(value: Any) -> bool:

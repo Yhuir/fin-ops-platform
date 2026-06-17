@@ -21,8 +21,8 @@
 | 场景 | 保护测试 | 说明 |
 | --- | --- | --- |
 | idle / busy / blocked health API | `tests/test_app_health_api.py`、`tests/test_app_health_service.py` | 覆盖 dirty OA scopes、workbench consistency failure、dependency error、background jobs、SSE |
-| App Status overview | `tests/test_app_status_overview_service.py`、`tests/test_background_job_service.py` | 覆盖 registry 一致性、background task、job accepted/progress visible payload、read model missing/failed、worker missing、runtime unavailable、current-effective blocker、历史 scope 诊断、API contract |
-| Runtime monitoring metrics | `tests/test_runtime_monitoring.py` | 覆盖 backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics、worker mismatch；App Status runtime repository 在 `tests/test_app_status_overview_service.py` 额外覆盖 legacy scope 与 covered outbox failure |
+| App Status overview | `tests/test_app_status_overview_service.py`、`tests/test_background_job_service.py` | 覆盖 registry 一致性、background task、job accepted/progress visible payload、read model missing/failed、worker missing、runtime unavailable、current-effective blocker、历史 scope 诊断、同 scope requeued failure -> refreshing、API contract |
+| Runtime monitoring metrics | `tests/test_runtime_monitoring.py` | 覆盖 backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics、worker mismatch；App Status runtime repository 在 `tests/test_app_status_overview_service.py` 额外覆盖 legacy scope、covered outbox failure 与 old failed + current processing 合并 |
 | Health payload size guard | `tests/test_app.py`、`tests/test_app_postgres_mode.py`、`tests/test_api_performance_metrics.py`、`tests/test_prometheus_metrics.py`、`tests/test_health_ready_payload_probe.py` | 覆盖 `/health/ready` 只输出 bounded 最慢 endpoint API performance 摘要和 compact runtime 摘要，不重复 `storage.runtime_infrastructure`、不输出完整 `entrypoints` / `worker_metrics` 明细；Prometheus `/metrics` 与 operations dashboard 仍保留完整 endpoint 明细；生产 probe 会在 readiness 慢、大、未截断、缺 bound metadata 或 HTML fallback 时失败，并从 readiness JSON 提取 `runtime_release_name` / `runtime_blockers`，同时不把 `dirty_scopes.done`、legacy cost statistics historical scope 或 `current_effective=false` optional worker 等非当前事实误判为 blocker，也能从 compact `worker_status_counts` 提取 current-effective worker blocker。 |
 | HTTP SLO probe defaults | `tests/test_http_slo_probe.py` | 覆盖 17 个页面 shell、认证态首屏 API、真实首屏 page/page_size、read model freshness 失败判定、auth 缺失语义，以及 API probe 误打到 HTML 页面壳时必须失败。 |
 | SSE first-event smoke | `tests/test_sse_smoke_probe.py` | 覆盖 `/api/app-health/stream` 与 `/api/workbench/events?month=all` 的 event-stream 首事件 SLO、auth 缺失、HTML fallback、错误状态码和事件名校验。 |
@@ -47,13 +47,18 @@
 
 ## 历史 bug 回归库
 
-当前未在本模块发现需要新增到 `docs/dev/regression-bug-bank.md` 的已复现 bug。本轮把“malformed payload 不得默认 green”“runtime unavailable 不得空 green”“dashboard refresh 失败保留旧 payload 但标 warning”“HTTP SLO probe 不得用偏小 page_size 低估真实首屏”“P2/P3 SLO 工具缺 DB URL 或 scenario 输入时不得 traceback”“P2/P3 final gate 不得用空 runtime facts 或 HTTP/SSE/read-model/write-audit/write-E2E 零样本通过最终闭环”作为已有回归保护记录。
+| 日期 | Bug / 风险 | 回归测试 | 状态 |
+| --- | --- | --- | --- |
+| 2026-06-18 | 同一 `cost_statistics active:2026-03` scope 旧 `failed deadlock detected` 已被新 `processing` 重试覆盖，但 App Health 仍显示当前失败，误导用户认为数据域阻断。 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_treats_requeued_cost_statistics_deadlock_as_refreshing` | covered |
+
+本轮同时继续保留“malformed payload 不得默认 green”“runtime unavailable 不得空 green”“dashboard refresh 失败保留旧 payload 但标 warning”“HTTP SLO probe 不得用偏小 page_size 低估真实首屏”“P2/P3 SLO 工具缺 DB URL 或 scenario 输入时不得 traceback”“P2/P3 final gate 不得用空 runtime facts 或 HTTP/SSE/read-model/write-audit/write-E2E 零样本通过最终闭环”等已有回归保护。
 
 ## 关键 smoke flows
 
 - dirty scope/outbox pending -> `/api/app-health` busy/yellow -> App Status popover 显示受影响 domain。
 - 真实 Chromium 打开 `/operations/app-health`：admin 渲染 dashboard 数据/请求区；read_export_only、forbidden、expired 不请求 dashboard API。
 - critical read model failed/unavailable -> App Status blocked/red -> 页面不能把旧数据当 fresh，但普通 read model failure 不应让 `overall.write_safety.blocks_mutations=true`。
+- 同一 current-effective scope 旧 failed + 当前 pending/processing -> App Status 显示 refreshing，不把旧 last_error 当作当前 failure banner。
 - legacy cost statistics scope 或已被后续真实完成事实覆盖的 outbox failure -> App Status 保持当前 canonical 状态，同时通过历史诊断暴露 repair/audit 信息。
 - required worker missing/stale/mismatch -> runtime infrastructure warning -> App Health dashboard 和 App Status domain 可定位。
 - import/data reset/background job running -> active background task -> App Status 显示任务进度和 affected domains；`BackgroundJobServiceTests.test_job_acceptance_and_progress_visibility_contract` 锁定 job accepted 后 queued payload 立即可见、progress 更新后 active payload 同步变化。

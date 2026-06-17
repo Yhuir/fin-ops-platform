@@ -203,17 +203,12 @@ class RuntimeMonitoringRepository:
                 continue
             current = grouped.setdefault(read_model_key, {"status": "missing", "count": 0, "details": [], "scopes": []})
             current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
-            current["status"] = _max_app_status(
-                str(current.get("status") or "missing"),
-                scope_status,
-            )
-            if last_error:
-                current["last_error"] = last_error
             if updated_at:
                 current["updated_at"] = updated_at
             scopes = current.setdefault("scopes", [])
             if isinstance(scopes, list):
-                scopes.append(
+                _upsert_app_status_read_model_scope(
+                    scopes,
                     _app_status_read_model_scope_payload(
                         read_model_key=read_model_key,
                         scope_type=scope_type,
@@ -221,8 +216,14 @@ class RuntimeMonitoringRepository:
                         status=scope_status,
                         last_error=last_error,
                         updated_at=updated_at,
-                    )
+                    ),
                 )
+                current["status"] = _app_status_status_from_scopes(scopes, fallback=str(current.get("status") or "missing"))
+                current_error = _app_status_last_error_from_scopes(scopes)
+                if current_error:
+                    current["last_error"] = current_error
+                elif str(current.get("status") or "").strip().lower() not in {"failed", "unavailable"}:
+                    current.pop("last_error", None)
         for key, definition in APP_STATUS_READ_MODEL_REGISTRY.items():
             grouped.setdefault(
                 key,
@@ -1708,6 +1709,72 @@ def _app_status_read_model_scope_payload(
         "last_error": str(last_error or "").strip(),
         "updated_at": str(updated_at or "").strip(),
     }
+
+
+def _upsert_app_status_read_model_scope(scopes: list[dict[str, Any]], payload: dict[str, Any]) -> None:
+    scope_identity = (
+        str(payload.get("read_model_key") or "").strip(),
+        str(payload.get("scope_type") or "").strip(),
+        str(payload.get("scope_key") or "").strip(),
+    )
+    for existing in scopes:
+        existing_identity = (
+            str(existing.get("read_model_key") or "").strip(),
+            str(existing.get("scope_type") or "").strip(),
+            str(existing.get("scope_key") or "").strip(),
+        )
+        if existing_identity != scope_identity:
+            continue
+        merged_status = _merge_app_status_read_model_scope_status(
+            str(existing.get("status") or ""),
+            str(payload.get("status") or ""),
+        )
+        existing["status"] = merged_status
+        existing["updated_at"] = _latest_text(existing.get("updated_at"), payload.get("updated_at"))
+        if merged_status == "refreshing":
+            existing["last_error"] = ""
+        elif payload.get("last_error"):
+            existing["last_error"] = str(payload.get("last_error") or "").strip()
+        return
+    scopes.append(payload)
+
+
+def _merge_app_status_read_model_scope_status(left: str, right: str) -> str:
+    normalized_left = str(left or "").strip().lower()
+    normalized_right = str(right or "").strip().lower()
+    if "refreshing" in {normalized_left, normalized_right}:
+        return "refreshing"
+    return _max_app_status(normalized_left or "missing", normalized_right or "missing")
+
+
+def _app_status_status_from_scopes(scopes: list[dict[str, Any]], *, fallback: str) -> str:
+    status = str(fallback or "missing").strip().lower() or "missing"
+    if not scopes:
+        return status
+    status = "ready"
+    for scope in scopes:
+        status = _max_app_status(status, str(scope.get("status") or "missing").strip().lower() or "missing")
+    return status
+
+
+def _app_status_last_error_from_scopes(scopes: list[dict[str, Any]]) -> str:
+    for scope in scopes:
+        if str(scope.get("status") or "").strip().lower() not in {"failed", "unavailable"}:
+            continue
+        error = str(scope.get("last_error") or "").strip()
+        if error:
+            return error
+    return ""
+
+
+def _latest_text(left: object, right: object) -> str:
+    left_text = str(left or "").strip()
+    right_text = str(right or "").strip()
+    if not left_text:
+        return right_text
+    if not right_text:
+        return left_text
+    return right_text if right_text > left_text else left_text
 
 
 def _app_status_historical_read_model_scope_payload(

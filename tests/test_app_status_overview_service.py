@@ -694,6 +694,91 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
             ],
         )
 
+    def test_runtime_repository_treats_requeued_cost_statistics_deadlock_as_refreshing(self) -> None:
+        class RequeuedDeadlockConnection(FakeRuntimeConnection):
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    return []
+                if "from read_model.app_status_readiness" in normalized:
+                    return [
+                        {
+                            "read_model_key": "cost_statistics",
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:all",
+                            "status": "fresh",
+                            "schema_version": "cost-v1",
+                            "source_versions": {"workbench": 10},
+                            "row_count": 42,
+                            "generated_at": "2026-06-04T10:03:00+00:00",
+                            "updated_at": "2026-06-04T10:03:00+00:00",
+                            "last_error": None,
+                        },
+                    ]
+                if "from job.read_model_dirty_scopes" in normalized:
+                    return [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:2026-03",
+                            "status": "failed",
+                            "count": 1,
+                            "last_error": "deadlock detected DETAIL: process waits for lock",
+                            "updated_at": "2026-06-04T10:05:00+00:00",
+                        },
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_key": "active:2026-03",
+                            "status": "processing",
+                            "count": 1,
+                            "last_error": None,
+                            "updated_at": "2026-06-04T10:06:00+00:00",
+                        },
+                    ]
+                if "from job.runtime_worker_heartbeats" in normalized and "coalesce(payload->>'worker_instance'" in normalized:
+                    return [
+                        {
+                            "worker_id": "cost-tax-1",
+                            "worker_instance": "cost-tax",
+                            "worker_kind": "cost-tax-read-model",
+                            "status": "running",
+                            "heartbeat_lag_seconds": 8,
+                            "payload": {
+                                "worker_instance": "cost-tax",
+                                "configured_event_types": [
+                                    "cost_statistics.read_model.refresh",
+                                    "tax_offset.read_model.refresh",
+                                ],
+                            },
+                        },
+                    ]
+                raise AssertionError(sql)
+
+        snapshot = RuntimeMonitoringRepository(RequeuedDeadlockConnection()).app_status_runtime_snapshot()
+        cost_status = snapshot["read_model_statuses"]["cost_statistics"]
+
+        self.assertEqual(cost_status["status"], "refreshing")
+        self.assertEqual(
+            cost_status["scopes"],
+            [
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "status": "fresh",
+                    "last_error": "",
+                    "updated_at": "2026-06-04T10:03:00+00:00",
+                },
+                {
+                    "read_model_key": "cost_statistics",
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-03",
+                    "status": "refreshing",
+                    "last_error": "",
+                    "updated_at": "2026-06-04T10:06:00+00:00",
+                },
+            ],
+        )
+
     def test_runtime_repository_treats_legacy_cost_statistics_scopes_as_historical(self) -> None:
         class LegacyCostScopeConnection(FakeRuntimeConnection):
             def fetch_all(self, sql: str, params: tuple[object, ...] = ()):

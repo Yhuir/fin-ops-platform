@@ -1729,6 +1729,27 @@ class RuntimeQueueRepository:
         )
         return row is not None
 
+    def read_model_refresh_is_fresh(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_key: str,
+    ) -> bool:
+        row = self._connection.fetch_one(
+            """
+            select 1
+            from job.read_model_dirty_scopes
+            where tenant_id = %s
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing', 'failed')
+            limit 1
+            """,
+            (tenant_id, scope_type, scope_key),
+        )
+        return row is None
+
     def record_worker_heartbeat(
         self,
         worker_id: str,

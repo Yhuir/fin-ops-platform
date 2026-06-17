@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-06-18 - App Status requeued failure current-effective merge
+
+- 目标：修复同一 read model scope 旧 `failed` 记录被新 `pending/processing` 重试覆盖后，App Health 仍把旧错误显示为当前失败的问题；本次现场表现为 `cost_statistics active:2026-03` 重新 processing 时仍显示 `deadlock detected`。
+- 影响范围：`RuntimeMonitoringRepository.app_status_runtime_snapshot()` 的 read model scope merge、App Health / App Status current-effective 状态展示；不改变 readiness、dirty scope 或 runtime queue 事实源。
+- 关键决策：同一 `(read_model_key, scope_type, scope_key)` 的 readiness/dirty scope 先合并再推导当前状态。只要同一 scope 有当前 `pending/processing`，当前状态显示 `refreshing` 并清空 current `last_error`；旧 `failed` 只保留为历史诊断，不再阻断当前页面状态。
+- 文档影响：更新本模块 `state-machine.md`、`tests.md` 和本实施记录。
+- 测试覆盖：新增 `tests.test_app_status_overview_service.AppStatusRuntimeRepositoryTests.test_runtime_repository_treats_requeued_cost_statistics_deadlock_as_refreshing`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_app_status_overview_service -v`。
+- 未测风险：本地 fake runtime connection 覆盖语义；真实生产 App Health 需要发布后通过 `/api/app-health` 或 popover smoke 确认旧 failed + 当前 processing 不再显示为当前失败。
+
 ## 2026-06-16 - Health readiness current-effective blocker gate
 
 - 目标：让 `/health/ready` 的 runtime blocker 口径与 App Status current-effective 口径一致，避免历史 `cost_statistics` 裸 `all` / `YYYY-MM` scope 和非 current-effective optional worker heartbeat 持续污染 readiness gate。

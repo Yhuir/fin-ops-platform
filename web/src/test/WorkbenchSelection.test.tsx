@@ -2300,6 +2300,35 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByText("工作台数据加载失败，请稍后重试。")).not.toBeInTheDocument();
   });
 
+  test("requeued workbench refresh failure does not show the stale failure banner", async () => {
+    installMockApiFetch({
+      workbenchRefreshStatus: {
+        scope_key: "all",
+        read_model_status: "refreshing",
+        dirty_scopes: [
+          {
+            scope_key: "2026-03",
+            status: "failed",
+            last_error: "workbench_all_scope_parent_inconsistent: active_relation_open_membership count=4",
+          },
+          {
+            scope_key: "2026-03",
+            status: "processing",
+          },
+        ],
+        last_error: null,
+        retryable: false,
+      },
+    });
+    renderWorkbenchPage();
+
+    expect(await screen.findByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/关联台刷新失败/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/workbench_all_scope_parent_inconsistent/)).not.toBeInTheDocument();
+    });
+  });
+
   test("expands one zone to the full workbench area and restores it", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
