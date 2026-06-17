@@ -191,9 +191,19 @@ class TurnoverRelationService:
     def rebuild_from_bank_rows(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         with self._lock:
             self._set_bank_rows(bank_rows)
+            manual_relations = [
+                deepcopy(relation)
+                for relation in self._relations
+                if relation.get("source") == "manual"
+                or relation.get("status") in {"confirmed", "withdrawn"}
+            ]
+            manual_active_row_ids = self._active_confirmed_row_ids(manual_relations)
             prepared_rows: list[_PreparedRow] = []
             conflict_rows: list[_PreparedRow] = []
             for row in list(bank_rows or []):
+                row_id = str(row.get("id") or row.get("transaction_id") or row.get("row_id") or "").strip()
+                if row_id and row_id in manual_active_row_ids:
+                    continue
                 prepared = self._prepare_row(row, allow_invalid_direction=True)
                 if prepared is None:
                     continue
@@ -207,13 +217,6 @@ class TurnoverRelationService:
                 for prepared in conflict_rows
             ]
             relations.extend(self._build_auto_relations(prepared_rows))
-            manual_relations = [
-                deepcopy(relation)
-                for relation in self._relations
-                if relation.get("source") == "manual"
-                or relation.get("status") in {"confirmed", "withdrawn"}
-            ]
-            manual_active_row_ids = self._active_confirmed_row_ids(manual_relations)
             if manual_active_row_ids:
                 relations = [
                     relation

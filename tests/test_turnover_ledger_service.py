@@ -558,6 +558,103 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["flow_rows"][0]["category_label"], "借出款")
         self.assertEqual(group["flow_rows"][0]["category_version"], 4)
 
+    def test_grouped_ledger_keeps_unselected_same_counterparty_flows_after_manual_closure(self) -> None:
+        transactions = [
+            self._transaction(
+                "txn-fang-closed-in",
+                direction=TransactionDirection.INFLOW,
+                amount="100000.00",
+                counterparty="房克丽",
+                trade_time="2026-02-03 08:24:01",
+                summary="电子汇入",
+                remark="暂借款",
+            ),
+            self._transaction(
+                "txn-fang-open-in",
+                direction=TransactionDirection.INFLOW,
+                amount="160000.00",
+                counterparty="房克丽",
+                trade_time="2026-02-03 08:27:06",
+                summary="电子汇入",
+                remark="暂借款",
+            ),
+            self._transaction(
+                "txn-fang-open-out",
+                direction=TransactionDirection.OUTFLOW,
+                amount="160000.00",
+                counterparty="房克丽",
+                trade_time="2026-03-09 12:04:27",
+                summary="电子转账",
+                remark="还暂借款",
+            ),
+            self._transaction(
+                "txn-fang-closed-out",
+                direction=TransactionDirection.OUTFLOW,
+                amount="100000.00",
+                counterparty="房克丽",
+                trade_time="2026-03-09 12:04:29",
+                summary="电子转账",
+                remark="还暂借款",
+            ),
+        ]
+        category_service = BankTransactionCategoryService.from_snapshot(
+            None,
+            transaction_exists=lambda transaction_id: transaction_id in {transaction.id for transaction in transactions},
+        )
+        category_service.apply_updates(
+            [
+                {
+                    "transaction_id": "txn-fang-closed-in",
+                    "category_code": "borrow_in_personal_pending_repayment",
+                    "expected_version": 0,
+                },
+                {
+                    "transaction_id": "txn-fang-open-in",
+                    "category_code": "borrow_in_personal_pending_repayment",
+                    "expected_version": 0,
+                },
+                {
+                    "transaction_id": "txn-fang-open-out",
+                    "category_code": "borrow_in_personal_repaid",
+                    "expected_version": 0,
+                },
+                {
+                    "transaction_id": "txn-fang-closed-out",
+                    "category_code": "borrow_in_personal_repaid",
+                    "expected_version": 0,
+                },
+            ],
+            actor="YNSYLP005",
+        )
+        relation_service = TurnoverRelationService.from_snapshot(None)
+        ledger_service = TurnoverLedgerService(
+            import_service=_ImportServiceStub(transactions),
+            category_service=category_service,
+            relation_service=relation_service,
+        )
+        ledger_service.list_grouped_ledger(family="personal")
+        relation_service.confirm_zero_difference_closure(
+            ["txn-fang-closed-in", "txn-fang-closed-out"],
+            actor="YNSYLP005",
+        )
+
+        payload = ledger_service.list_grouped_ledger(family="personal")
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        group = payload["groups"][0]
+        self.assertEqual(group["counterparty_name"], "房克丽")
+        self.assertEqual(
+            [row["source_bank_row_id"] for row in group["flow_rows"]],
+            [
+                "txn-fang-closed-in",
+                "txn-fang-open-in",
+                "txn-fang-open-out",
+                "txn-fang-closed-out",
+            ],
+        )
+        self.assertEqual(group["summary_row"]["borrow_amount"], "260000.00")
+        self.assertEqual(group["summary_row"]["repayment_amount"], "260000.00")
+
     def test_grouped_ledger_uses_manual_version_when_category_version_is_zero(self) -> None:
         transaction = self._transaction(
             "txn-zero-category-manual-version",

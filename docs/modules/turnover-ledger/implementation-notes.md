@@ -17,6 +17,12 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-17 - 手动闭环后保留同对方未选流水
+
+- 真实原因：`TurnoverRelationService.rebuild_from_bank_rows()` 先把同业务类型、同对方的所有流水建成一个自动 relation，再用已确认手动闭环 row ids 过滤自动 relation。只要自动 relation 和已闭环两笔有交集，整个同对方自动 relation 都被删除，导致房克丽名下其他未选流水从外部往来页消失。
+- 关键决策：已确认手动关系只排除它自己的 active row ids；自动 relation 重建输入必须先跳过这些 active row ids，剩余同对方流水继续参与自动分组。撤回后的 `withdrawn` relation 不算 active，相关流水可重新进入自动分组。
+- 回归保护：新增 `test_manual_closure_keeps_remaining_same_counterparty_rows_in_auto_relation` 和 `test_grouped_ledger_keeps_unselected_same_counterparty_flows_after_manual_closure`，覆盖“四笔同对方流水，闭环两笔后 grouped payload 仍保留四笔 flow rows”。
+
 ## 2026-06-17 - 写成功后 read model 同步误报失败修复
 
 - 真实原因：外部往来 manual closure 写入已经成功，但 API 返回的 hard `freshness_targets` 包含 `workbench:all`；生产 `workbench:all` 聚合处于 `workbench_all_scope_parent_inconsistent` blocked，前端把 post-write operation barrier blocked 冒泡给 `GlobalOperationOverlayProvider`，于是用户看到“操作失败”，但 canonical relation 和 Workbench active case 已经建立。

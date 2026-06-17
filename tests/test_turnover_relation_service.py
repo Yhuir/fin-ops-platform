@@ -127,6 +127,54 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(relations[0]["balance_amount"], "0.00")
         self.assertEqual(relations[0]["evidence"]["auto_confirm_reason"], "multiple_solutions")
 
+    def test_manual_closure_keeps_remaining_same_counterparty_rows_in_auto_relation(self) -> None:
+        rows = [
+            bank_row(
+                "txn-closed-in",
+                category_code="borrow_in_personal_pending_repayment",
+                counterparty_name="房克丽",
+                credit_amount="100000.00",
+                transaction_at="2026-02-03T08:24:01",
+            ),
+            bank_row(
+                "txn-open-in",
+                category_code="borrow_in_personal_pending_repayment",
+                counterparty_name="房克丽",
+                credit_amount="160000.00",
+                transaction_at="2026-02-03T08:27:06",
+            ),
+            bank_row(
+                "txn-closed-out",
+                category_code="borrow_in_personal_repaid",
+                counterparty_name="房克丽",
+                debit_amount="100000.00",
+                transaction_at="2026-03-09T12:04:29",
+            ),
+            bank_row(
+                "txn-open-out",
+                category_code="borrow_in_personal_repaid",
+                counterparty_name="房克丽",
+                debit_amount="160000.00",
+                transaction_at="2026-03-09T12:04:27",
+            ),
+        ]
+        service = TurnoverRelationService.from_snapshot(None, bank_rows=rows)
+        service.confirm_zero_difference_closure(["txn-closed-in", "txn-closed-out"], actor="YNSYLP005")
+
+        relations = service.rebuild_from_bank_rows(rows)
+        relation_ids = {frozenset(relation["bank_row_ids"]): relation for relation in relations}
+
+        self.assertIn(frozenset({"txn-closed-in", "txn-closed-out"}), relation_ids)
+        self.assertIn(frozenset({"txn-open-in", "txn-open-out"}), relation_ids)
+        self.assertEqual(
+            relation_ids[frozenset({"txn-closed-in", "txn-closed-out"})]["status"],
+            "confirmed",
+        )
+        self.assertEqual(
+            relation_ids[frozenset({"txn-open-in", "txn-open-out"})]["status"],
+            "deterministic",
+        )
+
     def test_category_family_mapping_covers_personal_company_bank_and_business(self) -> None:
         service = TurnoverRelationService.from_snapshot(None)
 
