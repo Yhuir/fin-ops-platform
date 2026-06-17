@@ -907,6 +907,46 @@ describe("Workbench row selection and detail modal", () => {
     ]);
   });
 
+  test("workbench action never waits on global relation scope when action response lacks precise targets", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      actionDelayMs: 20,
+      workbenchBackgroundLoadDelayMs: 3000,
+      transformWorkbenchConfirmActionResponse: (body) => ({
+        ...body,
+        affected_months: ["all"],
+        affected_scope_keys: ["all"],
+        freshness_targets: [
+          { read_model_key: "workbench_relation", scope_key: "all" },
+        ],
+      }),
+    });
+    renderWorkbenchPage();
+
+    const openBankRow = await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    const openInvoiceRow = await screen.findByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+
+    await user.click(openBankRow);
+    await user.click(openInvoiceRow);
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
+
+    expect(await screen.findByRole("dialog", { name: "全局操作进度" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
+    });
+
+    const barrierCalls = fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"));
+    expect(barrierCalls).toHaveLength(0);
+    expect(screen.queryByText(/操作同步等待超时/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
+  });
+
   test("confirm link does not expose local optimistic row movement before the fresh refetch", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });

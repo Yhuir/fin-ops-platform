@@ -275,27 +275,24 @@ function actionAffectedMonths(result: {
 
 function actionFreshnessTargets(result: WorkbenchActionResult | null): OperationBarrierTarget[] {
   if (!result) {
-    return operationBarrierTargets("workbench_relation", [WORKBENCH_VIEW_MONTH]);
+    return [];
   }
   if (result.freshnessTargets.length > 0) {
-    return result.freshnessTargets;
+    return result.freshnessTargets.filter((target) => target.scopeKey !== "all");
   }
-  if (result.affectedScopeKeys.length > 0) {
+  const scopeKeys = result.affectedScopeKeys.length > 0
+    ? result.affectedScopeKeys
+    : actionAffectedMonths(result).filter((scopeKey) => scopeKey !== "all");
+  if (scopeKeys.length > 0) {
     if (hasOperationProjection(result.operationProjection)) {
-      return operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
+      return operationBarrierTargets("workbench_relation", scopeKeys);
     }
     return [
-      ...operationBarrierTargets("workbench_relation", result.affectedScopeKeys),
-      ...operationBarrierTargets("workbench", result.affectedScopeKeys),
+      ...operationBarrierTargets("workbench_relation", scopeKeys),
+      ...operationBarrierTargets("workbench", scopeKeys),
     ];
   }
-  if (hasOperationProjection(result.operationProjection)) {
-    return operationBarrierTargets("workbench_relation", actionAffectedMonths(result));
-  }
-  return [
-    ...operationBarrierTargets("workbench_relation", actionAffectedMonths(result)),
-    ...operationBarrierTargets("workbench", actionAffectedMonths(result)),
-  ].filter((target) => target.scopeKey !== "all");
+  return [];
 }
 
 function actionResultMessage(result: string | WorkbenchActionResult) {

@@ -2,6 +2,9 @@
 
 ## 现有可复用测试
 
+- `tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_confirm_link_targets_resolved_row_months_when_row_ids_do_not_encode_month`：confirm 写入使用 row 内容推导 affected month shards，覆盖 `txn_imported_*` 这类 row id 不含月份时不能退回空 scope / `all`。
+- `tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_targets_preview_row_months_when_relation_scope_is_all`：withdraw 对历史 `month_scope=all` 的 relation 使用 preview rows 推导 affected month shards，返回 operation-scoped freshness targets。
+- `web/src/test/WorkbenchSelection.test.tsx::workbench action never waits on global relation scope when action response lacks precise targets`：前端遇到旧/异常 action response 只带 `workbench_relation:all` 时不调用 operation barrier 等全局 relation scope，不再误报同步等待超时。
 - `tests/test_workbench_pair_relation_service.py`：领域规则、row 去重、row type 对齐、active overlap、cancel、withdraw 可恢复关系策略、ETC 删除不恢复旧二栏 relation。
 - `tests/test_workbench_relation_command_service.py`：command service confirm/cancel/withdraw 基座、withdraw preview lock、row-id batch cancel、metadata update、freshness precondition、idempotency、mode registry 和 active row conflict。
 - `tests/test_workbench_auth_context_idempotency.py`：workbench confirm/cancel/withdraw actor/tenant/idempotency、withdraw 写入委托 command service、withdraw route 复用 request-local OA session actor/tenant，以及 legacy candidate / reconciliation decision 纯候选 `split_candidate` suppress 边界。

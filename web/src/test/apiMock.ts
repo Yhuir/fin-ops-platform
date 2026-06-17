@@ -71,6 +71,8 @@ type MockApiOptions = {
   workbenchExceptionPreview?: Record<string, unknown>;
   workbenchExceptionApply?: Record<string, unknown>;
   workbenchConfirmPreview?: Record<string, unknown>;
+  transformWorkbenchConfirmActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
+  transformWorkbenchWithdrawActionResponse?: (body: Record<string, unknown>) => Record<string, unknown>;
   workbenchExceptionPreviewStatus?: number;
   workbenchExceptionApplyStatus?: number;
   workbenchExceptionPreviewDelayMs?: number;
@@ -6580,21 +6582,24 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           open_groups: [],
         },
       };
+      const body = {
+        success: true,
+        action: "confirm_link",
+        month,
+        affected_row_ids: rowIds,
+        case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
+        affected_months: Array.from(touchedMonths),
+        affected_scope_keys: Array.from(touchedMonths),
+        freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
+          { read_model_key: "workbench_relation", scope_key: scopeKey }
+        )),
+        operation_projection: operationProjection,
+        message: `已确认 ${rowIds.length} 条记录关联。`,
+      };
       return {
-        body: {
-          success: true,
-          action: "confirm_link",
-          month,
-          affected_row_ids: rowIds,
-          case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
-          affected_months: Array.from(touchedMonths),
-          affected_scope_keys: Array.from(touchedMonths),
-          freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
-            { read_model_key: "workbench_relation", scope_key: scopeKey }
-          )),
-          operation_projection: operationProjection,
-          message: `已确认 ${rowIds.length} 条记录关联。`,
-        },
+        body: options.transformWorkbenchConfirmActionResponse
+          ? options.transformWorkbenchConfirmActionResponse(cloneJson(body))
+          : body,
       };
     },
     "/api/workbench/actions/withdraw-link/preview": ({ jsonBody }) => {
@@ -6633,21 +6638,24 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ),
         },
       };
+      const body = {
+        success: true,
+        action: "withdraw_link",
+        month,
+        affected_row_ids: rowIds,
+        restored_relations: [],
+        changed_scopes: Array.from(touchedMonths),
+        affected_scope_keys: Array.from(touchedMonths),
+        freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
+          { read_model_key: "workbench_relation", scope_key: scopeKey }
+        )),
+        operation_projection: operationProjection,
+        message: "已撤回 1 组关联。",
+      };
       return {
-        body: {
-          success: true,
-          action: "withdraw_link",
-          month,
-          affected_row_ids: rowIds,
-          restored_relations: [],
-          changed_scopes: Array.from(touchedMonths),
-          affected_scope_keys: Array.from(touchedMonths),
-          freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
-            { read_model_key: "workbench_relation", scope_key: scopeKey }
-          )),
-          operation_projection: operationProjection,
-          message: "已撤回 1 组关联。",
-        },
+        body: options.transformWorkbenchWithdrawActionResponse
+          ? options.transformWorkbenchWithdrawActionResponse(cloneJson(body))
+          : body,
       };
     },
     "/api/workbench/exception/preview": ({ jsonBody }) => {

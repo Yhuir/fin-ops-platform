@@ -1,5 +1,21 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-17 - 写后等待禁止回退到 workbench_relation:all
+
+目标：修复关联台 confirm/withdraw 已经写入成功，但前端等待 `workbench_relation:all` 超时并显示“操作失败”的问题。
+
+结论：
+
+- `relation.month_scope="all"` 可以表示跨月关系或旧历史关系，但不能作为用户写操作后的阻塞 freshness target。
+- Workbench confirm/withdraw response 的 `affected_scope_keys` / `freshness_targets` 必须优先来自实际 row 内容推导的 affected month shards；`txn_imported_*` 等不含月份的 row id 不能导致 operation scope 为空。
+- `WorkbenchWriteFacade` 统一用 operation scope normalization 过滤 `all`，confirm 从 `selected_rows` + row id 双来源推导 scope，withdraw 在 preview/command 只给 `all` 或空 scope 时从 preview rows 补推 affected months。
+- 前端 `actionFreshnessTargets` 只等待精确 scope；旧后端或异常 response 只返回 `all`/空 scope 时，不再调用 operation barrier 等 `workbench_relation:all`，避免“业务成功但 UI 报失败”。
+
+验证：
+
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_auth_context_idempotency.py -q`
+- `npm --prefix web test -- --run src/test/WorkbenchSelection.test.tsx`
+
 ## 2026-06-14 - Relation mutation fan-out drives Workbench active generation
 
 目标：修复 canonical relation 已写入、`workbench_relation` 已 linked，但关联台仍读取旧 active generation 导致已确认银行流水和发票不在同一行的问题。

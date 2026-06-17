@@ -321,6 +321,8 @@ def _new_facade(
     relation_groups: object | None = None,
     withdraw_rows_and_after_relations: object | None = None,
     scope_keys_for_row_ids: object | None = None,
+    scope_keys_for_rows: object | None = None,
+    resolve_rows_for_amount_check: object | None = None,
 ) -> WorkbenchWriteFacade:
     pair_relation_service = _PairRelationService()
     return WorkbenchWriteFacade(
@@ -335,12 +337,12 @@ def _new_facade(
         can_confirm_link_row_types=lambda **_: True,
         expand_confirm_link_row_ids_for_existing_context=lambda row_ids, **_: list(row_ids),
         amount_check_for_row_ids=lambda *_, **__: {},
-        resolve_rows_for_amount_check=lambda row_ids, **_: [{"id": row_id} for row_id in row_ids],
+        resolve_rows_for_amount_check=resolve_rows_for_amount_check or (lambda row_ids, **_: [{"id": row_id} for row_id in row_ids]),
         merge_relation_snapshots=lambda before, synthetic: list(before) + list(synthetic),
         synthetic_existing_case_relations=lambda *_, **__: [],
         month_scope_for_selected_row_ids=lambda **_: "2026-05",
         scope_keys_for_row_ids=scope_keys_for_row_ids or (lambda **_: {"2026-05"}),
-        scope_keys_for_rows=lambda rows, **_: ["2026-05"],
+        scope_keys_for_rows=scope_keys_for_rows or (lambda rows, **_: ["2026-05"]),
         resolve_live_rows_direct=lambda *_, **__: list(live_rows or []),
         resolve_live_row=lambda row_id, **_: {"id": row_id},
         relation_groups=relation_groups or (lambda *_, **__: []),
@@ -444,6 +446,50 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             ],
         )
 
+    def test_confirm_link_targets_resolved_row_months_when_row_ids_do_not_encode_month(self) -> None:
+        uow = _RecordingUoW()
+        row_ids = ["oa-imported-2048", "txn_imported_1361", "txn_imported_1269"]
+        selected_rows = [
+            {"id": "oa-imported-2048", "type": "oa", "summary_fields": {"申请日期": "2026-03-09"}},
+            {"id": "txn_imported_1361", "type": "bank", "trade_time": "2026-03-09 12:06:30"},
+            {"id": "txn_imported_1269", "type": "bank", "trade_time": "2026-02-03 09:16:49"},
+        ]
+        facade = _new_facade(
+            confirm_uow=uow,
+            resolve_rows_for_amount_check=lambda *_args, **_kwargs: selected_rows,
+            scope_keys_for_row_ids=lambda **_: {"all"},
+            scope_keys_for_rows=lambda rows, **_: [
+                "all",
+                *[
+                    str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期"))[:7]
+                    for row in rows
+                    if str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期") or "")[:7]
+                ],
+            ],
+        )
+
+        result = facade.confirm_link(
+            {
+                "month": "all",
+                "row_ids": row_ids,
+                "idempotency_key": "confirm:resolved-row-months",
+            },
+            request_id="req-confirm-row-months",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
+        self.assertEqual(
+            result.payload["freshness_targets"],
+            [
+                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
+            ],
+        )
+
     def test_cancel_link_replay_and_run_commands_use_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
         facade = _new_facade(cancel_uow=uow)
@@ -514,6 +560,73 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             result.payload["freshness_targets"],
             [
                 {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
+            ],
+        )
+
+    def test_withdraw_link_targets_preview_row_months_when_relation_scope_is_all(self) -> None:
+        class _AllScopePreviewRelationCommandService(_RecordingRelationCommandService):
+            def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+                self.preview_withdraw_calls.append(dict(kwargs))
+                active_relation = {
+                    "case_id": "CASE-ALL",
+                    "row_ids": list(kwargs["row_ids"]),
+                    "row_types": ["oa", "bank", "bank"],
+                    "status": "active",
+                    "month_scope": "all",
+                    "version": 7,
+                }
+                return {
+                    "operation": "withdraw_link",
+                    "operation_type": "withdraw_relation",
+                    "preview_id": "withdraw_relation:CASE-ALL:7",
+                    "active_relation": active_relation,
+                    "before_relations": [active_relation],
+                    "after_relations": [],
+                    "submit_expected_versions": {"relation:CASE-ALL": 7},
+                    "read_model_scope_keys": ["all"],
+                }
+
+        uow = _RecordingUoW()
+        row_ids = ["oa-imported-2048", "txn_imported_1361", "txn_imported_1269"]
+        preview_rows = [
+            {"id": "oa-imported-2048", "type": "oa", "summary_fields": {"申请日期": "2026-03-09"}},
+            {"id": "txn_imported_1361", "type": "bank", "trade_time": "2026-03-09 12:06:30"},
+            {"id": "txn_imported_1269", "type": "bank", "trade_time": "2026-02-03 09:16:49"},
+        ]
+        facade = _new_facade(
+            withdraw_uow=uow,
+            relation_command_service=_AllScopePreviewRelationCommandService(),
+            scope_keys_for_row_ids=lambda **_: {"all"},
+            scope_keys_for_rows=lambda rows, **_: [
+                "all",
+                *[
+                    str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期"))[:7]
+                    for row in rows
+                    if str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期") or "")[:7]
+                ],
+            ],
+            withdraw_rows_and_after_relations=lambda **_: (preview_rows, [], row_ids),
+        )
+
+        result = facade.withdraw_link(
+            {
+                "month": "all",
+                "row_ids": row_ids,
+                "idempotency_key": "withdraw:resolved-row-months",
+            },
+            request_id="req-withdraw-row-months",
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
+        self.assertEqual(
+            result.payload["freshness_targets"],
+            [
+                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
+                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
             ],
         )
 
