@@ -271,6 +271,9 @@ def _standardize_bank_detail_row(row: dict[str, Any]) -> dict[str, Any]:
         "effective_turnover_role": text(row.get("effective_turnover_role")),
         "effective_turnover_action_type": text(row.get("effective_turnover_action_type")),
         "effective_turnover_family": text(row.get("effective_turnover_family")),
+        "category_version": row.get("category_version"),
+        "manual_category_version": row.get("manual_category_version"),
+        "version": row.get("version"),
     }
 
 
@@ -300,6 +303,9 @@ def _provider_compatible_category(row: dict[str, Any]) -> dict[str, Any]:
         "effective_turnover_role": text(row.get("effective_turnover_role")),
         "effective_turnover_action_type": text(row.get("effective_turnover_action_type")),
         "effective_turnover_family": text(row.get("effective_turnover_family")),
+        "category_version": row.get("category_version"),
+        "manual_category_version": row.get("manual_category_version"),
+        "version": row.get("version"),
     }
 
 

@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-17 - downstream tag facade 版本字段合同
+
+- 目标：修复外部往来款管理依赖 fresh `bank_detail` read model 重建时，确认闭环仍因为 expected/current version 不一致被拒绝的问题。
+- 影响范围：`BankTransactionTagReadFacade` 的 standardized rows 与 provider-compatible category payload；下游包括 `turnover_ledger` grouped projection 和写入前置版本校验。
+- 关键决策：`category_version`、`manual_category_version`、`version` 是 bank detail 对下游 read model 的发布合同，不是页面内部字段；facade 读取 fresh bank detail 后必须透传这些字段，不能只发布标签、方向和金额语义。
+- 文档影响：更新 bank-details 与 turnover-ledger 模块实施记录和测试矩阵；长期业务口径不变。
+- 测试覆盖：新增 `BankTransactionTagReadFacadeTests.test_bulk_get_for_rows_preserves_versions_for_downstream_preconditions`，并更新 `test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows`。
+- 验证命令：`PYTHONPATH=backend/src pytest -q tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests tests/test_turnover_ledger_read_model_refresh.py`。
+- 未测风险：真实生产确认闭环写入仍建议由业务人员在页面执行一次 smoke；本轮生产只做了非写入 precondition probe。
+
 ## 2026-06-15 - 自动标签规则恢复入口与历史外部往来语义补齐
 
 - 目标：阻断工作台大 settings 保存入口污染 `bank_transaction_tags`，并让银行明细自动标签文件恢复可以从 Excel 与 app 历史恢复规则、复用旧 code、补齐历史外部往来语义。

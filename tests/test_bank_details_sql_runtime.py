@@ -176,6 +176,9 @@ def bank_detail_projected_row(
             "effective_turnover_role": "expense",
             "effective_turnover_action_type": "purchase",
             "effective_turnover_family": "operating",
+            "category_version": 7,
+            "manual_category_version": 7,
+            "version": 11,
         },
         "raw_payload": {"normalized_payload": {}},
         "summary": "货款",
@@ -359,6 +362,30 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertEqual(row["effective_category_code"], "equipment_purchase")
         self.assertEqual(row["effective_category_label_path"], ["货款", "设备采购"])
         self.assertEqual(row["effective_turnover_action_type"], "purchase")
+        self.assertEqual(row["category_version"], 7)
+        self.assertEqual(row["manual_category_version"], 7)
+        self.assertEqual(row["version"], 11)
+
+    def test_bulk_get_for_rows_preserves_versions_for_downstream_preconditions(self) -> None:
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload={
+                "read_model_status": "fresh",
+                "rows": [bank_detail_projected_row("txn-001")["payload"]],
+                "source_versions": {"bank_detail": 9},
+                "read_model_scope_keys": ["2026-05"],
+                "missing_transaction_ids": [],
+            }
+        )
+        facade = BankTransactionTagReadFacade(read_model_repository=repository)
+
+        categories = facade.bulk_get_for_rows(
+            [{"id": "txn-001", "txn_date": "2026-05-03", "txn_direction": "outflow", "amount": "23053.31"}]
+        )
+
+        self.assertEqual(categories["txn-001"]["category_version"], 7)
+        self.assertEqual(categories["txn-001"]["manual_category_version"], 7)
+        self.assertEqual(categories["txn-001"]["version"], 11)
+        self.assertEqual(categories["txn-001"]["turnover_action_type"], "purchase")
 
     def test_get_by_transaction_ids_requires_fresh_before_returning_publishable_rows(self) -> None:
         queue = CaptureRuntimeQueueRepository()

@@ -17,6 +17,16 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-17 - bank detail tag facade 版本字段透传修复
+
+- 目标：修复生产发布 `44bcd1f7` 并重建 read model 后，外部往来款管理页选择 `txn_imported_1269` 与 `txn_imported_1361` 点击“确认闭环”仍报“银行流水状态已变化，请刷新后重试。”的问题。
+- 真实原因：生产 release 已经是新版本，`turnover_ledger:all` read model 也可以处于 fresh；失败不是旧部署或页面没有刷新。真正问题在跨 read-model 边界：`TurnoverLedgerSqlProjectionBuilder` 通过 `BankTransactionTagReadFacade.bulk_get_for_rows(...)` 读取 fresh `bank_detail` 标签事实时，facade 的 `_standardize_bank_detail_row` / `_provider_compatible_category` 丢弃了 `category_version`、`manual_category_version`、`version`。因此 turnover worker 从 fresh bank_detail 重建出的 grouped flow rows 仍带 `category_version=0`，前端按 fresh/rebind 规则提交 `expected_versions=0`，后端 precondition 再读当前 bank detail 版本 `1/2` 时正确拒绝为 stale。
+- 影响范围：`BankTransactionTagReadFacade` 到 `TurnoverLedgerSqlProjectionBuilder` 的 downstream tag provider contract；不改变手动闭环金额规则、Workbench relation 写入口、stale precondition 或 read model freshness gate。
+- 关键决策：bank detail tag facade 必须把版本字段作为 publishable downstream contract 透传；继续保留 `TurnoverLedgerBankRowStalePreconditionPort` 的严格版本校验，不用放宽并发保护掩盖投影字段错误。
+- 生产验证：在 active release 热修复 facade、重启 API 与 `fin-ops-worker@turnover-ledger`，重新入队 `turnover_ledger:all` 并等 dirty/outbox pending 清零；生产 read model 中刘涵静 `txn_imported_1269/1361` 版本从 `0` 变为 `1`，贾小花 `txn_imported_1277/1292/1344` 版本为 `2`；非写入 precondition probe 对 `txn_imported_1269/1361` 通过。
+- 测试覆盖：新增 `BankTransactionTagReadFacadeTests.test_bulk_get_for_rows_preserves_versions_for_downstream_preconditions`，并更新 `test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows` 锁定 standardized row 的版本字段。
+- 未测风险：本轮没有在生产直接执行确认闭环写操作；只执行了非写入 precondition probe。生产热修复会在下一次正式发布时被 release 内容覆盖，必须把本地变更提交、推送并重新发布成新 release。
+
 ## 2026-06-17 - grouped read model 版本投影与 schema 失效修复
 
 - 目标：修复生产外部往来款管理页选择 `txn_imported_1269` 与 `txn_imported_1361` 两笔 240,000 确认闭环时仍报“银行流水状态已变化，请刷新后重试。”的问题，并说明上一轮为什么没改好。
