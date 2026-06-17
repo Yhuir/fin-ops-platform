@@ -38,7 +38,7 @@
 | API route contract | P0 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | covered | stale rows 仍 200；refreshing 空 payload 才 202；权限、错误 envelope、导出 facade。 |
 | 导出 | P1 | `tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx` | covered | 多 sheet、筛选转发、空结果、分页、公式转义、错误映射、filename、超过 20,000 行上限时页面展示行动建议。 |
 | 前端列表/筛选/分页/search | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | covered | 默认日期、账户切换、关键词、分类 counts、分页、表格中文标签。 |
-| 前端 drawer、规则保存、重应用 | P1 | `web/src/test/BankDetailsPage.test.tsx` | covered | 保存/重应用后全局遮罩等待 `bank_detail` 可见月份 barrier fresh，再重读当前交易直到 fresh；只刷新交易，不重取账户余额；完成后广播事件和反馈状态。 |
+| 前端 drawer、规则保存、重应用、分类选择浮层 | P1 | `web/src/test/BankDetailsPage.test.tsx` | covered | 保存/重应用后全局遮罩等待 `bank_detail` 可见月份 barrier fresh，再重读当前交易直到 fresh；只刷新交易，不重取账户余额；完成后广播事件和反馈状态；待分类/待确认选择面板必须 portal 到 `document.body`，避免被表格滚动容器截断。 |
 | 前端 stale/refreshing/error/abort | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | covered | 保留旧 rows、隐藏 read model 细节、unmount 清理 timer、abort 不报错。 |
 | 跨页面真实 worker smoke | P2 | 夜间 CI + staging/手动验证 | documented-risk | 真实 Postgres/RabbitMQ/Redis 和历史数据需要环境级 smoke。 |
 
@@ -72,6 +72,7 @@
 | 2026-06-16 | downstream tag facade 在任一月份 refreshing 时重刷所有相关月份，把已经 fresh 的月份反复打回 pending。 | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` | covered |
 | 2026-06-17 | downstream tag facade 丢弃 `category_version`、`manual_category_version`、`version`，导致外部往来 fresh grouped read model 提交旧 expected version，被后端 stale precondition 拒绝。 | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows`、`tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_bulk_get_for_rows_preserves_versions_for_downstream_preconditions` | covered |
 | 2026-06-17 | 自动标签规则保存/重新应用后页面在银行明细 read model 仍 refreshing 时提前可操作，导致用户看到旧标签或手动刷新后才更新。 | `web/src/test/BankDetailsPage.test.tsx::saving automatic tag rules refreshes bank details`、`web/src/test/BankDetailsPage.test.tsx::reapplying automatic tag rules refreshes bank details without saving changes`、`web/src/test/GlobalOperationOverlayContext.test.tsx` | covered |
+| 2026-06-17 | 待分类/待确认标签选择面板作为表格单元格后代渲染，被银行明细表格滚动容器截断，底部行无法完整选择和保存标签。 | `web/src/test/BankDetailsPage.test.tsx::uncategorized unmatched rows display manual classification choices from active auto tag rules` | covered |
 
 ## 关键 smoke flows
 

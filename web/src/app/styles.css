@@ -20446,11 +20446,15 @@ body.column-layout-dragging {
 }
 
 .bank-category-confirmation-popper {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 40;
-  padding-top: 4px;
+  position: fixed;
+  top: var(--bank-category-confirmation-top);
+  left: var(--bank-category-confirmation-left);
+  z-index: 1200;
+  width: var(--bank-category-confirmation-width);
+}
+
+.bank-category-confirmation-popper[data-placement="top"] {
+  transform: translateY(-100%);
 }
 
 .bank-category-confirmation-host {
@@ -20495,8 +20499,8 @@ body.column-layout-dragging {
 .bank-category-confirmation-panel {
   display: flex;
   flex-direction: column;
-  width: min(580px, calc(100vw - 40px));
-  max-height: min(320px, calc(100vh - 160px));
+  width: 100%;
+  max-height: var(--bank-category-confirmation-max-height);
   overflow: hidden;
   border: 1px solid var(--bank-border);
   border-radius: 8px;

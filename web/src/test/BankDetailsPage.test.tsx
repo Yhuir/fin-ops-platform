@@ -768,6 +768,11 @@ describe("Bank details page", () => {
     await user.click(within(supplierRow as HTMLElement).getByRole("button", { name: "待分类" }));
 
     const primaryMenu = await screen.findByRole("menu", { name: "待分类主标签" });
+    const confirmationPanel = primaryMenu.closest(".bank-category-confirmation-panel");
+    expect(confirmationPanel).toBeInstanceOf(HTMLElement);
+    expect((supplierRow as HTMLElement).contains(confirmationPanel)).toBe(false);
+    expect(confirmationPanel?.parentElement).toHaveClass("bank-category-confirmation-popper");
+    expect(confirmationPanel?.parentElement?.parentElement).toBe(document.body);
     expect(within(primaryMenu).getByRole("menuitem", { name: "费用" })).toBeInTheDocument();
     expect(within(primaryMenu).queryByRole("menuitem", { name: "质保金" })).not.toBeInTheDocument();
     expect(within(primaryMenu).queryByRole("menuitem", { name: "银行往来款" })).not.toBeInTheDocument();

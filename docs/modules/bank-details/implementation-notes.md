@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-17 - 待分类标签选择面板防裁剪
+
+- 目标：修复银行明细列表中点击“待分类/待确认”后，标签选择面板被表格滚动容器截断的问题。
+- 影响范围：`BankDetailsPage` 的 `TypeCell` 分类选择浮层、对应 CSS 和前端交互测试；不改变后端分类、候选确认或人工补分类 API contract。
+- 关键决策：分类选择面板通过 `createPortal` 渲染到 `document.body`，使用 trigger `getBoundingClientRect()` 做 fixed 定位，并在滚动/窗口尺寸变化时重新计算位置。outside-click 边界同时包含 trigger host 和 portal panel，避免点击面板内部被误判为外部关闭。
+- 文档影响：更新 bank-details 实施记录与测试矩阵；长期业务口径不变。
+- 测试覆盖：更新 `web/src/test/BankDetailsPage.test.tsx::uncategorized unmatched rows display manual classification choices from active auto tag rules`，断言分类面板不再挂在表格行下，而是 portal 到 `document.body`。
+- 验证命令：`cd web && npm test -- --run src/test/BankDetailsPage.test.tsx`。
+- 未测风险：Vitest/jsdom 不能证明真实浏览器像素位置；发布前建议用浏览器打开银行明细，在底部行点击“待分类”做一次视觉 smoke。
+
 ## 2026-06-17 - downstream tag facade 版本字段合同
 
 - 目标：修复外部往来款管理依赖 fresh `bank_detail` read model 重建时，确认闭环仍因为 expected/current version 不一致被拒绝的问题。

@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Chip } from "@heroui/react";
 import { Filter, Tags } from "lucide-react";
 
@@ -595,14 +596,15 @@ function EmptyTransactionOverlay() {
   );
 }
 
-function useCloseOnOutsidePointer(open: boolean, rootRef: RefObject<HTMLElement | null>, onClose: () => void) {
+function useCloseOnOutsidePointer(open: boolean, rootRef: RefObject<HTMLElement | null> | RefObject<HTMLElement | null>[], onClose: () => void) {
   useEffect(() => {
     if (!open) {
       return undefined;
     }
+    const rootRefs = Array.isArray(rootRef) ? rootRef : [rootRef];
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
-      if (target instanceof Node && rootRef.current?.contains(target)) {
+      if (target instanceof Node && rootRefs.some((candidate) => candidate.current?.contains(target))) {
         return;
       }
       onClose();
@@ -1107,8 +1109,16 @@ function TypeCell({
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [stagedChoice, setStagedChoice] = useState<ConfirmationChoice | null>(null);
+  const [confirmationPanelPosition, setConfirmationPanelPosition] = useState<{
+    left: number;
+    top: number;
+    maxHeight: number;
+    panelWidth: number;
+    placement: "bottom" | "top";
+  } | null>(null);
   const [internalTooltipOpen, setInternalTooltipOpen] = useState(false);
   const confirmationRef = useRef<HTMLSpanElement | null>(null);
+  const confirmationPanelRef = useRef<HTMLDivElement | null>(null);
   const confirmationGroups = useMemo(
     () => (row.categoryResolutionStatus === "needs_confirmation"
       ? buildConfirmationChoiceGroups(row.autoCandidateCategories, autoTagRules)
@@ -1163,11 +1173,56 @@ function TypeCell({
     setStagedChoice(null);
   }, [row.id, row.categoryResolutionStatus, row.effectiveCategoryCode]);
 
+  const updateConfirmationPanelPosition = useCallback((target: HTMLElement | null = anchorEl) => {
+    if (!target || typeof window === "undefined") {
+      setConfirmationPanelPosition(null);
+      return;
+    }
+    const viewportMargin = 12;
+    const triggerGap = 8;
+    const minPanelHeight = 220;
+    const maxPanelHeight = 360;
+    const preferredWidth = selectedSubGroup?.hasThirdLevel ? 680 : 580;
+    const panelWidth = Math.max(280, Math.min(preferredWidth, window.innerWidth - viewportMargin * 2));
+    const rect = target.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom - triggerGap - viewportMargin;
+    const spaceAbove = rect.top - triggerGap - viewportMargin;
+    const placement = spaceBelow >= minPanelHeight || spaceBelow >= spaceAbove ? "bottom" : "top";
+    const availableHeight = Math.max(
+      minPanelHeight,
+      placement === "bottom" ? spaceBelow : spaceAbove,
+    );
+    const maxHeight = Math.min(maxPanelHeight, availableHeight);
+    const left = Math.min(
+      Math.max(viewportMargin, rect.left),
+      Math.max(viewportMargin, window.innerWidth - panelWidth - viewportMargin),
+    );
+    const top = placement === "bottom"
+      ? Math.min(rect.bottom + triggerGap, window.innerHeight - viewportMargin)
+      : Math.max(viewportMargin, rect.top - triggerGap);
+    setConfirmationPanelPosition({ left, top, maxHeight, panelWidth, placement });
+  }, [anchorEl, selectedSubGroup?.hasThirdLevel]);
+
+  useEffect(() => {
+    if (!anchorEl) {
+      return undefined;
+    }
+    updateConfirmationPanelPosition(anchorEl);
+    const handleViewportChange = () => updateConfirmationPanelPosition(anchorEl);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [anchorEl, updateConfirmationPanelPosition]);
+
   const closeConfirmationPanel = () => {
     if (confirming) {
       return;
     }
     setAnchorEl(null);
+    setConfirmationPanelPosition(null);
     setStagedChoice(null);
   };
   const stageChoice = (choice: ConfirmationChoice) => {
@@ -1187,9 +1242,123 @@ function TypeCell({
       .then(() => setStagedChoice(null))
       .catch(() => setStagedChoice(null));
   };
-  useCloseOnOutsidePointer(Boolean(anchorEl), confirmationRef, closeConfirmationPanel);
+  useCloseOnOutsidePointer(Boolean(anchorEl), [confirmationRef, confirmationPanelRef], closeConfirmationPanel);
 
   if (selectionGroups.length > 0) {
+    const confirmationPanelStyle = confirmationPanelPosition ? ({
+      "--bank-category-confirmation-left": `${confirmationPanelPosition.left}px`,
+      "--bank-category-confirmation-top": `${confirmationPanelPosition.top}px`,
+      "--bank-category-confirmation-max-height": `${confirmationPanelPosition.maxHeight}px`,
+      "--bank-category-confirmation-width": `${confirmationPanelPosition.panelWidth}px`,
+    } as CSSProperties) : undefined;
+    const confirmationPanel = anchorEl && confirmationPanelPosition && typeof document !== "undefined" ? createPortal(
+      <div
+        className="bank-category-confirmation-popper"
+        data-placement={confirmationPanelPosition.placement}
+        style={confirmationPanelStyle}
+      >
+        <div
+          ref={confirmationPanelRef}
+          className="bank-category-confirmation-panel"
+          id={`bank-category-confirmation-${row.id}`}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closeConfirmationPanel();
+            }
+          }}
+        >
+          <div className={`bank-category-confirmation-columns${selectedSubGroup?.hasThirdLevel ? " bank-category-confirmation-columns--three-level" : ""}`}>
+            <div
+              aria-label={`${selectionLabel}主标签`}
+              className="bank-category-confirmation-primary-list"
+              role="menu"
+            >
+              {selectionGroups.map((group) => (
+                <button
+                  aria-current={group.key === selectedGroup?.key ? "true" : "false"}
+                  className="bank-category-confirmation-primary-item"
+                  key={group.key}
+                  onClick={() => {
+                    setSelectedPrimaryKey(group.key);
+                    setSelectedSubKey("");
+                    setStagedChoice(null);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span>{group.primaryLabel}</span>
+                </button>
+              ))}
+            </div>
+            <div className="bank-category-confirmation-divider" aria-hidden="true" role="separator" />
+            <div
+              aria-label={`${selectedGroup?.primaryLabel ?? "已选主标签"}${childLabelSuffix}`}
+              className="bank-category-confirmation-child-list"
+              role="menu"
+            >
+              {selectedSubGroups.map((subGroup) => (
+                <button
+                  aria-current={subGroup.key === selectedSubGroup?.key || subGroup.choices.some((choice) => stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) : false) ? "true" : "false"}
+                  className="bank-category-confirmation-child-item"
+                  key={subGroup.key}
+                  onClick={() => {
+                    if (subGroup.hasThirdLevel) {
+                      setSelectedSubKey(subGroup.key);
+                      return;
+                    }
+                    const choice = subGroup.choices[0];
+                    if (choice) {
+                      stageChoice(choice);
+                    }
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span>{subGroup.subLabel}</span>
+                </button>
+              ))}
+            </div>
+            {selectedSubGroup?.hasThirdLevel ? (
+              <>
+                <div className="bank-category-confirmation-divider" aria-hidden="true" role="separator" />
+                <div
+                  aria-label={`${selectedSubGroup.subLabel}${thirdLabelSuffix}`}
+                  className="bank-category-confirmation-third-list"
+                  role="menu"
+                >
+                  {selectedSubGroup.choices.map((choice) => (
+                    <button
+                      aria-current={stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) ? "true" : "false" : "false"}
+                      className="bank-category-confirmation-third-item"
+                      key={choiceKey(choice)}
+                      onClick={() => stageChoice(choice)}
+                      role="menuitem"
+                      type="button"
+                    >
+                      <span>{choice.thirdLabel ?? choiceSubLabel(choice)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
+          <div className="bank-category-confirmation-footer">
+            <button className="bank-category-confirmation-cancel" type="button" onClick={closeConfirmationPanel}>
+              取消
+            </button>
+            <button
+              className="bank-category-confirmation-save"
+              onClick={saveStagedChoice}
+              disabled={!stagedChoice || confirming}
+              type="button"
+            >
+              {confirming ? "保存中" : "保存"}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    ) : null;
     return (
       <span ref={confirmationRef} className="bank-category-confirmation-host">
         <button
@@ -1200,6 +1369,7 @@ function TypeCell({
           onClick={(event) => {
             if (!confirming) {
               setAnchorEl(event.currentTarget);
+              updateConfirmationPanelPosition(event.currentTarget);
             }
           }}
           aria-disabled={confirming ? "true" : undefined}
@@ -1208,108 +1378,7 @@ function TypeCell({
         >
           {triggerLabel}
         </button>
-        {anchorEl ? (
-          <div className="bank-category-confirmation-popper">
-            <div
-              className="bank-category-confirmation-panel"
-              id={`bank-category-confirmation-${row.id}`}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  closeConfirmationPanel();
-                }
-              }}
-            >
-              <div className={`bank-category-confirmation-columns${selectedSubGroup?.hasThirdLevel ? " bank-category-confirmation-columns--three-level" : ""}`}>
-                <div
-                  aria-label={`${selectionLabel}主标签`}
-                  className="bank-category-confirmation-primary-list"
-                  role="menu"
-                >
-                  {selectionGroups.map((group) => (
-                    <button
-                      aria-current={group.key === selectedGroup?.key ? "true" : "false"}
-                      className="bank-category-confirmation-primary-item"
-                      key={group.key}
-                      onClick={() => {
-                        setSelectedPrimaryKey(group.key);
-                        setSelectedSubKey("");
-                        setStagedChoice(null);
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <span>{group.primaryLabel}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="bank-category-confirmation-divider" aria-hidden="true" role="separator" />
-                <div
-                  aria-label={`${selectedGroup?.primaryLabel ?? "已选主标签"}${childLabelSuffix}`}
-                  className="bank-category-confirmation-child-list"
-                  role="menu"
-                >
-                  {selectedSubGroups.map((subGroup) => (
-                    <button
-                      aria-current={subGroup.key === selectedSubGroup?.key || subGroup.choices.some((choice) => stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) : false) ? "true" : "false"}
-                      className="bank-category-confirmation-child-item"
-                      key={subGroup.key}
-                      onClick={() => {
-                        if (subGroup.hasThirdLevel) {
-                          setSelectedSubKey(subGroup.key);
-                          return;
-                        }
-                        const choice = subGroup.choices[0];
-                        if (choice) {
-                          stageChoice(choice);
-                        }
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <span>{subGroup.subLabel}</span>
-                    </button>
-                  ))}
-                </div>
-                {selectedSubGroup?.hasThirdLevel ? (
-                  <>
-                    <div className="bank-category-confirmation-divider" aria-hidden="true" role="separator" />
-                    <div
-                      aria-label={`${selectedSubGroup.subLabel}${thirdLabelSuffix}`}
-                      className="bank-category-confirmation-third-list"
-                      role="menu"
-                    >
-                      {selectedSubGroup.choices.map((choice) => (
-                        <button
-                          aria-current={stagedChoice ? choiceKey(choice) === choiceKey(stagedChoice) ? "true" : "false" : "false"}
-                          className="bank-category-confirmation-third-item"
-                          key={choiceKey(choice)}
-                          onClick={() => stageChoice(choice)}
-                          role="menuitem"
-                          type="button"
-                        >
-                          <span>{choice.thirdLabel ?? choiceSubLabel(choice)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-              </div>
-              <div className="bank-category-confirmation-footer">
-                <button className="bank-category-confirmation-cancel" type="button" onClick={closeConfirmationPanel}>
-                  取消
-                </button>
-                <button
-                  className="bank-category-confirmation-save"
-                  onClick={saveStagedChoice}
-                  disabled={!stagedChoice || confirming}
-                  type="button"
-                >
-                  {confirming ? "保存中" : "保存"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        {confirmationPanel}
       </span>
     );
   }
