@@ -180,6 +180,78 @@ VITE_APP_BASE_PATH=/fin-ops/
 - `deploy/oa/env/fin-ops.worker.workbench.env.example`
 - `deploy/oa/env/fin-ops.rabbitmq-*.env.example`
 
+### OA 支付状态 MySQL 写回解锁
+
+生产启用“进行中 OA 确认已支付”前，必须由 DBA 或具备 MySQL 管理权限的运维账号创建最小权限用户。不要复用 SSH 密码、宝塔面板密码或 PostgreSQL 密码作为 MySQL 应用密码。
+
+2026-06-17 文件层检查确认当前生产 MySQL datadir 下存在 `smart_oa/t_payment_simple.ibd`，因此目标库名按 `smart_oa` 配置；如果后续迁移数据库，先重新执行表定位查询：
+
+```sql
+SELECT table_schema
+FROM information_schema.tables
+WHERE table_name = 't_payment_simple'
+ORDER BY table_schema;
+```
+
+推荐授权方式：
+
+```sql
+CREATE USER 'finops_oa_payment_status'@'127.0.0.1'
+  IDENTIFIED BY '<long-random-password>';
+
+GRANT SELECT,
+      INSERT (flow_id, pay_status),
+      UPDATE (pay_status)
+ON `smart_oa`.`t_payment_simple`
+TO 'finops_oa_payment_status'@'127.0.0.1';
+```
+
+写入 root-only secret env：
+
+```bash
+sudoedit /etc/fin-ops/fin-ops.secrets.env
+```
+
+```bash
+FIN_OPS_OA_PAYMENT_STATUS_ENABLED=1
+FIN_OPS_OA_PAYMENT_STATUS_HOST=127.0.0.1
+FIN_OPS_OA_PAYMENT_STATUS_PORT=3306
+FIN_OPS_OA_PAYMENT_STATUS_DATABASE=smart_oa
+FIN_OPS_OA_PAYMENT_STATUS_USERNAME=finops_oa_payment_status
+FIN_OPS_OA_PAYMENT_STATUS_PASSWORD=<long-random-password>
+FIN_OPS_OA_PAYMENT_STATUS_CONNECT_TIMEOUT_SECONDS=5
+```
+
+配置后重启 API，使 `MySQLOAPaymentStatusRepository.from_environment()` 重新读取环境变量：
+
+```bash
+sudo -n /usr/local/sbin/finops-deploy-control restart
+```
+
+只读连通性 smoke 不应输出密码；可用一个不存在的 sentinel `flow_id` 验证连接、表权限和读取路径：
+
+```bash
+set -a
+source /etc/fin-ops/fin-ops.common.env
+source /etc/fin-ops/fin-ops.secrets.env
+set +a
+release_src="$(systemctl show fin-ops.service -P WorkingDirectory)"
+cd "$release_src"
+PYTHONPATH="$release_src/backend/src" /opt/fin-ops/venv/bin/python - <<'PY'
+import json
+from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
+
+repo = MySQLOAPaymentStatusRepository.from_environment()
+payload = {"configured": repo is not None, "read_ok": False}
+if repo is not None:
+    payload["sentinel_found"] = repo.get_payment_status("__finops_payment_status_probe__") is not None
+    payload["read_ok"] = True
+print(json.dumps(payload, ensure_ascii=False))
+PY
+```
+
+最终生产闭环必须使用一条真实非敏感进行中 OA：确认支出流水后核对 `t_payment_simple.flow_id=<OA Mongo form_data._id>` 的最新记录 `pay_status=1`，同时页面行显示 `oaPaymentWriteback.label=已写回`。
+
 systemd 模板位于：
 
 - `deploy/oa/systemd/fin-ops.service.example`
