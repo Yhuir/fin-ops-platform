@@ -809,8 +809,9 @@ describe("Pending invoices page", () => {
       sourceByPath["src/pages/PendingInvoicesPage.tsx"].includes("PageScaffold") ? null : "PendingInvoicesPage.tsx should use PageScaffold or equivalent project shell",
       sourceByPath["src/pages/PendingInvoicesPage.tsx"].includes("PageToolbar") ? null : "PendingInvoicesPage.tsx should use PageToolbar or equivalent project toolbar",
       pendingInvoicesTableSource.includes("@heroui/react") ? null : "PendingInvoicesTable.tsx should use HeroUI React primitives",
-      pendingInvoicesTableSource.includes("Table.Content") && pendingInvoicesTableSource.includes("Table.Column") ? null : "PendingInvoicesTable.tsx should render with HeroUI Table",
-      pendingInvoicesTableSource.includes("allowsSorting") && pendingInvoicesTableSource.includes("sortDescriptor") && pendingInvoicesTableSource.includes("onSortChange") ? null : "PendingInvoicesTable.tsx should use HeroUI Table sorting",
+      pendingInvoicesTableSource.includes("Table.ScrollContainer") && pendingInvoicesTableSource.includes("<table") ? null : "PendingInvoicesTable.tsx should keep the HeroUI shell with native table content",
+      !pendingInvoicesTableSource.includes("Table.Content") && !pendingInvoicesTableSource.includes("Table.Column") ? null : "PendingInvoicesTable.tsx should not use RAC table content because it blocks body text selection",
+      pendingInvoicesTableSource.includes("aria-sort") && pendingInvoicesTableSource.includes("handleNativeSort") ? null : "PendingInvoicesTable.tsx should keep native accessible sorting",
       pendingInvoicesTableSource.includes("Dropdown.Menu") && pendingInvoicesTableSource.includes('selectionMode="multiple"') ? null : "PendingInvoicesTable.tsx should use HeroUI Dropdown multi-select filtering",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDrawerFrame.tsx"].includes("AppDrawer") ? null : "PendingInvoiceDrawerFrame.tsx should use AppDrawer for right drawer shape",
       sourceByPath["src/components/pendingInvoices/PendingInvoiceDetailDrawer.tsx"].includes("AppDialog") ? null : "PendingInvoiceDetailDrawer.tsx should use AppDialog for OA print dialog",
@@ -833,7 +834,9 @@ describe("Pending invoices page", () => {
     expect(css).toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:\s*var\(--fp-radius-sm\) var\(--fp-radius-sm\) 0 0/s);
     expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*max-height:\s*calc\(100vh - 176px\);[^}]*min-height:\s*292px/s);
     expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*transition:\s*background-color var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*user-select:\s*text/s);
     expect(css).toMatch(/\.pending-invoices-sort-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).not.toMatch(/\.pending-invoices-sort-button\s*{[^}]*pointer-events:\s*none/s);
     expect(css).toMatch(/\.pending-invoices-table-zone-header-grid\s*{[^}]*grid-template-columns:\s*14fr 10fr 11fr 11fr 11fr 10fr 7fr 11fr 15fr/s);
     expect(css).toMatch(/\.pending-invoices-icon-button,\s*\.pending-invoices-inline-action\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.pending-invoice-drawer\s+\.finance-drawer__header\s*{[^}]*padding:\s*10px var\(--fp-space-4\)/s);

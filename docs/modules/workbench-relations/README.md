@@ -8,6 +8,7 @@
 ## 修改前必读
 
 - `ARCHITECTURE.md`
+- `docs/dev/spec-first-e2e-audit.md`
 - `docs/architecture/persistence-and-read-models.md`
 - `docs/app-architecture/pages.md`
 - `docs/app-architecture/runtime-and-ownership.md`
@@ -20,6 +21,8 @@
 - `docs/modules/turnover-ledger/README.md`
 - `docs/modules/batch-accounting/README.md`
 - `docs/modules/etc-tickets/README.md`
+- `docs/modules/workbench-relations/e2e-spec.md`
+- `docs/modules/workbench-relations/e2e-coverage.md`
 
 ## 代码入口
 

@@ -1,5 +1,10 @@
 # 关联台关系事实源 测试矩阵
 
+Spec-first Browser e2e 审计入口：
+
+- `e2e-spec.md`：关系事实源跨页面 Browser e2e 验收合同。
+- `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 的映射和缺口。
+
 ## 现有可复用测试
 
 - `tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_confirm_link_targets_resolved_row_months_when_row_ids_do_not_encode_month`：confirm 写入使用 row 内容推导 affected month shards，覆盖 `txn_imported_*` 这类 row id 不含月份时不能退回空 scope / `all`。

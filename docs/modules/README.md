@@ -59,6 +59,8 @@
 - `README.md`：模块定位、修改前必读、代码入口、事实源链接和维护触发器。
 - `state-machine.md`：业务状态机、UI 状态机、read model/worker 状态和非法状态。
 - `tests.md`：七类测试适用性、现有测试入口、回归范围和验证命令。
+- `e2e-spec.md`：Spec-first Browser e2e 业务验收合同；页面/功能应该如何工作。
+- `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 覆盖的映射和缺口分类。
 - `implementation-notes.md`：提炼后的实施记录、决策、验收结果、风险和后续事项。
 
-不适用的文件不要删除；在文件内写明“不适用原因”，这样后续 Agent 不需要重复判断。
+不适用的文件不要删除；在文件内写明“不适用原因”，这样后续 Agent 不需要重复判断。旧模块可以按风险逐步补齐 `e2e-spec.md` / `e2e-coverage.md`，但一旦开始 Spec-first E2E Audit，后续新增或修改 Browser e2e 必须先映射到 Spec ID。

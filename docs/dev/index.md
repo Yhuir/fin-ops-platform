@@ -7,6 +7,8 @@
 - `runtime-development.md`：PostgreSQL durable queue、read model freshness、worker、runtime bootstrap、Redis/RabbitMQ 和对象存储开发边界。
 - `testing.md`：测试和验证命令。
 - `nightly-ci.md`：nightly CI、统一验证入口和失败处理规则。
+- `spec-first-e2e-audit.md`：Browser e2e / Playwright 的 Spec-first 审计规则。
+- `spec-first-e2e-inventory.md`：页面、功能和跨页面链路的 Spec-first E2E 审计队列。
 - `testing-closure-dependency-map.md`：页面/API/read model/worker/domain event 的测试闭环依赖地图。
 - `testing-closure-state.md`：测试闭环 master goal 的模块状态和下一步队列。
 

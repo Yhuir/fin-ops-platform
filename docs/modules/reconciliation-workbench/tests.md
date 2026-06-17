@@ -2,6 +2,11 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+Spec-first Browser e2e 审计入口：
+
+- `e2e-spec.md`：关联台页面和业务流程的 Browser e2e 验收合同。
+- `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 的映射和缺口。
+
 ## 修改前影响面清单
 
 关联台是高 fan-out 页面，任何改动都要先按下表做影响面评估：
@@ -15,7 +20,7 @@
 | Query facade / Redis cache | `WorkbenchQueryFacade`、groups page cache warmer | 只缓存 fresh payload；refreshing/stale/unavailable 不写 Redis；query timeout 有明确 refreshing/unavailable |
 | Matching dirty scope | workbench matching dirty queue/worker | lifecycle 只 mark dirty；worker drain matching；失败不回退 legacy dirty scope |
 | Relation read model | `workbench_relation` | 批量账务、银行明细 relation tags、下游 invoice lifecycle/cost/tax/search |
-| 前端交互 | `ReconciliationWorkbenchPage`、`CandidateGroupGrid`、selection hooks、column/filter tests、global operation overlay | loading/refreshing/stale/error、权限禁用、三栏 selection、详情、筛选排序、domain event 刷新、写操作期间全屏 operation pending |
+| 前端交互 | `ReconciliationWorkbenchPage`、`CandidateGroupGrid`、selection hooks、column/filter tests、关联预览弹窗、global operation overlay | loading/refreshing/stale/error、权限禁用、三栏 selection、详情、筛选排序、domain event 刷新、确认/撤回预览内阻塞、其他写操作全屏 operation pending |
 | 跨页面 fan-out | bank details、pending invoices、batch accounting、turnover ledger、cost statistics、App Health | relation 确认/撤回后旧页面不能读 stale/empty 伪 fresh |
 
 ## 场景覆盖清单
@@ -48,7 +53,7 @@
 | 外部往来 bank-only open 规则 | P0 | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | covered | `turnover_manual_closure` 是共同事实源但不再是 bank-only paired 例外；三栏补齐前留 open；外部往来页确认闭环/toolbar 撤回后必须等待 Workbench visibility targets fresh 再触发关联台刷新。Browser e2e 已覆盖小样本 confirm/withdraw barrier 和页面恢复。 |
 | OA offset / 附件上下文 repair | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_command_service.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | OA 附件发票冲抵自动闭环和缺失附件上下文 repair 必须通过 relation command service 写入。 |
 | 前端 action 后 emit `workbenchRelationUpdated` | P1 | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/CandidateGroupGrid.test.tsx`、页面事件 listener tests | covered | 保护当前页面/同会话刷新提示。 |
-| 前端 loading/stale/error/permission/operation overlay | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | covered for current gates | Workbench stale/loading 不全局禁用无关写；OA dirty/refreshing 仍禁写；提交成功后不做本地 optimistic paired/open 重排。带后端 operation projection 的确认/撤回只等待 `workbench_relation` operation barrier 并应用后端 projection；没有 projection 的旧动作继续等待目标 read model/fresh reload；OA 申请人列详情 icon 和第二行时间 chip 受交互测试保护。 |
+| 前端 loading/stale/error/permission/operation pending | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | covered for current gates | Workbench stale/loading 不全局禁用无关写；OA dirty/refreshing 仍禁写。确认/撤回 preview 提交后弹窗内阻塞，禁用关闭/取消/重复提交，等待 `workbench_relation` operation barrier 和当前 Workbench fresh refetch 后才关闭；fresh refetch 前不做本地 optimistic 或 operation projection 行移动。没有 projection 的旧动作继续等待目标 read model/fresh reload；OA 申请人列详情 icon 和第二行时间 chip 受交互测试保护。 |
 | 前端三栏列布局与选择状态 | P1 | `web/src/test/WorkbenchColumns.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchSelectionHook.test.tsx` | covered | 银行详情 icon 移到对方户名、发票详情 icon 移到发票号码、发票金额列合并、seller chip 第三行；打开详情不再让“已选 0”的行呈 selected 高亮。 |
 | 真实生产 active generation 回放 | P2 | `fin_ops_platform.tools.audit_workbench_relation_display`、`fin_ops_platform.tools.audit_object_identity`、运维 runbook | covered by production dry-run | 发布前或生产修复后用只读审计验证 active relation 与 active Workbench generation 的同组展示、重复 visible owner 和 all-scope 滞后；发现问题只通过正式 refresh/repair contract 处理。 |
 
@@ -68,6 +73,7 @@
 
 | 日期 | Bug / 风险 | 回归测试 | 状态 |
 | --- | --- | --- | --- |
+| 2026-06-18 | 关联预览确认/撤回提交后如果立即关闭弹窗并只显示全局 overlay，用户会在 Workbench 尚未重新加载时看到旧行或可继续操作；在 refresh 失败时也难以判断 relation 已写入但页面未刷新。 | `web/src/test/WorkbenchSelection.test.tsx::workbench action uses operation-scoped freshness targets and backend projection`、`workbench action never waits on global relation scope when action response lacks precise targets`、`confirm link does not expose local optimistic row movement before the fresh refetch`、`withdraw link finishes only after the fresh refetch moves the group back to open` | covered |
 | 2026-06-18 | 关联台确认 OA + 两组已闭环外部往来后，canonical relation 已写入，但 `workbench:all` aggregate-only event 抢在受影响月份 shard 重建前运行，用旧月度 active generation 对新 active relation 做 parent consistency 校验，弹出 `workbench_all_scope_parent_inconsistent ... active_relation_open_membership count=4`；二次复现说明 parent scope 已 failed/stale 或同 scope 旧 failed 被新 processing 覆盖时也不能继续显示当前失败。 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing`、`test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_failed`、`test_workbench_refresh_status_api_treats_requeued_failed_scope_as_refreshing`、`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope`、`web/src/test/WorkbenchSelection.test.tsx::requeued workbench refresh failure does not show the stale failure banner`；关联链路回归：`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_preserves_existing_case_group_before_submit`、`test_confirm_link_includes_active_relation_rows_for_selected_oa_context`、`web/src/test/WorkbenchSelection.test.tsx` operation barrier tests | covered |
 | 2026-06-17 | 关联台确认预览中，1 条 OA 支付 300,000 叠加 1 条支出 300,000 和 2 条收入合计 300,000 的银行流水时，后端金额核对按银行流水绝对金额显示 600,000，前端又用该展示合计二次判定“金额不一致”；长预览内容还会把 footer 挤到首屏外，让用户看不到“确认关联”。 | `tests/test_workbench_amount_check_service.py::WorkbenchAmountCheckServiceTests::test_payment_relation_uses_payment_bank_total_when_bank_rows_include_receipts`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_uses_directional_bank_total_for_mixed_bank_directions`、`web/src/test/WorkbenchSelection.test.tsx::confirm preview respects matched backend status for mixed bank directions` | covered |
 | 2026-06-17 | 关联台撤回关联后弹出 `操作同步等待超时 · workbench_relation · 2026-03 · refresh outbox pending`。生产证据显示 18:49:43 入队的 `workbench_relation` 2026-02/2026-03 refresh 分别 7.19s/8.20s 后完成，旧前端 2s barrier timeout 过短；同时后端 barrier 使用 event_type 级 outbox 聚合，存在其他 scope pending 误伤当前目标 scope 的风险。 | `tests/test_operation_freshness_barrier.py::OperationFreshnessBarrierServiceTests::test_target_scope_outbox_pending_keeps_target_refreshing_when_readiness_was_fresh`、`tests/test_operation_freshness_barrier.py::OperationFreshnessBarrierServiceTests::test_other_scope_outbox_pending_does_not_block_fresh_target_scope`、`tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_groups_dirty_scopes_outbox_and_workers_for_overview`、`web/src/test/WorkbenchSelection.test.tsx::workbench action uses operation-scoped freshness targets and backend projection` | covered |
@@ -112,7 +118,7 @@
 4. `open automatic candidate/decision -> group selection -> split_candidate preview -> submit suppresses candidate/decision -> workbench refresh no longer groups the same candidate`
 5. `ETC business batch submitted -> etc_invoice_summary open row -> OA/bank/invoice 三项确认 -> paired 区展开明细`
 6. `Workbench query refreshing/stale -> 页面展示刷新/陈旧状态 -> Redis 不缓存 stale payload -> 后续 fresh 后更新`
-7. `confirm/withdraw 写操作 -> 写 API 成功 -> operation barrier 等待后端返回的操作级 workbench_relation target fresh -> 应用后端 operation projection 更新受影响 group -> 全屏 overlay 释放；workbench month/all 与下游 read model 后台追赶并最终 fresh`
+7. `confirm/withdraw 预览 -> 写 API 成功 -> 预览弹窗内阻塞等待后端返回的操作级 workbench_relation target fresh -> 重新读取当前 Workbench fresh payload -> 预览关闭；workbench:all 与下游 read model 后台追赶并最终 fresh`
 8. `exception/ignore 等未返回 operation projection 的写操作 -> 写 API 成功 -> operation barrier 等待目标 read model/scope fresh -> Workbench active generation 重新读取 fresh -> 全屏 overlay 释放`
 
 ## 本模块验证命令

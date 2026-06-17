@@ -92,6 +92,16 @@ type RelationPreviewDialogState = {
   caseId?: string;
 };
 
+type WorkbenchActionProgressPhase = "submitting" | "syncing" | "loading";
+
+type WorkbenchActionProgress = {
+  phase: WorkbenchActionProgressPhase;
+  message: string;
+  committed: boolean;
+};
+
+type WorkbenchActionProgressHandler = (progress: WorkbenchActionProgress) => void;
+
 type WorkbenchExceptionDialogState = {
   rows: WorkbenchRecord[];
 };
@@ -1467,6 +1477,44 @@ export default function ReconciliationWorkbenchPage() {
     return true;
   }, []);
 
+  const executeWorkbenchActionWithFreshness = useCallback(async ({
+    loadingMessage,
+    syncingMessage = "正在同步关联台最新数据...",
+    action,
+    onProgress,
+    waitForFreshWorkbenchLoad = false,
+  }: {
+    loadingMessage: string;
+    syncingMessage?: string;
+    action: () => Promise<string | WorkbenchActionResult>;
+    onProgress?: WorkbenchActionProgressHandler;
+    waitForFreshWorkbenchLoad?: boolean;
+  }) => {
+    onProgress?.({ phase: "submitting", message: loadingMessage, committed: false });
+    const result = await action();
+    const actionResult = typeof result === "string" ? null : result;
+    const targets = actionFreshnessTargets(actionResult);
+    const committed = Boolean(actionResult);
+    if (targets.length > 0) {
+      onProgress?.({ phase: "syncing", message: syncingMessage, committed: true });
+      await waitForOperationFreshness(
+        targets,
+        { timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS },
+      );
+    }
+    const projectionApplied = !waitForFreshWorkbenchLoad && actionResult
+      ? applyWorkbenchOperationProjection(actionResult)
+      : false;
+    if (waitForFreshWorkbenchLoad || !projectionApplied) {
+      onProgress?.({ phase: "loading", message: "正在加载关联台最新数据...", committed });
+      await waitForWorkbenchFreshAfterOperation();
+    } else {
+      onProgress?.({ phase: "loading", message: "正在更新关联台页面...", committed });
+      refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
+    }
+    return actionResultMessage(result);
+  }, [applyWorkbenchOperationProjection, refreshWorkbenchDataInBackground, waitForWorkbenchFreshAfterOperation]);
+
   const runBlockingAction = useCallback(async ({
     loadingMessage,
     action,
@@ -1478,29 +1526,18 @@ export default function ReconciliationWorkbenchPage() {
     const outcome = await runOperation({
       loadingMessage,
       action: async ({ setMessage }) => {
-        const result = await action();
-        const actionResult = typeof result === "string" ? null : result;
-        const targets = actionFreshnessTargets(actionResult);
-        if (targets.length > 0) {
-          setMessage("正在同步关联台最新数据...");
-          await waitForOperationFreshness(
-            targets,
-            { timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS },
-          );
-        }
-        if (actionResult && applyWorkbenchOperationProjection(actionResult)) {
-          refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
-        } else {
-          await waitForWorkbenchFreshAfterOperation();
-        }
-        return actionResultMessage(result);
+        return executeWorkbenchActionWithFreshness({
+          loadingMessage,
+          action,
+          onProgress: (progress) => setMessage(progress.message),
+        });
       },
       errorMessage: actionErrorMessage,
     });
     if (outcome.status === "success") {
       setLastActionMessage(outcome.value);
     }
-  }, [applyWorkbenchOperationProjection, handleCloseDetail, refreshWorkbenchDataInBackground, runOperation, waitForWorkbenchFreshAfterOperation]);
+  }, [executeWorkbenchActionWithFreshness, handleCloseDetail, runOperation]);
 
   const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
     openActionResultDialog(actionErrorMessage(error), "操作失败");
@@ -1710,18 +1747,20 @@ export default function ReconciliationWorkbenchPage() {
     setRelationPreviewDialog({ preview, rowIds, caseId: resolveSelectedCaseId(rows) });
   };
 
-  const handleSubmitRelationPreview = async (note: string) => {
+  const handleSubmitRelationPreview = async (note: string, onProgress: WorkbenchActionProgressHandler) => {
     if (!relationPreviewDialog) {
       return;
     }
     if (!ensureCanWriteWorkbench()) {
-      return;
+      throw new Error("当前状态不允许执行写操作。");
     }
     const { preview, rowIds, caseId } = relationPreviewDialog;
-    setRelationPreviewDialog(null);
     if (preview.operation === "confirm_link") {
-      await runBlockingAction({
+      const message = await executeWorkbenchActionWithFreshness({
         loadingMessage: "正在确认关联...",
+        syncingMessage: "关系已写入，正在同步关联台最新数据...",
+        onProgress,
+        waitForFreshWorkbenchLoad: true,
         action: async () => {
           const result = await confirmWorkbenchLink({
             month: WORKBENCH_VIEW_MONTH,
@@ -1737,11 +1776,16 @@ export default function ReconciliationWorkbenchPage() {
           return result;
         },
       });
+      setLastActionMessage(message);
+      setRelationPreviewDialog(null);
       return;
     }
 
-    await runBlockingAction({
+    const message = await executeWorkbenchActionWithFreshness({
       loadingMessage: "正在撤回关联...",
+      syncingMessage: "关系已写入，正在同步关联台最新数据...",
+      onProgress,
+      waitForFreshWorkbenchLoad: true,
       action: async () => {
         const result = await withdrawWorkbenchLink({
           month: WORKBENCH_VIEW_MONTH,
@@ -1760,6 +1804,8 @@ export default function ReconciliationWorkbenchPage() {
         return result;
       },
     });
+    setLastActionMessage(message);
+    setRelationPreviewDialog(null);
   };
 
   const handleConfirmOpenSelection = async () => {
@@ -2257,6 +2303,63 @@ function CashTicketPurchaseModal({
   );
 }
 
+type RelationPreviewSubmitState =
+  | { phase: "idle"; message: string; committed: false }
+  | { phase: WorkbenchActionProgressPhase; message: string; committed: boolean }
+  | { phase: "error"; message: string; committed: boolean };
+
+function countRelationPreviewRows(groups: WorkbenchCandidateGroup[]) {
+  return groups.reduce(
+    (counts, group) => ({
+      oa: counts.oa + group.rows.oa.length,
+      bank: counts.bank + group.rows.bank.length,
+      invoice: counts.invoice + group.rows.invoice.length,
+    }),
+    { oa: 0, bank: 0, invoice: 0 },
+  );
+}
+
+function relationPreviewOperationCopy(preview: WorkbenchRelationPreview) {
+  if (preview.operation === "split_candidate") {
+    return {
+      title: "拆分候选预览",
+      submitLabel: "确认拆分",
+      submittingMessage: "正在确认拆分...",
+      statusLabel: "待拆分",
+    };
+  }
+  if (preview.operation === "withdraw_link") {
+    return {
+      title: "撤回关联预览",
+      submitLabel: "确认撤回",
+      submittingMessage: "正在撤回关联...",
+      statusLabel: "待撤回",
+    };
+  }
+  return {
+    title: "确认关联预览",
+    submitLabel: "确认关联",
+    submittingMessage: "正在确认关联...",
+    statusLabel: "待确认",
+  };
+}
+
+function relationPreviewPhaseLabel(phase: RelationPreviewSubmitState["phase"]) {
+  if (phase === "submitting") {
+    return "提交中";
+  }
+  if (phase === "syncing") {
+    return "同步中";
+  }
+  if (phase === "loading") {
+    return "加载中";
+  }
+  if (phase === "error") {
+    return "需处理";
+  }
+  return "待操作";
+}
+
 function RelationPreviewDialog({
   preview,
   columnLayouts,
@@ -2266,31 +2369,102 @@ function RelationPreviewDialog({
   preview: WorkbenchRelationPreview;
   columnLayouts?: WorkbenchSettings["workbenchColumnLayouts"];
   onClose: () => void;
-  onSubmit: (note: string) => void;
+  onSubmit: (note: string, onProgress: WorkbenchActionProgressHandler) => Promise<void>;
 }) {
   const [note, setNote] = useState("");
-  const isWithdraw = preview.operation === "withdraw_link";
-  const isSplitCandidate = preview.operation === "split_candidate";
-  const submitLabel = isSplitCandidate ? "确认拆分" : isWithdraw ? "确认撤回" : "确认关联";
-  const title = isSplitCandidate ? "拆分候选预览" : isWithdraw ? "撤回关联预览" : "确认关联预览";
+  const [submitState, setSubmitState] = useState<RelationPreviewSubmitState>({
+    phase: "idle",
+    message: "",
+    committed: false,
+  });
+  const operationCopy = relationPreviewOperationCopy(preview);
   const noteRequired = preview.requiresNote;
+  const isBusy = submitState.phase === "submitting" || submitState.phase === "syncing" || submitState.phase === "loading";
+  const isCommittedError = submitState.phase === "error" && submitState.committed;
   const canSubmit = preview.canSubmit && (!noteRequired || note.trim().length > 0);
+  const primaryDisabled = !canSubmit || isBusy || isCommittedError;
+  const rowCounts = countRelationPreviewRows(preview.after.groups);
+  const closePreview = () => {
+    if (!isBusy) {
+      onClose();
+    }
+  };
+  const handleSubmitClick = async () => {
+    if (primaryDisabled) {
+      return;
+    }
+    let committed = false;
+    const setProgress: WorkbenchActionProgressHandler = (progress) => {
+      committed = committed || progress.committed;
+      setSubmitState({ ...progress, committed });
+    };
+    setProgress({ phase: "submitting", message: operationCopy.submittingMessage, committed: false });
+    try {
+      await onSubmit(note.trim(), setProgress);
+    } catch (error) {
+      const message = actionErrorMessage(error);
+      setSubmitState({
+        phase: "error",
+        committed,
+        message: committed ? `关系已写入，关联台刷新未完成：${message}` : message,
+      });
+    }
+  };
+
+  useEffect(() => {
+    setNote("");
+    setSubmitState({ phase: "idle", message: "", committed: false });
+  }, [preview.previewId]);
 
   return (
     <div className="detail-modal-backdrop">
-      <button aria-label="关闭关联预览" className="detail-modal-backdrop-foreground" type="button" onClick={onClose} />
-      <section aria-label="关联预览" aria-modal="true" className="detail-modal relation-preview-modal" role="dialog">
+      <button
+        aria-label="关闭关联预览"
+        className="detail-modal-backdrop-foreground"
+        disabled={isBusy}
+        type="button"
+        onClick={closePreview}
+      />
+      <section
+        aria-busy={isBusy}
+        aria-label="关联预览"
+        aria-modal="true"
+        className={`detail-modal relation-preview-modal${isBusy ? " relation-preview-modal-busy" : ""}`}
+        role="dialog"
+      >
         <header className="detail-modal-header">
-          <div>
+          <div className="relation-preview-title-block">
             <div className="modal-eyebrow">关联预览</div>
-            <h2>{title}</h2>
+            <h2>{operationCopy.title}</h2>
+            <div className="relation-preview-subtitle">
+              <span>OA {rowCounts.oa}</span>
+              <span>流水 {rowCounts.bank}</span>
+              <span>发票 {rowCounts.invoice}</span>
+            </div>
           </div>
-          <button aria-label="关闭关联预览" className="detail-close-btn" type="button" onClick={onClose}>
-            ×
-          </button>
+          <div className="relation-preview-header-actions">
+            <span className={`relation-preview-phase-pill relation-preview-phase-${submitState.phase}`}>
+              {isBusy || submitState.phase === "error" ? relationPreviewPhaseLabel(submitState.phase) : operationCopy.statusLabel}
+            </span>
+            <button aria-label="关闭关联预览" className="detail-close-btn" disabled={isBusy} type="button" onClick={closePreview}>
+              ×
+            </button>
+          </div>
         </header>
         <div className="relation-preview-body">
           {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
+          {submitState.phase !== "idle" ? (
+            <div
+              className={`relation-preview-progress-panel relation-preview-progress-${submitState.phase}`}
+              role={submitState.phase === "error" ? "alert" : "status"}
+            >
+              {isBusy ? <span aria-hidden="true" className="relation-preview-spinner" /> : null}
+              <div>
+                <strong>{relationPreviewPhaseLabel(submitState.phase)}</strong>
+                <span>{submitState.message}</span>
+              </div>
+            </div>
+          ) : null}
           <div className="relation-preview-stack">
             <RelationPreviewTriPane
               title="操作前"
@@ -2313,16 +2487,29 @@ function RelationPreviewDialog({
           </div>
           <label className="relation-preview-note">
             <span>备注{noteRequired ? "（必填）" : ""}</span>
-            <textarea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
+            <textarea
+              aria-label="备注"
+              disabled={isBusy || isCommittedError}
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+            />
           </label>
         </div>
         <footer className="detail-modal-actions relation-preview-actions">
-          <button className="secondary-btn" type="button" onClick={onClose}>
-            取消
-          </button>
-          <button className="primary-action-btn" disabled={!canSubmit} type="button" onClick={() => onSubmit(note.trim())}>
-            {submitLabel}
-          </button>
+          {isCommittedError ? (
+            <button className="secondary-btn" type="button" onClick={closePreview}>
+              关闭
+            </button>
+          ) : (
+            <>
+              <button className="secondary-btn" disabled={isBusy} type="button" onClick={closePreview}>
+                取消
+              </button>
+              <button className="primary-action-btn" disabled={primaryDisabled} type="button" onClick={handleSubmitClick}>
+                {submitState.phase === "error" ? "重试" : operationCopy.submitLabel}
+              </button>
+            </>
+          )}
         </footer>
       </section>
     </div>

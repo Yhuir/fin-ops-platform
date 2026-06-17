@@ -44,7 +44,7 @@
 | stale | `read_model_status=stale`、failed/dirty scope、source mismatch | 页面必须提示陈旧；不能把空 rows 解释成真实业务结论。Workbench active generation stale 不等同于 OA dirty，不应把页面所有写操作全局禁用。 |
 | error | API/action/read model unavailable 或 failed | 展示业务错误；不暴露底层 SQL 细节。 |
 | empty | fresh active generation 中目标 zone/group 为空 | 只有 fresh 后才能认为 open/paired 为空。 |
-| operation pending | `GlobalOperationOverlayProvider` 包裹中的确认、撤回、异常、忽略等写操作 | 带后端 operation projection 的确认/撤回写 API 成功后只等待受影响月份 `workbench_relation` 操作级 barrier fresh，再应用后端 projection 并释放 overlay；barrier 按目标 scope 读取 outbox/readiness，其他月份 pending 不阻断当前操作。Workbench month/all active generation 和下游 read model 后台追赶。没有 operation projection 的旧动作仍需等待目标 read model/scope fresh 或重新读取 Workbench active generation 后释放。失败时展示错误并保持阻塞，用户确认后返回页面。 |
+| operation pending | 关联预览弹窗或 `GlobalOperationOverlayProvider` 包裹中的写操作 | 确认/撤回 preview 提交后留在预览弹窗内阻塞：禁用关闭、取消、重复提交和备注编辑；写 API 成功后等待受影响月份 `workbench_relation` 操作级 barrier fresh，并重新读取当前 Workbench fresh payload，加载完成后才关闭预览。预览路径不使用本地 optimistic 重排或 operation projection 先移动底层行；刷新失败时停留在弹窗错误状态。其他异常、忽略、现金等写操作继续走全局 overlay；带后端 operation projection 的非预览动作可只等目标 operation barrier 后应用 projection，未带 projection 的动作仍需等待目标 read model/scope fresh 或重新读取 Workbench active generation 后释放。 |
 | permission disabled/hidden | session 权限、App Health write safety gate、OA sync write gate | 无写权限、`overall.write_safety.blocks_mutations=true` 或 OA sync dirty/refreshing 时禁用确认/撤回；普通 read model blocked/red 只提示读侧故障并交给具体写 API precondition，不全局禁用无关 group。 |
 
 前端 domain event：
@@ -83,12 +83,13 @@ Refresh 触发来源：
 1. 查 `/api/workbench/refresh-status`、App Health、dirty scopes、outbox 和 worker heartbeat。
 2. 如果是 matching dirty scope，重试 `workbench-matching` worker；不要回退 legacy dirty scope。
 3. 如果是 active generation inconsistency，修复 generation 或重建 scope；不得手工把 failed 改 fresh。
-4. 如果是页面交互问题，先确认写 API response 的 affected months、operation freshness targets、operation projection、`/api/workbench*` 的 `read_model_status` 和 active generation freshness，再看 domain event/selection 状态。带 operation projection 的确认/撤回 overlay 不应等待 `workbench` month shard、`workbench:all` 或下游跨页面 read model 才释放；这些失败或 pending 仍是后台一致性问题，必须单独修复。
+4. 如果是页面交互问题，先确认写 API response 的 affected months、operation freshness targets、operation projection、`/api/workbench*` 的 `read_model_status` 和 active generation freshness，再看 domain event/selection 状态。确认/撤回预览必须等操作级 `workbench_relation` barrier 和当前 Workbench fresh refetch 后才关闭；它不应等待 `workbench:all` 或下游跨页面 read model 才释放。这些下游失败或 pending 仍是后台一致性问题，必须单独修复。
 
 ## 变更记录
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-18 | 确认/撤回关联预览提交改为弹窗内阻塞，等待操作级 `workbench_relation` fresh 和当前 Workbench fresh refetch 后才关闭；预览期间不应用 operation projection 先移动底层行 | `ReconciliationWorkbenchPage` 预览状态机、关联预览 UI、WorkbenchSelection 前端回归 | `web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-18 | `workbench:all` aggregate-only event 等待声明的 parent month shard 收敛；parent scope 仍 pending/processing/failed/stale 时走 dependency-not-fresh defer，不发布 failed all generation；同 scope 旧 failed 被重试覆盖时 refresh-status 展示 refreshing | `WorkbenchReadModelRefreshService`、`RuntimeQueueRepository`、`/api/workbench/refresh-status`、runtime worker defer、确认关联后 Workbench month/all 后台追赶 | `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing`、`test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_failed`、`test_workbench_refresh_status_api_treats_requeued_failed_scope_as_refreshing`、`tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope`、`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-17 | 关联台 operation barrier 等待窗口改为覆盖生产 worker 尾延迟，并将 outbox 判定收敛为目标 scope | `ReconciliationWorkbenchPage` 确认/撤回 overlay、`OperationFreshnessBarrierService`、`RuntimeMonitoringRepository.app_status_runtime_snapshot` | `tests/test_operation_freshness_barrier.py`、`tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests`、`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-15 | matching 规则版本变化后，`workbench-matching` worker 在 claim 前自检 completed dirty scopes 的 source_versions，原子重投旧版本 scope；all-scope 聚合传播 `workbench_matching_rules_version` | `WorkbenchMatchingDirtyScopeWorker`、`WorkbenchReconciliationDirtyQueue`、`PostgresReadModelRepository` matching dirty scope SQL、Workbench all-scope source_versions | `tests/test_workbench_matching_dirty_scope_worker.py`；`tests/test_workbench_reconciliation_dirty_queue.py`；`tests/test_workbench_sql_runtime.py` |

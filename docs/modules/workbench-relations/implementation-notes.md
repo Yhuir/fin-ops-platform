@@ -1,5 +1,21 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-18 - Spec-first E2E Audit 首轮基线
+
+目标：把 relation 事实源的跨页面 Browser e2e 明确成可追踪 Spec，而不是只维护测试文件列表。
+
+结论：
+
+- 新增 `e2e-spec.md`，定义 `WB-REL-E2E-001` 到 `WB-REL-E2E-010`。
+- 新增 `e2e-coverage.md`，把现有 Playwright fan-out smoke 映射到 relation Spec。
+- 当前 bank details、pending invoices、batch accounting、turnover 四条核心 relation fan-out Browser smoke 可保留；它们验证用户可见业务结果和后端重新读取。
+- 缺口集中在 candidate 不参与 linked-only 业务计算、relation read model non-fresh 诊断、重复提交/冲突、更多下游页面、真实下载和生产 display audit。
+- 生产/staging display audit 继续标记为 `external-risk`，不能作为本地 deterministic CI 已覆盖项。
+
+验证：
+
+- `bash scripts/verify.sh docs`
+
 ## 2026-06-17 - 写后等待禁止回退到 workbench_relation:all
 
 目标：修复关联台 confirm/withdraw 已经写入成功，但前端等待 `workbench_relation:all` 超时并显示“操作失败”的问题。

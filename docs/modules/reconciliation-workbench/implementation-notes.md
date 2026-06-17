@@ -27,6 +27,26 @@
 
 ## 历史记录
 
+## 2026-06-18 - Spec-first E2E Audit 首轮基线
+
+- 目标：把关联台 Browser e2e 从 smoke 覆盖升级为 Spec-first 审计，先明确页面应该如何工作，再映射现有 Playwright/Vitest/API/integration 覆盖。
+- 影响范围：新增 `e2e-spec.md` 和 `e2e-coverage.md`；更新模块 README/tests 入口；不改业务代码或测试代码。
+- 关键决策：现有 `workbench-relation-fanout.spec.ts`、`pending-invoices-fanout.spec.ts`、`batch-accounting-flow.spec.ts`、`turnover-ledger-flow.spec.ts` 不推翻重写。它们已经验证用户可见业务结果和跨页面 refetch，可保留；后续只加强 withdraw、split candidate、stale/refreshing、失败恢复、异常处理和大数据滚动等缺口。
+- 文档影响：同步 `docs/dev/spec-first-e2e-audit.md`、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/modules/README.md`。
+- 测试覆盖：本轮是审计文档基线，未新增测试。
+- 验证命令：`bash scripts/verify.sh docs`。
+- 未测风险：真实生产 active generation 回放、真实 worker drain、OA/iframe、大数据性能仍是 `external-risk`，不能计入本地 CI 覆盖。
+
+## 2026-06-18 - 确认/撤回预览内阻塞直到 Workbench fresh refetch
+
+- 目标：确认/撤回关联时，保留操作前/操作后三栏预览，并在用户点击确认后阻塞在同一个预览弹窗内，直到操作级 relation fresh 且当前关联台重新加载完成后才关闭。
+- 影响范围：`ReconciliationWorkbenchPage` relation preview submit flow、关联预览弹窗 UI、`WorkbenchSelection.test.tsx` 前端交互回归；不改变后端 relation 写 contract。
+- 关键决策：`runBlockingAction` 继续服务其他全局写操作；确认/撤回预览改用共享执行器但传入 `waitForFreshWorkbenchLoad=true`。预览路径先等待写 API 返回的 `workbench_relation` freshness targets fresh，再执行 Workbench fresh refetch；期间不应用本地 optimistic update 或 operation projection 移动底层行。弹窗 busy 时禁用关闭、取消、重复提交和备注编辑；写入后刷新失败时显示“关系已写入，关联台刷新未完成”，避免引导重复写入。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 和本实施记录；长期 API/worker contract 未变化。
+- 测试覆盖：更新 `web/src/test/WorkbenchSelection.test.tsx`，覆盖预览内 busy、无全局 overlay、按钮禁用、operation-scoped barrier target、不等待 global/all scope、fresh refetch 前不移动行、撤回 refetch 后恢复 open group。
+- 验证命令：`npm --prefix web test -- --run src/test/WorkbenchSelection.test.tsx`。
+- 未测风险：未跑真实浏览器截图或生产数据回放；视觉细节仍需在真实数据量的预览弹窗里人工抽样检查。
+
 ## 2026-06-17 - 撤回关联 operation barrier 超时修复
 
 - 目标：修复关联台撤回/确认后，写入已成功但全屏 overlay 报 `操作同步等待超时 · workbench_relation · 2026-03 · refresh outbox pending` 的问题。
