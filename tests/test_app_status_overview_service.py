@@ -507,8 +507,11 @@ class FakeRuntimeConnection:
             return [
                 {
                     "event_type": "bank_detail.read_model.refresh",
+                    "scope_type": "bank_detail",
+                    "scope_key": "2026-03",
                     "status": "pending",
                     "count": 1,
+                    "last_error": None,
                     "updated_at": "2026-06-04T10:00:00+00:00",
                 }
             ]
@@ -560,6 +563,19 @@ class AppStatusRuntimeRepositoryTests(unittest.TestCase):
 
         self.assertEqual(snapshot["read_model_statuses"]["bank_detail"]["status"], "refreshing")
         self.assertEqual(snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["status"], "pending")
+        self.assertEqual(
+            snapshot["outbox_statuses"]["bank_detail.read_model.refresh"]["scopes"],
+            [
+                {
+                    "event_type": "bank_detail.read_model.refresh",
+                    "scope_type": "bank_detail",
+                    "scope_key": "2026-03",
+                    "status": "pending",
+                    "count": 1,
+                    "updated_at": "2026-06-04T10:00:00+00:00",
+                }
+            ],
+        )
         self.assertEqual(snapshot["worker_statuses"]["bank-detail"]["status"], "ready")
 
     def test_runtime_repository_reports_registry_read_model_without_readiness_as_missing(self) -> None:

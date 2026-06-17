@@ -57,7 +57,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 1. 写 API 返回成功只代表 canonical write 已提交并产生 affected scopes/months。
 2. 前端通过 `/api/operation-barrier/status` 轮询这些 read model/scope 的 current-effective 状态。后端 `OperationFreshnessBarrierService` 只读 runtime snapshot，不写 readiness、不消费队列、不触发同步 rebuild。
-3. barrier 为 `refreshing` 时，全屏操作 overlay 保持显示；barrier 为 `blocked` 时显示具体失败，不把页面放回可操作状态并假装已同步。
+3. barrier 必须按目标 scope 判定 outbox/readiness；同一 `event_type` 下其他月份或其他 scope 的 pending refresh 不得阻断当前目标 scope。barrier 为 `refreshing` 时，全屏操作 overlay 保持显示；barrier 为 `blocked` 时显示具体失败，不把页面放回可操作状态并假装已同步。
 4. barrier 为 `fresh` 后，页面还要重新读取自己的 read boundary。Workbench 特别需要等待 active generation fresh；`workbench_relation` fresh 不能单独证明三栏展示已经更新。
 
 这个闭环用于压缩和隐藏写操作后的短暂 read model 收敛时间，不改变后端写安全。权限/session、DB 可写性、canonical relation version/idempotency/owner 状态仍由 command service 和 UoW 决定。

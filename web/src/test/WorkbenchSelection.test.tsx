@@ -54,6 +54,10 @@ function fetchPath(input: RequestInfo | URL) {
   return `${url.pathname}${url.search}`;
 }
 
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+}
+
 function isWorkbenchSummaryRequest(input: RequestInfo | URL) {
   return fetchPath(input).startsWith("/api/workbench/summary?");
 }
@@ -857,7 +861,47 @@ describe("Workbench row selection and detail modal", () => {
 
   test("workbench action uses operation-scoped freshness targets and backend projection", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 3000 });
+    const baseFetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 3000 });
+    let barrierPollCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/operation-barrier/status")) {
+        barrierPollCount += 1;
+        const fresh = barrierPollCount >= 9;
+        return jsonResponse({
+          status: fresh ? "fresh" : "refreshing",
+          fresh,
+          targets: [
+            {
+              read_model_key: "workbench_relation",
+              scope_type: "workbench_relation",
+              scope_key: "2026-03",
+              status: fresh ? "fresh" : "refreshing",
+              fresh,
+              blocking: !fresh,
+              raw_status: fresh ? "fresh" : "pending",
+              reason: fresh ? undefined : "refresh outbox pending",
+            },
+          ],
+          blocked_targets: [],
+          refreshing_targets: fresh
+            ? []
+            : [
+              {
+                read_model_key: "workbench_relation",
+                scope_type: "workbench_relation",
+                scope_key: "2026-03",
+                status: "refreshing",
+                fresh: false,
+                blocking: true,
+                raw_status: "pending",
+                reason: "refresh outbox pending",
+              },
+            ],
+        });
+      }
+      return baseFetchMock(input, init);
+    });
+    vi.stubGlobal("fetch", fetchMock);
     renderWorkbenchPage();
 
     const openZone = await screen.findByTestId("zone-open");
@@ -888,7 +932,7 @@ describe("Workbench row selection and detail modal", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
-    });
+    }, { timeout: 6_000 });
     expect(
       within(openZone).queryByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,

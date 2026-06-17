@@ -137,7 +137,11 @@ class OperationFreshnessBarrierService:
                 raw_status = "missing"
                 target_status = "refreshing"
                 reason = "target readiness scope missing"
-        outbox_payload = _dict(outbox_statuses.get(definition.refresh_event_type))
+        outbox_payload = _target_outbox_payload(
+            _dict(outbox_statuses.get(definition.refresh_event_type)),
+            scope_type=scope_type,
+            scope_key=target.scope_key,
+        )
         outbox_status = _clean_text(outbox_payload.get("status"))
         if outbox_status in BLOCKED_OUTBOX_STATUSES:
             target_status = "blocked"
@@ -208,6 +212,19 @@ def _matching_scope(payload: dict[str, Any], *, scope_type: str, scope_key: str)
     if _clean_text(payload.get("scope_type")) == scope_type and _clean_text(payload.get("scope_key")) == scope_key:
         return payload
     return None
+
+
+def _target_outbox_payload(payload: dict[str, Any], *, scope_type: str, scope_key: str) -> dict[str, Any]:
+    if not payload:
+        return {}
+    if scope_key == "all":
+        return payload
+    scoped_payload = _matching_scope(payload, scope_type=scope_type, scope_key=scope_key)
+    if scoped_payload is not None:
+        return scoped_payload
+    if isinstance(payload.get("scopes"), list):
+        return {}
+    return payload
 
 
 def _clean_text(value: Any) -> str:

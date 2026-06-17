@@ -70,6 +70,85 @@ class OperationFreshnessBarrierServiceTests(unittest.TestCase):
         self.assertFalse(payload["fresh"])
         self.assertEqual(payload["refreshing_targets"][0]["scope_key"], "2026-05")
 
+    def test_target_scope_outbox_pending_keeps_target_refreshing_when_readiness_was_fresh(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "workbench_relation": {
+                        "status": "fresh",
+                        "scopes": [
+                            {
+                                "scope_type": "workbench_relation",
+                                "scope_key": "2026-03",
+                                "status": "fresh",
+                                "updated_at": "2026-06-17T10:49:43+00:00",
+                            }
+                        ],
+                    }
+                },
+                "outbox_statuses": {
+                    "workbench_relation.read_model.refresh": {
+                        "status": "pending",
+                        "scopes": [
+                            {
+                                "scope_type": "workbench_relation",
+                                "scope_key": "2026-03",
+                                "status": "pending",
+                                "updated_at": "2026-06-17T10:49:44+00:00",
+                            }
+                        ],
+                    }
+                },
+                "worker_statuses": {"workbench-relation": {"status": "running"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("workbench_relation", "2026-03")])
+
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertFalse(payload["fresh"])
+        self.assertEqual(payload["refreshing_targets"][0]["reason"], "refresh outbox pending")
+
+    def test_other_scope_outbox_pending_does_not_block_fresh_target_scope(self) -> None:
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: {
+                "read_model_statuses": {
+                    "workbench_relation": {
+                        "status": "fresh",
+                        "scopes": [
+                            {
+                                "scope_type": "workbench_relation",
+                                "scope_key": "2026-03",
+                                "status": "fresh",
+                                "updated_at": "2026-06-17T10:49:52+00:00",
+                            }
+                        ],
+                    }
+                },
+                "outbox_statuses": {
+                    "workbench_relation.read_model.refresh": {
+                        "status": "pending",
+                        "scopes": [
+                            {
+                                "scope_type": "workbench_relation",
+                                "scope_key": "2026-04",
+                                "status": "pending",
+                                "updated_at": "2026-06-17T10:49:54+00:00",
+                            }
+                        ],
+                    }
+                },
+                "worker_statuses": {"workbench-relation": {"status": "running"}},
+            }
+        )
+
+        payload = service.status_payload([OperationFreshnessTarget("workbench_relation", "2026-03")])
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertTrue(payload["fresh"])
+        self.assertEqual(payload["targets"][0]["status"], "fresh")
+        self.assertNotIn("reason", payload["targets"][0])
+
     def test_outbox_failure_blocks_target_even_if_readiness_is_fresh(self) -> None:
         service = OperationFreshnessBarrierService(
             runtime_snapshot_provider=lambda: {

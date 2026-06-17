@@ -192,7 +192,8 @@ const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
 const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
 const WORKBENCH_OPERATION_FRESH_POLL_MS = 300;
-const WORKBENCH_OPERATION_FRESH_TIMEOUT_MS = 2_000;
+const WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS = 20_000;
+const WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS = 10_000;
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
   return JSON.stringify(query);
@@ -846,7 +847,7 @@ export default function ReconciliationWorkbenchPage() {
     const startedAt = Date.now();
     let lastReadModelStatus = "";
 
-    while (Date.now() - startedAt <= WORKBENCH_OPERATION_FRESH_TIMEOUT_MS) {
+    while (Date.now() - startedAt <= WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS) {
       const result = await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
         background: true,
         includeAuxiliary: false,
@@ -862,7 +863,7 @@ export default function ReconciliationWorkbenchPage() {
       await delayWorkbenchOperationPoll();
     }
 
-    throw new Error(`关联台最新数据同步超过 ${Math.round(WORKBENCH_OPERATION_FRESH_TIMEOUT_MS / 1000)} 秒，当前状态：${lastReadModelStatus || "unknown"}。`);
+    throw new Error(`关联台最新数据同步超过 ${Math.round(WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS / 1000)} 秒，当前状态：${lastReadModelStatus || "unknown"}。`);
   }, [zoneServerPageQueries]);
 
   const scheduleWorkbenchReadModelReload = useCallback(() => {
@@ -1484,7 +1485,7 @@ export default function ReconciliationWorkbenchPage() {
           setMessage("正在同步关联台最新数据...");
           await waitForOperationFreshness(
             targets,
-            { timeoutMs: WORKBENCH_OPERATION_FRESH_TIMEOUT_MS },
+            { timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS },
           );
         }
         if (actionResult && applyWorkbenchOperationProjection(actionResult)) {

@@ -334,6 +334,7 @@ class RuntimeMonitoringRepository:
                 e.scope_key,
                 e.status,
                 count(*)::bigint as count,
+                max(e.last_error) as last_error,
                 max(e.updated_at)::text as updated_at,
                 bool_or(
                     exists (
@@ -364,21 +365,53 @@ class RuntimeMonitoringRepository:
             """
         )
         grouped: dict[str, dict[str, Any]] = {}
+        scope_indexes: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
         for row in rows:
             event_type = str(row.get("event_type") or "").strip()
             if not event_type:
                 continue
             if _is_historical_outbox_status(row):
                 continue
+            row_count = _optional_int(row.get("count")) or 0
+            row_status = str(row.get("status") or "")
+            updated_at = str(row.get("updated_at") or "").strip()
+            last_error = str(row.get("last_error") or "").strip()
             current = grouped.setdefault(event_type, {"status": "ready", "count": 0})
-            current["count"] = int(current.get("count") or 0) + (_optional_int(row.get("count")) or 0)
+            current["count"] = int(current.get("count") or 0) + row_count
             current["status"] = _max_app_outbox_status(
                 str(current.get("status") or "ready"),
-                str(row.get("status") or ""),
+                row_status,
             )
-            updated_at = str(row.get("updated_at") or "").strip()
+            if last_error:
+                current["last_error"] = last_error
             if updated_at:
                 current["updated_at"] = updated_at
+            scope_type = str(row.get("scope_type") or "").strip()
+            scope_key = str(row.get("scope_key") or "").strip()
+            if scope_type or scope_key:
+                scope_index = scope_indexes.setdefault(event_type, {})
+                scope_payload = scope_index.setdefault(
+                    (scope_type, scope_key),
+                    {
+                        "event_type": event_type,
+                        "scope_type": scope_type,
+                        "scope_key": scope_key,
+                        "status": "ready",
+                        "count": 0,
+                    },
+                )
+                scope_payload["count"] = int(scope_payload.get("count") or 0) + row_count
+                scope_payload["status"] = _max_app_outbox_status(
+                    str(scope_payload.get("status") or "ready"),
+                    row_status,
+                )
+                if last_error:
+                    scope_payload["last_error"] = last_error
+                if updated_at:
+                    scope_payload["updated_at"] = updated_at
+        for event_type, scope_index in scope_indexes.items():
+            if event_type in grouped:
+                grouped[event_type]["scopes"] = list(scope_index.values())
         return grouped
 
     def _app_status_worker_statuses(self) -> dict[str, dict[str, Any]]:

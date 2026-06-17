@@ -27,6 +27,17 @@
 
 ## 历史记录
 
+## 2026-06-17 - 撤回关联 operation barrier 超时修复
+
+- 目标：修复关联台撤回/确认后，写入已成功但全屏 overlay 报 `操作同步等待超时 · workbench_relation · 2026-03 · refresh outbox pending` 的问题。
+- 影响范围：`ReconciliationWorkbenchPage` operation barrier 等待预算、`OperationFreshnessBarrierService` scope 判定、`RuntimeMonitoringRepository.app_status_runtime_snapshot` outbox payload、关联台测试矩阵和运行时调用链文档。
+- 真实原因：生产只读证据显示截图对应时间 2026-06-17 18:49:43 同时入队 `workbench_relation` 2026-02 与 2026-03 refresh，分别在 7.19s 和 8.20s 后 `done`，当前无 active backlog。旧前端把关联台 operation barrier timeout 设为 2s，因此在 worker 正常完成前误报超时；这不是 relation 撤回写失败。排查还发现后端 barrier 读取的 outbox 状态按 `event_type` 聚合，存在其他 scope pending 误伤当前目标 scope 的风险。
+- 关键决策：确认/撤回带 operation projection 的路径继续只等受影响月份 `workbench_relation`，但前端等待窗口改为覆盖生产 worker 尾延迟；完整 Workbench active generation fallback 使用独立预算。后端 runtime snapshot 保留 event_type 总览，同时暴露 `scopes[]`；operation barrier 只采纳目标 scope 的 outbox pending/failed，`all` scope 仍使用聚合状态。
+- 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md`、本实施记录，并同步 `docs/app-architecture/runtime-and-ownership.md`。
+- 测试覆盖：新增/更新 operation barrier service、runtime snapshot 和 Workbench 前端交互测试，覆盖目标 scope pending、其他 scope pending 不阻断、snapshot scopes 明细，以及前端 pending 超过 2s 后仍等待最终 fresh。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_operation_freshness_barrier tests.test_app_status_overview_service.AppStatusRuntimeRepositoryTests -v`；`cd web && npm test -- --run src/test/OperationBarrierApi.test.ts src/test/WorkbenchSelection.test.tsx`。
+- 未测风险：本地测试不执行真实生产写入；发布后仍需用受控撤回/确认或只读队列观察验证生产 overlay 不再在 2s 报错，且 App Status scoped outbox payload 正常。
+
 ## 2026-06-17 - 确认预览金额方向核对与确认按钮可见性
 
 - 目标：修复关联台确认预览把 mixed bank directions 的绝对流水合计误判为金额不一致，并让长预览中“确认关联”按钮持续可见。
@@ -98,7 +109,7 @@
 - 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 和本实施记录，并同步 read-models 模块说明。
 - 测试覆盖：`tests/test_workbench_auth_context_idempotency.py` 覆盖 response blocking targets；`tests/test_write_operation_slo_audit.py` 覆盖操作级与 cross-page profile 分离；`web/src/test/WorkbenchSelection.test.tsx` 覆盖 overlay barrier 只提交 `workbench_relation` target 且用后端 projection 更新 UI。
 - 验证命令：见本轮最终执行记录。
-- 未测风险：本地自动化证明 contract；生产 2 秒证明必须发布后用真实登录态再次执行受控 confirm/withdraw scenario。
+- 未测风险：本地自动化证明 contract；生产 2 秒证明必须发布后用真实登录态再次执行受控 confirm/withdraw scenario。2026-06-17 生产证据显示真实 `workbench_relation` refresh 可达 7-8 秒，该 2 秒口径只能作为优化目标/监控指标，不能作为前端失败阈值。
 
 ## 2026-06-14 - 写操作全屏 overlay 与真实 freshness barrier
 
