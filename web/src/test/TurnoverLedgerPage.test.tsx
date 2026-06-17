@@ -647,6 +647,7 @@ function installTurnoverLedgerFetch(options: {
   groupedPayloads?: Array<Record<string, unknown>>;
   missingDetailForRelationId?: string;
   exportDownloadResponse?: (url: URL) => Response;
+  operationBarrierResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
 } = {}) {
   let groupedRequestCount = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -905,8 +906,6 @@ function installTurnoverLedgerFetch(options: {
         freshness_targets: [
           { read_model_key: "turnover_ledger", scope_key: "all" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "all" },
         ],
       });
     }
@@ -921,8 +920,6 @@ function installTurnoverLedgerFetch(options: {
         freshness_targets: [
           { read_model_key: "turnover_ledger", scope_key: "all" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "all" },
         ],
       });
     }
@@ -936,12 +933,13 @@ function installTurnoverLedgerFetch(options: {
         freshness_targets: [
           { read_model_key: "turnover_ledger", scope_key: "all" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "all" },
         ],
       });
     }
     if (url.pathname === "/api/operation-barrier/status" && method === "POST") {
+      if (options.operationBarrierResponse) {
+        return options.operationBarrierResponse(JSON.parse(String(init?.body ?? "{}")), url);
+      }
       return Response.json({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
     }
     throw new Error(`Unexpected request ${method} ${url.pathname}`);
@@ -1311,6 +1309,61 @@ describe("Turnover ledger page", () => {
     window.removeEventListener("workbenchRelationUpdated", workbenchListener);
   });
 
+  test("does not report a committed manual closure as failed when post-write freshness sync is blocked", async () => {
+    const user = userEvent.setup();
+    let barrierCallCount = 0;
+    const fetchMock = installTurnoverLedgerFetch({
+      operationBarrierResponse: (body) => {
+        barrierCallCount += 1;
+        if (barrierCallCount === 1) {
+          return Response.json({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
+        }
+        const requestedTargets = Array.isArray(body.targets) ? body.targets as Array<Record<string, unknown>> : [];
+        const target = requestedTargets[0] ?? { read_model_key: "turnover_ledger", scope_key: "all" };
+        const blockedTarget = {
+          read_model_key: String(target.read_model_key ?? "turnover_ledger"),
+          scope_type: "snapshot",
+          scope_key: String(target.scope_key ?? "all"),
+          status: "blocked",
+          fresh: false,
+          blocking: true,
+          raw_status: "failed",
+          reason: "workbench_all_scope_parent_inconsistent",
+          last_error: "generation_metadata_actual_mismatch",
+        };
+        return Response.json({
+          status: "blocked",
+          fresh: false,
+          targets: [blockedTarget],
+          blocked_targets: [blockedTarget],
+          refreshing_targets: [],
+        });
+      },
+    });
+    renderTurnoverLedgerPage();
+
+    const page = await screen.findByTestId("turnover-ledger-page");
+    const table = await within(page).findByRole("table", { name: "往来款左右双栏台账" });
+    const companyGroupCell = within(table).getByTestId("turnover-group-cell-counterparty:company:yunnan");
+    await user.click(within(companyGroupCell).getByRole("button", { name: "展开 云南建设有限公司 流水明细" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-expense-1000" }));
+    await user.click(within(table).getByRole("checkbox", { name: "选择流水 bank-company-income-1000" }));
+    await user.click(within(page).getByRole("button", { name: "确认闭环" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "确认外部往来闭环" });
+    await user.click(within(drawer).getByRole("button", { name: "确定" }));
+
+    await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/turnover-ledger/closures/confirm" && init?.method === "POST";
+      });
+      expect(request).toBeDefined();
+    });
+    expect(await screen.findByText("操作已提交，后台同步尚未完成，请稍后刷新。")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
+  });
+
   test("omits closure expected versions when refreshed flow rows do not expose bank row versions", async () => {
     const user = userEvent.setup();
     const fetchMock = installTurnoverLedgerFetch();
@@ -1386,8 +1439,6 @@ describe("Turnover ledger page", () => {
           targets: [
             { read_model_key: "turnover_ledger", scope_key: "all" },
             { read_model_key: "workbench_relation", scope_key: "2026-05" },
-            { read_model_key: "workbench", scope_key: "2026-05" },
-            { read_model_key: "workbench", scope_key: "all" },
           ],
         });
       });
@@ -1632,8 +1683,6 @@ describe("Turnover ledger page", () => {
           targets: [
             { read_model_key: "turnover_ledger", scope_key: "all" },
             { read_model_key: "workbench_relation", scope_key: "2026-05" },
-            { read_model_key: "workbench", scope_key: "2026-05" },
-            { read_model_key: "workbench", scope_key: "all" },
           ],
         });
       });

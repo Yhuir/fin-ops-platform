@@ -1122,11 +1122,6 @@ def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -
             {"read_model_key": "workbench_relation", "scope_key": scope_key}
             for scope_key in normalized_months
         ],
-        *[
-            {"read_model_key": "workbench", "scope_key": scope_key}
-            for scope_key in normalized_months
-        ],
-        {"read_model_key": "workbench", "scope_key": "all"},
     ]
 
 

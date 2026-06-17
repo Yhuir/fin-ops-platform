@@ -84,7 +84,7 @@
 | blocking dirty scope 粒度不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
 | bank detail tag facade 下游版本合同 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows`、`BankTransactionTagReadFacadeTests.test_bulk_get_for_rows_preserves_versions_for_downstream_preconditions` |
 | 前端 stale 写禁用 | `shows grouped read model stale warning and blocks manual closure` |
-| 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 `turnover_ledger:all` fresh 并 reload/rebind 最新 flow rows，提交后等待后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation`、`workbench` barrier fresh，再 reload grouped payload、发送关联台刷新事件；`web/e2e/turnover-ledger-flow.spec.ts` 在真实 Chromium 中覆盖同组 flow rows confirm/withdraw recovery |
+| 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 `turnover_ledger:all` fresh 并 reload/rebind 最新 flow rows，提交后只把后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation` 作为硬等待目标，`workbench` 月份/all 聚合继续后台收敛；若 POST 成功后的 operation barrier/reload 被 blocked 或超时，页面显示“操作已提交，后台同步尚未完成” warning，不弹“操作失败”；`web/e2e/turnover-ledger-flow.spec.ts` 在真实 Chromium 中覆盖同组 flow rows confirm/withdraw recovery |
 
 ## 历史 bug 回归库
 
@@ -125,7 +125,7 @@
 3. 手动闭环 relation 撤回 -> 只撤回同一 `cash_closure_case_id` 的多流水闭环，并恢复确认前的 OA-bank relation；关联台已经配对的同组银行收支闭环从外部往来页撤回时走 `/api/turnover-ledger/closures/withdraw`，与关联台撤回同一条 Workbench command service 链路；已升级为包含发票或其他业务 row type 时必须从关联台撤回；Workbench relation read model 不 fresh 时必须 fail fast 且不产生 Turnover 半写入。`web/e2e/turnover-ledger-flow.spec.ts` 已覆盖已闭环 flow row toolbar 撤回和 grouped payload 移除“收支闭环”。
 4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。
 5. tag-selection / bank-row-tags / confirm / withdraw / extra 的 outbox 失败必须 rollback 或显式暴露失败。
-6. tag-selection / extra / confirm / withdraw -> 全屏 overlay；manual closure 提交前额外执行 `turnover_ledger:all` fresh gate 和 grouped reload/rebind -> 写成功后等待 operation barrier fresh -> reload grouped ledger -> overlay 释放；Browser smoke 已断言 confirm/withdraw 都触发 `POST /api/operation-barrier/status`。
+6. tag-selection / extra / confirm / withdraw -> 全屏 overlay；manual closure 提交前额外执行 `turnover_ledger:all` fresh gate 和 grouped reload/rebind -> 写成功后等待 operation barrier fresh -> reload grouped ledger -> overlay 释放；若写成功后的 barrier/reload 被 blocked 或超时，仅显示后台同步 warning，不得把已提交操作渲染成“操作失败”。Browser smoke 已断言 confirm/withdraw 都触发 `POST /api/operation-barrier/status`。
 
 真实环境 smoke 仍需在发布前执行：
 

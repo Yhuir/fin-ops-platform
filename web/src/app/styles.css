@@ -4098,7 +4098,7 @@ textarea {
   display: grid;
   align-items: start;
   gap: var(--fp-space-3);
-  grid-template-columns: minmax(280px, 30%) minmax(0, 1fr);
+  grid-template-columns: minmax(360px, clamp(360px, 32vw, 520px)) minmax(0, 1fr);
 }
 
 .batch-accounting-button {
@@ -4224,6 +4224,7 @@ textarea {
 }
 
 .batch-accounting-field--year {
+  flex: 0 0 128px;
   min-width: 128px;
 }
 
@@ -4327,6 +4328,7 @@ textarea {
 }
 
 .batch-accounting-bank-panel {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);
@@ -4335,10 +4337,16 @@ textarea {
 
 .batch-accounting-bank-panel__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--fp-space-2);
   padding: var(--fp-space-3);
+}
+
+.batch-accounting-bank-panel__header > div:first-child {
+  min-width: min(220px, 100%);
+  flex: 1 1 220px;
 }
 
 .batch-accounting-bank-panel__title {
@@ -4363,6 +4371,7 @@ textarea {
 
 .batch-accounting-pagination {
   display: inline-flex;
+  flex: 0 0 auto;
   min-height: 30px;
   align-items: center;
   gap: var(--fp-space-1);
@@ -4460,7 +4469,8 @@ textarea {
 }
 
 .batch-accounting-bank-row__main {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--fp-space-2);
@@ -4468,9 +4478,16 @@ textarea {
 
 .batch-accounting-bank-row__title,
 .batch-accounting-bank-row__amount {
+  min-width: 0;
   font-size: var(--fp-text-body);
   font-weight: 900;
   line-height: var(--fp-leading-tight);
+}
+
+.batch-accounting-bank-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .batch-accounting-bank-row__amount {
@@ -4482,6 +4499,7 @@ textarea {
 .batch-accounting-bank-row__tags,
 .batch-accounting-summary {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--fp-space-1);
@@ -4490,6 +4508,8 @@ textarea {
 .batch-accounting-tag,
 .batch-accounting-summary-tag {
   display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
   min-height: var(--fp-tag-height-table);
   align-items: center;
   justify-content: center;
@@ -4505,6 +4525,8 @@ textarea {
     background-color var(--motion-fast) var(--ease-out-quart),
     border-color var(--motion-fast) var(--ease-out-quart),
     color var(--motion-fast) var(--ease-out-quart);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -4827,6 +4849,28 @@ textarea {
   .batch-accounting-oa-panel__toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .batch-accounting-bank-panel__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .batch-accounting-field--year {
+    flex-basis: auto;
+    width: 100%;
+  }
+
+  .batch-accounting-pagination {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .batch-accounting-pagination__summary {
+    min-width: 0;
+    text-align: left;
   }
 }
 
@@ -5833,6 +5877,11 @@ textarea {
 .turnover-ledger-toast--success {
   border-color: color-mix(in srgb, var(--fp-success) 68%, var(--fp-border));
   background: var(--fp-success);
+}
+
+.turnover-ledger-toast--warning {
+  border-color: color-mix(in srgb, var(--fp-warning) 68%, var(--fp-border));
+  background: var(--fp-warning);
 }
 
 .turnover-ledger-toast--error {

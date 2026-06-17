@@ -1876,9 +1876,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 {"read_model_key": "turnover_ledger", "scope_key": "all"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-                {"read_model_key": "workbench", "scope_key": "2026-02"},
-                {"read_model_key": "workbench", "scope_key": "2026-03"},
-                {"read_model_key": "workbench", "scope_key": "all"},
             ],
         )
 

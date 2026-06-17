@@ -3,6 +3,43 @@ import { expect, test } from "@playwright/test";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 test.describe("batch accounting browser flow", () => {
+  test("keeps the bank rail readable in a narrow desktop viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1180, height: 720 });
+    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+
+    await page.goto("/batch-accounting");
+    await expect(page.getByRole("heading", { name: "日常报销批量账务管理" })).toBeVisible();
+
+    const bankPanel = page.getByRole("region", { name: "批量账务流水" });
+    const bankHeader = bankPanel.locator(".batch-accounting-bank-panel__header");
+    const title = bankPanel.locator(".batch-accounting-bank-panel__title");
+    const subtitle = bankPanel.locator(".batch-accounting-bank-panel__subtitle");
+    const yearInput = page.getByLabel("流水年份");
+    const pagination = page.getByRole("group", { name: "批量账务流水分页" });
+
+    await expect(bankPanel.getByRole("button", { name: /批量账务集中处理.*1,200.00.*建行 8106/ })).toBeVisible();
+
+    const headerBox = await bankHeader.boundingBox();
+    const titleBox = await title.boundingBox();
+    const subtitleBox = await subtitle.boundingBox();
+    const yearBox = await yearInput.boundingBox();
+    const paginationBox = await pagination.boundingBox();
+
+    expect(headerBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(subtitleBox).not.toBeNull();
+    expect(yearBox).not.toBeNull();
+    expect(paginationBox).not.toBeNull();
+    expect(titleBox!.height).toBeLessThan(38);
+    expect(subtitleBox!.height).toBeLessThan(48);
+
+    const headerRight = headerBox!.x + headerBox!.width + 1;
+    for (const box of [titleBox!, subtitleBox!, yearBox!, paginationBox!]) {
+      expect(box.x).toBeGreaterThanOrEqual(headerBox!.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(headerRight);
+    }
+  });
+
   test("submits and withdraws daily reimbursement rows through the relation freshness barrier", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 

@@ -17,6 +17,13 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-17 - 写成功后 read model 同步误报失败修复
+
+- 真实原因：外部往来 manual closure 写入已经成功，但 API 返回的 hard `freshness_targets` 包含 `workbench:all`；生产 `workbench:all` 聚合处于 `workbench_all_scope_parent_inconsistent` blocked，前端把 post-write operation barrier blocked 冒泡给 `GlobalOperationOverlayProvider`，于是用户看到“操作失败”，但 canonical relation 和 Workbench active case 已经建立。
+- 关键决策：外部往来写操作的 hard operation visibility targets 只保留本页可见性与关联台关系可见性：`turnover_ledger:all` 和受影响月份 `workbench_relation`。`workbench` 月份/all active generation、成本统计、搜索等 downstream read model 仍由 UoW dirty/outbox 刷新，但不再作为本页面写操作 overlay 释放条件。
+- 前端边界：POST 成功之前的 fresh gate、stale precondition、权限/session、DB/idempotency 错误继续作为操作失败；POST 成功之后的 operation barrier blocked/timeout 或 grouped reload 失败降级为“操作已提交，后台同步尚未完成，请稍后刷新。” warning，不得弹“操作失败”。
+- 回归保护：更新 closure freshness target contract 测试和页面交互测试，新增“提交成功后 barrier blocked 不显示操作失败”的组件用例。
+
 ## 2026-06-17 - 收支闭环 chip 与关联台撤回链路统一
 
 - 目标：外部往来款管理不再显示“已关联业务单据”“未闭环”“部分已闭环”“候选关联”等旧 chip；只显示正向事实 chip：“已关联 OA”“已关联 发票”“收支闭环”。已经在关联台形成同一组银行收支闭环的流水，在外部往来页也应显示“收支闭环”，并可从同一组流水直接撤回。
@@ -176,7 +183,7 @@
 
 - 目标：外部往来页面确认多笔 manual zero-difference closure 后，关联台 `open` 区必须能在同一次跨页刷新中看到同一个 `case:turnover:{relation_id}` open group，避免先刷新到旧 Workbench generation。
 - 影响范围：`TurnoverLedgerConfirmRequestBoundaryFacade` 响应契约、`TurnoverLedgerPage` operation barrier 等待、turnover closure API mapper、关联台跨页刷新事件时序。
-- 关键决策：relation 写入和 Workbench 分组架构保持不变；真实缺口是闭环 API 只让前端等待 turnover ledger，未暴露/等待 Workbench 可见性目标。manual closure confirm 响应新增 `freshness_targets`，包含 `turnover_ledger:all`、受影响月份 `workbench_relation`、受影响月份 `workbench` 和 `workbench:all`；前端等这些 targets fresh 后再 reload 和 emit `workbenchRelationUpdated`。
+- 关键决策：relation 写入和 Workbench 分组架构保持不变；真实缺口是闭环 API 只让前端等待 turnover ledger，未暴露/等待 Workbench 可见性目标。当时 manual closure confirm 响应新增 `freshness_targets`，包含 `turnover_ledger:all`、受影响月份 `workbench_relation`、受影响月份 `workbench` 和 `workbench:all`；该 hard target 范围已在 2026-06-17 被收窄为 `turnover_ledger:all` + 受影响月份 `workbench_relation`，`workbench` 月份/all 仅后台收敛，不再作为外部往来 overlay 释放条件。
 - 文档影响：更新本模块 `README.md`、`state-machine.md`、`tests.md` 与本实施记录；关联台模块测试矩阵同步补充跨页刷新等待保护。
 - 测试覆盖：新增/更新 `tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx`。
 - 验证命令：见本轮最终执行记录。

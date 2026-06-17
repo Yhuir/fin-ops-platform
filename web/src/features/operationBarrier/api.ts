@@ -60,6 +60,15 @@ type WaitForOperationFreshnessOptions = {
   onStatus?: (status: OperationBarrierStatus) => void;
 };
 
+const READ_MODEL_LABELS: Record<string, string> = {
+  bank_detail: "银行流水",
+  no_oa_bank_batch: "无 OA 银行批次",
+  pending_invoice: "待处理发票",
+  turnover_ledger: "往来款台账",
+  workbench: "关联台",
+  workbench_relation: "关联关系",
+};
+
 export class OperationBarrierBlockedError extends Error {
   payload: OperationBarrierStatus;
 
@@ -150,13 +159,9 @@ function operationBarrierMessage(payload: OperationBarrierStatus | null, fallbac
   if (!target) {
     return fallback;
   }
-  return [
-    fallback,
-    target.readModelKey,
-    target.scopeKey,
-    target.reason,
-    target.lastError,
-  ].filter(Boolean).join(" · ");
+  const label = READ_MODEL_LABELS[target.readModelKey] ?? "相关数据";
+  const scope = target.scopeKey && target.scopeKey !== "all" ? `（${target.scopeKey}）` : "";
+  return `${fallback}，${label}${scope}仍在同步，请稍后刷新后重试。`;
 }
 
 function mapOperationBarrierStatus(payload: ApiOperationBarrierStatus): OperationBarrierStatus {

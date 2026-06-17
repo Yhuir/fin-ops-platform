@@ -13,7 +13,11 @@ import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
 } from "../features/domainEvents";
-import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
+import {
+  operationBarrierTargetsFromMonths,
+  waitForOperationFreshness,
+  type OperationBarrierTarget,
+} from "../features/operationBarrier/api";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { ApiClientError } from "../features/apiClient";
 import {
@@ -90,6 +94,9 @@ const EMPTY_TAG_SELECTION: TurnoverLedgerTagSelection = {
 
 const SELF_SUB_LABEL = "主标签本身";
 const CLOSURE_SELECTION_STALE_MESSAGE = "所选流水已刷新，请重新选择后再确认闭环。";
+const POST_MUTATION_SYNC_WARNING_MESSAGE = "操作已提交，后台同步尚未完成，请稍后刷新。";
+
+type TurnoverLedgerToastSeverity = "success" | "warning" | "error";
 
 type ClosureSelection = {
   groupId: string;
@@ -255,6 +262,21 @@ function relationDetailErrorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : "往来关系详情加载失败";
 }
 
+async function waitForPostMutationVisibility(
+  targets: OperationBarrierTarget[],
+  reloadLedger: () => Promise<TurnoverLedgerGroupedResponse>,
+  markReloading: () => void,
+) {
+  try {
+    await waitForOperationFreshness(targets);
+    markReloading();
+    await reloadLedger();
+    return "";
+  } catch {
+    return POST_MUTATION_SYNC_WARNING_MESSAGE;
+  }
+}
+
 type ClosureCashDirection = "income" | "expense" | "unknown";
 
 type ClosurePreviewItem = {
@@ -368,7 +390,7 @@ export default function TurnoverLedgerPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportDownloading, setExportDownloading] = useState(false);
-  const [toast, setToast] = useState<{ severity: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = useState<{ severity: TurnoverLedgerToastSeverity; message: string } | null>(null);
 
   const summary = ledger?.summary ?? DEFAULT_SUMMARY;
   const groups = ledger?.groups ?? [];
@@ -575,6 +597,7 @@ export default function TurnoverLedgerPage() {
     if (bankRowIds.length < 2) {
       return;
     }
+    let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: "正在确认外部往来闭环...",
       action: async ({ setMessage }) => {
@@ -606,13 +629,13 @@ export default function TurnoverLedgerPage() {
           setClosureSelection(null);
           setClosureDrawerOpen(false);
           setMessage("正在等待往来款台账和关联台读模型同步...");
-          await waitForOperationFreshness(
+          postMutationSyncWarning = await waitForPostMutationVisibility(
             closureResult.freshnessTargets.length > 0
               ? closureResult.freshnessTargets
               : operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
+            reloadLedgerAfterMutation,
+            () => setMessage("正在刷新往来款台账..."),
           );
-          setMessage("正在刷新往来款台账...");
-          await reloadLedgerAfterMutation();
           return closureResult;
         } finally {
           setClosureSubmitting(false);
@@ -635,7 +658,10 @@ export default function TurnoverLedgerPage() {
         action: "turnover_manual_closure",
         source: "turnover_manual_closure",
       });
-      setToast({ severity: "success", message: "外部往来闭环已确认" });
+      setToast({
+        severity: postMutationSyncWarning ? "warning" : "success",
+        message: postMutationSyncWarning || "外部往来闭环已确认",
+      });
     } else {
       setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "外部往来闭环确认失败" });
     }
@@ -694,6 +720,7 @@ export default function TurnoverLedgerPage() {
     }
     const targetRow = selectedRow;
     const nextExtra = extraForm;
+    let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: "正在保存往来关系补充信息...",
       action: async ({ setMessage }) => {
@@ -703,9 +730,11 @@ export default function TurnoverLedgerPage() {
           setExtraForm(saved.extra);
           setExtraDirty(false);
           setMessage("正在等待往来款台账读模型同步...");
-          await waitForOperationFreshness(operationBarrierTargetsFromMonths("turnover_ledger", [], "all"));
-          setMessage("正在刷新往来款台账...");
-          await reloadLedgerAfterMutation();
+          postMutationSyncWarning = await waitForPostMutationVisibility(
+            operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
+            reloadLedgerAfterMutation,
+            () => setMessage("正在刷新往来款台账..."),
+          );
           return saved;
         } finally {
           setSavingExtra(false);
@@ -718,7 +747,10 @@ export default function TurnoverLedgerPage() {
         relationId: targetRow.relationId,
         source: "turnover_extra_save",
       });
-      setToast({ severity: "success", message: "补充信息已保存" });
+      setToast({
+        severity: postMutationSyncWarning ? "warning" : "success",
+        message: postMutationSyncWarning || "补充信息已保存",
+      });
     } else {
       setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "补充信息保存失败" });
     }
@@ -729,6 +761,7 @@ export default function TurnoverLedgerPage() {
       return;
     }
     const targetRow = selectedRow;
+    let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: kind === "confirm" ? "正在确认往来归并..." : "正在撤销往来归并...",
       action: async ({ setMessage }) => {
@@ -738,13 +771,13 @@ export default function TurnoverLedgerPage() {
             ? await confirmTurnoverRelation({ bankRowIds: targetRow.bankRowIds })
             : await withdrawTurnoverRelation({ relationId: targetRow.relationId });
           setMessage("正在等待往来款台账读模型同步...");
-          await waitForOperationFreshness(
+          postMutationSyncWarning = await waitForPostMutationVisibility(
             mutationResult.freshnessTargets.length > 0
               ? mutationResult.freshnessTargets
               : operationBarrierTargetsFromMonths("turnover_ledger", mutationResult.affectedMonths, "all"),
+            reloadLedgerAfterMutation,
+            () => setMessage("正在刷新往来款台账..."),
           );
-          setMessage("正在刷新往来款台账...");
-          await reloadLedgerAfterMutation();
           return mutationResult;
         } finally {
           setMutatingRelation(false);
@@ -766,7 +799,10 @@ export default function TurnoverLedgerPage() {
           source: "turnover_relation_mutation",
         });
       }
-      setToast({ severity: "success", message: kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销" });
+      setToast({
+        severity: postMutationSyncWarning ? "warning" : "success",
+        message: postMutationSyncWarning || (kind === "confirm" ? "往来关系已确认归并" : "往来归并已撤销"),
+      });
     } else {
       setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "往来关系操作失败" });
     }
@@ -779,6 +815,7 @@ export default function TurnoverLedgerPage() {
     const relationId = selectedCashClosureRelationId;
     const cashClosureCaseId = selectedCashClosureCaseId;
     const affectedRowIds = selectedClosureRows.map(flowBankRowId).filter(Boolean);
+    let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: "正在撤回外部往来闭环...",
       action: async ({ setMessage }) => {
@@ -790,13 +827,13 @@ export default function TurnoverLedgerPage() {
           setClosureSelection(null);
           setClosureDrawerOpen(false);
           setMessage("正在等待往来款台账和关联台读模型同步...");
-          await waitForOperationFreshness(
+          postMutationSyncWarning = await waitForPostMutationVisibility(
             mutationResult.freshnessTargets.length > 0
               ? mutationResult.freshnessTargets
               : operationBarrierTargetsFromMonths("turnover_ledger", mutationResult.affectedMonths, "all"),
+            reloadLedgerAfterMutation,
+            () => setMessage("正在刷新往来款台账..."),
           );
-          setMessage("正在刷新往来款台账...");
-          await reloadLedgerAfterMutation();
           return mutationResult;
         } finally {
           setMutatingRelation(false);
@@ -819,7 +856,10 @@ export default function TurnoverLedgerPage() {
         action: "cash_closure_withdraw",
         source: "turnover_cash_closure",
       });
-      setToast({ severity: "success", message: "外部往来闭环已撤回" });
+      setToast({
+        severity: postMutationSyncWarning ? "warning" : "success",
+        message: postMutationSyncWarning || "外部往来闭环已撤回",
+      });
     } else {
       setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "外部往来闭环撤回失败" });
     }
@@ -837,6 +877,7 @@ export default function TurnoverLedgerPage() {
       return;
     }
     const selectedTagCodes = Array.from(draftSelectedTagCodes);
+    let postMutationSyncWarning = "";
     const result = await runOperation({
       loadingMessage: "正在保存外部往来款标签设置...",
       action: async ({ setMessage }) => {
@@ -850,9 +891,11 @@ export default function TurnoverLedgerPage() {
           setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
           setTagDrawerOpen(false);
           setMessage("正在等待往来款台账读模型同步...");
-          await waitForOperationFreshness(operationBarrierTargetsFromMonths("turnover_ledger", [], "all"));
-          setMessage("正在刷新往来款台账...");
-          await reloadLedgerAfterMutation();
+          postMutationSyncWarning = await waitForPostMutationVisibility(
+            operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
+            reloadLedgerAfterMutation,
+            () => setMessage("正在刷新往来款台账..."),
+          );
           return saved;
         } finally {
           setTagSaving(false);
@@ -861,7 +904,10 @@ export default function TurnoverLedgerPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "外部往来款标签设置保存失败",
     });
     if (result.status === "success") {
-      setToast({ severity: "success", message: "外部往来款标签设置已保存" });
+      setToast({
+        severity: postMutationSyncWarning ? "warning" : "success",
+        message: postMutationSyncWarning || "外部往来款标签设置已保存",
+      });
     } else {
       setToast({ severity: "error", message: result.error instanceof Error ? result.error.message : "外部往来款标签设置保存失败" });
     }

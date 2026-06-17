@@ -82,7 +82,9 @@ same group flow rows selected
   -> Workbench open relation until invoice/full business relation is completed in Workbench
   -> turnover/workbench/workbench_relation dirty-outbox refresh
   -> API 返回 operation freshness targets
-  -> frontend waits turnover_ledger/workbench_relation/workbench fresh before emitting Workbench refresh event
+  -> frontend waits turnover_ledger:all + affected workbench_relation scopes as hard operation visibility targets
+  -> workbench month/all aggregate and other downstream read models converge in background SLO path
+  -> frontend emits Workbench refresh event; post-write sync/reload blockage is warning, not mutation failure
 ```
 
 校验：

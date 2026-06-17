@@ -346,8 +346,6 @@ describe("turnover ledger API", () => {
         freshness_targets: [
           { read_model_key: "turnover_ledger", scope_key: "all" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "all" },
         ],
       });
     });
@@ -367,8 +365,6 @@ describe("turnover ledger API", () => {
       freshnessTargets: [
         { readModelKey: "turnover_ledger", scopeKey: "all" },
         { readModelKey: "workbench_relation", scopeKey: "2026-05" },
-        { readModelKey: "workbench", scopeKey: "2026-05" },
-        { readModelKey: "workbench", scopeKey: "all" },
       ],
     });
   });
@@ -392,8 +388,6 @@ describe("turnover ledger API", () => {
         freshness_targets: [
           { read_model_key: "turnover_ledger", scope_key: "all" },
           { read_model_key: "workbench_relation", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "2026-05" },
-          { read_model_key: "workbench", scope_key: "all" },
         ],
       });
     });
@@ -410,8 +404,6 @@ describe("turnover ledger API", () => {
       freshnessTargets: [
         { readModelKey: "turnover_ledger", scopeKey: "all" },
         { readModelKey: "workbench_relation", scopeKey: "2026-05" },
-        { readModelKey: "workbench", scopeKey: "2026-05" },
-        { readModelKey: "workbench", scopeKey: "all" },
       ],
     });
   });

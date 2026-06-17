@@ -343,13 +343,20 @@ describe("BatchAccountingPage", () => {
 
   test("keeps premium compact panels, OA table, stable tags, and interaction CSS contracts", () => {
     const styles = readWebSource("src/app/styles.css");
+    const layoutRule = cssRule(styles, ".batch-accounting-layout");
     const buttonRule = cssRule(styles, ".batch-accounting-button");
     const segmentRule = cssRule(styles, ".batch-accounting-segment__button");
+    const yearFieldRule = cssRule(styles, ".batch-accounting-field--year");
     const inputRule = cssRule(styles, ".batch-accounting-field input,\\n.batch-accounting-field textarea");
     const searchRule = cssRule(styles, ".batch-accounting-search");
     const searchClearRule = cssRule(styles, ".batch-accounting-search__clear");
+    const paginationRule = cssRule(styles, ".batch-accounting-pagination");
     const paginationButtonRule = cssRule(styles, ".batch-accounting-pagination__button");
+    const bankHeaderRule = cssRule(styles, ".batch-accounting-bank-panel__header");
+    const bankHeaderTitleRule = cssRule(styles, ".batch-accounting-bank-panel__header > div:first-child");
     const bankRowRule = cssRule(styles, ".batch-accounting-bank-row");
+    const bankRowMainRule = cssRule(styles, ".batch-accounting-bank-row__main");
+    const bankRowTitleRule = cssRule(styles, ".batch-accounting-bank-row__title");
     const selectedBankRowRule = cssRule(styles, ".batch-accounting-bank-row--selected,\\n.batch-accounting-bank-row[aria-pressed=\"true\"]");
     const tagRule = cssRule(styles, ".batch-accounting-tag,\\n.batch-accounting-summary-tag");
     const mismatchRule = cssRule(styles, ".batch-accounting-mismatch-warning__trigger");
@@ -375,10 +382,20 @@ describe("BatchAccountingPage", () => {
     expect(expandToggleRule).toContain("var(--motion-fast)");
     expect(feedbackCloseRule).toContain("var(--motion-fast)");
 
+    expect(layoutRule).toContain("minmax(360px, clamp(360px, 32vw, 520px))");
+    expect(yearFieldRule).toContain("flex: 0 0 128px");
+    expect(paginationRule).toContain("flex: 0 0 auto");
+    expect(bankHeaderRule).toContain("flex-wrap: wrap");
+    expect(bankHeaderTitleRule).toContain("flex: 1 1 220px");
+    expect(bankRowMainRule).toContain("grid-template-columns: minmax(0, 1fr) auto");
+    expect(bankRowTitleRule).toContain("text-overflow: ellipsis");
+    expect(styles).toContain("@media (max-width: 640px)");
+    expect(styles).toContain(".batch-accounting-pagination {\n    justify-content: space-between;");
     expect(bankRowRule).toContain("padding: var(--fp-space-2) var(--fp-space-3)");
     expect(selectedBankRowRule).toContain("inset 3px 0 0 var(--fp-primary)");
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
     expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
+    expect(tagRule).toContain("text-overflow: ellipsis");
     expect(oaToolbarRule).toContain("padding: var(--fp-space-2) var(--fp-space-3)");
     expect(paginationButtonRule).toContain("width: 30px");
     expect(paginationButtonRule).toContain("height: 30px");

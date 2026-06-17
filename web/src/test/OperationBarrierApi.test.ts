@@ -71,6 +71,13 @@ describe("operation barrier API", () => {
       refreshing_targets: [],
     })));
 
-    await expect(waitForOperationFreshness([{ readModelKey: "turnover_ledger", scopeKey: "all" }])).rejects.toThrow(OperationBarrierBlockedError);
+    try {
+      await waitForOperationFreshness([{ readModelKey: "turnover_ledger", scopeKey: "all" }]);
+      throw new Error("expected operation barrier to reject");
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(OperationBarrierBlockedError);
+      expect((caught as Error).message).toBe("操作同步被阻断，往来款台账仍在同步，请稍后刷新后重试。");
+      expect((caught as Error).message).not.toMatch(/refresh outbox blocked|worker failed/);
+    }
   });
 });
