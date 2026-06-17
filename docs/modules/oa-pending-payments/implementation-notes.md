@@ -17,7 +17,7 @@
 - `invoice-usage-collection` refresh handler 必须在 rebuild/fan-out 前校验 event source_version 是否仍为当前 dirty scope；旧事件只能返回 `skipped/stale_source_version`，不能覆盖较新的 read model。
 - OA pending `all` scope 的 source version 判定优先从 `read_model.oa_pending_payment_rows` 的实际行聚合；只有完全没有实际行时才退回 scope 表，避免历史空月份 scope 把默认视图误判为 stale。
 - 2026-06-17 生产已通过 release `main-e8de2711-20260617182353` 更新/重启服务器 `invoice-usage-collection` worker；后续不得只用本地手工 rebuild 代替标准 release/worker helper。
-- 生产 OA MySQL 支付状态写回必须显式配置 `FIN_OPS_OA_PAYMENT_STATUS_*`。2026-06-17 实测生产 env 未配置该组变量，且当前可用 SSH/宝塔候选无法登录 MySQL；确认已支付写回在补齐可用 MySQL 凭据前仍属于未闭合风险。
+- 生产 OA MySQL 支付状态写回必须显式配置 `FIN_OPS_OA_PAYMENT_STATUS_*`。2026-06-17 已创建最小权限 MySQL 账号 `finops_oa_payment_status` 并写入 root-only 生产 env；该账号仅有 `smart_oa.t_payment_simple` 的 `SELECT`、`INSERT(flow_id, pay_status)`、`UPDATE(pay_status)` 权限。
 - pending invoice rules 对 OA 待付款的刷新当前由执行层 workbench invalidation 间接入队 invoice usage collection，已有 `tests/test_pending_invoice_api.py` 回归保护；dry-run plan 的 domain 名称不直观，暂记为 documented-risk。
 
 ## 记录模板
@@ -37,6 +37,20 @@
 
 ## 历史记录
 
+## 2026-06-17 - OA 支付状态 MySQL 写回生产配置闭环
+
+- 目标：解除 Phase 08 最后一项生产 blocker，使“进行中 OA 确认已支付”具备可用的 OA MySQL 写回路径。
+- 影响范围：生产 MySQL `smart_oa.t_payment_simple` 最小权限账号、`/etc/fin-ops/fin-ops.secrets.env`、fin-ops API/worker/dispatcher 重启、`oa_pending_payment` read model refresh。
+- 关键决策：不重置 MySQL root；通过一次 MySQL init-file 重启创建 `finops_oa_payment_status` 的 `127.0.0.1` 和 `localhost` host entry；临时 init-file/drop-in 创建后立即删除；验证写权限使用事务 rollback，不落业务 probe 行。
+- 文档影响：更新本实施记录；`deploy/oa/README.md` 保留后续运维 runbook。
+- 测试覆盖：生产侧验证 `MySQLOAPaymentStatusRepository.from_environment()` 可实例化并读取 sentinel flow_id；MySQL 最小权限账号对 `t_payment_simple` 的读、插入、更新通过 rollback smoke；重启后 `oa_pending_payment:all` durable refresh 由生产 worker 消费。
+- 验证命令：root SSH 生产脚本创建账号并执行 PyMySQL rollback smoke；`sudo -n /usr/local/sbin/finops-deploy-control restart`；生产 env repository smoke；`/fin-ops-api/health/ready`；投递 `oa_pending_payment:all` refresh 并查询 `job.outbox_events`、`job.read_model_dirty_scopes`、`read_model.oa_pending_payment_*`。
+- 运行时证据：`finops_oa_payment_status@127.0.0.1` 与 `finops_oa_payment_status@localhost` 均可读取 `smart_oa.t_payment_simple`，事务内 insert/update 后 rollback 剩余 probe 行数为 `0`；`SHOW GRANTS FOR CURRENT_USER()` 显示 `USAGE` 以及 `SELECT, INSERT(flow_id, pay_status), UPDATE(pay_status)` on `smart_oa.t_payment_simple`。生产 env 七个 `FIN_OPS_OA_PAYMENT_STATUS_*` key 均存在，repository configured/read_ok。
+- Worker 证据：重启后 source_version `123` 的 `oa_pending_payment.read_model.refresh` event `a8a7eee2-04ff-4033-8f07-7276f0c1ccd2` 已 `done`，dirty scope `done`，月份 shard 更新在 `2026-06-17 18:44:56` 至 `18:44:58`，`invoice-usage-collection` heartbeat current。
+- 数据结论：生产 repository 同源读取 `view_mode=in_progress` 为 fresh、total `0`；`view_mode=completed` 为 fresh、total `210`。当前仍没有可执行真实 confirm-paid 的进行中 OA 行，因此没有改动真实业务支付状态；写回能力通过生产权限和 rollback smoke 验证。
+- 未测风险：真实用户点击 confirm-paid 需要未来出现一条真实进行中 OA + 支出流水候选/关系时再做业务级 smoke；当前生产事实数据没有 in-progress 行可用于不造数验证。
+- 后续事项：当出现真实进行中 OA 样本时，执行一次确认已支付，核对 `t_payment_simple.flow_id=<OA Mongo form_data._id>` 最新记录 `pay_status=1`，并核对页面 `oaPaymentWriteback.label=已写回`。
+
 ## 2026-06-17 - Phase 08 生产发布与 worker smoke
 
 - 目标：按 GSD 主控闭环完成 Phase 08 发布后验证，确认进行中 OA 视图的生产 read model/worker/页面数据路径不是只在本地可用。
@@ -47,8 +61,8 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime tests.test_oa_pending_payment_api tests.test_oa_pending_payment_service tests.test_oa_payment_status_service tests.test_oa_pending_payment_command_service tests.test_oa_projection_sql_runtime tests.test_mongo_oa_adapter -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_postgres_migrations tests.test_platform_runtime_boundary_guards -v`；`cd web && npm test -- OaPendingPaymentsPage.test.tsx --run`；`bash scripts/verify.sh docs`；`cd web && npm run build`；`./scripts/deploy-oa.sh --dry-run`；`./scripts/deploy-oa.sh`；生产入队 `oa_pending_payment:all` refresh 并查询 `job.outbox_events`、`job.read_model_dirty_scopes`、`read_model.oa_pending_payment_*`。
 - 运行时证据：生产 release metadata 为 `main-e8de2711-20260617182353` / commit `e8de27118e15403ff0b256a6c40ab82b13a69932`；`/fin-ops-api/health/ready.status=ready`，runtime release consistent；deploy-control 显示 API、dispatcher 和 `fin-ops-worker@invoice-usage-collection.service` active。post-deploy event `cade4a8b-d7e3-40f8-a704-9b591803dbf0` source_version `122` 已 `done`，all scope fan-out 到 `2026-06` 至 `2025-12` month shards，最近生产 rows 更新在 `2026-06-17 18:27:19` 至 `18:27:21`。
 - 数据结论：生产 repository 同源读取 `view_mode=in_progress` 为 fresh、total `0`；`view_mode=completed` 为 fresh、total `211`。当前进行中视图空表是 OA 投影事实数据，不是页面未加载。
-- 未测风险：未能完成生产 OA MySQL 写回配置验证；生产 env 未配置 `FIN_OPS_OA_PAYMENT_STATUS_*`，文件层已确认目标表在 MySQL datadir 的 `smart_oa/t_payment_simple.ibd`，但当前服务器 SSH root 密码和宝塔 `config.mysql_root` 候选均不能登录 MySQL。需要正确 MySQL 凭据或明确授权重置/创建最小权限账号后，才能宣称“确认已支付写回 OA MySQL”生产闭合。
-- 后续事项：补齐生产 MySQL 凭据后，配置 root-only `/etc/fin-ops/fin-ops.secrets.env`，重启 API/worker，再用真实非敏感 flow_id 做 `get_payment_status` 只读 smoke；最后用一条真实进行中 OA + 已确认支出流水执行 confirm-paid 写回并核对 `t_payment_simple.pay_status=1`。
+- 未测风险：当时未能完成生产 OA MySQL 写回配置验证；文件层已确认目标表在 MySQL datadir 的 `smart_oa/t_payment_simple.ibd`，但缺少可用 MySQL 管理凭据。该 blocker 已由后续“OA 支付状态 MySQL 写回生产配置闭环”记录解除。
+- 后续事项：已由后续记录补齐最小权限账号、生产 env、只读 repository smoke 和 rollback 写权限 smoke；真实业务级 confirm-paid smoke 仍需等待生产出现进行中 OA 样本。
 
 ## 2026-06-17 - OA pending read model runtime freshness 闭环
 
