@@ -24,22 +24,82 @@
 | Module | Route | Page component | API client | 后端入口 | Read model / worker / status | 主要测试入口 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `reconciliation-workbench` | `/` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench*`、`routes_workbench.py` | `workbench`、`workbench_relation`、`workbench-matching`、App Status `workbench` | `tests/test_workbench_*`、`web/src/test/Workbench*.test.tsx` |
-| `tax-offset` | `/tax-offset` | `web/src/pages/TaxOffsetPage.tsx` | `web/src/features/tax/api.ts` | `routes_tax.py`、`server.py` `/api/tax-offset*` | `tax_offset`、`invoice_lifecycle`、`cost-tax`、`invoice-lifecycle` | `tests/test_tax_offset_*`、`web/src/test/TaxOffsetPage.test.tsx` |
-| `cost-statistics` | `/cost-statistics` | `web/src/pages/CostStatisticsPage.tsx` | `web/src/features/cost-statistics/api.ts` | `routes_cost_statistics.py`、`server.py` `/api/cost-statistics*` | `cost_statistics`、`cost-tax` | `tests/test_cost_statistics_*`、`web/src/test/CostStatistics*.test.ts` |
+| `tax-offset` | `/tax-offset` | `web/src/pages/TaxOffsetPage.tsx` | `web/src/features/tax/api.ts` | `routes_tax.py`、`server.py` `/api/tax-offset*` | `tax_offset`、`invoice_lifecycle`、`cost-tax`、`invoice-lifecycle` | `tests/test_tax_offset_*`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` |
+| `cost-statistics` | `/cost-statistics` | `web/src/pages/CostStatisticsPage.tsx` | `web/src/features/cost-statistics/api.ts` | `routes_cost_statistics.py`、`server.py` `/api/cost-statistics*` | `cost_statistics`、`cost-tax` | `tests/test_cost_statistics_*`、`web/src/test/CostStatistics*.test.ts`、`web/e2e/cost-statistics-flow.spec.ts` |
 | `bank-details` | `/bank-details` | `web/src/pages/BankDetailsPage.tsx` | `web/src/features/bankDetails/api.ts` | `routes_bank_details.py`、`server.py` `/api/bank-details*` | `bank_detail`、`bank_account_balance`、`bank-detail`、`bank-account-balance` | `tests/test_bank_details_*`、`tests/test_bankdetail_*`、`web/src/test/BankDetails*.test.tsx` |
 | `pending-invoices` | `/pending-invoices` | `web/src/pages/PendingInvoicesPage.tsx` | `web/src/features/pendingInvoices/api.ts` | `routes_pending_invoices.py`、`server.py` `/api/pending-invoices*` | `pending_invoice`、`search`、`invoice_lifecycle`、`search-pending`、`invoice-lifecycle` | `tests/test_pending_invoice_*`、`web/src/test/PendingInvoices*.test.tsx` |
-| `input-invoice-usage` | `/input-invoice-usage` | `web/src/pages/InputInvoiceUsagePage.tsx` | `web/src/features/inputInvoiceUsage/api.ts` | `server.py` `/api/input-invoice-usage*` | `input_invoice_usage`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_input_invoice_usage_*`、`tests/test_invoice_usage_collection_*`、`web/src/test/InputInvoiceUsage*.test.tsx` |
-| `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | `oa_pending_payment`、`invoice_lifecycle`、`invoice-usage-collection`、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx` |
-| `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | `output_invoice_collection`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` |
-| `no-oa-bank-batches` | `/no-oa-bank-batches` | `web/src/pages/NoOaBankBatchPage.tsx` | `web/src/features/noOaBankBatches/api.ts` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | `no_oa_bank_batch`、`no-oa-bank-batch` | `tests/test_no_oa_bank_batch_*`、`web/src/test/NoOaBankBatch*.test.tsx` |
-| `batch-accounting` | `/batch-accounting` | `web/src/pages/BatchAccountingPage.tsx` | `web/src/features/batchAccounting/api.ts` | `server.py` `/api/batch-accounting*` | `workbench_relation`、`workbench-relation` | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx` |
-| `turnover-ledger` | `/turnover-ledger` | `web/src/pages/TurnoverLedgerPage.tsx` | `web/src/features/turnoverLedger/api.ts` | `routes_turnover_ledger.py`、`server.py` `/api/turnover-ledger*` | `turnover_ledger`、`turnover-ledger` | `tests/test_turnover_*`、`web/src/test/TurnoverLedger*.test.tsx` |
-| `etc-tickets` | `/etc-tickets` | `web/src/pages/EtcTicketManagementPage.tsx` | `web/src/features/etc/api.ts` | `routes_etc.py`、`server.py` `/api/etc*` | `import` worker、ETC import/business batch state | `tests/test_etc_*`、`web/src/test/Etc*.test.tsx` |
-| `settings` | `/settings` | `web/src/pages/SettingsPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench/settings*` | `oa-sync`、`settings_refresh`、`oa_identity`、`state_store` | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/SettingsPage.test.tsx` |
+| `input-invoice-usage` | `/input-invoice-usage` | `web/src/pages/InputInvoiceUsagePage.tsx` | `web/src/features/inputInvoiceUsage/api.ts` | `server.py` `/api/input-invoice-usage*` | `input_invoice_usage`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_input_invoice_usage_*`、`tests/test_invoice_usage_collection_*`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` |
+| `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | `oa_pending_payment`、`invoice_lifecycle`、`invoice-usage-collection`、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` |
+| `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | `output_invoice_collection`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` |
+| `no-oa-bank-batches` | `/no-oa-bank-batches` | `web/src/pages/NoOaBankBatchPage.tsx` | `web/src/features/noOaBankBatches/api.ts` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | `no_oa_bank_batch`、`no-oa-bank-batch` | `tests/test_no_oa_bank_batch_*`、`web/src/test/NoOaBankBatch*.test.tsx`、`web/e2e/no-oa-bank-batches-flow.spec.ts` |
+| `batch-accounting` | `/batch-accounting` | `web/src/pages/BatchAccountingPage.tsx` | `web/src/features/batchAccounting/api.ts` | `server.py` `/api/batch-accounting*` | `workbench_relation`、`workbench-relation` | `tests/test_batch_accounting_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
+| `turnover-ledger` | `/turnover-ledger` | `web/src/pages/TurnoverLedgerPage.tsx` | `web/src/features/turnoverLedger/api.ts` | `routes_turnover_ledger.py`、`server.py` `/api/turnover-ledger*` | `turnover_ledger`、`turnover-ledger` | `tests/test_turnover_*`、`web/src/test/TurnoverLedger*.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` |
+| `etc-tickets` | `/etc-tickets` | `web/src/pages/EtcTicketManagementPage.tsx` | `web/src/features/etc/api.ts` | `routes_etc.py`、`server.py` `/api/etc*` | `import` worker、ETC import/business batch state | `tests/test_etc_*`、`web/src/test/Etc*.test.tsx`、`web/e2e/etc-tickets-flow.spec.ts` |
+| `settings` | `/settings` | `web/src/pages/SettingsPage.tsx` | `web/src/features/workbench/api.ts` | `server.py` `/api/workbench/settings*` | `oa-sync`、`settings_refresh`、`oa_identity`、`state_store` | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/SettingsPage.test.tsx`、`web/e2e/settings-data-reset-flow.spec.ts` |
 | `app-health-operations` | `/operations/app-health` | `web/src/pages/AppHealthOperationsPage.tsx` | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard` | App Status domains、runtime workers、queue、readiness | `tests/test_app_health_*`、`tests/test_app_status_*`、`web/src/test/AppHealth*.test.tsx` |
-| `imports-bank-transactions` | `/imports/bank-transactions` | `web/src/pages/imports/ImportBankTransactionsPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`bank_transaction_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx` |
-| `imports-invoices` | `/imports/invoices` | `web/src/pages/imports/ImportInvoicesPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`invoice_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts` |
-| `imports-etc-invoices` | `/imports/etc-invoices` | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` | `web/src/features/imports/api.ts`、`web/src/features/etc/api.ts` | `server.py` `/api/etc/import*` | `import` worker、`etc_invoice_import` | `tests/test_etc_backend.py`、`tests/test_import_*`、`web/src/test/EtcApi.test.ts` |
+| `imports-bank-transactions` | `/imports/bank-transactions` | `web/src/pages/imports/ImportBankTransactionsPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`bank_transaction_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` |
+| `imports-invoices` | `/imports/invoices` | `web/src/pages/imports/ImportInvoicesPage.tsx` | `web/src/features/imports/api.ts` | `server.py` import endpoints | `import` worker、`invoice_import`、`import.process.requested` | `tests/test_import_*`、`web/src/test/ImportsApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` |
+| `imports-etc-invoices` | `/imports/etc-invoices` | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` | `web/src/features/imports/api.ts`、`web/src/features/etc/api.ts` | `server.py` `/api/etc/import*` | `import` worker、`etc_invoice_import` | `tests/test_etc_backend.py`、`tests/test_import_*`、`web/src/test/EtcApi.test.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-etc-invoices-flow.spec.ts` |
+
+## 模块细化：cost-statistics
+
+本节记录成本统计的浏览器测试闭环。业务事实源仍以 `docs/product-specs/`、`docs/modules/cost-statistics/`、`docs/dev/api-contracts.md` 和成本统计 read model 文档为准。
+
+| 层级 | 当前入口 | 回归风险 |
+| --- | --- | --- |
+| Frontend page | `web/src/pages/CostStatisticsPage.tsx` | time/project/bank/expenseType 视图、project scope、范围选择、drilldown、详情 modal、export center 和 read model refreshing/empty/error 状态不能漂移。 |
+| Frontend API mapper | `web/src/features/cost-statistics/api.ts` | explorer/export-preview/export/transaction detail 的 query 参数、project scope、read model status、错误 JSON message 和缓存 key 不能漂移。 |
+| API/service/read model | `/api/cost-statistics*`、`CostStatisticsService`、`CostStatisticsReadModelService` | project scope、export row-limit、parent/shard readiness、scope normalization 和 worker enqueue 必须保持一致。 |
+| Export center | `ExportCenterModal` | preview 与 download 必须携带当前 view/project scope/filter；结构化后端错误必须展示给用户，不得误当文件下载。 |
+
+当前 Browser e2e：
+
+- `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 中进入成本统计页，验证按时间首屏，切到按项目并切换 `project_scope=all`，从项目到费用类型再到流水详情下钻，打开导出中心执行 project preview，并断言同步导出行数上限错误能在弹窗内显示。
+
+## 模块细化：input-invoice-usage
+
+本节记录进项发票使用情况的浏览器测试闭环。业务事实源仍以 `docs/product-specs/invoice-lifecycle.md`、`docs/modules/input-invoice-usage/` 和 `docs/dev/api-contracts.md` 为准。
+
+| 层级 | 当前入口 | 回归风险 |
+| --- | --- | --- |
+| Frontend page | `web/src/pages/InputInvoiceUsagePage.tsx` | rows/filter-options 并行加载、read model stale/refreshing、筛选/排序/导出、workflow drawer 状态不能互相污染。 |
+| OA reverse drawer | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | 候选子集必须重新 preview 并使用刷新后的 hash；草稿创建后只能展示用户可理解的提交确认，不暴露内部 batch 字段。 |
+| Frontend API mapper | `web/src/features/inputInvoiceUsage/api.ts` | snake_case/camelCase、preview/draft/manual-status/history shape、错误消息和权限字段不能漂移。 |
+| API/service/read model | `/api/input-invoice-usage*`、`InputInvoiceUsageQueryService`、`InputInvoiceUsageOaReverseService` | rows/filter/detail/export fresh gate、OA reverse preview hash、目标申请人 token、submitted history 和 relation command 边界必须保持一致。 |
+
+当前 Browser e2e：
+
+- `web/e2e/input-invoice-usage-flow.spec.ts`：真实 Chromium 中进入进项发票使用情况页，打开 `以发票反提 OA` drawer，取消一张候选发票后创建 OA 草稿，断言子集 preview 请求只携带当前勾选发票，确认 `已提交 OA` 后进入已提交 tab，并验证历史只展示业务字段、不泄漏内部 batch id。
+
+## 模块细化：oa-pending-payments
+
+本节记录 OA 待付款核对的浏览器测试闭环。业务事实源仍以 `docs/product-specs/invoice-lifecycle.md`、`docs/modules/oa-pending-payments/` 和 `docs/dev/api-contracts.md` 为准。
+
+| 层级 | 当前入口 | 回归风险 |
+| --- | --- | --- |
+| Frontend page | `web/src/pages/OaPendingPaymentsPage.tsx` | rows/filter-options 并行加载、read model refreshing/empty、搜索、表头筛选、排序、详情 drawer 和规则 drawer 不能漂移。 |
+| Grouped table | `web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx` | OA 主行、支出流水、进项发票、付款状态、金额/方向 chip、空值和 `+N` 关系展开必须稳定。 |
+| Frontend API mapper | `web/src/features/oaPendingPayments/api.ts` | rows/filter/detail query 参数、detail target kind、filters JSON encoding、camelCase/snake_case response shape 不能漂移。 |
+| API/service/read model | `/api/oa-pending-payments*`、`OaPendingPaymentApiRoutes`、`OaPendingPaymentQueryService`、`OaPendingPaymentReadModelService` | rows/filter/detail fresh gate、非法参数、detail unavailable、read model enqueue 和权限必须保持一致。 |
+
+当前 Browser e2e：
+
+- `web/e2e/oa-pending-payments-flow.spec.ts`：真实 Chromium 中进入 OA 待付款核对页，验证 OA 主行、支付状态、支出流水和进项发票列，执行搜索、支付状态筛选和交易时间排序，打开 OA/支出流水/发票详情抽屉，并打开支出流水无需开票规则抽屉复用 pending invoice rules endpoint。
+
+## 模块细化：tax-offset
+
+本节记录税金抵扣的浏览器测试闭环。业务事实源仍以 `docs/product-specs/invoice-lifecycle.md`、`docs/modules/tax-offset/` 和 `docs/app-architecture/pages.md` 为准。
+
+| 层级 | 当前入口 | 回归风险 |
+| --- | --- | --- |
+| Frontend page | `web/src/pages/TaxOffsetPage.tsx` | 试算、保存、认证导入后必须刷新当前月份 payload；read model refreshing/stale 不能允许保存。 |
+| Certified import modal | `web/src/components/tax/CertifiedInvoiceImportModal.tsx` | React StrictMode effect replay 后 mounted guard 必须恢复；confirm 返回后必须关闭 modal 并调用页面刷新。 |
+| Frontend API mapper | `web/src/features/tax/api.ts` | preview/confirm/job payload、summary amount 和 source_versions shape 不能漂移。 |
+| API/read model | `/api/tax-offset*`、`TaxOffsetQueryService`、`TaxOffsetReadModelRefreshService` | miss/stale 必须走 freshness/enqueue；认证导入 confirm 必须 dirty tax offset month。 |
+
+当前 Browser e2e：
+
+- `web/e2e/tax-offset-flow.spec.ts`：真实 Chromium 中进入税金抵扣页，取消一张进项计划后触发 calculate，保存计划，再在页内 modal 上传认证结果 Excel、preview 行级计划内/外拆分、confirm 后等待 `/api/tax-offset` 刷新，验证已认证进项税额和已认证 drawer 更新。
 
 ## 模块细化：turnover-ledger
 
@@ -65,6 +125,10 @@
 | relation extra 保存 | `turnover_ledger.read_model.refresh`，前端 `turnoverLedgerExtraUpdated` | 往来款 |
 | manual closure confirm | Turnover manual relation + Workbench active pair relation，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
 | withdraw | relation withdrawn + Workbench relation 恢复，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
+
+当前 Browser e2e：
+
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前触发 `turnover_ledger:all` fresh gate 与 grouped reload/rebind，写成功后等待后端 `turnover_ledger` / `workbench_relation` / `workbench` operation barrier，再从已闭环 flow row toolbar 撤回并验证 grouped payload 恢复未闭环。
 
 ## 模块细化：no-oa-bank-batches
 
@@ -92,6 +156,10 @@
 | batch withdraw | pair relation cancel + `no_oa_bank_batch_changed`、`workbenchRelationUpdated` | 免 OA、关联台、银行明细、成本统计、搜索 |
 | bank auto tag rules changed | `no_oa_bank_batch` all-scope refresh | 免 OA、银行明细相关候选 |
 
+当前 Browser e2e：
+
+- `web/e2e/no-oa-bank-batches-flow.spec.ts`：真实 Chromium 中进入免 OA 流水批量处理页，选择未提交手续费流水，断言 `submit-selection` 请求体和 operation barrier fresh，切到已提交 bucket 撤回批次并确认撤回请求体，最后进入历史 bucket 验证已撤回只读。
+
 ## 模块细化：batch-accounting
 
 本节记录 `2026-06-11` 首轮 CodeGraph 审计后的批量账务调用链。业务事实源仍以 `docs/product-specs/reconciliation-and-workbench.md` 和 `docs/modules/batch-accounting/` 为准。
@@ -116,6 +184,10 @@
 | batch withdraw | Workbench relation withdraw + snapshot restore + `batch_accounting_relation_changed` + `workbench_relation.read_model.refresh`；前端 `workbenchRelationUpdated` | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 |
 | legacy collision repair | 显式 service repair / mutation 路径；GET 列表不允许 repair | 批量账务、关联台 relation projection |
 | relation read model missing/stale | `WorkbenchRelationReadFacade` enqueue refresh | 批量账务 mutation 禁用、App Status busy/blocked |
+
+当前 Browser e2e：
+
+- `web/e2e/batch-accounting-flow.spec.ts`：真实 Chromium 中选择未提交批量账务银行流水和 OA 行，submit 后等待 `workbench_relation` operation barrier，再重新读取并在 submitted bucket 展示 relation/OA 明细；随后填写撤回原因，withdraw 后等待 barrier 并回到未提交状态。
 
 ## 模块细化：imports-bank-transactions
 
@@ -143,6 +215,10 @@
 | bank import lifecycle | `bank_import_confirmed` -> bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost、search | 银行明细、关联台、待找发票、成本统计、App Health |
 | preview stale | API `409 preview_stale`，前端提示重新预览 | 当前导入页 |
 
+当前 Browser e2e：
+
+- `web/e2e/imports-bank-transactions-flow.spec.ts`：真实 Chromium 中上传两份银行流水 XLSX、选择银行账户、预览 audit/重复项、处理银行账户冲突弹窗、confirm 后触发 `/api/workbench` 刷新，再进入银行明细验证导入流水可见。
+
 ## 模块细化：imports-invoices
 
 本节记录 `2026-06-11` 首轮 CodeGraph 审计后的发票导入调用链。业务事实源仍以 `docs/product-specs/imports-and-etc.md`、`docs/product-specs/invoice-lifecycle.md` 和 `docs/modules/imports-invoices/` 为准。
@@ -168,6 +244,10 @@
 | file confirm processed | input/output invoice facts 持久化、source links、duplicate decisions、Workbench matching scope 计算 | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计、搜索 |
 | invoice import lifecycle | `invoice_import_confirmed` -> workbench、workbench relation、workbench matching、invoice lifecycle、tax offset、tax month cache、cost statistics、search | 关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计、App Health |
 | preview stale | API `409 preview_stale`，前端提示重新预览 | 当前导入页 |
+
+当前 Browser e2e：
+
+- `web/e2e/imports-invoices-flow.spec.ts`：真实 Chromium 中上传两份发票 XLSX、分别选择销项/进项方向、预览 audit/重复与需复核文案、confirm 后触发 `/api/workbench` 刷新并清空导入草稿。
 
 ## 模块细化：imports-etc-invoices
 
@@ -197,6 +277,10 @@
 | lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
 | task/business batch delete | `etc_reconciliation_task_deleted` 或 business batch reset | ETC 票据管理、关联台 summary row、税金/成本、search |
 | preview stale | API `409 stale_reconciliation_task_preview` 或 `409 preview_stale`，前端清空 preview | 当前导入页 |
+
+当前 Browser e2e：
+
+- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中加载 ready ETC 对账任务、选择 task、上传两份 zip、预览 audit/新增/重复/附件补齐/异常项、确认后展示 `etc_invoice_import` background job feedback，并断言没有走通用 `/imports/files/*` 导入端点。
 
 ## 模块细化：output-invoice-collections
 
@@ -235,6 +319,7 @@
 - `tests/test_output_invoice_collection_api.py` 保护 API contract、权限、structured error 和 SQL fresh overlay。
 - `tests/test_invoice_usage_collection_sql_runtime.py` 保护 output read model stale -> `202 refreshing`、source_versions、all scope expansion 和 RabbitMQ event registration。
 - `web/src/test/OutputInvoiceCollectionsPage.test.tsx` 保护页面骨架、refreshing/empty、retry cleanup、workflow drawers 和 admin-only 设置。
+- `web/e2e/output-invoice-collections-flow.spec.ts` 用真实 Chromium 保护销项收款 rows/filter 首屏、收款状态/提醒保存、rows refresh、正式收据 create 和 history 展示。
 
 ## 模块细化：etc-tickets
 
@@ -274,6 +359,7 @@
 - `tests/test_import_service.py`、`tests/test_postgres_core_repository.py`、`tests/test_platform_runtime_boundary_guards.py` 保护 ETC canonical invoice identity、弱 fingerprint、不重新引入自动检测 worker。
 - `tests/test_workbench_sql_runtime.py`、`tests/test_workbench_pair_relation_service.py` 保护 `etc_invoice_summary` 投影、active relation 排除和 delete/reset 关系恢复规则。
 - `web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/CandidateGroupGrid.test.tsx` 保护页面交互、API mapper、错误反馈和 Workbench summary 展示。
+- `web/e2e/etc-tickets-flow.spec.ts` 用真实 Chromium 保护 ETC 票据管理未提交业务批次首屏、发票明细表、创建 OA 草稿、人工确认已提交和进入已提交 bucket 的可见闭环。
 
 ## 模块细化：settings
 
@@ -312,6 +398,7 @@
 - `tests/test_oa_applicant_credentials_*`、`tests/test_target_oa_applicant_token_provider.py` 保护独立凭据事实源、PG 加密、无密码回显和目标 OA token provider。
 - `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` 保护 settings fan-out 到 read model/worker/App Status 的共享 contract。
 - `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` 保护设置页、关联台内设置入口、data reset progress/reentry、admin-only 凭据和全局状态提示。
+- `web/e2e/settings-data-reset-flow.spec.ts` 保护真实 Chromium 下设置页 data reset：数据重置 section、影响确认、OA 密码复核、job create/polling、完成后 settings reload 和全局成功反馈。
 
 ## 模块细化：app-health-operations
 
@@ -370,9 +457,9 @@
 | Access tier | 允许 | 禁止 | 典型测试 |
 | --- | --- | --- | --- |
 | `denied` | 无 | 业务 API / 页面访问 | `tests/test_auth_guard.py`、`web/src/test/SessionGate.test.tsx` |
-| `read_export_only` | 查询、导出 | 写入、导入确认、数据重置、admin 运维 | `tests/test_session_api.py`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx` |
-| `full_access` | 普通业务写入 | 账户管理、OA 凭据、数据重置、AppHealth dashboard | `tests/test_oa_applicant_credentials_api.py`、`web/src/test/SettingsPage.test.tsx` |
-| `admin` | 管理账户、OA 凭据、数据重置、AppHealth dashboard | 不能绕过二次确认/密码复核 | `tests/test_settings_data_reset_service.py`、`web/src/test/AppHealthOperationsPage.test.tsx` |
+| `read_export_only` | 查询、导出 | 写入、导入确认、数据重置、admin 运维 | `tests/test_session_api.py`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
+| `full_access` | 普通业务写入 | 账户管理、OA 凭据、数据重置、AppHealth dashboard | `tests/test_oa_applicant_credentials_api.py`、`web/src/test/SettingsPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
+| `admin` | 管理账户、OA 凭据、数据重置、AppHealth dashboard | 不能绕过二次确认/密码复核 | `tests/test_settings_data_reset_service.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
 
 `permissions-and-audit` 写入/审计 fan-out：
 
@@ -393,6 +480,7 @@
 - `tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` 保护模块写入权限。
 - `tests/test_platform_runtime_boundary_guards.py` 保护 service/worker 不依赖 HTTP auth 边界。
 - `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx` 保护前端权限展示和禁用。
+- `web/e2e/permissions-role-matrix.spec.ts` 保护 read_export_only 全页面可读无 mutation API、settings/tax/import/no-OA 高风险写入口禁用、full_access 非 admin 运维拒绝、admin 设置高危区和 AppHealth 可见。
 
 ## 模块细化：app-shell-navigation
 
@@ -519,6 +607,10 @@
 | Backup/export | `tests/test_export_app_mongo.py`、operations runbooks | 本地只覆盖 legacy export 只读/manifest；真实 PostgreSQL PITR、对象存储和 runtime config 需 staging |
 | App Status/App Health | `app_health` API、App Status registries、runtime monitoring | reset job、dirty scope、worker readiness 和 dependency failure 必须被全局状态面暴露 |
 
+当前 Browser e2e：
+
+- `web/e2e/settings-data-reset-flow.spec.ts`：真实 Chromium 中以 admin 进入设置页，打开数据重置 section，经影响确认和 OA 密码复核创建 `settings_data_reset` job，等待 job polling 完成后验证 settings reload 与全局成功状态。
+
 `data-safety-reset` fan-out：
 
 | 重置动作 | 删除/清理 | 必须保留 | 受影响页面/状态 |
@@ -541,7 +633,7 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Nightly CI | `.github/workflows/nightly-ci.yml`、`scripts/verify.sh` | solo 开发漏跑全量后端、前端、build 或 docs，远端门禁失效 |
+| Nightly CI | `.github/workflows/nightly-ci.yml`、`scripts/verify.sh` | solo 开发漏跑全量后端、前端、browser e2e、build 或 docs，远端门禁失效 |
 | Release script | `scripts/deploy_oa.py`、`scripts/deploy-oa.sh` | release layout、storage preflight、helper contract、activation 顺序和 public route smoke 漂移 |
 | Deploy control | `deploy/oa/bin/finops-deploy-control.sh` | env/secrets/migrator/drop-in/restart/readiness/cleanup 任一环节出错会影响所有页面 |
 | Worker ensure | `deploy/oa/bin/finops-ensure-runtime-workers.sh`、`runtime_worker_manifest` | 新 worker/read model event 未部署，导致页面长期 refreshing/stale |
@@ -552,7 +644,7 @@
 
 | 发布动作 | 影响 | 受影响页面/状态 |
 | --- | --- | --- |
-| `bash scripts/verify.sh all` | 后端 check/unittest、前端 Vitest/build、docs check | 所有模块的自动化门禁 |
+| `bash scripts/verify.sh all` | 后端 check/unittest、前端 Vitest/build、deterministic Playwright browser smoke、docs check | 所有模块的自动化门禁 |
 | release upload/check-release | release layout、env contract、storage preflight | 发布前阻断错误包 |
 | activate/migration | PostgreSQL schema、API/worker Python env、systemd drop-in、frontend dist | 所有 API、worker 和页面 |
 | runtime worker ensure | required worker env/systemd/check command/restart | 所有 read model 页面、App Health |
@@ -561,7 +653,7 @@
 
 关键回归入口：
 
-- `tests/test_nightly_ci.py` 保护 nightly workflow 和 `scripts/verify.sh all` 不漏跑 backend/frontend/docs。
+- `tests/test_nightly_ci.py` 保护 nightly workflow 和 `scripts/verify.sh all` 不漏跑 backend/frontend/browser e2e/docs。
 - `tests/test_deploy_oa_script.py` 保护 release script、deploy-control、worker ensure、storage preflight、readiness 和 public route smoke。
 - `tests/test_deploy_oa_nginx_config.py` 保护同域 Nginx path、SPA fallback、assets cache 和 API proxy。
 - `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` 保护 worker registry/env/dispatcher event contract。

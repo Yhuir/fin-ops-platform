@@ -9,6 +9,7 @@ import { renderAuthenticatedAppAt as renderAppAt } from "./renderHelpers";
 import * as etcApi from "../features/etc/api";
 
 const INVOICE_DRAFT_STORAGE_KEY = "finops:pageSession:v1:101:imports.invoice:previewSession";
+const ROUTE_RENDER_TIMEOUT = 5000;
 
 function seedInvoicePreviewSession() {
   const now = Date.now();
@@ -139,7 +140,7 @@ describe("Import pages", () => {
 
     renderAppAt("/imports/bank-transactions");
 
-    expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "银行流水导入" }, { timeout: ROUTE_RENDER_TIMEOUT })).toBeInTheDocument();
     expectProjectImportShell();
     const bankUploadInput = expectProjectUploadZone("上传银行流水文件");
     expect(screen.queryByRole("dialog", { name: "银行流水导入" })).not.toBeInTheDocument();

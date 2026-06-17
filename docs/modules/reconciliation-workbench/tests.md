@@ -42,10 +42,10 @@
 | Groups query freshness/cache | P0 | `tests/test_workbench_query_facade.py` | covered | refreshing/stale 不写 Redis；fresh 才缓存。 |
 | Refresh handler / dirty scope done | P0 | `tests/test_workbench_sql_runtime.py` | covered | worker refresh 后发布 generation 并完成 dirty scope。 |
 | Matching dirty queue | P0 | `tests/test_workbench_dirty_queue_wiring.py`、`tests/test_workbench_matching_dirty_scope_worker.py` | covered | DB dirty queue 是主路径，失败不回退 legacy dirty scopes。 |
-| Relation tags 下游投影 | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_read_facade.py`、`tests/test_bank_details_service.py` | covered | 银行明细、批量账务和下游页面不能读旧 relation。 |
+| Relation tags 下游投影 | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_read_facade.py`、`tests/test_bank_details_service.py`、`web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/pending-invoices-fanout.spec.ts`、`web/e2e/batch-accounting-flow.spec.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | covered | 银行明细、批量账务、外部往来和下游页面不能读旧 relation；Browser e2e 已覆盖 confirm 后银行明细 relation tags 从候选到已关联、待找发票从待开票到已开票、批量账务 submit/withdraw 后等待 relation barrier 并进入对应 bucket，以及往来款 confirm/withdraw 后等待 turnover/workbench barriers 并恢复 grouped payload。 |
 | OA 附件正式发票统一事实源 | P0 | `tests/test_import_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_query_service.py`、`tests/test_workbench_relation_sql_projection.py` | covered | OA 附件正式发票通过 import service promotion 到 `app.invoices`；Workbench SQL 投影只读 canonical invoice；legacy OA query service 不发布 invoice row；relation projection 不回捞 `read_model.workbench_rows` 作为事实源。 |
 | Active relation row 去重 | P0 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py` | covered | 同一 relation 重复 row id 被 normalize/repair/query grouping 去重，跨 active case 复用 row 被拒绝。 |
-| 外部往来 bank-only open 规则 | P0 | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | covered | `turnover_manual_closure` 是共同事实源但不再是 bank-only paired 例外；三栏补齐前留 open；外部往来页确认闭环/toolbar 撤回后必须等待 Workbench visibility targets fresh 再触发关联台刷新。 |
+| 外部往来 bank-only open 规则 | P0 | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | covered | `turnover_manual_closure` 是共同事实源但不再是 bank-only paired 例外；三栏补齐前留 open；外部往来页确认闭环/toolbar 撤回后必须等待 Workbench visibility targets fresh 再触发关联台刷新。Browser e2e 已覆盖小样本 confirm/withdraw barrier 和页面恢复。 |
 | OA offset / 附件上下文 repair | P0 | `tests/test_workbench_v2_api.py`、`tests/test_workbench_relation_command_service.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | OA 附件发票冲抵自动闭环和缺失附件上下文 repair 必须通过 relation command service 写入。 |
 | 前端 action 后 emit `workbenchRelationUpdated` | P1 | `web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/CandidateGroupGrid.test.tsx`、页面事件 listener tests | covered | 保护当前页面/同会话刷新提示。 |
 | 前端 loading/stale/error/permission/operation overlay | P1 | `web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchApiRuntimePath.test.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | covered for current gates | Workbench stale/loading 不全局禁用无关写；OA dirty/refreshing 仍禁写；提交成功后不做本地 optimistic paired/open 重排。带后端 operation projection 的确认/撤回只等待 `workbench_relation` operation barrier 并应用后端 projection；没有 projection 的旧动作继续等待目标 read model/fresh reload；OA 申请人列详情 icon 和第二行时间 chip 受交互测试保护。 |
@@ -61,7 +61,7 @@
 | 3. API contract tests | 适用 | `tests/test_workbench_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_workbench_query_facade.py` | 覆盖 query/action/preview/cancel/refresh status、payload shape、错误字段和 stale/fresh 状态。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_workbench_sql_runtime.py`、`tests/test_workbench_read_model_service.py`、`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_workbench_matching_dirty_scope_worker.py`、`tests/test_workbench_reconciliation_dirty_queue.py` | active generation、dirty scope、matching completed scope source-version 自愈、refresh worker、Redis page cache、retention。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/Workbench*.test.tsx`、`web/src/test/CandidateGroupGrid.test.tsx`、`web/src/test/WorkbenchApi*.test.ts` | 覆盖三栏、selection、列/筛选、API mapper、runtime path、domain event。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_etc_backend.py`、`tests/test_turnover_workbench_integration.py`、`tests/test_no_oa_bank_batch_workbench_integration.py` | 覆盖 ETC/no-OA/turnover/confirm-withdraw 等跨模块链路。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_etc_backend.py`、`tests/test_turnover_workbench_integration.py`、`tests/test_no_oa_bank_batch_workbench_integration.py`、`web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/pending-invoices-fanout.spec.ts`、`web/e2e/batch-accounting-flow.spec.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 覆盖 ETC/no-OA/turnover/confirm-withdraw 等跨模块链路；Browser e2e 覆盖 confirm -> bank details relation tag fan-out、confirm -> pending invoices row status fan-out、batch accounting submit/withdraw -> bucket recovery 和 turnover manual closure confirm/withdraw -> grouped recovery。 |
 | 7. Existing feature regression tests | 适用 | 全部 Workbench regression tests | 关联台是共享事实源；任何改动都要问会影响哪些旧候选、旧分区、旧 action、旧下游页面。 |
 
 ## 历史 bug 回归库
@@ -128,6 +128,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_sql_runtime.Work
 PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_get_api_workbench_keeps_oa_bank_exact_sum_candidate_in_one_open_group tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_and_cancel_link_defer_read_model_persistence_to_background -v
 cd web && npm test -- --run src/test/WorkbenchApi.test.ts src/test/WorkbenchApiRuntimePath.test.ts src/test/WorkbenchSelection.test.tsx src/test/CandidateGroupGrid.test.tsx
 cd web && npm test -- --run src/test/GlobalOperationOverlayContext.test.tsx src/test/OperationBarrierApi.test.ts
+cd web && npm run e2e:smoke
 bash scripts/verify.sh docs
 ```
 
@@ -142,10 +143,10 @@ cd web && npm test -- --run src/test/WorkbenchExceptionModal.test.tsx src/test/W
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend vitest 和 build，覆盖完整 Workbench 测试集。单轮模块验证只跑最小闭环，避免把所有历史 Workbench case 作为每次人工推进的阻塞项。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend vitest、build 和 deterministic Playwright smoke，覆盖完整 Workbench 后端/Vitest 测试集，并覆盖真实 Chromium 中 `关联台 confirm -> bank details relation tags`、`关联台 confirm -> pending invoices invoice status`、`batch accounting submit/withdraw -> workbench_relation barrier -> bucket recovery`、`turnover ledger manual closure confirm/withdraw -> closure recovery`。单轮模块验证只跑最小闭环，避免把所有历史 Workbench case 作为每次人工推进的阻塞项。
 
 ## 未测风险
 
 - 本轮不运行真实生产库 active generation 全量回放；需要 staging/生产只读验证。
-- 前端视觉布局和大数据性能需要浏览器/真实数据 smoke，Vitest 主要保护交互和 API mapper。
+- 前端视觉布局、大数据性能、withdraw/error/network recovery 和其他下游页面 fan-out 需要继续补浏览器/真实数据 smoke；Vitest 主要保护交互和 API mapper。
 - 关联台仍有 legacy `server.py` handler 和多条生产相关链路；后续改动应按具体影响选择扩展回归，而不是只跑最小闭环。

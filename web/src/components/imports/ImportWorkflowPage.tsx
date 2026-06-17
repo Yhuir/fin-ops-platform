@@ -47,6 +47,7 @@ import { useImportWorkflowDraft } from "../../contexts/ImportWorkflowDraftContex
 import type { FileSelectionState } from "../../contexts/ImportWorkflowDraftContext";
 import { useImportProgress } from "../../contexts/ImportProgressContext";
 import { useAppHealthStatus } from "../../contexts/AppHealthStatusContext";
+import { useSessionPermissions } from "../../contexts/SessionContext";
 import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
 
 type ImportWorkflowPageProps = {
@@ -786,6 +787,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setIsConfirming,
   } = useImportWorkflowDraft(mode);
   const healthStatus = useAppHealthStatus();
+  const { canMutateData } = useSessionPermissions();
   const {
     selectedFiles,
     fileSelections,
@@ -954,6 +956,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     return mode === "bank_transaction" ? Boolean(selection?.bankMappingId) : Boolean(selection?.invoiceBatchType);
   });
   const canPreview = canUseBankImport
+    && canMutateData
     && hasSelectedEtcTask
     && allFilesConfigured
     && !isPreviewing
@@ -972,8 +975,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     () => etcBlockingIssues.filter(isMissingEtcRequirementIssue),
     [etcBlockingIssues],
   );
-  const canConfirm = confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
+  const canConfirm = canMutateData && confirmableFileIds.length > 0 && !isPreviewing && !isConfirming;
   const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId)
+    && canMutateData
     && Boolean(selectedEtcTaskId)
     && Boolean(selectedEtcTask)
     && etcBlockingIssues.length === 0
@@ -1058,6 +1062,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }
 
   function applyDroppedFiles(files: File[]) {
+    if (!canMutateData) {
+      return;
+    }
     const isSupportedFile = mode === "etc_invoice" ? isZipFile : isExcelFile;
     const validFiles = files.filter(isSupportedFile);
     const invalidFiles = files.filter((file) => !isSupportedFile(file));
@@ -1073,7 +1080,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   function handleDropzoneDragOver(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
-    if (!isPreviewing && !isConfirming) {
+    if (canMutateData && !isPreviewing && !isConfirming) {
       setIsDragActive(true);
     }
   }
@@ -1088,7 +1095,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   function handleDropzoneDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setIsDragActive(false);
-    if (isPreviewing || isConfirming) {
+    if (!canMutateData || isPreviewing || isConfirming) {
       return;
     }
     const nextFiles = Array.from(event.dataTransfer.files ?? []);
@@ -1288,6 +1295,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setErrorMessage(null);
     try {
       const payload = await confirmImportFiles(previewPayload.session.id, confirmableFileIds);
+      setConflictDialogOpen(false);
       if (payload.job) {
         resetDraft();
         setFeedbackMessage("已开始后台导入");
@@ -1383,6 +1391,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length > 0 && !selectedEtcTask ? (
             <ImportNotice tone="warning">请选择已确认的 ETC 对账任务后再预览 ETC zip。</ImportNotice>
           ) : null}
+          {!canMutateData ? (
+            <ImportNotice tone="accent">当前账号仅支持查看和导出，不能导入文件。</ImportNotice>
+          ) : null}
 
           <div className="import-workflow-layout">
             <section className="import-workflow-panel">
@@ -1420,7 +1431,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 ) : null}
 
                 <label
-                  className={`import-workflow-upload-zone${isDragActive ? " import-workflow-upload-zone--active" : ""}${isPreviewing || isConfirming ? " import-workflow-upload-zone--disabled" : ""}`}
+                  className={`import-workflow-upload-zone${isDragActive ? " import-workflow-upload-zone--active" : ""}${!canMutateData || isPreviewing || isConfirming ? " import-workflow-upload-zone--disabled" : ""}`}
                   htmlFor={inputId}
                   aria-label={uploadLabel}
                   onDragEnter={handleDropzoneDragOver}
@@ -1438,7 +1449,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     multiple
                     type="file"
                     accept={mode === "etc_invoice" ? ".zip,application/zip" : ".xlsx,.xls"}
-                    disabled={isPreviewing || isConfirming}
+                    disabled={!canMutateData || isPreviewing || isConfirming}
                     onChange={(event) => {
                       setIsDragActive(false);
                       applyDroppedFiles(Array.from(event.currentTarget.files ?? []));

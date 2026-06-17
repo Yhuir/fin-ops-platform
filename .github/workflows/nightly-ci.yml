@@ -10,7 +10,7 @@ on:
 
 jobs:
   verify:
-    name: Verify backend, frontend, and docs
+    name: Verify backend, frontend, browser e2e, and docs
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -36,6 +36,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: web
         run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: web
+        run: npx playwright install --with-deps chromium
 
       - name: Run verification
         run: bash scripts/verify.sh all

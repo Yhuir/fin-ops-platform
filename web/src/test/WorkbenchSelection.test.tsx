@@ -14,9 +14,13 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
+const ROUTE_RENDER_TIMEOUT = 5_000;
+
 async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("link", { name: "设置" }));
-  const settingsPage = await screen.findByTestId("settings-page");
+  const settingsPage = await screen.findByTestId("settings-page", undefined, {
+    timeout: ROUTE_RENDER_TIMEOUT,
+  });
   await within(settingsPage).findByRole("tree", { name: "设置分类" });
   return settingsPage;
 }

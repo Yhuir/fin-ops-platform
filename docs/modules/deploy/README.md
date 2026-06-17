@@ -57,7 +57,7 @@ Nightly CI 入口是：
 bash scripts/verify.sh all
 ```
 
-它覆盖后端 `--check`、后端 unittest discovery、前端 Vitest、前端 build、docs 结构检查。
+它覆盖后端 `--check`、后端 unittest discovery、前端 Vitest、前端 build、deterministic Playwright browser smoke、docs 结构检查。
 
 ## 影响面
 

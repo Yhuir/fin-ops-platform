@@ -7,6 +7,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { sidebarGroups } from "../components/shell/sidebarItems";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+import type { SessionAccessTier, SessionPayload } from "../features/session/api";
 import NoOaBankBatchPage from "../pages/NoOaBankBatchPage";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
@@ -264,12 +266,46 @@ function cssRule(source: string, selector: string) {
   return match?.[1] ?? "";
 }
 
-function renderPage() {
+const fullAccessSessionPayload: SessionPayload = {
+  allowed: true,
+  user: {
+    userId: "test-user",
+    username: "finance-user",
+    nickname: "财务用户",
+    displayName: "财务用户",
+    deptId: "finance",
+    deptName: "财务部",
+    avatar: null,
+  },
+  roles: ["fin_ops_user"],
+  permissions: ["finops:app:view"],
+  accessTier: "full_access",
+  canAccessApp: true,
+  canMutateData: true,
+  canAdminAccess: false,
+};
+
+function sessionValue(accessTier: SessionAccessTier = "full_access"): SessionContextValue {
+  return {
+    status: "authenticated",
+    session: {
+      ...fullAccessSessionPayload,
+      accessTier,
+      canMutateData: accessTier === "full_access" || accessTier === "admin",
+      canAdminAccess: accessTier === "admin",
+    },
+    refresh: () => undefined,
+  };
+}
+
+function renderPage(accessTier: SessionAccessTier = "full_access") {
   return render(
     <GlobalOperationOverlayProvider>
-      <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
-        <NoOaBankBatchPage />
-      </PageRuntimeProvider>
+      <SessionContext.Provider value={sessionValue(accessTier)}>
+        <PageRuntimeProvider value={{ pageKey: "no-oa-bank-batches", active: true, activationGeneration: 0 }}>
+          <NoOaBankBatchPage />
+        </PageRuntimeProvider>
+      </SessionContext.Provider>
     </GlobalOperationOverlayProvider>,
   );
 }
@@ -553,6 +589,28 @@ describe("NoOaBankBatchPage", () => {
     expect(within(transactionRegion).getByRole("checkbox", { name: "选择流水 bank-row-001" })).toBeInTheDocument();
     expect(within(transactionRegion).queryByText("分类来源")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("自动")).not.toBeInTheDocument();
+  });
+
+  test("read-export users can view batches but cannot submit, withdraw, or save tag scope", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    renderPage("read_export_only");
+
+    expect(await screen.findByRole("heading", { name: "免OA流水批量处理" })).toBeInTheDocument();
+    expect(screen.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存免OA流水批次。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提交批次" })).not.toBeInTheDocument();
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: "选择流水 bank-row-001" });
+    expect(rowCheckbox).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "免OA流水标签管理" }));
+    const drawer = await screen.findByRole("dialog", { name: "免OA流水标签管理" });
+    expect(within(drawer).getByRole("button", { name: "全选" })).toBeDisabled();
+    expect(within(drawer).getByRole("button", { name: "清空" })).toBeDisabled();
+    expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
+
+    expect(fetchMock.mock.calls.some(([, init]) => ["POST", "PUT", "PATCH", "DELETE"].includes(String(init?.method ?? "GET")))).toBe(false);
   });
 
   test("uses backend pagination for no OA first-screen batches", async () => {

@@ -6,14 +6,14 @@
 
 | 影响面 | 需要保护的行为 | 当前测试入口 |
 | --- | --- | --- |
-| 页面交互 | 加载、空态、错误、筛选、bucket 切换、银行/OA 选择、差额说明、提交、撤回、feedback、侧栏入口 | `web/src/test/BatchAccountingPage.test.tsx` |
-| Operation overlay | 提交/撤回写操作成功后等待 `workbench_relation` barrier fresh，再 reload 页面并关闭 overlay；失败时不假装成功 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx` |
+| 页面交互 | 加载、空态、错误、筛选、bucket 切换、银行/OA 选择、差额说明、提交、撤回、feedback、侧栏入口 | `web/src/test/BatchAccountingPage.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
+| Operation overlay | 提交/撤回写操作成功后等待 `workbench_relation` barrier fresh，再 reload 页面并关闭 overlay；失败时不假装成功 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
 | API contract | `GET /api/batch-accounting`、`POST /api/batch-accounting/submit`、`POST /api/batch-accounting/{relation_id}/withdraw` 的状态码、错误码、DTO shape、freshness 字段 | `tests/test_batch_accounting_api.py` |
 | 业务核心 | 日常报销 OA 过滤、批量账务银行流水过滤、金额差异说明、version conflict、active relation 排除、跨年选择、撤回原因 | `tests/test_batch_accounting_api.py` |
 | Service / repository | `BatchAccountingService` 调用 Workbench payload、relation command service、relation facade、legacy collision repair；提交失败回滚 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py` |
 | Relation read model | `workbench_relation` fresh/missing/stale、row id 去重、linked/unlinked projection、refresh enqueue、source version | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_batch_accounting_api.py` |
 | Worker / App Status | `workbench-relation` worker registry、`workbench_relation.read_model.refresh` job、App Status domain/job 映射 | `tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` |
-| Cross-page fan-out | 批量账务关系变化影响关联台、银行明细、成本统计、搜索、发票 lifecycle 相关页面；前端事件只做刷新提示 | `tests/test_derived_data_lifecycle_service.py`、`web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx` |
+| Cross-page fan-out | 批量账务关系变化影响关联台、银行明细、成本统计、搜索、发票 lifecycle 相关页面；前端事件只做刷新提示 | `tests/test_derived_data_lifecycle_service.py`、`web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` |
 
 ## 关键场景覆盖
 
@@ -40,9 +40,9 @@
 | 2. Service-layer tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `BatchAccountingService` 与 relation command service、relation facade、提交失败回滚、历史关系 command 恢复，以及 submit/withdraw 的 canonical write safety。 |
 | 3. API contract tests | 适用 | `tests/test_batch_accounting_api.py` | 覆盖 GET/submit/withdraw 的成功 shape、显式分页 `pagination` / `invalid_paging`、错误码、freshness 字段、summary/relations/mutation result；read model non-fresh 由 GET/facade 透出诊断，mutation 默认不因普通 distribution 追赶中被拒。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_workbench_relation_read_facade.py`、`tests/test_workbench_relation_sql_projection.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 `workbench_relation` facade、projection、non-fresh enqueue、worker registry 和 App Status 绑定；批量账务列表读取必须通过 facade `require_fresh` 触发入队。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | 覆盖 loading/empty/error、freshness 诊断、刷新未入队提示、筛选、搜索、选择、提交、撤回、operation overlay、CSS/组件契约和侧栏入口；普通 non-fresh 不应全局禁用具备 canonical write safety 的操作。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/domainEvents.test.ts` | 覆盖 submit -> Workbench relation -> submitted list / Workbench projection、withdraw -> snapshot restore、前端刷新事件。真实 worker drain 仍是 documented-risk。 |
-| 7. Existing feature regression tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/BatchAccountingPage.test.tsx` | 覆盖旧 case_id collision、非 batch relation 不被覆盖、GET 不执行 legacy repair、旧页面不把 non-fresh relation 当真实空。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/BatchAccountingPage.test.tsx`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/e2e/batch-accounting-flow.spec.ts` | 覆盖 loading/empty/error、freshness 诊断、刷新未入队提示、筛选、搜索、选择、提交、撤回、operation overlay、CSS/组件契约和侧栏入口；Browser e2e 覆盖真实 Chromium 中未提交 bucket 选择银行/OA、金额归零、提交反馈、已提交 bucket 展示、撤回弹窗和撤回后回到未提交状态。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/domainEvents.test.ts`、`web/e2e/batch-accounting-flow.spec.ts` | 覆盖 submit -> Workbench relation -> submitted list / Workbench projection、withdraw -> snapshot restore、前端刷新事件；Browser e2e 额外证明 submit/withdraw 后都等待 `workbench_relation` operation barrier，再重新读取并恢复对应 bucket。真实 worker drain 仍是 documented-risk。 |
+| 7. Existing feature regression tests | 适用 | `tests/test_batch_accounting_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/BatchAccountingPage.test.tsx`、`web/e2e/batch-accounting-flow.spec.ts` | 覆盖旧 case_id collision、非 batch relation 不被覆盖、GET 不执行 legacy repair、旧页面不把 non-fresh relation 当真实空；Browser e2e 防止提交/撤回后的 summary、bucket 和 OA 表格状态回归。 |
 
 ## 历史 Bug 回归库
 
@@ -60,9 +60,9 @@
 
 ## 关键 Smoke Flows
 
-1. 批量账务列表 fresh -> 选择银行流水 -> 选择 OA 行 -> 金额一致提交 -> `workbenchRelationUpdated` -> submitted bucket 展示关系。
+1. 批量账务列表 fresh -> 选择银行流水 -> 选择 OA 行 -> 金额一致提交 -> `workbenchRelationUpdated` -> submitted bucket 展示关系；`web/e2e/batch-accounting-flow.spec.ts` 在真实 Chromium 中覆盖该 happy path，并断言 `workbench_relation` operation barrier 被调用。
 2. 金额不一致 -> 空说明被拒 -> 填写说明提交 -> 关联台/银行明细/成本统计下游通过 relation read model 看到关系标签。
-3. submitted bucket -> 填写撤回原因 -> 撤回 -> relation read model refresh -> 原银行/OA 行回到可处理状态。
+3. submitted bucket -> 填写撤回原因 -> 撤回 -> relation read model refresh -> 原银行/OA 行回到可处理状态；`web/e2e/batch-accounting-flow.spec.ts` 覆盖真实 Chromium 撤回弹窗、原因输入、确认撤回、barrier 和回到未提交 bucket。
 4. `workbench_relation` missing/stale -> API 透出 freshness 并经 facade/gateway 入队刷新 -> 页面显示 warning/reason/scope，但不因普通 read model non-fresh 全局禁用具备 canonical write safety 的操作 -> worker 刷新后恢复。
 5. 显式 `page/page_size` -> `bank_rows` / `oa_rows` 有界返回、summary 仍保留完整命中数量，超限页大小 fail closed。
 6. submit/withdraw -> 全屏 overlay -> `workbench_relation` operation barrier fresh -> 重新加载当前 bucket -> overlay 释放。
@@ -86,6 +86,8 @@ cd web && npm test -- --run \
   src/test/domainEvents.test.ts \
   src/test/useActiveFinanceDomainEvent.test.tsx
 
+cd web && npx playwright test e2e/batch-accounting-flow.spec.ts
+
 bash scripts/verify.sh docs
 ```
 
@@ -101,11 +103,11 @@ npm --prefix web test -- --run src/test/BatchAccountingPage.test.tsx
 
 ## Nightly CI 覆盖
 
-Nightly CI 通过 `scripts/verify.sh` 执行后端、前端和文档校验。批量账务的窄范围回归命令应在本地模块变更时优先运行；跨模块改动再升级为 `scripts/verify.sh backend` / `scripts/verify.sh web`。
+Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright browser smoke 和文档校验。当前 Playwright smoke 已包含 `web/e2e/batch-accounting-flow.spec.ts`，覆盖提交批量账务关系、等待 `workbench_relation` freshness barrier、重新加载并在已提交 bucket 展示关联 OA，以及撤回后等待 barrier 并回到未提交 bucket。批量账务的窄范围回归命令应在本地模块变更时优先运行；跨模块改动再升级为 `scripts/verify.sh backend` / `scripts/verify.sh frontend` / `scripts/verify.sh e2e`。
 
 ## 未测风险
 
 - 真实 PostgreSQL 历史数据中批量账务 legacy relation / 半迁移 / 重复 case id 的全量回放仍需 staging 或生产前 dry-run。
 - 真实 RabbitMQ/Redis/systemd `workbench-relation` worker drain、App Status readiness 收敛和长时间队列重试仍需环境 smoke。
-- 大年份范围、超长 OA 描述、长备注和高行数表格的真实浏览器性能/视觉回归未由当前单元测试完全证明；当前前端分页接入由 Vitest 证明请求参数和可见行边界，仍需要真实登录态浏览器 smoke 采集实际渲染耗时。
+- 大年份范围、超长 OA 描述、长备注和高行数表格的真实浏览器性能/视觉回归未由当前单元测试完全证明；当前前端分页接入由 Vitest 证明请求参数和可见行边界，Playwright smoke 只覆盖小样本提交链路，仍需要真实登录态浏览器 smoke 采集实际渲染耗时。
 - 关联台、银行明细、成本统计、搜索等下游页面对同一 relation read model 的最终显示仍由对应模块回归继续保护。

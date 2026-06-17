@@ -8,9 +8,9 @@
 | --- | --- | --- |
 | OA token/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` | cookie/header 解析、401/403、超时、local dev/test auth、过期 token |
 | Access control | `AccessControlService`、settings access control | denied/read_export_only/full_access/admin 判断，动态 provider 失败时不可误拒绝已授权用户 |
-| Session frontend | `SessionContext`、`SessionGate` | loading/forbidden/expired/error/retry，权限 hooks 的默认 fail-closed |
+| Session frontend | `SessionContext`、`SessionGate`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | loading/forbidden/expired/error/retry，权限 hooks 的默认 fail-closed，真实浏览器下未授权不渲染业务页，只读/全权限/admin 角色矩阵不越权 |
 | API guards | `server.py` read/mutation/admin route helpers | read API、write API、export API、admin-only API 的二次校验和错误 shape |
-| App health permissions | App Health dashboard / App Status popover | dashboard admin-only，非 admin 不请求 dashboard；App Status admin link 受控 |
+| App health permissions | App Health dashboard / App Status popover / `web/e2e/app-shell.spec.ts` | dashboard admin-only，非 admin 不请求 dashboard；App Status admin link 受控 |
 | Settings permissions | `SettingsPage`、`AppSettingsService` | admin 账户管理、只读用户不可保存、数据重置和 OA 凭据 admin-only |
 | Export permissions | bank/tax/cost/input/output/turnover exports | read_export_only 可导出但不能写；导出错误/HTML 不能误当文件；`test_readonly_export_user_can_export_but_cannot_mutate_or_admin` 覆盖 cost/turnover 下载、pending export auth pass-through 和代表性写入/admin 403 |
 | Audit trail | `AuditTrailService`、业务 service/UoW | actor、tenant、action、entity、金额、metadata；事务失败不能留下半条 audit |
@@ -20,11 +20,11 @@
 
 | 场景 | 保护测试 | 说明 |
 | --- | --- | --- |
-| OA session bootstrap | `tests/test_session_api.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx` | Authorization header、Admin-Token cookie、超时、expired、forbidden、retry |
+| OA session bootstrap | `tests/test_session_api.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/e2e/app-shell.spec.ts` | Authorization header、Admin-Token cookie、超时、expired、forbidden、retry；真实 Chromium 下 forbidden/expired 不触发 protected page API |
 | protected API guard | `tests/test_auth_guard.py`、各 API 权限测试 | 无 token 401、无权限 403、导入端点也受保护；readonly export 聚合 smoke 校验代表性导出可读、写入/admin 仍拒绝 |
 | access tier 判定 | `tests/test_session_api.py`、`tests/test_app_settings_service.py` | settings allowed/readonly/admin/full access、admin 自动 allowed、provider 失败；`test_get_session_me_projects_access_tier_matrix_from_settings` 聚合校验 `/api/session/me` 的角色能力矩阵 |
 | write/admin 权限 | `tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` | 写入、规则保存、数据重置、OA 凭据、标签规则、turnover relation 的 403 |
-| 前端隐藏/禁用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx` | readonly/full-access/admin 不同 UI 能力 |
+| 前端隐藏/禁用 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | readonly/full-access/admin 不同 UI 能力；AppHealth dashboard admin-only 的真实浏览器 API 调用边界；只读用户全页面可读但 settings/tax/import/no-OA 写入口不可用 |
 | audit 记录 | `tests/test_audit_service.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_bankdetail_write_uow_contract.py`、`tests/test_turnover_ledger_uow_contract.py`、业务 service tests | actor/tenant、事务内 audit、rollback、防半写入 |
 | 敏感数据保护 | `tests/test_postgres_migrations.py`、`tests/test_app_postgres_mode_integration.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_settings_data_reset_service.py` | SQL 不含 secret、session/app health secret safe、密码不回显 |
 
@@ -36,9 +36,9 @@
 | 2. Service-layer tests | 适用 | `tests/test_workbench_auth_context_idempotency.py`、`tests/test_bankdetail_write_uow_contract.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_bank_auto_tag_rules_api.py` | 覆盖 actor/tenant 传递、事务内 audit + dirty/outbox、失败 rollback、规则权限。 |
 | 3. API contract tests | 适用 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_app_health_api.py` | 覆盖 401/403、session payload、readonly export 路由聚合 smoke、write/admin 403、dashboard admin-only、错误字段。 |
 | 4. Read model/cache/background job tests | 局部适用 | `tests/test_app_health_api.py`、`tests/test_runtime_queue_ops.py`、`tests/test_platform_runtime_boundary_guards.py` | 权限本身不走 read model；但 App Status 会消费 session/permission，worker/service 不得 import auth 或解析 cookie/header。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/SessionGate.test.tsx`、`web/src/test/SessionApi.test.ts`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx` | 覆盖 session gate、权限 hooks、readonly/admin UI、写入按钮隐藏/禁用、运维入口。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_auth_context_idempotency.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx` | 覆盖 session actor -> 写入 command -> audit/dirty/outbox，以及 readonly 用户无法写入的关键路径。 |
-| 7. Existing feature regression tests | 适用 | 以上全部 + 下游模块权限测试 | 每次权限改动都可能影响所有页面/API；必须保护旧 401/403、旧导出、旧按钮、旧 audit、旧 admin-only。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/SessionGate.test.tsx`、`web/src/test/SessionApi.test.ts`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖 session gate、权限 hooks、readonly/admin UI、写入按钮隐藏/禁用、运维入口，以及真实浏览器中 AppHealth admin-only gate 和全页面角色矩阵。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_auth_context_idempotency.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖 session actor -> 写入 command -> audit/dirty/outbox、readonly 用户无法写入的关键路径，以及 session -> route -> protected dashboard/API/页面写入口不越权的浏览器 smoke。 |
+| 7. Existing feature regression tests | 适用 | 以上全部 + 下游模块权限测试 | 每次权限改动都可能影响所有页面/API；必须保护旧 401/403、旧导出、旧按钮、旧 audit、旧 admin-only 和浏览器层受保护 API 不被调用。 |
 
 ## 历史 bug 回归库
 
@@ -48,6 +48,9 @@
 
 - 无 token 调 protected API -> `401 invalid_oa_session`；过期 token -> `401`；无权限用户 -> `403 forbidden`。
 - OA session bootstrap -> `SessionGate` loading -> authenticated/forbidden/expired/error；超时后可 retry。
+- 真实 Chromium 打开 `/operations/app-health`：admin 可见 dashboard；read_export_only、forbidden、expired 不能触发 `/api/operations/app-health-dashboard`。
+- 真实 Chromium 以 `read_export_only` 逐页打开所有非 admin 页面：页面可读且不触发 POST/PUT/PATCH/DELETE；settings/tax/import/no-OA 写入口禁用或隐藏。
+- 真实 Chromium 以 `full_access` 打开普通业务写入口但不能访问 AppHealth dashboard；以 `admin` 打开 settings 高危区和 AppHealth dashboard。
 - admin 在 settings 保存访问控制 -> `/api/session/me` 对 allowed/readonly/full/admin 产出正确 tier。
 - readonly export 用户可查询/导出，但看不到写入、导入确认、数据重置、高风险运维入口。
 - full access 用户可业务写入，但不能维护 OA 凭据、访问账户管理、数据重置或 AppHealth dashboard。
@@ -84,18 +87,23 @@ cd web && npm test -- --run \
   src/test/WorkbenchSelection.test.tsx \
   src/test/AppHealthOperationsPage.test.tsx \
   src/test/AppStatusIndicator.test.tsx \
-  src/test/TaxOffsetPage.test.tsx
+  src/test/TaxOffsetPage.test.tsx \
+  src/test/NoOaBankBatchPage.test.tsx
+
+cd web && npx playwright test e2e/permissions-role-matrix.spec.ts
 
 bash scripts/verify.sh docs
+
+cd web && npm run e2e:smoke
 ```
 
 ## Nightly CI 覆盖
 
-Nightly full suite 应覆盖本模块的 session/auth/permission/audit 后端测试、前端 SessionGate/权限交互测试、docs verify。模块级快速验证使用上方命令。
+Nightly full suite 应覆盖本模块的 session/auth/permission/audit 后端测试、前端 SessionGate/权限交互测试、Playwright app shell permission smoke、Playwright 全页面角色矩阵、docs verify。模块级快速验证使用上方命令。
 
 ## 未测风险
 
 - 真实 OA 菜单、OA 角色同步、OA 会话接口超时/失败和生产 token 过期语义需要 staging/生产 smoke。
-- 后端 session contract 和代表性 readonly export 路由已有聚合测试；全页面按钮/导出/写入交互仍依赖各页面模块权限测试和 nightly full suite。
+- 后端 session contract、代表性 readonly export 路由、AppHealth browser permission smoke 和本地 deterministic 全页面角色矩阵已有聚合测试；逐页面所有按钮、真实导出下载和生产代理层权限行为仍依赖各页面模块测试、Playwright 扩展和 staging/生产 smoke。
 - 审计目前分散在多个业务 service/UoW；缺少统一生产审计查询/导出 smoke。
 - 真实导出下载在浏览器和代理层的文件名、header 暴露和权限行为需要发布前 smoke。

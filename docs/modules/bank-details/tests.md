@@ -32,7 +32,8 @@
 | 银行明细 SQL read model freshness | P0 | `tests/test_bank_details_sql_runtime.py` | covered | missing、fresh empty、schema mismatch、dirty scope refreshing、规则版本 stale、cache key。 |
 | read model refresh worker | P0 | `tests/test_bank_details_sql_runtime.py` | covered | `all` fan-out 到月份 shard；月份 scope rebuild 后按 source version complete。 |
 | 账户余额独立 read model | P0 | `tests/test_bank_account_balance_read_model.py`、`web/src/test/BankDetailsPage.test.tsx` | covered | latest balance、CNY 别名、日期筛选只影响 count、不从 detail rows 聚合、不用 stale 覆盖 fresh。 |
-| 关系标签投影 | P0 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py` | covered | relation distribution row、OA/invoice-only 边界、失败降级、不读 legacy candidate matches。 |
+| 关系标签投影 | P0 | `tests/test_bank_details_service.py`、`tests/test_bank_details_sql_runtime.py`、`web/e2e/workbench-relation-fanout.spec.ts` | covered | relation distribution row、OA/invoice-only 边界、失败降级、不读 legacy candidate matches；Browser e2e 覆盖关联台 confirm 后页面标签从 `候选oa`/`候选发票` 变为 `有oa`/`有发票`。 |
+| 银行流水导入后列表显示 | P0 | `tests/test_import_formalization_api.py`、`tests/test_bank_details_sql_runtime.py`、`web/e2e/imports-bank-transactions-flow.spec.ts` | covered | 导入确认后 bank detail read model 应能展示导入行；Browser e2e 覆盖导入页 confirm 后进入银行明细看到新流水。 |
 | API route contract | P0 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | covered | stale rows 仍 200；refreshing 空 payload 才 202；权限、错误 envelope、导出 facade。 |
 | 导出 | P1 | `tests/test_bank_details_export_service.py`、`web/src/test/BankDetailsApi.test.ts`、`web/src/test/BankDetailsPage.test.tsx` | covered | 多 sheet、筛选转发、空结果、分页、公式转义、错误映射、filename、超过 20,000 行上限时页面展示行动建议。 |
 | 前端列表/筛选/分页/search | P1 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | covered | 默认日期、账户切换、关键词、分类 counts、分页、表格中文标签。 |
@@ -49,7 +50,7 @@
 | 3. API contract tests | 适用 | `tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py` | 覆盖 accounts/transactions/规则/确认/人工补分类/reapply/file replacement、权限、错误字段和 stale/refreshing 响应。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_bank_details_sql_runtime.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bankdetail_backfill_cli.py` | 覆盖 bank detail rows/scopes、schema/source version、dirty scope、worker fan-out、账户余额 read model 和 backfill。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/BankDetailsPage.test.tsx`、`web/src/test/BankDetailsApi.test.ts` | 覆盖页面加载、筛选、drawer、候选确认、人工补分类、导出、domain event、stale/refreshing/abort。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bankdetail_write_uow_contract.py`、Workbench/no-OA/turnover 相关模块测试 | 本模块现有集成以 API/UoW/lifecycle 为主；真实导入到多页面完整 smoke 仍归 staging/nightly 风险项。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_bank_auto_tag_rules_api.py`、`tests/test_bankdetail_write_uow_contract.py`、Workbench/no-OA/turnover/import 相关模块测试、`web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 本模块现有集成以 API/UoW/lifecycle 为主；Browser e2e 覆盖 Workbench confirm 后银行明细 relation tags fan-out，以及银行流水导入确认后银行明细显示导入行；真实导入到更多页面完整 smoke 仍归 staging/nightly 风险项。 |
 | 7. Existing feature regression tests | 适用 | 上述全部 bank details 回归测试，加 `tests/test_workbench_*`、`tests/test_no_oa_*`、`tests/test_turnover_*`、`tests/test_cost_statistics_*` 的按改动选择扩展集 | 银行明细是多个页面上游事实源；任何标签、分类、read model、导入或关系变更都要先问会影响哪些旧页面。 |
 
 ## 历史 bug 回归库
@@ -72,11 +73,11 @@
 
 ## 关键 smoke flows
 
-1. `银行流水导入确认 -> bank_account_balance + bank_detail dirty scope -> worker refresh -> /api/bank-details/accounts + /transactions fresh -> 页面展示余额、标签和原始字段`
+1. `银行流水导入确认 -> bank_account_balance + bank_detail dirty scope -> worker refresh -> /api/bank-details/accounts + /transactions fresh -> 页面展示余额、标签和原始字段`。当前 Browser e2e 覆盖导入页 confirm 后进入银行明细看到导入行。
 2. `自动标签规则保存/文件替换 -> audit + lifecycle -> bank_detail/no-OA/turnover dirty -> 页面全局遮罩等待当前可见月份 fresh -> 交易重读 fresh -> 页面规则抽屉反馈完成 -> 旧账户余额不被 stale payload 覆盖`
 3. `needs_confirmation 行 -> 后端重新计算当前候选 -> 用户确认第三层标签 -> dirty/outbox -> 银行明细、往来款、成本统计刷新`
 4. `unmatched 行 -> 人工补分类 -> audit + dirty/outbox -> manual 清除 -> 回到当前自动规则计算`
-5. `关联台确认/撤回 -> workbench relation distribution -> bank details relation tag projection -> 页面收到 domain event 后 refetch`
+5. `关联台确认/撤回 -> workbench relation distribution -> bank details relation tag projection -> 页面收到 domain event 或重新进入页面后 refetch`。当前 Browser e2e 覆盖 confirm 后回到银行明细显示 `有oa` / `有发票`；withdraw 仍待补。
 
 ## 本模块验证命令
 
@@ -89,6 +90,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime t
 PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_export_service tests.test_bank_transaction_identity_service -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_restore_bank_auto_tag_rules_tool -v
 cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx
+cd web && npm run e2e:smoke
 bash scripts/verify.sh docs
 ```
 
@@ -103,10 +105,10 @@ cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx src/test/NoOaBa
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest 和 build，覆盖完整 bank details 测试集。单轮模块验证只跑最小闭环，避免把所有历史下游页面回归作为每次人工推进的阻塞项。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、build 和 deterministic Playwright smoke，覆盖完整 bank details 后端/Vitest 测试集，并覆盖真实 Chromium 中 Workbench confirm 后银行明细 relation tags 更新，以及银行流水导入后银行明细显示导入行。单轮模块验证只跑最小闭环，避免把所有历史下游页面回归作为每次人工推进的阻塞项。
 
 ## 未测风险
 
 - 本轮不运行真实生产 Postgres/RabbitMQ/Redis worker drain；真实导入、backfill 和多页面 smoke 需要 staging 或夜间环境验证。
-- 前端 Vitest 覆盖交互和 API mapper，不覆盖真实浏览器视觉布局、超大数据滚动性能和下载文件人工验收。
+- 前端 Vitest 覆盖交互和 API mapper；当前 Browser e2e 覆盖 Workbench confirm fan-out 和银行导入后列表显示，但不覆盖 withdraw、错误恢复、真实浏览器视觉布局、超大数据滚动性能和下载文件人工验收。
 - 银行明细对 pending invoices、turnover、no-OA、cost/tax 的 fan-out 仍需在对应模块轮次继续矩阵化；本模块只记录上游影响和已有关键保护。

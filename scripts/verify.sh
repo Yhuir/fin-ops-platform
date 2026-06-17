@@ -5,14 +5,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/verify.sh [backend|frontend|docs|runtime-check|all]
+Usage: scripts/verify.sh [backend|frontend|e2e|docs|runtime-check|all]
 
 backend   Run clean backend check and full backend unittest discovery.
 frontend  Run frontend Vitest and production build.
+e2e       Run deterministic Playwright browser smoke tests.
 docs      Run lightweight documentation structure checks.
 runtime-check
           Run app check against the current configured runtime state.
-all       Run backend, frontend, and docs checks. This is the default.
+all       Run backend, frontend, deterministic browser e2e, and docs checks. This is the default.
 USAGE
 }
 
@@ -41,6 +42,11 @@ run_frontend() {
   cd "$ROOT_DIR/web"
   npm test -- --run
   npm run build
+}
+
+run_e2e() {
+  cd "$ROOT_DIR/web"
+  npm run e2e:smoke
 }
 
 run_docs() {
@@ -75,6 +81,9 @@ case "$target" in
   frontend)
     run_frontend
     ;;
+  e2e)
+    run_e2e
+    ;;
   docs)
     run_docs
     ;;
@@ -84,6 +93,7 @@ case "$target" in
   all)
     run_backend
     run_frontend
+    run_e2e
     run_docs
     ;;
   -h|--help|help)

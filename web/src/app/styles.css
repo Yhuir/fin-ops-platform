@@ -8969,6 +8969,9 @@ textarea {
 }
 
 .finance-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 920px);
   border-radius: var(--fp-radius-md);
   color: var(--fp-text-primary);
   font-size: var(--fp-text-body);
@@ -8991,6 +8994,8 @@ textarea {
 }
 
 .finance-dialog__body {
+  min-height: 0;
+  overflow: auto;
   padding: var(--fp-space-5);
 }
 
@@ -9008,6 +9013,7 @@ textarea {
 }
 
 .finance-dialog__footer {
+  flex-shrink: 0;
   gap: var(--fp-space-2);
   border-top: 1px solid var(--fp-border);
   padding: var(--fp-space-4) var(--fp-space-5);

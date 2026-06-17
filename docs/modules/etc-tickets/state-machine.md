@@ -51,6 +51,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-17 | 补充 ETC 票据管理 Browser e2e，覆盖未提交业务批次、发票明细、OA 草稿创建、人工已提交确认和已提交 bucket 展示 | ETC 页面 UI 状态、business batch `imported -> oa_confirmation_pending -> manually_marked_submitted` 可见链路、Playwright smoke | `cd web && npx playwright test e2e/etc-tickets-flow.spec.ts` |
 | 2026-06-12 | 删除 ETC repair/link/migration service 的 direct pair relation 写 fallback，缺少 Workbench relation command service 时 fail fast 且不先写本地批次 | 历史 repair、historical business batch migration、existing batch link、Workbench relation command 边界 | `tests/test_etc_backend.py`；`tests/test_historical_etc_business_batch_migration_service.py`；`tests/test_platform_runtime_boundary_guards.py` |
 | 2026-06-12 | 已提交 ETC 业务批次删除/reset 在本地 mutation 前先校验 Workbench relation read model fresh，summary relation 取消、历史 repair 和 existing link 生产写入迁入 `WorkbenchRelationCommandService` | ETC 业务批次删除、绑定 reconciliation task 删除、历史 repair/migration/link 工具、Workbench relation 事实源 | `tests/test_etc_backend.py`；`tests/test_workbench_relation_command_service.py`；`tests/test_historical_etc_business_batch_migration_service.py`；`tests/test_platform_runtime_boundary_guards.py` |
 | 2026-06-11 | 新建批次改为 `POST /api/etc/business-batches` 后端闭环创建 task + business batch，前端批次列表收敛到 business batch 事实源，task-only orphan 不再混入左侧列表 | `EtcBusinessBatchApplicationService`、ETC 页面、前端 API mapper/mock、API 契约、生产 orphan task 清理口径 | `tests.test_etc_backend`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts`；ETC cleanup tool tests |

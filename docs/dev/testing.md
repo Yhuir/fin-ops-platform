@@ -5,8 +5,8 @@
 ## 验证层级
 
 - 本地目标验证：修改某个模块时，优先运行 `docs/modules/<module>/tests.md` 中列出的模块命令。
-- 统一本地验证：运行 `bash scripts/verify.sh all`。
-- Nightly CI：每天自动运行后端全量 unittest、前端 Vitest、前端 build 和文档检查。
+- 统一本地验证：运行 `bash scripts/verify.sh all`，覆盖后端、前端 Vitest/build、deterministic Playwright browser smoke 和文档检查。
+- Nightly CI：每天自动运行后端全量 unittest、前端 Vitest、前端 build、Playwright browser smoke 和文档检查。
 - 发布前验证：涉及生产数据、read model、worker、OA、Redis/RabbitMQ/PostgreSQL runtime 或部署资产时，按模块文档和运维文档补充 dry-run、staging 或生产只读 smoke。
 
 ## 统一验证入口
@@ -20,6 +20,7 @@ bash scripts/verify.sh all
 ```bash
 bash scripts/verify.sh backend
 bash scripts/verify.sh frontend
+bash scripts/verify.sh e2e
 bash scripts/verify.sh docs
 ```
 
@@ -43,7 +44,19 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 cd web
 npm test
 npm run build
+npm run e2e:smoke
 ```
+
+## Browser e2e / Playwright
+
+默认 browser e2e 使用 Playwright Chromium、Vite dev server 和 deterministic API mocks，目标是用真实浏览器保护 shell、导航、会话 gate、权限 gate、App Status/AppHealth，以及高 fan-out 页面之间的核心业务链路。目前 smoke 覆盖 app shell / AppHealth 权限门禁、compact/mobile drawer、embedded OA shell、`read_export_only/full_access/admin` 全页面角色矩阵和高风险写入口权限门禁，并覆盖 `关联台 confirm -> bank details relation tags`、`关联台 confirm -> pending invoices invoice status`、`batch accounting submit/withdraw -> workbench_relation barrier -> bucket recovery`、`turnover ledger manual closure confirm/withdraw -> turnover/workbench barriers -> closure recovery`、`bank import preview/confirm -> workbench refresh -> bank details imported row`、`invoice import input/output preview/confirm -> workbench refresh`、`ETC invoice ready task zip preview/confirm -> background import job`、`tax offset recalculate/save -> certified import preview/confirm -> tax page refresh`、`settings data reset impact/password/job polling -> settings reload`、`output invoice collection status/reminder save -> rows refresh -> formal receipt create/history`、`input invoice OA reverse selected subset -> OA draft -> submitted history`、`ETC ticket imported business batch -> OA draft -> manual submitted bucket`、`OA pending payments rows/filter/sort -> OA/bank/invoice/rules drawers`、`no-OA selected row submit -> freshness barrier -> submitted withdraw -> history`、`cost statistics project drilldown -> transaction detail -> export row-limit feedback` 的跨页面/跨读模型同步。
+
+```bash
+cd web
+npm run e2e:smoke
+```
+
+这类测试应优先覆盖用户可见业务流、导航、弹窗、下载、iframe、焦点、滚动、大表格、网络恢复和跨页面同步。真实 PostgreSQL/RabbitMQ/Redis/systemd worker/OA Mongo/对象存储不属于默认本地 mock e2e，应通过 staging、只读生产 smoke 或显式 runtime gate 补充。
 
 ## 文档变更检查
 

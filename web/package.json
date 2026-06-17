@@ -7,6 +7,9 @@
     "dev": "../scripts/start-web.sh",
     "dev:raw": "vite",
     "build": "tsc -b && vite build",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:smoke": "playwright test e2e/app-shell.spec.ts e2e/app-shell-responsive.spec.ts e2e/workbench-relation-fanout.spec.ts e2e/pending-invoices-fanout.spec.ts e2e/batch-accounting-flow.spec.ts e2e/turnover-ledger-flow.spec.ts e2e/imports-bank-transactions-flow.spec.ts e2e/imports-invoices-flow.spec.ts e2e/imports-etc-invoices-flow.spec.ts e2e/tax-offset-flow.spec.ts e2e/settings-data-reset-flow.spec.ts e2e/output-invoice-collections-flow.spec.ts e2e/input-invoice-usage-flow.spec.ts e2e/etc-tickets-flow.spec.ts e2e/oa-pending-payments-flow.spec.ts e2e/no-oa-bank-batches-flow.spec.ts e2e/cost-statistics-flow.spec.ts e2e/permissions-role-matrix.spec.ts",
     "test": "vitest"
   },
   "dependencies": {

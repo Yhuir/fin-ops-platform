@@ -60,4 +60,5 @@
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
 | - | 初始骨架 | 待补充 | - |
+| 2026-06-17 | 补齐 Browser 权限角色矩阵 | 新增 read_export_only/full_access/admin 真实 Chromium 矩阵；只读用户逐页可读且不触发 mutation API，settings/tax/import/no-OA 写入口受控；同步修复导入页和免 OA 页 UI 权限门禁 | `cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`、`cd web && npm test -- --run src/test/ImportCenterPage.test.tsx src/test/NoOaBankBatchPage.test.tsx src/test/WorkbenchSelection.test.tsx src/test/App.test.tsx src/test/SessionGate.test.tsx src/test/SessionApi.test.ts` |
 | 2026-06-11 | 补齐权限与审计测试闭环状态机 | 将 session、access tier、UI 权限、API guard、audit 原子性和敏感数据保护纳入统一维护边界 | `tests.test_auth_guard`、`tests.test_session_api`、`tests.test_audit_service`、`web/src/test/SessionGate.test.tsx`、`web/src/test/SettingsPage.test.tsx` |

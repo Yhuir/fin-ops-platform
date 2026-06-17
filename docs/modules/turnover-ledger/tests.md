@@ -44,6 +44,7 @@
 - `web/src/test/TurnoverLedgerApi.test.ts`
 - `web/src/test/TurnoverLedgerPage.test.tsx`
 - `web/src/test/domainEvents.test.ts`
+- `web/e2e/turnover-ledger-flow.spec.ts`
 
 ## 七类测试适用性
 
@@ -53,9 +54,9 @@
 | 2. Service-layer tests | 适用 | `tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_ledger_api.py`、`tests/test_turnover_workbench_integration.py`、`tests/test_workbench_pair_relation_service.py` | 已覆盖 UoW transaction、rollback、dirty/outbox、stale precondition、idempotency、settings/extra/bankdetail/relation ports、Workbench relation command service 委托、缺 command fail-fast、既有 OA-bank relation 合并进外部往来闭环、撤回闭环恢复旧 OA-bank relation 和 Workbench pair relation。 |
 | 3. API contract tests | 适用 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_read_facade.py` | 已覆盖列表/grouped/tag-selection/bank-row-tags/extra/confirm/withdraw/export、权限、错误、版本冲突、idempotency replay/conflict、stale conflict、relation freshness 诊断、导出上限结构化错误、HTML response routing error。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_turnover_ledger_query_service.py`、`tests/test_turnover_ledger_read_model_refresh.py`、`tests/test_turnover_ledger_source_versions.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 已覆盖 stale SQL read model 不伪装 fresh、missing required SQL read model 返回 refreshing、legacy fallback、source versions、projection 保存、Workbench relation fresh 状态写入 grouped payload、Workbench relation non-fresh 不保存半成品、worker handler、registry/App Status 登记。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` | 已覆盖 API mapper、tag drawer 保存、grouped table、OA/业务单据关联 chip 与“已闭环/未闭环”chip 拆分、manual closure、仅已关联 OA 的 flow row 不禁用确认闭环、已闭环 flow-row toolbar 撤回、提交前 fresh/rebind 最新 flow row versions、刷新后所选流水消失时不发 POST、跨组/非零差额禁用、extra drawer、detail missing error、stale 阻断 manual closure、operation overlay、导出、domain event。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx` | 已覆盖 deterministic 不进入 Workbench、manual zero-difference closure 写 Workbench pair relation、canonical write safety 不通过时不半写入、legacy relation 不污染 Workbench grouping、前端闭环前重刷台账且闭环后刷新关联台可见性。 |
-| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/domainEvents.test.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、domain event contract。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/GlobalOperationOverlayContext.test.tsx`、`web/src/test/OperationBarrierApi.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 API mapper、tag drawer 保存、grouped table、OA/业务单据关联 chip 与“已闭环/未闭环”chip 拆分、manual closure、仅已关联 OA 的 flow row 不禁用确认闭环、已闭环 flow-row toolbar 撤回、提交前 fresh/rebind 最新 flow row versions、刷新后所选流水消失时不发 POST、跨组/非零差额禁用、extra drawer、detail missing error、stale 阻断 manual closure、operation overlay、导出、domain event；真实 Chromium 覆盖同组两条 flow rows 确认闭环和 toolbar 撤回。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_turnover_workbench_integration.py`、`tests/test_workbench_turnover_grouping.py`、`web/src/test/TurnoverLedgerPage.test.tsx`、`web/e2e/turnover-ledger-flow.spec.ts` | 已覆盖 deterministic 不进入 Workbench、manual zero-difference closure 写 Workbench pair relation、canonical write safety 不通过时不半写入、legacy relation 不污染 Workbench grouping、前端闭环前重刷台账且闭环后刷新关联台可见性；Browser e2e 覆盖 confirm/withdraw 后等待后端 freshness targets 并重读 grouped payload。 |
+| 7. Existing feature regression tests | 适用 | 上述全部，加 `tests/test_workbench_turnover_grouping.py`、`web/src/test/domainEvents.test.ts`、`web/e2e/turnover-ledger-flow.spec.ts` | 已保护旧 grouped shape、legacy flat/read model 兼容、导出字段、Workbench open grouping、Bankdetail tag batch、旧 relation/system relation 拒绝、domain event contract，以及真实浏览器里 closure/recovery 不破坏表格选择和 toolbar 状态。 |
 
 当前首轮闭环未发现必须立即新增的 P0 测试。已有 turnover 测试覆盖密度高，本轮不为了覆盖率新增低价值测试。
 
@@ -75,14 +76,14 @@
 | relation extra | `test_relation_extra_get_returns_default_structure_and_put_persists`、`test_target_relation_extra_stale_expected_version_rejects_without_save_or_refresh`、`test_relation_extra_outbox_failure_does_not_return_best_effort_success` |
 | Bankdetail tag batch fan-out | `test_turnover_bank_row_tag_batch_refreshes_all_required_scopes`、`test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save` |
 | Workbench 回归 | `test_deterministic_turnover_relation_does_not_group_bank_rows_in_workbench`、`test_bank_only_turnover_manual_closure_rows_remain_open_even_when_linked`、`test_manual_pair_relation_occupied_bank_row_is_not_overridden_by_turnover_relation`、`test_withdraw_restores_previous_relations_from_turnover_manual_closure_history`、`test_turnover_workbench_pair_port_delegates_manual_closure_withdraw_to_relation_command_service`、`test_turnover_workbench_pair_port_withdraw_restores_merged_oa_bank_relations`、`test_turnover_workbench_pair_port_requires_relation_command_service_for_manual_closure_withdraw`、`test_turnover_closure_and_withdraw_wiring_use_workbench_relation_command_service` |
-| 前端闭环 chip 和 toolbar | `shows Workbench relation feedback from the grouped ledger payload`、`allows manual closure confirmation when selected rows are only linked to OA`、`withdraws a selected linked manual closure from the table toolbar` |
+| 前端闭环 chip 和 toolbar | `shows Workbench relation feedback from the grouped ledger payload`、`allows manual closure confirmation when selected rows are only linked to OA`、`withdraws a selected linked manual closure from the table toolbar`、`web/e2e/turnover-ledger-flow.spec.ts` |
 | Worker / App Status | `test_worker_handler_rebuilds_scope_and_completes_dirty_scope`、`test_domain_registry_covers_frontend_routes`、`test_required_worker_missing_marks_critical_domain_blocked` |
 | Workbench relation 状态投影 | `test_projection_enriches_rows_with_fresh_workbench_relation_context`、`test_projection_does_not_save_when_workbench_relation_context_is_not_fresh`、`maps ledger, detail, confirm, and withdraw responses from snake_case`、`shows Workbench relation feedback from the grouped ledger payload` |
 | `bank_detail` dependency fan-out 不阻塞 all-scope 台账 | `RuntimeWorkerTests.test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency`、`ReadModelRefreshGatewayTests.test_bank_detail_all_shard_reason_does_not_bump_active_scope` |
 | fresh missing bank tag rows 不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_keeps_fresh_status_when_some_rows_are_not_projected`、`BankTransactionTagReadFacadeTests.test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
 | blocking dirty scope 粒度不阻塞 all-scope 台账 | `BankTransactionTagReadFacadeTests.test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
 | 前端 stale 写禁用 | `shows grouped read model stale warning and blocks manual closure` |
-| 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 `turnover_ledger:all` fresh 并 reload/rebind 最新 flow rows，提交后等待后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation`、`workbench` barrier fresh，再 reload grouped payload、发送关联台刷新事件 |
+| 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 `turnover_ledger:all` fresh 并 reload/rebind 最新 flow rows，提交后等待后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation`、`workbench` barrier fresh，再 reload grouped payload、发送关联台刷新事件；`web/e2e/turnover-ledger-flow.spec.ts` 在真实 Chromium 中覆盖同组 flow rows confirm/withdraw recovery |
 
 ## 历史 bug 回归库
 
@@ -118,11 +119,11 @@
 本地自动化重点保护：
 
 1. 银行明细已确认外部往来分类 -> tag-selection 生效 -> grouped ledger 展示。
-2. grouped table 选择同组多条真实 flow rows -> 提交前等待台账 fresh 并重绑最新 row versions -> 人工零差额闭环 -> Turnover manual relation + Workbench pair relation；若所选流水已有 OA-bank relation，则合并进同一个 active case -> 前端刷新。
-3. 手动闭环 relation 撤回 -> 只撤回 `turnover_manual_closure` 多流水闭环，并恢复确认前的 OA-bank relation；已升级为包含发票或其他业务 row type 时必须从关联台撤回；Workbench relation read model 不 fresh 时必须 fail fast 且不产生 Turnover 半写入。
+2. grouped table 选择同组多条真实 flow rows -> 提交前等待台账 fresh 并重绑最新 row versions -> 人工零差额闭环 -> Turnover manual relation + Workbench pair relation；若所选流水已有 OA-bank relation，则合并进同一个 active case -> 前端刷新。`web/e2e/turnover-ledger-flow.spec.ts` 已在真实 Chromium 中覆盖两条同组 flow rows 的 confirm 主链路。
+3. 手动闭环 relation 撤回 -> 只撤回 `turnover_manual_closure` 多流水闭环，并恢复确认前的 OA-bank relation；已升级为包含发票或其他业务 row type 时必须从关联台撤回；Workbench relation read model 不 fresh 时必须 fail fast 且不产生 Turnover 半写入。`web/e2e/turnover-ledger-flow.spec.ts` 已覆盖已闭环 flow row toolbar 撤回和 grouped payload 恢复未闭环。
 4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。
 5. tag-selection / bank-row-tags / confirm / withdraw / extra 的 outbox 失败必须 rollback 或显式暴露失败。
-6. tag-selection / extra / confirm / withdraw -> 全屏 overlay；manual closure 提交前额外执行 `turnover_ledger:all` fresh gate 和 grouped reload/rebind -> 写成功后等待 operation barrier fresh -> reload grouped ledger -> overlay 释放。
+6. tag-selection / extra / confirm / withdraw -> 全屏 overlay；manual closure 提交前额外执行 `turnover_ledger:all` fresh gate 和 grouped reload/rebind -> 写成功后等待 operation barrier fresh -> reload grouped ledger -> overlay 释放；Browser smoke 已断言 confirm/withdraw 都触发 `POST /api/operation-barrier/status`。
 
 真实环境 smoke 仍需在发布前执行：
 
@@ -143,6 +144,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_query_serv
 
 ```bash
 cd web && npm test -- --run src/test/TurnoverLedgerApi.test.ts src/test/TurnoverLedgerPage.test.tsx src/test/GlobalOperationOverlayContext.test.tsx src/test/OperationBarrierApi.test.ts src/test/domainEvents.test.ts
+cd web && npx playwright test e2e/turnover-ledger-flow.spec.ts
 ```
 
 文档验证：
@@ -159,12 +161,12 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 通过 backend unittest discovery、frontend Vitest 和 frontend build 覆盖本模块。由于 turnover 后端测试数量多，nightly 可以发现大部分 API/UoW/read model/worker 回归；本地开发时仍应优先运行上方目标验证命令，减少反馈时间。
+`bash scripts/verify.sh all` 通过 backend unittest discovery、frontend Vitest、frontend build 和 deterministic Playwright smoke 覆盖本模块。Browser smoke 当前包含 `web/e2e/turnover-ledger-flow.spec.ts`，用于保护真实 Chromium 中 manual closure confirm/withdraw、operation barrier 和 grouped payload recovery。由于 turnover 后端测试数量多，nightly 可以发现大部分 API/UoW/read model/worker 回归；本地开发时仍应优先运行上方目标验证命令，减少反馈时间。
 
 ## 未测风险
 
 - 真实生产 PostgreSQL 历史数据中的重复、缺字段、半迁移状态，不能由本地 fixture 完全证明。
 - 真实 RabbitMQ/Redis/systemd worker drain、网络抖动和 worker 重启恢复需要 staging 或生产前 smoke。
-- 大数据量 grouped table、导出 XLSX 文件和浏览器视觉遮挡需要真实浏览器/样本验证。
+- 大数据量 grouped table、导出 XLSX 文件、浏览器视觉遮挡、error/network recovery 和真实下载打开耗时需要真实浏览器/样本验证；本地 Playwright smoke 只覆盖小样本 confirm/withdraw 主链路。
 - 外部往来写路径仍保留 legacy fallback 分支；常规 manual closure/withdraw 已通过 command service 收敛，未来删除 fallback 前需要单独回归。
 - 自动标签规则恢复只证明银行明细 read model 可从当前定义补齐历史确认语义；真实生产仍需刷新对应 `bank_detail`、`turnover_ledger`、`workbench_relation`、`workbench` scopes 后验证 open 区可见。

@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-17 - ETC票据管理Browser e2e闭环
+
+- 目标：补齐 ETC 票据管理页面真实浏览器层的关键 OA 提交流转保护，降低只靠 Vitest/API 测试时漏掉导航、弹窗、状态刷新和 bucket 切换回归的风险。
+- 影响范围：Playwright deterministic API mocks、`web/e2e/etc-tickets-flow.spec.ts`、smoke 脚本和 ETC 测试文档；后端业务代码和 API 契约不变。
+- 关键决策：本轮选择已导入业务批次的最小高价值链路，不引入真实 OA、对象存储或大 ZIP 依赖；用 mock 状态推进 `imported -> oa_confirmation_pending -> manually_marked_submitted`，验证页面可见状态和请求次数。
+- 文档影响：更新本模块 `tests.md`、`state-machine.md`，并同步 `docs/dev/testing.md`、`docs/dev/nightly-ci.md`、`docs/dev/testing-closure-state.md` 和 `docs/dev/testing-closure-dependency-map.md`。
+- 测试覆盖：新增 `web/e2e/etc-tickets-flow.spec.ts`，覆盖未提交业务批次首屏、发票明细表、创建 OA 草稿弹窗、人工确认已提交和已提交 bucket 展示。
+- 验证命令：`cd web && npx playwright test e2e/etc-tickets-flow.spec.ts`；`cd web && npm test -- --run src/test/EtcTicketManagementPage.test.tsx src/test/EtcApi.test.ts src/test/CandidateGroupGrid.test.tsx`；`cd web && npm run e2e:smoke`；`bash scripts/verify.sh docs`。
+- 未测风险：deterministic Playwright 不证明真实大 ZIP、票根网 PDF/XML/TXT 混合包、真实对象存储/Nginx 上传、真实 OA 草稿页面、生产历史迁移和 worker drain。
+- 后续事项：继续按 fan-out 风险补 `oa-pending-payments` 等页面的 Browser e2e。
+
 ## 2026-06-16 - ETC API 测试严格临时目录扫尾
 
 - 目标：把 P2/P3-016 中剩余的 ETC 后端 `TemporaryDirectory(ignore_cleanup_errors=True)` 测试卫生风险转为可执行证据。

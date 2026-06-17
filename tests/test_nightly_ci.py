@@ -24,21 +24,24 @@ class NightlyCITests(unittest.TestCase):
         self.assertIn("node-version: \"20\"", workflow)
         self.assertIn("python -m pip install -r backend/requirements.txt", workflow)
         self.assertIn("npm ci", workflow)
+        self.assertIn("npx playwright install --with-deps chromium", workflow)
         self.assertIn("bash scripts/verify.sh all", workflow)
+        self.assertNotIn("bash scripts/verify.sh e2e", workflow)
 
-    def test_verify_all_runs_backend_frontend_and_docs_checks(self) -> None:
+    def test_verify_all_runs_backend_frontend_e2e_and_docs_checks(self) -> None:
         script = VERIFY_SCRIPT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("run_clean_app_check", script)
         self.assertIn("PYTHONPATH=backend/src python3 -m unittest discover -s tests -v", script)
         self.assertIn("npm test -- --run", script)
         self.assertIn("npm run build", script)
+        self.assertIn("npm run e2e:smoke", script)
         self.assertIn("docs/dev/nightly-ci.md", script)
         self.assertIn("docs/dev/testing-closure-state.md", script)
         self.assertIn("docs/dev/testing-closure-dependency-map.md", script)
         self.assertRegex(
             script,
-            re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_docs\s+;;", re.MULTILINE),
+            re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;", re.MULTILINE),
         )
 
     def test_backend_verification_uses_clean_app_state_by_default(self) -> None:

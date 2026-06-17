@@ -30,6 +30,17 @@
 
 ## 历史记录
 
+## 2026-06-17 - OA待付款Browser e2e闭环
+
+- 目标：补齐 OA 待付款核对页面真实浏览器层的首屏、筛选/排序和详情抽屉保护，降低只靠 Vitest 时漏掉实际导航、drawer、请求参数编码或规则抽屉复用 endpoint 回归的风险。
+- 影响范围：Playwright deterministic API mocks、`web/e2e/oa-pending-payments-flow.spec.ts`、smoke 脚本和 OA 待付款测试文档；后端业务代码和 API 契约不变。
+- 关键决策：本轮选择只读高价值链路，覆盖 rows/filter-options、搜索、支付状态筛选、交易时间排序、OA/流水/发票详情和支出流水无需开票规则抽屉；真实 OA/Mongo、真实 Postgres 和 worker drain 仍留给 staging/生产 smoke。
+- 文档影响：更新本模块 `tests.md`、`state-machine.md`，并同步 `docs/dev/testing.md`、`docs/dev/nightly-ci.md`、`docs/dev/testing-closure-state.md` 和 `docs/dev/testing-closure-dependency-map.md`。
+- 测试覆盖：新增 `web/e2e/oa-pending-payments-flow.spec.ts`，并加入 `npm run e2e:smoke`。
+- 验证命令：`cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts`；`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx src/test/TableAlignmentStyles.test.ts`；`cd web && npm run e2e:smoke`；`bash scripts/verify.sh docs`。
+- 未测风险：真实 OA/Mongo 字段变体、真实生产 PostgreSQL 大数据 EXPLAIN/锁等待/长分页、真实 RabbitMQ/Redis/systemd worker drain、虚拟滚动压力、像素级视觉和网络中断恢复仍需 staging/生产 smoke。
+- 后续事项：继续按 fan-out 风险补 `no-oa-bank-batches` 等页面的 Browser e2e。
+
 ## 2026-06-16 - 首屏 page-size 性能护栏证据
 
 - 目标：补齐 P2/P3 大数据列表本地 synthetic SLO 与前端首屏请求证据，防止 OA 待付款核对首屏请求把超大 page size 透传为全量读取。

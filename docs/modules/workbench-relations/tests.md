@@ -19,8 +19,11 @@
 - `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`：进项发票 OA reverse evidence detected 后通过 relation command service 写 `input_invoice_oa_reverse`，缺 command fail-fast，command stale/conflict 返回 409 且不推进本地 batch。
 - `tests/test_workbench_relation_history_replay_tool.py`：PostgreSQL history replay 只读巡检，覆盖 active row 多 case 占用、row shape、未注册 mode severity、display-only relation mode/history 污染、非可恢复 history before_relations、relation/history 差异、readiness 状态和 `--fail-on-issues`。
 - `tests/test_audit_workbench_relation_display_tool.py`：Workbench relation display 只读巡检，覆盖 active relation 成员缺失、active scope 拆组、同 row 多 visible owner、payload case/mode mismatch、`all` generation 旧于成员月份 generation，以及 `--fail-on-issues` 不执行写入。
+- `web/e2e/workbench-relation-fanout.spec.ts`：真实 Chromium 中从银行明细候选关系标签进入关联台，执行 confirm preview/submit/operation barrier，再回银行明细验证 `有oa` / `有发票` 标签。
+- `web/e2e/batch-accounting-flow.spec.ts`：真实 Chromium 中从批量账务未提交 bucket 选择银行流水和 OA，submit 后等待 `workbench_relation` operation barrier，再进入已提交 bucket 验证 relation 与 OA 明细；随后 withdraw 等待同一 freshness barrier 并恢复未提交状态。
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中从外部往来款 grouped table 选择同组两条 flow rows，confirm manual closure 后等待 `turnover_ledger` / `workbench_relation` / `workbench` freshness targets，再从 toolbar withdraw 并验证未闭环恢复。
 
-## 七类测试要求
+## 七类测试适用性
 
 ### 1. Business core unit tests
 
@@ -98,10 +101,10 @@
 
 适用。至少覆盖：
 
-- 在关联台 confirm 后，bank detail、pending invoice、invoice usage/OA pending 或 batch accounting 通过后端 read model 看到同一 relation。
+- 在关联台 confirm 后，bank detail、pending invoice、invoice usage/OA pending 或 batch accounting 通过后端 read model 看到同一 relation；当前 Browser e2e 已覆盖 bank detail relation tag fan-out、pending invoice row status fan-out、batch accounting submit/withdraw 后等待 relation barrier 并进入对应 bucket，以及 turnover manual closure confirm/withdraw 后等待 turnover/workbench barriers 并恢复 grouped payload。
 - 在关联台 confirm -> withdraw 后，用真实登录态 HTTP 响应、relation audit、durable outbox/readiness 和 `write_operation_slo_audit --since <scenario-start>` 证明不是假同步；旧失败样本不得混入新发布 gate。
 - no-OA submit/withdraw 与关联台 internal transfer confirm-link 对同一组 row 收敛到同一 case，并在 Workbench paired/open 之间恢复。
-- turnover closure submit/withdraw 影响 workbench_relation、cost/search；必须覆盖 canonical write safety 下不产生半写入。
+- turnover closure submit/withdraw 影响 workbench_relation、cost/search；必须覆盖 canonical write safety 下不产生半写入。当前 Browser e2e 已覆盖小样本 confirm/withdraw 的 barrier 与页面恢复，复杂 OA-bank merge、cost/search 最终显示仍由后端 integration 和后续目标 smoke 保护。
 - pending invoice attach existing 后，发票页和银行页关系一致。
 - batch accounting submit/withdraw 后，workbench_relation 恢复。
 
@@ -140,6 +143,17 @@ PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py::EtcApiTests:
 PYTHONPATH=backend/src python3 -m pytest tests/test_batch_accounting_api.py tests/test_no_oa_bank_batch_api.py tests/test_turnover_ledger_api.py tests/test_pending_invoice_service.py -q
 cd web && npm test -- --run src/test/BatchAccountingPage.test.tsx
 cd web && npm run build
+cd web && npm run e2e:smoke
 ```
 
 全量闭环前必须补充目标 e2e 或 integration smoke，证明一个页面 mutation 后其他页面通过后端事实重新读取到一致 relation。
+
+## Nightly CI 覆盖
+
+`bash scripts/verify.sh all` 会运行全量后端 unittest、前端 Vitest、前端 build、deterministic Playwright smoke 和 docs check。当前 Playwright smoke 覆盖 app shell / AppHealth / session permission gate，并覆盖关联台 confirm 后银行明细 relation tags、待找发票行状态跨页面同步、批量账务 submit/withdraw -> `workbench_relation` barrier -> bucket recovery，以及外部往来 manual closure confirm/withdraw -> turnover/workbench barriers -> grouped recovery；错误恢复和更复杂下游同步仍主要由后端 integration、Vitest 和运行时 SLO 工具保护。
+
+## 未测风险
+
+- 真实浏览器里的关联台 mutation 跨页面 business-flow smoke 仍不完整：confirm -> bank details relation tags、confirm -> pending invoice row status、batch accounting submit/withdraw -> bucket recovery、turnover manual closure confirm/withdraw -> grouped recovery 已覆盖；relation read model stale/refreshing、关联台 withdraw、复杂下游最终显示、错误反馈和网络恢复仍需后续 Playwright 场景补齐。
+- 真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产历史 relation 半迁移、大数据 active generation 回放和真实导出/滚动性能仍需 staging 或生产只读 smoke。
+- 关联台关系 fan-out 影响银行明细、待找发票、进项/销项、no-OA、turnover、batch accounting、成本、搜索等多个页面；新增 relation mode 或 write contract 时必须同步补目标 API/服务/前端/e2e 回归。

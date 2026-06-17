@@ -109,7 +109,7 @@ export default function CertifiedInvoiceImportModal({
   onImported,
 }: CertifiedInvoiceImportModalProps) {
   const session = useSession();
-  const isMountedRef = useRef(true);
+  const isMountedRef = useRef(false);
   const canMutateData =
     session.status === "authenticated" ? session.session.canMutateData : false;
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -127,6 +127,7 @@ export default function CertifiedInvoiceImportModal({
       : "system";
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };

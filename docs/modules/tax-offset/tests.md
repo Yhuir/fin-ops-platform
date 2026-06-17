@@ -37,7 +37,7 @@
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_tax_offset_api.py` | covered | 发票导入、认证导入、规则变更、OA rebuild 等事件刷新 tax offset，不误刷银行导入。 |
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_worker_registry.py` | covered | route/domain registry、read model readiness、`tax-offset` worker 注册与回填。 |
 | migration/schema | P1 | `tests/test_postgres_migrations.py`、`tests/test_postgres_state_store.py` | covered | certified import、tax offset plans、read model 表结构和状态存取。 |
-| 前端页面交互 | P1 | `web/src/test/TaxOffsetPage.test.tsx` | covered | loading abort、remount reload、只读权限、导入 modal、drag/drop、非 Excel 拒绝、recalculate、save、搜索/排序/筛选、drawer、高亮、empty。 |
+| 前端页面交互 | P1 | `web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` | covered | loading abort、remount reload、只读权限、导入 modal、drag/drop、非 Excel 拒绝、recalculate、save、搜索/排序/筛选、drawer、高亮、empty；Browser e2e 覆盖真实 Chromium 下的试算、保存、modal preview/confirm 和页面刷新。 |
 | 真实外部环境 worker drain | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres/Redis/RabbitMQ/systemd `tax-offset` worker。 |
 
 ## 七类测试适用性
@@ -48,9 +48,9 @@
 | 2. Service-layer tests | 适用 | `tests/test_tax_offset_read_model_service.py`、`tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`tests/test_postgres_state_store.py` | 覆盖 read model service、计划保存 service、导入 job repository、Postgres 状态边界。 |
 | 3. API contract tests | 适用 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`web/src/test/TaxApi.test.ts` | 覆盖 `/api/tax-offset`、calculate、summary、plans、certified-import preview/confirm/job/list 的 response shape、权限和错误。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_tax_offset_sql_runtime.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` | 覆盖 SQL projection、Redis cache、refresh gateway、worker all fan-out、dirty scope、lifecycle fan-out 和 App Status。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts` | 覆盖用户可见 loading/error/empty/权限/导入/保存/搜索/排序/筛选/drawer/job polling。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`tests/test_tax_offset_sql_runtime.py`、`web/src/test/TaxOffsetPage.test.tsx` | 覆盖认证导入 preview -> confirm/job -> read model invalidation -> 页面刷新；真实 worker drain 仍为 documented-risk。 |
-| 7. Existing feature regression tests | 适用 | 上述全部 tax offset tests，加 invoice lifecycle、pending invoice、ETC、workbench、cost statistics tests 的按改动选择扩展集 | 发票、ETC、关系、规则和 read model 改动都可能影响税金抵扣旧功能。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/TaxOffsetPage.test.tsx`、`web/src/test/TaxApi.test.ts`、`web/e2e/tax-offset-flow.spec.ts` | 覆盖用户可见 loading/error/empty/权限/导入/保存/搜索/排序/筛选/drawer/job polling，并用真实浏览器覆盖 StrictMode 下 modal confirm 后关闭与刷新。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_tax_offset_api.py`、`tests/test_import_job_queue.py`、`tests/test_tax_offset_sql_runtime.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/tax-offset-flow.spec.ts` | 覆盖认证导入 preview -> confirm/job -> read model invalidation -> 页面刷新；Browser e2e 覆盖用户从试算/保存到认证导入刷新后的可见结果；真实 worker drain 仍为 documented-risk。 |
+| 7. Existing feature regression tests | 适用 | 上述全部 tax offset tests，加 invoice lifecycle、pending invoice、ETC、workbench、cost statistics tests 的按改动选择扩展集 | 发票、ETC、关系、规则和 read model 改动都可能影响税金抵扣旧功能；`web/e2e/tax-offset-flow.spec.ts` 保护已认证导入 modal 的 StrictMode mounted guard 回归。 |
 
 ## 历史 bug 回归库
 
@@ -65,6 +65,7 @@
 | 长期 | 税金认证导入确认后页面不刷新税金 read model。 | `tests/test_tax_offset_api.py::test_tax_certified_confirm_invalidates_tax_offset_month_cache`、`web/src/test/TaxOffsetPage.test.tsx` | covered |
 | 长期 | 银行流水导入误刷新税金抵扣。 | `tests/test_tax_offset_api.py::test_bank_import_confirm_does_not_invalidate_tax_offset_cache` | covered |
 | 2026-06-13 | 税金抵扣从 OA 附件 parser cache/Workbench 临时行读取发票，绕过统一 Invoice repository。 | `tests/test_tax_offset_service.py::test_month_payload_includes_oa_attachment_invoices_by_issue_month`、`tests/test_tax_offset_api.py::test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month` | covered |
+| 2026-06-17 | React StrictMode effect replay 后，已认证导入 modal mounted guard 停留为 false，confirm 200 后直接 return，页面不关闭 modal、不刷新 tax offset。 | `web/e2e/tax-offset-flow.spec.ts` | covered |
 
 ## 关键 smoke flows
 
@@ -73,6 +74,7 @@
 3. `用户调整计划勾选 -> calculate -> summary 更新 -> save plan with scope/source versions -> stale version conflict 或幂等成功`
 4. `ETC 发票导入/业务批次变化 -> invoiceFactUpdated / lifecycle -> tax_offset refresh -> 页面重新读取`
 5. `pending invoice rules changed -> invoice_lifecycle -> tax_offset + cost_statistics + search refresh -> 不刷新 no_oa_bank_batch/bank_account_balance`
+6. `Browser e2e: /tax-offset -> 取消一张进项计划 -> calculate -> 保存计划 -> 页内已认证发票导入 preview/confirm -> 刷新已认证结果 drawer`
 
 ## 本模块验证命令
 
@@ -84,6 +86,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_api tests.test_
 PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_sql_runtime tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_app_status_overview_service tests.test_postgres_state_store tests.test_postgres_migrations -v
 cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx src/test/TaxApi.test.ts src/test/AppStatusIndicator.test.tsx
+cd web && npx playwright test e2e/tax-offset-flow.spec.ts
 bash scripts/verify.sh docs
 ```
 
@@ -98,10 +101,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest 和 build，覆盖完整税金抵扣、认证导入、read model、App Status 和前端测试集。单轮模块验证只跑最小闭环。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、frontend build 和 deterministic Playwright smoke，覆盖完整税金抵扣、认证导入、read model、App Status、前端测试集和 `web/e2e/tax-offset-flow.spec.ts` 的浏览器导入刷新闭环。单轮模块验证只跑最小闭环。
 
 ## 未测风险
 
 - 本地测试不连接真实税局认证 XLSX 大样本、真实 OA 附件发票缓存或真实 ETC 生产数据；真实数据格式变化需要发布前样本 smoke。
 - 本地测试不跑真实 RabbitMQ/Redis/systemd `tax-offset` worker drain；dirty/outbox 到 projection 的真实收敛需要 staging 或夜间 CI/生产前 smoke。
-- 前端 Vitest 覆盖交互和 job polling，不覆盖真实浏览器下载、超大表格性能和真实网络中断恢复。
+- 前端 Vitest 与 deterministic Playwright 覆盖交互、job polling、真实 Chromium modal confirm/刷新闭环；仍不覆盖真实浏览器下载、超大表格性能、真实网络中断恢复和真实税局文件差异。

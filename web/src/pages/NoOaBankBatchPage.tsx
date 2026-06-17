@@ -12,6 +12,7 @@ import {
 } from "../features/domainEvents";
 import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import { operationBarrierTargets, operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   fetchNoOaBankBatchDetail,
@@ -302,11 +303,12 @@ type NativeCheckboxProps = {
   ariaLabel?: string;
   checked: boolean;
   className?: string;
+  disabled?: boolean;
   indeterminate?: boolean;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
 };
 
-function NativeCheckbox({ ariaLabel, checked, className, indeterminate = false, onChange }: NativeCheckboxProps) {
+function NativeCheckbox({ ariaLabel, checked, className, disabled = false, indeterminate = false, onChange }: NativeCheckboxProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -320,6 +322,7 @@ function NativeCheckbox({ ariaLabel, checked, className, indeterminate = false, 
       aria-label={ariaLabel}
       checked={checked}
       className={className}
+      disabled={disabled}
       onChange={onChange}
       ref={inputRef}
       type="checkbox"
@@ -380,6 +383,7 @@ function LabelRail({ title, subtitle, ariaLabel, emptyTitle, groups, selectedKey
 export default function NoOaBankBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { active } = useOptionalPageActivation("no-oa-bank-batches");
+  const { canMutateData } = useSessionPermissions();
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<NoOaBankBatchStatusBucket>("unsubmitted");
   const [payload, setPayload] = useState<NoOaBankBatchesResponse>(EMPTY_BATCHES);
@@ -790,7 +794,7 @@ export default function NoOaBankBatchPage() {
   };
 
   const handleSubmitSelected = async () => {
-    if (selectedTransactionIds.size === 0 || mutating) {
+    if (!canMutateData || selectedTransactionIds.size === 0 || mutating) {
       return;
     }
     const transactionIds = Array.from(selectedTransactionIds);
@@ -824,7 +828,7 @@ export default function NoOaBankBatchPage() {
   };
 
   const handleSubmitBatch = async (batch: NoOaBankBatch) => {
-    if (!canSubmitInternalTransferBatch(batch, bucket) || mutating) {
+    if (!canMutateData || !canSubmitInternalTransferBatch(batch, bucket) || mutating) {
       return;
     }
     const result = await runOperation({
@@ -858,7 +862,7 @@ export default function NoOaBankBatchPage() {
   };
 
   const handleConfirmWithdraw = async () => {
-    if (!withdrawTarget || !withdrawReason.trim() || mutating) {
+    if (!canMutateData || !withdrawTarget || !withdrawReason.trim() || mutating) {
       return;
     }
     const target = withdrawTarget;
@@ -896,7 +900,7 @@ export default function NoOaBankBatchPage() {
   };
 
   const saveTagSelection = async () => {
-    if (mutating) {
+    if (!canMutateData || mutating) {
       return;
     }
     const selectedTagCodes = Array.from(draftSelectedTagCodes);
@@ -1004,6 +1008,9 @@ export default function NoOaBankBatchPage() {
         </div>
       )}
     >
+      {!canMutateData ? (
+        <StatePanel compact tone="warning">当前账号仅支持查看和导出，不能提交、撤回或保存免OA流水批次。</StatePanel>
+      ) : null}
       <div aria-label="批次筛选" className="no-oa-bank-batches-filter" role="region">
         <div aria-label="批次状态" className="no-oa-bank-batches-segment" role="group">
           <button
@@ -1044,7 +1051,7 @@ export default function NoOaBankBatchPage() {
           pageSize={listPagination.pageSize}
           total={listPagination.total}
         />
-        {bucket === "unsubmitted" ? (
+        {bucket === "unsubmitted" && canMutateData ? (
           <button
             className="no-oa-bank-batches-button no-oa-bank-batches-button--primary"
             disabled={selectedTransactionIds.size === 0 || mutating}
@@ -1153,7 +1160,7 @@ export default function NoOaBankBatchPage() {
                           <>
                             <button
                               className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
-                              disabled={rows.length === 0 || mutating}
+                              disabled={!canMutateData || rows.length === 0 || mutating}
                               onClick={() => setRegionSelection(rows, true)}
                               type="button"
                             >
@@ -1161,7 +1168,7 @@ export default function NoOaBankBatchPage() {
                             </button>
                             <button
                               className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
-                              disabled={rows.length === 0 || mutating}
+                              disabled={!canMutateData || rows.length === 0 || mutating}
                               onClick={() => setRegionSelection(rows, false)}
                               type="button"
                             >
@@ -1169,7 +1176,7 @@ export default function NoOaBankBatchPage() {
                             </button>
                           </>
                         ) : null}
-                        {internalTransferSubmitEnabled ? (
+                        {internalTransferSubmitEnabled && canMutateData ? (
                           <button
                             className="no-oa-bank-batches-button no-oa-bank-batches-button--compact no-oa-bank-batches-button--primary"
                             disabled={mutating}
@@ -1179,7 +1186,7 @@ export default function NoOaBankBatchPage() {
                             提交内部往来批次
                           </button>
                         ) : null}
-                        {bucket === "submitted" && canWithdraw(batch) ? (
+                        {bucket === "submitted" && canMutateData && canWithdraw(batch) ? (
                           <button
                             className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
                             disabled={mutating}
@@ -1220,6 +1227,7 @@ export default function NoOaBankBatchPage() {
                                     aria-label={`${accountLabel(batch)}全选`}
                                     checked={regionChecked}
                                     className="no-oa-bank-batches-checkbox"
+                                    disabled={!canMutateData}
                                     onChange={(event) => setRegionSelection(rows, event.target.checked)}
                                     type="checkbox"
                                   />
@@ -1240,6 +1248,7 @@ export default function NoOaBankBatchPage() {
                                       aria-label={`选择流水 ${row.transactionId}`}
                                       checked={selectedTransactionIds.has(row.transactionId)}
                                       className="no-oa-bank-batches-checkbox"
+                                      disabled={!canMutateData}
                                       onChange={(event) => toggleTransaction(row, event.target.checked)}
                                       type="checkbox"
                                     />
@@ -1326,6 +1335,7 @@ export default function NoOaBankBatchPage() {
                         <NativeCheckbox
                           checked={allChecked}
                           className="no-oa-bank-batches-checkbox"
+                          disabled={!canMutateData}
                           indeterminate={checkedCount > 0 && !allChecked}
                           onChange={(event) => {
                             setDraftSelectedTagCodes((current) => {
@@ -1351,6 +1361,7 @@ export default function NoOaBankBatchPage() {
                               <NativeCheckbox
                                 checked={draftSelectedTagCodes.has(tag.code)}
                                 className="no-oa-bank-batches-checkbox"
+                                disabled={!canMutateData}
                                 onChange={(event) => {
                                   setDraftSelectedTagCodes((current) => {
                                     const next = new Set(current);
@@ -1377,6 +1388,7 @@ export default function NoOaBankBatchPage() {
               <div className="no-oa-bank-batches-drawer__actions">
                 <button
                   className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+                  disabled={!canMutateData}
                   onClick={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))}
                   type="button"
                 >
@@ -1384,6 +1396,7 @@ export default function NoOaBankBatchPage() {
                 </button>
                 <button
                   className="no-oa-bank-batches-button no-oa-bank-batches-button--compact"
+                  disabled={!canMutateData}
                   onClick={() => setDraftSelectedTagCodes(new Set())}
                   type="button"
                 >
@@ -1391,7 +1404,7 @@ export default function NoOaBankBatchPage() {
                 </button>
                 <button
                   className="no-oa-bank-batches-button no-oa-bank-batches-button--compact no-oa-bank-batches-button--primary"
-                  disabled={mutating}
+                  disabled={!canMutateData || mutating}
                   onClick={saveTagSelection}
                   type="button"
                 >

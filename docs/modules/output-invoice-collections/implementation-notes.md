@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-06-17 - Browser e2e 状态/收据主流程
+
+- 目标：补齐销项发票收款情况页面的真实 Chromium 主流程保护，避免维护页面 drawer、API mapper 或 mock 契约时破坏状态/提醒保存和正式收据创建链路。
+- 影响范围：Playwright deterministic API mocks、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/package.json` smoke 入口和测试闭环文档；业务源码不变。
+- 关键决策：复用现有页面 API contract 和组件测试 payload shape；mock 在 `collection-status`、`collection-reminder`、`receipts` mutation 后改变 rows payload，用浏览器断言 rows refresh、`待冲红` 状态、正式收据 `SK2026050002` history 展示和 create receipt idempotency header。
+- 文档影响：更新本模块 `tests.md`、`state-machine.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md`、`docs/dev/testing-closure-dependency-map.md`、`docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/output-invoice-collections-flow.spec.ts`，覆盖 Browser e2e / Playwright、第 5/6/7 类测试；业务核心、service、API contract、read model/worker 继续由既有后端与 Vitest 保护。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts`。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、生产历史样本、真实并发锁等待、红蓝票到税金/成本/搜索最终页面、大数据视觉/下载仍需 staging/专项 smoke。
+- 后续事项：继续按 fan-out 风险补 `etc-tickets`、`input-invoice-usage`、`oa-pending-payments` 等页面 Browser e2e。
+
 ## 2026-06-16 - 首屏 page-size 性能护栏证据
 
 - 目标：补齐 P2/P3 大数据列表本地 synthetic SLO 与前端首屏请求证据，防止销项发票收款情况首屏请求把超大 page size 透传为全量读取。

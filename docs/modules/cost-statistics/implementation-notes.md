@@ -28,6 +28,28 @@
 
 ## 历史记录
 
+## 2026-06-17 - Browser e2e 项目下钻与导出错误反馈
+
+- 目标：补齐成本统计真实浏览器主路径，防止后续页面维护时破坏 project scope、项目/费用类型/流水详情下钻、导出 preview 和结构化导出错误反馈。
+- 影响范围：`web/e2e/cost-statistics-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、成本统计测试矩阵与全局测试闭环文档。
+- 关键决策：
+  - 使用 deterministic API mocks 构造 active/all 项目范围差异，浏览器必须请求 `project_scope=all` 后才能看到已完成项目。
+  - e2e 断言真实 Chromium 中的可见 UI、transaction detail query、export-preview query 和 export row-limit JSON 错误展示；不新增后端业务代码或 read model 逻辑。
+  - 导出接口在 e2e 中返回 `cost_statistics_export_row_limit_exceeded`，用于保护前端对结构化错误的真实浏览器闭环。
+- 文档影响：更新本实施记录、`tests.md`、`state-machine.md`、`docs/dev/testing*.md` 和 testing closure dependency/state。
+- 测试覆盖：
+  - `web/e2e/cost-statistics-flow.spec.ts`
+  - `cd web && npm run e2e:smoke`
+- 七类测试覆盖：
+  - Business core unit tests：本轮未改成本归因规则，由既有 service tests 保护。
+  - Service-layer tests：本轮未改 service/read model 写边界，由既有 cost read model/runtime tests 保护。
+  - API contract tests：适用，e2e 额外断言 explorer project scope、transaction detail、export-preview 和 export row-limit response。
+  - Read model/cache/background job tests：本轮未改 worker/readiness；真实 worker drain 仍属未测风险。
+  - Frontend component and interaction tests：适用并新增真实 Chromium tab、scope、三段下钻、modal、preview 和导出错误反馈。
+  - End-to-end business-flow integration tests：适用并新增 explorer -> project scope -> drilldown -> export preview/error browser flow。
+  - Existing feature regression tests：适用并防止 project scope、detail modal 和 export center 在真实浏览器中断链。
+- 未测风险：真实 PostgreSQL scope cleanup `--apply`、真实 RabbitMQ/Redis/cost-statistics worker drain、真实文件下载/打开、大数据下载耗时和视觉性能仍需 staging/manual smoke。
+
 ## 2026-06-17 - 成本统计项目费用类型下钻重复流水行修复
 
 - 目标：修复成本统计项目视图中选中项目后再切换费用类型，真实数据含同一流水多条成本行时页面卡死/白屏的问题。

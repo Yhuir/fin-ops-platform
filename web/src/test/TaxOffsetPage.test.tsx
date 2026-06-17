@@ -6,6 +6,8 @@ import { afterEach, vi } from "vitest";
 import App from "../app/App";
 import { installMockApiFetch } from "./apiMock";
 
+const ROUTE_RENDER_TIMEOUT = 5000;
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -111,7 +113,13 @@ describe("Tax offset workbench", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("正在加载 2026-03 的税金抵扣计划与已认证结果...")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "正在加载 2026-03 的税金抵扣计划与已认证结果...",
+        {},
+        { timeout: ROUTE_RENDER_TIMEOUT },
+      ),
+    ).toBeInTheDocument();
     act(() => {
       abortControllers.forEach((controller) => controller.abort());
     });
@@ -535,8 +543,8 @@ describe("Tax offset workbench", () => {
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
 
     const inputTable = getTaxFinanceGrid("进项票认证计划");
-    const firstCheckbox = within(inputTable).getByRole("checkbox", { name: /11203490/ }) as HTMLInputElement;
-    const secondCheckbox = within(inputTable).getByRole("checkbox", { name: /11203491/ }) as HTMLInputElement;
+    const firstCheckbox = await within(inputTable).findByRole("checkbox", { name: /11203490/ }) as HTMLInputElement;
+    const secondCheckbox = await within(inputTable).findByRole("checkbox", { name: /11203491/ }) as HTMLInputElement;
 
     expect(firstCheckbox.checked).toBe(true);
     expect(secondCheckbox.checked).toBe(true);

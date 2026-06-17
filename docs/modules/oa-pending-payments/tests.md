@@ -33,7 +33,7 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | worker fan-out | P0 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_runtime_worker_registry.py` | covered | `oa_pending_payment.read_model.refresh` all scope 扩展月份 shard，RabbitMQ/default dispatch event 覆盖。 |
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_pending_invoice_api.py` | covered/documented-risk | OA rebuild / invoice lifecycle 计划覆盖；pending rules API 已断言会入队 `oa_pending_payment`，但 dry-run domain 名称仍通过 workbench executor 间接表达。 |
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_worker_registry.py` | covered | domain registry、read model registry、worker registry、missing/failed readiness 状态。 |
-| 前端页面交互 | P1 | `web/src/test/OaPendingPaymentsPage.test.tsx` | covered | sidebar route、grouped table、首屏有界 `page_size=20` 请求、column filters/sort、drawer、rules drawer、empty、refreshing detail unavailable。 |
+| 前端页面交互 | P1 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` | covered | sidebar route、grouped table、首屏有界 `page_size=20` 请求、column filters/sort、drawer、rules drawer、empty、refreshing detail unavailable；Playwright 补充真实 Chromium 下首屏、搜索、筛选、排序和详情/规则抽屉闭环。 |
 | 表格样式/布局回归 | P1 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts` | covered | compact table、银行金额/方向 chip 非重叠、空流水 dash、项目下申请时间。 |
 | 真实 OA/生产 worker drain | P2 | staging / runbook | documented-risk | 需要真实 OA/Mongo、生产 Postgres、RabbitMQ/Redis/systemd worker、真实大数据和浏览器 smoke。 |
 
@@ -45,9 +45,9 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | 2. Service-layer tests | 适用 | `tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | 覆盖 query service、read model service、queue enqueue、detail lookup、projection builder、refresh service 和大页请求上限。 |
 | 3. API contract tests | 适用 | `tests/test_oa_pending_payment_api.py` | 覆盖成功响应 shape、validation/not found、权限、read model refreshing、detail unavailable 和 source version stale。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 SQL read model、source versions、all/month scope、worker event、registry 和 App Status。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts` | 覆盖 loading/empty/error、首屏有界分页请求、筛选/排序、drawer、规则 drawer、refreshing detail、表格 CSS 和布局。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_pending_invoice_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` | 覆盖规则保存/关系变化 -> lifecycle/dirty scope -> OA read model refresh -> 页面刷新语义；真实 worker drain 仍为 documented-risk。 |
-| 7. Existing feature regression tests | 适用 | 上述全部测试 + `tests/test_app_status_readiness_backfill.py` | 每次变更都要保护旧 API shape、旧筛选/排序/分页、旧 detail payload、权限、App Status 和页面布局。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts`、`web/e2e/oa-pending-payments-flow.spec.ts` | 覆盖 loading/empty/error、首屏有界分页请求、筛选/排序、drawer、规则 drawer、refreshing detail、表格 CSS 和布局；Playwright 补充真实浏览器 rows 首屏、搜索、支付状态筛选、交易时间排序、OA/流水/发票详情抽屉和规则抽屉。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_pending_invoice_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` | 覆盖规则保存/关系变化 -> lifecycle/dirty scope -> OA read model refresh -> 页面刷新语义；Playwright 补充真实浏览器从 rows/filter-options 到 detail/rules endpoint 的只读业务闭环；真实 worker drain 仍为 documented-risk。 |
+| 7. Existing feature regression tests | 适用 | 上述全部测试 + `tests/test_app_status_readiness_backfill.py`、`web/e2e/oa-pending-payments-flow.spec.ts` | 每次变更都要保护旧 API shape、旧筛选/排序/分页、旧 detail payload、权限、App Status、页面布局和浏览器层详情抽屉/规则抽屉入口。 |
 
 ## 历史 bug 回归库
 
@@ -71,6 +71,7 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | 银行/发票导入 -> Workbench relation -> OA 支付状态变化 | `tests/test_oa_pending_payment_service.py`、`tests/test_invoice_lifecycle_page_integration.py` | 用真实导入样本验证 worker drain 和页面刷新。 |
 | 待找发票规则保存 -> invoice lifecycle -> OA 待付款刷新 | `tests/test_pending_invoice_api.py` | 若后续把 indirect fan-out 改成显式 domain，必须先补 lifecycle plan 单测。 |
 | rows/filter-options/detail 非 fresh | `tests/test_oa_pending_payment_api.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` | 真实 worker 停止/恢复时确认页面不把空 rows 当 fresh。 |
+| Browser rows/filter/detail/rules | `web/e2e/oa-pending-payments-flow.spec.ts` | staging 仍需真实 OA/Mongo、真实 Postgres 大数据和真实 worker drain。 |
 
 ## 模块验证命令
 
@@ -81,6 +82,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_service
 PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_service.OaPendingPaymentQueryServiceTests.test_page_size_limit_protects_first_screen_slo -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime tests.test_derived_data_lifecycle_service tests.test_app_status_overview_service tests.test_runtime_worker_registry -v
 cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx src/test/TableAlignmentStyles.test.ts
+cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts
+cd web && npm run e2e:smoke
 bash scripts/verify.sh docs
 ```
 
@@ -95,13 +98,14 @@ cd web && npm test -- --run src/test/AppStatusIndicator.test.tsx
 
 - `scripts/verify.sh backend` 覆盖后端核心回归，但具体模块命令仍以本文件为准。
 - `scripts/verify.sh frontend` 覆盖前端 test/build，但本模块变更应优先跑上方最小模块验证。
+- `scripts/verify.sh e2e` / `npm run e2e:smoke` 覆盖 Playwright browser smoke，其中 `web/e2e/oa-pending-payments-flow.spec.ts` 保护 rows/filter/sort/detail/rules drawer。
 - `scripts/verify.sh docs` 保护模块文档链接和格式。
 
 ## 未测风险
 
 - 未连接真实 OA/Mongo，同步异常、OA 字段变体和真实权限菜单仍需 staging smoke。
 - 未在真实生产 Postgres 上跑大数据量 filter/sort/detail lookup EXPLAIN、锁等待和长分页性能。
-- 本地 synthetic page-size guard 不替代真实 PostgreSQL 大数据 EXPLAIN、浏览器滚动或真实网络中断恢复。
+- deterministic Playwright 已覆盖浏览器首屏、筛选/排序、OA/流水/发票详情和规则抽屉；本地 synthetic page-size guard 不替代真实 PostgreSQL 大数据 EXPLAIN、浏览器滚动或真实网络中断恢复。
 - 未跑真实 RabbitMQ/Redis/systemd `invoice-usage-collection` 与 `invoice-lifecycle` worker drain。
 - pending rules 对 OA 待付款的 fan-out 当前由执行层 workbench invalidation 间接入队，已有 API 回归保护；若后续需要 dry-run plan 也显式列出 `oa_pending_payment_read_model`，应作为独立生命周期重构补测试。
-- 前端 Vitest 不做真实浏览器像素级截图、虚拟滚动压力和网络中断恢复。
+- Playwright smoke 不做真实浏览器像素级截图、虚拟滚动压力和网络中断恢复。

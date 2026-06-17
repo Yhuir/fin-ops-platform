@@ -30,7 +30,7 @@
 | Closure tool config/input state | `tests/test_slo_tool_defaults.py`、`tests/test_runtime_sync_closure_gate.py`、`tests/test_read_model_slo_smoke.py`、`tests/test_write_operation_scenario_discovery.py`、`tests/test_write_operation_e2e_smoke.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_rabbitmq_staging_preflight.py` | 覆盖一秒级默认阈值，HTTP/SSE/runtime gate 共享 `FIN_OPS_HTTP_SLO_*` 认证 env，缺少 Postgres/RabbitMQ URL 时 runtime/read-model/write/RabbitMQ gates 和 scenario discovery 返回结构化 `configuration_missing`；Postgres gate 缺 URL 时同时输出 `blocking_condition=database_url_required`、`required_env`、安全 `next_actions`、允许的只读远程证据和未经批准禁止动作。runtime health 缺 durable queue/worker facts 不能当 pass，runtime gate 必须包含 health-ready payload check 和 SSE first-event check，authenticated HTTP 零 probe/sample、SSE 零 probe、direct read-model apply smoke 零 scope/零 result 都不能当 pass，write-operation audit 零 event/expectation 样本和 write E2E 零 scenario/result 都不能当 pass，scenario discovery 无候选时不写空 scenario 文件，write E2E direct API 空 scenario 返回 `scenario_empty` input error，缺少 `--write-scenario` 或 `--apply-write-scenarios` 时暴露 `missing_args` / `required_args`，invalid runtime scenario 暴露 `input_error` 且不运行 unscoped write audit，write E2E 缺 scenario/非法 scenario 返回结构化 `input_error`，mutating step 拿到 HTML 页面壳必须失败，均不得 traceback。 |
 | Readiness backfill | `tests/test_app_status_readiness_backfill.py` | 覆盖 dry-run/apply、missing projection 不伪造 fresh |
 | Worker/queue ops | `tests/test_runtime_worker_registry.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_queue_ops.py`、`tests/test_deploy_runtime_examples.py` | 覆盖 registry-derived worker、outbox/dirty queue、dead letter resolve、deployment examples |
-| Frontend dashboard | `web/src/test/AppHealthOperationsPage.test.tsx` | 覆盖只读 dashboard、admin gate、unknown metrics、refresh failure stale payload |
+| Frontend dashboard | `web/src/test/AppHealthOperationsPage.test.tsx`、`web/e2e/app-shell.spec.ts` | 覆盖只读 dashboard、admin gate、unknown metrics、refresh failure stale payload；真实 Chromium 下 admin-only route 和 protected dashboard API 调用边界 |
 | Frontend global status | `web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppStatusApi.test.ts`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthResolver.test.ts`、`web/src/test/AppHealthBroadcast.test.tsx` | 覆盖 mapper、icon/popover、route independence、SSE/轮询和 BroadcastChannel sync |
 
 ## 七类测试适用性
@@ -41,9 +41,9 @@
 | 2. Service-layer tests | 适用 | `tests/test_app_status_overview_service.py`、`tests/test_runtime_monitoring.py`、`tests/test_runtime_queue_ops.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_slo_tool_defaults.py`、`tests/test_runtime_sync_closure_gate.py`、`tests/test_write_operation_scenario_discovery.py`、`tests/test_write_operation_e2e_smoke.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_rabbitmq_staging_preflight.py`、`tests/test_p2p3_closure_summary.py` | 覆盖 service/repository 边界、runtime snapshot、worker metrics、readiness 写入、ops 操作约束、closure gate 配置缺失状态、closure gate health-ready/SSE 必经检查、RabbitMQ staging env gate、runtime health durable queue/worker fact 要求、HTTP/SSE/read-model/write audit/write E2E 非空样本要求、write scenario 输入契约、mutating step HTML fallback 拒绝，以及 P2/P3 ledger 到 JSON 的闭环状态解析和 next_focus 分支选择。 |
 | 3. API contract tests | 适用 | `tests/test_app.py`、`tests/test_app_health_api.py`、`tests/test_app_status_overview_service.py`、`tests/test_http_slo_probe.py`、`tests/test_sse_smoke_probe.py`、`tests/test_health_ready_payload_probe.py`、`web/src/test/AppStatusApi.test.ts` | 覆盖 `/health/ready` bounded metrics、`/metrics` full metrics、`/api/app-health`、SSE、dashboard admin-only、`app_status` shape、SLO probe 首屏 API contract、SSE 首事件 contract、HTML 页面壳误当 API/health-ready 响应的拒绝逻辑、readiness runtime blocker 摘要、malformed payload 拒绝。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_runtime_monitoring.py`、`tests/test_runtime_queue.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_background_job_service.py` | 覆盖 dirty scopes、outbox、worker heartbeat、RabbitMQ、readiness missing/stale/failed，以及后台任务 accepted 后 queued payload 立即可见、progress 更新后 active payload 同步变化。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx` | 覆盖 dashboard、全局 icon、popover、admin link、SSE/轮询、BroadcastChannel。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` | 覆盖 job/dirty/readiness -> API -> 前端展示的关键路径。真实 worker drain 到 UI 仍为 documented-risk。 |
-| 7. Existing feature regression tests | 适用 | `tests/test_app_status_overview_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`web/src/test/AppStatusIndicator.test.tsx` | 保护旧页面 route registry、worker manifest、deploy env、App Status 不因路由切换或新 domain 漏报。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx`、`web/e2e/app-shell.spec.ts` | 覆盖 dashboard、全局 icon、popover、admin link、SSE/轮询、BroadcastChannel 和真实浏览器 dashboard smoke。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/app-shell.spec.ts` | 覆盖 job/dirty/readiness -> API -> 前端展示的关键路径，以及 session -> route -> dashboard API 的真实浏览器 smoke。真实 worker drain 到 UI 仍为 documented-risk。 |
+| 7. Existing feature regression tests | 适用 | `tests/test_app_status_overview_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/app-shell.spec.ts` | 保护旧页面 route registry、worker manifest、deploy env、App Status 不因路由切换或新 domain 漏报，并保护 dashboard admin-only 浏览器行为。 |
 
 ## 历史 bug 回归库
 
@@ -52,6 +52,7 @@
 ## 关键 smoke flows
 
 - dirty scope/outbox pending -> `/api/app-health` busy/yellow -> App Status popover 显示受影响 domain。
+- 真实 Chromium 打开 `/operations/app-health`：admin 渲染 dashboard 数据/请求区；read_export_only、forbidden、expired 不请求 dashboard API。
 - critical read model failed/unavailable -> App Status blocked/red -> 页面不能把旧数据当 fresh，但普通 read model failure 不应让 `overall.write_safety.blocks_mutations=true`。
 - legacy cost statistics scope 或已被后续真实完成事实覆盖的 outbox failure -> App Status 保持当前 canonical 状态，同时通过历史诊断暴露 repair/audit 信息。
 - required worker missing/stale/mismatch -> runtime infrastructure warning -> App Health dashboard 和 App Status domain 可定位。
@@ -100,16 +101,18 @@ cd web && npm test -- --run \
   src/test/AppHealthResolver.test.ts \
   src/test/AppHealthBroadcast.test.tsx
 
+cd web && npm run e2e:smoke
+
 bash scripts/verify.sh docs
 ```
 
 ## Nightly CI 覆盖
 
-Nightly full suite 应覆盖本模块的后端 app health/status/runtime tests、前端 AppHealth/AppStatus tests、docs verify。模块级快速验证使用上方命令。
+Nightly full suite 应覆盖本模块的后端 app health/status/runtime tests、前端 AppHealth/AppStatus tests、Playwright AppHealth browser smoke、docs verify。模块级快速验证使用上方命令。
 
 ## 未测风险
 
 - 真实 PostgreSQL/RabbitMQ/Redis/systemd worker 的 heartbeat、queue backlog、DLQ、readiness convergence 需要 staging 或生产 smoke；本地测试使用 fake repository/connection 证明 contract。
 - SSE 经过 Nginx/OA iframe 代理后是否缓冲、断线、回退轮询，需要真实部署 smoke。
 - `/api/operations/app-health-dashboard` 的真实大库指标性能、pg_stat_statements 可用性和短 TTL cache 行为需要生产观测。
-- App Status 只能证明全局运行事实 plane，不替代每个业务页面自己的 stale/error/loading 交互测试。
+- App Status 和现有 Playwright smoke 只能证明全局运行事实 plane 与 AppHealth dashboard 浏览器 gate，不替代每个业务页面自己的 stale/error/loading 交互测试。

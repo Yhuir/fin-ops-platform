@@ -1,10 +1,10 @@
 # Nightly CI 与测试闭环
 
-Nightly CI 是 solo 开发流程里的自动化验证门禁。它不替代本地目标测试，也不证明生产完全无风险；它负责每天自动暴露全量后端、前端和构建层面的回归。
+Nightly CI 是 solo 开发流程里的自动化验证门禁。它不替代本地目标测试，也不证明生产完全无风险；它负责每天自动暴露全量后端、前端、浏览器 smoke 和构建层面的回归。
 
 ## 目标
 
-- 每天运行干净 app 状态检查、后端全量 unittest、前端 Vitest 和前端 build。
+- 每天运行干净 app 状态检查、后端全量 unittest、前端 Vitest、前端 build 和 deterministic Playwright browser smoke。
 - 发现新功能破坏旧功能时尽早失败。
 - 给 `docs/modules/<module>/tests.md` 提供稳定的 nightly 覆盖入口。
 - 防止依赖本地记忆手动运行验证。
@@ -34,6 +34,13 @@ FIN_OPS_DATA_DIR="$(mktemp -d)" PYTHONPATH=backend/src python3 -m fin_ops_platfo
 PYTHONPATH=backend/src python3 -m unittest discover -s tests -v
 cd web && npm test -- --run
 cd web && npm run build
+cd web && npm run e2e:smoke
+```
+
+GitHub Actions 在运行统一入口前会执行：
+
+```bash
+cd web && npx playwright install --with-deps chromium
 ```
 
 `scripts/verify.sh backend` 和 `scripts/verify.sh all` 默认使用临时 `FIN_OPS_DATA_DIR` 做 clean app check，不读取开发机 `.runtime/fin_ops_platform/app_mongo_config.json` 或其他本地残留状态。这个检查证明当前代码可以从干净状态启动，但不证明开发机或生产当前 runtime 数据可用。
@@ -67,7 +74,7 @@ bash scripts/verify.sh docs
 每个 `docs/modules/<module>/tests.md` 必须有 `Nightly CI 覆盖` 小节，说明：
 
 - nightly 是否覆盖该模块。
-- 覆盖来自后端 unittest、前端 Vitest、build 还是文档检查。
+- 覆盖来自后端 unittest、前端 Vitest、Playwright browser smoke、build 还是文档检查。
 - 哪些风险仍需本地目标测试、staging、生产 dry-run 或人工验证。
 
 ## 发布前验证
@@ -85,4 +92,4 @@ Nightly CI 不替代发布前验证。涉及生产数据、read model、worker�
 - 生产 PostgreSQL 历史脏数据、半迁移状态、重复记录或缺字段。
 - Redis/RabbitMQ 真连接和网络抖动。
 - 大数据量 SQL 性能退化。
-- 浏览器视觉遮挡、移动端布局和真实下载文件检查。
+- deterministic Playwright smoke 尚未覆盖的浏览器像素级视觉遮挡、真实下载文件、真实 iframe，以及除 `app shell compact drawer -> route navigation close`、`embedded OA shell -> collapsed/expandable desktop shell`、`read_export_only/full_access/admin role matrix -> readable pages and high-risk write gates`、`关联台 confirm -> bank details relation tags`、`关联台 confirm -> pending invoices invoice status`、`batch accounting submit/withdraw -> workbench_relation barrier -> bucket recovery`、`turnover ledger manual closure confirm/withdraw -> closure recovery`、`bank import preview/confirm -> bank details imported row`、`invoice import input/output preview/confirm -> workbench refresh`、`ETC invoice ready task zip preview/confirm -> background import job`、`tax offset recalculate/save -> certified import preview/confirm -> tax page refresh`、`settings data reset impact/password/job polling -> settings reload`、`output invoice collection status/reminder save -> rows refresh -> formal receipt create/history`、`input invoice OA reverse selected subset -> OA draft -> submitted history`、`ETC ticket imported business batch -> OA draft -> manual submitted bucket`、`OA pending payments rows/filter/sort -> OA/bank/invoice/rules drawers`、`no-OA selected row submit -> freshness barrier -> submitted withdraw -> history`、`cost statistics project drilldown -> transaction detail -> export row-limit feedback` 以外的跨页面业务写链路检查。

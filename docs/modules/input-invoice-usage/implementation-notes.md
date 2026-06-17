@@ -34,6 +34,16 @@
 
 ## 历史记录
 
+## 2026-06-17 - Browser e2e 覆盖 OA reverse 子集草稿闭环
+
+- 目标：给进项发票使用情况补真实 Chromium 流，覆盖 rows 首屏、`以发票反提 OA` drawer、候选子集重新 preview、创建 OA 草稿、确认 `已提交 OA` 和 submitted history 展示。
+- 影响范围：deterministic Playwright API mock、`web/e2e/input-invoice-usage-flow.spec.ts`、`npm run e2e:smoke` 和测试闭环文档；业务实现不变。
+- 关键决策：mock 保持后端真实 contract 的 preview/draft/manual-status/history shape；e2e 明确断言子集 preview request 只携带当前勾选发票，并断言已提交历史不展示内部 batch id。
+- 文档影响：更新本实施记录、`tests.md`、`state-machine.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md`、`docs/dev/testing-closure-state.md` 和 `docs/dev/testing-closure-dependency-map.md`。
+- 测试覆盖：新增 `web/e2e/input-invoice-usage-flow.spec.ts`，并加入 `web/package.json` 的 `e2e:smoke`。
+- 验证命令：`cd web && npx playwright test e2e/input-invoice-usage-flow.spec.ts`；完整最终命令见本轮最终说明。
+- 未测风险：真实 OA 登录、公钥 RSA、草稿页面打开、人工提交、真实 Postgres/RabbitMQ/Redis worker drain 仍需 staging/发布前 smoke。
+
 ## 2026-06-17 - OA reverse 子集候选 preview hash 修复
 
 - 目标：修复 `以发票反提 OA` drawer 中只勾选部分候选后点击 `创建 OA 草稿` 报 `OA reverse preview is stale. Refresh preview before creating an OA draft.` 的问题。

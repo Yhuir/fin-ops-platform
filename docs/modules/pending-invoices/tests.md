@@ -25,7 +25,7 @@
 
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| 支出待找发票状态 | P0 | `tests/test_pending_invoice_service.py`、`tests/test_invoice_lifecycle_page_integration.py` | covered | 多发票同流水、规则命中、发票付款事实、最终 `invoice_acquisition_status`。 |
+| 支出待找发票状态 | P0 | `tests/test_pending_invoice_service.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/e2e/pending-invoices-fanout.spec.ts` | covered | 多发票同流水、规则命中、发票付款事实、最终 `invoice_acquisition_status`；Browser e2e 覆盖关联台 confirm 后从 `已支付待开票` 更新为 `已支付已开票`。 |
 | 收入待找发票状态 | P0 | `tests/test_pending_invoice_service.py`、`tests/test_search_pending_sql_runtime.py`、`web/src/test/PendingInvoicesPage.test.tsx` | covered | `income_pending_invoice`、`cash_income`、`income_no_invoice_required`、收入规则筛选和 income status override。 |
 | 规则版本与规则保存 | P0 | `tests/test_pending_invoice_api.py`、`tests/test_pending_invoice_service.py`、`web/src/test/PendingInvoicesPage.test.tsx` | covered | 支出/收入版本独立、stale version conflict、requires complement、互斥分组、保存后 lifecycle；前端保存后全局遮罩等待 `pending_invoice` barrier fresh 并重读当前 rows 后才释放。 |
 | manual invoice 新写入口移除 | P0 | `tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesApi.test.ts` | covered | manual preview/confirm HTTP route 返回 not_found；页面没有行内三点、补票 dialog 或 manual API client。 |
@@ -41,7 +41,7 @@
 | worker scope fan-out | P0 | `tests/test_search_pending_sql_runtime.py`、`tests/test_runtime_worker_registry.py` | covered | search/pending refresh handler、legacy pending scope、filter scope、month shard。 |
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_pending_invoice_api.py` | covered | rules/attach/income status 事件刷新正确 read model；历史 manual command 恢复保持兼容，不误刷无关域。 |
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py` | covered | pending route/read model/worker 在 domain registry 中可观测。 |
-| 前端交互 | P1 | `web/src/test/PendingInvoicesPage.test.tsx` | covered | four-zone table、filters、状态快捷筛选、rules drawer、conflict、detail drawers、选中工具栏 attach existing、收入批量标记、refreshing 时选择栏可用、导出下载错误消息可见。 |
+| 前端交互 | P1 | `web/src/test/PendingInvoicesPage.test.tsx`、`web/e2e/pending-invoices-fanout.spec.ts` | covered | four-zone table、filters、状态快捷筛选、rules drawer、conflict、detail drawers、选中工具栏 attach existing、收入批量标记、refreshing 时选择栏可用、导出下载错误消息可见；Browser e2e 覆盖真实导航、Workbench confirm 弹窗和返回待找发票后的行状态。 |
 | 前端 API mapper | P1 | `web/src/test/PendingInvoicesApi.test.ts` | covered | 不猜缺失状态、filter/sort query、rules/detail/candidates、批量 candidates/attach、export/income batch mapper、下载失败结构化消息透出。 |
 | 真实生产数据与 worker drain | P2 | 运维 runbook / staging smoke | documented-risk | 需要真实 Postgres、RabbitMQ/Redis、`pending-invoice` / `search` / `invoice-lifecycle` workers 和大数据量样本。 |
 
@@ -53,9 +53,9 @@
 | 2. Service-layer tests | 适用 | `tests/test_pending_invoice_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_pending_invoice_relation_identity.py`、`tests/test_pending_invoice_oa_identity_backfill.py` | 覆盖 application service、command repository、relation command service 委托、audit/finalizer、identity/backfill、状态写入边界和 `page_size` 上限。 |
 | 3. API contract tests | 适用 | `tests/test_pending_invoice_api.py`、`web/src/test/PendingInvoicesApi.test.ts` | 覆盖 rows、filter-options、detail、rules、manual endpoint removal、attach、income status batch、export 和权限/错误。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_search_pending_sql_runtime.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` | 覆盖 SQL read model fresh/stale/missing/source mismatch、worker refresh、lifecycle fan-out 和 App Status。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesApi.test.ts` | 覆盖页面状态、筛选、规则、drawer、选中工具栏 attach/income 操作、manual UI 移除、refreshing 状态、首屏有界请求、API mapper 和下载失败消息。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py`、`web/src/test/PendingInvoicesPage.test.tsx` | 覆盖 attach/rules/income status -> lifecycle/dirty scope -> read model -> 页面刷新；真实 worker drain 仍为 documented-risk。 |
-| 7. Existing feature regression tests | 适用 | 上述全部 pending invoice tests，加 invoice lifecycle、workbench、tax offset、cost statistics、bank details tests 的按改动选择扩展集 | 待找发票规则和关系会影响多个下游页面；任何改动都要问旧页面会不会被误刷或误判 fresh。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/PendingInvoicesPage.test.tsx`、`web/src/test/PendingInvoicesApi.test.ts`、`web/e2e/pending-invoices-fanout.spec.ts` | 覆盖页面状态、筛选、规则、drawer、选中工具栏 attach/income 操作、manual UI 移除、refreshing 状态、首屏有界请求、API mapper、下载失败消息和真实浏览器跨页确认后行状态更新。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_pending_invoice_api.py`、`tests/test_search_pending_sql_runtime.py`、`web/src/test/PendingInvoicesPage.test.tsx`、`web/e2e/pending-invoices-fanout.spec.ts` | 覆盖 attach/rules/income status -> lifecycle/dirty scope -> read model -> 页面刷新；Browser e2e 覆盖 Workbench confirm -> pending invoice rows fresh 后页面刷新；真实 worker drain 仍为 documented-risk。 |
+| 7. Existing feature regression tests | 适用 | 上述全部 pending invoice tests，加 invoice lifecycle、workbench、tax offset、cost statistics、bank details tests 的按改动选择扩展集，以及 `web/e2e/pending-invoices-fanout.spec.ts` | 待找发票规则和关系会影响多个下游页面；任何改动都要问旧页面会不会被误刷或误判 fresh。 |
 
 ## 历史 bug 回归库
 
@@ -90,6 +90,7 @@
 4. `多选支出流水 -> 批量候选进项发票 -> 多选发票 -> preview 汇总金额差额 -> confirm 写一条 active relation -> 页面 refetch`
 5. `多选收入流水 -> 批量标记 no invoice required/cash income -> pending_invoice_income_status_override_confirmed -> pending/search refresh -> 税金/成本不误刷`
 6. `manual invoice legacy command retry -> command log 恢复旧中断状态；HTTP/UI 新入口保持不可达`
+7. `关联台 confirm -> workbench relation distribution -> pending invoice read model rows fresh -> 待找发票从已支付待开票更新为已支付已开票，并显示发票和 OA`
 
 ## 本模块验证命令
 
@@ -101,6 +102,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_search_pending_sql_runtime
 PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_app_status_overview_service tests.test_runtime_worker_registry -v
 PYTHONPATH=backend/src python3 -m unittest tests.test_pending_invoice_service.PendingInvoiceQueryServiceTests.test_page_size_limit_protects_first_screen_slo -v
 cd web && npm test -- --run src/test/PendingInvoicesApi.test.ts src/test/PendingInvoicesPage.test.tsx
+cd web && npm run e2e:smoke
 bash scripts/verify.sh docs
 ```
 
@@ -115,10 +117,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest 和 build，覆盖完整待找发票、SQL projection、invoice lifecycle、App Status 和前端测试集。单轮模块验证只跑最小闭环。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、build 和 deterministic Playwright smoke，覆盖完整待找发票、SQL projection、invoice lifecycle、App Status 和前端测试集，并覆盖真实 Chromium 中 Workbench confirm 后待找发票行状态更新。单轮模块验证只跑最小闭环。
 
 ## 未测风险
 
 - 本地测试不连接真实生产 Postgres 大数据量，不验证真实搜索/待找发票 SQL projection 的 EXPLAIN、锁等待或长尾分页性能。
 - 本地测试不跑真实 RabbitMQ/Redis/systemd `pending-invoice`、`search` 与 invoice-lifecycle worker drain；dirty/outbox 到 projection 的最终收敛需要 staging 或夜间 CI/生产前 smoke。
-- 本地已覆盖待找发票超过 20,000 行导出 fail-closed，但前端 Vitest 不覆盖真实浏览器下载、文件打开、大文件下载耗时和真实网络中断恢复。
+- 本地已覆盖待找发票超过 20,000 行导出 fail-closed；当前 Browser e2e 覆盖一条 Workbench confirm fan-out，但不覆盖 withdraw、stale/refreshing、真实浏览器下载、文件打开、大文件下载耗时和真实网络中断恢复。

@@ -12,7 +12,7 @@
 | `nightly_queued` | GitHub Actions schedule/workflow_dispatch/push | 远端 CI 已排队，不代表通过 |
 | `nightly_running` | GitHub Actions job | 正在安装依赖和运行 `bash scripts/verify.sh all` |
 | `nightly_failed` | GitHub Actions job failed | 必须分类为真实 bug、测试不稳定、外部环境缺失或契约变化 |
-| `nightly_succeeded` | GitHub Actions job succeeded | 证明后端 unittest、前端 Vitest/build、docs 在远端环境通过 |
+| `nightly_succeeded` | GitHub Actions job succeeded | 证明后端 unittest、前端 Vitest/build、Playwright browser smoke、docs 在远端环境通过 |
 
 ## Release 状态
 

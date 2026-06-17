@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-17 - Browser role matrix 权限闭环
+
+- 目标：把权限矩阵从组件/API 层推进到真实 Chromium，覆盖 read_export_only/full_access/admin 在全页面导航和高风险写入口上的可见行为。
+- 影响范围：`web/e2e/permissions-role-matrix.spec.ts`、`web/src/components/imports/ImportWorkflowPage.tsx`、`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/package.json` smoke。
+- 关键决策：不改变后端权限 contract；前端继续使用 `/api/session/me` 的 `can_mutate_data/can_admin_access` 作为 UI 门禁。read_export_only 在浏览器里可打开所有非 admin 页面，但不应触发 mutation API；full_access 可用普通业务写入口但不能进 AppHealth；admin 可进入 settings 高危区和 AppHealth。
+- 文档影响：更新权限模块测试矩阵、状态机、全局测试说明、Nightly CI 风险和 closure state。
+- 测试覆盖：新增 Playwright role matrix；新增 NoOaBankBatchPage read-only unit regression；相关 Vitest 覆盖 ImportCenter、NoOa、WorkbenchSelection、App、SessionGate、SessionApi。
+- 验证命令：`cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`；`cd web && npm test -- --run src/test/ImportCenterPage.test.tsx src/test/NoOaBankBatchPage.test.tsx src/test/WorkbenchSelection.test.tsx src/test/App.test.tsx src/test/SessionGate.test.tsx src/test/SessionApi.test.ts`。
+- 未测风险：真实 OA 菜单/角色同步、生产 token 过期语义、真实导出下载与代理层 header、生产审计查询/导出仍需 staging/生产 smoke。
+- 后续事项：新增页面或新增写入口时，必须把 read_export_only 行为加入本 role matrix 或对应页面 e2e。
+
 ## 2026-06-16 - access tier 聚合矩阵 gate
 
 - 目标：把分散的 readonly/full/admin/denied 权限证据压成一个后端 session contract 聚合测试，降低 17 个页面 P2/P3 推进时权限口径漂移风险。

@@ -16,6 +16,37 @@
 - `GET /api/no-oa-bank-batches` 支持可选显式分页 `page/page_size` 或 `pageSize`；只有请求带分页参数时才裁剪 `batches` 并返回 `pagination`，旧调用方不带分页参数时保持原 shape。no-OA 前端默认以 `page=1&page_size=200` 读取列表并渲染分页控件；切换月份、状态 bucket 或页码时必须清空选择、详情缓存和详情错误。`page_size` 上限为 200，超限必须 fail closed 为 `invalid_paging`。
 - 前端 stale polling、route unmount cleanup、category/rules events 刷新 list/detail/tag drawer 都是页面行为契约。submit-selection、submit、withdraw、tag-selection 保存等写操作必须用全屏 operation overlay 等待 `no_oa_bank_batch` barrier fresh 后再释放。
 
+## 2026-06-17 - read-only 写入口权限门禁
+
+- 目标：把免 OA 页提交、撤回、tag scope 保存和批量选择接入 session `can_mutate_data`，避免 read_export_only 用户在浏览器层看到或触发写操作。
+- 影响范围：`web/src/pages/NoOaBankBatchPage.tsx`、`web/src/test/NoOaBankBatchPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts`。
+- 关键决策：不改变 no-OA API contract；后端权限仍是安全边界，前端只做可见行为门禁。只读用户仍可查看批次、明细和标签范围。
+- 文档影响：更新本模块 `tests.md`、`state-machine.md`，并由 `docs/modules/permissions-and-audit/` 记录全局权限矩阵事实。
+- 测试覆盖：新增 read-export unit regression；Playwright role matrix 覆盖 no-OA read-only 提交/撤回/tag scope 保存禁用。
+- 验证命令：`cd web && npm test -- --run src/test/NoOaBankBatchPage.test.tsx`；`cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`。
+- 未测风险：真实生产长标签树、大月份和长列表滚动/视觉遮挡仍需 staging/生产登录态 smoke。
+
+## 2026-06-17 - Browser e2e 选择提交到撤回闭环
+
+- 目标：补齐免 OA 流水批量处理的真实浏览器主路径，防止后续页面维护时破坏选择未提交流水、提交、等待 read model fresh、进入已提交、撤回和历史只读。
+- 影响范围：`web/e2e/no-oa-bank-batches-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、本模块测试矩阵与全局测试闭环文档。
+- 关键决策：
+  - 使用 deterministic API mocks 固定一个 `fee` 手续费批次，状态从 `draft` -> `submitted` -> `withdrawn` 随浏览器操作流转。
+  - e2e 断言用户可见 UI 合约和 HTTP mutation request body，不断言页面没有渲染的 submitted/withdrawn actor 字段。
+  - 写操作成功后必须经过 `/api/operation-barrier/status`，再进入后续 bucket 验证，避免只测 API 成功不测 freshness closure。
+- 测试覆盖：
+  - `web/e2e/no-oa-bank-batches-flow.spec.ts`
+  - `cd web && npm run e2e:smoke`
+- 七类测试覆盖：
+  - Business core unit tests：本轮未改业务状态机，由既有 service tests 保护。
+  - Service-layer tests：本轮未改 service 写边界，由既有 application/UoW tests 保护。
+  - API contract tests：本轮未改后端 contract；e2e 额外断言 `submit-selection` 和 `withdraw` 请求体。
+  - Read model/cache/background job tests：适用前端 freshness closure，e2e 断言 operation barrier 被调用；真实 worker drain 仍属未测风险。
+  - Frontend component and interaction tests：适用并新增真实 Chromium 页面选择、bucket、dialog、toast 和只读状态。
+  - End-to-end business-flow integration tests：适用并新增 selected-row submit -> barrier -> withdraw -> history browser flow。
+  - Existing feature regression tests：适用并防止按钮、bucket 数量、请求体和 freshness barrier 回归。
+- 未测风险：真实 PostgreSQL/RabbitMQ/Redis/systemd no-oa-bank-batch worker drain、大数据长列表、网络恢复和生产历史半迁移仍需 staging/生产 smoke。
+
 ## 2026-06-16 - P2/P3 显式分页首屏保护
 
 - 目标：为免 OA list 建立可执行首屏上限，避免后续大数据月份把全部批次一次性返回给首屏。
