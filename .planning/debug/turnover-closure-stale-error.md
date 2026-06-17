@@ -18,14 +18,14 @@ updated: "2026-06-17"
 - Timeline:
   - 2026-06-17 用户截图反馈；发生在 OA 关联与闭环 chip 拆分修复后继续完善页面时。
 - Reproduction:
-  - 外部往来款管理 -> 个人往来 -> 展开刘涵静 -> 选中两笔 240,000 流水 -> 点击 `确认闭环` -> 确认弹窗提交。
+  - 外部往来款管理 -> 个人往来 -> 展开贾小花 -> 选中 `txn_imported_1277`、`txn_imported_1292`、`txn_imported_1344`，收支相抵 0.00 -> 点击 `确认闭环` -> 确认弹窗提交。
 
 ## Current Focus
 
-- hypothesis: 前端 fresh reload 后仍提交了后端不能接受的 `turnover_bank_row:*` expected_versions；真实 payload 中 bank row category/version 字段与 mock/e2e 用例不一致，导致 e2e 只断言 POST 发生，未断言真实 stale 409 成功路径。
-- test: 先补页面/ API 测试复现 expected_versions 版本键或值不匹配，再补 e2e/mock 断言 confirm payload 包含真实 bank row versions 且成功后不出现操作失败。
-- expecting: 修复后页面对缺失/不可靠版本不提交错误 expected_versions，或提交后端实际可比对的版本；e2e 覆盖 stale error dialog 不出现。
-- next_action: complete verification and report root cause.
+- hypothesis: confirmed。真实 `txn_imported_1277/1292/1344` 路径由 SQL bank detail/turnover projection 带出 `category_version=0` 占位值；前端按 `manual_category_version` / `version` 提交真实 `expected_versions`，但后端 stale precondition 把 0 当成当前版本，误报 stale。
+- test: 已补 SQL row version fallback 单测、UoW stale precondition 契约测试、`/api/turnover-ledger/closures/confirm` API 集成测试和前端 grouped mapper 测试。
+- expecting: 后端用于 grouped payload 和 stale precondition 的 bank row version 一致；三笔贾小花/截图路径确认闭环成功，真正版本变化仍返回 stale。
+- next_action: resolved; keep regression tests in `docs/modules/turnover-ledger/tests.md`.
 
 ## Evidence
 
@@ -35,6 +35,14 @@ updated: "2026-06-17"
   observation: "web/src/pages/TurnoverLedgerPage.tsx 在确认前重新拉 fresh ledger，并用 `closureExpectedVersions(freshRows)` 构造 `turnover_bank_row:{bankRowId}` expected_versions。"
 - timestamp: "2026-06-17"
   observation: "web/e2e/fixtures/apiMocks.ts 对 `/api/turnover-ledger/closures/confirm` 是 mock 成功响应，未模拟 expected_versions 与真实后端 stale precondition 的比对。"
+- timestamp: "2026-06-17"
+  observation: "用户 12:16 截图显示三笔 `txn_imported_1277`、`txn_imported_1292`、`txn_imported_1344` 收支相抵 0.00，点击确定后仍返回 `银行流水状态已变化，请刷新后重试。`，说明上次页面侧修复未覆盖真实后端版本字段语义。"
+- timestamp: "2026-06-17"
+  observation: "repo docs/tests 已出现线索：SQL bank detail row 缺 `category_version` 或存在占位 `0` 时，应使用 `manual_category_version` 或基础 `version`，否则 turnover closure stale precondition 会误报。"
+- timestamp: "2026-06-17"
+  observation: "`test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_is_zero`、`test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_version_is_zero`、`test_bank_row_stale_precondition_uses_manual_version_when_category_version_is_zero`、`test_bank_row_stale_precondition_uses_base_version_when_category_versions_are_zero` 证明原先缺少 `category_version=0` 占位分支保护。"
+- timestamp: "2026-06-17"
+  observation: "`test_manual_closure_api_accepts_sql_rows_with_zero_category_version` 用截图同款 `txn_imported_1277/1292/1344` 和 `category_version=0` 形态走 `/api/turnover-ledger/closures/confirm`，确认 turnover relation 与 Workbench relation 都能写入。"
 
 ## Eliminated
 
@@ -43,19 +51,24 @@ updated: "2026-06-17"
 
 ## Resolution
 
-- root_cause: 页面确认闭环前会重新拉 grouped ledger，但没有检查 fresh reload 的 `readModelStatus`，因此 reload 结果仍为 stale 时也会继续提交。另一个问题是 grouped flow row 缺少 `category_version` 时，前端 mapper 把缺失版本映射成 `0`，导致确认请求提交 `turnover_bank_row:* = 0`，后端用真实 bank row 版本比对后返回 `银行流水状态已变化，请刷新后重试。`
-- fix: 前端把 `categoryVersion` 改为 `number | null`，只有后端明确提供版本时才提交 `expected_versions`；确认前 fresh reload 如果仍非 fresh，清空选择并提示重新选择，不再 POST `/closures/confirm`。浏览器 e2e mock 现在会校验 closure confirm 请求里的 bank row ids 和 `turnover_bank_row:*` versions，版本不匹配时返回 409。
-- why_e2e_missed: 原 e2e fixture 对 `/api/turnover-ledger/closures/confirm` 无条件返回成功，不读取请求体，也不校验 `expected_versions`。用例只断言 POST 次数和成功 UI，所以页面即使发送错误版本也会通过。
+- root_cause: 上一轮修复没有覆盖真实 SQL bank detail 的 `category_version=0` 占位语义。页面 fresh reload 后会用 grouped row 中的 `manual_category_version` / `version` 提交 `turnover_bank_row:*` 真实版本；后端 `TurnoverLedgerBankRowStalePreconditionPort` 和 SQL row mapper 却优先取 `category_version`，把 0 当成真实当前版本，因此 4/5/6 与 0 比对失败并误报 `银行流水状态已变化，请刷新后重试。`
+- fix: 后端新增共享 `turnover_bank_row_version(row)`，按 `category_version`、`manual_category_version`、`version` 顺序选择第一个非零数值，只有全部缺失或全为 0 时才返回 0；`Application._turnover_bank_transaction_row_from_bank_detail` 和 `TurnoverLedgerBankRowStalePreconditionPort` 共用该逻辑。前端 `turnoverBankRowVersion(...)` 使用同一语义，让 grouped mapper 和后端 precondition 对版本字段达成一致。
+- why_previous_fix_incomplete: 当时只修了页面 fresh reload、缺失版本字段和 e2e mock 请求体校验，测试数据没有包含 SQL read model 常见的 `category_version=0` 占位值；因此页面已经提交了更正确的版本，但后端仍按 0 校验，真实数据继续失败。
+- why_e2e_missed: 原 e2e fixture 对 `/api/turnover-ledger/closures/confirm` 曾经无条件返回成功；后来虽然补了请求体校验，但 mock fixture 里的 row 版本不是 `category_version=0` + `manual_category_version/version` 的真实 SQL 形态，所以没覆盖这次误报。
 - verification:
-  - `cd web && npm test -- --run src/test/TurnoverLedgerPage.test.tsx -t "omits closure expected versions|blocks manual closure submit"` passed.
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_is_zero tests.test_turnover_ledger_api.TurnoverLedgerApiTests.test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_version_is_zero tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_bank_row_stale_precondition_uses_manual_version_when_category_version_is_zero tests.test_turnover_ledger_uow_contract.TurnoverLedgerUoWContractTests.test_bank_row_stale_precondition_uses_base_version_when_category_versions_are_zero tests.test_turnover_workbench_integration.TurnoverWorkbenchIntegrationTests.test_manual_closure_api_accepts_sql_rows_with_zero_category_version -v` passed: 5 tests.
+  - `PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.test_turnover_ledger_uow_contract tests.test_turnover_workbench_integration -q` passed: 227 tests.
   - `cd web && npm test -- --run src/test/TurnoverLedgerPage.test.tsx src/test/TurnoverLedgerApi.test.ts` passed: 32 tests.
   - `cd web && npx playwright test e2e/turnover-ledger-flow.spec.ts` passed: 1 test.
   - `cd web && npm run build` passed, with existing CSS minifier warnings unrelated to this change.
   - `git diff --check` passed.
 - files_changed:
+  - `backend/src/fin_ops_platform/app/server.py`
+  - `backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py`
+  - `tests/test_turnover_ledger_api.py`
+  - `tests/test_turnover_ledger_uow_contract.py`
+  - `tests/test_turnover_workbench_integration.py`
   - `web/src/features/turnoverLedger/api.ts`
-  - `web/src/features/turnoverLedger/types.ts`
-  - `web/src/pages/TurnoverLedgerPage.tsx`
-  - `web/src/test/TurnoverLedgerPage.test.tsx`
-  - `web/e2e/fixtures/apiMocks.ts`
-  - `web/e2e/turnover-ledger-flow.spec.ts`
+  - `web/src/test/TurnoverLedgerApi.test.ts`
+  - `docs/modules/turnover-ledger/tests.md`
+  - `docs/modules/turnover-ledger/implementation-notes.md`

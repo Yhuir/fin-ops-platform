@@ -1564,6 +1564,41 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 0)
         self.assertEqual(deps.connection.rollbacks, 1)
 
+    def test_bank_row_stale_precondition_uses_manual_version_when_category_version_is_zero(self) -> None:
+        module = self._write_adapters_module()
+        port = module.TurnoverLedgerBankRowStalePreconditionPort(
+            bank_rows_provider=lambda: [
+                {
+                    "id": "bank_txn_1",
+                    "category_version": 0,
+                    "manual_category_version": 9,
+                }
+            ]
+        )
+
+        port.assert_current(
+            expected_versions={"turnover_bank_row:bank_txn_1": 9},
+            transaction=object(),
+        )
+
+    def test_bank_row_stale_precondition_uses_base_version_when_category_versions_are_zero(self) -> None:
+        module = self._write_adapters_module()
+        port = module.TurnoverLedgerBankRowStalePreconditionPort(
+            bank_rows_provider=lambda: [
+                {
+                    "id": "bank_txn_1",
+                    "category_version": 0,
+                    "manual_category_version": 0,
+                    "version": 5,
+                }
+            ]
+        )
+
+        port.assert_current(
+            expected_versions={"turnover_bank_row:bank_txn_1": 5},
+            transaction=object(),
+        )
+
     def test_target_confirm_relation_facade_passes_idempotency_before_repository(self) -> None:
         # PF-P177 target contract: confirm should reserve/replay/conflict by durable idempotency before repository save.
         class _CommandCapturingUoW:

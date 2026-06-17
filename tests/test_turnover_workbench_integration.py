@@ -318,6 +318,85 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(set(relation["bank_row_ids"]), {"txn_imported_1277", "txn_imported_1292", "txn_imported_1344"})
         self.assertEqual(relation["status"], "confirmed")
 
+    def test_manual_closure_api_accepts_sql_rows_with_zero_category_version(self) -> None:
+        rows = [
+            {
+                "id": "txn_imported_1277",
+                "source_bank_row_id": "txn_imported_1277",
+                "category_code": "borrow_in_personal_pending_repayment",
+                "category_version": 0,
+                "manual_category_version": 4,
+                "version": 1,
+                "debit_amount": "",
+                "credit_amount": "200000.00",
+                "txn_date": "2026-02-04",
+                "trade_time": "2026-02-04T13:20:48+08:00",
+                "counterparty_name": "贾小花",
+            },
+            {
+                "id": "txn_imported_1292",
+                "source_bank_row_id": "txn_imported_1292",
+                "category_code": "borrow_in_personal_pending_repayment",
+                "category_version": 0,
+                "manual_category_version": 5,
+                "version": 1,
+                "debit_amount": "",
+                "credit_amount": "100000.00",
+                "txn_date": "2026-02-04",
+                "trade_time": "2026-02-04T17:07:45+08:00",
+                "counterparty_name": "贾小花",
+            },
+            {
+                "id": "txn_imported_1344",
+                "source_bank_row_id": "txn_imported_1344",
+                "category_code": "borrow_in_personal_repaid",
+                "category_version": 0,
+                "manual_category_version": 6,
+                "version": 1,
+                "debit_amount": "300000.00",
+                "credit_amount": "",
+                "txn_date": "2026-03-04",
+                "trade_time": "2026-03-04T15:24:58+08:00",
+                "counterparty_name": "贾小花",
+            },
+        ]
+        transaction_ids = [str(row["id"]) for row in rows]
+        expected_versions = {
+            f"turnover_bank_row:{row['id']}": row["manual_category_version"]
+            for row in rows
+        }
+        with self._temporary_app() as app:
+            app._turnover_bank_transaction_rows = lambda: [dict(row) for row in rows]  # type: ignore[method-assign]
+            app._bank_transaction_category_affected_months = lambda _ids: ["2026-02", "2026-03"]  # type: ignore[method-assign]
+
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/closures/confirm",
+                body=json.dumps(
+                    {
+                        "bank_row_ids": transaction_ids,
+                        "expected_versions": expected_versions,
+                        "note": "截图复现场景",
+                    }
+                ),
+            )
+            payload = json.loads(response.body)
+            relation_id = str(payload.get("turnover_relation", {}).get("relation_id") or "")
+            active_closure = app._workbench_pair_relation_service.get_active_relation_by_case_id(
+                f"turnover:{relation_id}"
+            )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
+        self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
+        self.assertIsNotNone(active_closure)
+        assert active_closure is not None
+        self.assertEqual(
+            active_closure["special_metadata"]["turnover_closure_bank_row_ids"],
+            transaction_ids,
+        )
+
     def test_sql_turnover_rows_tolerate_early_startup_before_app_settings_service_is_bound(self) -> None:
         with self._temporary_app() as app:
             app._bank_detail_sql_read_repository = object()

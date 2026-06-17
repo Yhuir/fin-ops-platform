@@ -302,6 +302,25 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIsNotNone(turnover_row)
         self.assertEqual(turnover_row["category_version"], 9)
 
+    def test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_is_zero(self) -> None:
+        row = {
+            "id": "bank-row-zero-category-version",
+            "effective_category_code": "external_personal",
+            "effective_turnover_action_type": "personal_advance",
+            "effective_turnover_family": "personal",
+            "direction": "income",
+            "amount": "100.00",
+            "trade_time": "2026-02-03T10:11:12",
+            "counterparty_name": "张三",
+            "category_version": 0,
+            "manual_category_version": 9,
+        }
+
+        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
+
+        self.assertIsNotNone(turnover_row)
+        self.assertEqual(turnover_row["category_version"], 9)
+
     def test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_versions_missing(self) -> None:
         row = {
             "id": "bank-row-base-version",
@@ -312,6 +331,25 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             "amount": "100.00",
             "trade_time": "2026-02-03T10:11:12",
             "counterparty_name": "张三",
+            "version": 5,
+        }
+
+        turnover_row = Application._turnover_bank_transaction_row_from_bank_detail(row)
+
+        self.assertIsNotNone(turnover_row)
+        self.assertEqual(turnover_row["category_version"], 5)
+
+    def test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_version_is_zero(self) -> None:
+        row = {
+            "id": "bank-row-zero-category-base-version",
+            "effective_category_code": "external_personal",
+            "effective_turnover_action_type": "personal_advance",
+            "effective_turnover_family": "personal",
+            "direction": "expense",
+            "amount": "100.00",
+            "trade_time": "2026-02-03T10:11:12",
+            "counterparty_name": "张三",
+            "category_version": 0,
             "version": 5,
         }
 

@@ -17,6 +17,16 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-17 - SQL bank row 0 占位版本导致闭环 stale 误报
+
+- 目标：修复外部往来款管理页选择 `txn_imported_*` SQL bank detail 流水确认手动零差额闭环时，后端误报“银行流水状态已变化，请刷新后重试。”的问题。
+- 影响范围：SQL bank detail row -> turnover flow row 映射、`TurnoverLedgerBankRowStalePreconditionPort` 写入前置版本校验、前端 grouped row mapper、manual closure API/e2e 回归。
+- 根因：上一轮修复覆盖了前端 fresh reload 和缺失版本字段，但真实 SQL 读模型里 `category_version=0` 是占位值；前端已按 `manual_category_version` / `version` 提交真实 `expected_versions`，后端 stale precondition 却仍把 `category_version=0` 当当前版本，导致误判 stale。
+- 关键决策：统一使用 `turnover_bank_row_version` 选择银行流水版本，按 `category_version`、`manual_category_version`、`version` 顺序取第一个非零数值；只有所有候选都为空或为 0 时才保留 0。前端 mapper 使用同一语义，避免页面提交体和后端校验再次分叉。
+- 文档影响：更新本模块 `tests.md` 与本实施记录；业务口径、API 字段 shape 和状态机不变。
+- 测试覆盖：新增/更新 `test_sql_bank_detail_turnover_row_uses_manual_category_version_when_category_version_is_zero`、`test_sql_bank_detail_turnover_row_falls_back_to_bank_row_version_when_category_version_is_zero`、`test_bank_row_stale_precondition_uses_manual_version_when_category_version_is_zero`、`test_bank_row_stale_precondition_uses_base_version_when_category_versions_are_zero`、`test_manual_closure_api_accepts_sql_rows_with_zero_category_version`、`web/src/test/TurnoverLedgerApi.test.ts`，并继续保留 Playwright 对 confirm payload 的校验。
+- 未测风险：本地未连接真实生产 PostgreSQL 数据重放截图中的原始三笔记录；已用相同 row id 和版本字段形态构造 API 集成复现。
+
 ## 2026-06-17 - OA 关联展示与外部往来闭环关系拆分
 
 - 目标：修复外部往来款管理页把某条流水已关联 OA 的状态显示成“关联台已关联”，并把它误用于确认/撤回闭环判断的问题；同时支持流水 1/OA1、流水 2/OA2、流水 3 共同确认成一个外部往来闭环 active case。

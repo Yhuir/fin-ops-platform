@@ -493,6 +493,8 @@ describe("turnover ledger API", () => {
                   summary_text: "电子转账 / 暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-002"],
+                  category_version: 0,
+                  version: 7,
                   bank_row_ids: ["bank_002"],
                 },
                 {
@@ -517,6 +519,9 @@ describe("turnover ledger API", () => {
                   summary_text: "电子转账 / 还暂借款",
                   allocation_status: "allocated",
                   allocated_lot_ids: ["lot-001", "lot-002"],
+                  category_version: 0,
+                  manual_category_version: 12,
+                  version: 5,
                   bank_row_ids: ["bank_003"],
                   workbench_relation_status: "linked",
                   workbench_relation_case_ids: ["case-turnover-001"],
@@ -660,6 +665,8 @@ describe("turnover ledger API", () => {
     });
     expect(ledger.groups[0].flowRows).toHaveLength(3);
     expect(ledger.groups[0].flowRows.map((row) => row.sourceBankRowId)).toEqual(["bank_001", "bank_002", "bank_003"]);
+    expect(ledger.groups[0].flowRows[1].categoryVersion).toBe(7);
+    expect(ledger.groups[0].flowRows[2].categoryVersion).toBe(12);
     expect(ledger.groups[0].flowRows[2]).toMatchObject({
       rowKind: "flow",
       flowId: "bank:bank_003",

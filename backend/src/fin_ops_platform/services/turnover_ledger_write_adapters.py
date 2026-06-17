@@ -18,6 +18,23 @@ from fin_ops_platform.services.workbench_relation_distribution_mapper import rel
 TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 
 
+def turnover_bank_row_version(row: dict[str, object]) -> object:
+    zero_candidate: object | None = None
+    for field_name in ("category_version", "manual_category_version", "version"):
+        value = row.get(field_name)
+        if value is None or value == "":
+            continue
+        try:
+            numeric_value = int(str(value).strip())
+        except (TypeError, ValueError):
+            return value
+        if numeric_value != 0:
+            return numeric_value
+        if zero_candidate is None:
+            zero_candidate = numeric_value
+    return zero_candidate
+
+
 class TurnoverLedgerWritePreconditionError(ValueError):
     def __init__(
         self,
@@ -1240,11 +1257,7 @@ class TurnoverLedgerBankRowStalePreconditionPort:
 
     @staticmethod
     def _bank_row_version(row: dict[str, object]) -> object:
-        for field_name in ("category_version", "manual_category_version", "version"):
-            value = row.get(field_name)
-            if value is not None:
-                return value
-        return None
+        return turnover_bank_row_version(row)
 
 
 class TurnoverLedgerRelationExtraStalePreconditionPort:

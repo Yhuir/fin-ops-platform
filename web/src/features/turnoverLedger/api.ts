@@ -407,6 +407,26 @@ function nullableNumberValue(value: number | string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function turnoverBankRowVersion(...values: Array<number | string | null | undefined>) {
+  let zeroCandidate: number | null = null;
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") {
+      continue;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      continue;
+    }
+    if (parsed !== 0) {
+      return parsed;
+    }
+    if (zeroCandidate === null) {
+      zeroCandidate = parsed;
+    }
+  }
+  return zeroCandidate;
+}
+
 function stringList(value: string[] | undefined) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
@@ -590,7 +610,7 @@ function mapGroupedRow(row: ApiTurnoverLedgerGroupedRow, fallbackRowKind = ""): 
     categorySubLabel: text(row.category_sub_label),
     categoryThirdLabel: text(row.category_third_label),
     categoryLabelPath: stringList(row.category_label_path),
-    categoryVersion: nullableNumberValue(row.category_version ?? row.manual_category_version ?? row.version),
+    categoryVersion: turnoverBankRowVersion(row.category_version, row.manual_category_version, row.version),
     counterpartyBankName: text(row.counterparty_bank_name),
     bankAccountLabels: stringList(row.bank_account_labels),
     summaryText: text(row.summary_text),

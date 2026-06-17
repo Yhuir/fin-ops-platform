@@ -348,6 +348,7 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerWithdrawRequestBoundaryFacade,
     TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
     TurnoverLedgerWithdrawLegacyFallbackFacade,
+    turnover_bank_row_version,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
@@ -1467,11 +1468,7 @@ class Application:
         counterparty_name = str(row.get("counterparty_name") or "").strip()
         category_path = list(row.get("effective_category_path") or row.get("category_path") or [])
         category_label_path = list(row.get("effective_category_label_path") or row.get("category_label_path") or [])
-        raw_category_version = row.get("category_version")
-        if raw_category_version is None:
-            raw_category_version = row.get("manual_category_version")
-        if raw_category_version is None:
-            raw_category_version = row.get("version")
+        raw_category_version = turnover_bank_row_version(row)
         try:
             category_version = int(raw_category_version or 0)
         except (TypeError, ValueError):
