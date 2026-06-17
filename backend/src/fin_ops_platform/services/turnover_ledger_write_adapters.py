@@ -10,29 +10,13 @@ from fin_ops_platform.services.read_model_scope_policy import (
     DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
     ReadModelScopePolicyRegistry,
 )
+from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 
 TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
-
-
-def turnover_bank_row_version(row: dict[str, object]) -> object:
-    zero_candidate: object | None = None
-    for field_name in ("category_version", "manual_category_version", "version"):
-        value = row.get(field_name)
-        if value is None or value == "":
-            continue
-        try:
-            numeric_value = int(str(value).strip())
-        except (TypeError, ValueError):
-            return value
-        if numeric_value != 0:
-            return numeric_value
-        if zero_candidate is None:
-            zero_candidate = numeric_value
-    return zero_candidate
 
 
 class TurnoverLedgerWritePreconditionError(ValueError):

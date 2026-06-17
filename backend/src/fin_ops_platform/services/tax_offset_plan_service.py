@@ -6,7 +6,10 @@ import re
 from typing import Any, Callable
 from uuid import uuid4
 
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -97,8 +100,24 @@ class TaxOffsetPlanService:
                     "expected_read_model_scope_key": expected_scope_key,
                 },
             )
+        try:
+            expected_versions = require_expected_source_versions(
+                expected_source_versions if isinstance(expected_source_versions, dict) else {},
+                context="tax_offset_plan_expected_read_model",
+            )
+        except ValueError as exc:
+            raise TaxOffsetPlanConflictError(
+                "Tax offset read model source versions are missing.",
+                payload={
+                    "error": "tax_offset_read_model_version_conflict",
+                    "message": "税金抵扣数据来源版本缺失，请刷新页面后重新保存。",
+                    "read_model_scope_key": read_model_scope_key,
+                    "source_versions": source_versions,
+                    "expected_source_versions": expected_source_versions,
+                },
+            ) from exc
         mismatch_reasons = source_version_mismatch_reasons(
-            expected=expected_source_versions if isinstance(expected_source_versions, dict) else {},
+            expected=expected_versions,
             actual=source_versions,
         )
         if mismatch_reasons:

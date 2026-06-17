@@ -356,6 +356,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "scope_month": "2026-05-01",
                 "generated_at": "2026-05-21T09:00:00+00:00",
                 "entry_count": 1,
+                "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                 "payload": {"month": "2026-05", "time_rows": [{"transaction_id": "txn-1"}]},
             },
             dirty=True,
@@ -366,6 +367,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(view["payload"]["time_rows"], [{"transaction_id": "txn-1"}])
         self.assertEqual(view["refresh_status"], "refreshing")
+        self.assertEqual(view["schema_version"], COST_STATISTICS_READ_MODEL_SCHEMA_VERSION)
         self.assertTrue(all("app_settings" not in sql for sql, _params in connection.fetch_one_calls))
 
     def test_repository_prefers_cost_statistics_row_table_over_snapshot_payload(self) -> None:
@@ -376,6 +378,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "scope_month": "2026-05-01",
                 "generated_at": "2026-05-21T09:00:00+00:00",
                 "entry_count": 1,
+                "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                 "payload": {"month": "2026-05", "time_rows": [{"transaction_id": "stale-json"}]},
             },
             cost_rows=[
@@ -550,6 +553,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                         ],
                     },
                     "refresh_status": "fresh",
+                    "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                     "generated_at": "2026-05-21T09:00:00+00:00",
                     "source_versions": app._cost_statistics_expected_source_versions("active:2026-05"),
                 }
@@ -590,6 +594,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "get_cost_statistics_view": lambda *_args, **_kwargs: {
                     "payload": {"month": "2026-05", "time_rows": [{"transaction_id": "txn-1"}]},
                     "refresh_status": "fresh",
+                    "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                     "generated_at": "2026-05-21T09:00:00+00:00",
                     "source_versions": app._cost_statistics_expected_source_versions("active:2026-05"),
                 }

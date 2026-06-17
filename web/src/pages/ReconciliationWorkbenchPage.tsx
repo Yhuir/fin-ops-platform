@@ -2291,30 +2291,34 @@ function RelationPreviewDialog({
             ×
           </button>
         </header>
-        {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
-        <div className="relation-preview-stack">
-          <RelationPreviewTriPane
-            title="操作前"
-            testId="relation-preview-before"
-            groups={preview.before.groups}
-            totals={preview.amountSummary.before}
-            mismatchFields={preview.amountSummary.mismatchFields}
-            columnLayouts={columnLayouts}
-          />
-          <RelationPreviewTriPane
-            title="操作后"
-            testId="relation-preview-after"
-            groups={preview.after.groups}
-            totals={preview.amountSummary.after}
-            mismatchFields={preview.amountSummary.mismatchFields}
-            columnLayouts={columnLayouts}
-          />
+        <div className="relation-preview-body">
+          {preview.message ? <div className={`relation-preview-message ${preview.requiresNote ? "warning" : ""}`}>{preview.message}</div> : null}
+          <div className="relation-preview-stack">
+            <RelationPreviewTriPane
+              title="操作前"
+              testId="relation-preview-before"
+              groups={preview.before.groups}
+              totals={preview.amountSummary.before}
+              status={preview.amountSummary.status}
+              mismatchFields={preview.amountSummary.mismatchFields}
+              columnLayouts={columnLayouts}
+            />
+            <RelationPreviewTriPane
+              title="操作后"
+              testId="relation-preview-after"
+              groups={preview.after.groups}
+              totals={preview.amountSummary.after}
+              status={preview.amountSummary.status}
+              mismatchFields={preview.amountSummary.mismatchFields}
+              columnLayouts={columnLayouts}
+            />
+          </div>
+          <label className="relation-preview-note">
+            <span>备注{noteRequired ? "（必填）" : ""}</span>
+            <textarea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
+          </label>
         </div>
-        <label className="relation-preview-note">
-          <span>备注{noteRequired ? "（必填）" : ""}</span>
-          <textarea aria-label="备注" value={note} onChange={(event) => setNote(event.target.value)} />
-        </label>
-        <footer className="detail-modal-actions">
+        <footer className="detail-modal-actions relation-preview-actions">
           <button className="secondary-btn" type="button" onClick={onClose}>
             取消
           </button>

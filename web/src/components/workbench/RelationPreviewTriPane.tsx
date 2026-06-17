@@ -20,6 +20,7 @@ export type RelationPreviewTriPaneProps = {
     bankTotal: string;
     invoiceTotal: string;
   };
+  status?: "matched" | "mismatch" | "unknown" | (string & {});
   mismatchFields: string[];
   columnLayouts?: WorkbenchColumnLayouts;
 };
@@ -53,6 +54,7 @@ function RelationPreviewTriPane({
   testId,
   groups,
   totals,
+  status,
   mismatchFields,
   columnLayouts,
 }: RelationPreviewTriPaneProps) {
@@ -88,12 +90,12 @@ function RelationPreviewTriPane({
     }),
     [groups],
   );
-  const previewStatus = resolvePreviewStatus(mismatchFields, totals, rowCountByPane);
+  const previewStatus = resolvePreviewStatus(status, mismatchFields, totals, rowCountByPane);
   const visualMismatchFields = useMemo(
-    () => resolveVisualMismatchFields(totals, mismatchFields, rowCountByPane),
-    [totals, mismatchFields, rowCountByPane],
+    () => resolveVisualMismatchFields(status, totals, mismatchFields, rowCountByPane),
+    [status, totals, mismatchFields, rowCountByPane],
   );
-  const deltaAmount = useMemo(() => buildDeltaAmount(totals, rowCountByPane), [totals, rowCountByPane]);
+  const deltaAmount = useMemo(() => buildDeltaAmount(status, totals, rowCountByPane), [status, totals, rowCountByPane]);
   const sectionToneClass = resolvePreviewSectionToneClass(testId, title);
 
   const handleSyncScroll = (paneId: WorkbenchRecordType, element: HTMLDivElement) => {
@@ -296,11 +298,22 @@ function resolvePaneTotal(totals: RelationPreviewTriPaneProps["totals"], paneId:
 }
 
 function resolvePreviewStatus(
+  amountStatus: RelationPreviewTriPaneProps["status"],
   mismatchFields: string[],
   totals: RelationPreviewTriPaneProps["totals"],
   rowCountByPane: Record<WorkbenchRecordType, number>,
 ): keyof typeof PREVIEW_STATUS_LABELS {
-  const visualMismatchFields = resolveVisualMismatchFields(totals, mismatchFields, rowCountByPane);
+  if (amountStatus === "matched") {
+    return "matched";
+  }
+  if (amountStatus === "unknown") {
+    return "pending";
+  }
+  if (amountStatus === "mismatch") {
+    return "mismatch";
+  }
+
+  const visualMismatchFields = resolveVisualMismatchFields(amountStatus, totals, mismatchFields, rowCountByPane);
   if (visualMismatchFields.length > 0) {
     return "mismatch";
   }
@@ -367,6 +380,7 @@ function resolveComparableAmounts(
 }
 
 function resolveVisualMismatchFields(
+  amountStatus: RelationPreviewTriPaneProps["status"],
   totals: RelationPreviewTriPaneProps["totals"],
   mismatchFields: string[],
   rowCountByPane: Record<WorkbenchRecordType, number>,
@@ -375,6 +389,13 @@ function resolveVisualMismatchFields(
   const nonEmptyMismatchFields = mismatchFields.filter((field) =>
     PREVIEW_PANES.some((pane) => pane.mismatchField === field && rowCountByPane[pane.id] > 0),
   );
+
+  if (amountStatus === "matched" || amountStatus === "unknown") {
+    return [];
+  }
+  if (amountStatus === "mismatch" && nonEmptyMismatchFields.length > 0) {
+    return nonEmptyMismatchFields;
+  }
 
   if (comparableAmounts.length < 2) {
     return nonEmptyMismatchFields;
@@ -410,9 +431,13 @@ function resolveVisualMismatchFields(
 }
 
 function buildDeltaAmount(
+  amountStatus: RelationPreviewTriPaneProps["status"],
   totals: RelationPreviewTriPaneProps["totals"],
   rowCountByPane: Record<WorkbenchRecordType, number>,
 ) {
+  if (amountStatus && amountStatus !== "mismatch") {
+    return null;
+  }
   const comparableAmounts = resolveComparableAmounts(totals, rowCountByPane);
   if (comparableAmounts.length < 2) {
     return null;

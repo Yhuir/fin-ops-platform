@@ -19,6 +19,13 @@ def normalize_source_versions(source_versions: Any) -> dict[str, str]:
     return normalized
 
 
+def require_expected_source_versions(source_versions: Any, *, context: str) -> dict[str, str]:
+    normalized = normalize_source_versions(source_versions)
+    if not normalized:
+        raise ValueError(f"{context} missing expected source versions.")
+    return normalized
+
+
 def source_version_mismatch_reasons(
     *,
     expected: dict[str, Any] | None,
@@ -72,12 +79,11 @@ def resolve_read_model_freshness(
         return ReadModelFreshness("refreshing")
     if normalized_dirty_status in {"failed", "dead_lettered"}:
         return ReadModelFreshness("failed", ("dirty_scope_failed",))
-    if (
-        expected_schema_version not in (None, "")
-        and actual_schema_version not in (None, "")
-        and str(expected_schema_version) != str(actual_schema_version)
-    ):
-        return ReadModelFreshness("schema_mismatch", ("schema_version_mismatch",))
+    if expected_schema_version not in (None, ""):
+        if actual_schema_version in (None, ""):
+            return ReadModelFreshness("schema_mismatch", ("schema_version_missing",))
+        if str(expected_schema_version) != str(actual_schema_version):
+            return ReadModelFreshness("schema_mismatch", ("schema_version_mismatch",))
     mismatch_reasons = source_version_mismatch_reasons(
         expected=expected_source_versions,
         actual=actual_source_versions,

@@ -11,6 +11,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
 )
 from fin_ops_platform.services.bank_turnover_tag_semantics import EXTERNAL_TURNOVER_ROLE
+from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_relation_service import (
     TURNOVER_CATEGORY_RULES,
     TurnoverRelationService,
@@ -21,7 +22,7 @@ MONEY_QUANT = Decimal("0.01")
 RATE_QUANT = Decimal("0.000001")
 ZERO = Decimal("0.00")
 ZERO_RATE = Decimal("0.000000")
-TURNOVER_LEDGER_SCHEMA_VERSION = "2026-05-turnover-ledger-v1"
+TURNOVER_LEDGER_SCHEMA_VERSION = "2026-06-turnover-ledger-v2"
 TURNOVER_FAMILY_LABELS = {
     "personal": "个人往来",
     "company": "公司往来",
@@ -267,7 +268,13 @@ class TurnoverLedgerService:
             enriched["turnover_role"] = category.get("turnover_role")
             enriched["turnover_action_type"] = category.get("turnover_action_type")
             enriched["turnover_family"] = category.get("turnover_family")
-            enriched["category_version"] = int(category.get("category_version") or 0)
+            version_source = dict(row)
+            version_source.update(category)
+            enriched["category_version"] = self._bank_row_category_version(version_source)
+            for field_name in ("manual_category_version", "version"):
+                raw_value = category.get(field_name) if category.get(field_name) is not None else row.get(field_name)
+                if raw_value is not None:
+                    enriched[field_name] = raw_value
             enriched["debit_amount"] = self._debit_amount(row)
             enriched["credit_amount"] = self._credit_amount(row)
             enriched["counterparty_name"] = str(row.get("counterparty_name_raw") or row.get("counterparty_name") or "")
@@ -664,7 +671,8 @@ class TurnoverLedgerService:
                     "category_sub_label": str(bank_row.get("category_sub_label") or "").strip(),
                     "category_third_label": str(bank_row.get("category_third_label") or "").strip(),
                     "category_label_path": list(bank_row.get("category_label_path") or []),
-                    "category_version": int(bank_row.get("category_version") or 0),
+                    "category_version": self._bank_row_category_version(bank_row),
+                    **self._bank_row_version_fields(bank_row),
                     "counterparty_bank_name": self._counterparty_bank_name([bank_row]),
                     "bank_account_labels": self._bank_account_labels([bank_row]),
                     "summary_text": self._summary_text([bank_row]),
@@ -705,7 +713,8 @@ class TurnoverLedgerService:
             "category_sub_label": str(row.get("category_sub_label") or "").strip(),
             "category_third_label": str(row.get("category_third_label") or "").strip(),
             "category_label_path": list(row.get("category_label_path") or []),
-            "category_version": int(row.get("category_version") or 0),
+            "category_version": self._bank_row_category_version(row),
+            **self._bank_row_version_fields(row),
             "counterparty_bank_name": self._counterparty_bank_name([row]),
             "bank_account_labels": self._bank_account_labels([row]),
             "summary_text": self._summary_text([row]),
@@ -755,6 +764,21 @@ class TurnoverLedgerService:
             "counterparty_name": str(row.get("counterparty_name") or ""),
             "business_type": "",
             "balance_amount": amount,
+        }
+
+    @staticmethod
+    def _bank_row_category_version(row: dict[str, Any]) -> int:
+        try:
+            return int(turnover_bank_row_version(row) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _bank_row_version_fields(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            field_name: row.get(field_name)
+            for field_name in ("manual_category_version", "version")
+            if row.get(field_name) is not None
         }
 
     @staticmethod

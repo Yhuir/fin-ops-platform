@@ -6929,6 +6929,37 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         )
         self.assertIn("金额不一致", paired_invoice["tags"])
 
+    def test_confirm_link_preview_uses_directional_bank_total_for_mixed_bank_directions(self) -> None:
+        app = build_application()
+        raw_payload = build_personal_advance_repayment_raw_payload()
+        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
+            app.handle_request("GET", "/api/workbench?month=2026-03")
+
+        row_ids = [
+            "oa-personal-advance-001",
+            "bank-personal-advance-out-001",
+            "bank-personal-advance-in-001",
+            "bank-personal-advance-in-002",
+        ]
+        preview_response = app.handle_request(
+            "POST",
+            "/api/workbench/actions/confirm-link/preview",
+            json.dumps({"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-MIXED-DIRECTION"}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200, preview_response.body)
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_payload["operation"], "confirm_link")
+        self.assertFalse(preview_payload["requires_note"])
+        self.assertTrue(preview_payload["can_submit"])
+        self.assertEqual(preview_payload["amount_summary"]["status"], "matched")
+        self.assertEqual(preview_payload["amount_summary"]["direction"], "payment")
+        self.assertEqual(preview_payload["amount_summary"]["before"]["oa_total"], "300000.00")
+        self.assertEqual(preview_payload["amount_summary"]["before"]["bank_total"], "300000.00")
+        self.assertEqual(preview_payload["amount_summary"]["after"]["bank_total"], "300000.00")
+        self.assertEqual(preview_payload["amount_summary"]["amount_delta"], "0.00")
+        self.assertEqual(preview_payload["amount_summary"]["mismatch_fields"], [])
+
     def _submit_batch_accounting_mismatch_with_note(
         self,
         app: Application,

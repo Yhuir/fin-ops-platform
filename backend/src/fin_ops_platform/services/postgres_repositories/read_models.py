@@ -7166,7 +7166,7 @@ class PostgresReadModelRepository:
             return None
         row = self._connection.fetch_one(
             """
-            select scope_key, project_scope, scope_month, generated_at, entry_count, source_versions, payload, raw_payload
+            select scope_key, project_scope, scope_month, generated_at, entry_count, source_versions, schema_version, payload, raw_payload
             from read_model.cost_statistics_read_models
             where scope_key = %s
             limit 1
@@ -7221,6 +7221,7 @@ class PostgresReadModelRepository:
             "scope_key": normalized_scope_key,
             "project_scope": text(row.get("project_scope") or payload.get("project_scope")),
             "payload": payload,
+            "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
             "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
             "source_versions": (
                 row.get("source_versions")

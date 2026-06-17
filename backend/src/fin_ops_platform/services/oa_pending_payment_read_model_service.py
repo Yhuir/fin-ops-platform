@@ -10,7 +10,10 @@ from fin_ops_platform.services.oa_pending_payment_read_model_details import (
     oa_pending_payment_relation_details_from_row,
 )
 from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError, OaPendingPaymentQueryService
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
@@ -29,7 +32,7 @@ class OaPendingPaymentReadModelService:
         self._repository = repository
         self._queue_repository = queue_repository
         self._query_service = query_service
-        self._source_versions_provider = source_versions_provider or (lambda: {})
+        self._source_versions_provider = source_versions_provider
 
     def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         scope_key = self._scope_key_from_query(query)
@@ -175,7 +178,12 @@ class OaPendingPaymentReadModelService:
         )
 
     def expected_source_versions(self) -> dict[str, Any]:
-        return dict(self._source_versions_provider() or {})
+        if not callable(self._source_versions_provider):
+            return require_expected_source_versions({}, context="oa_pending_payment_read_model")
+        return require_expected_source_versions(
+            self._source_versions_provider() or {},
+            context="oa_pending_payment_read_model",
+        )
 
     def refreshing_rows_payload(self, *, scope_key: str, stale_reasons: list[str] | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {

@@ -7,7 +7,10 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
     input_invoice_usage_relation_details_from_row,
 )
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 
 
 class InputInvoiceUsageReadModelDetailService:
@@ -42,7 +45,10 @@ class InputInvoiceUsageReadModelDetailService:
             self._enqueue_refresh(scope_key, "api_detail_stale")
             return self._refreshing_payload(kind=normalized_kind, scope_key=scope_key)
         stale_reasons = source_version_mismatch_reasons(
-            expected=self._source_versions_provider(),
+            expected=require_expected_source_versions(
+                self._source_versions_provider(),
+                context="input_invoice_usage_read_model_detail",
+            ),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:

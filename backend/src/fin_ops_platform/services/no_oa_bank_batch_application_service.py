@@ -19,7 +19,10 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     NoOaBankBatchService,
 )
 from fin_ops_platform.services.no_oa_managed_rule_policy import NO_OA_MANAGED_LABELS
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
@@ -883,7 +886,10 @@ class NoOaBankBatchApplicationService:
         batch_rows = batches if isinstance(batches, list) else []
         if not batch_rows:
             return []
-        expected = self.no_oa_bank_batch_source_versions()
+        expected = require_expected_source_versions(
+            self.no_oa_bank_batch_source_versions(),
+            context="no_oa_bank_batch_read_model",
+        )
         reasons: list[str] = []
         for batch in batch_rows:
             if not isinstance(batch, dict):

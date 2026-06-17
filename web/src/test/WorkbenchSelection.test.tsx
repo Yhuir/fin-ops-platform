@@ -344,6 +344,136 @@ describe("Workbench row selection and detail modal", () => {
     });
   });
 
+  test("confirm preview respects matched backend status for mixed bank directions", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      workbenchConfirmPreview: {
+        operation: "confirm_link",
+        operation_type: "confirm_link",
+        can_submit: true,
+        requires_note: false,
+        message: "",
+        before: {
+          groups: [
+            {
+              group_id: "preview:mixed-bank-before",
+              group_type: "open",
+              match_confidence: "medium",
+              reason: "manual_preview",
+              oa_rows: [
+                {
+                  id: "oa-mixed-001",
+                  type: "oa",
+                  applicant: "刘际涛",
+                  project_name: "云南溯源科技",
+                  apply_type: "支付申请",
+                  amount: "300000.00",
+                  application_date: "2026-03-11 07:25:52",
+                },
+              ],
+              bank_rows: [
+                {
+                  id: "bk-mixed-out-001",
+                  type: "bank",
+                  trade_time: "2026-03-04 15:24:58",
+                  counterparty_name: "贾小花",
+                  debit_amount: "300000.00",
+                  credit_amount: null,
+                },
+                {
+                  id: "bk-mixed-in-001",
+                  type: "bank",
+                  trade_time: "2026-02-04 17:07:45",
+                  counterparty_name: "贾小花",
+                  debit_amount: null,
+                  credit_amount: "100000.00",
+                },
+                {
+                  id: "bk-mixed-in-002",
+                  type: "bank",
+                  trade_time: "2026-02-04 13:20:48",
+                  counterparty_name: "贾小花",
+                  debit_amount: null,
+                  credit_amount: "200000.00",
+                },
+              ],
+              invoice_rows: [],
+            },
+          ],
+        },
+        after: {
+          groups: [
+            {
+              group_id: "case:preview:mixed-bank-after",
+              group_type: "manual_confirmed",
+              match_confidence: "medium",
+              reason: "manual_preview",
+              oa_rows: [
+                {
+                  id: "oa-mixed-001",
+                  type: "oa",
+                  applicant: "刘际涛",
+                  project_name: "云南溯源科技",
+                  apply_type: "支付申请",
+                  amount: "300000.00",
+                  application_date: "2026-03-11 07:25:52",
+                },
+              ],
+              bank_rows: [
+                {
+                  id: "bk-mixed-out-001",
+                  type: "bank",
+                  trade_time: "2026-03-04 15:24:58",
+                  counterparty_name: "贾小花",
+                  debit_amount: "300000.00",
+                  credit_amount: null,
+                },
+                {
+                  id: "bk-mixed-in-001",
+                  type: "bank",
+                  trade_time: "2026-02-04 17:07:45",
+                  counterparty_name: "贾小花",
+                  debit_amount: null,
+                  credit_amount: "100000.00",
+                },
+                {
+                  id: "bk-mixed-in-002",
+                  type: "bank",
+                  trade_time: "2026-02-04 13:20:48",
+                  counterparty_name: "贾小花",
+                  debit_amount: null,
+                  credit_amount: "200000.00",
+                },
+              ],
+              invoice_rows: [],
+            },
+          ],
+        },
+        amount_summary: {
+          before: { oa_total: "300000.00", bank_total: "600000.00", invoice_total: null },
+          after: { oa_total: "300000.00", bank_total: "600000.00", invoice_total: null },
+          status: "matched",
+          direction: "payment",
+          mismatch_fields: [],
+        },
+      },
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "关联预览" });
+    const after = within(dialog).getByTestId("relation-preview-after");
+    expect(within(after).getByText("金额一致")).toBeInTheDocument();
+    expect(within(after).queryByTestId("relation-preview-delta")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "确认关联" })).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "确认关联" }).closest(".detail-modal-actions")).toHaveClass(
+      "relation-preview-actions",
+    );
+  });
+
   test("confirm preview for an already linked selection submits withdraw instead of confirm", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({

@@ -279,7 +279,11 @@ from fin_ops_platform.services.postgres_repositories.workbench import PostgresWo
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
-from fin_ops_platform.services.read_model_freshness import normalize_source_versions, source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    normalize_source_versions,
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.search_service import MONTH_RE as SEARCH_MONTH_RE, SUPPORTED_SCOPES as SEARCH_SUPPORTED_SCOPES, SUPPORTED_STATUSES as SEARCH_SUPPORTED_STATUSES, SearchService
 from fin_ops_platform.services.settings_data_reset_service import (
@@ -307,6 +311,7 @@ from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
     TurnoverLedgerExportLimitError,
 )
+from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankdetailWritePort,
@@ -348,7 +353,6 @@ from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerWithdrawRequestBoundaryFacade,
     TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
     TurnoverLedgerWithdrawLegacyFallbackFacade,
-    turnover_bank_row_version,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
@@ -4714,7 +4718,10 @@ class Application:
         if refresh_status != "fresh":
             self._enqueue_search_read_model_refresh(scope_key, reason="api_stale")
         stale_reasons = source_version_mismatch_reasons(
-            expected=self._search_index_expected_source_versions(),
+            expected=require_expected_source_versions(
+                self._search_index_expected_source_versions(),
+                context="search_index_read_model",
+            ),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
@@ -9902,7 +9909,10 @@ class Application:
             self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason="api_stale")
             return self._invoice_relation_refreshing_payload(scope_key=scope_key)
         stale_reasons = source_version_mismatch_reasons(
-            expected=self._input_invoice_usage_expected_source_versions(),
+            expected=require_expected_source_versions(
+                self._input_invoice_usage_expected_source_versions(),
+                context="input_invoice_usage_read_model",
+            ),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
@@ -9953,7 +9963,10 @@ class Application:
             self._enqueue_output_invoice_collection_read_model_refresh(scope_key, reason="api_stale")
             return self._invoice_relation_refreshing_payload(scope_key=scope_key, include_output_metadata=True)
         stale_reasons = source_version_mismatch_reasons(
-            expected=self._output_invoice_collection_expected_source_versions(),
+            expected=require_expected_source_versions(
+                self._output_invoice_collection_expected_source_versions(),
+                context="output_invoice_collection_read_model",
+            ),
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
@@ -16233,7 +16246,10 @@ class Application:
         scope_key: str | None = None,
     ) -> list[str]:
         return source_version_mismatch_reasons(
-            expected=self._workbench_sql_read_model_source_versions(scope_key),
+            expected=require_expected_source_versions(
+                self._workbench_sql_read_model_source_versions(scope_key),
+                context="workbench_sql_read_model",
+            ),
             actual=source_versions if isinstance(source_versions, dict) else {},
         )
 
@@ -16257,7 +16273,10 @@ class Application:
         batch_rows = batches if isinstance(batches, list) else []
         if not batch_rows:
             return []
-        expected = self._no_oa_bank_batch_source_versions()
+        expected = require_expected_source_versions(
+            self._no_oa_bank_batch_source_versions(),
+            context="no_oa_bank_batch_read_model",
+        )
         reasons: list[str] = []
         for batch in batch_rows:
             if not isinstance(batch, dict):
@@ -16283,7 +16302,10 @@ class Application:
 
     def _turnover_ledger_stale_reasons(self, source_versions: object) -> list[str]:
         return source_version_mismatch_reasons(
-            expected=self._turnover_ledger_source_versions(),
+            expected=require_expected_source_versions(
+                self._turnover_ledger_source_versions(),
+                context="turnover_ledger_read_model",
+            ),
             actual=source_versions if isinstance(source_versions, dict) else {},
         )
 

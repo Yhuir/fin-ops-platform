@@ -18521,6 +18521,26 @@ body.column-layout-dragging {
 
 .relation-preview-modal {
   width: min(1180px, calc(100vw - 48px));
+  overflow: hidden;
+}
+
+.relation-preview-body {
+  display: grid;
+  gap: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.relation-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 0 -18px -20px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid #dbe3ef;
+  background: linear-gradient(180deg, rgba(249, 251, 254, 0.92) 0%, #ffffff 70%);
+  backdrop-filter: blur(6px);
 }
 
 .relation-preview-message {

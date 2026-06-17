@@ -49,6 +49,8 @@ class ReadModelQueryGateway:
         source_mismatch_reason: str = "api_source_versions_stale",
     ) -> ReadModelQueryResult:
         expected_versions = normalize_source_versions(expected_source_versions)
+        if not expected_versions and expected_schema_version in (None, ""):
+            raise ValueError("ReadModelQueryGateway requires expected_source_versions or expected_schema_version.")
         cached_payload = self._get_cached_payload(
             cache_key,
             scope_key=scope_key,
@@ -62,6 +64,7 @@ class ReadModelQueryGateway:
                 scope_key=scope_key,
                 status="fresh",
                 source_versions=expected_versions,
+                schema_version=expected_schema_version,
             )
             payload["refresh_enqueued"] = False
             return ReadModelQueryResult(payload=payload, cache_hit=True)
@@ -287,7 +290,7 @@ def _cached_payload_passes_fresh_gate(
     actual_schema = str(
         gate.get("schema_version") or payload.get("read_model_schema_version") or payload.get("schema_version") or ""
     ).strip()
-    return not actual_schema or actual_schema == expected_schema
+    return actual_schema == expected_schema
 
 
 class ReadModelRefreshQueueAdapter:

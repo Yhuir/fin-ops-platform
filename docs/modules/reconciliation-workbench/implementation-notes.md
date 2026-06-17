@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-17 - 确认预览金额方向核对与确认按钮可见性
+
+- 目标：修复关联台确认预览把 mixed bank directions 的绝对流水合计误判为金额不一致，并让长预览中“确认关联”按钮持续可见。
+- 影响范围：`WorkbenchAmountCheckService.check`、`/api/workbench/actions/confirm-link/preview` amount summary、`RelationPreviewTriPane` 金额状态展示、`RelationPreviewDialog` footer 样式、本模块测试矩阵。
+- 关键决策：金额核对口径保留在后端 service。若 OA 或发票给出本次关系方向，银行流水只用同方向子合计参与本次确认金额比较；反向流水仍在预览明细里展示，但不计入可比 `bank_total`。前端预览只消费后端 `amount_summary.status/mismatch_fields`，不再用展示合计自行重算业务状态。预览弹窗改为中间内容区滚动、底部 actions 固定在 modal 内，长内容下保持“取消/确认”按钮可见。
+- 文档影响：更新本模块 `tests.md` 和本实施记录；未改变 relation mode/state 或长期产品口径。
+- 测试覆盖：新增后端金额 core 单测、confirm preview API contract 测试和前端交互回归，覆盖 1 条 OA 支付、1 条支出流水、2 条收入流水的截图形态。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_amount_check_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_and_submit_require_note_for_amount_mismatch tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_link_preview_uses_directional_bank_total_for_mixed_bank_directions tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_creates_settled_case_and_pair_relation tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_confirm_personal_advance_repayment_rejects_unbalanced_amounts -v`；`cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx`；`cd web && npm run build`。
+- 未测风险：未用生产真实截图数据做浏览器/数据库回放；发布后如仍看到 active relation 已占用的部分 row 让 confirm preview 变成 withdraw preview，需要按 canonical active relation 与 Workbench active generation display audit 单独排查。
+
 ## 2026-06-17 - 未配对自动 decision 撤回关联拆分
 
 - 目标：修复未配对区银行流水+发票自动匹配候选点击“撤回关联”返回 `Workbench relation is not active or does not exist.` 的问题。

@@ -28,6 +28,38 @@
 
 ## 历史记录
 
+## 2026-06-17 - Direct fresh / direct mismatch architecture guard
+
+- 目标：把仍保留在 legacy route、service、repository 中的 direct `read_model_status=fresh` 和 direct `source_version_mismatch_reasons(...)` 路径纳入架构层静态保护，避免未来新增页面绕过 `ReadModelQueryGateway` 或等价 freshness boundary。
+- 影响范围：`tests/test_read_model_architecture_guards.py`、`server.py` legacy read model helpers、`NoOaBankBatchApplicationService`、`TaxOffsetPlanService`、read-models 状态机和测试矩阵。
+- 关键决策：允许的 direct fresh 位置必须在静态白名单中写明数量和理由；新增或移动 direct fresh 会导致测试失败。所有 direct source version mismatch 比较必须先通过 `require_expected_source_versions(...)` 或等价 fail-fast expected contract；共享 freshness comparator 本身是唯一例外。
+- 文档影响：更新 read-models 状态机、测试矩阵和本实施记录。
+- 测试覆盖：`tests/test_read_model_architecture_guards.py` 新增 direct fresh inventory guard 和 direct mismatch expected-contract guard；相关业务回归覆盖 pending invoice、OA pending payment、cost/tax offset、workbench、no-OA batch 和 turnover ledger。
+- 验证命令：见本轮交付说明。
+- 未测风险：静态 guard 保证代码层面不能新增未分类绕行；生产旧 projection 仍必须在发布后通过 worker drain/requeue 真实重建。
+- 后续事项：新增 read model 页面优先接入 `ReadModelQueryGateway`；确需自管 freshness 的模块必须同步扩展 guard 和模块测试。
+
+## 2026-06-17 - Read model freshness contract fail-closed
+
+- 目标：从架构层面防止页面或 query service 把缺少 expected/actual freshness 证明的 read model projection 当作 fresh，避免单页补丁后同类 stale bug 反复出现。
+- 影响范围：`ReadModelQueryGateway`、`read_model_freshness` resolver、Pending Invoice/OA Pending Payment/Input Invoice Usage 等自管 freshness 服务、Cost Statistics SQL repository schema metadata、read-models 测试矩阵和运维合同。
+- 关键决策：查询方必须声明 `expected_source_versions` 或 `expected_schema_version`；缺少 expected contract 直接 fail-fast。已声明 expected schema/source 时，SQL view 或 Redis fresh gate 缺少 actual metadata proof 必须返回 refreshing/stale reason 并入队 refresh，不允许写 fresh cache。自管 read model service 禁止默认空 `source_versions_provider`。
+- 文档影响：更新 read-models README、状态机、测试矩阵，以及 app/runtime 运维合同。
+- 测试覆盖：新增 `tests/test_read_model_architecture_guards.py` 静态保护 gateway call sites 和空 provider 反模式；扩展 `tests/test_read_model_freshness.py`、`tests/test_read_model_query_gateway.py` 覆盖缺 schema proof、空 expected contract 和 cache miss；扩展 `tests/test_cost_statistics_sql_runtime.py` 覆盖真实 repository 返回 schema metadata。
+- 验证命令：见本轮交付说明。
+- 未测风险：本地测试不能证明生产旧 projection 已全部重建；发布后仍需 worker drain 或受控 requeue，让旧缺 schema/source metadata 的 projection 重新生成。
+- 后续事项：后续新增 read model 页面必须使用 `ReadModelQueryGateway` 或等价 fail-closed resolver；若暂时保留自管 freshness，必须有静态 guard 或模块测试证明 expected contract 非空。
+
+## 2026-06-17 - 业务 projection 版本语义变化必须 bump schema version
+
+- 目标：修复外部往来 grouped read model 旧 projection 继续被当 fresh，导致页面提交旧 `expected_versions=0` 的问题，并把 read model schema/source version 失效要求固化为回归。
+- 影响范围：`turnover_ledger` read model source versions、`TurnoverLedgerService` grouped payload、read-models 测试矩阵。
+- 关键决策：当业务 payload 字段语义改变到会影响写操作 precondition 时，必须 bump 对应业务 read model schema/source version；不能只修改 live conversion 或前端 mapper。旧 projection 必须通过 source version mismatch 进入 stale/refreshing，并由 worker 重建。
+- 文档影响：同步更新 turnover-ledger 模块实施记录、状态机和测试矩阵；本模块记录通用边界。
+- 测试覆盖：`tests/test_turnover_ledger_source_versions.py::TurnoverLedgerSourceVersionsTests::test_source_versions_include_all_turnover_and_cross_module_inputs` 锁定 `turnover_ledger_schema_version` bump；`tests/test_turnover_ledger_service.py` 覆盖 grouped flow row 版本 fallback。
+- 验证命令：见本轮交付说明。
+- 未测风险：本地未执行生产 worker drain；发布后仍需观察 `turnover_ledger:all` old projection stale/rebuild 到 fresh。
+
 ## 2026-06-16 - 事务型 producer 补齐成本统计 scope policy
 
 - 目标：修复外部往来 Postgres 事务写路径绕过 read model scope policy，导致 `turnover_relation_changed` 继续生成 legacy `cost_statistics` scope 的风险。

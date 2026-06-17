@@ -108,6 +108,29 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(result["bank_total"], "100.00")
         self.assertIsNone(result["invoice_total"])
 
+    def test_payment_relation_uses_payment_bank_total_when_bank_rows_include_receipts(self) -> None:
+        result = self.service.check(
+            {
+                "oa": [self._oa_row("300000")],
+                "bank": [
+                    self._bank_row("300000"),
+                    self._bank_income_row("100000"),
+                    self._bank_income_row("200000"),
+                ],
+                "invoice": [],
+            }
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["direction"], "payment")
+        self.assertFalse(result["requires_note"])
+        self.assertEqual(result["mismatch_fields"], [])
+        self.assertEqual(result["oa_total"], "300000.00")
+        self.assertEqual(result["bank_total"], "300000.00")
+        self.assertEqual(result["oa_amount"], "300000.00")
+        self.assertEqual(result["bank_amount"], "300000.00")
+        self.assertEqual(result["amount_delta"], "0.00")
+
     @staticmethod
     def _oa_row(amount: str) -> dict[str, str]:
         return {
@@ -121,6 +144,13 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         return {
             "type": "bank",
             "debit_amount": amount,
+        }
+
+    @staticmethod
+    def _bank_income_row(amount: str) -> dict[str, str]:
+        return {
+            "type": "bank",
+            "credit_amount": amount,
         }
 
     @staticmethod

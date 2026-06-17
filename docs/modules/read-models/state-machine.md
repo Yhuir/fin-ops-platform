@@ -12,9 +12,12 @@
 - 允许流转：
   - business write -> lifecycle/dirty scope -> outbox event -> worker processing -> projection publish -> readiness fresh
   - API miss/stale -> `ReadModelQueryGateway` 返回 refreshing payload -> `ReadModelRefreshGateway` enqueue refresh
+  - expected schema/source contract 与 actual projection metadata 不匹配或缺失 -> refreshing/stale reason -> enqueue refresh
   - worker failure -> readiness failed/unavailable -> App Status busy/blocked
 - 禁止流转：
+  - query service 没有 expected schema/source contract，却把 projection 判为 fresh
   - 页面或 service 绕过 freshness gate 读取旧 projection 并标记 fresh
+  - 新增 direct `read_model_status=fresh` 或 direct `source_version_mismatch_reasons(...)` 调用，却没有进入架构 guard 分类和 expected contract 证明
   - Redis/RabbitMQ 被当作 read model 状态事实源
   - 业务 service 直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`
   - fan-out-only refresh 结果写假 fresh readiness
@@ -31,7 +34,7 @@
 
 ## Read Model / Worker 状态
 
-- `fresh`：projection/readiness 与期望 schema/source version 匹配，可以对外展示 payload，也可以写 fresh-gated Redis cache。
+- `fresh`：query service 已声明 expected schema/source contract，projection/readiness 的实际 schema/source version 与之匹配，可以对外展示 payload，也可以写 fresh-gated Redis cache。
 - `missing`：没有可用 projection/readiness；API 应返回 refreshing 语义并入队 refresh。
 - `refreshing`：dirty scope pending/processing、worker 等待 shard、source/schema stale 后已入队；页面显示刷新中或后台刷新提示。
 - `stale`：内部 freshness 判定不匹配；公开 API 通常映射为 refreshing 语义并带 stale reasons。
@@ -43,6 +46,8 @@
 ## refresh 触发来源
 
 - API miss
+- missing expected freshness contract（代码配置错误，fail fast）
+- missing schema/source metadata proof
 - schema version mismatch
 - source version missing/mismatch
 - 业务写入后的 `DerivedDataLifecycleService` dirty cascade
@@ -62,6 +67,9 @@
 ## 非法状态
 
 - `read_model_status=fresh` 但缺少对应 readiness/source version 证明。
+- `read_model_status=fresh` 但 query service 没有声明 expected schema/source contract。
+- `read_model_status=fresh` 由未分类 direct path 写出，或 direct source version mismatch 比较没有先调用 `require_expected_source_versions(...)`。
+- `read_model_status=fresh` 但已声明 expected schema，actual projection 或 Redis fresh gate 缺少 schema proof。
 - `read_model_status=fresh` 但 dirty scope 仍 pending/processing 且覆盖同一 scope。
 - API 返回空 rows 且不带 refreshing/stale/missing 语义，却实际没有 fresh projection。
 - Redis cache 命中绕过 fresh gate。
@@ -73,6 +81,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-17 | read model 查询 freshness contract fail-closed，并纳管 legacy direct fresh/direct mismatch 路径 | `ReadModelQueryGateway` 必须传 expected schema/source；actual schema/source metadata 缺失时不能 fresh；自管 read model service 禁止空 source version provider；所有直接写 fresh 或直接比较 source version 的 legacy 入口必须通过静态架构 guard 分类 | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness tests.test_read_model_query_gateway tests.test_read_model_architecture_guards -v` |
 | 2026-06-14 | 依赖未 fresh 的 readiness 记录从 failed 收敛为 refreshing | 下游 read model 等待 Bankdetail/Workbench relation 等依赖时不污染 App Status blocker；仍保留 last_error 诊断和真实 retry/defer | `PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_readiness_reporter tests.test_runtime_worker tests.test_runtime_queue tests.test_read_model_refresh_gateway -v` |
 | 2026-06-13 | 依赖未 fresh 的 outbox event 短延迟 defer | downstream read model 不再因普通 60s retry 放大失败长尾；freshness 事实源不变 | `PYTHONPATH=backend/src python3 -m unittest tests.test_runtime_worker tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_defer_event_delays_dependency_retry_without_failure_or_dead_letter -v` |
 | 2026-06-13 | 写操作 refresh metadata/action_name 透传 | `workbench_relation_withdraw`、`no_oa_bank_batch_withdraw` 可按具体动作审计跨页面 enqueue-to-fresh；不改变 freshness 事实源 | `PYTHONPATH=backend/src python3 -m pytest tests/test_read_model_refresh_gateway.py tests/test_workbench_uow_contract.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_dirty_queue_wiring.py tests/test_write_operation_slo_audit.py tests/test_write_operation_scenario_discovery.py -q` |

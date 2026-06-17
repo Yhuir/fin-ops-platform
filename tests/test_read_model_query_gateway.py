@@ -29,6 +29,17 @@ class RedisRecorder:
 
 
 class ReadModelQueryGatewayTests(unittest.TestCase):
+    def test_load_requires_expected_freshness_contract(self) -> None:
+        gateway = ReadModelQueryGateway(queue_repository=QueueRecorder())
+
+        with self.assertRaisesRegex(ValueError, "expected_source_versions or expected_schema_version"):
+            gateway.load(
+                scope_type="example",
+                scope_key="all",
+                load_view=lambda: {"payload": {"rows": []}, "refresh_status": "fresh"},
+                empty_payload_factory=lambda: {"rows": []},
+            )
+
     def test_fresh_cache_hit_does_not_call_sql_or_enqueue_refresh(self) -> None:
         queue = QueueRecorder()
         redis = RedisRecorder(
@@ -65,6 +76,45 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         self.assertFalse(result.refresh_enqueued)
         self.assertEqual(queue.refreshes, [])
         self.assertEqual(redis.gets, ["example:all:v3"])
+
+    def test_cache_missing_expected_schema_misses_and_uses_sql_view(self) -> None:
+        queue = QueueRecorder()
+        redis = RedisRecorder(
+            {
+                "payload": {
+                    "rows": [{"id": "cached"}],
+                    "read_model_status": "fresh",
+                    "source_versions": {"source_version": "3"},
+                },
+                "fresh_gate": {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "source_versions": {"source_version": "3"},
+                },
+            }
+        )
+        gateway = ReadModelQueryGateway(queue_repository=queue, redis_helper=redis)
+
+        result = gateway.load(
+            scope_type="example",
+            scope_key="all",
+            expected_source_versions={"source_version": 3},
+            expected_schema_version="schema-v2",
+            load_view=lambda: {
+                "payload": {"rows": [{"id": "sql"}]},
+                "refresh_status": "fresh",
+                "source_versions": {"source_version": 3},
+                "schema_version": "schema-v2",
+            },
+            empty_payload_factory=lambda: {"rows": []},
+            cache_key="example:all:v3:schema-v2",
+            cache_ttl_seconds=60,
+        )
+
+        self.assertEqual(result.payload["rows"], [{"id": "sql"}])
+        self.assertFalse(result.cache_hit)
+        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(len(redis.sets), 1)
 
     def test_legacy_cache_without_fresh_gate_or_source_versions_misses_and_repopulates(self) -> None:
         queue = QueueRecorder()
@@ -118,6 +168,38 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         self.assertEqual(result.payload["refresh_reason"], "source_version_mismatch")
         self.assertTrue(result.refresh_enqueued)
         self.assertFalse(result.cache_hit)
+        self.assertEqual(
+            queue.refreshes,
+            [{"scope_type": "example", "scope_key": "all", "reason": "api_source_versions_stale"}],
+        )
+        self.assertEqual(redis.sets, [])
+
+    def test_missing_sql_view_schema_enqueues_refresh_without_populating_cache(self) -> None:
+        queue = QueueRecorder()
+        redis = RedisRecorder()
+        gateway = ReadModelQueryGateway(queue_repository=queue, redis_helper=redis)
+
+        result = gateway.load(
+            scope_type="example",
+            scope_key="all",
+            expected_schema_version="schema-v2",
+            expected_source_versions={"source_version": 3},
+            load_view=lambda: {
+                "payload": {"rows": [{"id": "missing-schema"}]},
+                "refresh_status": "fresh",
+                "source_versions": {"source_version": 3},
+            },
+            empty_payload_factory=lambda: {"rows": []},
+            cache_key="example:all:v3:schema-v2",
+            cache_ttl_seconds=60,
+            source_mismatch_reason="api_source_versions_stale",
+        )
+
+        self.assertEqual(result.payload["rows"], [{"id": "missing-schema"}])
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(result.payload["read_model_stale_reasons"], ["schema_version_missing"])
+        self.assertEqual(result.payload["refresh_reason"], "source_version_mismatch")
+        self.assertTrue(result.refresh_enqueued)
         self.assertEqual(
             queue.refreshes,
             [{"scope_type": "example", "scope_key": "all", "reason": "api_source_versions_stale"}],

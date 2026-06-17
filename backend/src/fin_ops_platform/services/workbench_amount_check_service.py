@@ -87,13 +87,13 @@ class WorkbenchAmountCheckService:
             "bank": list(rows_by_type.get("bank") or []),
             "invoice": list(rows_by_type.get("invoice") or []),
         }
+        direction, has_direction_conflict = self._check_direction(normalized_rows)
         totals = {
             "oa_total": self._sum_amounts(normalized_rows["oa"]),
-            "bank_total": self._sum_amounts(normalized_rows["bank"]),
-            "invoice_total": self._sum_amounts(normalized_rows["invoice"]),
+            "bank_total": self._pane_total_for_direction(normalized_rows["bank"], direction),
+            "invoice_total": self._pane_total_for_direction(normalized_rows["invoice"], direction),
         }
         directions = self._directions(normalized_rows)
-        direction = next(iter(directions)) if len(directions) == 1 else "unknown"
         has_direction_gap = any(
             self._row_direction(row) is None
             for rows in normalized_rows.values()
@@ -104,7 +104,7 @@ class WorkbenchAmountCheckService:
         status = "matched"
         requires_note = False
 
-        if direction == "unknown" and (has_direction_gap or not directions):
+        if direction == "unknown" and (has_direction_gap or not directions or has_direction_conflict):
             status = "unknown"
             requires_note = True
         elif direction != "unknown" and len(comparable) >= 2:
@@ -119,9 +119,47 @@ class WorkbenchAmountCheckService:
             "oa_total": self._format_amount(totals["oa_total"]),
             "bank_total": self._format_amount(totals["bank_total"]),
             "invoice_total": self._format_amount(totals["invoice_total"]),
+            "oa_amount": self._format_amount(totals["oa_total"]),
+            "bank_amount": self._format_amount(totals["bank_total"]),
+            "amount_delta": self._format_amount(self._amount_delta(comparable)),
             "mismatch_fields": mismatch_fields,
             "requires_note": requires_note,
         }
+
+    def _check_direction(self, rows_by_type: dict[str, list[dict[str, Any]]]) -> tuple[str, bool]:
+        non_bank_directions = {
+            direction
+            for row_type in ("oa", "invoice")
+            for row in rows_by_type.get(row_type, [])
+            for direction in (self._row_direction(row),)
+            if direction is not None
+        }
+        if len(non_bank_directions) == 1:
+            return next(iter(non_bank_directions)), False
+        if len(non_bank_directions) > 1:
+            return "unknown", True
+
+        directions = self._directions(rows_by_type)
+        if len(directions) == 1:
+            return next(iter(directions)), False
+        return "unknown", False
+
+    def _pane_total_for_direction(self, rows: list[dict[str, Any]], direction: str) -> Decimal | None:
+        if direction not in {"payment", "receipt"}:
+            return self._sum_amounts(rows)
+        matching_rows = [row for row in rows if self._row_direction(row) == direction]
+        if matching_rows:
+            return self._sum_amounts(matching_rows)
+        known_direction_rows = [row for row in rows if self._row_direction(row) is not None]
+        if known_direction_rows:
+            return ZERO
+        return self._sum_amounts(rows)
+
+    def _amount_delta(self, comparable: dict[str, Decimal]) -> Decimal | None:
+        if len(comparable) < 2:
+            return None
+        values = list(comparable.values())
+        return (max(values) - min(values)).quantize(CENT)
 
     def _mismatch_fields_for_totals(self, comparable: dict[str, Decimal]) -> list[str]:
         if len(comparable) < 2:

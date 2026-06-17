@@ -4,6 +4,7 @@ import unittest
 
 from fin_ops_platform.services.read_model_freshness import (
     normalize_source_versions,
+    require_expected_source_versions,
     resolve_read_model_freshness,
     source_version_mismatch_reasons,
     source_versions_match,
@@ -52,6 +53,21 @@ class ReadModelFreshnessTests(unittest.TestCase):
 
         self.assertEqual(freshness.status, "schema_mismatch")
         self.assertEqual(freshness.stale_reasons, ("schema_version_mismatch",))
+
+    def test_missing_schema_is_not_fresh_when_expected_schema_is_set(self) -> None:
+        freshness = resolve_read_model_freshness(
+            expected_schema_version="schema-v2",
+            actual_schema_version=None,
+            expected_source_versions={"source_version": 3},
+            actual_source_versions={"source_version": 3},
+        )
+
+        self.assertEqual(freshness.status, "schema_mismatch")
+        self.assertEqual(freshness.stale_reasons, ("schema_version_missing",))
+
+    def test_expected_source_versions_contract_must_not_be_empty(self) -> None:
+        with self.assertRaisesRegex(ValueError, "missing expected source versions"):
+            require_expected_source_versions({}, context="unit_test")
 
     def test_source_version_mismatch_is_stale(self) -> None:
         freshness = resolve_read_model_freshness(

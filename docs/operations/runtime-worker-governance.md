@@ -61,11 +61,12 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 页面读取 SQL read model 时，必须先经过统一 freshness/status 边界：
 
 1. route 只解析 HTTP 参数并调用 query service。
-2. query service 调 `ReadModelQueryGateway` 或同等统一 freshness resolver。
-3. fresh 时才允许读取 SQL payload，并且 Redis 只可缓存 fresh gate 之后的 payload。
-4. missing、dirty、schema mismatch、source version mismatch 时返回 `read_model_status=refreshing`，
+2. query service 调 `ReadModelQueryGateway` 或同等统一 freshness resolver，并必须声明 `expected_source_versions` 或 `expected_schema_version`。
+3. fresh 时才允许读取 SQL payload，并且 Redis 只可缓存 fresh gate 之后的 payload；fresh gate 必须同时带 scope、schema/source metadata proof。
+4. missing、dirty、schema mismatch、schema proof missing、source version missing/mismatch 时返回 `read_model_status=refreshing`，
    同时通过 `ReadModelRefreshGateway` 入队。
-5. unavailable 时由 route 映射 HTTP 状态，不能把不可用 projection 包装成 fresh。
+5. query service 缺少 expected freshness contract 属于代码配置错误，应 fail fast，不能默认空 versions 后继续返回 fresh。
+6. unavailable 时由 route 映射 HTTP 状态，不能把不可用 projection 包装成 fresh。
 
 统一响应至少应包含：
 

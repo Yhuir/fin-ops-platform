@@ -11,7 +11,10 @@ from fin_ops_platform.services.pending_invoice_service import (
     VALID_FILTERS,
     PendingInvoiceError,
 )
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
@@ -58,7 +61,7 @@ class PendingInvoiceReadModelService:
         self._queue_repository = queue_repository
         self._row_normalizer = row_normalizer
         self._settings_provider = settings_provider or (lambda: {})
-        self._source_versions_provider = source_versions_provider or (lambda: {})
+        self._source_versions_provider = source_versions_provider
 
     def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         direction = str(query.get("direction", ["expense"])[0] or "expense").strip()
@@ -203,16 +206,21 @@ class PendingInvoiceReadModelService:
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         provider = self._source_versions_provider
+        if not callable(provider):
+            return require_expected_source_versions({}, context="pending_invoice_read_model")
         try:
             parameters = signature(provider).parameters
         except (TypeError, ValueError):
-            return dict(provider() or {})
+            return require_expected_source_versions(provider() or {}, context="pending_invoice_read_model")
         if any(parameter.kind == parameter.VAR_KEYWORD for parameter in parameters.values()) or {
             "query",
             "payload",
         }.intersection(parameters):
-            return dict(provider(query=query or {}, payload=payload or {}) or {})
-        return dict(provider() or {})
+            return require_expected_source_versions(
+                provider(query=query or {}, payload=payload or {}) or {},
+                context="pending_invoice_read_model",
+            )
+        return require_expected_source_versions(provider() or {}, context="pending_invoice_read_model")
 
     def source_summary_for_query(
         self,

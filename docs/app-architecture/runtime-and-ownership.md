@@ -24,9 +24,10 @@ flowchart LR
 
 1. 页面调用 `web/src/features/*/api.ts`。
 2. Flask route 完成 HTTP 参数解析、权限映射和响应 shape。
-3. 查询型 service 或 `ReadModelQueryGateway` 判断 read model 是否 fresh。
-4. fresh 时读取 SQL projection 或 repository；stale/missing 时返回状态并按需 enqueue refresh。
-5. 页面根据 `read_model_status`、`refreshing`、`stale`、`job` 等字段展示加载、刷新或不可用状态。
+3. 查询型 service 或 `ReadModelQueryGateway` 带着 expected schema/source contract 判断 read model 是否 fresh。
+4. fresh 必须同时满足 expected contract、actual projection metadata、dirty/readiness 状态；缺少 expected contract 或 actual schema/source proof 时不能标 fresh。
+5. fresh 时读取 SQL projection 或 repository；stale/missing/schema/source mismatch 时返回状态并按需 enqueue refresh。
+6. 页面根据 `read_model_status`、`refreshing`、`stale`、`job` 等字段展示加载、刷新或不可用状态。
 
 页面不能自行假设 read model fresh，也不能为了“有数据”绕过 freshness gate。
 

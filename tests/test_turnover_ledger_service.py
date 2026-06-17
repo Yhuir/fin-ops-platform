@@ -558,6 +558,85 @@ class TurnoverLedgerServiceTests(unittest.TestCase):
         self.assertEqual(group["flow_rows"][0]["category_label"], "借出款")
         self.assertEqual(group["flow_rows"][0]["category_version"], 4)
 
+    def test_grouped_ledger_uses_manual_version_when_category_version_is_zero(self) -> None:
+        transaction = self._transaction(
+            "txn-zero-category-manual-version",
+            direction=TransactionDirection.INFLOW,
+            amount="240000.00",
+            counterparty="刘涵静",
+            trade_time="2026-02-03 09:16:49",
+            summary="电子汇入",
+            remark="暂借款",
+        )
+        ledger_service = TurnoverLedgerService(
+            import_service=_ImportServiceStub([transaction]),
+            category_service=BankTransactionCategoryService.from_snapshot(None),
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-zero-category-manual-version": {
+                        "category_code": "external_turnover",
+                        "category_label": "借入款",
+                        "category_primary_label": "外部往来款收款",
+                        "category_sub_label": "借入款",
+                        "category_third_label": "个人往来",
+                        "category_label_path": ["外部往来款收款", "借入款", "个人往来"],
+                        "category_source": "auto",
+                        "category_version": 0,
+                        "manual_category_version": 11,
+                        "version": 3,
+                        "turnover_role": "external_turnover",
+                        "turnover_action_type": "pending_repayment",
+                        "turnover_family": "personal",
+                    }
+                }
+            ),
+        )
+
+        payload = ledger_service.list_grouped_ledger(family="personal")
+
+        flow_row = payload["groups"][0]["flow_rows"][0]
+        self.assertEqual(flow_row["source_bank_row_id"], "txn-zero-category-manual-version")
+        self.assertEqual(flow_row["category_version"], 11)
+        self.assertEqual(flow_row["manual_category_version"], 11)
+        self.assertEqual(flow_row["version"], 3)
+
+    def test_grouped_ledger_uses_bank_row_version_when_category_versions_are_zero(self) -> None:
+        transaction = self._transaction(
+            "txn-zero-category-base-version",
+            direction=TransactionDirection.INFLOW,
+            amount="9000.00",
+            counterparty="云南路桥",
+            trade_time="2026-01-01 09:00:00",
+            summary="往来款",
+        )
+        ledger_service = TurnoverLedgerService(
+            import_service=_ImportServiceStub([transaction]),
+            category_service=BankTransactionCategoryService.from_snapshot(None),
+            relation_service=TurnoverRelationService.from_snapshot(None),
+            category_provider=_EffectiveCategoryProviderStub(
+                {
+                    "txn-zero-category-base-version": {
+                        "category_code": "external_turnover",
+                        "category_label": "外部往来款",
+                        "category_path": [],
+                        "category_source": "auto",
+                        "category_version": 0,
+                        "manual_category_version": 0,
+                        "version": 7,
+                    }
+                }
+            ),
+        )
+
+        payload = ledger_service.list_grouped_ledger()
+
+        flow_row = payload["groups"][0]["flow_rows"][0]
+        self.assertEqual(flow_row["source_bank_row_id"], "txn-zero-category-base-version")
+        self.assertEqual(flow_row["category_version"], 7)
+        self.assertEqual(flow_row["manual_category_version"], 0)
+        self.assertEqual(flow_row["version"], 7)
+
     def test_grouped_ledger_filters_bank_detail_rows_by_selected_external_tags_and_third_label(self) -> None:
         transactions = [
             self._transaction(

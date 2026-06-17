@@ -17,6 +17,17 @@
 - 前端 domain event 只作为刷新提示；跨页面一致性仍由后端 dirty/outbox、read model freshness 和 worker readiness 保证。
 - export-preview/export 是同步生成路径；group 总数或展开后的 formal rows 超过 20,000 时必须返回 `turnover_ledger_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 
+## 2026-06-17 - grouped read model 版本投影与 schema 失效修复
+
+- 目标：修复生产外部往来款管理页选择 `txn_imported_1269` 与 `txn_imported_1361` 两笔 240,000 确认闭环时仍报“银行流水状态已变化，请刷新后重试。”的问题，并说明上一轮为什么没改好。
+- 真实原因：生产前后端都已部署上一轮修复；问题不是旧代码、OA 关联 chip 或金额不平。Chrome 登录态检查显示 grouped API 对这两条 flow row 仍返回 `category_version=0`，且没有 `manual_category_version` / `version`。上一轮修复了 live bank detail 转换、前端 mapper 和 stale precondition，但漏掉了 saved `turnover_ledger` grouped read model 投影；同时 `TURNOVER_LEDGER_SCHEMA_VERSION` 没有 bump，旧 projection 被 API 当 fresh 返回。前端按 fresh/rebind 规则重拉后仍只能提交 `expected_versions=0`，后端 live precondition 读取非零真实版本后正确拒绝为 stale。
+- 影响范围：`TurnoverLedgerService` grouped flow row 投影、`turnover_ledger_schema_version` source version、写入 stale precondition 共享版本 helper、本模块测试矩阵和 read-models 记录。
+- 关键决策：抽出共享 `turnover_bank_row_version`，按 `category_version`、`manual_category_version`、`version` 顺序取第一个非零数值；`TurnoverLedgerService` 在 bank rows、classified flow rows、unclassified flow rows 都使用同一语义，并保留 fallback 字段供前端 mapper 兜底。将 `TURNOVER_LEDGER_SCHEMA_VERSION` bump 到 `2026-06-turnover-ledger-v2`，发布后让旧 `turnover_ledger` read model stale/rebuild。继续保留后端 stale precondition，不放宽并发保护。
+- 为什么 e2e 没测出：现有 e2e 使用新建 fixture 和新投影 payload，覆盖了前端 fresh/rebind、confirm/withdraw 和 API mapper，但没有模拟“生产已存在的 SQL grouped read model 在 schema version 未变时继续被视为 fresh”。因此上一轮测试没有触达旧 projection 只含 `category_version=0` 的路径。
+- 文档影响：更新本模块 `state-machine.md`、`tests.md`、本实施记录和 read-models 模块记录；业务口径不变。
+- 测试覆盖：新增 `test_grouped_ledger_uses_manual_version_when_category_version_is_zero`、`test_grouped_ledger_uses_bank_row_version_when_category_versions_are_zero`；更新 `test_source_versions_include_all_turnover_and_cross_module_inputs` 锁定 schema version bump；保留 UoW stale precondition fallback 回归。
+- 未测风险：本地测试证明 projection 和 source version 语义；生产仍需发布后等待 `turnover_ledger:all` worker 重建，并用真实登录态对 `txn_imported_1269/1361` 做一次手工 smoke。
+
 ## 2026-06-17 - SQL bank row 0 占位版本导致闭环 stale 误报
 
 - 目标：修复外部往来款管理页选择 `txn_imported_*` SQL bank detail 流水确认手动零差额闭环时，后端误报“银行流水状态已变化，请刷新后重试。”的问题。
