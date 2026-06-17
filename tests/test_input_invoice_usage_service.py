@@ -393,6 +393,79 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
         self.assertEqual(row["paymentStatus"]["code"], "pending")
 
+    def test_oa_attachment_source_relation_displays_for_promoted_formal_invoice(self) -> None:
+        vendor = self._counterparty("vendor", "安徽德易智莱科技有限公司")
+        invoice = self._invoice(
+            "inv-formal-promoted",
+            "01506808456",
+            vendor,
+            total_with_tax="423.80",
+        )
+        invoice.seller_tax_no = "913401003366798893"
+        invoice.source_links = [
+            {
+                "source_type": "oa_attachment_invoice",
+                "source_workbench_row_id": "oa-att-inv-deyizhilai",
+                "derived_from_oa_id": "oa-deyizhilai",
+            }
+        ]
+        bank = self._bank_transaction("bank-deyizhilai", "423.80")
+        oa_projection = StaticOAProjection([self._oa("oa-deyizhilai", "樊相芳", "423.80")])
+        relation_facade = FakeWorkbenchRelationFacade(
+            [
+                {
+                    "row_id": "oa-att-inv-deyizhilai",
+                    "row_type": "input_invoice",
+                    "relation_status": "candidate",
+                    "group_ids": ["decision-oa-attachment-source"],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [{"id": bank.id, "relation_status": "candidate"}],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                }
+            ],
+            groups=[
+                {
+                    "group_id": "decision-oa-attachment-source",
+                    "scope_month": "2026-05",
+                    "relation_source": "automatic_decision",
+                    "relation_status": "candidate",
+                    "oa_row_ids": ["oa-deyizhilai"],
+                    "bank_transaction_ids": [bank.id],
+                    "input_invoice_ids": ["oa-att-inv-deyizhilai"],
+                    "output_invoice_ids": [],
+                    "payload": {
+                        "group_id": "decision-oa-attachment-source",
+                        "row_ids": ["oa-deyizhilai", bank.id, "oa-att-inv-deyizhilai"],
+                        "row_types": ["oa", "bank", "invoice"],
+                        "relation_mode": "automatic_decision",
+                        "relation_status": "candidate",
+                        "amount_check": {"matched": True},
+                    },
+                }
+            ],
+        )
+        service = InputInvoiceUsageQueryService(
+            import_service=ImportNormalizationService(
+                existing_invoices=[invoice],
+                existing_transactions=[bank],
+            ),
+            relation_facade=relation_facade,
+            oa_projection=oa_projection,
+        )
+
+        row = service.list_rows()["rows"][0]
+
+        self.assertEqual(row["invoice"]["sellerName"], "安徽德易智莱科技有限公司")
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(row["oa"]["primaryOaId"], "oa-deyizhilai")
+        self.assertEqual(row["oa"]["applicantName"], "樊相芳")
+        self.assertEqual(row["oa"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["bankTransactions"]["relationCount"], 1)
+        self.assertEqual(row["bankTransactions"]["primaryBankTransactionId"], bank.id)
+        self.assertEqual(row["bankTransactions"]["summaries"][0]["relationStatus"], "candidate")
+        self.assertEqual(row["paymentStatus"]["code"], "pending")
+
     def test_details_and_filter_options_have_complete_contract_shape(self) -> None:
         vendor = self._counterparty("vendor", "云南中招招标有限公司")
         invoice = self._invoice("inv-detail", "9301", vendor, buyer_name="云南溯源科技有限公司", remark="发票备注")

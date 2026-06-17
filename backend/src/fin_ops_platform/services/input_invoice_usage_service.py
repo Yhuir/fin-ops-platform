@@ -402,9 +402,14 @@ class InputInvoiceUsageQueryService:
 
     def _build_rows(self, *, month: str | None, context: DistributedInvoiceRelationContext) -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
-        context.preload_relation_rows([line.id for group in groups for line in group["line_items"]])
+        relation_lookup_ids = [
+            row_id
+            for group in groups
+            for row_id in self._invoice_relation_lookup_ids(group["line_items"])
+        ]
+        context.preload_relation_rows(relation_lookup_ids)
         context.preload_oa_records_from_relations(
-            [line.id for group in groups for line in group["line_items"]]
+            relation_lookup_ids
         )
         return [self._row_payload(group, context=context) for group in groups]
 
@@ -451,8 +456,8 @@ class InputInvoiceUsageQueryService:
     def _row_payload(self, group: dict[str, Any], *, context: DistributedInvoiceRelationContext) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         line_items: list[Invoice] = group["line_items"]
-        invoice_ids = [line.id for line in line_items]
-        relations = context.distributed_relations_for_row_ids(invoice_ids)
+        relation_lookup_ids = self._invoice_relation_lookup_ids(line_items)
+        relations = context.distributed_relations_for_row_ids(relation_lookup_ids)
         bank_payload = self._bank_relation_payload(primary, line_items, relations, context=context)
         oa_payload = self._oa_relation_payload(primary, line_items, relations, context=context)
         invoice_relation_payload = self._invoice_relation_payload(primary, line_items, relations, context=context)
@@ -657,7 +662,13 @@ class InputInvoiceUsageQueryService:
             for invoice in line_items:
                 if invoice.id not in seen:
                     seen.add(invoice.id)
-                    summaries.append(self._invoice_relation_summary(invoice, primary_invoice, None))
+                    summaries.append(
+                        self._invoice_relation_summary(
+                            invoice,
+                            primary_invoice,
+                            self._relation_for_invoice(relations, invoice),
+                        )
+                    )
         summaries.sort(key=lambda item: item["_sort"])
         public_summaries = [{key: value for key, value in item.items() if key != "_sort"} for item in summaries]
         primary = public_summaries[0] if public_summaries else {}
@@ -1017,6 +1028,34 @@ class InputInvoiceUsageQueryService:
             if row_id in {typed_row_id for typed_row_id, _ in self._typed_relation_rows(relation)}:
                 return relation
         return None
+
+    def _relation_for_invoice(self, relations: list[dict[str, Any]], invoice: Invoice) -> dict[str, Any] | None:
+        for row_id in self._invoice_relation_lookup_ids([invoice]):
+            relation = self._relation_for_row_id(relations, row_id)
+            if relation is not None:
+                return relation
+        return None
+
+    @classmethod
+    def _invoice_relation_lookup_ids(cls, line_items: list[Invoice]) -> list[str]:
+        return _dedupe_preserve_order(
+            row_id
+            for invoice in list(line_items or [])
+            for row_id in cls._invoice_relation_lookup_ids_for_invoice(invoice)
+        )
+
+    @staticmethod
+    def _invoice_relation_lookup_ids_for_invoice(invoice: Invoice) -> list[str]:
+        row_ids = [str(invoice.id or "").strip()]
+        for link in list(getattr(invoice, "source_links", []) or []):
+            if not isinstance(link, dict):
+                continue
+            if str(link.get("source_type") or "").strip() != "oa_attachment_invoice":
+                continue
+            source_row_id = str(link.get("source_workbench_row_id") or "").strip()
+            if source_row_id:
+                row_ids.append(source_row_id)
+        return row_ids
 
     @staticmethod
     def _relation_status(relation: dict[str, Any] | None) -> str:

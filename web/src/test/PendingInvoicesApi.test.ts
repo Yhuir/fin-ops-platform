@@ -400,6 +400,8 @@ describe("pending invoices and tag settings API mapping", () => {
             remaining_amount: "1200.00",
             amount_difference_abs: "0.00",
             candidate_status: "available",
+            bank_relation_status: "unlinked",
+            linked_bank_transaction_count: 0,
           }],
           pagination: { page: 1, page_size: 20, total: 1 },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -501,7 +503,14 @@ describe("pending invoices and tag settings API mapping", () => {
       page: 1,
       pageSize: 20,
     });
-    expect(candidates).toMatchObject({ rows: [{ invoiceId: "inv_001", candidateStatus: "available" }] });
+    expect(candidates).toMatchObject({
+      rows: [{
+        invoiceId: "inv_001",
+        candidateStatus: "available",
+        bankRelationStatus: "unlinked",
+        linkedBankTransactionCount: 0,
+      }],
+    });
 
     const preview = await api().previewAttachExistingInvoice({ transactionId: "txn_001", invoiceId: "inv_001", requestId: "preview-request" });
     expect(preview).toMatchObject({ previewId: "attach_preview_001", paymentImpact: { remainingAmountAfter: "0.00" } });
@@ -571,6 +580,8 @@ describe("pending invoices and tag settings API mapping", () => {
               remaining_amount: "120.00",
               amount_difference_abs: "116.00",
               candidate_status: "available",
+              bank_relation_status: "linked",
+              linked_bank_transaction_count: 1,
             },
           ],
           pagination: { page: 1, page_size: 20, total: 1 },
@@ -649,7 +660,12 @@ describe("pending invoices and tag settings API mapping", () => {
     expect(candidates).toMatchObject({
       transactionIds: ["txn_001", "txn_002"],
       selectionSummary: { transactionCount: 2, bankTotal: "236.00" },
-      rows: [{ invoiceId: "inv_001", amountDifferenceAbs: "116.00" }],
+      rows: [{
+        invoiceId: "inv_001",
+        amountDifferenceAbs: "116.00",
+        bankRelationStatus: "linked",
+        linkedBankTransactionCount: 1,
+      }],
       pagination: { page: 1, pageSize: 20, total: 1 },
     });
 
@@ -679,6 +695,48 @@ describe("pending invoices and tag settings API mapping", () => {
       affectedTransactionIds: ["txn_001", "txn_002"],
       affectedInvoiceIds: ["inv_001", "inv_002"],
     });
+  });
+
+  test("maps attach-existing preview conflict objects into readable messages", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      preview_id: "attach_conflict_preview",
+      request_key: "pending_invoice_attach_existing_batch:conflict",
+      can_confirm: false,
+      transaction_summaries: [],
+      invoice_summaries: [],
+      selection_summary: {
+        transaction_count: 1,
+        invoice_count: 1,
+        bank_total: "100.00",
+        invoice_total: "100.00",
+        difference_amount: "0.00",
+      },
+      payment_impact: {
+        paid_total_before: "0.00",
+        paid_total_after: "100.00",
+        invoice_total: "100.00",
+        remaining_amount_after: "0.00",
+        difference_amount_after: "0.00",
+      },
+      affected_months: ["2026-05"],
+      warnings: ["读模型已刷新，请确认后再提交"],
+      conflicts: [{
+        relation_case_id: "case_conflict",
+        relation_mode: "manual_confirmed",
+        row_ids: ["claim_001", "inv_001"],
+      }],
+      expires_at: "2026-05-25T10:10:00+08:00",
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const preview = await api().previewAttachExistingInvoices({
+      transactionIds: ["txn_001"],
+      invoiceIds: ["inv_001"],
+      requestId: "preview-conflict",
+    });
+
+    expect(preview.canConfirm).toBe(false);
+    expect(preview.conflicts).toEqual(["关系 case_conflict，模式 manual_confirmed，对象 claim_001, inv_001"]);
+    expect(preview.warnings).toEqual(["读模型已刷新，请确认后再提交"]);
   });
 
   test("batch marks income invoice status with generated request id", async () => {

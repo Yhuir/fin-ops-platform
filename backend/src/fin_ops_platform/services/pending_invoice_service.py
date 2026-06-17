@@ -74,6 +74,10 @@ PENDING_INVOICE_SORT_FIELDS = {
 }
 INVOICE_CANDIDATE_SORT_FIELDS = {"issue_date", "total_with_tax", "seller_name", "amount_difference_abs"}
 PENDING_INVOICE_EXPORT_ROW_LIMIT = 20000
+BANK_RELATION_STATUS_UNLINKED = "unlinked"
+BANK_RELATION_STATUS_LINKED = "linked"
+BANK_RELATION_STATUS_ALREADY_SELECTED = "already_selected"
+BANK_RELATION_STATUS_CONFLICT = "conflict"
 COMMAND_STATUSES = {
     "started",
     "invoice_created",
@@ -1093,6 +1097,11 @@ class PendingInvoiceQueryService:
                 else self._empty_payment_summary([self._invoice_payload(invoice, direction="expense")])
             )
             candidate_status = self._candidate_status(transaction.id, invoice.id)
+            bank_relation = self._bank_relation_status_payload(
+                relation_row,
+                selected_transaction_ids=[transaction.id],
+                candidate_status=candidate_status,
+            )
             amount_difference = (invoice_total - transaction.amount).copy_abs()
             rows.append(
                 {
@@ -1108,6 +1117,8 @@ class PendingInvoiceQueryService:
                     "related_paid_total": paid_summary["paid_total"],
                     "remaining_amount": paid_summary["remaining_amount"],
                     "candidate_status": candidate_status,
+                    **bank_relation,
+                    "conflict_reason": "已有不兼容关系" if candidate_status == "conflict" else "",
                     "amount_difference_abs": _decimal_to_str(amount_difference),
                 }
             )
@@ -1172,6 +1183,11 @@ class PendingInvoiceQueryService:
                 else self._empty_payment_summary([self._invoice_payload(invoice, direction="expense")])
             )
             candidate_status = self._batch_candidate_status(normalized_transaction_ids, invoice.id)
+            bank_relation = self._bank_relation_status_payload(
+                relation_row,
+                selected_transaction_ids=normalized_transaction_ids,
+                candidate_status=candidate_status,
+            )
             amount_difference = (invoice_total - selected_bank_total).copy_abs()
             rows.append(
                 {
@@ -1187,6 +1203,8 @@ class PendingInvoiceQueryService:
                     "related_paid_total": paid_summary["paid_total"],
                     "remaining_amount": paid_summary["remaining_amount"],
                     "candidate_status": candidate_status,
+                    **bank_relation,
+                    "conflict_reason": "已有不兼容关系" if candidate_status == "conflict" else "",
                     "amount_difference_abs": _decimal_to_str(amount_difference),
                 }
             )
@@ -1684,6 +1702,8 @@ class PendingInvoiceQueryService:
         }
         if expected.issubset({invoice_id, *linked_bank_ids}):
             return "already_related"
+        if not linked_bank_ids and self._distribution_row_has_attach_existing_linkable_group(relation_row, invoice_id):
+            return "available"
         return "available" if linked_bank_ids else ("conflict" if _linked_group_ids_from_distribution_row(relation_row) else "available")
 
     def _batch_candidate_status(self, transaction_ids: list[str], invoice_id: str) -> str:
@@ -1693,6 +1713,66 @@ class PendingInvoiceQueryService:
         if statuses and all(status == "already_related" for status in statuses):
             return "already_related"
         return "available"
+
+    @staticmethod
+    def _linked_bank_transaction_ids_from_distribution_row(relation_row: dict[str, Any] | None) -> set[str]:
+        if relation_row is None:
+            return set()
+        return {
+            str(item.get("id") or item.get("transaction_id") or "").strip()
+            for item in list(relation_row.get("linked_bank_transactions") or [])
+            if isinstance(item, dict)
+            and _distribution_item_is_linked(item)
+            and str(item.get("id") or item.get("transaction_id") or "").strip()
+        }
+
+    @staticmethod
+    def _distribution_row_has_attach_existing_linkable_group(relation_row: dict[str, Any] | None, invoice_id: str) -> bool:
+        if relation_row is None:
+            return False
+        for group in list(relation_row.get("_relation_groups") or []):
+            if not isinstance(group, dict) or not _distribution_group_is_linked(group):
+                continue
+            payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
+            row_ids = [str(row_id).strip() for row_id in list(payload.get("row_ids") or []) if str(row_id).strip()]
+            row_types = [
+                str(row_type).strip()
+                for row_type in list(payload.get("row_types") or [])
+                if str(row_type).strip()
+            ]
+            if not row_ids:
+                row_ids = [
+                    *[str(row_id).strip() for row_id in list(group.get("bank_transaction_ids") or []) if str(row_id).strip()],
+                    *[str(row_id).strip() for row_id in list(group.get("input_invoice_ids") or []) if str(row_id).strip()],
+                    *[str(row_id).strip() for row_id in list(group.get("output_invoice_ids") or []) if str(row_id).strip()],
+                    *[str(row_id).strip() for row_id in list(group.get("oa_row_ids") or []) if str(row_id).strip()],
+                ]
+            row_type_set = {row_type for row_type in row_types if row_type}
+            if invoice_id in row_ids and "invoice" in row_type_set and row_type_set.issubset({"bank", "invoice", "oa"}):
+                return True
+        return False
+
+    def _bank_relation_status_payload(
+        self,
+        relation_row: dict[str, Any] | None,
+        *,
+        selected_transaction_ids: list[str],
+        candidate_status: str,
+    ) -> dict[str, Any]:
+        linked_bank_ids = self._linked_bank_transaction_ids_from_distribution_row(relation_row)
+        selected_ids = {str(transaction_id).strip() for transaction_id in list(selected_transaction_ids or []) if str(transaction_id).strip()}
+        if candidate_status == "conflict":
+            status = BANK_RELATION_STATUS_CONFLICT
+        elif selected_ids and selected_ids.issubset(linked_bank_ids):
+            status = BANK_RELATION_STATUS_ALREADY_SELECTED
+        elif linked_bank_ids:
+            status = BANK_RELATION_STATUS_LINKED
+        else:
+            status = BANK_RELATION_STATUS_UNLINKED
+        return {
+            "bank_relation_status": status,
+            "linked_bank_transaction_count": len(linked_bank_ids),
+        }
 
     @staticmethod
     def _sort_candidate_rows(
@@ -2788,7 +2868,7 @@ class PendingInvoiceApplicationService:
             row_ids = {str(row_id) for row_id in list(relation.get("row_ids") or [])}
             if expected_rows.issubset(row_ids):
                 return str(relation.get("case_id"))
-            if invoice_id in row_ids and _relation_links_invoice_to_bank_payment(relation, invoice_id):
+            if invoice_id in row_ids and _relation_can_absorb_attach_existing_invoice(relation, invoice_id):
                 existing_row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
                 existing_row_types = [
                     str(row_type).strip()
@@ -2861,7 +2941,7 @@ class PendingInvoiceApplicationService:
             if expected_rows.issubset(relation_row_ids):
                 return str(relation.get("case_id") or "")
             for invoice_id in invoice_ids:
-                if invoice_id in relation_row_ids and not _relation_links_invoice_to_bank_payment(relation, invoice_id):
+                if invoice_id in relation_row_ids and not _relation_can_absorb_attach_existing_invoice(relation, invoice_id):
                     raise PendingInvoiceError(
                         "active_relation_conflict",
                         "One or more invoices already have an active conflicting relation.",
@@ -2940,7 +3020,7 @@ class PendingInvoiceApplicationService:
             }
             if transaction_id in linked_bank_ids:
                 return []
-            saw_existing_bank_payment_group = False
+            saw_existing_linkable_group = False
             for group in list(relation_row.get("_relation_groups") or []):
                 if not isinstance(group, dict):
                     continue
@@ -2961,8 +3041,14 @@ class PendingInvoiceApplicationService:
                     for row_type in list(payload.get("row_types") or [])
                     if str(row_type).strip()
                 ]
-                if invoice_id in row_ids and transaction_id not in row_ids and "bank" in row_types and "invoice" in row_types:
-                    saw_existing_bank_payment_group = True
+                row_type_set = {row_type for row_type in row_types if row_type}
+                if (
+                    invoice_id in row_ids
+                    and transaction_id not in row_ids
+                    and "invoice" in row_type_set
+                    and row_type_set.issubset({"bank", "invoice", "oa"})
+                ):
+                    saw_existing_linkable_group = True
                     continue
                 if invoice_id in row_ids and transaction_id not in row_ids:
                     conflicts.append(
@@ -2974,7 +3060,7 @@ class PendingInvoiceApplicationService:
                     )
             if conflicts:
                 return conflicts
-            if saw_existing_bank_payment_group:
+            if saw_existing_linkable_group:
                 return []
             group_ids = _linked_group_ids_from_distribution_row(relation_row)
             if linked_bank_ids or group_ids:
@@ -3444,12 +3530,11 @@ def _invoice_total(invoice: Invoice) -> Decimal:
     return Decimal(invoice.total_with_tax if invoice.total_with_tax is not None else invoice.amount).quantize(Decimal("0.01"))
 
 
-def _relation_links_invoice_to_bank_payment(relation: dict[str, Any], invoice_id: str) -> bool:
+def _relation_can_absorb_attach_existing_invoice(relation: dict[str, Any], invoice_id: str) -> bool:
     row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
     row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
     has_invoice = any(row_id == invoice_id and row_type == "invoice" for row_id, row_type in zip(row_ids, row_types, strict=False))
-    has_bank = any(row_type == "bank" for row_type in row_types)
-    return has_invoice and has_bank
+    return has_invoice and {row_type for row_type in row_types if row_type}.issubset({"bank", "invoice", "oa"})
 
 
 def _distribution_item_relation_status(item: dict[str, Any] | None) -> str:

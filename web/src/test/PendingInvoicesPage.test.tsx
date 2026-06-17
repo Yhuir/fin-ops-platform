@@ -354,6 +354,7 @@ function installPendingInvoiceFetch(options: {
   rowsPayload?: (url: URL) => Array<Record<string, unknown>>;
   readModelStatus?: string;
   operationBarrierResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
+  attachExistingInvoicesPreviewResponse?: (body: Record<string, unknown>, url: URL) => Response | Promise<Response>;
   exportDownloadResponse?: (url: URL) => Response;
   onRulesSaved?: () => void;
   rulesSaveResponse?: (body: Record<string, unknown>, url: URL) => Response;
@@ -589,6 +590,8 @@ function installPendingInvoiceFetch(options: {
             remaining_amount: "1200.00",
             amount_difference_abs: multi ? "36.00" : "0.00",
             candidate_status: "available",
+            bank_relation_status: "unlinked",
+            linked_bank_transaction_count: 0,
           },
           ...(multi ? [{
             invoice_id: "inv-candidate-2",
@@ -602,6 +605,8 @@ function installPendingInvoiceFetch(options: {
             remaining_amount: "36.00",
             amount_difference_abs: "1200.00",
             candidate_status: "available",
+            bank_relation_status: "linked",
+            linked_bank_transaction_count: 1,
           }] : []),
         ],
         pagination: { page: 1, page_size: 20, total: multi ? 2 : 1 },
@@ -621,12 +626,17 @@ function installPendingInvoiceFetch(options: {
           remaining_amount: "1200.00",
           amount_difference_abs: "0.00",
           candidate_status: "available",
+          bank_relation_status: "unlinked",
+          linked_bank_transaction_count: 0,
         }],
         pagination: { page: 1, page_size: 20, total: 1 },
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/pending-invoices/attach-existing-invoices/preview" && method === "POST") {
       const body = JSON.parse(String(init?.body ?? "{}")) as { transaction_ids?: string[]; invoice_ids?: string[] };
+      if (options.attachExistingInvoicesPreviewResponse) {
+        return options.attachExistingInvoicesPreviewResponse(body, url);
+      }
       const transactionIds = Array.isArray(body.transaction_ids) ? body.transaction_ids : [];
       const invoiceIds = Array.isArray(body.invoice_ids) ? body.invoice_ids : [];
       const multi = transactionIds.includes("txn-paid-pending-2") || invoiceIds.includes("inv-candidate-2");
@@ -1405,8 +1415,11 @@ describe("Pending invoices page", () => {
     await user.click(within(page).getByRole("button", { name: "选择发票" }));
 
     expect(await screen.findByRole("heading", { name: "选择已有进项发票" })).toBeInTheDocument();
-    expect(await screen.findByRole("table", { name: "发票候选" })).toBeInTheDocument();
+    const candidateTable = await screen.findByRole("table", { name: "发票候选" });
+    expect(within(candidateTable).getByRole("columnheader", { name: "流水关联" })).toBeInTheDocument();
+    expect(within(candidateTable).queryByRole("columnheader", { name: "待支付" })).not.toBeInTheDocument();
     expect(await screen.findByText("DIG-CAND-001")).toBeInTheDocument();
+    expect(within(candidateTable).getByText("未关联流水")).toBeInTheDocument();
     await user.type(screen.getByLabelText("销方"), "云南开票供应商");
     await user.click(screen.getByRole("button", { name: "搜索" }));
     await waitFor(() => {
@@ -1428,6 +1441,64 @@ describe("Pending invoices page", () => {
       expect(paths).toContain("/api/pending-invoices/attach-existing-invoices");
       expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
     });
+  }, 45_000);
+
+  test("shows preview conflicts and keeps confirm disabled when attach-existing cannot be confirmed", async () => {
+    const user = userEvent.setup();
+    installPendingInvoiceFetch({
+      attachExistingInvoicesPreviewResponse: () => new Response(JSON.stringify({
+        preview_id: "attach-preview-conflict",
+        request_key: "pending_invoice_attach_existing_batch:conflict",
+        can_confirm: false,
+        transaction_summaries: [{
+          id: "txn-paid-pending",
+          counterparty_name: "云南开票供应商",
+          trade_time: "2026-05-02",
+          debit_amount: "1200.00",
+        }],
+        invoice_summaries: [{
+          id: "inv-candidate",
+          digital_invoice_no: "DIG-CAND-001",
+          issue_date: "2026-05-06",
+          seller_name: "云南开票供应商",
+          seller_tax_no: "915300009999",
+          total_with_tax: "1200.00",
+        }],
+        selection_summary: {
+          transaction_count: 1,
+          invoice_count: 1,
+          bank_total: "1200.00",
+          invoice_total: "1200.00",
+          difference_amount: "0.00",
+        },
+        payment_impact: {
+          paid_total_before: "0.00",
+          paid_total_after: "1200.00",
+          invoice_total: "1200.00",
+          remaining_amount_after: "0.00",
+          difference_amount_after: "0.00",
+        },
+        affected_months: ["2026-05"],
+        warnings: [],
+        conflicts: [{
+          relation_case_id: "case-conflict",
+          relation_mode: "manual_confirmed",
+          row_ids: ["claim-001", "inv-candidate"],
+        }],
+        expires_at: "2026-05-25T10:10:00+08:00",
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    });
+    renderAppAt("/pending-invoices");
+
+    const page = await findPendingInvoicesPage();
+    await user.click(await within(page).findByRole("checkbox", { name: "选择流水 云南开票供应商" }));
+    await user.click(within(page).getByRole("button", { name: "选择发票" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择发票 DIG-CAND-001" }));
+    await user.click(screen.getByRole("button", { name: "预览关联" }));
+
+    expect(await screen.findByText("不可确认原因")).toBeInTheDocument();
+    expect(screen.getByText("关系 case-conflict，模式 manual_confirmed，对象 claim-001, inv-candidate")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认建立关系" })).toBeDisabled();
   }, 45_000);
 
   test("selects multiple expense rows and multiple invoices from the existing invoice drawer", async () => {
@@ -1452,11 +1523,12 @@ describe("Pending invoices page", () => {
     await user.click(await screen.findByRole("checkbox", { name: "选择发票 DIG-CAND-001" }));
     await user.click(await screen.findByRole("checkbox", { name: "选择发票 DIG-CAND-002" }));
     expect(screen.getByText("已选发票金额")).toBeInTheDocument();
-    expect(screen.getByText("差额")).toBeInTheDocument();
+    expect(screen.getByText("本次选择差额")).toBeInTheDocument();
     expect(screen.getByText("0.00")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "预览关联" }));
     expect(await screen.findByText("pending_invoice_attach_existing_batch:multi")).toBeInTheDocument();
+    expect(screen.getByText("关联后待付")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "确认建立关系" }));
 
     await waitFor(() => {

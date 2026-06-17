@@ -13,6 +13,8 @@
 - filter-options 在 fresh gate 通过后应优先走 SQL 聚合读取选项，不再为生成筛选项拉取全量 rows；这属于页面首屏性能路径，不能回退到伪 fresh。
 - export-preview 和 export 通过 `PendingInvoiceReadModelService.all_rows()` 收集当前筛选结果时，超过 20,000 行必须 fail-closed，不能继续分页并同步生成大 XLSX。
 - OA/流水/发票 relation 不是待找发票私有事实；当前页面只通过 attach existing 写入选择已有发票关系，且必须委托 `WorkbenchRelationCommandService`；读取既有关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution。
+- 选择已有进项发票候选表的“流水关联”chip 必须使用后端返回的 `bank_relation_status` / `linked_bank_transaction_count`，不能用 `remaining_amount=0` 或候选金额推断；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。
+- attach existing 可并入兼容的 bank+invoice 或 OA+invoice active relation；confirm 后如果从关联台 withdraw 新 active case，必须恢复 confirm 前上一 active relation 状态。
 - manual invoice 不再是当前待找发票 HTTP/UI 新写入口；历史 `preview_manual_invoice` / `confirm_manual_invoice` 只保留旧 command 恢复和迁移兼容。
 - 收入状态覆盖必须走批量 service/API 边界，先整批校验再一次写 command/audit/finalizer，不能由前端循环单条接口形成半成功。
 - 2026-06-15 测试闭环审计确认：现有 P0/P1 覆盖支出/收入状态、规则保存、manual 新写入口移除、历史 manual command 兼容、attach existing、income status batch、API 契约、SQL read model、worker fan-out、lifecycle fan-out、App Status 和前端交互。
@@ -33,6 +35,17 @@
 ```
 
 ## 历史记录
+
+## 2026-06-17 - 选择已有发票候选关系 chip 与 active case restore
+
+- 目标：修复“选择已有进项发票”预览后确认按钮不可解释地禁用的问题，并把候选表“待支付”列替换为后端事实驱动的“流水关联”chip；同时确保已有 OA+发票关系能与本次选择的流水/发票合并进同一 active case，关联台撤回恢复上一状态。
+- 影响范围：`PendingInvoiceQueryService` candidates、`PendingInvoiceApplicationService` attach existing 合并规则、`PendingInvoiceInvoicePickerDrawer`、前端 pending invoice API/types、API/module 文档和服务/API/前端测试。
+- 关键决策：候选表继续保留后端 `remaining_amount` 兼容字段，但 UI 不用它表达流水关联；新增 `bank_relation_status` 和 `linked_bank_transaction_count`。preview 中 `selection_summary.difference_amount` 只表示本次选择差额，最终补付看 `payment_impact.remaining_amount_after`。兼容 active relation 的 row types 限定为 `bank` / `invoice` / `oa`，未知 row type 仍按冲突处理。
+- 文档影响：更新 `docs/dev/api-contracts.md`、本模块 `README.md`、`state-machine.md`、`tests.md` 和本实施记录。
+- 测试覆盖：新增/更新 `tests/test_pending_invoice_service.py` 覆盖 candidate chip 状态、OA+invoice 可并入和 withdraw restore；更新 `tests/test_pending_invoice_api.py` 覆盖 batch candidate 字段；更新 `web/src/test/PendingInvoicesApi.test.ts` 覆盖 mapper 和 conflict object 文案；更新 `web/src/test/PendingInvoicesPage.test.tsx` 覆盖 chip、差额标签、preview 冲突原因和禁用确认。
+- 验证命令：`PYTHONPATH=backend/src python -m unittest tests.test_pending_invoice_service.PendingInvoiceQueryServiceTests tests.test_pending_invoice_service.PendingInvoiceApplicationServiceTests tests.test_pending_invoice_api.PendingInvoiceApiTests.test_batch_attach_existing_invoice_endpoints -v`；`cd web && npm test -- --run src/test/PendingInvoicesApi.test.ts src/test/PendingInvoicesPage.test.tsx`。
+- 未测风险：本地未跑真实浏览器截图和真实 Workbench 页面 withdraw 操作；withdraw restore 由 service-level canonical relation command 覆盖。真实 Postgres/RabbitMQ/Redis worker drain 仍需 staging 或夜间 CI。
+- 后续事项：可在 staging 用真实“OA+发票+多流水+多发票”样本做一次关联台展示和撤回人工 smoke。
 
 ## 2026-06-16 - P2/P3 导出全量收集上限
 

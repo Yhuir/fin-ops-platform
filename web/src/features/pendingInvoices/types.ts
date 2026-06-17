@@ -361,6 +361,7 @@ export type PendingInvoiceObjectDetail = {
 };
 
 export type PendingInvoiceCandidateStatus = "available" | "already_related" | "conflict" | (string & {});
+export type PendingInvoiceCandidateBankRelationStatus = "unlinked" | "linked" | "already_selected" | "conflict" | (string & {});
 
 export type PendingInvoiceCandidateSortField = "issue_date" | "total_with_tax" | "seller_name" | "amount_difference_abs";
 
@@ -394,6 +395,8 @@ export type PendingInvoiceCandidate = PendingInvoiceSummary & {
   remainingAmount: string;
   amountDifferenceAbs: string;
   candidateStatus: PendingInvoiceCandidateStatus;
+  bankRelationStatus: PendingInvoiceCandidateBankRelationStatus;
+  linkedBankTransactionCount: number;
   conflictReason: string;
 };
 

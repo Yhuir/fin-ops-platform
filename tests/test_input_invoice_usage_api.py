@@ -436,6 +436,77 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(failed_payload["status"], "oa_draft_failed")
         self.assertEqual(failed_payload["version"], 2)
 
+    def test_oa_reverse_preview_marks_candidate_oa_relation_as_non_selectable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            invoice = self._invoice("inv-candidate-oa", "3002", "候选供应商", total_with_tax="109.00")
+            oa_projection = StaticOAProjection([self._oa("oa-candidate-existing", "胡蓉", "109.00")])
+            relation_facade = FakeWorkbenchRelationFacade(
+                [
+                    {
+                        "row_id": invoice.id,
+                        "row_type": "input_invoice",
+                        "relation_status": "candidate",
+                        "group_ids": ["decision-open-oa-candidate"],
+                        "linked_oa": [],
+                        "linked_bank_transactions": [],
+                        "linked_input_invoices": [],
+                        "linked_output_invoices": [],
+                    }
+                ],
+                groups=[
+                    {
+                        "group_id": "decision-open-oa-candidate",
+                        "scope_month": "2026-05",
+                        "relation_source": "automatic_decision",
+                        "relation_status": "candidate",
+                        "oa_row_ids": ["oa-candidate-existing"],
+                        "bank_transaction_ids": [],
+                        "input_invoice_ids": [invoice.id],
+                        "output_invoice_ids": [],
+                        "payload": {
+                            "group_id": "decision-open-oa-candidate",
+                            "row_ids": ["oa-candidate-existing", invoice.id],
+                            "row_types": ["oa", "invoice"],
+                            "relation_mode": "automatic_decision",
+                            "relation_status": "candidate",
+                            "amount_check": {"matched": True},
+                        },
+                    }
+                ],
+            )
+            self._install_service(
+                app,
+                invoices=[invoice],
+                oa_projection=oa_projection,
+                relation_facade=relation_facade,
+            )
+
+            response = app.handle_request(
+                "POST",
+                "/api/input-invoice-usage/oa-reverse/preview",
+                body=json.dumps(
+                    {
+                        "source": "explicitSelection",
+                        "invoiceIds": [invoice.id],
+                        "targetApplicantCode": "chen_xiuyun",
+                    }
+                ),
+            )
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["invoiceCount"], 0)
+        self.assertFalse(payload["canCreateDraft"])
+        self.assertEqual(payload["nextAction"], "no_valid_candidates")
+        self.assertEqual(payload["invoiceRows"], [])
+        self.assertEqual(len(payload["rejectedInvoices"]), 1)
+        rejected = payload["rejectedInvoices"][0]
+        self.assertEqual(rejected["invoiceId"], invoice.id)
+        self.assertEqual(rejected["invoiceNo"], "3002")
+        self.assertEqual(rejected["reasonCode"], "already_has_candidate_oa")
+        self.assertEqual(rejected["oaRelationStatus"], "candidate")
+
     def test_oa_reverse_draft_route_creates_draft_then_waits_for_user_submission_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -901,6 +972,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         transactions: list[BankTransaction] | None = None,
         pair_service: WorkbenchPairRelationService | None = None,
         oa_projection: object | None = None,
+        relation_facade: object | None = None,
     ) -> None:
         import_service = ImportNormalizationService(
             existing_invoices=invoices,
@@ -911,7 +983,8 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         app._workbench_pair_relation_service = relation_service
         app._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=import_service,
-            relation_facade=FakeWorkbenchRelationFacade.from_pair_service(
+            relation_facade=relation_facade
+            or FakeWorkbenchRelationFacade.from_pair_service(
                 pair_service=relation_service,
                 transactions=list(transactions or []),
                 invoices=list(invoices),

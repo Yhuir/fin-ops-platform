@@ -189,6 +189,70 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertTrue(preview["canCreateDraft"])
         self.assertEqual(preview["nextAction"], "create_batch")
 
+    def test_preview_marks_oa_candidate_relations_without_treating_them_as_unlinked(self) -> None:
+        vendor = self._counterparty("vendor", "供应商")
+        invoice = self._invoice("inv-candidate-oa", "9501", vendor, total_with_tax="109.00")
+        oa_projection = StaticOAProjection([self._oa("oa-candidate-existing", "胡蓉", "109.00")])
+        relation_facade = FakeWorkbenchRelationFacade(
+            [
+                {
+                    "row_id": invoice.id,
+                    "row_type": "input_invoice",
+                    "relation_status": "candidate",
+                    "group_ids": ["decision-open-oa-candidate"],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                }
+            ],
+            groups=[
+                {
+                    "group_id": "decision-open-oa-candidate",
+                    "scope_month": "2026-05",
+                    "relation_source": "automatic_decision",
+                    "relation_status": "candidate",
+                    "oa_row_ids": ["oa-candidate-existing"],
+                    "bank_transaction_ids": [],
+                    "input_invoice_ids": [invoice.id],
+                    "output_invoice_ids": [],
+                    "payload": {
+                        "group_id": "decision-open-oa-candidate",
+                        "row_ids": ["oa-candidate-existing", invoice.id],
+                        "row_types": ["oa", "invoice"],
+                        "relation_mode": "automatic_decision",
+                        "relation_status": "candidate",
+                        "amount_check": {"matched": True},
+                    },
+                }
+            ],
+        )
+        service = InputInvoiceUsageOaReverseService(
+            query_service=InputInvoiceUsageQueryService(
+                import_service=ImportNormalizationService(existing_invoices=[invoice]),
+                relation_facade=relation_facade,
+                oa_projection=oa_projection,
+            ),
+            repository=InMemoryInputInvoiceUsageOaReverseBatchRepository(),
+        )
+
+        preview = service.preview(
+            {
+                "source": "explicitSelection",
+                "invoiceIds": [invoice.id],
+                "targetApplicantCode": "chen_xiuyun",
+            },
+            can_create_draft=True,
+        )
+
+        self.assertEqual(preview["invoiceCount"], 0)
+        self.assertFalse(preview["canCreateDraft"])
+        candidate_rejection = preview["rejectedInvoices"][0]
+        self.assertEqual(candidate_rejection["invoiceId"], invoice.id)
+        self.assertEqual(candidate_rejection["reasonCode"], "already_has_candidate_oa")
+        self.assertEqual(candidate_rejection["oaRelationStatus"], "candidate")
+        self.assertEqual(candidate_rejection["invoiceNo"], "9501")
+
     def test_create_batch_is_idempotent_and_persists_audit_metadata(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
         preview = service.preview({"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True)

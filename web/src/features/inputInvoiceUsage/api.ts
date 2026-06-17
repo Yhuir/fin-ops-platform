@@ -571,6 +571,7 @@ function mapOaReverseInvoice(rawValue: unknown) {
     totalWithTax: stringValue(camelOrSnake(raw, "totalWithTax", "total_with_tax")),
     paymentStatusLabel: stringValue(camelOrSnake(raw, "paymentStatusLabel", "payment_status_label") ?? camelOrSnake(raw, "statusLabel", "status_label") ?? paymentStatus.label ?? raw.status),
     targetApplicantName: stringValue(camelOrSnake(raw, "targetApplicantName", "target_applicant_name")),
+    oaRelationStatus: stringValue(camelOrSnake(raw, "oaRelationStatus", "oa_relation_status")),
   };
 }
 
@@ -596,6 +597,7 @@ function mapRejectedInvoice(rawValue: unknown) {
         ?? paymentStatus.label
         ?? raw.status,
     ),
+    oaRelationStatus: stringValue(camelOrSnake(raw, "oaRelationStatus", "oa_relation_status")),
     reasonCode: stringValue(camelOrSnake(raw, "reasonCode", "reason_code")),
     reason: stringValue(raw.reason),
   };

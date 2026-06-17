@@ -277,6 +277,8 @@ type ApiCandidatesResponse = {
     remaining_amount: string | null;
     amount_difference_abs: string | null;
     candidate_status: string | null;
+    bank_relation_status: string | null;
+    linked_bank_transaction_count: number | string | null;
     conflict_reason: string | null;
   }>> | null;
   pagination?: {
@@ -376,6 +378,30 @@ function numberValue(value: unknown, fallback = 0) {
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function issueList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => {
+    if (typeof item === "string") {
+      return item.trim();
+    }
+    if (item && typeof item === "object") {
+      const record = item as Record<string, unknown>;
+      const relationCaseId = String(record.relation_case_id ?? record.relationCaseId ?? "").trim();
+      const relationMode = String(record.relation_mode ?? record.relationMode ?? "").trim();
+      const rowIds = stringList(record.row_ids ?? record.rowIds);
+      const parts = [
+        relationCaseId ? `关系 ${relationCaseId}` : "",
+        relationMode ? `模式 ${relationMode}` : "",
+        rowIds.length > 0 ? `对象 ${rowIds.join(", ")}` : "",
+      ].filter(Boolean);
+      return parts.length > 0 ? parts.join("，") : JSON.stringify(record);
+    }
+    return String(item).trim();
+  }).filter(Boolean);
 }
 
 function objectStringMap(value: Record<string, unknown>): Record<string, string> {
@@ -883,6 +909,8 @@ function mapPendingInvoiceCandidatesResponse(
         remainingAmount: stringValue(row.remaining_amount),
         amountDifferenceAbs: stringValue(row.amount_difference_abs),
         candidateStatus: stringValue(row.candidate_status, "available") as PendingInvoiceCandidate["candidateStatus"],
+        bankRelationStatus: stringValue(row.bank_relation_status, "unlinked") as PendingInvoiceCandidate["bankRelationStatus"],
+        linkedBankTransactionCount: numberValue(row.linked_bank_transaction_count),
         conflictReason: stringValue(row.conflict_reason),
       };
     }),
@@ -1012,8 +1040,8 @@ export async function previewAttachExistingInvoice(request: AttachExistingInvoic
     invoiceSummary: mapInvoice(payload.invoice_summary),
     paymentImpact: mapAttachPaymentImpact(payload.payment_impact),
     affectedMonths: stringList(payload.affected_months),
-    warnings: stringList(payload.warnings),
-    conflicts: stringList(payload.conflicts),
+    warnings: issueList(payload.warnings),
+    conflicts: issueList(payload.conflicts),
     expiresAt: stringValue(payload.expires_at),
   };
 }
@@ -1046,8 +1074,8 @@ export async function previewAttachExistingInvoices(request: AttachExistingInvoi
     },
     paymentImpact: mapAttachPaymentImpact(payload.payment_impact),
     affectedMonths: stringList(payload.affected_months),
-    warnings: stringList(payload.warnings),
-    conflicts: stringList(payload.conflicts),
+    warnings: issueList(payload.warnings),
+    conflicts: issueList(payload.conflicts),
     expiresAt: stringValue(payload.expires_at),
   };
 }

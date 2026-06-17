@@ -36,14 +36,16 @@ export type OaReverseRejectedInvoice = {
   issueDate?: string | null;
   totalWithTax?: string | null;
   paymentStatusLabel?: string | null;
+  oaRelationStatus?: OaRelationStatus | string | null;
   reasonCode?: string | null;
   reason: string;
 };
 
-type OaRelationFilter = "all" | "linked" | "unlinked";
+type OaRelationStatus = "linked" | "candidate" | "unlinked";
+type OaRelationFilter = "all" | OaRelationStatus;
 
 type OaReverseDisplayInvoice = InputInvoiceUsageOaReverseInvoice & {
-  oaRelationStatus: "linked" | "unlinked";
+  oaRelationStatus: OaRelationStatus;
   selectable: boolean;
   rejectedReason?: string | null;
 };
@@ -503,7 +505,7 @@ export default function OaReverseWorkspaceDrawer({
                                 aria-label={
                                   invoice.selectable
                                     ? `选择候选发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}`
-                                    : `已关联 OA 发票 ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId} 不可选择`
+                                    : `${oaRelationDisabledLabel(invoice.oaRelationStatus)} ${invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId} 不可选择`
                                 }
                                 checked={selectedCandidateIdSet.has(invoice.invoiceId)}
                                 disabled={!invoice.selectable}
@@ -531,14 +533,8 @@ export default function OaReverseWorkspaceDrawer({
                             <td>{invoice.issueDate || "-"}</td>
                             <td className="input-invoice-usage-oa-table__amount">{invoice.totalWithTax || "-"}</td>
                             <td>
-                              <span
-                                className={
-                                  invoice.oaRelationStatus === "linked"
-                                    ? "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning"
-                                    : "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success"
-                                }
-                              >
-                                {invoice.oaRelationStatus === "linked" ? "已关联oa" : "未关联oa"}
+                              <span className={oaRelationChipClassName(invoice.oaRelationStatus)}>
+                                {oaRelationChipLabel(invoice.oaRelationStatus)}
                               </span>
                             </td>
                             <td>{invoice.paymentStatusLabel || "候选"}</td>
@@ -594,6 +590,7 @@ export default function OaReverseWorkspaceDrawer({
 const OA_RELATION_FILTER_OPTIONS: Array<{ value: OaRelationFilter; label: string }> = [
   { value: "all", label: "全部" },
   { value: "linked", label: "已经关联oa" },
+  { value: "candidate", label: "候选oa" },
   { value: "unlinked", label: "未关联oa" },
 ];
 
@@ -601,17 +598,49 @@ function oaRelationFilterLabel(value: OaRelationFilter) {
   return OA_RELATION_FILTER_OPTIONS.find((option) => option.value === value)?.label ?? "全部";
 }
 
+function oaRelationChipLabel(value: OaRelationStatus) {
+  if (value === "linked") {
+    return "已关联oa";
+  }
+  if (value === "candidate") {
+    return "候选oa";
+  }
+  return "未关联oa";
+}
+
+function oaRelationChipClassName(value: OaRelationStatus) {
+  if (value === "linked") {
+    return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning";
+  }
+  if (value === "candidate") {
+    return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--info";
+  }
+  return "input-invoice-usage-rules-tag input-invoice-usage-rules-tag--success";
+}
+
+function oaRelationDisabledLabel(value: OaRelationStatus) {
+  return value === "candidate" ? "候选 OA 发票" : "已关联 OA 发票";
+}
+
+function normalizeOaRelationStatus(value: unknown): OaRelationStatus {
+  return value === "linked" || value === "candidate" ? value : "unlinked";
+}
+
 function invoicesFromPreview(preview: OaReversePreviewPayload) {
   const byId = new Map<string, OaReverseDisplayInvoice>();
   const putSelectable = (invoice: InputInvoiceUsageOaReverseInvoice) => {
+    const relationStatus = normalizeOaRelationStatus(invoice.oaRelationStatus);
     byId.set(invoice.invoiceId, {
       ...invoice,
-      oaRelationStatus: "unlinked",
-      selectable: true,
+      oaRelationStatus: relationStatus,
+      selectable: relationStatus === "unlinked",
     });
   };
-  const putLinkedRejected = (invoice: OaReverseRejectedInvoice, targetApplicantName?: string) => {
+  const putNonSelectableRejected = (invoice: OaReverseRejectedInvoice, targetApplicantName?: string) => {
     const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId;
+    const relationStatus = normalizeOaRelationStatus(
+      invoice.oaRelationStatus || (invoice.reasonCode === "already_has_candidate_oa" ? "candidate" : "linked"),
+    );
     byId.set(invoice.invoiceId, {
       invoiceId: invoice.invoiceId,
       invoiceNumber: String(invoice.invoiceNumber || invoiceNumber || ""),
@@ -621,7 +650,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
       totalWithTax: String(invoice.totalWithTax || ""),
       paymentStatusLabel: String(invoice.paymentStatusLabel || "候选"),
       targetApplicantName,
-      oaRelationStatus: "linked",
+      oaRelationStatus: relationStatus,
       selectable: false,
       rejectedReason: invoice.reason,
     });
@@ -633,8 +662,8 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
     putSelectable(invoice);
   }
   for (const invoice of preview.rejectedInvoices ?? []) {
-    if (invoice.reasonCode === "already_has_active_oa") {
-      putLinkedRejected(invoice, preview.targetApplicantName);
+    if (invoice.reasonCode === "already_has_active_oa" || invoice.reasonCode === "already_has_candidate_oa") {
+      putNonSelectableRejected(invoice, preview.targetApplicantName);
     }
   }
   for (const group of preview.groups) {
@@ -665,10 +694,10 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
       }
     }
     for (const invoice of group.rejectedInvoices ?? []) {
-      if (invoice.reasonCode !== "already_has_active_oa") {
+      if (invoice.reasonCode !== "already_has_active_oa" && invoice.reasonCode !== "already_has_candidate_oa") {
         continue;
       }
-      putLinkedRejected(invoice, group.targetApplicantName);
+      putNonSelectableRejected(invoice, group.targetApplicantName);
     }
   }
   return Array.from(byId.values());

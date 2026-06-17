@@ -63,6 +63,33 @@ function candidateStatusTone(status: PendingInvoiceCandidate["candidateStatus"])
   return "neutral";
 }
 
+function bankRelationStatusLabel(status: PendingInvoiceCandidate["bankRelationStatus"]) {
+  const labels: Record<string, string> = {
+    unlinked: "未关联流水",
+    linked: "已关联流水",
+    already_selected: "已关联本次流水",
+    conflict: "流水关系冲突",
+  };
+  return labels[status] ?? status;
+}
+
+function bankRelationStatusTone(status: PendingInvoiceCandidate["bankRelationStatus"]) {
+  if (status === "linked" || status === "already_selected") {
+    return "success";
+  }
+  if (status === "conflict") {
+    return "warning";
+  }
+  return "neutral";
+}
+
+function linkedBankTransactionText(candidate: PendingInvoiceCandidate) {
+  if (candidate.linkedBankTransactionCount <= 0) {
+    return "";
+  }
+  return `${candidate.linkedBankTransactionCount} 条已关联流水`;
+}
+
 export default function PendingInvoiceInvoicePickerDrawer({
   open,
   transactionIds,
@@ -246,14 +273,19 @@ export default function PendingInvoiceInvoicePickerDrawer({
       {error ? <StatusMessage tone="danger">{error}</StatusMessage> : null}
       {preview ? (
         <StatusMessage tone={preview.canConfirm ? "info" : "warning"}>
-          <span>{preview.requestKey}</span>
-          <span>关联后待付 {formatMoney(preview.paymentImpact.remainingAmountAfter)}</span>
+          <div className="pending-invoice-preview-message">
+            <span>{preview.requestKey}</span>
+            <span>关联后待付 {formatMoney(preview.paymentImpact.remainingAmountAfter)}</span>
+            {preview.conflicts.length > 0 ? <PreviewIssueList title="不可确认原因" items={preview.conflicts} /> : null}
+            {preview.warnings.length > 0 ? <PreviewIssueList title="提示" items={preview.warnings} /> : null}
+          </div>
         </StatusMessage>
       ) : null}
       <section aria-label="选择汇总" className="pending-invoice-metric-grid pending-invoice-picker-summary">
         <Metric label="已选流水金额" value={formatMoney(selectedBankTotal)} />
         <Metric label="已选发票金额" value={formatMoneyNumber(selectedInvoiceTotal)} />
-        <Metric label="差额" value={formatMoneyNumber(selectedDifference)} />
+        <Metric label="本次选择差额" value={formatMoneyNumber(selectedDifference)} />
+        {preview ? <Metric label="关联后待付" value={formatMoney(preview.paymentImpact.remainingAmountAfter)} /> : null}
       </section>
       <section className="pending-invoice-panel pending-invoice-filter-panel" aria-label="发票候选筛选">
         <Field label="关键词" value={keyword} onChange={(value) => { setKeyword(value); setPage(1); }} />
@@ -272,7 +304,7 @@ export default function PendingInvoiceInvoicePickerDrawer({
               <th scope="col">发票号码</th>
               <th scope="col">销方</th>
               <th className="pending-invoice-simple-table__amount" scope="col">价税合计</th>
-              <th className="pending-invoice-simple-table__amount" scope="col">待支付</th>
+              <th scope="col">流水关联</th>
               <th scope="col">状态</th>
             </tr>
           </thead>
@@ -307,7 +339,14 @@ export default function PendingInvoiceInvoicePickerDrawer({
                   </span>
                 </td>
                 <td className="pending-invoice-simple-table__amount">{formatMoney(candidate.totalWithTax)}</td>
-                <td className="pending-invoice-simple-table__amount">{formatMoney(candidate.remainingAmount)}</td>
+                <td>
+                  <span className="pending-invoice-table-stack">
+                    <span className={`pending-invoice-status-tag pending-invoice-status-tag--${bankRelationStatusTone(candidate.bankRelationStatus)}`}>
+                      {bankRelationStatusLabel(candidate.bankRelationStatus)}
+                    </span>
+                    {linkedBankTransactionText(candidate) ? <span>{linkedBankTransactionText(candidate)}</span> : null}
+                  </span>
+                </td>
                 <td>
                   <span className="pending-invoice-table-stack">
                     <span className={`pending-invoice-status-tag pending-invoice-status-tag--${candidateStatusTone(candidate.candidateStatus)}`}>
@@ -356,6 +395,17 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="pending-invoice-metric">
       <span className="pending-invoice-metric__label">{label}</span>
       <strong className="pending-invoice-metric__value">{value}</strong>
+    </div>
+  );
+}
+
+function PreviewIssueList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="pending-invoice-preview-issues">
+      <span>{title}</span>
+      <ul>
+        {items.map((item) => <li key={item}>{item}</li>)}
+      </ul>
     </div>
   );
 }

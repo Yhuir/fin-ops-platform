@@ -37,7 +37,7 @@
 
 OA/流水/发票配对关系不属于待找发票页面私有状态。读关系必须通过 `WorkbenchRelationReadFacade` / `workbench_relation` distribution；attach existing 单条和批量写关系必须委托 `WorkbenchRelationCommandService`。普通 relation read model 非 fresh 只影响读侧 freshness 和候选展示；写 API 的阻断条件必须来自权限/session、DB/目标写模型不可用、canonical relation version/idempotency/row occupation 冲突，不能因为 distribution 追赶中先写本模块半事实。历史 manual invoice command/service 只保留为旧数据恢复和迁移兼容事实，不再通过待找发票 HTTP API 或页面 UI 暴露新写入口。
 
-选择已有进项发票只从表格上方的选中流水工具栏进入。页面可以选择一条或多条 eligible 支出流水，右侧抽屉通过批量 candidates/preview/confirm API 选择多张进项发票，并展示已选流水金额、已选发票金额和差额。行内三点菜单和“补票”入口不是当前 UI/HTTP 契约。
+选择已有进项发票只从表格上方的选中流水工具栏进入。页面可以选择一条或多条 eligible 支出流水，右侧抽屉通过批量 candidates/preview/confirm API 选择多张进项发票。候选表的“流水关联”chip 必须来自后端 `bank_relation_status` / `linked_bank_transaction_count`，不得用 `remaining_amount=0` 推断是否已关联流水；候选表不再展示“待支付”金额列。抽屉汇总展示已选流水金额、已选发票金额和“本次选择差额”，preview 后展示“关联后待付”；最终补付金额以 preview `payment_impact.remaining_amount_after` 为准。preview `can_confirm=false` 时必须展示后端 conflicts/warnings 原因，不能只禁用确认按钮。行内三点菜单和“补票”入口不是当前 UI/HTTP 契约。
 
 收入侧支持与支出侧一致的多选，但只在 `direction=income` scope 内启用；选中后表格上方工具栏显示“标记无需开票”“标记现金收入”“清除选择”。收入批量状态写入走 `PUT /api/pending-invoices/income-statuses`，后端必须先全量校验 transaction ids、方向、重复选择、已关联销项发票和 status code，再一次性写入 command/audit/finalizer，不能逐行循环造成半成功。
 

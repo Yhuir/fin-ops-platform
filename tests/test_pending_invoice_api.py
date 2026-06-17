@@ -263,6 +263,10 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(candidates_response.status_code, 200)
         self.assertEqual(candidates_payload["selection_summary"]["transaction_count"], 2)
         self.assertEqual(candidates_payload["selection_summary"]["bank_total"], "236.00")
+        self.assertTrue(candidates_payload["rows"])
+        for row in candidates_payload["rows"]:
+            self.assertIn("bank_relation_status", row)
+            self.assertIn("linked_bank_transaction_count", row)
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(preview_payload["selection_summary"]["bank_total"], "236.00")
         self.assertEqual(preview_payload["selection_summary"]["invoice_total"], "236.00")

@@ -16,7 +16,7 @@
 - 关联台未配对区 open/proposed 候选必须通过 `WorkbenchRelationReadFacade` 进入进项发票使用情况页面展示；页面不能直接读取关联台候选表。candidate 只展示关系证据，不参与支付状态或 confirmed relation 判断。
 - `+N` 详情展开优先读取 `read_model.input_invoice_usage_rows` 单行 payload；SQL read model stale/missing 时返回 refreshing 并入队刷新，不在详情接口中触发全量 live rebuild。
 - `以发票反提 OA` 的草稿提交确认弹窗一旦打开，必须保持到用户选择 `已提交 OA` 或 `未提交 OA`；父页面重渲染和 preview reload 不能清空当前草稿 batch。
-- OA reverse preview 中已有 active OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选，并支持 `全部/已经关联oa/未关联oa` 表头筛选。
+- OA reverse preview 中已有 active/linked OA 关系的发票仍然不是可创建候选，但需要作为 rejected display row 返回给前端，展示 `已关联oa` chip、禁用勾选；关联台未配对区 open/proposed OA candidate 也不是可创建候选，展示 `候选oa` chip、禁用勾选。drawer 支持 `全部/已经关联oa/候选oa/未关联oa` 表头筛选。
 - 2026-06-11 测试闭环审计确认：本模块 P0/P1 已有测试覆盖 read model all scope、OA 反提、凭据加密、目标申请人 token provider、未提交回滚、已提交历史、设置页 UI 和进项页面 drawer；本轮不新增重复测试，主要补齐测试矩阵并同步长期 API 契约。
 
 ## 记录模板
@@ -35,6 +35,26 @@
 ```
 
 ## 历史记录
+
+## 2026-06-17 - 主列表显示 OA 附件来源 relation 证据
+
+- 目标：修复 `进项发票使用情况` 主列表中正式发票已由 OA 附件来源提升/合并，但 OA 列仍为空的问题；例如 `安徽德易智莱科技有限公司 / 913401003366798893` 在关联事实中有 OA，却因 row id 不一致未展示。
+- 影响范围：`InputInvoiceUsageQueryService` rows 构建、relation preload、发票 relation summary、模块 README/状态机/测试矩阵。
+- 关键决策：不新增页面私有匹配，不直接从前端或 pending invoice UI 推断 OA；列表仍通过 `WorkbenchRelationReadFacade` 读取统一 relation distribution，只是在查询 key 中加入 `source_links[].source_workbench_row_id`，覆盖正式发票 id 与 OA 附件 row id 不同的生产形态。candidate 证据只展示，不参与支付状态。
+- 文档影响：更新本实施记录、`README.md`、`state-machine.md` 和 `tests.md`；API shape 未变化，不更新 `docs/dev/api-contracts.md`。
+- 测试覆盖：新增 `InputInvoiceUsageQueryServiceTests.test_oa_attachment_source_relation_displays_for_promoted_formal_invoice`，覆盖 OA 附件来源 row id 的 OA candidate 展示和支付状态不变。
+- 验证命令：本轮最终说明列出实际执行命令。
+- 未测风险：真实生产行仍需部署后通过 read model refresh/只读 smoke 确认；本地测试覆盖 service 和 SQL read model 构建路径，不连接真实 OA/Postgres worker drain。
+
+## 2026-06-17 - OA reverse 候选 OA 三态 chip 修复
+
+- 目标：修复截图中发票在关联台未配对区已经有 OA candidate，但在 `以发票反提 OA` drawer 中显示 `未关联oa` 的问题。
+- 影响范围：`InputInvoiceUsageOaReverseService.preview` 的 rejected invoice contract、`OaReverseWorkspaceDrawer` 的 chip/filter/disabled 状态、前端 API mapper/types、样式、API contract 测试和模块文档。
+- 关键决策：截图 1 的“有 OA”是关联台未配对区 candidate，不是 active/linked OA 关系；旧实现只有 `linked/unlinked` 二态，导致 candidate 默认落到 `unlinked`。修复后 OA reverse 使用 `linked/candidate/unlinked` 三态：`linked` 显示 `已关联oa`，`candidate` 显示 `候选oa`，两者都不可勾选且不进入创建 OA 草稿 payload。
+- 文档影响：更新本实施记录、`README.md`、`state-machine.md`、`tests.md`、`oa-reverse-design.md` 和 `docs/dev/api-contracts.md`。
+- 测试覆盖：新增 service/API candidate OA preview 回归；更新前端 drawer 测试覆盖 `候选oa` chip、禁用勾选和 `全部/已经关联oa/候选oa/未关联oa` 筛选。
+- 验证命令：本轮最终说明列出实际执行命令。
+- 未测风险：真实生产截图行仍需部署后用实际 read model 数据只读 smoke；本地测试已覆盖 relation facade candidate payload 到 preview/API/UI mapper 的路径。
 
 ## 2026-06-17 - OA reverse 确认弹窗持久化与 OA 关联状态筛选
 

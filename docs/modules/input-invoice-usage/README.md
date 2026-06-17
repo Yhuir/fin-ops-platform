@@ -34,6 +34,10 @@ OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须�
 
 进项发票使用情况的列表和关系详情是读路径：关系证据来自 `WorkbenchRelationReadFacade` / `DistributedInvoiceRelationContext`，不直接调用 `WorkbenchRelationCommandService`。关联台未配对区 open/proposed 候选也必须通过同一个 facade 进入本页展示，不能由本页直接读取关联台候选表或自行拼候选。
 
+如果正式进项发票由 OA 附件发票提升或合并而来，列表关系查询必须同时使用发票自身 id 和 `source_links[].source_workbench_row_id` 中的 OA 附件发票 row id 查询统一 relation distribution。这样截图类“正式发票 id 与 OA 附件 row id 不同”的行仍能显示 OA/流水证据，但证据仍来自 `WorkbenchRelationReadFacade`，不能改为本页私有匹配。
+
+`以发票反提 OA` drawer 必须区分 OA 关系三态：`linked` 展示 `已关联oa`、不可勾选；`candidate` 展示 `候选oa`、不可勾选，提示用户先回关联台确认或处理候选；`unlinked` 展示 `未关联oa` 并允许进入创建 OA 草稿 payload。
+
 同一 linked 或 candidate relation 中存在多条 OA、银行流水或进项发票时，rows DTO 必须聚合为一条使用情况行，金额展示各自合计，并用 `relationCount`、`detailMode=list`、`summaries` 和 `invoiceRelations` 支持前端显示 `+N` 后打开关系明细。`relationStatus='candidate'` 只能作为候选证据展示；支付状态、已支付判断和已确认关系判断只能使用 `relationStatus='linked'` 的关系。
 
 `/api/input-invoice-usage/rows/{row_id}/relation-details` 在 SQL read model 可用时必须按 `row_id` 读取单行 payload 并展开已有 summaries，不能为了打开 `+N` 详情触发全量 live rebuild；read model missing/stale/source mismatch 时返回 refreshing 状态并入队刷新。

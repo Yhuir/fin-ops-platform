@@ -1181,6 +1181,12 @@ textarea {
   color: var(--fp-warning);
 }
 
+.input-invoice-usage-rules-tag--info {
+  border-color: color-mix(in srgb, var(--fp-info) 35%, var(--fp-border));
+  background: var(--fp-info-soft);
+  color: var(--fp-info);
+}
+
 .input-invoice-usage-rules-tag--success {
   border-color: color-mix(in srgb, var(--fp-success) 35%, var(--fp-border));
   background: var(--fp-success-soft);
@@ -7791,6 +7797,26 @@ textarea {
 
 .pending-invoice-status-message > span {
   display: block;
+}
+
+.pending-invoice-preview-message {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pending-invoice-preview-issues {
+  display: grid;
+  gap: 3px;
+}
+
+.pending-invoice-preview-issues ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.pending-invoice-preview-issues li {
+  overflow-wrap: anywhere;
 }
 
 .pending-invoice-spinner {

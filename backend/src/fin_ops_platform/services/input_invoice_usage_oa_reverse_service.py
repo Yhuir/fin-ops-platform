@@ -786,13 +786,20 @@ class InputInvoiceUsageOaReverseService:
     @staticmethod
     def _candidate_rejection(row: dict[str, object]) -> dict[str, object] | None:
         invoice_id = str(row.get("invoiceId") or "")
-        oa_payload = row.get("oa") if isinstance(row.get("oa"), dict) else {}
-        if int(oa_payload.get("relationCount") or 0) > 0:
+        oa_relation_status = InputInvoiceUsageOaReverseService._oa_relation_status(row)
+        if oa_relation_status == "linked":
             return {
                 "invoiceId": invoice_id,
                 "reasonCode": "already_has_active_oa",
                 "reason": "发票已有 active OA 关系",
                 "oaRelationStatus": "linked",
+            }
+        if oa_relation_status == "candidate":
+            return {
+                "invoiceId": invoice_id,
+                "reasonCode": "already_has_candidate_oa",
+                "reason": "发票已有待确认 OA 候选关系",
+                "oaRelationStatus": "candidate",
             }
         return None
 
@@ -814,8 +821,24 @@ class InputInvoiceUsageOaReverseService:
                 "label": str(payment_status.get("label") or ""),
                 "reason": str(payment_status.get("reason") or ""),
             },
-            "oaRelationStatus": "unlinked",
+            "oaRelationStatus": InputInvoiceUsageOaReverseService._oa_relation_status(row),
         }
+
+    @staticmethod
+    def _oa_relation_status(row: dict[str, object]) -> str:
+        oa_payload = row.get("oa") if isinstance(row.get("oa"), dict) else {}
+        summaries = [summary for summary in list(oa_payload.get("summaries") or []) if isinstance(summary, dict)]
+        statuses = {
+            str(summary.get("relationStatus") or summary.get("relation_status") or "linked").strip() or "linked"
+            for summary in summaries
+        }
+        if "linked" in statuses:
+            return "linked"
+        if "candidate" in statuses:
+            return "candidate"
+        if int(oa_payload.get("relationCount") or 0) > 0:
+            return "linked"
+        return "unlinked"
 
     @staticmethod
     def _resolve_target_applicant(value: Any) -> tuple[str, str]:
