@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-18 - 票根网TXT编码兼容
+
+- 目标：修复 GB18030/GBK 编码的票根网 `.txt` 被误判为非 TXT 文档来源，进入文档解析器后显示 `blocking` 的问题。
+- 影响范围：`/api/etc/reconciliation-tasks/{task_id}/ticket-root-files` 上传模式判定、票根网 TXT 解码、source file `contentType` 和 parse issue 显示；前端展示逻辑不变。
+- 关键决策：只在票根网文本上传路径支持 `utf-8-sig`、`utf-8`、`gb18030`、`gbk` 候选解码；可解码且符合票根网行程结构的 `.txt/.text` 继续走 `TicketRootClipboardTextParser`，不扩大到 ZIP/PDF/XML 导入。
+- 文档影响：更新本实施记录和测试矩阵；产品口径、API response shape 和状态机不变。
+- 测试覆盖：新增 `EtcApiTests.test_ticket_root_upload_route_imports_gb18030_txt_file_with_clipboard_parser`，验证 GB18030 票根网 TXT 不调用文档解析器、不产生 blocking、返回 text/plain source file 并解析行程。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend.EtcApiTests.test_ticket_root_upload_route_imports_gb18030_txt_file_with_clipboard_parser -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend -v`；本机 4 个真实票根网 GB18030 TXT 样本 smoke。
+- 未测风险：未跑真实浏览器上传和对象存储/Nginx 大文件链路；真实 PDF/JPG/OCR 票根来源不在本次改动范围。
+- 后续事项：如生产还有 UTF-16 或其它编码样本，应先收集样本并补回归测试后再扩展候选编码。
+
 ## 2026-06-17 - ETC票据管理Browser e2e闭环
 
 - 目标：补齐 ETC 票据管理页面真实浏览器层的关键 OA 提交流转保护，降低只靠 Vitest/API 测试时漏掉导航、弹窗、状态刷新和 bucket 切换回归的风险。

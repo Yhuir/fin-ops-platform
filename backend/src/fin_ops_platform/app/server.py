@@ -4928,7 +4928,7 @@ class Application:
                     else ""
                 )
                 content_type = (
-                    "text/plain; charset=utf-8"
+                    f"text/plain; charset={_ticket_root_text_encoding(upload.content) or 'utf-8'}"
                     if source_kind == SourceFileKind.TICKET_ROOT and ticket_root_upload_mode == "text_file"
                     else "application/octet-stream"
                 )
@@ -4944,7 +4944,7 @@ class Application:
                     parse_result = CcbCreditCardStatementParser().parse_pdf_bytes(file_id=source_file.file_id, content=upload.content)
                 elif source_kind == SourceFileKind.TICKET_ROOT:
                     if ticket_root_upload_mode == "text_file":
-                        decoded_text = _decode_utf8_text(upload.content) or ""
+                        decoded_text = _decode_ticket_root_text(upload.content) or ""
                         parse_result = (
                             TicketRootClipboardTextParser().parse_text(file_id=source_file.file_id, text=decoded_text)
                             if _looks_like_ticket_root_clipboard_text(decoded_text)
@@ -22243,7 +22243,7 @@ def _has_ticket_root_document_source(task: object) -> bool:
 
 
 def _ticket_root_upload_source_mode(upload: UploadedImportFile) -> str:
-    decoded_text = _decode_utf8_text(upload.content)
+    decoded_text = _decode_ticket_root_text(upload.content)
     if decoded_text is None:
         return "document"
     lower_name = str(upload.file_name or "").strip().lower()
@@ -22254,14 +22254,29 @@ def _ticket_root_upload_source_mode(upload: UploadedImportFile) -> str:
     return "document"
 
 
-def _decode_utf8_text(content: bytes) -> str | None:
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-    if "\x00" in text or not text.strip():
-        return None
-    return text
+TEXT_FILE_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "gbk")
+
+
+def _decode_ticket_root_text(content: bytes) -> str | None:
+    decoded = _decode_text_file_content(content)
+    return decoded[0] if decoded is not None else None
+
+
+def _ticket_root_text_encoding(content: bytes) -> str | None:
+    decoded = _decode_text_file_content(content)
+    return decoded[1] if decoded is not None else None
+
+
+def _decode_text_file_content(content: bytes) -> tuple[str, str] | None:
+    for encoding in TEXT_FILE_ENCODINGS:
+        try:
+            text = content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if "\x00" in text or not text.strip():
+            return None
+        return text, "utf-8" if encoding == "utf-8-sig" else encoding
+    return None
 
 
 def _looks_like_ticket_root_clipboard_text(text: str) -> bool:

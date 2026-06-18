@@ -2079,6 +2079,42 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["ticketRootItems"][0]["extraction_method"], "clipboard_text")
         self.assertEqual(payload["parseIssues"], [])
 
+    def test_ticket_root_upload_route_imports_gb18030_txt_file_with_clipboard_parser(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            created = json.loads(app.handle_request(
+                "POST",
+                "/api/etc/reconciliation-tasks",
+                json.dumps({"title": "ETC", "createdBy": "alice"}),
+            ).body)
+            body, headers = multipart(
+                {"云A516HJ-4月.txt": TICKET_ROOT_CLIPBOARD_TEXT.replace("云ADA0381", "云A516HJ").encode("gb18030")},
+                fields={"expectedVersion": str(created["version"])},
+            )
+
+            with patch(
+                "fin_ops_platform.app.server.TicketRootDocumentParser.parse_file",
+                return_value=FileParseResult(file_id="DOC-UNEXPECTED", parser_code="ticket_root_document_v1"),
+            ) as document_parse:
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/reconciliation-tasks/{created['taskId']}/ticket-root-files",
+                    body=body,
+                    headers=headers,
+                )
+            payload = json.loads(response.body)
+
+        document_parse.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["sourceFiles"][0]["originalName"], "云A516HJ-4月.txt")
+        self.assertTrue(payload["sourceFiles"][0]["contentType"].startswith("text/plain"))
+        self.assertFalse(payload["sourceFiles"][0]["hasBlockingIssue"])
+        self.assertEqual(len(payload["ticketRootItems"]), 1)
+        self.assertEqual(payload["ticketRootItems"][0]["vehicle_plate"], "云A516HJ")
+        self.assertEqual(payload["ticketRootItems"][0]["amount"], "71.25")
+        self.assertEqual(payload["ticketRootItems"][0]["extraction_method"], "clipboard_text")
+        self.assertEqual(payload["parseIssues"], [])
+
     def test_ticket_root_txt_file_upload_returns_structured_storage_error(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
