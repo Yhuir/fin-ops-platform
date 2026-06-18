@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
@@ -29,6 +30,42 @@ class DeployOAScriptTest(unittest.TestCase):
     def setUp(self) -> None:
         self.module = load_deploy_module()
 
+    def _deployment_config(self, root_dir: Path, *, mode: str = "release"):
+        return self.module.DeploymentConfig(
+            mode=mode,
+            host="finops-prod",
+            user="finops-deploy",
+            domain="www.yn-sourcing.com",
+            root_dir=root_dir,
+            frontend_base_path="/fin-ops/",
+            remote_frontend_dir="/www/wwwroot/fin-ops/dist",
+            remote_backend_dir="/opt/fin-ops/current/backend",
+            remote_data_dir="/opt/fin-ops/data",
+            remote_service_name="fin-ops.service",
+            remote_extract_root="/tmp/fin-ops-release",
+            remote_releases_dir="/opt/fin-ops/releases",
+            release_name="main-abcdef1-20260524170000",
+            deploy_control_path="/usr/local/sbin/finops-deploy-control",
+            keep_releases=8,
+            skip_build=True,
+            skip_pip=False,
+            reload_nginx=False,
+            activate=False,
+            allow_dirty=False,
+            replace_release=False,
+            dry_run=False,
+        )
+
+    def _write_minimal_release_tree(self, root_dir: Path, *, index_html: str) -> None:
+        dist_dir = root_dir / "web" / "dist"
+        backend_dir = root_dir / "backend"
+        dist_dir.mkdir(parents=True)
+        backend_dir.mkdir()
+        (dist_dir / "index.html").write_text(index_html, encoding="utf-8")
+        (dist_dir / "assets").mkdir()
+        (dist_dir / "assets" / "index.js").write_text("console.log('ok');", encoding="utf-8")
+        (backend_dir / "requirements.txt").write_text("", encoding="utf-8")
+
     def test_parser_defaults_match_oa_server(self) -> None:
         parser = self.module.build_parser()
         args = parser.parse_args([])
@@ -47,6 +84,35 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertFalse(args.reload_nginx)
         self.assertFalse(args.no_activate)
         self.assertFalse(args.dry_run)
+
+    def test_release_archive_rejects_frontend_assets_outside_configured_base_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            self._write_minimal_release_tree(
+                root_dir,
+                index_html=(
+                    '<!doctype html><script type="module" src="/assets/index.js"></script>'
+                    '<link rel="stylesheet" href="/assets/index.css">'
+                ),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "frontend dist base path mismatch"):
+                self.module.create_versioned_release_archive(self._deployment_config(root_dir))
+
+    def test_release_archive_accepts_frontend_assets_under_configured_base_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            self._write_minimal_release_tree(
+                root_dir,
+                index_html=(
+                    '<!doctype html><script type="module" src="/fin-ops/assets/index.js"></script>'
+                    '<link rel="stylesheet" href="/fin-ops/assets/index.css">'
+                ),
+            )
+
+            archive_path = self.module.create_versioned_release_archive(self._deployment_config(root_dir))
+
+        self.assertTrue(archive_path.exists())
 
     def test_release_remote_script_uses_versioned_release_and_deploy_control(self) -> None:
         config = self.module.DeploymentConfig(

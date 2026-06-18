@@ -526,6 +526,7 @@ def create_versioned_release_archive(config: DeploymentConfig) -> Path:
         raise FileNotFoundError(f"frontend dist not found: {frontend_dist}")
     if not backend_dir.exists():
         raise FileNotFoundError(f"backend dir not found: {backend_dir}")
+    validate_frontend_dist_base_path(frontend_dist, config.frontend_base_path)
 
     temp_dir = Path(tempfile.mkdtemp(prefix="fin-ops-release-"))
     archive_path = temp_dir / "release.tar.gz"
@@ -556,6 +557,7 @@ def create_legacy_release_archive(config: DeploymentConfig) -> Path:
         raise FileNotFoundError(f"frontend dist not found: {frontend_dist}")
     if not backend_dir.exists():
         raise FileNotFoundError(f"backend dir not found: {backend_dir}")
+    validate_frontend_dist_base_path(frontend_dist, config.frontend_base_path)
 
     temp_dir = Path(tempfile.mkdtemp(prefix="fin-ops-deploy-"))
     archive_path = temp_dir / "release.tar.gz"
@@ -563,6 +565,28 @@ def create_legacy_release_archive(config: DeploymentConfig) -> Path:
         archive.add(frontend_dist, arcname="dist", filter=_tar_filter)
         archive.add(backend_dir, arcname="backend", filter=_tar_filter)
     return archive_path
+
+
+def validate_frontend_dist_base_path(frontend_dist: Path, frontend_base_path: str) -> None:
+    index_path = frontend_dist / "index.html"
+    if not index_path.exists():
+        raise FileNotFoundError(f"frontend index.html not found: {index_path}")
+
+    html = index_path.read_text(encoding="utf-8")
+    expected_asset_prefix = f"{normalize_base_path(frontend_base_path)}assets/"
+    asset_urls = re.findall(r"""(?:src|href)=["']([^"']*?/assets/[^"']*)["']""", html)
+    bad_urls = [
+        url
+        for url in asset_urls
+        if url.startswith("/") and not url.startswith(expected_asset_prefix)
+    ]
+    if bad_urls or expected_asset_prefix not in html:
+        bad_url_summary = ", ".join(bad_urls[:3]) if bad_urls else "missing expected asset prefix"
+        raise RuntimeError(
+            "frontend dist base path mismatch: "
+            f"expected assets under {expected_asset_prefix!r} in {index_path}, got {bad_url_summary}. "
+            "Rebuild with VITE_APP_BASE_PATH set to the deploy frontend base path."
+        )
 
 
 def build_release_metadata(config: DeploymentConfig) -> dict[str, object]:
