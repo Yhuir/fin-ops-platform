@@ -3,10 +3,64 @@ import type { Page, Route } from "@playwright/test";
 export type AccessTier = "denied" | "read_export_only" | "full_access" | "admin";
 
 type SessionMode = "admin" | "full_access" | "read_export_only" | "forbidden" | "expired" | "error";
+type OaSyncMockMode = "idle" | "dirty" | "refreshing" | "error";
+type WorkbenchHealthMockStatus = "ready" | "stale" | "rebuilding" | "error";
+type WorkbenchRefreshMockStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
+type WorkbenchPageMockStatus = "fresh" | "refreshing" | "stale";
+type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
+type PendingInvoiceReadModelMockStatus = "fresh" | "refreshing" | "stale" | "missing";
+type BankDetailReadModelMockStatus = "fresh" | "refreshing" | "stale" | "schema_mismatch" | "missing";
+type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
+type BankDetailCategoryOverride = {
+  categoryCode: string;
+  primaryLabel: string;
+  subLabel: string;
+  thirdLabel?: string | null;
+  labelPath: string[];
+  source: "auto_confirmation" | "manual";
+};
+type BankAutoTagRulesPayloadOptions = {
+  version?: number;
+  readModelStatus?: "fresh" | "refreshing";
+  salarySubLabel?: string;
+};
 
 type ApiMockOptions = {
+  appHealthWriteSafetyBlocked?: boolean;
+  bankDetailsAccountReadModelStatus?: BankDetailReadModelMockStatus;
+  bankDetailsAccountReadModelStatuses?: BankDetailReadModelMockStatus[];
+  bankDetailsClassificationMode?: BankDetailClassificationMockMode;
+  bankDetailsExportReadModelStatus?: BankDetailReadModelMockStatus;
+  bankDetailsLargeDataset?: boolean;
+  bankDetailsTransactionReadModelStatus?: BankDetailReadModelMockStatus;
+  bankDetailsTransactionReadModelStatuses?: BankDetailReadModelMockStatus[];
+  bankDetailsTransactionsEmpty?: boolean;
+  bankDetailsTransactionsTotal?: number;
+  costStatisticsRelationFanout?: boolean;
+  inputInvoiceUsageRelationFanout?: boolean;
+  oaPendingPaymentCandidateRelations?: boolean;
+  outputInvoiceRedRelationCandidate?: boolean;
+  pendingInvoiceCandidateRelations?: boolean;
+  pendingInvoiceReadModelStatus?: PendingInvoiceReadModelMockStatus;
+  pendingInvoiceRowsEmpty?: boolean;
   sessionMode?: SessionMode;
   dashboardError?: boolean;
+  oaSyncMode?: OaSyncMockMode;
+  operationBarrierMode?: OperationBarrierMockMode;
+  workbenchConfirmSubmitConflict?: boolean;
+  workbenchConfirmSubmitDelayMs?: number;
+  workbenchConfirmSubmitError?: boolean;
+  workbenchConfirmSubmitFailuresBeforeSuccess?: number;
+  workbenchFreshRefetchError?: boolean;
+  workbenchHealthStatus?: WorkbenchHealthMockStatus;
+  workbenchInitialExceptionApplied?: boolean;
+  workbenchInitialRelationConfirmed?: boolean;
+  workbenchInitialRowIgnored?: boolean;
+  workbenchLargeDataset?: boolean;
+  workbenchPageEmpty?: boolean;
+  workbenchPageStatus?: WorkbenchPageMockStatus;
+  workbenchRefreshStatus?: WorkbenchRefreshMockStatus;
+  workbenchWithdrawSubmitDelayMs?: number;
 };
 
 type WorkbenchZone = "paired" | "open";
@@ -76,67 +130,172 @@ function sessionPayload(accessTier: AccessTier) {
   };
 }
 
-function appStatusOverview() {
+function appStatusWriteSafety(blocksMutations = false, reason = blocksMutations ? "写操作暂不可用" : "写操作可用") {
+  return {
+    status: blocksMutations ? "blocked" : "ready",
+    reason,
+    blocks_mutations: blocksMutations,
+    blockers: blocksMutations ? ["runtime"] : [],
+  };
+}
+
+function appStatusWorkbenchDomain(status: WorkbenchHealthMockStatus = "ready") {
+  const readModelStatus = status === "ready" ? "ready" : status === "rebuilding" ? "refreshing" : status === "error" ? "failed" : "stale";
+  const level = status === "error" ? "blocked" : status === "ready" ? "ok" : "busy";
+  const reason = status === "ready"
+    ? "关联台已同步"
+    : status === "rebuilding"
+      ? "关联台刷新中"
+      : status === "error"
+        ? "关联台刷新失败"
+        : "关联台待刷新";
+  return {
+    key: "workbench",
+    label: "关联台",
+    route: "/",
+    level,
+    status: readModelStatus,
+    reason,
+    details: [],
+    read_models: ["workbench"],
+    read_model_scopes: [],
+    workers: ["workbench-read-model"],
+    job_ids: [],
+    updated_at: "2026-06-17T01:00:00Z",
+  };
+}
+
+function appStatusOverall(options: ApiMockOptions = {}) {
+  const writeSafety = appStatusWriteSafety(options.appHealthWriteSafetyBlocked === true);
+  if (options.appHealthWriteSafetyBlocked) {
+    return {
+      level: "blocked",
+      color: "red",
+      reason: writeSafety.reason,
+      blocks_mutations: true,
+      write_safety: writeSafety,
+    };
+  }
+  if (options.workbenchHealthStatus === "error") {
+    return {
+      level: "blocked",
+      color: "red",
+      reason: "关联台刷新失败",
+      blocks_mutations: false,
+      write_safety: writeSafety,
+    };
+  }
+  if (options.oaSyncMode === "refreshing") {
+    return {
+      level: "busy",
+      color: "yellow",
+      reason: "OA 正在同步",
+      blocks_mutations: false,
+      write_safety: writeSafety,
+    };
+  }
+  if (options.oaSyncMode === "dirty" || options.workbenchHealthStatus === "stale") {
+    return {
+      level: "busy",
+      color: "yellow",
+      reason: "关联台待刷新",
+      blocks_mutations: false,
+      write_safety: writeSafety,
+    };
+  }
+  if (options.workbenchHealthStatus === "rebuilding") {
+    return {
+      level: "busy",
+      color: "yellow",
+      reason: "关联台刷新中",
+      blocks_mutations: false,
+      write_safety: writeSafety,
+    };
+  }
+  return {
+    level: "ok",
+    color: "green",
+    reason: "浏览器 e2e mock runtime ready",
+    blocks_mutations: false,
+    write_safety: writeSafety,
+  };
+}
+
+function appStatusOverview(options: ApiMockOptions = {}) {
   return {
     version: 1,
     generated_at: "2026-06-17T01:00:00Z",
-    overall: {
-      level: "ok",
-      color: "green",
-      reason: "浏览器 e2e mock runtime ready",
-      blocks_mutations: false,
-      write_safety: {
-        status: "ready",
-        reason: "",
-        blocks_mutations: false,
-        blockers: [],
-      },
-    },
-    domains: [
-      {
-        key: "workbench",
-        label: "关联台",
-        route: "/",
-        level: "ok",
-        status: "ready",
-        reason: "mock ready",
-        details: [],
-        read_models: ["workbench"],
-        read_model_scopes: [],
-        workers: ["workbench-read-model"],
-        job_ids: [],
-        updated_at: "2026-06-17T01:00:00Z",
-      },
-    ],
+    overall: appStatusOverall(options),
+    domains: [appStatusWorkbenchDomain(options.workbenchHealthStatus)],
     background_tasks: [],
     alerts: [],
   };
 }
 
-function appHealthPayload() {
+function oaSyncPayload(mode: OaSyncMockMode = "idle") {
+  return {
+    status: mode === "dirty" ? "idle" : mode,
+    message: mode === "refreshing"
+      ? "OA 正在同步"
+      : mode === "dirty"
+        ? "OA 有待处理变更"
+        : mode === "error"
+          ? "OA 同步失败"
+          : "OA 已同步",
+    dirty_scopes: mode === "dirty" ? ["2026-03"] : [],
+    changed_scopes: [],
+    version: 1,
+    last_synced_at: "2026-06-17T01:00:00Z",
+  };
+}
+
+function workbenchReadModelHealthPayload(status: WorkbenchHealthMockStatus = "ready") {
+  return {
+    status,
+    read_model_status: status === "ready" ? "fresh" : status === "rebuilding" ? "refreshing" : status === "error" ? "failed" : "stale",
+    dirty_scopes: status === "ready" ? [] : ["2026-03"],
+    matching_dirty_scopes: status === "ready" ? [] : ["2026-03"],
+    matching_running_scopes: status === "rebuilding" ? ["2026-03"] : [],
+    stale_scopes: status === "ready" ? [] : ["2026-03"],
+    rebuilding_scopes: status === "rebuilding" ? ["2026-03"] : [],
+    last_matching_error: status === "error" ? "browser workbench refresh failed" : null,
+  };
+}
+
+function workbenchRefreshStatusPayload(status: WorkbenchRefreshMockStatus = "fresh") {
+  const scopeStatus = status === "fresh"
+    ? "completed"
+    : status === "failed" || status === "unavailable"
+      ? "failed"
+      : "processing";
+  return {
+    scope_key: "all",
+    read_model_status: status,
+    read_model_version: "workbench-refresh-e2e-001",
+    active_generation_id: "workbench-generation-e2e-001",
+    dirty_scopes: status === "fresh"
+      ? []
+      : [
+        {
+          scope_key: "2026-03",
+          status: scopeStatus,
+          last_error: status === "failed" ? "browser refresh failed" : null,
+        },
+      ],
+    last_error: status === "failed" ? "browser refresh failed" : null,
+    retryable: status === "failed",
+  };
+}
+
+function appHealthPayload(options: ApiMockOptions = {}) {
   return {
     status: "ok",
     generated_at: "2026-06-17T01:00:00Z",
     version: 1,
-    app_status: appStatusOverview(),
+    app_status: appStatusOverview(options),
     session: { status: "authenticated" },
-    oa_sync: {
-      status: "idle",
-      dirty_scopes: [],
-      changed_scopes: [],
-      version: 1,
-      last_synced_at: "2026-06-17T01:00:00Z",
-    },
-    workbench_read_model: {
-      status: "ready",
-      read_model_status: "fresh",
-      dirty_scopes: [],
-      matching_dirty_scopes: [],
-      matching_running_scopes: [],
-      stale_scopes: [],
-      rebuilding_scopes: [],
-      last_matching_error: null,
-    },
+    oa_sync: oaSyncPayload(options.oaSyncMode),
+    workbench_read_model: workbenchReadModelHealthPayload(options.workbenchHealthStatus),
     background_jobs: {
       active: 0,
       queued: 0,
@@ -401,14 +560,192 @@ function buildWorkbenchGroup(zone: WorkbenchZone, linked: boolean) {
   };
 }
 
-function workbenchGroups(zone: WorkbenchZone, relationConfirmed: boolean) {
+function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "open") {
+  const suffix = String(index).padStart(3, "0");
+  const caseId = `CASE-LARGE-202603-${suffix}`;
+  const amount = `${(42000 + index * 137).toLocaleString("en-US")}.00`;
+  const supplier = `长列表供应商${suffix}有限公司`;
+  const rows = {
+    oa: {
+      ...workbenchRows().oa,
+      id: `oa-large-202603-${suffix}`,
+      case_id: caseId,
+      applicant: `大数据申请人${suffix}`,
+      project_name: `长列表项目第${index}组`,
+      amount,
+      counterparty_name: supplier,
+      reason: `第${index}组设备服务尾款，备注文本较长用于验证列宽和横向滚动稳定性`,
+      detail_fields: {
+        审批完成时间: `2026-03-${String((index % 27) + 1).padStart(2, "0")} 18:10`,
+        大数据场景: `第${index}组 OA 详情`,
+      },
+    },
+    bank: {
+      ...workbenchRows().bank,
+      id: `bk-large-202603-${suffix}`,
+      case_id: caseId,
+      trade_time: `2026-03-${String((index % 27) + 1).padStart(2, "0")} 10:18`,
+      debit_amount: amount,
+      counterparty_name: supplier,
+      payment_account_label: `建设银行 ${String(1100 + index).slice(-4)}`,
+      pay_receive_time: `2026-03-${String((index % 27) + 1).padStart(2, "0")} 10:18`,
+      remark: `第${index}组长列表流水备注，包含跨栏长文本用于验证滚动后不遮挡操作区`,
+      detail_fields: {
+        银行流水编号: `BK-LARGE-${suffix}`,
+        大数据场景: `第${index}组银行流水详情`,
+      },
+    },
+    invoice: {
+      ...workbenchRows().invoice,
+      id: `iv-large-202603-${suffix}`,
+      case_id: caseId,
+      seller_tax_no: `91330108MA27B${suffix}`,
+      seller_name: supplier,
+      issue_date: `2026-03-${String((index % 27) + 1).padStart(2, "0")}`,
+      amount,
+      total_with_tax: amount,
+      detail_fields: {
+        发票号码: `LARGE-${suffix}`,
+        大数据场景: `第${index}组发票详情`,
+      },
+    },
+  };
+  return {
+    group_id: `case:${caseId}`,
+    group_type: zone === "paired" ? "manual_confirmed" : "candidate",
+    match_confidence: zone === "paired" ? "high" : "medium",
+    reason: `browser_e2e_large_dataset_${suffix}`,
+    oa_rows: [rows.oa],
+    bank_rows: [rows.bank],
+    invoice_rows: [rows.invoice],
+    can_withdraw: zone === "paired",
+    amount_check: {
+      status: "matched",
+      direction: "payment",
+      bank_amount: amount.replace(/,/g, ""),
+      oa_amount: amount.replace(/,/g, ""),
+      amount_delta: "0.00",
+      requires_note: false,
+    },
+  };
+}
+
+function largeWorkbenchGroups(zone: WorkbenchZone) {
+  const total = zone === "paired" ? 5 : 205;
+  return Array.from({ length: total }, (_, index) => buildLargeWorkbenchGroup(index + 1, zone));
+}
+
+function buildProcessedExceptionGroup() {
+  const rows = workbenchRows();
+  const handledRows = {
+    oa: {
+      ...rows.oa,
+      handled_exception: true,
+      oa_bank_relation: { code: "wait_input_invoice", label: "追进项发票", tone: "danger" },
+      relation_note: "浏览器异常备注",
+      available_actions: ["detail", "cancel_exception"],
+    },
+    bank: {
+      ...rows.bank,
+      handled_exception: true,
+      invoice_relation: { code: "wait_input_invoice", label: "追进项发票", tone: "danger" },
+      relation_note: "浏览器异常备注",
+      available_actions: ["detail", "cancel_exception"],
+    },
+    invoice: {
+      ...rows.invoice,
+      handled_exception: true,
+      invoice_bank_relation: { code: "wait_input_invoice", label: "追进项发票", tone: "danger" },
+      relation_note: "浏览器异常备注",
+      available_actions: ["detail", "cancel_exception"],
+    },
+  };
+  return {
+    group_id: "case:CASE-202603-101",
+    group_type: "processed_exception",
+    match_confidence: "medium",
+    reason: "browser_e2e_processed_exception",
+    oa_rows: [handledRows.oa],
+    bank_rows: [handledRows.bank],
+    invoice_rows: [handledRows.invoice],
+    can_withdraw: false,
+    relation_note: "浏览器异常备注",
+    processed_exception_summary: {
+      scenario: {
+        code: "expense_oa_bank_missing_invoice",
+        label: "OA和支出流水一致，缺进项发票",
+      },
+      resolution: {
+        action_code: "wait_input_invoice",
+        action_label: "追进项发票",
+        note: "浏览器异常备注",
+      },
+      detail_note: "浏览器异常备注",
+      display_tags: ["追进项发票"],
+    },
+    amount_check: {
+      status: "mismatch",
+      direction: "payment",
+      bank_amount: "58000.00",
+      oa_amount: "58000.00",
+      amount_delta: "0.00",
+      requires_note: true,
+    },
+  };
+}
+
+function buildOpenGroupWithoutIgnoredInvoice() {
+  const group = buildWorkbenchGroup("open", false);
+  return {
+    ...group,
+    invoice_rows: [],
+  };
+}
+
+function ignoredWorkbenchRows(rowIgnored: boolean) {
+  if (!rowIgnored) {
+    return [];
+  }
+  const invoice = workbenchRows().invoice;
+  return [
+    {
+      ...invoice,
+      ignored: true,
+      handled_exception: false,
+      invoice_bank_relation: { code: "ignored", label: "浏览器忽略发票", tone: "warn" },
+      available_actions: ["detail"],
+      relation_note: "由关联台忽略发票：iv-o-202603-001",
+    },
+  ];
+}
+
+function workbenchGroups(
+  zone: WorkbenchZone,
+  relationConfirmed: boolean,
+  candidateSplitSuppressed = false,
+  exceptionApplied = false,
+  rowIgnored = false,
+  largeDataset = false,
+) {
+  if (largeDataset) {
+    return largeWorkbenchGroups(zone);
+  }
   if (zone === "paired") {
     return relationConfirmed ? [buildWorkbenchGroup("paired", true)] : [];
+  }
+  if (candidateSplitSuppressed) {
+    return [];
+  }
+  if (exceptionApplied) {
+    return [buildProcessedExceptionGroup()];
+  }
+  if (rowIgnored) {
+    return [buildOpenGroupWithoutIgnoredInvoice()];
   }
   return relationConfirmed ? [] : [buildWorkbenchGroup("open", false)];
 }
 
-function countWorkbenchRows(groups: Array<ReturnType<typeof buildWorkbenchGroup>>) {
+function countWorkbenchRows(groups: Array<{ oa_rows: unknown[]; bank_rows: unknown[]; invoice_rows: unknown[] }>) {
   const counts = groups.reduce((total, group) => ({
     oa: total.oa + group.oa_rows.length,
     bank: total.bank + group.bank_rows.length,
@@ -420,49 +757,126 @@ function countWorkbenchRows(groups: Array<ReturnType<typeof buildWorkbenchGroup>
   };
 }
 
-function workbenchSummary(relationConfirmed: boolean) {
+function workbenchSummary(
+  relationConfirmed: boolean,
+  candidateSplitSuppressed = false,
+  exceptionApplied = false,
+  rowIgnored = false,
+  pageEmpty = false,
+  largeDataset = false,
+) {
+  if (pageEmpty) {
+    return {
+      oa_count: 0,
+      bank_count: 0,
+      invoice_count: 0,
+      paired_count: 0,
+      open_count: 0,
+      exception_count: 0,
+      ignored_count: rowIgnored ? 1 : 0,
+    };
+  }
+  if (largeDataset) {
+    return {
+      oa_count: 210,
+      bank_count: 210,
+      invoice_count: 210,
+      paired_count: 5,
+      open_count: 205,
+      exception_count: 0,
+      ignored_count: rowIgnored ? 1 : 0,
+    };
+  }
   return {
     oa_count: 1,
     bank_count: 1,
     invoice_count: 1,
     paired_count: relationConfirmed ? 1 : 0,
-    open_count: relationConfirmed ? 0 : 1,
-    exception_count: 0,
+    open_count: relationConfirmed || candidateSplitSuppressed || exceptionApplied ? 0 : 1,
+    exception_count: exceptionApplied ? 3 : 0,
+    ignored_count: rowIgnored ? 1 : 0,
   };
 }
 
-function workbenchSummaryPayload(relationConfirmed: boolean) {
+function workbenchSummaryPayload(
+  relationConfirmed: boolean,
+  candidateSplitSuppressed = false,
+  exceptionApplied = false,
+  rowIgnored = false,
+  pageStatus: WorkbenchPageMockStatus = "fresh",
+  pageEmpty = false,
+  largeDataset = false,
+) {
   return {
     month: "all",
-    summary: workbenchSummary(relationConfirmed),
+    summary: workbenchSummary(relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
     oa_status: { code: "ready", message: "OA 已同步" },
     invoice_inventory: {
-      system_total: 1,
+      system_total: largeDataset ? 210 : 1,
       manual_import_total: 0,
-      workbench_visible_total: 1,
+      workbench_visible_total: largeDataset ? 210 : 1,
       hidden_submitted_etc_total: 0,
       extra_etc_total: 0,
       etc_summary_batch_count: 0,
-      oa_attachment_total: 1,
+      oa_attachment_total: largeDataset ? 210 : 1,
     },
-    read_model_status: "fresh",
+    read_model_status: pageStatus,
     generated_at: "2026-06-17T01:00:00Z",
   };
 }
 
-function workbenchGroupsPayload(zone: WorkbenchZone, relationConfirmed: boolean) {
-  const groups = workbenchGroups(zone, relationConfirmed);
+function workbenchGroupsPayload(
+  zone: WorkbenchZone,
+  relationConfirmed: boolean,
+  candidateSplitSuppressed = false,
+  exceptionApplied = false,
+  rowIgnored = false,
+  pageStatus: WorkbenchPageMockStatus = "fresh",
+  pageEmpty = false,
+  largeDataset = false,
+  page = 1,
+  pageSize = 50,
+  search = "",
+) {
+  const allGroups = pageEmpty
+    ? []
+    : workbenchGroups(zone, relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset);
+  const normalizedSearch = search.trim().toLowerCase();
+  const groups = normalizedSearch
+    ? allGroups.filter((group) => JSON.stringify(group).toLowerCase().includes(normalizedSearch))
+    : allGroups;
+  const boundedPage = Math.max(1, page);
+  const boundedPageSize = Math.max(1, pageSize);
+  const start = (boundedPage - 1) * boundedPageSize;
+  const pageGroups = groups.slice(start, start + boundedPageSize);
   return {
     month: "all",
     zone,
-    page: 1,
-    page_size: 50,
+    page: boundedPage,
+    page_size: boundedPageSize,
     total: groups.length,
     row_counts: countWorkbenchRows(groups),
-    has_more: false,
-    groups,
-    read_model_status: "fresh",
+    has_more: start + pageGroups.length < groups.length,
+    groups: pageGroups,
+    read_model_status: pageStatus,
   };
+}
+
+function findWorkbenchRow(
+  rowId: string,
+  relationConfirmed: boolean,
+  candidateSplitSuppressed = false,
+  exceptionApplied = false,
+  rowIgnored = false,
+  largeDataset = false,
+) {
+  const groups = [
+    ...workbenchGroups("paired", relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset),
+    ...workbenchGroups("open", relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset),
+  ];
+  return groups
+    .flatMap((group) => [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows])
+    .find((row) => row.id === rowId) ?? null;
 }
 
 function workbenchSettingsPayload() {
@@ -515,23 +929,31 @@ function workbenchSettingsPayload() {
   };
 }
 
-function legacyWorkbenchPayload(relationConfirmed: boolean) {
+function legacyWorkbenchPayload(
+  relationConfirmed: boolean,
+  candidateSplitSuppressed = false,
+  exceptionApplied = false,
+  rowIgnored = false,
+  pageStatus: WorkbenchPageMockStatus = "fresh",
+  pageEmpty = false,
+  largeDataset = false,
+) {
   return {
     month: "all",
-    summary: workbenchSummary(relationConfirmed),
+    summary: workbenchSummary(relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
     oa_status: { code: "ready", message: "OA 已同步" },
     invoice_inventory: {
-      system_total: 1,
+      system_total: largeDataset ? 210 : 1,
       manual_import_total: 0,
-      workbench_visible_total: 1,
+      workbench_visible_total: largeDataset ? 210 : 1,
       hidden_submitted_etc_total: 0,
       extra_etc_total: 0,
       etc_summary_batch_count: 0,
-      oa_attachment_total: 1,
+      oa_attachment_total: largeDataset ? 210 : 1,
     },
-    paired: { groups: workbenchGroups("paired", relationConfirmed) },
-    open: { groups: workbenchGroups("open", relationConfirmed) },
-    read_model_status: "fresh",
+    paired: { groups: pageEmpty ? [] : workbenchGroups("paired", relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset) },
+    open: { groups: pageEmpty ? [] : workbenchGroups("open", relationConfirmed, candidateSplitSuppressed, exceptionApplied, rowIgnored, largeDataset) },
+    read_model_status: pageStatus,
     generated_at: "2026-06-17T01:00:00Z",
   };
 }
@@ -1239,76 +1661,158 @@ function taxCertifiedImportConfirmPayload() {
   };
 }
 
-function inputInvoiceUsageRowsPayload() {
+function inputInvoiceUsageWorkbenchRelationRow(relationConfirmed: boolean) {
   return {
-    rows: [
-      {
-        id: "input-usage-row-e2e-001",
-        invoice: {
-          id: "input-invoice-row-e2e-001",
-          display_no: "SD-INV-E2E-0001",
-          invoice_no: "E2E-0001",
-          invoice_code: "5300",
-          digital_invoice_no: "SD-INV-E2E-0001",
-          issue_date: "2026-05-02",
-          seller_name: "浏览器进项供应商",
-          seller_tax_no: "91530100E2EIN001",
-          total_with_tax: "88.00",
-          amount_without_tax: "83.02",
-          tax_rate: "6%",
-          tax_amount: "4.98",
-          specific_business_type: "技术服务",
-          taxable_item_name: "浏览器 e2e 进项服务",
-        },
-        payment_status: {
-          code: "pending",
-          label: "待处理",
-          reason: "尚未创建 OA 反提关系。",
-        },
-        oa: {
-          primary: {
-            id: "oa-input-e2e-001",
-            applicant: "陈秀云",
-            application_type: "费用报销",
-            project_name: "浏览器进项项目",
-            amount: "88.00",
-            detail_available: true,
-          },
-          relation_count: 1,
-          has_multiple: false,
-          detail_mode: "single",
-          summaries: [],
-        },
-        bank: {
-          primary: {
-            id: "bank-input-e2e-001",
-            counterparty_name: "浏览器进项供应商",
-            trade_time: "2026-05-03 10:30:00",
-            amount: "88.00",
-            direction: "outflow",
-            direction_label: "支出",
-            bank_name: "建设银行",
-            account_last4: "1138",
-            summary: "浏览器 e2e 进项付款",
-            remark: "进项使用 e2e",
-            detail_available: true,
-          },
-          relation_count: 1,
-          has_multiple: false,
-          detail_mode: "single",
-          summaries: [],
-        },
-        invoice_relations: {
-          primary: null,
-          relation_count: 0,
-          has_multiple: false,
-          detail_mode: "none",
-          summaries: [],
-          total_with_tax: "0.00",
-        },
+    id: "input-usage-row-e2e-relation",
+    invoice: {
+      id: "input-invoice-row-e2e-relation",
+      display_no: "SD-INV-E2E-REL-001",
+      invoice_no: "12561048",
+      invoice_code: "3300",
+      digital_invoice_no: "SD-INV-E2E-REL-001",
+      issue_date: "2026-03-28",
+      seller_name: "智能工厂设备商",
+      seller_tax_no: "91330108MA27B4011D",
+      total_with_tax: "65540.00",
+      amount_without_tax: "58000.00",
+      tax_rate: "13%",
+      tax_amount: "7540.00",
+      specific_business_type: "设备采购",
+      taxable_item_name: "智能工厂设备尾款",
+    },
+    payment_status: relationConfirmed
+      ? {
+        code: "paid",
+        label: "已支付",
+        reason: "关联台已确认 OA、流水和进项发票，支付状态可由 linked 关系证明。",
+      }
+      : {
+        code: "pending",
+        label: "待处理",
+        reason: "关联台候选关系仅作为证据展示，不能证明已支付。",
       },
-    ],
-    pagination: { page: 1, page_size: 20, total: 1 },
+    oa: {
+      primary: {
+        id: "oa-o-202603-001",
+        applicant: "陈涛",
+        application_type: "供应商付款申请",
+        project_name: "智能工厂项目",
+        amount: "58000.00",
+        detail_available: true,
+        relation_case_id: "CASE-202603-101",
+        relation_status: relationConfirmed ? "linked" : "candidate",
+        relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
+      },
+      relation_count: 1,
+      has_multiple: false,
+      detail_mode: "single",
+      summaries: [],
+    },
+    bank: {
+      primary: {
+        id: "bk-o-202603-001",
+        counterparty_name: "智能工厂设备商",
+        trade_time: "2026-03-28 10:18:00",
+        amount: "58000.00",
+        direction: "outflow",
+        direction_label: "支出",
+        bank_name: "建设银行",
+        account_last4: "1138",
+        summary: relationConfirmed ? "设备尾款已闭环" : "设备尾款候选关系",
+        remark: relationConfirmed ? "关联台已确认" : "关联台候选证据",
+        detail_available: true,
+        relation_case_id: "CASE-202603-101",
+        relation_status: relationConfirmed ? "linked" : "candidate",
+        relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
+      },
+      relation_count: 1,
+      has_multiple: false,
+      detail_mode: "single",
+      summaries: [],
+    },
+    invoice_relations: {
+      primary: null,
+      relation_count: 0,
+      has_multiple: false,
+      detail_mode: "none",
+      summaries: [],
+      total_with_tax: "0.00",
+    },
+  };
+}
+
+function inputInvoiceUsageRowsPayload(relationConfirmed = false, includeWorkbenchRelationEvidence = false) {
+  const rows = [
+    ...(includeWorkbenchRelationEvidence ? [inputInvoiceUsageWorkbenchRelationRow(relationConfirmed)] : []),
+    {
+      id: "input-usage-row-e2e-001",
+      invoice: {
+        id: "input-invoice-row-e2e-001",
+        display_no: "SD-INV-E2E-0001",
+        invoice_no: "E2E-0001",
+        invoice_code: "5300",
+        digital_invoice_no: "SD-INV-E2E-0001",
+        issue_date: "2026-05-02",
+        seller_name: "浏览器进项供应商",
+        seller_tax_no: "91530100E2EIN001",
+        total_with_tax: "88.00",
+        amount_without_tax: "83.02",
+        tax_rate: "6%",
+        tax_amount: "4.98",
+        specific_business_type: "技术服务",
+        taxable_item_name: "浏览器 e2e 进项服务",
+      },
+      payment_status: {
+        code: "pending",
+        label: "待处理",
+        reason: "尚未创建 OA 反提关系。",
+      },
+      oa: {
+        primary: {
+          id: "oa-input-e2e-001",
+          applicant: "陈秀云",
+          application_type: "费用报销",
+          project_name: "浏览器进项项目",
+          amount: "88.00",
+          detail_available: true,
+        },
+        relation_count: 1,
+        has_multiple: false,
+        detail_mode: "single",
+        summaries: [],
+      },
+      bank: {
+        primary: {
+          id: "bank-input-e2e-001",
+          counterparty_name: "浏览器进项供应商",
+          trade_time: "2026-05-03 10:30:00",
+          amount: "88.00",
+          direction: "outflow",
+          direction_label: "支出",
+          bank_name: "建设银行",
+          account_last4: "1138",
+          summary: "浏览器 e2e 进项付款",
+          remark: "进项使用 e2e",
+          detail_available: true,
+        },
+        relation_count: 1,
+        has_multiple: false,
+        detail_mode: "single",
+        summaries: [],
+      },
+      invoice_relations: {
+        primary: null,
+        relation_count: 0,
+        has_multiple: false,
+        detail_mode: "none",
+        summaries: [],
+        total_with_tax: "0.00",
+      },
+    },
+  ];
+  return {
+    rows,
+    pagination: { page: 1, page_size: 20, total: rows.length },
     filter_config: [
       { field: "seller_name", label: "销方名称", mode: "enum_multi", sortable: true, operators: ["in", "contains"] },
       { field: "payment_status", label: "支付状态", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -1365,13 +1869,36 @@ function inputInvoiceOaReverseInvoice(index: 1 | 2) {
   };
 }
 
-function inputInvoiceOaReversePreviewPayload(selectedInvoiceIds: string[]) {
+function inputInvoiceOaReverseRejectedRelationInvoice(relationConfirmed: boolean) {
+  return {
+    invoice_id: "input-invoice-row-e2e-relation",
+    invoice_no: "SD-INV-E2E-REL-001",
+    display_no: "SD-INV-E2E-REL-001",
+    seller_name: "智能工厂设备商",
+    issue_date: "2026-03-28",
+    total_with_tax: "65540.00",
+    payment_status_label: relationConfirmed ? "已支付" : "待处理",
+    target_applicant_name: "陈涛",
+    oa_relation_status: relationConfirmed ? "linked" : "candidate",
+    reason_code: relationConfirmed ? "already_has_active_oa" : "already_has_candidate_oa",
+    reason: relationConfirmed ? "关联台已确认 OA 关系。" : "关联台存在未配对 OA 候选关系。",
+  };
+}
+
+function inputInvoiceOaReversePreviewPayload(
+  selectedInvoiceIds: string[],
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+) {
   const selected = selectedInvoiceIds.length > 0
     ? selectedInvoiceIds
     : ["input-oa-invoice-e2e-001", "input-oa-invoice-e2e-002"];
   const invoices = [inputInvoiceOaReverseInvoice(1), inputInvoiceOaReverseInvoice(2)]
     .filter((invoice) => selected.includes(invoice.invoice_id));
   const isSubset = invoices.length === 1;
+  const rejectedRelationInvoices = includeWorkbenchRelationEvidence
+    ? [inputInvoiceOaReverseRejectedRelationInvoice(relationConfirmed)]
+    : [];
   return {
     preview_id: isSubset ? "input-oa-reverse-preview-e2e-subset" : "input-oa-reverse-preview-e2e-all",
     preview_hash: isSubset ? "input-oa-reverse-hash-e2e-subset" : "input-oa-reverse-hash-e2e-all",
@@ -1393,9 +1920,10 @@ function inputInvoiceOaReversePreviewPayload(selectedInvoiceIds: string[]) {
         total_with_tax: isSubset ? "49.86" : "99.72",
         candidate_invoice_ids: invoices.map((invoice) => invoice.invoice_id),
         invoice_rows: invoices,
-        rejected_invoices: [],
+        rejected_invoices: rejectedRelationInvoices,
       },
     ],
+    rejected_invoices: rejectedRelationInvoices,
     can_create_draft: true,
     next_action: "create_oa_draft",
     permissions: { can_create_draft: true, can_manual_status: true },
@@ -1447,7 +1975,14 @@ function inputInvoiceOaReverseSubmittedHistoryPayload(submitted: boolean) {
   };
 }
 
-function oaPendingPaymentRowsPayload() {
+function oaPendingPaymentRowsPayload(candidateRelations = false) {
+  const candidateRelationFields = candidateRelations
+    ? {
+      relationStatus: "candidate",
+      relationSource: "workbench_relation_candidate",
+    }
+    : {};
+
   return {
     rows: [
       {
@@ -1460,6 +1995,8 @@ function oaPendingPaymentRowsPayload() {
           applicationTime: "2026-05-20",
           amount: "12000.00",
           detailAvailable: true,
+          relationCount: candidateRelations ? 1 : 0,
+          ...candidateRelationFields,
         },
         paymentStatus: {
           code: "partially_paid",
@@ -1494,6 +2031,7 @@ function oaPendingPaymentRowsPayload() {
           amount: "8000.00",
           paidTotal: "8000.00",
           relationCount: 1,
+          ...candidateRelationFields,
           hasMultiple: false,
           detailMode: "single",
         },
@@ -1504,6 +2042,7 @@ function oaPendingPaymentRowsPayload() {
           invoiceDate: "2026-05-22",
           totalWithTax: "12000.00",
           relationCount: 1,
+          ...candidateRelationFields,
           hasMultiple: false,
           detailMode: "single",
         },
@@ -1734,6 +2273,18 @@ const costProjectRows: Record<string, Record<string, CostBrowserProjectRow[]>> =
   },
 };
 
+const workbenchRelationCostProjectName = "智能工厂项目";
+const workbenchRelationCostRow: CostBrowserProjectRow = {
+  transaction_id: "bk-o-202603-001",
+  trade_time: "2026-03-28 10:18",
+  direction: "支出",
+  expense_type: "设备货款及材料费",
+  expense_content: "智能工厂设备尾款",
+  amount: "58,000.00",
+  counterparty_name: "智能工厂设备商",
+  payment_account_label: "建设银行 1138",
+};
+
 function isCostProjectVisibleForScope(projectName: string, projectScope: string | null) {
   return projectScope === "all" || !completedCostProjectNames.has(projectName);
 }
@@ -1746,8 +2297,28 @@ function sumCostAmounts(rows: Array<{ amount: string }>) {
   });
 }
 
-function allCostProjectRows() {
-  return Object.values(costProjectRows).reduce<Record<string, CostBrowserProjectRow[]>>((result, projectMap) => {
+function costProjectRowsForMonth(
+  month: string,
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+) {
+  const projectRowsForMonth = costProjectRows[month] ?? {};
+  if (month !== "2026-03" || !relationConfirmed || !includeWorkbenchRelationEvidence) {
+    return projectRowsForMonth;
+  }
+  return {
+    ...projectRowsForMonth,
+    [workbenchRelationCostProjectName]: [
+      ...(projectRowsForMonth[workbenchRelationCostProjectName] ?? []),
+      workbenchRelationCostRow,
+    ],
+  };
+}
+
+function allCostProjectRows(relationConfirmed = false, includeWorkbenchRelationEvidence = false) {
+  const projectMaps = Object.keys(costProjectRows)
+    .map((month) => costProjectRowsForMonth(month, relationConfirmed, includeWorkbenchRelationEvidence));
+  return projectMaps.reduce<Record<string, CostBrowserProjectRow[]>>((result, projectMap) => {
     for (const [projectName, rows] of Object.entries(projectMap)) {
       result[projectName] = [...(result[projectName] ?? []), ...rows];
     }
@@ -1755,8 +2326,15 @@ function allCostProjectRows() {
   }, {});
 }
 
-function costTimeRows(month: string, projectScope: string | null) {
-  const sourceProjectRowMap = month === "all" ? allCostProjectRows() : (costProjectRows[month] ?? {});
+function costTimeRows(
+  month: string,
+  projectScope: string | null,
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+) {
+  const sourceProjectRowMap = month === "all"
+    ? allCostProjectRows(relationConfirmed, includeWorkbenchRelationEvidence)
+    : costProjectRowsForMonth(month, relationConfirmed, includeWorkbenchRelationEvidence);
   return Object.entries(sourceProjectRowMap)
     .filter(([projectName]) => isCostProjectVisibleForScope(projectName, projectScope))
     .flatMap(([projectName, rows]) =>
@@ -1776,8 +2354,13 @@ function costTimeRows(month: string, projectScope: string | null) {
     .sort((left, right) => right.trade_time.localeCompare(left.trade_time));
 }
 
-function costStatisticsExplorerPayload(month: string, projectScope: string | null) {
-  const timeRows = costTimeRows(month, projectScope);
+function costStatisticsExplorerPayload(
+  month: string,
+  projectScope: string | null,
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+) {
+  const timeRows = costTimeRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence);
   const projectGroups = new Map<string, { amount: number; transactionCount: number; expenseTypes: Set<string> }>();
   const expenseTypeGroups = new Map<string, { amount: number; transactionCount: number; projects: Set<string> }>();
 
@@ -1822,8 +2405,13 @@ function costStatisticsExplorerPayload(month: string, projectScope: string | nul
   };
 }
 
-function costTransactionPayload(transactionId: string) {
-  const row = costTimeRows("all", "all").find((item) => item.transaction_id === transactionId);
+function costTransactionPayload(
+  transactionId: string,
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+) {
+  const row = costTimeRows("all", "all", relationConfirmed, includeWorkbenchRelationEvidence)
+    .find((item) => item.transaction_id === transactionId);
   return {
     month: transactionId.includes("101") ? "2026-04" : "2026-03",
     transaction: {
@@ -1855,13 +2443,17 @@ function costTransactionPayload(transactionId: string) {
   };
 }
 
-function costStatisticsExportPreviewPayload(url: URL) {
+function costStatisticsExportPreviewPayload(
+  url: URL,
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+) {
   const month = url.searchParams.get("month") ?? "all";
   const view = url.searchParams.get("view") ?? "time";
   const projectScope = url.searchParams.get("project_scope") ?? "active";
   const projectNames = new Set(url.searchParams.getAll("project_name").filter(Boolean));
   const expenseTypes = new Set(url.searchParams.getAll("expense_type").filter(Boolean));
-  const rows = costTimeRows(month, projectScope)
+  const rows = costTimeRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence)
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
     .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true));
   const fileName = view === "project"
@@ -2089,85 +2681,180 @@ function outputInvoiceCollectionStatus(saved: boolean, reminderSaved: boolean) {
   };
 }
 
-function outputInvoiceCollectionRowsPayload(statusSaved: boolean, reminderSaved: boolean, receiptCreated: boolean) {
+function outputInvoiceRedInvoiceRelation(confirmed: boolean) {
+  if (!confirmed) {
+    return {
+      relation_count: 0,
+      has_multiple: false,
+      detail_mode: "none",
+      summaries: [],
+    };
+  }
+
+  const manualRelation = {
+    id: "out-e2e-002",
+    related_invoice_id: "out-e2e-002",
+    relation_id: "output-red-relation-e2e-001",
+    invoice_no: "XSFP-E2E-0002",
+    invoice_date: "2026-05-06",
+    buyer_name: "浏览器销项客户",
+    total_with_tax: "-12,345.67",
+    relation_type: "red_invoice",
+    reason: "浏览器 e2e 红字发票关系",
+    evidence: "浏览器 e2e 红蓝票关系确认",
+    confidence: "manual_confirmed",
+    source: "manual",
+  };
+
   return {
-    rows: [
-      {
-        id: "output-collection-row-e2e-001",
-        invoice_id: "out-e2e-001",
-        invoice_identity_key: "id:out-e2e-001",
-        invoice: {
-          id: "out-e2e-001",
-          display_no: "XSFP-E2E-0001",
-          invoice_no: "E2E-0001",
-          invoice_code: "5300",
-          digital_invoice_no: "XSFP-E2E-0001",
-          issue_date: "2026-05-02",
-          buyer_name: "浏览器销项客户",
-          buyer_tax_no: "91530100E2E001",
-          seller_name: "云南溯源科技有限公司",
-          seller_tax_no: "91530000E2ESELLER",
-          total_with_tax: "12,345.67",
-          amount_without_tax: "11,646.86",
-          tax_rate: "6%",
-          tax_amount: "698.81",
-          specific_business_type: "信息技术服务",
-          taxable_item_name: "浏览器 e2e 销项收款服务",
-        },
-        collection_status: outputInvoiceCollectionStatus(statusSaved, reminderSaved),
-        bank: {
-          primary: {
-            bank_transaction_id: "bank-output-e2e-001",
-            counterparty_name: "浏览器销项客户",
-            trade_time: "2026-05-03 10:30:00",
-            amount: "5,000.00",
-            direction: "inflow",
-            direction_label: "收入",
-            bank_name: "建设银行",
-            account_last4: "8106",
-            summary: "浏览器 e2e 客户回款",
-            remark: "销项收款 e2e",
-            relation_status: "linked",
-          },
-          relation_count: 1,
-          has_multiple: false,
-          received_total: "5,000.00",
-          detail_mode: "single",
-          summaries: [],
-        },
-        red_invoice: {
-          relation_count: 0,
-          has_multiple: false,
-          detail_mode: "none",
-          summaries: [],
-        },
-        receipt: receiptCreated
-          ? {
-            status: "issued",
-            label: "已出收据",
-            reason: "正式收据已创建。",
-            preview_available: true,
-            source_available: true,
-            latest_receipt: {
-              id: "receipt-output-e2e-001",
-              receipt_no: "SK2026050002",
-              amount: "5,000.00",
-              status: "issued",
-              created_at: "2026-05-03T10:40:00+08:00",
-            },
-          }
-          : {
-            status: "pending",
-            label: "待出收据",
-            reason: "可基于收入流水生成正式收据。",
-            preview_available: true,
-            source_available: true,
-            latest_receipt: null,
-          },
+    primary: manualRelation,
+    relation_count: 1,
+    has_multiple: false,
+    detail_mode: "single",
+    summaries: [manualRelation],
+  };
+}
+
+function outputInvoiceCollectionRowsPayload(
+  statusSaved: boolean,
+  reminderSaved: boolean,
+  receiptCreated: boolean,
+  redRelationConfirmed = false,
+  includeRedRelationCandidate = false,
+) {
+  const rows: unknown[] = [
+    {
+      id: "output-collection-row-e2e-001",
+      invoice_id: "out-e2e-001",
+      invoice_identity_key: "id:out-e2e-001",
+      invoice: {
+        id: "out-e2e-001",
+        display_no: "XSFP-E2E-0001",
+        invoice_no: "E2E-0001",
+        invoice_code: "5300",
+        digital_invoice_no: "XSFP-E2E-0001",
+        issue_date: "2026-05-02",
+        buyer_name: "浏览器销项客户",
+        buyer_tax_no: "91530100E2E001",
+        seller_name: "云南溯源科技有限公司",
+        seller_tax_no: "91530000E2ESELLER",
+        total_with_tax: "12,345.67",
+        amount_without_tax: "11,646.86",
+        tax_rate: "6%",
+        tax_amount: "698.81",
+        specific_business_type: "信息技术服务",
+        taxable_item_name: "浏览器 e2e 销项收款服务",
       },
-    ],
+      collection_status: outputInvoiceCollectionStatus(statusSaved || redRelationConfirmed, reminderSaved),
+      bank: {
+        primary: {
+          bank_transaction_id: "bank-output-e2e-001",
+          counterparty_name: "浏览器销项客户",
+          trade_time: "2026-05-03 10:30:00",
+          amount: "5,000.00",
+          direction: "inflow",
+          direction_label: "收入",
+          bank_name: "建设银行",
+          account_last4: "8106",
+          summary: "浏览器 e2e 客户回款",
+          remark: "销项收款 e2e",
+          relation_status: "linked",
+        },
+        relation_count: 1,
+        has_multiple: false,
+        received_total: "5,000.00",
+        detail_mode: "single",
+        summaries: [],
+      },
+      redInvoiceRelation: outputInvoiceRedInvoiceRelation(redRelationConfirmed),
+      receipt: receiptCreated
+        ? {
+          status: "issued",
+          label: "已出收据",
+          reason: "正式收据已创建。",
+          preview_available: true,
+          source_available: true,
+          latest_receipt: {
+            id: "receipt-output-e2e-001",
+            receipt_no: "SK2026050002",
+            amount: "5,000.00",
+            status: "issued",
+            created_at: "2026-05-03T10:40:00+08:00",
+          },
+        }
+        : {
+          status: "pending",
+          label: "待出收据",
+          reason: "可基于收入流水生成正式收据。",
+          preview_available: true,
+          source_available: true,
+          latest_receipt: null,
+        },
+    },
+  ];
+
+  if (includeRedRelationCandidate) {
+    rows.push({
+      id: "output-collection-row-e2e-002",
+      invoice_id: "out-e2e-002",
+      invoice_identity_key: "id:out-e2e-002",
+      invoice: {
+        id: "out-e2e-002",
+        display_no: "XSFP-E2E-0002",
+        invoice_no: "E2E-0002",
+        invoice_code: "5300",
+        digital_invoice_no: "XSFP-E2E-0002",
+        issue_date: "2026-05-06",
+        buyer_name: "浏览器销项客户",
+        buyer_tax_no: "91530100E2E001",
+        seller_name: "云南溯源科技有限公司",
+        seller_tax_no: "91530000E2ESELLER",
+        total_with_tax: "-12,345.67",
+        amount_without_tax: "-11,646.86",
+        tax_rate: "6%",
+        tax_amount: "-698.81",
+        specific_business_type: "红字发票",
+        taxable_item_name: "浏览器 e2e 红字发票",
+      },
+      collection_status: {
+        code: "red_invoice_candidate",
+        label: "红字发票待关联",
+        reason: "等待与原蓝字发票建立人工关系。",
+        collected_amount: "0.00",
+        pending_amount: "0.00",
+        severity: "info",
+        manual_override: null,
+        expected_collection_date: null,
+        reminder: null,
+      },
+      bank: {
+        relation_count: 0,
+        has_multiple: false,
+        received_total: "0.00",
+        detail_mode: "none",
+        summaries: [],
+      },
+      redInvoiceRelation: {
+        relation_count: 0,
+        has_multiple: false,
+        detail_mode: "none",
+        summaries: [],
+      },
+      receipt: {
+        status: "not_applicable",
+        label: "无需收据",
+        reason: "红字发票不生成收据。",
+        preview_available: false,
+        source_available: true,
+        latest_receipt: null,
+      },
+    });
+  }
+
+  return {
+    rows,
     summary: {
-      invoice_count: 1,
+      invoice_count: rows.length,
       total_with_tax: "12,345.67",
       collected_amount: "5,000.00",
       pending_amount: "7,345.67",
@@ -2175,7 +2862,7 @@ function outputInvoiceCollectionRowsPayload(statusSaved: boolean, reminderSaved:
       partial_collection_count: statusSaved ? 0 : 1,
       receipt_pending_count: receiptCreated ? 0 : 1,
     },
-    pagination: { page: 1, page_size: 20, total: 1 },
+    pagination: { page: 1, page_size: 20, total: rows.length },
     filter_config: [
       { field: "invoice_no", label: "发票号码", mode: "text", sortable: true, operators: ["contains", "equals"] },
       { field: "collection_status", label: "收款状态", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -2366,24 +3053,215 @@ function confirmResultPayload() {
   };
 }
 
-function operationBarrierPayload() {
+function withdrawPreviewPayload() {
   return {
-    status: "fresh",
-    fresh: true,
-    targets: [
+    operation: "withdraw_link",
+    operation_type: "withdraw_relation",
+    preview_id: "withdraw_relation:CASE-202603-101",
+    submit_expected_versions: { "CASE-202603-101": 1 },
+    candidate_keys: ["CASE-202603-101"],
+    can_submit: true,
+    requires_note: false,
+    message: "所选记录已确认关联，可在此撤回这组配对关系。",
+    active_relation: {
+      case_id: "CASE-202603-101",
+      version: 1,
+      row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+    },
+    before: { groups: [buildWorkbenchGroup("paired", true)] },
+    after: { groups: [buildWorkbenchGroup("open", false)] },
+    amount_summary: amountSummary(),
+  };
+}
+
+function withdrawResultPayload() {
+  return {
+    success: true,
+    action: "withdraw_link",
+    month: "all",
+    affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+    case_id: "CASE-202603-101",
+    affected_months: ["2026-03"],
+    affected_scope_keys: ["2026-03"],
+    freshness_targets: [
       {
         read_model_key: "workbench_relation",
-        scope_type: "",
         scope_key: "2026-03",
-        status: "fresh",
-        raw_status: "fresh",
-        fresh: true,
-        blocking: false,
-        generated_at: "2026-06-17T01:00:00Z",
       },
     ],
-    blocked_targets: [],
-    refreshing_targets: [],
+    operation_projection: {
+      after: {
+        paired_groups: [],
+        open_groups: [buildWorkbenchGroup("open", false)],
+      },
+    },
+    message: "已撤回 3 条记录关联。",
+  };
+}
+
+function splitCandidatePreviewPayload() {
+  return {
+    operation: "split_candidate",
+    operation_type: "split_candidate",
+    preview_id: "split_candidate:CASE-202603-101",
+    submit_expected_versions: { "decision:CASE-202603-101": 1 },
+    candidate_keys: ["CASE-202603-101"],
+    can_submit: true,
+    requires_note: false,
+    message: "该组是自动候选，确认后会拆分并隐藏这条候选。",
+    before: { groups: [buildWorkbenchGroup("open", false)] },
+    after: { groups: [] },
+    amount_summary: amountSummary(),
+  };
+}
+
+function splitCandidateResultPayload() {
+  return {
+    success: true,
+    action: "split_candidate",
+    operation: "split_candidate",
+    month: "all",
+    affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+    case_id: "CASE-202603-101",
+    affected_months: ["2026-03"],
+    affected_scope_keys: ["2026-03"],
+    freshness_targets: [
+      {
+        read_model_key: "workbench_relation",
+        scope_key: "2026-03",
+      },
+    ],
+    operation_projection: {
+      after: {
+        paired_groups: [],
+        open_groups: [],
+      },
+    },
+    message: "已拆分并隐藏自动候选。",
+  };
+}
+
+function workbenchExceptionPreviewPayload() {
+  return {
+    rule_version: "exception_rules_browser_e2e_v1",
+    scenario: {
+      business_line: "expense",
+      scenario_code: "expense_oa_bank_missing_invoice",
+      scenario_label: "OA和支出流水一致，缺进项发票",
+      confidence: "high",
+      amount_relation: "oa_equals_bank_missing_invoice",
+    },
+    amount_summary: {
+      oa_total: "58000.00",
+      bank_expense_total: "58000.00",
+      bank_income_total: "0.00",
+      input_invoice_total: "0.00",
+      output_invoice_total: "0.00",
+      expense_relation: "oa_equals_bank_missing_invoice",
+    },
+    automatic_actions: [],
+    available_actions: [
+      {
+        action_code: "wait_input_invoice",
+        label: "追进项发票",
+        result_status: "open",
+        required_fields: ["note"],
+        description: "金额已核对，等待后续进项发票补齐。",
+      },
+    ],
+    warnings: [
+      {
+        code: "missing_input_invoice",
+        severity: "warning",
+        message: "当前候选缺进项发票，提交后进入已处理异常。",
+      },
+    ],
+    workflow_projection: {
+      next_status: "processed_exception",
+    },
+    candidate_evidence: [
+      {
+        id: "CASE-202603-101",
+        label: "命中候选分组 CASE-202603-101",
+        detail: "OA 与银行流水金额一致，发票仍需追踪。",
+      },
+    ],
+    can_apply: true,
+  };
+}
+
+function workbenchExceptionApplyResultPayload() {
+  return {
+    success: true,
+    case: {
+      id: "WEX-BROWSER-001",
+      status: "open",
+      scenario_code: "expense_oa_bank_missing_invoice",
+      action_code: "wait_input_invoice",
+    },
+    pair_relation: null,
+    updated_rows: [],
+    affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+    affected_scope_keys: ["2026-03"],
+    freshness_targets: [
+      {
+        read_model_key: "workbench_relation",
+        scope_key: "2026-03",
+      },
+    ],
+    workbench_refresh_required: true,
+    message: "已提交统一异常处理。",
+  };
+}
+
+function workbenchExceptionActionResultPayload(action: "cancel_exception" | "ignore_row" | "unignore_row") {
+  const affectedRowIds = action === "ignore_row" || action === "unignore_row"
+    ? ["iv-o-202603-001"]
+    : ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"];
+  const messages = {
+    cancel_exception: "已取消异常处理。",
+    ignore_row: "已忽略 1 条记录。",
+    unignore_row: "已撤回忽略。",
+  };
+  return {
+    success: true,
+    action,
+    month: "all",
+    affected_row_ids: affectedRowIds,
+    exception_case_id: "WEX-BROWSER-001",
+    affected_months: ["2026-03"],
+    affected_scope_keys: ["2026-03"],
+    freshness_targets: [
+      {
+        read_model_key: "workbench_relation",
+        scope_key: "2026-03",
+      },
+    ],
+    message: messages[action],
+  };
+}
+
+function operationBarrierPayload(mode: OperationBarrierMockMode = "fresh") {
+  const fresh = mode === "fresh";
+  const blocked = mode === "blocked";
+  const target = {
+    read_model_key: "workbench_relation",
+    scope_type: "",
+    scope_key: "2026-03",
+    status: fresh ? "fresh" : blocked ? "blocked" : "refreshing",
+    raw_status: fresh ? "fresh" : blocked ? "failed" : "processing",
+    fresh,
+    blocking: blocked,
+    reason: blocked ? "browser relation refresh blocked" : mode === "refreshing" ? "browser relation refresh pending" : "",
+    last_error: blocked ? "browser relation refresh blocked" : null,
+    generated_at: "2026-06-17T01:00:00Z",
+  };
+  return {
+    status: fresh ? "fresh" : blocked ? "blocked" : "refreshing",
+    fresh,
+    targets: [target],
+    blocked_targets: blocked ? [target] : [],
+    refreshing_targets: mode === "refreshing" ? [target] : [],
   };
 }
 
@@ -2601,6 +3479,21 @@ function parseJsonBody(postData: string | null): Record<string, unknown> {
   }
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sequencedReadModelStatus(
+  sequence: BankDetailReadModelMockStatus[] | undefined,
+  requestIndex: number,
+  fallback: BankDetailReadModelMockStatus | undefined,
+) {
+  if (!sequence?.length) {
+    return fallback ?? "fresh";
+  }
+  return sequence[Math.min(requestIndex, sequence.length - 1)] ?? fallback ?? "fresh";
+}
+
 function turnoverClosureExpectedVersions() {
   return Object.fromEntries(
     Object.entries(turnoverBankRowVersions).map(([rowId, version]) => [
@@ -2651,7 +3544,7 @@ function turnoverClosureMutationPayload() {
   };
 }
 
-function bankAccountsPayload() {
+function bankAccountsPayload(readModelStatus: BankDetailReadModelMockStatus = "fresh") {
   return {
     accounts: [
       {
@@ -2668,18 +3561,29 @@ function bankAccountsPayload() {
     total_balance: "130500.50",
     balance_account_count: 1,
     missing_balance_account_count: 0,
-    read_model_status: "fresh",
-    balance_read_model_status: "fresh",
+    read_model_status: readModelStatus,
+    balance_read_model_status: readModelStatus,
   };
 }
 
-function bankTransactionsPayload(relationConfirmed: boolean, bankImportConfirmed = false) {
+function bankTransactionsPayload(
+  relationConfirmed: boolean,
+  bankImportConfirmed = false,
+  options: {
+    classificationMode?: BankDetailClassificationMockMode;
+    categoryOverride?: BankDetailCategoryOverride | null;
+    largeDataset?: boolean;
+    page?: number;
+    pageSize?: number;
+    readModelStatus?: BankDetailReadModelMockStatus;
+    rowsEmpty?: boolean;
+    total?: number;
+  } = {},
+) {
   const relationTags = relationConfirmed ? ["有oa", "有发票"] : ["候选oa", "候选发票"];
-  return {
-    account_key: null,
-    date_from: "2026-01-01",
-    date_to: "2026-12-31",
-    rows: [
+  const rows = options.rowsEmpty
+    ? []
+    : [
       {
         id: "bk-o-202603-001",
         trade_time: "2026-03-28 10:18:00",
@@ -2772,9 +3676,163 @@ function bankTransactionsPayload(relationConfirmed: boolean, bankImportConfirmed
           relation_status: "",
         },
       ] : []),
-    ],
-    category_counts: { equipment_payment: 1, uncategorized: 0 },
-    pagination: { page: 1, page_size: 100, total: bankImportConfirmed ? 2 : 1 },
+      ...(options.largeDataset ? Array.from({ length: 119 }, (_, index) => {
+        const sequence = index + 2;
+        const padded = String(sequence).padStart(3, "0");
+        return {
+          id: `bk-large-202603-${padded}`,
+          trade_time: `2026-03-${String((sequence % 28) + 1).padStart(2, "0")} 15:42:00`,
+          counterparty_name: `长字段浏览器供应商${padded}有限公司-跨区域设备服务与维护合同`,
+          direction: "expense",
+          direction_label: "支",
+          amount: `${(5000 + sequence * 37).toLocaleString("en-US")}.00`,
+          balance: `${(130500 - sequence * 19).toLocaleString("en-US")}.50`,
+          summary: `浏览器长列表验收摘要 ${padded} - 包含项目、合同、批次和跨页备注`,
+          purpose: `设备维护与备品备件采购 ${padded}`,
+          purpose_text: `设备维护与备品备件采购 ${padded} / 超长用途字段用于检查列宽与换行`,
+          summary_text: `浏览器长列表验收摘要 ${padded} - 包含项目、合同、批次和跨页备注`,
+          note_text: `客户附言 ${padded}：跨区域售后服务、安装调试、验收留存和发票待匹配说明`,
+          bank_name: "建设银行",
+          account_last4: "1138",
+          category_code: null,
+          category_label: null,
+          category_path: [],
+          category_source: "",
+          category_version: 1,
+          category_resolution_status: "auto_matched",
+          auto_category_code: "equipment_payment",
+          auto_category_label: "设备款",
+          auto_category_path: ["自动识别", "设备款"],
+          auto_category_primary_label: "成本",
+          auto_category_sub_label: "设备款",
+          auto_category_third_label: null,
+          auto_category_label_path: ["成本", "设备款"],
+          auto_category_source: "browser_e2e_large",
+          auto_category_reason: "浏览器 e2e 大表格 mock",
+          auto_category_confidence: "high",
+          effective_category_code: "equipment_payment",
+          effective_category_label: "设备款",
+          effective_category_path: ["自动识别", "设备款"],
+          effective_category_primary_label: "成本",
+          effective_category_sub_label: "设备款",
+          effective_category_third_label: null,
+          effective_category_label_path: ["成本", "设备款"],
+          effective_category_source: "auto",
+          oa_relation_tag: relationTags[0],
+          invoice_relation_tag: relationTags[1],
+          relation_tags: relationTags,
+          relation_case_id: `CASE-LARGE-202603-${padded}`,
+          relation_status: relationConfirmed ? "linked" : "candidate",
+        };
+      }) : []),
+    ];
+  const firstRow = rows[0];
+  if (firstRow && options.categoryOverride) {
+    const override = options.categoryOverride;
+    Object.assign(firstRow, {
+      category_code: override.categoryCode,
+      category_label: override.subLabel,
+      category_path: override.labelPath,
+      category_primary_label: override.primaryLabel,
+      category_sub_label: override.subLabel,
+      category_third_label: override.thirdLabel ?? null,
+      category_label_path: override.labelPath,
+      category_source: override.source,
+      category_version: 2,
+      category_resolution_status: "manual_confirmed",
+      manual_confirmed_category_code: override.categoryCode,
+      auto_category_code: null,
+      auto_category_label: null,
+      auto_category_path: [],
+      auto_category_primary_label: null,
+      auto_category_sub_label: null,
+      auto_category_third_label: null,
+      auto_category_label_path: [],
+      auto_category_source: "",
+      auto_category_reason: "",
+      auto_category_confidence: "",
+      auto_candidate_category_codes: [],
+      auto_candidate_categories: [],
+      effective_category_code: override.categoryCode,
+      effective_category_label: override.subLabel,
+      effective_category_path: override.labelPath,
+      effective_category_primary_label: override.primaryLabel,
+      effective_category_sub_label: override.subLabel,
+      effective_category_third_label: override.thirdLabel ?? null,
+      effective_category_label_path: override.labelPath,
+      effective_category_source: override.source === "manual" ? "manual" : "auto_confirmation",
+    });
+  } else if (firstRow && options.classificationMode === "needs_confirmation") {
+    Object.assign(firstRow, {
+      category_resolution_status: "needs_confirmation",
+      auto_category_code: null,
+      auto_category_label: null,
+      auto_category_path: [],
+      auto_category_primary_label: null,
+      auto_category_sub_label: null,
+      auto_category_third_label: null,
+      auto_category_label_path: [],
+      effective_category_code: null,
+      effective_category_label: null,
+      effective_category_path: [],
+      effective_category_primary_label: null,
+      effective_category_sub_label: null,
+      effective_category_third_label: null,
+      effective_category_label_path: [],
+      effective_category_source: "",
+      auto_candidate_category_codes: ["equipment_payment"],
+      auto_candidate_categories: [
+        {
+          category_code: "equipment_payment",
+          category_label: "设备款",
+          category_primary_label: "成本",
+          category_sub_label: "设备款",
+          category_third_label: null,
+          category_label_path: ["成本", "设备款"],
+          category_path: ["自动识别", "设备款"],
+          rule_code: "equipment_payment_rule",
+          reason: "浏览器 e2e mock 候选",
+        },
+      ],
+    });
+  }
+  else if (firstRow && options.classificationMode === "unmatched") {
+    Object.assign(firstRow, {
+      category_resolution_status: "unmatched",
+      auto_category_code: null,
+      auto_category_label: null,
+      auto_category_path: [],
+      auto_category_primary_label: null,
+      auto_category_sub_label: null,
+      auto_category_third_label: null,
+      auto_category_label_path: [],
+      effective_category_code: null,
+      effective_category_label: null,
+      effective_category_path: [],
+      effective_category_primary_label: null,
+      effective_category_sub_label: null,
+      effective_category_third_label: null,
+      effective_category_label_path: [],
+      effective_category_source: "",
+    });
+  }
+  const equipmentPaymentCount = rows.filter((row) => row.effective_category_code === "equipment_payment").length;
+  return {
+    account_key: null,
+    date_from: "2026-01-01",
+    date_to: "2026-12-31",
+    rows,
+    category_counts: {
+      equipment_payment: equipmentPaymentCount,
+      salary: options.categoryOverride?.categoryCode === "salary" ? 1 : 0,
+      external_payment: options.categoryOverride?.categoryCode === "external_payment" ? 1 : 0,
+      uncategorized: options.classificationMode === "unmatched" && !options.rowsEmpty && !options.categoryOverride ? 1 : 0,
+    },
+    pagination: {
+      page: options.page ?? 1,
+      page_size: options.pageSize ?? 100,
+      total: options.total ?? rows.length,
+    },
     tag_dictionary: {
       version: 1,
       tags: [
@@ -2782,18 +3840,39 @@ function bankTransactionsPayload(relationConfirmed: boolean, bankImportConfirmed
           code: "equipment_payment",
           label: "设备款",
           path: ["自动识别", "设备款"],
+          output_primary_label: "成本",
+          output_sub_label: "设备款",
+          status: "active",
+          source: "system",
+        },
+        {
+          code: "salary",
+          label: "工资",
+          path: ["费用", "工资"],
+          output_primary_label: "费用",
+          output_sub_label: "工资",
+          status: "active",
+          source: "system",
+        },
+        {
+          code: "external_payment",
+          label: "借出款",
+          path: ["外部往来款付款", "借出款"],
+          output_primary_label: "外部往来款付款",
+          output_sub_label: "借出款",
           status: "active",
           source: "system",
         },
       ],
     },
-    read_model_status: "fresh",
+    read_model_status: options.readModelStatus ?? "fresh",
   };
 }
 
-function bankAutoTagRulesPayload() {
+function bankAutoTagRulesPayload(canSave = true, options: BankAutoTagRulesPayloadOptions = {}) {
+  const salarySubLabel = options.salarySubLabel ?? "工资";
   return {
-    version: 1,
+    version: options.version ?? 1,
     system_rule: {
       code: "internal_transfer",
       label: "内部往来款",
@@ -2804,7 +3883,85 @@ function bankAutoTagRulesPayload() {
       archivable: false,
       sortable: false,
     },
-    active_rules: [],
+    active_rules: [
+      {
+        code: "equipment_payment",
+        label: "设备款",
+        output_primary_label: "成本",
+        output_sub_label: "设备款",
+        status: "active",
+        source: "custom",
+        priority: 2,
+        priority_label: "优先级 2",
+        sort_order: 1,
+        direction: "expense",
+        account_scope: { type: "any", values: [] },
+        rules: {
+          match_fields: ["purpose_text", "summary_text", "note_text", "detail_text"],
+          exact_any: [],
+          contains_any: ["设备"],
+          contains_all: [],
+          none_of: [],
+          regex_any: [],
+        },
+        rule_summary: "用途/摘要/备注包含设备",
+        editable: true,
+        archivable: true,
+        sortable: true,
+      },
+      {
+        code: "salary",
+        label: salarySubLabel,
+        output_primary_label: "费用",
+        output_sub_label: salarySubLabel,
+        status: "active",
+        source: "custom",
+        priority: 3,
+        priority_label: "优先级 3",
+        sort_order: 2,
+        direction: "expense",
+        account_scope: { type: "any", values: [] },
+        rules: {
+          match_fields: ["purpose_text", "summary_text", "note_text", "detail_text"],
+          exact_any: [],
+          contains_any: ["工资"],
+          contains_all: [],
+          none_of: [],
+          regex_any: [],
+        },
+        rule_summary: "用途/摘要/备注包含工资",
+        editable: true,
+        archivable: true,
+        sortable: true,
+      },
+      {
+        code: "external_payment",
+        label: "借出款",
+        output_primary_label: "外部往来款付款",
+        output_sub_label: "借出款",
+        turnover_role: "external_turnover",
+        turnover_action_type: "pending_collection",
+        status: "active",
+        source: "custom",
+        priority: 4,
+        priority_label: "优先级 4",
+        sort_order: 3,
+        direction: "expense",
+        account_scope: { type: "any", values: [] },
+        rules: {
+          match_fields: ["counterparty_name", "purpose_text", "summary_text", "note_text"],
+          exact_any: [],
+          contains_any: ["往来"],
+          contains_all: [],
+          none_of: [],
+          regex_any: [],
+        },
+        rule_summary: "对方户名/用途/摘要/备注包含往来",
+        editable: true,
+        archivable: true,
+        sortable: true,
+      },
+    ],
     archived_rules: [],
     field_options: [
       { value: "counterparty_name", label: "对方户名" },
@@ -2814,12 +3971,13 @@ function bankAutoTagRulesPayload() {
     ],
     turnover_third_label_options: [],
     turnover_action_type_options: [],
-    permissions: { can_save: true },
-    read_model_status: "fresh",
+    permissions: { can_save: canSave },
+    read_model_status: options.readModelStatus ?? "fresh",
   };
 }
 
-function pendingInvoiceRow(relationConfirmed: boolean) {
+function pendingInvoiceRow(relationConfirmed: boolean, candidateRelations = false) {
+  const hasCandidateRelations = !relationConfirmed && candidateRelations;
   const status = relationConfirmed
     ? {
       code: "paid_invoiced",
@@ -2835,7 +3993,7 @@ function pendingInvoiceRow(relationConfirmed: boolean) {
       severity: "warning",
       primary_action: "attach_existing_invoice",
     };
-  const inputInvoice = relationConfirmed ? {
+  const inputInvoice = relationConfirmed || hasCandidateRelations ? {
     id: "iv-o-202603-001",
     invoice_no: "12561048",
     digital_invoice_no: "",
@@ -2847,10 +4005,10 @@ function pendingInvoiceRow(relationConfirmed: boolean) {
     buyer_name: "杭州溯源科技有限公司",
     invoice_type: "input",
     relation_case_id: "CASE-202603-101",
-    relation_status: "linked",
-    relation_source: "workbench_relation",
+    relation_status: relationConfirmed ? "linked" : "candidate",
+    relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
   } : null;
-  const oaSummary = relationConfirmed ? {
+  const oaSummary = relationConfirmed || hasCandidateRelations ? {
     id: "oa-o-202603-001",
     applicant: "陈涛",
     application_type: "供应商付款申请",
@@ -2859,8 +4017,8 @@ function pendingInvoiceRow(relationConfirmed: boolean) {
     form_no: "CASE-202603-101",
     detail_available: true,
     relation_case_id: "CASE-202603-101",
-    relation_status: "linked",
-    relation_source: "workbench_relation",
+    relation_status: relationConfirmed ? "linked" : "candidate",
+    relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
   } : null;
   return {
     id: "bk-o-202603-001",
@@ -2896,10 +4054,10 @@ function pendingInvoiceRow(relationConfirmed: boolean) {
     invoice_acquisition_status: status,
     input_invoices: {
       primary: inputInvoice,
-      relation_count: relationConfirmed ? 1 : 0,
+      relation_count: inputInvoice ? 1 : 0,
       linked_relation_count: relationConfirmed ? 1 : 0,
       has_multiple: false,
-      summaries: relationConfirmed && inputInvoice ? [inputInvoice] : [],
+      summaries: inputInvoice ? [inputInvoice] : [],
       payment_summary: relationConfirmed ? {
         paid_total: "58000.00",
         invoice_total: "65540.00",
@@ -2909,38 +4067,46 @@ function pendingInvoiceRow(relationConfirmed: boolean) {
     },
     oa: {
       primary: oaSummary,
-      relation_count: relationConfirmed ? 1 : 0,
+      relation_count: oaSummary ? 1 : 0,
       has_multiple: false,
-      detail_available: relationConfirmed,
-      summaries: relationConfirmed && oaSummary ? [oaSummary] : [],
+      detail_available: Boolean(oaSummary),
+      summaries: oaSummary ? [oaSummary] : [],
     },
-    invoices: relationConfirmed && inputInvoice ? [inputInvoice] : [],
-    oa_applicant: relationConfirmed ? "陈涛" : null,
+    invoices: inputInvoice ? [inputInvoice] : [],
+    oa_applicant: oaSummary ? "陈涛" : null,
     can_create_invoice: !relationConfirmed,
     available_actions: relationConfirmed ? ["view_relation"] : ["attach_existing_invoice", "view_payment_detail"],
-    relation_case_ids: relationConfirmed ? ["CASE-202603-101"] : [],
+    relation_case_ids: inputInvoice || oaSummary ? ["CASE-202603-101"] : [],
   };
 }
 
-function pendingInvoiceRowsPayload(relationConfirmed: boolean) {
+function pendingInvoiceRowsPayload(
+  relationConfirmed: boolean,
+  candidateRelations = false,
+  readModelStatus: PendingInvoiceReadModelMockStatus = "fresh",
+  rowsEmpty = false,
+) {
+  const rows = rowsEmpty ? [] : [pendingInvoiceRow(relationConfirmed, candidateRelations)];
+  const totalRows = rows.length;
   return {
     direction: "expense",
     filter: "all",
-    rows: [pendingInvoiceRow(relationConfirmed)],
-    pagination: { page: 1, page_size: 50, total: 1 },
+    rows,
+    pagination: { page: 1, page_size: 50, total: totalRows },
     summary: {
-      total_rows: 1,
-      missing_invoice_rows: relationConfirmed ? 0 : 1,
-      create_invoice_available_rows: relationConfirmed ? 0 : 1,
+      total_rows: totalRows,
+      missing_invoice_rows: relationConfirmed || rowsEmpty ? 0 : 1,
+      create_invoice_available_rows: relationConfirmed || rowsEmpty ? 0 : 1,
       source_summary: {
-        bank_transaction_rows: 1,
-        expense_rows: 1,
+        bank_transaction_rows: totalRows,
+        expense_rows: totalRows,
         income_rows: 0,
-        current_direction_rows: 1,
+        current_direction_rows: totalRows,
         excluded_direction_rows: 0,
       },
     },
-    read_model_status: "fresh",
+    read_model_status: readModelStatus,
+    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["workbench_relation_not_fresh"],
     tag_dictionary: {
       version: 1,
       tags: [
@@ -2981,6 +4147,32 @@ function pendingInvoiceFilterOptionsPayload(relationConfirmed: boolean) {
       },
     ],
   };
+}
+
+function bankDetailsExportBody(relationConfirmed: boolean, url: URL) {
+  const relationTags = relationConfirmed ? ["有oa", "有发票"] : ["候选oa", "候选发票"];
+  return [
+    "交易ID,对方户名,银行账户,标签,关系案例,OA关系,发票关系,关系状态,摘要",
+    [
+      "bk-o-202603-001",
+      "智能工厂设备商",
+      "建设银行 1138",
+      "设备款",
+      "CASE-202603-101",
+      relationTags[0],
+      relationTags[1],
+      relationConfirmed ? "linked" : "candidate",
+      relationConfirmed ? "设备尾款已闭环" : "设备尾款待进项票",
+    ].join(","),
+    [
+      "导出筛选",
+      url.searchParams.get("date_from") ?? "",
+      url.searchParams.get("date_to") ?? "",
+      url.searchParams.get("account_key") ?? "",
+      url.searchParams.get("keyword") ?? "",
+      url.searchParams.get("category_code") ?? "",
+    ].join(","),
+  ].join("\n");
 }
 
 function batchAccountingOaRows() {
@@ -3105,7 +4297,19 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   });
 
   const calls: string[] = [];
-  let relationConfirmed = false;
+  const requestBodies = new Map<string, Record<string, unknown>[]>();
+  let relationConfirmed = options.workbenchInitialRelationConfirmed === true;
+  let candidateSplitSuppressed = false;
+  let workbenchExceptionApplied = options.workbenchInitialExceptionApplied === true;
+  let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
+  let workbenchConfirmSubmitAttempts = 0;
+  const workbenchPageStatus = options.workbenchPageStatus ?? "fresh";
+  let bankDetailsCategoryOverride: BankDetailCategoryOverride | null = null;
+  let bankAutoTagRulesVersion = 1;
+  let bankAutoTagRulesSalarySubLabel = "工资";
+  let bankDetailsAccountsRequestCount = 0;
+  let bankDetailsTransactionsRequestCount = 0;
+  let bankDetailsTransactionsFailuresRemaining = 0;
   let batchAccountingSubmitted = false;
   let turnoverClosureConfirmed = false;
   let latestImportScenario: ImportScenario = "bank";
@@ -3118,6 +4322,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let outputInvoiceStatusSaved = false;
   let outputInvoiceReminderSaved = false;
   let outputInvoiceReceiptCreated = false;
+  let outputInvoiceRedRelationConfirmed = false;
   let inputInvoiceOaSubmitted = false;
   let etcBusinessBatchStatus: EtcBusinessBatchStatus = "imported";
   let noOaBankBatchStatus: NoOaBrowserBatchStatus = "draft";
@@ -3131,7 +4336,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     const request = route.request();
     const url = new URL(request.url());
     const path = normalizeApiPath(url.pathname);
-    calls.push(`${request.method()} ${path}`);
+    const methodAndPath = `${request.method()} ${path}`;
+    calls.push(methodAndPath);
+    if (request.method() !== "GET") {
+      const existingBodies = requestBodies.get(methodAndPath) ?? [];
+      existingBodies.push(parseJsonBody(request.postData()));
+      requestBodies.set(methodAndPath, existingBodies);
+    }
 
     if (path === "/api/session/me") {
       if (options.sessionMode === "expired") {
@@ -3155,21 +4366,19 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/app-health") {
-      return json(route, appHealthPayload());
+      return json(route, appHealthPayload(options));
     }
 
     if (path === "/api/oa-sync/status") {
-      return json(route, {
-        status: "idle",
-        dirty_scopes: [],
-        changed_scopes: [],
-        version: 1,
-        last_synced_at: "2026-06-17T01:00:00Z",
-      });
+      return json(route, oaSyncPayload(options.oaSyncMode));
+    }
+
+    if (path === "/api/workbench/refresh-status") {
+      return json(route, workbenchRefreshStatusPayload(options.workbenchRefreshStatus));
     }
 
     if (path === "/api/operation-barrier/status") {
-      return json(route, operationBarrierPayload());
+      return json(route, operationBarrierPayload(options.operationBarrierMode));
     }
 
     if (path === "/api/workbench/settings") {
@@ -3305,7 +4514,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/input-invoice-usage/rows") {
-      return json(route, inputInvoiceUsageRowsPayload());
+      return json(route, inputInvoiceUsageRowsPayload(
+        relationConfirmed,
+        Boolean(options.inputInvoiceUsageRelationFanout),
+      ));
     }
 
     if (path === "/api/input-invoice-usage/filter-options") {
@@ -3317,7 +4529,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         invoiceIds?: string[];
         invoice_ids?: string[];
       };
-      return json(route, inputInvoiceOaReversePreviewPayload(body.invoiceIds ?? body.invoice_ids ?? []));
+      return json(route, inputInvoiceOaReversePreviewPayload(
+        body.invoiceIds ?? body.invoice_ids ?? [],
+        relationConfirmed,
+        Boolean(options.inputInvoiceUsageRelationFanout),
+      ));
     }
 
     if (path === "/api/input-invoice-usage/oa-reverse/oa-draft") {
@@ -3335,7 +4551,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/oa-pending-payments/rows") {
-      return json(route, oaPendingPaymentRowsPayload());
+      return json(route, oaPendingPaymentRowsPayload(Boolean(options.oaPendingPaymentCandidateRelations)));
     }
 
     if (path === "/api/oa-pending-payments/filter-options") {
@@ -3362,11 +4578,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, costStatisticsExplorerPayload(
         url.searchParams.get("month") ?? "all",
         url.searchParams.get("project_scope") ?? "active",
+        relationConfirmed,
+        Boolean(options.costStatisticsRelationFanout),
       ));
     }
 
     if (path === "/api/cost-statistics/export-preview") {
-      return json(route, costStatisticsExportPreviewPayload(url));
+      return json(route, costStatisticsExportPreviewPayload(
+        url,
+        relationConfirmed,
+        Boolean(options.costStatisticsRelationFanout),
+      ));
     }
 
     if (path === "/api/cost-statistics/export") {
@@ -3379,7 +4601,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     const costTransactionDetailMatch = path.match(/^\/api\/cost-statistics\/transactions\/([^/]+)$/);
     if (costTransactionDetailMatch) {
-      return json(route, costTransactionPayload(decodeURIComponent(costTransactionDetailMatch[1] ?? "")));
+      return json(route, costTransactionPayload(
+        decodeURIComponent(costTransactionDetailMatch[1] ?? ""),
+        relationConfirmed,
+        Boolean(options.costStatisticsRelationFanout),
+      ));
     }
 
     if (path === "/api/cost-statistics") {
@@ -3388,6 +4614,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         summary: costStatisticsExplorerPayload(
           url.searchParams.get("month") ?? "all",
           url.searchParams.get("project_scope") ?? "active",
+          relationConfirmed,
+          Boolean(options.costStatisticsRelationFanout),
         ).summary,
         rows: [],
       });
@@ -3420,6 +4648,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         outputInvoiceStatusSaved,
         outputInvoiceReminderSaved,
         outputInvoiceReceiptCreated,
+        outputInvoiceRedRelationConfirmed,
+        Boolean(options.outputInvoiceRedRelationCandidate),
       ));
     }
 
@@ -3476,8 +4706,38 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
+    if (path === "/api/output-invoice-collections/rows/output-collection-row-e2e-001/red-invoice-relations") {
+      outputInvoiceRedRelationConfirmed = true;
+      return json(route, {
+        ok: true,
+        relation: {
+          id: "output-red-relation-e2e-001",
+          row_id: "output-collection-row-e2e-001",
+          related_invoice_id: "out-e2e-002",
+          relation_type: "red_invoice",
+          source: "manual",
+        },
+      });
+    }
+
+    if (path === "/api/output-invoice-collections/red-invoice-relations/output-red-relation-e2e-001") {
+      outputInvoiceRedRelationConfirmed = false;
+      return json(route, {
+        ok: true,
+        relation_id: "output-red-relation-e2e-001",
+      });
+    }
+
     if (path === "/api/workbench") {
-      return json(route, legacyWorkbenchPayload(relationConfirmed));
+      return json(route, legacyWorkbenchPayload(
+        relationConfirmed,
+        candidateSplitSuppressed,
+        workbenchExceptionApplied,
+        workbenchRowIgnored,
+        workbenchPageStatus,
+        options.workbenchPageEmpty === true,
+        options.workbenchLargeDataset === true,
+      ));
     }
 
     if (path === "/imports/files/preview") {
@@ -3527,16 +4787,67 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/summary") {
-      return json(route, workbenchSummaryPayload(relationConfirmed));
+      return json(route, workbenchSummaryPayload(
+        relationConfirmed,
+        candidateSplitSuppressed,
+        workbenchExceptionApplied,
+        workbenchRowIgnored,
+        workbenchPageStatus,
+        options.workbenchPageEmpty === true,
+        options.workbenchLargeDataset === true,
+      ));
     }
 
     if (path === "/api/workbench/groups") {
+      if (options.workbenchFreshRefetchError && (relationConfirmed || workbenchExceptionApplied)) {
+        return json(route, {
+          error: "browser_workbench_refetch_failed",
+          message: "browser workbench refetch failed",
+        }, 500);
+      }
       const zone = url.searchParams.get("zone") === "paired" ? "paired" : "open";
-      return json(route, workbenchGroupsPayload(zone, relationConfirmed));
+      const requestedPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
+      const requestedPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "50", 10);
+      return json(route, workbenchGroupsPayload(
+        zone,
+        relationConfirmed,
+        candidateSplitSuppressed,
+        workbenchExceptionApplied,
+        workbenchRowIgnored,
+        workbenchPageStatus,
+        options.workbenchPageEmpty === true,
+        options.workbenchLargeDataset === true,
+        Number.isFinite(requestedPage) ? requestedPage : 1,
+        Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
+        url.searchParams.get("search") ?? "",
+      ));
+    }
+
+    const workbenchRowDetailMatch = path.match(/^\/api\/workbench\/rows\/([^/]+)$/);
+    if (workbenchRowDetailMatch) {
+      const rowId = decodeURIComponent(workbenchRowDetailMatch[1] ?? "");
+      const row = findWorkbenchRow(
+        rowId,
+        relationConfirmed,
+        candidateSplitSuppressed,
+        workbenchExceptionApplied,
+        workbenchRowIgnored,
+        options.workbenchLargeDataset === true,
+      );
+      if (!row) {
+        return json(route, {
+          error: "workbench_row_not_found",
+          message: "关联台记录不存在。",
+        }, 404);
+      }
+      return json(route, { row });
     }
 
     if (path === "/api/workbench/ignored") {
-      return json(route, { month: url.searchParams.get("month") ?? "all", rows: [] });
+      return json(route, {
+        month: url.searchParams.get("month") ?? "all",
+        rows: ignoredWorkbenchRows(workbenchRowIgnored),
+      });
     }
 
     if (path === "/api/workbench/settings") {
@@ -3548,24 +4859,257 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/actions/confirm-link") {
+      workbenchConfirmSubmitAttempts += 1;
+      const submitDelayMs = Math.max(0, options.workbenchConfirmSubmitDelayMs ?? 0);
+      if (submitDelayMs > 0) {
+        await delay(submitDelayMs);
+      }
+      if (options.workbenchConfirmSubmitConflict) {
+        return json(route, {
+          error: "workbench_relation_preview_stale",
+          message: "关联预览已失效，请重新预览。",
+        }, 409);
+      }
+      const failuresBeforeSuccess = Math.max(0, options.workbenchConfirmSubmitFailuresBeforeSuccess ?? 0);
+      if (workbenchConfirmSubmitAttempts <= failuresBeforeSuccess) {
+        return json(route, {
+          error: "browser_confirm_temporarily_unavailable",
+          message: "网络暂时失败，请重试。",
+        }, 503);
+      }
+      if (options.workbenchConfirmSubmitError) {
+        return json(route, {
+          error: "browser_confirm_failed",
+          message: "browser confirm failed",
+        }, 500);
+      }
       relationConfirmed = true;
+      candidateSplitSuppressed = false;
       return json(route, confirmResultPayload());
     }
 
+    if (path === "/api/workbench/actions/withdraw-link/preview") {
+      return json(route, relationConfirmed ? withdrawPreviewPayload() : splitCandidatePreviewPayload());
+    }
+
+    if (path === "/api/workbench/actions/withdraw-link") {
+      await delay(Math.max(0, options.workbenchWithdrawSubmitDelayMs ?? 200));
+      const body = parseJsonBody(request.postData());
+      if (body.operation_type === "split_candidate") {
+        relationConfirmed = false;
+        candidateSplitSuppressed = true;
+        return json(route, splitCandidateResultPayload());
+      }
+      relationConfirmed = false;
+      candidateSplitSuppressed = false;
+      return json(route, withdrawResultPayload());
+    }
+
+    if (path === "/api/workbench/exception/preview") {
+      return json(route, workbenchExceptionPreviewPayload());
+    }
+
+    if (path === "/api/workbench/exception/apply") {
+      await delay(200);
+      relationConfirmed = false;
+      candidateSplitSuppressed = false;
+      workbenchRowIgnored = false;
+      workbenchExceptionApplied = true;
+      return json(route, workbenchExceptionApplyResultPayload());
+    }
+
+    if (path === "/api/workbench/actions/cancel-exception") {
+      await delay(200);
+      workbenchExceptionApplied = false;
+      candidateSplitSuppressed = false;
+      relationConfirmed = false;
+      return json(route, workbenchExceptionActionResultPayload("cancel_exception"));
+    }
+
+    if (path === "/api/workbench/actions/ignore-row") {
+      await delay(200);
+      workbenchRowIgnored = true;
+      workbenchExceptionApplied = false;
+      relationConfirmed = false;
+      candidateSplitSuppressed = false;
+      return json(route, workbenchExceptionActionResultPayload("ignore_row"));
+    }
+
+    if (path === "/api/workbench/actions/unignore-row") {
+      await delay(200);
+      workbenchRowIgnored = false;
+      return json(route, workbenchExceptionActionResultPayload("unignore_row"));
+    }
+
     if (path === "/api/bank-details/accounts") {
-      return json(route, bankAccountsPayload());
+      const readModelStatus = sequencedReadModelStatus(
+        options.bankDetailsAccountReadModelStatuses,
+        bankDetailsAccountsRequestCount,
+        options.bankDetailsAccountReadModelStatus,
+      );
+      bankDetailsAccountsRequestCount += 1;
+      return json(route, bankAccountsPayload(readModelStatus));
+    }
+
+    if (path === "/api/bank-details/transactions/export") {
+      const exportReadModelStatus = options.bankDetailsExportReadModelStatus
+        ?? options.bankDetailsTransactionReadModelStatus
+        ?? "fresh";
+      if (exportReadModelStatus !== "fresh") {
+        return json(route, {
+          error: "bank_detail_read_model_not_fresh",
+          message: "银行明细正在刷新，请稍后重试导出。",
+          read_model_status: exportReadModelStatus,
+        }, 409);
+      }
+      const filename = `银行明细_${url.searchParams.get("mode") === "account" ? "当前账户" : "全部银行"}_${url.searchParams.get("date_from") ?? "全部"}_${url.searchParams.get("date_to") ?? "全部"}.xlsx`;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers: {
+          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        },
+        body: bankDetailsExportBody(relationConfirmed, url),
+      });
     }
 
     if (path === "/api/bank-details/transactions") {
-      return json(route, bankTransactionsPayload(relationConfirmed, importConfirmed.bank));
+      if (bankDetailsTransactionsFailuresRemaining > 0) {
+        bankDetailsTransactionsFailuresRemaining -= 1;
+        return json(route, {
+          error: "bank_detail_transactions_unavailable",
+          message: "银行流水暂时无法加载，请稍后重试。",
+        }, 503);
+      }
+      const readModelStatus = sequencedReadModelStatus(
+        options.bankDetailsTransactionReadModelStatuses,
+        bankDetailsTransactionsRequestCount,
+        options.bankDetailsTransactionReadModelStatus,
+      );
+      bankDetailsTransactionsRequestCount += 1;
+      const page = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
+      const pageSize = Number.parseInt(url.searchParams.get("page_size") ?? "100", 10);
+      return json(route, bankTransactionsPayload(
+        relationConfirmed,
+        importConfirmed.bank,
+        {
+          classificationMode: options.bankDetailsClassificationMode,
+          categoryOverride: bankDetailsCategoryOverride,
+          largeDataset: options.bankDetailsLargeDataset,
+          page: Number.isFinite(page) ? page : 1,
+          pageSize: Number.isFinite(pageSize) ? pageSize : 100,
+          readModelStatus,
+          rowsEmpty: options.bankDetailsTransactionsEmpty,
+          total: options.bankDetailsTransactionsTotal,
+        },
+      ));
+    }
+
+    const bankCategoryConfirmationMatch = path.match(/^\/api\/bank-details\/transactions\/([^/]+)\/category-confirmation$/);
+    if (bankCategoryConfirmationMatch) {
+      const body = parseJsonBody(request.postData());
+      if (request.method() === "DELETE") {
+        bankDetailsCategoryOverride = null;
+        return json(route, {
+          ok: true,
+          transaction_id: decodeURIComponent(bankCategoryConfirmationMatch[1] ?? ""),
+          action: "bank_detail_category_confirmation_revoked",
+          affected_months: ["2026-03"],
+        });
+      }
+      bankDetailsCategoryOverride = {
+        categoryCode: String(body.category_code ?? "equipment_payment"),
+        primaryLabel: String(body.category_primary_label ?? "成本"),
+        subLabel: String(body.category_sub_label ?? "设备款"),
+        thirdLabel: body.category_third_label ? String(body.category_third_label) : null,
+        labelPath: body.category_label_path && Array.isArray(body.category_label_path)
+          ? body.category_label_path.map(String)
+          : ["成本", "设备款"],
+        source: "auto_confirmation",
+      };
+      return json(route, {
+        ok: true,
+        transaction_id: decodeURIComponent(bankCategoryConfirmationMatch[1] ?? ""),
+        selected_category_code: bankDetailsCategoryOverride.categoryCode,
+        affected_months: ["2026-03"],
+        freshness_targets: [{ read_model_key: "bank_detail", scope_key: "2026-03" }],
+      });
+    }
+
+    const bankCategoryAssignmentMatch = path.match(/^\/api\/bank-details\/transactions\/([^/]+)\/category-assignment$/);
+    if (bankCategoryAssignmentMatch) {
+      const body = parseJsonBody(request.postData());
+      if (request.method() === "DELETE") {
+        bankDetailsCategoryOverride = null;
+        return json(route, {
+          ok: true,
+          transaction_id: decodeURIComponent(bankCategoryAssignmentMatch[1] ?? ""),
+          action: "bank_detail_category_manual_assignment_cleared",
+          affected_months: ["2026-03"],
+        });
+      }
+      const primaryLabel = String(body.category_primary_label ?? "费用");
+      const subLabel = String(body.category_sub_label ?? "工资");
+      const thirdLabel = body.category_third_label ? String(body.category_third_label) : null;
+      bankDetailsCategoryOverride = {
+        categoryCode: String(body.category_code ?? "salary"),
+        primaryLabel,
+        subLabel,
+        thirdLabel,
+        labelPath: body.category_label_path && Array.isArray(body.category_label_path)
+          ? body.category_label_path.map(String)
+          : [primaryLabel, subLabel].filter(Boolean),
+        source: "manual",
+      };
+      return json(route, {
+        ok: true,
+        transaction_id: decodeURIComponent(bankCategoryAssignmentMatch[1] ?? ""),
+        selected_category_code: bankDetailsCategoryOverride.categoryCode,
+        previous_resolution_status: "unmatched",
+        assignment_source: "manual",
+        affected_months: ["2026-03"],
+        freshness_targets: [{ read_model_key: "bank_detail", scope_key: "2026-03" }],
+      });
+    }
+
+    const canSaveBankAutoTagRules = options.sessionMode !== "read_export_only"
+      && options.sessionMode !== "forbidden";
+    if (path === "/api/bank-details/auto-tag-rules/reapply") {
+      return json(route, bankAutoTagRulesPayload(canSaveBankAutoTagRules, {
+        version: bankAutoTagRulesVersion,
+        readModelStatus: "refreshing",
+        salarySubLabel: bankAutoTagRulesSalarySubLabel,
+      }), 202);
     }
 
     if (path === "/api/bank-details/auto-tag-rules") {
-      return json(route, bankAutoTagRulesPayload());
+      if (request.method() === "PUT") {
+        const body = parseJsonBody(request.postData());
+        const activeRules = Array.isArray(body.active_rules)
+          ? body.active_rules.filter((rule): rule is Record<string, unknown> => (
+            typeof rule === "object" && rule !== null && !Array.isArray(rule)
+          ))
+          : [];
+        const salaryRule = activeRules.find((rule) => rule.code === "salary");
+        const salarySubLabel = salaryRule?.output_sub_label;
+        if (typeof salarySubLabel === "string" && salarySubLabel.trim()) {
+          bankAutoTagRulesSalarySubLabel = salarySubLabel.trim();
+        }
+        bankAutoTagRulesVersion += 1;
+      }
+      return json(route, bankAutoTagRulesPayload(canSaveBankAutoTagRules, {
+        version: bankAutoTagRulesVersion,
+        salarySubLabel: bankAutoTagRulesSalarySubLabel,
+      }));
     }
 
     if (path === "/api/pending-invoices/rows") {
-      return json(route, pendingInvoiceRowsPayload(relationConfirmed));
+      return json(route, pendingInvoiceRowsPayload(
+        relationConfirmed,
+        Boolean(options.pendingInvoiceCandidateRelations),
+        options.pendingInvoiceReadModelStatus ?? "fresh",
+        Boolean(options.pendingInvoiceRowsEmpty),
+      ));
     }
 
     if (path === "/api/pending-invoices/filter-options") {
@@ -3600,6 +5144,16 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     calls,
     count(methodAndPath: string) {
       return calls.filter((entry) => entry === methodAndPath).length;
+    },
+    bodies(methodAndPath: string) {
+      return requestBodies.get(methodAndPath) ?? [];
+    },
+    lastBody(methodAndPath: string) {
+      const bodies = requestBodies.get(methodAndPath) ?? [];
+      return bodies[bodies.length - 1] ?? {};
+    },
+    failNextBankDetailsTransactions(count = 1) {
+      bankDetailsTransactionsFailuresRemaining += Math.max(1, count);
     },
   };
 }

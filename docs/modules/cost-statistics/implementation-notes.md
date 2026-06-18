@@ -28,6 +28,28 @@
 
 ## 历史记录
 
+## 2026-06-18 - Workbench 成本关系 Browser fan-out
+
+- 目标：补齐 Spec-first Browser E2E 中的成本统计下游 fan-out，防止关联台 open candidate 被误算进成本，或 confirmed 成本关系写入后成本页没有重新读取并展示。
+- 影响范围：`web/e2e/cost-statistics-relation-fanout.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`web/package.json`、成本统计 Spec-first E2E 文档、测试矩阵、状态机和全局测试闭环文档。
+- 关键决策：
+  - 使用 opt-in deterministic mock `costStatisticsRelationFanout` 构造成本关系链路；默认成本统计 mock 数据保持不变。
+  - Browser 规格先断言候选阶段看不到 `智能工厂项目` 和 `智能工厂设备尾款`，再通过关联台确认关系，返回成本页验证项目金额 `58,000.00`、对应流水和详情 modal。
+  - 本轮不改成本归因 service、SQL projection 或 read model worker；candidate 排除和 confirmed inclusion 的后端规则继续由既有 service/SQL tests 保护。
+- 文档影响：新增 `e2e-spec.md` / `e2e-coverage.md`，更新本实施记录、`tests.md`、`state-machine.md`、`docs/dev/testing*.md` 和 workbench-relations 覆盖矩阵。
+- 测试覆盖：
+  - `web/e2e/cost-statistics-relation-fanout.spec.ts`
+  - `cd web && npm run e2e:smoke`
+- 七类测试覆盖：
+  - Business core unit tests：本轮未改业务规则；candidate 排除由既有成本 service/SQL 测试继续保护。
+  - Service-layer tests：本轮未改 service/read model 写边界；真实 worker drain 仍为 staging/production 风险。
+  - API contract tests：适用；e2e 断言成本 explorer/detail 在 Workbench confirm 后重新读取并展示 confirmed 成本关系。
+  - Read model/cache/background job tests：本轮未改 worker/readiness；真实 enqueue-to-fresh 仍需 staging smoke。
+  - Frontend component and interaction tests：适用并新增真实 Chromium 跨页确认、返回成本页、项目/费用/流水/详情展示。
+  - End-to-end business-flow integration tests：适用并新增 Workbench confirm -> 成本统计重新读取 -> confirmed 成本关系出现的浏览器闭环。
+  - Existing feature regression tests：适用，防止 candidate/linked relation 成本语义和既有成本页下钻断链。
+- 未测风险：真实 RabbitMQ/Redis/cost-statistics worker drain、生产旧 scope cleanup、真实大数据下载/视觉性能、导入/turnover/no-OA/ETC/settings 到成本页的更多 fan-out 仍需后续轮次或 staging smoke。
+
 ## 2026-06-17 - Browser e2e 项目下钻与导出错误反馈
 
 - 目标：补齐成本统计真实浏览器主路径，防止后续页面维护时破坏 project scope、项目/费用类型/流水详情下钻、导出 preview 和结构化导出错误反馈。

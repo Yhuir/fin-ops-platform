@@ -10,6 +10,8 @@
 - `paymentStatus` 由 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` 判定，前端不得按金额字段自行推断。
 - `paymentStatus` 不输出 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计进入 `pending_review`，多 OA 合并付款先按 relation group 合计后再判定。
 - `/oa-pending-payments` 通过 `view_mode=completed|in_progress` 承载同一页面的两类 OA：completed 是原待付款核对，in_progress 只展示 OA 系统仍进行中的支付申请/日常报销。
+- completed 视图展示 OA、支付状态、支出流水和进项发票证据；in_progress 视图隐藏发票列，直到 relation 事实能证明发票证据。
+- OA/支付状态/支出流水是表格主体的固定三段：OA 单元格内按“申请人 / 项目 / 金额”三栏展示，支出流水单元格内按“对方户名 / 金额 / 摘要”三栏展示；支付状态列保持窄列，只展示付款状态、可用确认动作和“未写回/已写回”。
 - 进行中 OA 的候选流水不能自动写回；必须由用户点击“确认已支付”，后端校验 workflow/outflow/金额/flow_id 后确认 Workbench relation，并写回 OA MySQL `t_payment_simple.pay_status=1`。
 - OA MySQL `t_payment_simple.flow_id` 使用 OA Mongo `form_data._id`。该结论来自 2026-06-17 服务器实机脱敏验证：现有 `t_payment_simple.flow_id` 为 24 位 ObjectId 形态，能匹配 Mongo `_id`，未匹配 Flowable `PROC_INST_ID_`；流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为最终写回 ID。
 - 生产 rows、filter-options 和 detail 必须走 `OaPendingPaymentReadModelService` 的 freshness/source-version gate；非 fresh 返回 refreshing/unavailable 并入队 `oa_pending_payment.read_model.refresh`，不能 live scan。
@@ -36,6 +38,32 @@
 ```
 
 ## 历史记录
+
+## 2026-06-18 - OA pending 主体三段表格内部布局调整
+
+- 目标：按最新 UI 要求调整 OA 待付款核对的 completed/in-progress 表格主体，让 OA 区域内部固定展示申请人、项目、金额三栏；流水区域内部固定展示对方户名、金额、摘要三栏；支付状态列收窄并只展示“待支付/已支付”“确认已支付”和“未写回/已写回”。
+- 影响范围：`OaPendingPaymentsTable`、表格 CSS、`OaPendingPaymentsPage.test.tsx` 和本模块测试/实施文档；后端 API、read model、付款判定和写回流程不变。
+- 关键决策：保持 HTML 主表格仍以 OA、支付状态、流水为主体；completed 视图按既有状态机继续保留发票情况列，in-progress 视图继续隐藏发票列。写回状态不展示失败标签，外部依赖不可用仍只展示同步状态异常。
+- 文档影响：更新本实施记录和 `tests.md`；长期 API/架构文档不适用。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，覆盖 OA/流水内部三栏结构、流程状态 chip 文案、支付状态列宽、写回状态文案和缺流水 `-` 展示。
+
+## 2026-06-18 - 修复进行中 OA 投影后页面不刷新的链路
+
+- 目标：修复生产“OA 待付款核对 / 进行中 OA”为空。排查确认 Mongo 中 2026 年后存在进行中支付申请/日常报销，Postgres OA projection 与 `read_model.oa_pending_payment_rows` 中没有 `in_progress` 行；直接原因是生产未用当前 projection 逻辑重跑，且 `oa.sync` 完成后没有把 `oa_pending_payment` read model 标脏。
+- 影响范围：`OAProjectionSyncService`、生产 `oa.sync` / `oa_pending_payment.read_model.refresh` worker drain、本模块测试文档。
+- 关键决策：OA projection sync 仍是统一事实源；页面不 live scan Mongo。`oa.sync` 完成后必须同时 fan-out `workbench`、`search`、`pending_invoice` 和 `oa_pending_payment`，让进行中 OA 通过 worker/read model 进入页面。
+- 测试覆盖：新增 `tests/test_oa_projection_sync_service.py`，锁定 `in_progress` OA 同步后会入队 `oa_pending_payment` 月份和 `all` refresh。
+- 生产修复动作：部署后触发一次 `oa.sync:all`，确认 `app.oa_applications.workflow_status='in_progress'` 和 `read_model.oa_pending_payment_rows.oa_workflow_status='in_progress'` 均有数据。
+
+## 2026-06-18 - OA pending completed 视图恢复发票证据列
+
+- 目标：修复 Playwright smoke 暴露的回归：`oa-pending-payments` rows payload 已返回 `invoice.digitalInvoiceNo`，但表格只渲染 OA/支付状态/流水三列，导致真实浏览器首屏看不到发票号，也无法打开发票详情。
+- 影响范围：`OaPendingPaymentsTable`、`OaPendingPaymentsPage`、表格 CSS、`OaPendingPaymentsPage.test.tsx`、本模块测试/实施文档；后端 API contract 不变。
+- 关键决策：按状态机保留 view-mode 区分。`completed` 视图显示发票情况列，支持单发票详情和多发票 relation 明细；`in_progress` 视图继续隐藏发票列。表格展示层只消费后端 row payload，不自行推断发票状态。
+- 文档影响：更新本实施记录和 `tests.md`；状态机既有“completed 视图保留 invoice detail 能力、in_progress 不展示发票列”的口径不变。
+- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，覆盖 completed 发票列/发票筛选/开票日期排序/单发票详情/多发票 relation 明细，并保留 in-progress 隐藏发票列断言；`web/e2e/oa-pending-payments-flow.spec.ts` 重新通过。
+- 验证命令：`cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`；`cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts`；`cd web && npm run e2e:smoke`。
+- 未测风险：未做真实大数据横向滚动截图；新增列宽由 deterministic browser smoke 和 Vitest 覆盖基本可读性，真实生产宽表仍需 staging/人工抽样。
 
 ## 2026-06-17 - OA 支付状态 MySQL 写回生产配置闭环
 

@@ -37,6 +37,7 @@ type WorkbenchRecordCardProps = {
   row: WorkbenchRecord;
   rowState: WorkbenchRowState;
   actionMode?: "default" | "cancel-exception-only";
+  showActionColumn?: boolean;
   highlighted?: boolean;
   searchQuery?: string;
   sheetRowMode?: "stretched" | "split";
@@ -56,6 +57,7 @@ function WorkbenchRecordCard({
   row,
   rowState,
   actionMode = "default",
+  showActionColumn = false,
   highlighted = false,
   searchQuery = "",
   sheetRowMode = "split",
@@ -67,7 +69,7 @@ function WorkbenchRecordCard({
   readOnly = false,
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
-  const hasActionColumn = !readOnly && actionMode === "cancel-exception-only" && paneId !== "invoice";
+  const hasActionColumn = !readOnly && showActionColumn;
   const showInlineDetail = !readOnly && actionMode === "default" && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
@@ -109,6 +111,7 @@ function WorkbenchRecordCard({
             canMutateData={canMutateData}
             mode={actionMode}
             recordType={row.recordType}
+            showDetailAction={actionMode !== "default" || !showInlineDetail}
             showWorkflowActions={showWorkflowActions}
             variant={row.actionVariant}
             onAction={(action, event) => {
@@ -134,6 +137,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.row === nextProps.row
   && previousProps.rowState === nextProps.rowState
   && previousProps.actionMode === nextProps.actionMode
+  && previousProps.showActionColumn === nextProps.showActionColumn
   && previousProps.highlighted === nextProps.highlighted
   && previousProps.sheetRowMode === nextProps.sheetRowMode
   && previousProps.showWorkflowActions === nextProps.showWorkflowActions

@@ -18,6 +18,8 @@ type MockFetchHandler = (request: {
 
 type MockApiOptions = {
   workbenchErrorMonths?: string[];
+  workbenchEmptyPayload?: boolean;
+  workbenchReadModelStatus?: "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
   workbenchRefreshStatus?: Record<string, unknown>;
   workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
@@ -1404,6 +1406,32 @@ function buildWorkbenchPayload(month: string, oaStatus?: MockApiOptions["workben
 }
 
 type RawWorkbenchPayload = ReturnType<typeof buildWorkbenchRowPayload>;
+
+function emptyWorkbenchPayload(month: string): RawWorkbenchPayload {
+  return {
+    month,
+    summary: {
+      oa_count: 0,
+      bank_count: 0,
+      invoice_count: 0,
+      paired_count: 0,
+      open_count: 0,
+      exception_count: 0,
+    },
+    paired: { oa: [], bank: [], invoice: [] },
+    open: { oa: [], bank: [], invoice: [] },
+  };
+}
+
+function mockWorkbenchPayloadForMonth(
+  store: ReturnType<typeof createWorkbenchStateStore>,
+  month: string,
+  options: MockApiOptions,
+) {
+  return options.workbenchEmptyPayload
+    ? emptyWorkbenchPayload(month)
+    : cloneJson(store.get(month));
+}
 type RawWorkbenchSectionKey = "paired" | "open";
 type RawWorkbenchPaneKey = "oa" | "bank" | "invoice";
 type RawWorkbenchRow = RawWorkbenchPayload["paired"][RawWorkbenchPaneKey][number];
@@ -4626,21 +4654,21 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench failed" } };
       }
-      return { body: toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus) };
+      return { body: toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus) };
     },
     "/api/workbench/summary": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench summary failed" } };
       }
-      const payload = toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus);
+      const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
       return {
           body: {
             month: payload.month,
             summary: payload.summary,
             oa_status: payload.oa_status,
             invoice_inventory: payload.invoice_inventory,
-            read_model_status: "fresh",
+            read_model_status: options.workbenchReadModelStatus ?? "fresh",
             generated_at: "2026-05-22T09:30:00+08:00",
           },
       };
@@ -4653,7 +4681,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const zone = url.searchParams.get("zone") === "paired" ? "paired" : "open";
       const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
-      const payload = toGroupedWorkbenchPayload(cloneJson(workbenchStateStore.get(month)), options.workbenchOaStatus);
+      const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
       const search = String(url.searchParams.get("search") ?? "").trim();
       const searchByPane = parseWorkbenchGroupJsonParam(url.searchParams.get("search_by_pane"));
       const sort = String(url.searchParams.get("sort") ?? "").trim();
@@ -4675,7 +4703,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           row_counts: rowCounts,
           has_more: offset + pageSize < groups.length,
           groups: groups.slice(offset, offset + pageSize),
-          read_model_status: "fresh",
+          read_model_status: options.workbenchReadModelStatus ?? "fresh",
         },
       };
     },

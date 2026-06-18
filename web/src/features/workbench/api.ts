@@ -645,6 +645,24 @@ type ApiWorkbenchExceptionApplyResult = {
   updatedRows?: Array<Record<string, unknown>>;
   affected_row_ids?: unknown[];
   affectedRowIds?: unknown[];
+  affected_scope_keys?: unknown[];
+  affectedScopeKeys?: unknown[];
+  freshness_targets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
+  freshnessTargets?: Array<{
+    readModelKey?: unknown;
+    read_model_key?: unknown;
+    scopeType?: unknown;
+    scope_type?: unknown;
+    scopeKey?: unknown;
+    scope_key?: unknown;
+  }>;
   workbench_refresh_required?: boolean;
   workbenchRefreshRequired?: boolean;
   message?: string;
@@ -1722,6 +1740,9 @@ function mapWorkbenchExceptionApplyResult(
     pairRelation: payload.pairRelation ?? payload.pair_relation ?? null,
     updatedRows: payload.updatedRows ?? payload.updated_rows ?? [],
     affectedRowIds: (payload.affectedRowIds ?? payload.affected_row_ids ?? []).map((rowId) => String(rowId)),
+    affectedScopeKeys: cleanScopeList(payload.affectedScopeKeys ?? payload.affected_scope_keys)
+      .filter((scopeKey) => scopeKey !== "all"),
+    freshnessTargets: cleanFreshnessTargets(payload.freshnessTargets ?? payload.freshness_targets),
     workbenchRefreshRequired: payload.workbenchRefreshRequired ?? payload.workbench_refresh_required ?? false,
     message: typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : undefined,
   };

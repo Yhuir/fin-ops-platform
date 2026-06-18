@@ -27,6 +27,117 @@
 
 ## 历史记录
 
+## 2026-06-18 - Spec-first Browser 首屏与 fresh 空态闭环
+
+- 目标：补齐 `BANK-E2E-001` 的页面级 Browser 证据，覆盖默认当前年首屏、账户余额、默认交易列、relation/category 字段和 fresh 空结果空态。
+- 影响范围：`web/e2e/bank-details-initial-state.spec.ts`、`web/package.json` smoke 脚本、bank-details/testing closure 文档和全局 inventory；不改变生产页面、后端 API 或 read model contract。
+- 关键决策：Browser 验收按用户可见合同断言当前年默认 accounts/transactions query、全部账户选中、余额、默认列、候选 relation tags、自动分类和 fresh 空态；stale/missing 空态由 `bank-details-stale-refreshing` 继续保护，避免把两个业务状态混在一个测试里。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：新增 `web/e2e/bank-details-initial-state.spec.ts` 两条测试，覆盖首屏非空和 fresh 空结果；纳入 `npm run e2e:smoke`。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-initial-state.spec.ts`。
+- 未测风险：真实历史多账户组合、真实 worker drain、真实生产大数据性能和真实 XLSX 完整解析仍按 staging/专项风险处理。
+- 后续事项：bank-details 的 `BANK-E2E-001..010` 已有覆盖；下一轮按全局 inventory 推进 `workbench-relations` 税金/search 或 imports/pending 等未覆盖模块。
+
+## 2026-06-18 - Spec-first Browser 权限与会话 gate 闭环
+
+- 目标：补齐 `BANK-E2E-009` 的银行明细页面级 Browser 证据，覆盖只读导出、禁止写入、admin 写入、forbidden 和 expired session gate。
+- 影响范围：`web/e2e/bank-details-filtered-export-permissions.spec.ts`、bank-details/testing closure 文档和全局 inventory；不改变生产页面逻辑、后端权限 API 或分类 API contract。
+- 关键决策：denied/expired 验收必须落在 `/bank-details` 路由并断言银行明细 protected API 零调用，不能只依赖全局 AppHealth session smoke；admin 写入使用最小候选确认路径，避免重复覆盖完整分类业务语义。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：扩展 `web/e2e/bank-details-filtered-export-permissions.spec.ts` 到 6 条，新增 forbidden session gate、expired session gate 和 admin 分类写入；既有 read-export 零 mutation、筛选导出、自定义日期/分页导出继续保留。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-filtered-export-permissions.spec.ts`。
+- 未测风险：真实 OA 角色同步、真实代理下载权限、真实 XLSX 完整解析和每按钮笛卡尔权限矩阵仍按 staging/专项风险处理。
+- 后续事项：`BANK-E2E-001` 已由后续首屏与 fresh 空态闭环补齐；继续按全局 inventory 推进 imports / pending / tax / workbench-relations 下游 fan-out。
+
+## 2026-06-18 - Spec-first Browser 大表格与遮挡闭环
+
+- 目标：补齐 `BANK-E2E-010` 的真实浏览器证据，覆盖银行明细长列表、宽字段、分类浮层、导出菜单、桌面/窄屏和横向滚动不遮挡关键操作。
+- 影响范围：deterministic API mock、`web/e2e/bank-details-large-scroll-flow.spec.ts`、`web/package.json` smoke 脚本和 bank-details/testing closure 文档；不改变生产页面布局、后端 API 或导出 contract。
+- 关键决策：Browser 验收使用 DOM hit-test 判断控件可见且未被覆盖，避免截图像素基线；mock 增加 120 行长字段数据和真实分类计数，只用于 deterministic e2e。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：新增 `web/e2e/bank-details-large-scroll-flow.spec.ts`，覆盖桌面长列表纵向滚动、分页/导出按钮可操作、标签筛选菜单、`待分类` 选择浮层、窄屏导出菜单、表格横向滚动到最右列和窄屏标签筛选菜单。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-large-scroll-flow.spec.ts`。
+- 未测风险：真实生产超大数据性能、真实 XLSX 完整解析、真实代理导出 headers 和真实生产大文件仍待 staging 或后续专项验证。
+- 后续事项：权限专项与 `BANK-E2E-001` 均已由后续闭环补齐；继续按全局 inventory 推进其他模块。
+
+## 2026-06-18 - Spec-first Browser 自定义日期与分页导出闭环
+
+- 目标：补齐 `BANK-E2E-004` / `BANK-E2E-005` 中 custom date、page size 和翻页后导出筛选一致性的 Browser 证据，避免导出丢失日期/分类或误按当前页导出。
+- 影响范围：deterministic API mock、`web/e2e/bank-details-filtered-export-permissions.spec.ts` 和 bank-details/testing closure 文档；不改变生产后端导出 API、导出 service 或页面导出 contract。
+- 关键决策：交易列表分页属于浏览器列表状态，导出应按当前业务筛选全量导出，不携带 `page` / `page_size`；mock 只为 Browser 验收回显总数、页码和导出筛选字段，不引入新的生产逻辑。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：扩展 `web/e2e/bank-details-filtered-export-permissions.spec.ts`，覆盖自定义日期、账户、关键字、分类、page size、第二页请求和导出当前账户，断言导出请求包含筛选但不包含分页，并验证下载文件名/内容包含日期、账户、关键字和分类字段。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-filtered-export-permissions.spec.ts`。
+- 未测风险：真实 XLSX 完整解析、真实代理导出 headers 和真实生产大文件仍待 staging 或后续专项验证。
+- 后续事项：权限专项与 `BANK-E2E-001` 均已由后续闭环补齐；继续按全局 inventory 推进其他模块。
+
+## 2026-06-18 - Spec-first Browser 非 fresh 恢复闭环
+
+- 目标：补齐 `BANK-E2E-008` 剩余 Browser 证据，覆盖 account read model 非 fresh retry、transaction missing 初始化态和交易网络失败后的用户重试恢复。
+- 影响范围：`BankDetailsPage` 的 read model retry 调度、deterministic API mock、`web/e2e/bank-details-stale-refreshing.spec.ts` 和 bank-details/testing closure 文档；不改变后端 read model contract、导出服务或 worker contract。
+- 关键决策：页面 retry 不能只刷新交易列表；当 accounts read model 非 fresh 时必须独立重拉 accounts，但普通 transaction refresh、自动标签保存、relation event 仍不应无条件重拉账户余额。Browser mock 支持 accounts/transactions read model 状态序列和显式下一次交易请求失败，测试按用户可见流程验证诊断、保留 rows/余额、恢复 fresh 和网络失败后重试。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：扩展 `web/e2e/bank-details-stale-refreshing.spec.ts` 到 5 条，覆盖 transaction `refreshing`、`stale` false-empty + export error、account `schema_mismatch` retry 到 fresh、transaction `missing` false-empty、交易请求失败后用户搜索重试恢复。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-stale-refreshing.spec.ts`。
+- 未测风险：真实 worker drain、真实生产数据、真实代理导出和每个 account/transaction status 的笛卡尔组合仍待 staging/nightly 或后续专项验证。
+- 后续事项：权限专项与 `BANK-E2E-001` 均已由后续闭环补齐；继续按全局 inventory 推进其他模块。
+
+## 2026-06-18 - Spec-first Browser 自动标签规则 drawer 闭环
+
+- 目标：补齐 `BANK-E2E-006` 的真实浏览器证据，覆盖自动标签规则 drawer 保存、重应用和后置同步 blocked warning。
+- 影响范围：deterministic API mock、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts`、`npm run e2e:smoke` 和 bank-details/testing closure 文档；不改变生产后端自动标签规则 API contract、dirty/outbox 或 read model worker。
+- 关键决策：Browser spec 按业务合同断言 PUT 必须带 `expected_version` 与当前可见日期 `refresh_scope`，reapply 不能触发 PUT 保存草稿；PUT/POST 成功后等待 `bank_detail` 可见月份 fresh，若后置 barrier blocked 只能显示“后台同步尚未完成”warning，不能弹“操作失败”。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：新增 `web/e2e/bank-details-auto-tag-rules-flow.spec.ts`，覆盖保存编辑后的规则、reapply 原规则、以及 operation barrier blocked 的成功降级 warning。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-auto-tag-rules-flow.spec.ts`。
+- 后续复盘：若完整 smoke 中 reapply 按钮偶发 disabled，但单文件复跑和真实页面操作均通过，按测试/mock 稳定性问题处理；下一步最合理的修法是加固测试和 mock，不改产品逻辑。已在后续轮次新增 `web/e2e/fixtures/pageReady.ts` route-level 诊断，并补齐 Playwright auto-tag mock 的外部往来 `turnover_role` / `turnover_action_type` canonical 字段。
+- 未测风险：真实 worker drain、真实生产数据和真实生产大数据性能仍待后续场景补齐。
+- 后续事项：权限专项与 `BANK-E2E-001` 均已由后续闭环补齐；继续按全局 inventory 推进其他模块。
+
+## 2026-06-18 - Spec-first Browser 分类确认与人工补分类闭环
+
+- 目标：补齐 `BANK-E2E-007` 的真实浏览器证据，覆盖候选确认、撤销、unmatched 人工补分类和清除，防止前端把候选确认与人工补分类接口混用。
+- 影响范围：deterministic API mock、`web/e2e/bank-details-category-flow.spec.ts`、`npm run e2e:smoke` 和 bank-details/testing closure 文档；不改变生产后端分类 API contract 或 read model contract。
+- 关键决策：候选确认场景只展示当前 `auto_candidate_categories`，即使 active rule 中还有其他标签也不能出现；人工补分类从 active auto tag rules 生成选择项，外部往来三层标签必须提交 `category_label_path`、`turnover_action_type` 和 `turnover_family`；保存和撤销/清除后都要 refetch 当前流水并回到正确可见状态。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：新增 `web/e2e/bank-details-category-flow.spec.ts`，覆盖 `needs_confirmation` -> POST `/category-confirmation` -> `manual_confirmed` -> DELETE 撤销，以及 `unmatched` -> 外部往来三层 POST `/category-assignment` -> `manual_confirmed` -> DELETE 清除；同时断言错误接口零调用。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-category-flow.spec.ts`、`cd web && npm run e2e:smoke`。
+- 未测风险：真实 worker drain、真实生产数据和真实生产大数据性能仍待后续场景补齐。
+- 后续事项：权限专项与 `BANK-E2E-001` 均已由后续闭环补齐；继续按全局 inventory 推进其他模块。
+
+## 2026-06-18 - Spec-first Browser 筛选导出与只读权限闭环
+
+- 目标：补齐 `BANK-E2E-004` / `BANK-E2E-005` / `BANK-E2E-009` 中账户、关键字、分类筛选导出和 `read_export_only` 权限矩阵的真实浏览器证据。
+- 影响范围：`BankDetailsPage` 的 session-level 写入口 gate、`AutoTagRulesDrawer` 的只读权限入口、deterministic API mock、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`npm run e2e:smoke` 和 bank-details/testing closure 文档；不改变后端导出 API contract、分类 API contract 或 read model contract。
+- 关键决策：前端写入口不能只依赖 drawer payload 的 `permissions.can_save`，还必须叠加 session `canMutateData`；`read_export_only` 应能执行导出，但待确认分类、人工分类清除、自动标签新增/保存/重应用必须禁用且不触发银行明细 mutation API。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、状态机记录、全局 inventory、testing 文档和 testing closure 状态。
+- 测试覆盖：新增 `web/e2e/bank-details-filtered-export-permissions.spec.ts`，覆盖当前账户 + 关键字 + 分类筛选后交易 query 与导出 query 一致、下载内容包含账户/分类字段，以及 `read_export_only` 可导出但分类/规则写入口禁用且 mutation API 零调用。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-filtered-export-permissions.spec.ts`、`cd web && npm run e2e:smoke`。
+- 未测风险：真实 XLSX 完整解析和真实代理下载权限仍待 staging 或后续专项验证；full_access/admin 分类写入成功路径和 denied/expired bank-details 专项已由后续 Browser 权限与会话 gate 闭环补齐。
+- 后续事项：`BANK-E2E-001` 已由后续首屏与 fresh 空态闭环补齐；继续按全局 inventory 推进其他模块。
+
+## 2026-06-18 - Spec-first Browser freshness 诊断闭环
+
+- 目标：补齐 `BANK-E2E-008` 的真实浏览器证据，防止 transaction read model `refreshing/stale` 时把旧数据或空 payload 误解释成真实业务结果。
+- 影响范围：`BankDetailsPage` 非 fresh 诊断态、deterministic API mock、`web/e2e/bank-details-stale-refreshing.spec.ts`、`npm run e2e:smoke` 和 bank-details/testing closure 文档；不改变后端 read model contract 或导出服务。
+- 关键决策：页面在 `refreshing/stale/schema_mismatch/missing` 时显示业务诊断；非 fresh 且 rows 为空时表格显示刷新状态行，不再显示“当前时间范围内没有流水”。导出仍走后端/API contract；非 fresh 时 mock 返回 `409 bank_detail_read_model_not_fresh`，页面展示业务错误，避免假下载成功。
+- 文档影响：更新银行明细 Spec-first 覆盖矩阵、测试矩阵、全局 inventory 和 testing closure 状态。
+- 测试覆盖：新增 `web/e2e/bank-details-stale-refreshing.spec.ts`，覆盖 transaction `refreshing` 保留可用行、`stale` 空 rows 不误报真空态，以及导出业务错误。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-stale-refreshing.spec.ts`、`cd web && npm run e2e:smoke`。
+- 未测风险：真实 worker drain、真实导出代理和每个 account/transaction status 的笛卡尔组合仍待后续场景补齐。
+- 后续事项：权限专项与 `BANK-E2E-001` 均已由后续闭环补齐；继续按全局 inventory 推进其他模块。
+
+## 2026-06-18 - Spec-first Browser 导出下载闭环
+
+- 目标：补齐银行明细导出缺少真实浏览器 download event 的风险，并把导出字段与 Workbench linked relation 事实源绑定到 Spec-first E2E。
+- 影响范围：`web/e2e/bank-details-export-download.spec.ts`、deterministic API mock、`npm run e2e:smoke` 和 bank-details/workbench-relations Spec-first 文档；不改变生产后端导出服务、页面业务逻辑或 API contract。
+- 关键决策：测试从银行明细候选关系开始，先通过关联台 confirm 建立 linked relation，再回银行明细执行“导出全部银行”。断言导出请求携带当前默认全银行/全年筛选，真实浏览器产生 download event，文件名和内容包含 `CASE-202603-101`、`有oa`、`有发票` 和 `linked`。
+- 文档影响：新增 `e2e-spec.md` / `e2e-coverage.md`，更新测试矩阵、全局 Spec-first inventory 和 testing closure 状态。
+- 测试覆盖：新增 `web/e2e/bank-details-export-download.spec.ts`，覆盖 `BANK-E2E-004` 和 `WB-REL-E2E-009` 的首条 Browser 下载证据。
+- 验证命令：`cd web && npx playwright test e2e/bank-details-export-download.spec.ts`、`cd web && npm run e2e:smoke`。
+- 未测风险：本地 deterministic mock 不解析真实 XLSX，也未覆盖账户/关键字/分类筛选、`read_export_only` 导出权限、真实代理 headers 和生产大文件。
+- 后续事项：继续补银行明细 stale/refreshing Browser 场景，或补更多导出筛选/权限组合。
+
 ## 2026-06-18 - 自动标签规则保存后置同步误报失败
 
 - 目标：修复银行明细自动标签规则点击保存后，规则已经成功保存，但后置 `bank_detail` read model 同步 blocked/timeout 时全局弹出“操作失败”的问题。

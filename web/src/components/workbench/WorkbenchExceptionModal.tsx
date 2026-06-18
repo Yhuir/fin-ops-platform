@@ -13,7 +13,7 @@ type WorkbenchExceptionModalProps = {
   month: string;
   rows: WorkbenchRecord[];
   onClose: () => void;
-  onApplied: (result: WorkbenchExceptionApplyResult) => void;
+  onApplied: (result: WorkbenchExceptionApplyResult, onProgress: WorkbenchExceptionProgressHandler) => Promise<void> | void;
 };
 
 type WorkbenchExceptionDraft = {
@@ -29,6 +29,21 @@ const DRAFT_INITIAL_VALUE: WorkbenchExceptionDraft = {
   reasonCode: "",
   dueDate: "",
 };
+
+type WorkbenchExceptionProgressPhase = "submitting" | "syncing" | "loading";
+
+type WorkbenchExceptionProgress = {
+  phase: WorkbenchExceptionProgressPhase;
+  message: string;
+  committed: boolean;
+};
+
+type WorkbenchExceptionProgressHandler = (progress: WorkbenchExceptionProgress) => void;
+
+type WorkbenchExceptionSubmitState =
+  | { phase: "idle"; message: string; committed: false }
+  | WorkbenchExceptionProgress
+  | { phase: "error"; message: string; committed: boolean };
 
 const DRAFT_STATE_KEY = "workbenchExceptionModalDraft:v2";
 const DRAFT_SCHEMA_VERSION = 2;
@@ -46,6 +61,11 @@ export default function WorkbenchExceptionModal({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitState, setSubmitState] = useState<WorkbenchExceptionSubmitState>({
+    phase: "idle",
+    message: "",
+    committed: false,
+  });
   const [extraPayload, setExtraPayload] = useState<Record<string, string>>({});
   const draftSession = usePageSessionState<WorkbenchExceptionDraft>({
     pageKey: "reconciliation-workbench",
@@ -111,7 +131,15 @@ export default function WorkbenchExceptionModal({
     () => selectedAction?.requiredFields.filter((field) => !fieldValue(field, draft, extraPayload).trim()) ?? [],
     [draft, extraPayload, selectedAction],
   );
-  const canSubmit = Boolean(preview?.canApply && selectedAction && missingRequiredFields.length === 0 && !isSubmitting);
+  const isCommittedError = submitState.phase === "error" && submitState.committed;
+  const isBusy = isSubmitting;
+  const canSubmit = Boolean(
+    preview?.canApply
+    && selectedAction
+    && missingRequiredFields.length === 0
+    && !isBusy
+    && !isCommittedError,
+  );
 
   const updateDraft = useCallback((patch: Partial<WorkbenchExceptionDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -165,6 +193,12 @@ export default function WorkbenchExceptionModal({
     }
     setIsSubmitting(true);
     setApplyError(null);
+    setSubmitState({
+      phase: "submitting",
+      message: "正在提交统一异常处理...",
+      committed: false,
+    });
+    let committed = false;
     try {
       const result = await applyWorkbenchException({
         month,
@@ -173,25 +207,63 @@ export default function WorkbenchExceptionModal({
         actionCode: selectedAction.actionCode,
         payload: buildPayload(),
       });
+      committed = true;
+      const setProgress: WorkbenchExceptionProgressHandler = (progress) => {
+        committed = committed || progress.committed;
+        setSubmitState({ ...progress, committed });
+      };
+      setProgress({
+        phase: "syncing",
+        message: "异常处理已写入，正在同步关联台最新数据...",
+        committed: true,
+      });
+      await onApplied(result, setProgress);
       draftSession.reset();
-      onApplied(result);
       onClose();
     } catch (error) {
-      setApplyError(readErrorMessage(error));
+      const message = readErrorMessage(error);
+      setApplyError(committed ? `异常处理已写入，关联台刷新未完成：${message}` : message);
+      setSubmitState({
+        phase: "error",
+        message: committed ? `异常处理已写入，关联台刷新未完成：${message}` : message,
+        committed,
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const closeIfIdle = () => {
+    if (!isBusy) {
+      onClose();
+    }
+  };
+
   return (
-    <div aria-label="统一异常处理" aria-modal="true" className="detail-modal-backdrop" role="dialog">
-      <div className="detail-modal workbench-exception-modal" onClick={(event) => event.stopPropagation()}>
+    <div
+      aria-busy={isBusy}
+      aria-label="统一异常处理"
+      aria-modal="true"
+      className="detail-modal-backdrop"
+      role="dialog"
+    >
+      <div
+        aria-busy={isBusy}
+        className={`detail-modal workbench-exception-modal${isBusy ? " workbench-exception-modal-busy" : ""}`}
+        onClick={(event) => event.stopPropagation()}
+      >
         <header className="detail-modal-header">
           <div>
             <div className="modal-eyebrow">统一异常处理</div>
             <h2>统一异常处理</h2>
           </div>
-          <button aria-label="关闭统一异常处理" className="detail-close-btn" type="button" onClick={onClose}>
+          <button
+            aria-label="关闭统一异常处理"
+            className="detail-close-btn"
+            disabled={isBusy}
+            type="button"
+            onClick={closeIfIdle}
+          >
             关闭
           </button>
         </header>
@@ -271,6 +343,7 @@ export default function WorkbenchExceptionModal({
                 selectedActionCode={selectedAction?.actionCode ?? ""}
                 title="系统自动动作"
                 tone="automatic"
+                disabled={isBusy || isCommittedError}
                 onSelect={(actionCode) => updateDraft({ actionCode })}
               />
 
@@ -285,6 +358,7 @@ export default function WorkbenchExceptionModal({
                         <input
                           aria-label={`${action.label} ${resultStatusLabel(action.resultStatus)}`}
                           checked={draft.actionCode === action.actionCode}
+                          disabled={isBusy || isCommittedError}
                           name="workbench-exception-action"
                           type="radio"
                           value={action.actionCode}
@@ -311,6 +385,7 @@ export default function WorkbenchExceptionModal({
                       <RequiredField
                         key={field}
                         field={field}
+                        disabled={isBusy || isCommittedError}
                         value={fieldValue(field, draft, extraPayload)}
                         onChange={(value) => handleFieldChange(field, value)}
                       />
@@ -326,22 +401,46 @@ export default function WorkbenchExceptionModal({
               <div>{applyError}</div>
             </div>
           ) : null}
+          {submitState.phase !== "idle" && submitState.phase !== "error" ? (
+            <div className="state-panel" role="status">
+              <strong>{exceptionSubmitPhaseLabel(submitState.phase)}</strong>
+              <div>{submitState.message}</div>
+            </div>
+          ) : null}
         </div>
 
         <div className="detail-modal-footer">
-          <button className="secondary-button" disabled={isSubmitting} type="button" onClick={onClose}>
-            取消
-          </button>
-          {preview && !preview.canApply ? <span className="state-panel">当前预览不可提交。</span> : null}
-          {preview && submitActions.length > 0 ? (
-            <button className="primary-button" disabled={!canSubmit} type="button" onClick={handleSubmit}>
-              {isSubmitting ? "提交中..." : "提交处理"}
+          {isCommittedError ? (
+            <button className="secondary-button" type="button" onClick={closeIfIdle}>
+              关闭
             </button>
-          ) : null}
+          ) : (
+            <>
+              <button className="secondary-button" disabled={isBusy} type="button" onClick={closeIfIdle}>
+                取消
+              </button>
+              {preview && !preview.canApply ? <span className="state-panel">当前预览不可提交。</span> : null}
+              {preview && submitActions.length > 0 ? (
+                <button className="primary-button" disabled={!canSubmit} type="button" onClick={handleSubmit}>
+                  {isSubmitting ? "提交中..." : "提交处理"}
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function exceptionSubmitPhaseLabel(phase: WorkbenchExceptionProgressPhase) {
+  if (phase === "submitting") {
+    return "提交中";
+  }
+  if (phase === "syncing") {
+    return "同步中";
+  }
+  return "加载中";
 }
 
 function isWorkbenchExceptionDraft(value: unknown): value is WorkbenchExceptionDraft {
@@ -384,12 +483,14 @@ function ActionSection({
   selectedActionCode,
   title,
   tone,
+  disabled = false,
   onSelect,
 }: {
   actions: WorkbenchExceptionAction[];
   selectedActionCode?: string;
   title: string;
   tone: "automatic" | "manual";
+  disabled?: boolean;
   onSelect?: (actionCode: string) => void;
 }) {
   if (actions.length === 0) {
@@ -405,6 +506,7 @@ function ActionSection({
               <input
                 aria-label={`${action.label} ${resultStatusLabel(action.resultStatus)}`}
                 checked={selectedActionCode === action.actionCode}
+                disabled={disabled}
                 name="workbench-exception-action"
                 type="radio"
                 value={action.actionCode}
@@ -426,10 +528,12 @@ function ActionSection({
 
 function RequiredField({
   field,
+  disabled = false,
   value,
   onChange,
 }: {
   field: string;
+  disabled?: boolean;
   value: string;
   onChange: (value: string) => void;
 }) {
@@ -441,6 +545,7 @@ function RequiredField({
         <textarea
           aria-label={label}
           className="field-textarea"
+          disabled={disabled}
           rows={3}
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -454,6 +559,7 @@ function RequiredField({
       <input
         aria-label={label}
         className="field-input"
+        disabled={disabled}
         type={field === "due_date" ? "date" : "text"}
         value={value}
         onChange={(event) => onChange(event.target.value)}

@@ -27,11 +27,121 @@
 
 ## 历史记录
 
+## 2026-06-18 - App Health write-safety Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-012`，用真实 Chromium 覆盖 App Health 系统级写保护与关联台逐角色写入口组合。
+- 影响范围：`web/e2e/workbench-permissions-flow.spec.ts`、deterministic API mock 的 `app_status.overall.write_safety.blocks_mutations` 开关、Spec-first E2E 覆盖文档；页面已有 `canWriteWorkbench` gate，未改业务页面逻辑。
+- 关键决策：测试按业务规格断言：`overall.write_safety.blocks_mutations=true` 时，`read_export_only`、`full_access`、`admin` 仍可查看 open/paired/processed/ignored 读侧状态和诊断，但确认、撤回、split candidate、异常 apply/cancel、ignore/unignore 必须隐藏或 disabled；同时断言所有 Workbench mutation endpoint 和 operation barrier 均为零调用。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：扩展 `web/e2e/workbench-permissions-flow.spec.ts` 三个 Browser 场景；扩展 `web/e2e/fixtures/apiMocks.ts` 支持 `appHealthWriteSafetyBlocked`。
+- 验证命令：`cd web && npx playwright test e2e/workbench-permissions-flow.spec.ts`。
+- 未测风险：真实生产 App Health 状态源、真实角色同步、生产 active generation 全量回放和其他下游页面 fan-out 仍需 staging/生产只读 smoke；本地 deterministic Browser 已覆盖关联台 App Health write-safety blocker。
+- 后续事项：`reconciliation-workbench` 当前 Spec-first E2E ID 已全量覆盖；下一轮转入 `workbench-relations` candidate/linked 负面语义，或 relation read model non-fresh 浏览器诊断。
+
+## 2026-06-18 - 网络恢复与重复提交 Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-011`，用真实 Chromium 覆盖关联预览的临时网络失败重试、409 stale preview 和重复提交防护。
+- 影响范围：`ReconciliationWorkbenchPage` relation preview error/retry 状态机、`web/e2e/workbench-network-recovery-flow.spec.ts`、deterministic API mock 失败/冲突/延迟开关、`web/package.json` smoke 入口、Spec-first E2E 覆盖文档。
+- 关键决策：测试按业务规格断言：临时网络失败不移动行、不启动 barrier，并允许在同一 preview 上重试；409/stale preview 不允许重试同一个 `preview_id`/`expected_versions`，只能关闭后重新预览；confirm/split_candidate/withdraw 在提交期间禁用关闭、取消、备注和主按钮，真实双击只产生一次 mutation。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/workbench-network-recovery-flow.spec.ts` 五个 Browser 场景；扩展 `web/e2e/fixtures/apiMocks.ts` 支持 confirm submit one-shot failure、409 conflict、confirm/withdraw submit delay；将该 spec 加入 `npm run e2e:smoke`。
+- 验证命令：`cd web && npx playwright test e2e/workbench-network-recovery-flow.spec.ts`。
+- 未测风险：真实断网/代理层重试、生产尾延迟和大数据下的同类重试体验仍需 staging/后续 Browser 场景；App Health write-safety 全局 blocker 已由后续 Browser 场景覆盖。
+- 后续事项：下一轮转入 `workbench-relations` candidate/linked 负面语义，或 relation read model non-fresh 浏览器诊断。
+
+## 2026-06-18 - 逐入口权限 Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-008`，用真实 Chromium 覆盖 `read_export_only` 用户在关联台 open/paired/processed/ignored 状态下的写入口权限。
+- 影响范围：`web/e2e/workbench-permissions-flow.spec.ts`、deterministic API mock 初始状态开关、`web/package.json` smoke 入口、Spec-first E2E 覆盖文档。
+- 关键决策：测试按权限规格断言：read-export 用户仍可查看 Workbench 和辅助弹窗，但确认、撤回、split candidate、异常 apply/cancel、ignore/unignore 必须隐藏或 disabled；同时断言所有 Workbench mutation endpoint 和 operation barrier 均为零调用。为了不通过先执行写操作制造状态，mock 增加初始已配对、已处理异常和已忽略开关。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/workbench-permissions-flow.spec.ts` 三个 Browser 场景；扩展 `web/e2e/fixtures/apiMocks.ts` 支持 `workbenchInitialRelationConfirmed`、`workbenchInitialExceptionApplied` 和 `workbenchInitialRowIgnored`；将该 spec 加入 `npm run e2e:smoke`。
+- 验证命令：`cd web && npx playwright test e2e/workbench-permissions-flow.spec.ts`；`cd web && npm run build`；`bash scripts/verify.sh docs`；`PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`cd web && npm run e2e:smoke`。
+- 未测风险：真实生产权限同步和审计查询仍属 staging/生产风险。网络恢复、重复提交、409 stale preview 和 App Health write-safety 已由后续 Browser 场景覆盖。
+- 后续事项：下一轮转入 `workbench-relations` candidate/linked 负面语义，或 relation read model non-fresh 浏览器诊断。
+
+## 2026-06-18 - 大数据三栏滚动 Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-010`，用真实 Chromium 覆盖关联台大数据长列表、三栏横向滚动、分页、搜索过滤、详情抽屉和选择状态保持。
+- 影响范围：`web/e2e/workbench-large-scroll-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts` large dataset mock、`web/package.json` smoke 入口、Spec-first E2E 覆盖文档。
+- 关键决策：本地 deterministic E2E 不声称覆盖生产 P95/P99 性能；它覆盖用户可见的长列表 contract：205 个 open group 首屏分页、加载更多、搜索到第 65 组、详情打开/关闭、选择状态不丢、三栏 footer scrollbar 同步 header/body scrollLeft，并断言“加载更多/确认关联/关闭详情”等关键按钮在真实浏览器中未被遮挡。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/workbench-large-scroll-flow.spec.ts`；扩展 deterministic API mock 支持 `workbenchLargeDataset`、分页、搜索过滤和 `/api/workbench/rows/{row_id}` detail lookup；将该 spec 加入 `npm run e2e:smoke`。
+- 验证命令：`cd web && npx playwright test e2e/workbench-large-scroll-flow.spec.ts`；`cd web && npm run build`；`bash scripts/verify.sh docs`；`PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`cd web && npm run e2e:smoke`。
+- 未测风险：真实生产库 P95/P99、大数据 SQL/worker drain、像素级截图基线仍需后续 Browser/staging 场景；网络恢复和重复提交/409 stale preview 已由后续 Browser 场景覆盖。
+- 后续事项：App Health write-safety 已由后续 Browser 场景覆盖；下一轮转入 `workbench-relations` candidate/linked 负面语义，或 relation read model non-fresh 浏览器诊断。
+
+## 2026-06-18 - refreshing/stale false-empty Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-006`，用真实 Chromium 覆盖 Workbench refreshing、stale false-empty 和 OA sync refreshing 写入口 gate。
+- 影响范围：`ReconciliationWorkbenchPage` read model 状态提示与空态判断、`web/e2e/workbench-stale-error-flow.spec.ts`、deterministic API mock、Vitest mock、Spec-first E2E 覆盖文档。
+- 关键决策：页面必须把 Workbench page 的 `read_model_status` 作为空态前置条件；只有 paired/open 首屏 page 都是 `fresh` 时，summary zero 才能显示“当前没有可展示记录”。`stale` 或 `refreshing` 返回空 rows 时只显示待刷新/刷新中诊断，不能把 false-empty 当业务结论。普通 Workbench refreshing 不全局禁用无关 group 写入口；OA sync refreshing 仍禁用 mutation。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：扩展 `web/e2e/workbench-stale-error-flow.spec.ts` 到 9 个 Browser 场景；扩展 `web/e2e/fixtures/apiMocks.ts` 支持 non-fresh/empty Workbench page payload；扩展 `web/src/test/apiMock.ts` 和 `web/src/test/WorkbenchSelection.test.tsx` 锁住 stale empty 不显示全局空态。
+- 验证命令：`cd web && npx vitest run src/test/WorkbenchSelection.test.tsx`；`cd web && npx playwright test e2e/workbench-stale-error-flow.spec.ts`；`cd web && npm run build`；`bash scripts/verify.sh docs`；`PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`；`cd web && npm run e2e:smoke`；`git diff --check`。
+- 未测风险：大数据三栏滚动、重复提交/409 stale preview、网络恢复和 App Health write-safety 已由后续 Browser 场景覆盖；真实生产 App Health 状态源仍属 staging/生产风险。
+- 后续事项：下一轮转入 `workbench-relations` candidate/linked 负面语义，或 relation read model non-fresh 浏览器诊断。
+
+## 2026-06-18 - 异常处理 apply/cancel/ignore Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-009`，用真实 Chromium 覆盖关联台异常处理 apply/cancel/ignore/unignore 的用户主链路。
+- 影响范围：`web/e2e/workbench-exception-flow.spec.ts`、deterministic API mock、`WorkbenchExceptionModal`、`ReconciliationWorkbenchPage` exception/ignore 操作顺序、`CandidateGroupGrid`/`CandidateGroupCell`/`WorkbenchRecordCard`/`RowActions` 默认 action column、前端 Workbench API mapper、`WorkbenchWriteFacade` exception apply response contract 和 Spec-first E2E 文档。
+- 关键决策：测试按业务规格断言：异常 apply 写 API 成功后必须留在弹窗内 busy，等待 operation barrier 和当前 Workbench fresh refetch 后才展示 processed exception；写后同步失败不能引导重复提交。ignore/unignore 必须通过真实浏览器行按钮进入 ignored modal 并刷新辅助数据。审计过程中发现 open group 发票行有 ignore API 但默认三栏未暴露 action column、ignore 后 ignored 列表未刷新、exception apply response 未返回可等待的 scope/freshness targets，均已修复。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/workbench-exception-flow.spec.ts`；扩展 `web/e2e/fixtures/apiMocks.ts` 的 exception preview/apply/cancel 与 ignore/unignore mock；更新 `web/src/test/WorkbenchExceptionModal.test.tsx`、`web/src/test/WorkbenchApi.test.ts` 和 `tests/test_workbench_v2_api.py` 锁住前后端 contract。
+- 验证命令：`cd web && npx vitest run src/test/WorkbenchApi.test.ts src/test/WorkbenchExceptionModal.test.tsx`；`cd web && npx playwright test e2e/workbench-exception-flow.spec.ts`；`cd web && npx vitest run src/test/WorkbenchSelection.test.tsx src/test/WorkbenchExceptionModal.test.tsx`；`PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_exception_apply_api_creates_closed_case_and_pair_relation -v`；`cd web && npm run build`；`cd web && npm run e2e:smoke`。
+- 未测风险：大数据三栏滚动、重复提交/409 stale preview、网络恢复和 App Health write-safety 已由后续 Browser 场景覆盖；真实生产 App Health 状态源仍属 staging/生产风险。
+- 后续事项：`RECON-WB-E2E-006` refreshing/stale false-empty、`RECON-WB-E2E-010` 大数据三栏滚动、`RECON-WB-E2E-011` 网络恢复/重复提交和 `RECON-WB-E2E-012` App Health write-safety 已由后续 Browser 场景覆盖；下一轮转入 `workbench-relations` candidate/linked 负面语义。
+
+## 2026-06-18 - 关联预览 barrier/refetch failure Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-007` 剩余缺口，用真实 Chromium 覆盖写成功后 operation barrier timeout 与 Workbench fresh refetch failure 的 committed error。
+- 影响范围：`web/e2e/workbench-stale-error-flow.spec.ts`、deterministic API mock、`ReconciliationWorkbenchPage` 关联预览提交顺序、Spec-first E2E 覆盖文档。
+- 关键决策：测试按业务规格断言：写 API 成功后若 barrier timeout 或 fresh refetch 失败，弹窗必须停留在错误状态，提示“关系已写入，关联台刷新未完成”，禁用备注和重试，只允许关闭；底层行在 fresh refetch 成功前不能被本页自己的 domain event 提前移动。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：扩展 `web/e2e/workbench-stale-error-flow.spec.ts` 两个 Browser 负面场景；扩展 `web/e2e/fixtures/apiMocks.ts` 的 operation barrier refreshing 和 Workbench fresh refetch failure mock；修复 `ReconciliationWorkbenchPage` 只在 barrier + fresh refetch 成功后才 clear selection 并 emit `workbenchRelationUpdated`。
+- 验证命令：`cd web && npx playwright test e2e/workbench-stale-error-flow.spec.ts`。
+- 未测风险：409 stale preview、重复点击、网络恢复和 App Health write-safety 已由后续 Browser 场景覆盖；真实生产 App Health 状态源仍属 staging/生产风险。
+- 后续事项：`RECON-WB-E2E-009` 异常处理、`RECON-WB-E2E-006` refreshing/stale false-empty、`RECON-WB-E2E-011` 网络恢复/重复提交和 `RECON-WB-E2E-012` App Health write-safety 已由后续 Browser 场景覆盖；下一轮转入 `workbench-relations` candidate/linked 负面语义。
+
+## 2026-06-18 - 关联台 stale/error Browser E2E
+
+- 目标：推进 `RECON-WB-E2E-006/007/012`，用真实 Chromium 覆盖关联台 stale、OA dirty、refresh failed 和写 API 失败的用户可见负面链路。
+- 影响范围：`web/e2e/workbench-stale-error-flow.spec.ts`、deterministic API mock、`AppHealthStatusContext` 的 source 合成、`npm run e2e:smoke`、Spec-first E2E 覆盖文档。
+- 关键决策：测试按业务规格断言：普通 Workbench stale 只能提示陈旧，不应全局禁用无关 group 写入口；OA dirty/refreshing 才禁用关联台写入口；refresh failed 必须提示但保留当前 active generation 可查看；写 API 失败必须停留在预览弹窗显示错误，不移动行、不启动 operation barrier。测试过程中发现 `app_status` 存在时前端 health context 会丢掉 `oa_sync.dirty_scopes`，已补回为单元回归和 Browser gate。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/workbench-stale-error-flow.spec.ts`；扩展 `web/e2e/fixtures/apiMocks.ts` 的 App Status / OA sync / Workbench health mock；更新 `web/src/test/AppHealthStatusContext.test.tsx` 锁住 `app_status + oa dirty` 组合契约。
+- 验证命令：`cd web && npm test -- --run src/test/AppHealthStatusContext.test.tsx`；`cd web && npx playwright test e2e/workbench-stale-error-flow.spec.ts`；`cd web && npm run e2e:smoke`；`cd web && npm run build`；`bash scripts/verify.sh docs`。
+- 未测风险：409 stale preview、重复点击、网络恢复和 App Health write-safety 已由后续 Browser 负面场景覆盖；真实生产 App Health 状态源仍属 staging/生产风险。
+- 后续事项：barrier timeout / fresh refetch failure、`RECON-WB-E2E-009` 异常处理、`RECON-WB-E2E-006` refreshing/stale false-empty、`RECON-WB-E2E-011` 网络恢复/重复提交和 `RECON-WB-E2E-012` App Health write-safety 已由后续 Browser 场景覆盖；下一轮转入 `workbench-relations` candidate/linked 负面语义。
+
+## 2026-06-18 - 自动候选 split_candidate Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-005`，用真实 Chromium 覆盖未配对区自动候选的统一撤回/拆分主链路。
+- 影响范围：`web/e2e/workbench-candidate-split-flow.spec.ts`、deterministic API mock、`ReconciliationWorkbenchPage` relation preview submit 文案、`npm run e2e:smoke`、Spec-first E2E 覆盖文档。
+- 关键决策：测试按业务规格断言：用户点击自动候选任意一行时 UI 显示显式选中 1 条、上下文带入 2 条；preview/submit 仍必须携带完整 group row ids。后端 preview 判定 `split_candidate` 后，submit 必须回传 `operation_type`、`preview_id` 和 `submit_expected_versions`，弹窗内 busy 锁定，等待 operation barrier 和当前 Workbench fresh refetch 后才关闭并隐藏候选。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`、`state-machine.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/nightly-ci.md` 和 `docs/dev/testing-closure-state.md`。
+- 测试覆盖：新增 `web/e2e/workbench-candidate-split-flow.spec.ts`；扩展 `web/e2e/fixtures/apiMocks.ts` 的 split_candidate preview/submit mock、候选 suppress 状态和请求体观测；修复 `ReconciliationWorkbenchPage` split 提交时被硬编码 withdraw loading 文案覆盖的问题。
+- 验证命令：`cd web && npx playwright test e2e/workbench-candidate-split-flow.spec.ts`；`cd web && npm run e2e:smoke`；`cd web && npm run build`；`bash scripts/verify.sh docs`。
+- 未测风险：stale/refreshing 页面 gate、重复点击、409 stale preview、网络恢复和 App Health write-safety 已由后续 Browser 负面场景覆盖；真实生产 App Health 状态源仍属 staging/生产风险。
+- 后续事项：stale/error、refreshing/stale false-empty、barrier timeout、fresh refetch failure、异常处理、`RECON-WB-E2E-011` 网络恢复/重复提交和 `RECON-WB-E2E-012` App Health write-safety 已由后续 Browser 场景覆盖；下一轮转入 `workbench-relations` candidate/linked 负面语义。
+
+## 2026-06-18 - 关联台自身 withdraw Browser E2E
+
+- 目标：补齐 `RECON-WB-E2E-004`，用真实 Chromium 覆盖从 paired group 发起撤回关联的用户主链路。
+- 影响范围：`web/e2e/workbench-withdraw-flow.spec.ts`、deterministic API mock、`npm run e2e:smoke`、Spec-first E2E 覆盖文档；不改业务页面逻辑。
+- 关键决策：测试按业务规格断言，而不是照当前实现自证。用例先建立 paired group，再执行 withdraw preview/submit；断言 preview 锁定 `operation_type`、`preview_id`、`submit_expected_versions`，提交时弹窗内 busy 并禁用关闭/取消/重复提交/备注，fresh refetch 前不做本地 optimistic 行移动，operation barrier 与当前 Workbench fresh refetch 完成后才关闭并恢复 open group。
+- 文档影响：更新本模块 `e2e-coverage.md`、`tests.md`、`implementation-notes.md`，同步 `docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/dev/testing-closure-state.md` 和 Nightly CI 风险说明。
+- 测试覆盖：新增 `web/e2e/workbench-withdraw-flow.spec.ts`；扩展 `web/e2e/fixtures/apiMocks.ts` 的 withdraw preview/submit mock 和请求体观测。
+- 验证命令：`cd web && npx playwright test e2e/workbench-withdraw-flow.spec.ts`；`cd web && npm run e2e:smoke`；`bash scripts/verify.sh docs`。
+- 未测风险：stale/refreshing 页面 gate、重复点击、409 stale preview、网络恢复和 App Health write-safety 已由后续 Browser 负面场景覆盖；真实生产 App Health 状态源仍属 staging/生产风险。
+- 后续事项：stale/error、refreshing/stale false-empty、barrier timeout、fresh refetch failure、异常处理、`RECON-WB-E2E-011` 网络恢复/重复提交和 `RECON-WB-E2E-012` App Health write-safety 已由后续 Browser 场景覆盖；下一轮转入 `workbench-relations` candidate/linked 负面语义。
+
 ## 2026-06-18 - Spec-first E2E Audit 首轮基线
 
 - 目标：把关联台 Browser e2e 从 smoke 覆盖升级为 Spec-first 审计，先明确页面应该如何工作，再映射现有 Playwright/Vitest/API/integration 覆盖。
 - 影响范围：新增 `e2e-spec.md` 和 `e2e-coverage.md`；更新模块 README/tests 入口；不改业务代码或测试代码。
-- 关键决策：现有 `workbench-relation-fanout.spec.ts`、`pending-invoices-fanout.spec.ts`、`batch-accounting-flow.spec.ts`、`turnover-ledger-flow.spec.ts` 不推翻重写。它们已经验证用户可见业务结果和跨页面 refetch，可保留；后续只加强 withdraw、split candidate、stale/refreshing、失败恢复、异常处理和大数据滚动等缺口。
+- 关键决策：现有 `workbench-relation-fanout.spec.ts`、`pending-invoices-fanout.spec.ts`、`batch-accounting-flow.spec.ts`、`turnover-ledger-flow.spec.ts` 不推翻重写。它们已经验证用户可见业务结果和跨页面 refetch，可保留；当时未覆盖 withdraw、split candidate、read model 负面状态、失败恢复、异常处理和大数据滚动等缺口。本记录之后已补充 withdraw、split candidate、stale/refreshing/false-empty、OA dirty/refreshing、refresh failed/write failure、barrier timeout/fresh refetch failure、exception apply/cancel/ignore、大数据三栏滚动、网络恢复、409 stale preview、重复提交和 App Health write-safety Browser smoke，剩余重点转为权限矩阵跨其他页面扩展和下游 relation 语义。
 - 文档影响：同步 `docs/dev/spec-first-e2e-audit.md`、`docs/dev/spec-first-e2e-inventory.md`、`docs/dev/testing.md`、`docs/modules/README.md`。
 - 测试覆盖：本轮是审计文档基线，未新增测试。
 - 验证命令：`bash scripts/verify.sh docs`。

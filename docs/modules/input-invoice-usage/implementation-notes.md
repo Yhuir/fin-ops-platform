@@ -36,6 +36,16 @@
 
 ## 历史记录
 
+## 2026-06-18 - Browser e2e 覆盖 relation fan-out 与 OA 三态保护
+
+- 目标：为 `进项发票使用情况` 建立 Spec-first E2E 基线，并补真实 Chromium smoke，证明 Workbench relation candidate/linked 语义在进项页和 OA reverse drawer 中不回归。
+- 影响范围：Playwright deterministic mock、`web/e2e/input-invoice-relation-fanout.spec.ts`、`npm run e2e:smoke`、本模块 `e2e-spec.md` / `e2e-coverage.md` / `tests.md` / `state-machine.md` 和 `workbench-relations` 覆盖矩阵。
+- 关键决策：不新增页面私有匹配规则；mock 表达真实 API contract。candidate OA/流水关系只作为证据显示，支付状态保持 `待处理`；Workbench confirm 后重新进入页面读取 linked rows，显示 `已支付`。OA reverse preview 中 candidate/linked 发票均不可勾选，且不触发草稿 API。
+- 文档影响：新增本模块 Spec-first E2E 文档，更新全局 inventory、nightly、testing 和 closure state。
+- 测试覆盖：新增 `web/e2e/input-invoice-relation-fanout.spec.ts`，覆盖七类中的前端交互、端到端业务流和既有功能回归。
+- 验证命令：本轮最终说明列出实际执行命令。
+- 未测风险：真实 OA、真实 worker drain、真实下载、tax/cost/search 更下游 fan-out 仍需后续轮次或 staging。
+
 ## 2026-06-17 - 主列表显示 OA 附件来源 relation 证据
 
 - 目标：修复 `进项发票使用情况` 主列表中正式发票已由 OA 附件来源提升/合并，但 OA 列仍为空的问题；例如 `安徽德易智莱科技有限公司 / 913401003366798893` 在关联事实中有 OA，却因 row id 不一致未展示。

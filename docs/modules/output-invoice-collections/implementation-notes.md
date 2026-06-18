@@ -29,6 +29,18 @@
 
 ## 历史记录
 
+## 2026-06-18 - Browser e2e 红蓝票 relation fan-out
+
+- 目标：补齐 `WB-REL-E2E-008` 中销项收款下游页面的一条 Spec-first Browser fan-out，证明红蓝票关系写入后页面不是靠本地状态成功，而是通过 rows refresh 展示 relation overlay。
+- 影响范围：Playwright deterministic API mocks、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`web/package.json` smoke 入口、销项模块 `e2e-spec.md` / `e2e-coverage.md` / `tests.md` 和全局 Spec-first inventory；业务源码不变。
+- 关键决策：`outputInvoiceRedRelationCandidate` mock 选项只为本 spec 增加第二张可关联销项发票，不改变既有销项主流程 smoke；红蓝票提交后 mock rows 返回 `redInvoiceRelation`，与前端 API mapper contract 保持一致。
+- 文档影响：新增本模块 Spec-first E2E 基线；`OUT-COLL-E2E-004` 标记为 Browser covered；`WB-REL-E2E-008` 从 missing 提升为 partial，仍需继续覆盖进项、成本、税金、搜索等更多下游页面。
+- 测试覆盖：新增 `web/e2e/output-invoice-red-relation-fanout.spec.ts`，覆盖 Browser e2e / Playwright、第 5/6/7 类测试；后端业务核心、service、API 和 read model 继续由既有测试保护。
+- 验证命令：`cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts`。
+- 后续复盘：若完整 smoke 中本 spec 偶发停在 route-level `正在加载页面`，按 Playwright/lazy route 诊断问题处理，不改红蓝票业务逻辑；已在后续轮次接入 `web/e2e/fixtures/pageReady.ts`，失败时输出 route fallback、console、pageerror 和 request 诊断。
+- 未测风险：红蓝票撤销 Browser recovery、红冲关系到税金/成本/search 最终页面、真实 worker drain、真实下载和生产历史样本仍需后续轮次补。
+- 后续事项：优先继续 `WB-REL-E2E-008` 的进项/成本/税金/search fan-out，或补 `OUT-COLL-E2E-005` Browser stale/refreshing。
+
 ## 2026-06-17 - Browser e2e 状态/收据主流程
 
 - 目标：补齐销项发票收款情况页面的真实 Chromium 主流程保护，避免维护页面 drawer、API mapper 或 mock 契约时破坏状态/提醒保存和正式收据创建链路。

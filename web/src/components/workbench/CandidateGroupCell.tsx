@@ -18,6 +18,7 @@ type CandidateGroupCellProps = {
   scrollPaneId: WorkbenchRecordType;
   scrollTestId: string;
   actionMode?: "default" | "cancel-exception-only";
+  showActionColumn?: boolean;
   highlightedRowId?: string | null;
   searchQuery?: string;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
@@ -38,6 +39,7 @@ function CandidateGroupCell({
   scrollPaneId,
   scrollTestId,
   actionMode = "default",
+  showActionColumn = false,
   highlightedRowId,
   searchQuery = "",
   getRowState,
@@ -86,6 +88,7 @@ function CandidateGroupCell({
             row={row}
             rowState={getRowState(row, zoneId)}
             sheetRowMode={isSingleRecord ? "stretched" : "split"}
+            showActionColumn={showActionColumn}
             showWorkflowActions={showWorkflowActions}
             canMutateData={canMutateData}
             readOnly={readOnly}

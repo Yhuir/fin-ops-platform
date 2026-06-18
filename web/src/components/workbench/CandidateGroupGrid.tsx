@@ -227,7 +227,15 @@ function CandidateGroupGrid({
     });
   };
 
-  const paneHasActionColumn = (paneId: WorkbenchRecordType) => actionMode === "cancel-exception-only" && paneId !== "invoice";
+  const paneHasActionColumn = useCallback((paneId: WorkbenchRecordType) => {
+    if (actionMode === "cancel-exception-only") {
+      return paneId !== "invoice";
+    }
+    if (actionMode !== "default") {
+      return false;
+    }
+    return groups.some((group) => group.rows[paneId].some(hasDefaultRowActions));
+  }, [actionMode, groups]);
   const paneLayoutClass = (paneId: WorkbenchRecordType) =>
     paneHasActionColumn(paneId) ? "pane-layout-with-action" : "pane-layout-no-action";
   const hasTrailingColumns = trailingColumns.length > 0;
@@ -247,7 +255,7 @@ function CandidateGroupGrid({
       bank: getWorkbenchPaneGridStyle("bank", columnLayouts, paneHasActionColumn("bank")),
       invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts, paneHasActionColumn("invoice")),
     }),
-    [columnLayouts, actionMode],
+    [columnLayouts, paneHasActionColumn],
   );
 
   const filterOptionsByPane = useMemo(() => {
@@ -493,6 +501,7 @@ function CandidateGroupGrid({
                           records={segment.rows[paneId]}
                           scrollPaneId={paneId}
                           scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${segment.id}-${pane.id}`}
+                          showActionColumn={paneHasActionColumn(paneId)}
                           showWorkflowActions={zoneId !== "open"}
                           canMutateData={canMutateData}
                           zoneId={zoneId}
@@ -530,6 +539,7 @@ function CandidateGroupGrid({
                       records={group.rows[paneId]}
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
+                      showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "open"}
                       canMutateData={canMutateData}
                       zoneId={zoneId}
@@ -607,6 +617,7 @@ function CandidateGroupGrid({
                       records={visibleRecords}
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
+                      showActionColumn={paneHasActionColumn(paneId)}
                       showWorkflowActions={zoneId !== "open"}
                       canMutateData={canMutateData}
                       zoneId={zoneId}
@@ -839,6 +850,10 @@ function CandidateGroupGrid({
 }
 
 export default memo(CandidateGroupGrid);
+
+function hasDefaultRowActions(row: WorkbenchRecord) {
+  return row.availableActions.some((action) => action !== "detail" && action !== "view_relation");
+}
 
 function isSourceSegmentedPane(paneId: WorkbenchRecordType) {
   return paneId === "oa" || paneId === "invoice";

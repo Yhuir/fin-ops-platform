@@ -1,5 +1,149 @@
 # 关联台关系事实源 实施记录
 
+## 2026-06-18 - 银行明细 relation 字段真实下载 Browser smoke
+
+目标：推进 `WB-REL-E2E-009`，为含 relation 字段的导出补首条真实 Chromium download 证据。
+
+结论：
+
+- 新增 `web/e2e/bank-details-export-download.spec.ts`，并加入 `npm run e2e:smoke`。
+- deterministic API mock 新增 `/api/bank-details/transactions/export` 的 XLSX content-type 和 `Content-Disposition` 响应；文件内容包含当前 relation 状态字段，便于 Browser 下载后断言。
+- Browser 从银行明细候选标签开始，经 Workbench confirm 后回到银行明细执行“导出全部银行”，断言请求携带 `mode=all`、`date_from=2026-01-01`、`date_to=2026-12-31`，下载文件包含 `CASE-202603-101`、`有oa`、`有发票` 和 `linked`。
+- `WB-REL-E2E-009` 从 `missing` 更新为 `partial`：银行明细 relation 字段下载已覆盖；`read_export_only` 导出权限、账户/关键字/分类筛选和其他页面 relation 导出仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/bank-details-export-download.spec.ts`
+
+后续：
+
+- 下一轮可继续补 `WB-REL-E2E-008` 的税金/search fan-out，或扩展 `WB-REL-E2E-009` 的导出筛选/权限组合。
+
+## 2026-06-18 - 成本统计 relation downstream fan-out Browser smoke
+
+目标：继续推进 `WB-REL-E2E-008`，为成本统计补真实 Chromium 证据，证明成本页只消费 confirmed 成本关系，不把 open/proposed candidate 当作成本金额。
+
+结论：
+
+- 新增 `web/e2e/cost-statistics-relation-fanout.spec.ts`，并加入 `npm run e2e:smoke`。
+- deterministic API mock 新增 `costStatisticsRelationFanout`，只在本 spec 中让成本统计 explorer/detail 随 Workbench `relationConfirmed` 状态展示 confirmed 成本关系；默认成本统计 mock 数据保持不变。
+- Browser 断言候选阶段成本页看不到 `智能工厂项目` / `智能工厂设备尾款`；Workbench confirm 后返回成本页，项目金额 `58,000.00`、对应流水和详情 modal 可见。
+- `WB-REL-E2E-008` 继续保持 `partial`：销项、进项和成本已有 Browser 覆盖；税金、搜索和真实下载仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/cost-statistics-relation-fanout.spec.ts`
+
+后续：
+
+- 下一轮继续补 `WB-REL-E2E-008`：优先选择税金抵扣或搜索 relation 写后 Browser fan-out；也可按风险补 `WB-REL-E2E-009` 真实下载。
+
+## 2026-06-18 - 进项发票使用 relation downstream fan-out Browser smoke
+
+目标：继续推进 `WB-REL-E2E-008`，补一条进项发票使用页面的真实 Chromium 证据，证明该页面消费统一 relation distribution，而不是页面私有匹配或当前实现偶然状态。
+
+结论：
+
+- 新增 `web/e2e/input-invoice-relation-fanout.spec.ts`，并加入 `npm run e2e:smoke`。
+- deterministic API mock 新增 `inputInvoiceUsageRelationFanout`，只在本 spec 中让进项 rows 和 OA reverse preview 随 Workbench `relationConfirmed` 状态显示 candidate/linked 证据；默认数据保持不变。
+- Browser 断言 candidate OA/流水证据可见但支付状态保持 `待处理`；Workbench confirm 后重新进入进项页面，linked 证据显示 `已支付`；OA reverse drawer 中 candidate/linked 发票分别显示 `候选oa`/`已关联oa` 且均不可勾选。
+- `WB-REL-E2E-008` 继续保持 `partial`：进项和销项已有各一条 Browser 覆盖，成本、税金、搜索等下游页面仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/input-invoice-relation-fanout.spec.ts`
+
+后续：
+
+- 下一轮继续补 `WB-REL-E2E-008`：优先选择成本统计、税金抵扣或搜索中的一个 relation 写后 Browser fan-out；也可按风险补 `WB-REL-E2E-009` 真实下载。
+
+## 2026-06-18 - 销项红蓝票 relation downstream fan-out Browser smoke
+
+目标：推进 `WB-REL-E2E-008`，为更多下游页面 relation fan-out 补一条真实 Chromium 证据，证明销项收款页面的红蓝票 relation 写入后通过 rows refresh 展示人工依据。
+
+结论：
+
+- 新增 `web/e2e/output-invoice-red-relation-fanout.spec.ts`，并加入 `npm run e2e:smoke`。
+- deterministic API mock 新增 `outputInvoiceRedRelationCandidate`，只在本 spec 中提供第二张可关联销项发票；红蓝票确认后 rows 返回 `redInvoiceRelation`，匹配前端 mapper 和 API contract。
+- `WB-REL-E2E-008` 从 `missing` 更新为 `partial`；销项收款红蓝票 relation overlay 已有 Browser 覆盖。后续已补进项发票使用 fan-out，成本、税金、搜索等更多下游页面仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts`
+
+后续：
+
+- 下一轮继续补 `WB-REL-E2E-008`：优先选择成本统计、税金抵扣或搜索中的一个 relation 写后 Browser fan-out；也可按风险补 `WB-REL-E2E-009` 真实下载。
+
+## 2026-06-18 - Relation read model non-fresh Browser diagnostics
+
+目标：补齐 `WB-REL-E2E-006`，用真实 Chromium 证明下游页面遇到 relation-backed read model 非 fresh 时显示诊断，不把空结果当真实空，也不全局禁用具备 canonical 写安全的无关操作。
+
+结论：
+
+- 新增 `web/e2e/workbench-relations-nonfresh-diagnostics.spec.ts`，并加入 `npm run e2e:smoke`。
+- deterministic API mock 新增 `pendingInvoiceReadModelStatus` 和 `pendingInvoiceRowsEmpty`，可构造 `refreshing`、`stale`、空 rows 等 relation-backed pending invoice 状态；默认保持 `fresh`，不影响既有 smoke。
+- Browser 断言 `refreshing` 时待找发票显示“数据刷新中”、禁用导出，但保留已有行、状态和选择发票入口；`stale` 且 rows 为空时显示“读模型 stale，写入和导出已暂停”并禁用导出，空表不会失去 freshness 诊断。
+- `WB-REL-E2E-006` 从 `partial` 更新为 `covered`；`workbench-relations` 模块整体仍为 `spec-first-partial`，因为更多下游页面 fan-out、真实下载和生产 display audit 仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/workbench-relations-nonfresh-diagnostics.spec.ts`
+- `cd web && npm run build`
+- `bash scripts/verify.sh docs`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`
+- `cd web && npm run e2e:smoke`
+- `git diff --check`
+
+后续事项：
+
+- 下一轮优先补 `WB-REL-E2E-008`：relation fan-out 到成本、税金或搜索等更多下游页面的 Browser smoke；也可按风险选择 `WB-REL-E2E-009` 真实下载。
+
+## 2026-06-18 - Candidate relation Browser linked-only negative semantics
+
+目标：补齐 `WB-REL-E2E-005`，用真实 Chromium 证明 candidate relation 只作为跨页面证据展示，不参与 linked-only 业务状态。
+
+结论：
+
+- 新增 `web/e2e/workbench-relations-candidate-semantics.spec.ts`，并加入 `npm run e2e:smoke`。
+- deterministic API mock 新增 `pendingInvoiceCandidateRelations` 和 `oaPendingPaymentCandidateRelations`，可显式构造“候选关系可见但未确认”的页面数据，不影响既有 fan-out happy path。
+- Browser 断言银行明细只显示 `候选oa` / `候选发票`，不显示 `有oa` / `有发票`；待找发票展示候选发票/OA 证据但状态仍为 `已支付待开票`；OA 待付款展示 OA/银行/发票候选 chip，但状态仍为 `支付少了`，只有显式确认动作才可能进入写回。
+- `WB-REL-E2E-005` 从 `partial` 更新为 `covered`；后续已由 `workbench-relations-nonfresh-diagnostics.spec.ts` 补齐 non-fresh 诊断，`workbench-relations` 模块整体仍为 `spec-first-partial`，因为更多下游页面、真实下载和生产 display audit 仍未闭环。
+
+验证：
+
+- `cd web && npx playwright test e2e/workbench-relations-candidate-semantics.spec.ts`
+- `cd web && npm run build`
+- `bash scripts/verify.sh docs`
+- `PYTHONPATH=backend/src python3 -m unittest tests.test_nightly_ci -v`
+- `cd web && npm run e2e:smoke`
+- `git diff --check`
+
+后续事项：
+
+- 下一轮优先补 `WB-REL-E2E-008` 更多下游页面 fan-out，或按风险补 `WB-REL-E2E-009` 真实下载；`WB-REL-E2E-006` 已由后续 Browser 场景覆盖。
+
+## 2026-06-18 - 关联台 withdraw Browser relation lock 主链路
+
+目标：补齐 relation 写入主链路中的浏览器级 withdraw 保护，证明前端从 preview 到 submit 没有绕过 canonical relation lock。
+
+结论：
+
+- 新增 `web/e2e/workbench-withdraw-flow.spec.ts`，真实 Chromium 中先确认 relation，再从关联台 paired group 发起 withdraw。
+- deterministic mock 返回 `operation=withdraw_link`、`operation_type=withdraw_relation`、`preview_id=withdraw_relation:CASE-202603-101` 和 `submit_expected_versions`；Playwright 断言 submit payload 原样带回这些字段和选中 row ids。
+- 用例断言提交期间弹窗保持 busy，关闭/取消/确认/备注均禁用；fresh refetch 前 paired group 不做本地 optimistic 移动；`workbench_relation` operation barrier 与 Workbench fresh reload 完成后才恢复 open group。
+- `npm run e2e:smoke` 纳入该 spec，relation Browser smoke 从四条扩展为五条。
+
+验证：
+
+- `cd web && npx playwright test e2e/workbench-withdraw-flow.spec.ts`
+- `cd web && npm run e2e:smoke`
+- `bash scripts/verify.sh docs`
+
+剩余风险：
+
+- Browser 已覆盖关联台 relation preview 的重复点击、409 stale preview 和后续 relation-backed pending invoice non-fresh 诊断；仍未覆盖 barrier/refetch 在更多下游页面的失败反馈和复杂下游最终显示。
+
 ## 2026-06-18 - Spec-first E2E Audit 首轮基线
 
 目标：把 relation 事实源的跨页面 Browser e2e 明确成可追踪 Spec，而不是只维护测试文件列表。
@@ -9,7 +153,7 @@
 - 新增 `e2e-spec.md`，定义 `WB-REL-E2E-001` 到 `WB-REL-E2E-010`。
 - 新增 `e2e-coverage.md`，把现有 Playwright fan-out smoke 映射到 relation Spec。
 - 当前 bank details、pending invoices、batch accounting、turnover 四条核心 relation fan-out Browser smoke 可保留；它们验证用户可见业务结果和后端重新读取。
-- 缺口集中在 candidate 不参与 linked-only 业务计算、relation read model non-fresh 诊断、重复提交/冲突、更多下游页面、真实下载和生产 display audit。
+- 缺口集中在 candidate 不参与 linked-only 业务计算、relation read model non-fresh 诊断、更多下游页面、真实下载和生产 display audit；重复提交/409 stale preview 已由关联台 Browser smoke 覆盖。
 - 生产/staging display audit 继续标记为 `external-risk`，不能作为本地 deterministic CI 已覆盖项。
 
 验证：

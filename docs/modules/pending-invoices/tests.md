@@ -94,6 +94,8 @@
 5. `多选收入流水 -> 批量标记 no invoice required/cash income -> pending_invoice_income_status_override_confirmed -> pending/search refresh -> 税金/成本不误刷`
 6. `manual invoice legacy command retry -> command log 恢复旧中断状态；HTTP/UI 新入口保持不可达`
 7. `关联台 confirm -> workbench relation distribution -> pending invoice read model rows fresh -> 待找发票从已支付待开票更新为已支付已开票，并显示发票和 OA`
+8. `candidate relation -> 待找发票显示候选发票/OA 证据，但仍保持已支付待开票，不把 candidate 计入 linked-only 开票状态`
+9. `relation-backed pending invoice read model refreshing/stale -> 页面显示刷新/读模型诊断；refreshing 保留选择发票入口，stale 空 rows 不伪装真实空`
 
 ## 本模块验证命令
 
@@ -120,10 +122,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、build 和 deterministic Playwright smoke，覆盖完整待找发票、SQL projection、invoice lifecycle、App Status 和前端测试集，并覆盖真实 Chromium 中 Workbench confirm 后待找发票行状态更新。单轮模块验证只跑最小闭环。
+`bash scripts/verify.sh all` 会运行 backend unittest discover、frontend Vitest、build 和 deterministic Playwright smoke，覆盖完整待找发票、SQL projection、invoice lifecycle、App Status 和前端测试集，并覆盖真实 Chromium 中 Workbench confirm 后待找发票行状态更新、candidate relation 只展示候选证据不驱动 `已支付已开票` 状态，以及 relation-backed read model 非 fresh 诊断。单轮模块验证只跑最小闭环。
 
 ## 未测风险
 
 - 本地测试不连接真实生产 Postgres 大数据量，不验证真实搜索/待找发票 SQL projection 的 EXPLAIN、锁等待或长尾分页性能。
 - 本地测试不跑真实 RabbitMQ/Redis/systemd `pending-invoice`、`search` 与 invoice-lifecycle worker drain；dirty/outbox 到 projection 的最终收敛需要 staging 或夜间 CI/生产前 smoke。
-- 本地已覆盖待找发票超过 20,000 行导出 fail-closed；当前 Browser e2e 覆盖一条 Workbench confirm fan-out，但不覆盖 withdraw、stale/refreshing、真实浏览器下载、文件打开、大文件下载耗时和真实网络中断恢复。
+- 本地已覆盖待找发票超过 20,000 行导出 fail-closed；当前 Browser e2e 覆盖 Workbench confirm fan-out、candidate/linked 负面语义和 relation-backed read model 非 fresh 诊断，但不覆盖 withdraw、真实浏览器下载、文件打开、大文件下载耗时和真实网络中断恢复。

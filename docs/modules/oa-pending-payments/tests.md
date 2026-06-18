@@ -34,11 +34,11 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | API contract | P0 | `tests/test_oa_pending_payment_api.py` | covered | rows、filter-options、OA/bank/invoice/detail、`kind=oa|bank|invoice` relation detail、错误 shape、权限 403。 |
 | read model freshness | P0 | `tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | covered | repository unavailable、miss、stale/source mismatch、detail stale/missing 都返回 refreshing 并入队，不 live scan；OA pending `all` source versions 优先从实际 rows 聚合，历史空 scope 不污染默认视图。 |
 | SQL projection/repository | P0 | `tests/test_invoice_usage_collection_sql_runtime.py` | covered | rows 保存 source versions/bank total、detail lookup native columns、all scope source version 聚合、空 scope 标记。 |
-| worker fan-out | P0 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_runtime_worker_registry.py` | covered | `oa_pending_payment.read_model.refresh` all scope 扩展月份 shard，RabbitMQ/default dispatch event 覆盖；stale source_version event 在 rebuild/fan-out 前跳过，不能覆盖较新的 read model。 |
+| worker fan-out | P0 | `tests/test_oa_projection_sync_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_runtime_worker_registry.py` | covered | `oa.sync` 会把 OA 投影变更 fan-out 到 `oa_pending_payment` 月份和 all scope；`oa_pending_payment.read_model.refresh` all scope 扩展月份 shard，RabbitMQ/default dispatch event 覆盖；stale source_version event 在 rebuild/fan-out 前跳过，不能覆盖较新的 read model。 |
 | lifecycle fan-out | P0 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_pending_invoice_api.py` | covered/documented-risk | OA rebuild / invoice lifecycle 计划覆盖；pending rules API 已断言会入队 `oa_pending_payment`，但 dry-run domain 名称仍通过 workbench executor 间接表达。 |
 | App Status / registry | P1 | `tests/test_app_status_overview_service.py`、`tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_worker_registry.py` | covered | domain registry、read model registry、worker registry、missing/failed readiness 状态。 |
-| 前端页面交互 | P1 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` | covered | sidebar route、`已完成 OA/进行中 OA` 切换、三列 OA/支付状态/流水表格、确认已支付按钮、写回状态、首屏有界 `page_size=20` 请求、column filters/sort、drawer、rules drawer、empty、refreshing detail unavailable；Playwright 补充真实 Chromium 下首屏、搜索、筛选、排序和详情/规则抽屉闭环。 |
-| 表格样式/布局回归 | P1 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts` | covered | compact table、银行金额/方向 chip 非重叠、空流水 dash、项目下申请时间。 |
+| 前端页面交互 | P1 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` | covered | sidebar route、`已完成 OA/进行中 OA` 切换、已完成视图 OA/支付状态/流水/发票情况四列表格、进行中视图隐藏发票列、确认已支付按钮、写回状态、首屏有界 `page_size=20` 请求、column filters/sort、drawer、rules drawer、empty、refreshing detail unavailable；Playwright 补充真实 Chromium 下首屏、搜索、筛选、排序和详情/规则抽屉闭环。 |
+| 表格样式/布局回归 | P1 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts` | covered | compact table、OA 内部申请人/项目/金额三栏、流水内部对方户名/金额/摘要三栏、支付状态窄列、银行金额/方向 chip 非重叠、空流水 dash、项目下申请时间。 |
 | 真实 OA/生产 worker drain | P2 | staging / runbook | documented-risk | 需要真实 OA/Mongo、生产 Postgres、RabbitMQ/Redis/systemd worker、真实大数据和浏览器 smoke。 |
 
 ## 七类测试适用性
@@ -48,8 +48,8 @@ OA 待付款核对是 OA 申请、支出流水、进项发票、Workbench relati
 | 1. Business core unit tests | 适用 | `tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_oa_payment_status_service.py`、`tests/test_invoice_lifecycle_page_integration.py` | 覆盖付款状态、金额边界、多关系合并、缺失事实、支出/收入方向、进行中 OA confirm-paid 状态流转、`flow_id` 候选解析和 lifecycle policy delegate。 |
 | 2. Service-layer tests | 适用 | `tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | 覆盖 query service、command service、OA payment status repository、read model service、queue enqueue、detail lookup、projection builder、refresh service 和大页请求上限。 |
 | 3. API contract tests | 适用 | `tests/test_oa_pending_payment_api.py` | 覆盖 rows/filter-options 的 `view_mode`、confirm-paid 成功响应 shape、validation/not found、权限、read model refreshing、detail unavailable 和 source version stale。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_postgres_migrations.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 OA workflow status 投影、SQL read model、source versions、all/month scope、worker event stale guard、registry 和 App Status。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts`、`web/e2e/oa-pending-payments-flow.spec.ts` | 覆盖 loading/empty/error、首屏有界分页请求、`已完成 OA/进行中 OA` 切换、三列表格、支付状态筛选、确认已支付按钮/POST body、写回状态、筛选/排序、drawer、规则 drawer、refreshing detail、表格 CSS 和布局；Playwright 补充真实浏览器只读链路。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_oa_projection_sync_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_postgres_migrations.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 OA workflow status 投影、OA sync 到 OA 待付款 read model fan-out、SQL read model、source versions、all/month scope、worker event stale guard、registry 和 App Status。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts`、`web/e2e/oa-pending-payments-flow.spec.ts` | 覆盖 loading/empty/error、首屏有界分页请求、`已完成 OA/进行中 OA` 切换、已完成视图四列表格、进行中视图隐藏发票列、支付状态筛选、确认已支付按钮/POST body、写回状态、筛选/排序、drawer、规则 drawer、refreshing detail、OA/流水内部三栏表格 CSS 和布局；Playwright 补充真实浏览器只读链路。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_oa_pending_payment_command_service.py`、`tests/test_pending_invoice_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` | 覆盖候选流水确认 -> Workbench relation confirm -> OA MySQL 写回 -> workbench/oa_pending_payment refresh enqueue；也覆盖规则保存/关系变化 -> lifecycle/dirty scope -> OA read model refresh -> 页面刷新语义；真实 worker drain 仍为 documented-risk。 |
 | 7. Existing feature regression tests | 适用 | 上述全部测试 + `tests/test_app_status_readiness_backfill.py`、`web/e2e/oa-pending-payments-flow.spec.ts` | 每次变更都要保护旧 API shape、旧 completed 视图筛选/排序/分页、旧 detail payload、权限、App Status、页面布局和浏览器层详情抽屉/规则抽屉入口。 |
 
@@ -110,7 +110,7 @@ cd web && npm test -- --run src/test/AppStatusIndicator.test.tsx
 
 - `scripts/verify.sh backend` 覆盖后端核心回归，但具体模块命令仍以本文件为准。
 - `scripts/verify.sh frontend` 覆盖前端 test/build，但本模块变更应优先跑上方最小模块验证。
-- `scripts/verify.sh e2e` / `npm run e2e:smoke` 覆盖 Playwright browser smoke，其中 `web/e2e/oa-pending-payments-flow.spec.ts` 保护 rows/filter/sort/detail/rules drawer。
+- `scripts/verify.sh e2e` / `npm run e2e:smoke` 覆盖 Playwright browser smoke，其中 `web/e2e/oa-pending-payments-flow.spec.ts` 保护 rows/filter/sort/detail/rules drawer，`web/e2e/workbench-relations-candidate-semantics.spec.ts` 保护 candidate OA/银行/发票 chip 不把付款状态直接推成 paid。
 - `scripts/verify.sh docs` 保护模块文档链接和格式。
 
 ## 未测风险
@@ -118,7 +118,7 @@ cd web && npm test -- --run src/test/AppStatusIndicator.test.tsx
 - 未连接真实 OA/Mongo，同步异常、OA 字段变体和真实权限菜单仍需 staging smoke。
 - 本地自动化使用 fake MySQL repository；真实 OA MySQL `t_payment_simple` 写回、网络超时、账号权限和生产锁等待仍需 staging smoke。
 - 未在真实生产 Postgres 上跑大数据量 filter/sort/detail lookup EXPLAIN、锁等待和长分页性能。
-- deterministic Playwright 已覆盖浏览器首屏、筛选/排序、OA/流水/发票详情和规则抽屉；本地 synthetic page-size guard 不替代真实 PostgreSQL 大数据 EXPLAIN、浏览器滚动或真实网络中断恢复。
+- deterministic Playwright 已覆盖浏览器首屏、筛选/排序、OA/流水/发票详情、规则抽屉和 candidate/linked 负面语义；本地 synthetic page-size guard 不替代真实 PostgreSQL 大数据 EXPLAIN、浏览器滚动或真实网络中断恢复。
 - 未跑真实 RabbitMQ/Redis/systemd `invoice-usage-collection` 与 `invoice-lifecycle` worker drain。
 - 2026-06-17 runtime smoke 已确认服务器 `invoice-usage-collection` worker heartbeat 存在且仍可消费 `oa_pending_payment.read_model.refresh`；当前代码发布/重启该 worker 前，生产 read model 仍可能被旧部署覆盖回旧 source version。
 - pending rules 对 OA 待付款的 fan-out 当前由执行层 workbench invalidation 间接入队，已有 API 回归保护；若后续需要 dry-run plan 也显式列出 `oa_pending_payment_read_model`，应作为独立生命周期重构补测试。

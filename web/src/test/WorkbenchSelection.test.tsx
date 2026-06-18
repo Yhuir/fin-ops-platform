@@ -2310,6 +2310,31 @@ describe("Workbench row selection and detail modal", () => {
     expect(screen.queryByText("工作台数据加载失败，请稍后重试。")).not.toBeInTheDocument();
   });
 
+  test("does not render the global empty state for a stale empty workbench payload", async () => {
+    installMockApiFetch({
+      workbenchEmptyPayload: true,
+      workbenchReadModelStatus: "stale",
+      workbenchRefreshStatus: {
+        scope_key: "all",
+        read_model_status: "stale",
+        dirty_scopes: [
+          {
+            scope_key: "2026-03",
+            status: "failed",
+            last_error: null,
+          },
+        ],
+        last_error: null,
+        retryable: true,
+      },
+    });
+    renderWorkbenchPage();
+
+    expect(await screen.findByText("关联台待刷新，当前结果可能不是完整最新数据。")).toBeInTheDocument();
+    expect(screen.queryByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).not.toBeInTheDocument();
+    expect(within(await screen.findByTestId("zone-open")).getByText("未配对 0 项")).toBeInTheDocument();
+  });
+
   test("requeued workbench refresh failure does not show the stale failure banner", async () => {
     installMockApiFetch({
       workbenchRefreshStatus: {

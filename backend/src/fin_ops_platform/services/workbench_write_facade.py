@@ -3436,13 +3436,15 @@ class WorkbenchWriteFacade:
             )
             raise _WorkbenchWritePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
 
-        changed_scope_keys = list(
+        changed_scope_keys = self._normalize_operation_scope_keys(list(
             self._scope_keys_for_row_ids(
                 month=month,
                 row_ids=row_ids,
                 month_scope=str(relation.get("month_scope") or "") if isinstance(relation, dict) else month,
             )
-        )
+        ))
+        result["affected_scope_keys"] = list(changed_scope_keys)
+        result["freshness_targets"] = self._operation_freshness_targets(changed_scope_keys)
         self._execute_derived_data_lifecycle_event(
             "exception_case_changed",
             scope_keys=changed_scope_keys,

@@ -157,11 +157,14 @@ describe("WorkbenchExceptionModal", () => {
         }),
       );
     });
-    expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      workbenchRefreshRequired: true,
-      affectedRowIds: ["bank-1", "invoice-1"],
-    }));
+    expect(onApplied).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        workbenchRefreshRequired: true,
+        affectedRowIds: ["bank-1", "invoice-1"],
+      }),
+      expect.any(Function),
+    );
     expect(onClose).toHaveBeenCalled();
     expect(sessionStorageKeys().some((key) => key.includes("workbenchExceptionModalDraft"))).toBe(false);
   });
@@ -211,10 +214,13 @@ describe("WorkbenchExceptionModal", () => {
         }),
       );
     });
-    expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({
-      success: true,
-      affectedRowIds: ["oa-1", "bank-1", "invoice-1"],
-    }));
+    expect(onApplied).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        affectedRowIds: ["oa-1", "bank-1", "invoice-1"],
+      }),
+      expect.any(Function),
+    );
     expect(onClose).toHaveBeenCalled();
   });
 

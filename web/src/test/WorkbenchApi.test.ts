@@ -2496,6 +2496,13 @@ describe("workbench exception api", () => {
           pair_relation: { id: "REL-1" },
           updated_rows: [{ id: "bank-1" }],
           affected_row_ids: ["bank-1"],
+          affected_scope_keys: ["2026-05"],
+          freshness_targets: [
+            {
+              read_model_key: "workbench_relation",
+              scope_key: "2026-05",
+            },
+          ],
           workbench_refresh_required: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -2537,6 +2544,13 @@ describe("workbench exception api", () => {
       pairRelation: { id: "REL-1" },
       updatedRows: [{ id: "bank-1" }],
       affectedRowIds: ["bank-1"],
+      affectedScopeKeys: ["2026-05"],
+      freshnessTargets: [
+        {
+          readModelKey: "workbench_relation",
+          scopeKey: "2026-05",
+        },
+      ],
       workbenchRefreshRequired: true,
     });
   });

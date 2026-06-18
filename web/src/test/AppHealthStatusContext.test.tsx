@@ -284,6 +284,61 @@ describe("AppHealthStatusProvider", () => {
     });
   });
 
+  it("preserves OA dirty source when app status overview is present", async () => {
+    mocked.appHealth = {
+      status: "busy",
+      session: { status: "authenticated" },
+      oa_sync: { status: "idle", message: "OA 有待处理变更", dirty_scopes: ["2026-03"] },
+      workbench_read_model: { status: "ready", dirty_scopes: [], stale_scopes: [], rebuilding_scopes: [] },
+      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
+      app_status: {
+        version: 1,
+        generated_at: "2026-06-13T17:30:00+08:00",
+        overall: {
+          level: "busy",
+          color: "yellow",
+          reason: "关联台待刷新",
+          blocks_mutations: false,
+          write_safety: {
+            status: "ready",
+            reason: "写操作可用",
+            blocks_mutations: false,
+            blockers: [],
+          },
+        },
+        domains: [
+          {
+            key: "workbench",
+            label: "关联台",
+            route: "/",
+            level: "ok",
+            status: "ready",
+            reason: "关联台已同步",
+            details: [],
+            read_models: ["workbench"],
+            read_model_scopes: [],
+            workers: ["workbench-read-model"],
+            job_ids: [],
+            updated_at: "2026-06-13T17:30:00+08:00",
+          },
+        ],
+        background_tasks: [],
+        alerts: [],
+      },
+    };
+
+    renderProbe();
+
+    await waitFor(() => {
+      const status = screen.getByLabelText("health");
+      expect(status).toHaveAttribute("data-level", "busy");
+      expect(status).toHaveAttribute("data-reason", "关联台待刷新");
+      expect(status).toHaveAttribute("data-blocks", "false");
+      expect(status).toHaveAttribute("data-can-mutate", "true");
+      expect(status).toHaveTextContent("\"oaSync\":\"dirty\"");
+    });
+  });
+
   it("reports workbench matching running months without being overwritten by OA synced", async () => {
     mocked.appHealth = {
       status: "busy",

@@ -194,6 +194,7 @@ class OAProjectionSyncService:
             return
         refresh_gateway.enqueue_many("workbench", target_scopes, reason="oa_projection_sync")
         refresh_gateway.enqueue_many("search", target_scopes, reason="oa_projection_sync")
+        refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")
         refresh_gateway.enqueue_many("pending_invoice", ["expense:all", "income:all"], reason="oa_projection_sync")
 
 

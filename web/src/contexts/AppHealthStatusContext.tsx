@@ -427,6 +427,21 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppHealthStatus>(() => {
     const appStatus = mapAppStatusOverview(apiPayload?.app_status);
     if (appStatus) {
+      const localSessionSource = sessionSourceFromLocal(session.status);
+      const sessionSource =
+        remoteSessionSource && localSessionSource === "authenticated"
+          ? remoteSessionSource
+          : localSessionSource;
+      const backgroundJobs = appStatus.backgroundTasks.some((task) => task.status === "queued" || task.status === "running")
+        ? "running"
+        : appStatus.backgroundTasks.some((task) => task.attention || task.status === "failed" || task.status === "partial_success")
+          ? "attention"
+          : "idle";
+      const workbench = appStatus.domains.some((domain) => domain.key === "workbench" && domain.level === "blocked")
+        ? "error"
+        : appStatus.domains.some((domain) => domain.key === "workbench" && domain.level === "busy")
+          ? "stale"
+          : "ready";
       return {
         level: appStatus.overall.level,
         reason: appStatus.overall.reason,
@@ -436,19 +451,11 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
           .slice(0, 3),
         blocksMutations: canMutateData ? appStatus.overall.blocksMutations : true,
         sources: {
-          session: sessionSourceFromLocal(session.status),
-          backgroundJobs: appStatus.backgroundTasks.some((task) => task.status === "queued" || task.status === "running")
-            ? "running"
-            : appStatus.backgroundTasks.some((task) => task.attention || task.status === "failed" || task.status === "partial_success")
-              ? "attention"
-              : "idle",
-          importProgress: "idle",
-          oaSync: "unknown",
-          workbench: appStatus.domains.some((domain) => domain.key === "workbench" && domain.level === "blocked")
-            ? "error"
-            : appStatus.domains.some((domain) => domain.key === "workbench" && domain.level === "busy")
-              ? "stale"
-              : "ready",
+          session: sessionSource,
+          backgroundJobs,
+          importProgress: importProgressSource(progress?.tone),
+          oaSync: oaSyncSourceFromPayload(apiPayload, fallbackOaSync),
+          workbench,
         },
       };
     }

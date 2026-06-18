@@ -24,6 +24,7 @@ type RowActionsProps = {
   canMutateData: boolean;
   availableActions: string[];
   mode?: RowActionsMode;
+  showDetailAction?: boolean;
   onOpenDetail: (event: MouseEvent<HTMLButtonElement>) => void;
   onAction: (action: WorkbenchInlineAction, event: MouseEvent<HTMLButtonElement>) => void;
 };
@@ -35,6 +36,7 @@ export default function RowActions({
   canMutateData,
   availableActions = [],
   mode = "default",
+  showDetailAction = true,
   onOpenDetail,
   onAction,
 }: RowActionsProps) {
@@ -121,9 +123,11 @@ export default function RowActions({
 
   return (
     <div className="row-actions" onClick={(event) => event.stopPropagation()}>
-      <button className="row-action-btn" type="button" onClick={onOpenDetail}>
-        详情
-      </button>
+      {showDetailAction ? (
+        <button className="row-action-btn" type="button" onClick={onOpenDetail}>
+          详情
+        </button>
+      ) : null}
 
       {canMutateData && canIgnore ? (
         <button className="row-action-btn warning" type="button" onClick={handleAction("ignore-row")}>

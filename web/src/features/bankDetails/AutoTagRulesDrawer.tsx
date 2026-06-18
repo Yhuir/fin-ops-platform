@@ -19,6 +19,7 @@ type AutoTagRulesDrawerProps = {
   open: boolean;
   onClose: () => void;
   onSaved?: (payload: BankAutoTagRulesResponse) => void;
+  canMutateData?: boolean;
   refreshStatus?: "idle" | "refreshing" | "fresh";
   refreshScope?: BankAutoTagRefreshScope;
   saveAutoTagRules?: (payload: SaveBankAutoTagRulesRequest) => Promise<BankAutoTagRulesResponse>;
@@ -278,6 +279,7 @@ export default function AutoTagRulesDrawer({
   open,
   onClose,
   onSaved,
+  canMutateData = true,
   refreshStatus = "idle",
   refreshScope,
   saveAutoTagRules = saveBankAutoTagRules,
@@ -353,7 +355,7 @@ export default function AutoTagRulesDrawer({
   }, [lastRefreshAction, refreshStatus]);
 
   const dirty = useMemo(() => normalizedDraft(activeRules, archivedRules) !== baseline, [activeRules, archivedRules, baseline]);
-  const readonly = !canSave || saving || reapplying || loading;
+  const readonly = !canMutateData || !canSave || saving || reapplying || loading;
   const reapplyDisabled = readonly || dirty;
   const visibleFieldOptions = fieldOptions.filter((option) => !HIDDEN_MATCH_FIELDS.has(option.value));
   const visibleTurnoverActionTypeOptions = turnoverActionTypeOptions.length ? turnoverActionTypeOptions : FALLBACK_TURNOVER_ACTION_TYPE_OPTIONS;

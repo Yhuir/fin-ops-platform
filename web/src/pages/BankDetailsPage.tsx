@@ -15,6 +15,7 @@ import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
+import { useSessionPermissions } from "../contexts/SessionContext";
 import BankCategoryTag from "../features/bankDetails/BankCategoryTag";
 import AutoTagRulesDrawer from "../features/bankDetails/AutoTagRulesDrawer";
 import {
@@ -404,6 +405,22 @@ function combinedReadModelStatus(
     return "missing";
   }
   return "fresh";
+}
+
+function bankReadModelStatusMessage(status: BankDetailReadModelStatus) {
+  if (status === "refreshing") {
+    return "银行明细正在刷新，暂时显示当前可用数据。";
+  }
+  if (status === "stale") {
+    return "银行明细待刷新，暂时显示当前可用数据。";
+  }
+  if (status === "schema_mismatch") {
+    return "银行明细结构正在升级，暂时显示当前可用数据。";
+  }
+  if (status === "missing") {
+    return "银行明细读模型正在初始化，暂时显示当前可用数据。";
+  }
+  return "";
 }
 
 type BankCategoryFilterControlProps = {
@@ -1096,6 +1113,7 @@ function TypeCell({
   row,
   autoTagRules,
   confirming,
+  canMutateData,
   onConfirm,
   onAssign,
   onRevoke,
@@ -1104,6 +1122,7 @@ function TypeCell({
   row: BankDetailTransaction;
   autoTagRules: BankAutoTagEditableRule[];
   confirming: boolean;
+  canMutateData: boolean;
   onConfirm: (row: BankDetailTransaction, choice: ConfirmationChoice) => Promise<void>;
   onAssign: (row: BankDetailTransaction, choice: ConfirmationChoice) => Promise<void>;
   onRevoke: (row: BankDetailTransaction) => void;
@@ -1220,7 +1239,7 @@ function TypeCell({
   }, [anchorEl, updateConfirmationPanelPosition]);
 
   const closeConfirmationPanel = () => {
-    if (confirming) {
+    if (!canMutateData || confirming) {
       return;
     }
     setAnchorEl(null);
@@ -1228,13 +1247,13 @@ function TypeCell({
     setStagedChoice(null);
   };
   const stageChoice = (choice: ConfirmationChoice) => {
-    if (confirming) {
+    if (!canMutateData || confirming) {
       return;
     }
     setStagedChoice(choice);
   };
   const saveStagedChoice = () => {
-    if (!stagedChoice || confirming) {
+    if (!canMutateData || !stagedChoice || confirming) {
       return;
     }
     const choice = stagedChoice;
@@ -1351,7 +1370,7 @@ function TypeCell({
             <button
               className="bank-category-confirmation-save"
               onClick={saveStagedChoice}
-              disabled={!stagedChoice || confirming}
+              disabled={!canMutateData || !stagedChoice || confirming}
               type="button"
             >
               {confirming ? "保存中" : "保存"}
@@ -1369,13 +1388,14 @@ function TypeCell({
           aria-haspopup="menu"
           className="bank-category-confirmation-trigger"
           onClick={(event) => {
-            if (!confirming) {
+            if (canMutateData && !confirming) {
               setAnchorEl(event.currentTarget);
               updateConfirmationPanelPosition(event.currentTarget);
             }
           }}
-          aria-disabled={confirming ? "true" : undefined}
+          aria-disabled={!canMutateData || confirming ? "true" : undefined}
           data-tone={isManualAssignment ? "info" : "warning"}
+          disabled={!canMutateData || confirming}
           type="button"
         >
           {triggerLabel}
@@ -1400,13 +1420,16 @@ function TypeCell({
           type="button"
           className="bank-manual-category-revoke"
           onClick={() => {
+            if (!canMutateData) {
+              return;
+            }
             if (row.effectiveCategorySource === "manual") {
               onClearAssignment(row);
             } else {
               onRevoke(row);
             }
           }}
-          disabled={confirming}
+          disabled={!canMutateData || confirming}
         >
           撤销
         </button>
@@ -1486,6 +1509,7 @@ function BankTextCell({ value }: { value: string }) {
 export default function BankDetailsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
   const { runOperation } = useGlobalOperationOverlay();
+  const { canMutateData } = useSessionPermissions();
   const pageActiveRef = useRef(active);
   const pendingTagRefreshRef = useRef(false);
   const selectedAccountSession = usePageSessionState<string | null>({
@@ -1569,9 +1593,13 @@ export default function BankDetailsPage() {
   });
   const hasAccountPayloadRef = useRef(false);
   const hasTransactionPayloadRef = useRef(false);
+  const [accountRefreshToken, setAccountRefreshToken] = useState(0);
   const [refreshToken, setRefreshToken] = useState(0);
   const readModelStatus = combinedReadModelStatus(accountsReadModelStatus, transactionsReadModelStatus);
-  const readModelNeedsRefresh = readModelStatus !== "fresh";
+  const accountsNeedRefresh = accountsReadModelStatus !== "fresh";
+  const transactionsNeedRefresh = transactionsReadModelStatus !== "fresh";
+  const readModelNeedsRefresh = accountsNeedRefresh || transactionsNeedRefresh;
+  const readModelStatusMessage = bankReadModelStatusMessage(readModelStatus);
   const selectedTransactionAccountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey || null;
   const categoryFilterQueryKey = useMemo(() => categoryFilterSnapshotKey({
     accountKey: selectedTransactionAccountKey,
@@ -1683,7 +1711,7 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
+  }, [accountRefreshToken, dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1824,10 +1852,24 @@ export default function BankDetailsPage() {
       return undefined;
     }
     const retryId = window.setTimeout(() => {
-      setRefreshToken((current) => current + 1);
+      if (accountsNeedRefresh) {
+        setAccountRefreshToken((current) => current + 1);
+      }
+      if (transactionsNeedRefresh) {
+        setRefreshToken((current) => current + 1);
+      }
     }, BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS);
     return () => window.clearTimeout(retryId);
-  }, [accountRequestPending, active, loading, readModelNeedsRefresh, refreshToken, rowLoading, transactionRequestPending]);
+  }, [
+    accountRequestPending,
+    accountsNeedRefresh,
+    active,
+    loading,
+    readModelNeedsRefresh,
+    rowLoading,
+    transactionRequestPending,
+    transactionsNeedRefresh,
+  ]);
 
   const handleWorkbenchRelationUpdated = useCallback((event: Event) => {
     const affectedMonths = eventAffectedMonths(event);
@@ -2355,6 +2397,11 @@ export default function BankDetailsPage() {
             {rulesFeedback}
           </StatePanel>
         ) : null}
+        {!loading && readModelNeedsRefresh && readModelStatusMessage ? (
+          <StatePanel tone={readModelStatus === "refreshing" ? "loading" : "warning"} compact>
+            {readModelStatusMessage}
+          </StatePanel>
+        ) : null}
         {!loading && !readModelNeedsRefresh && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
@@ -2536,7 +2583,20 @@ export default function BankDetailsPage() {
                         <FinanceTableCell columnRole="description" textValue="loading">-</FinanceTableCell>
                       </FinanceTableRow>
                     ) : null}
-                    {!rowLoading && rows.length === 0 ? (
+                    {!rowLoading && rows.length === 0 && readModelNeedsRefresh ? (
+                      <FinanceTableRow id="read-model-refreshing" className="bank-transaction-state-row" textValue={readModelStatusMessage}>
+                        <FinanceTableCell columnRole="identity" textValue={readModelStatusMessage}>
+                          <span className="bank-transaction-state-message">{readModelStatusMessage}</span>
+                        </FinanceTableCell>
+                        <FinanceTableCell columnRole="status" textValue="refreshing">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="amount" textValue="refreshing">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="amount" textValue="refreshing">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="refreshing">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="refreshing">-</FinanceTableCell>
+                        <FinanceTableCell columnRole="description" textValue="refreshing">-</FinanceTableCell>
+                      </FinanceTableRow>
+                    ) : null}
+                    {!rowLoading && rows.length === 0 && !readModelNeedsRefresh ? (
                       <FinanceTableRow id="empty" className="bank-transaction-state-row" textValue="当前时间范围内没有流水。">
                         <FinanceTableCell columnRole="identity" textValue="当前时间范围内没有流水。">
                           <EmptyTransactionOverlay />
@@ -2584,6 +2644,7 @@ export default function BankDetailsPage() {
                             row={row}
                             autoTagRules={activeAutoTagRules}
                             confirming={categoryMutationId === row.id}
+                            canMutateData={canMutateData}
                             onConfirm={handleConfirmCategory}
                             onAssign={handleAssignCategory}
                             onRevoke={handleRevokeCategoryConfirmation}
@@ -2641,6 +2702,7 @@ export default function BankDetailsPage() {
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}
         onSaved={() => undefined}
+        canMutateData={canMutateData}
         saveAutoTagRules={saveAutoTagRulesWithRefresh}
         reapplyAutoTagRules={reapplyAutoTagRulesWithRefresh}
         refreshScope={{ dateFrom: dateFilter.dateFrom, dateTo: dateFilter.dateTo }}

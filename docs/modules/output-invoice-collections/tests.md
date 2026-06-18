@@ -25,7 +25,7 @@
 | stale/missing/source version mismatch | `tests/test_invoice_usage_collection_sql_runtime.py::test_output_api_stale_returns_refreshing_without_stale_rows` | 真实 worker drain、Redis/RabbitMQ/systemd 需 staging smoke |
 | lifecycle overlay | `tests/test_output_invoice_collection_api.py::test_sql_fresh_rows_route_applies_lifecycle_overlay_before_response`、`tests/test_invoice_lifecycle_page_integration.py` | 跨页面最终 UI 展示由下游模块继续补 |
 | 手动状态/提醒 | `tests/test_output_invoice_collection_lifecycle.py::test_manual_status_and_reminder_overlay_rows_and_enqueue_month_scope`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` | 真实多用户 expectedVersion 冲突未做并发压测 |
-| 红蓝票关系 | `tests/test_output_invoice_collection_lifecycle.py::test_red_relation_overlay_adds_manual_evidence`、API route 测试 | 红冲对税金/成本最终展示为跨模块 smoke 风险 |
+| 红蓝票关系 | `tests/test_output_invoice_collection_lifecycle.py::test_red_relation_overlay_adds_manual_evidence`、API route 测试、`web/e2e/output-invoice-red-relation-fanout.spec.ts` | Browser 已覆盖确认红蓝票关系 -> rows refresh -> drawer 已有依据展示；撤销 Browser recovery 和红冲对税金/成本/search 最终展示仍为跨模块 smoke 风险 |
 | 正式收据 create/void/reissue/history/settings | `tests/test_output_invoice_collection_lifecycle.py::test_receipts_are_idempotent_and_history_is_real`、`tests/test_output_invoice_collection_lifecycle.py::test_receipt_numbers_are_unique_under_concurrent_creates_and_reset_periods`、`tests/test_postgres_migrations.py::test_output_invoice_receipt_numbering_schema_contract`、`tests/test_output_invoice_collection_api.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` | 本地覆盖并发创建、月度/年度/不重置序列、PostgreSQL 唯一约束 contract 和真实 Chromium 创建/历史展示；真实数据库压力与生产历史样本仍需 staging/生产验证 |
 | 权限与 admin-only 设置 | `tests/test_output_invoice_collection_api.py::test_detail_routes_require_output_collection_read_session`、前端 admin 设置入口测试 | 全角色矩阵仍由 permissions-and-audit 模块统一审计 |
 | 前端 loading/empty/error/refreshing/drawer | `web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` | 已覆盖首屏有界 `page_size=20` 请求、20/50/100 页大小选项、refreshing/empty、drawer 和真实 Chromium 状态/收据主流程；视觉回归和超长文本溢出仍需专项浏览器 smoke |
@@ -39,9 +39,9 @@
 | 2. Service-layer tests | 适用，已覆盖主要写边界 | `tests/test_output_invoice_collection_lifecycle.py`、`tests/test_output_invoice_collection_service.py` | 覆盖手动状态、提醒、红蓝票关系、receipt 幂等、tenant scoped overlay、enqueue month scope、正式收据并发编号、跨期重置和大页请求上限。 |
 | 3. API contract tests | 适用，已覆盖 | `tests/test_output_invoice_collection_api.py` | 覆盖 rows/detail/rules/preview/history/relation routes、structured validation/not found、权限、fresh SQL overlay、lifecycle 写 routes。 |
 | 4. Read model/cache/background job tests | 适用，已覆盖核心 read model/worker | `tests/test_invoice_usage_collection_sql_runtime.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py` | 覆盖 output SQL repository native filters/sort、stale 返回 refreshing、不返回 stale rows、source_versions、all scope expansion、RabbitMQ event registration、App Status readiness。 |
-| 5. Frontend component and interaction tests | 适用，已覆盖页面主交互 | `web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` | 覆盖页面骨架、首屏有界分页请求、空状态、refreshing metadata hidden、retry cleanup、表格、三类 workflow drawer、lifecycle action close、admin-only receipt settings，以及真实 Chromium 中状态/提醒保存和正式收据 drawer。 |
-| 6. End-to-end business-flow integration tests | 适用，已有关键链路级回归 | `tests/test_invoice_lifecycle_page_integration.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` | 覆盖 invoice lifecycle 委托、invoice lifecycle 先于下游发票页面、output read model refresh、税金页读取销项发票行，以及真实 Chromium `状态/提醒保存 -> rows refresh -> 正式收据 create/history`。真实导入到最终页面展示仍为 documented-risk。 |
-| 7. Existing feature regression tests | 适用，已覆盖旧行为保护 | `tests/test_output_invoice_collection_*`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts` | 覆盖旧 API shape、receipt 不伪造历史、stale 不返回旧 rows、页面不暴露 read model metadata、旧导出按钮不被伪造，并防止真实浏览器 drawer 保存/创建收据链路断裂。 |
+| 5. Frontend component and interaction tests | 适用，已覆盖页面主交互 | `web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` | 覆盖页面骨架、首屏有界分页请求、空状态、refreshing metadata hidden、retry cleanup、表格、三类 workflow drawer、lifecycle action close、admin-only receipt settings，以及真实 Chromium 中状态/提醒保存、正式收据 drawer 和红蓝票关系 drawer。 |
+| 6. End-to-end business-flow integration tests | 适用，已有关键链路级回归 | `tests/test_invoice_lifecycle_page_integration.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` | 覆盖 invoice lifecycle 委托、invoice lifecycle 先于下游发票页面、output read model refresh、税金页读取销项发票行，以及真实 Chromium `状态/提醒保存 -> rows refresh -> 正式收据 create/history` 和 `红蓝票关系确认 -> rows refresh -> 已有依据展示`。真实导入到最终页面展示仍为 documented-risk。 |
+| 7. Existing feature regression tests | 适用，已覆盖旧行为保护 | `tests/test_output_invoice_collection_*`、`tests/test_invoice_usage_collection_sql_runtime.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` | 覆盖旧 API shape、receipt 不伪造历史、stale 不返回旧 rows、页面不暴露 read model metadata、旧导出按钮不被伪造，并防止真实浏览器 drawer 保存/创建收据或红蓝票关系链路断裂。 |
 
 ## 历史 bug 回归库
 
@@ -60,12 +60,14 @@
 - 服务层首屏分页必须拒绝超过 200 的大页请求，且前端首屏必须显式发送有界 `page_size=20`，避免大数据列表退化成全量读取：`test_page_size_limit_protects_first_screen_slo`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`。
 - 前端不能把 refreshing payload 当最终空数据，也不能展示 read model 技术细节：`OutputInvoiceCollectionsPage.test.tsx` refreshing/empty 测试。
 - 真实浏览器中收款状态/提醒保存必须触发 rows refresh，正式收据创建必须带 idempotency key 并能进入 history 展示：`web/e2e/output-invoice-collections-flow.spec.ts`。
+- 真实浏览器中红蓝票关系确认必须触发 rows refresh，重新打开 drawer 后展示人工 relation evidence：`web/e2e/output-invoice-red-relation-fanout.spec.ts`。
 
 ## 关键 smoke flows
 
 - 发票导入或关系变化 -> `invoice_lifecycle.read_model.refresh` -> `output_invoice_collection.read_model.refresh` -> `/api/output-invoice-collections/rows` fresh -> 页面展示 `collectionStatus`。
 - 手动收款状态/提醒保存 -> lifecycle fact 写入 -> dirty/outbox enqueue `output_invoice_collection` month scope -> rows overlay 更新 -> drawer 关闭并刷新列表。
 - Browser e2e：`状态/提醒` drawer 保存手动状态和提醒 -> rows refresh 后显示 `待冲红` -> `待出收据` preview -> 创建正式收据 -> rows refresh 后 `已出收据` history 显示 `SK2026050002`。
+- Browser e2e：`红蓝票` drawer 选择红字发票候选 -> 确认人工关系 -> rows refresh 后显示 `待冲红` -> 重新打开 drawer 后显示 `XSFP-E2E-0002 / manual / 浏览器 e2e 红蓝票关系确认`。
 - 红蓝票关系确认/撤回 -> relation overlay -> collection status/receipt eligibility 更新 -> 税金抵扣和成本统计通过 invoice lifecycle/domain event/readiness 重新读取。
 - 收据 preview -> create formal receipt with idempotency key -> history 展示 issued -> void -> reissue -> history 展示 voided/reissued。
 - read model stale/source version mismatch -> API `202 refreshing` -> 前端显示标准 empty/refreshing 行为并自动 retry；不得显示旧 rows 为 fresh。
@@ -96,13 +98,14 @@ cd web && npm test -- --run \
   src/test/domainEvents.test.ts
 
 cd web && npx playwright test e2e/output-invoice-collections-flow.spec.ts
+cd web && npx playwright test e2e/output-invoice-red-relation-fanout.spec.ts
 
 bash scripts/verify.sh docs
 ```
 
 ## Nightly CI 覆盖
 
-夜间 CI 应包含上述后端和前端模块命令，并包含全局 docs 校验。push/main smoke 可只跑 `tests.test_output_invoice_collection_api`、`tests.test_output_invoice_collection_lifecycle`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` 和 deterministic Playwright `web/e2e/output-invoice-collections-flow.spec.ts`。
+夜间 CI 应包含上述后端和前端模块命令，并包含全局 docs 校验。push/main smoke 可只跑 `tests.test_output_invoice_collection_api`、`tests.test_output_invoice_collection_lifecycle`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx` 和 deterministic Playwright `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`。
 
 ## 未测风险
 
@@ -110,6 +113,6 @@ bash scripts/verify.sh docs
 - 本地 synthetic page-size guard 不替代真实 PostgreSQL EXPLAIN、锁等待、浏览器滚动或真实导出下载性能。
 - 真实 RabbitMQ/Redis/systemd `invoice-usage-collection` 与 `invoice-lifecycle` worker drain、heartbeat 和 backlog 需要 staging/生产前 smoke。
 - 正式收据编号已由本地并发/跨期测试和 PostgreSQL schema contract 保护；真实数据库锁等待、唯一约束冲突恢复和生产历史样本仍需 staging/生产压测验证。
-- 红蓝票关系、税金抵扣、成本统计和搜索最终页面同步仍需跨模块 smoke；本模块只确认自身 dirty/read model/overlay。
+- 红蓝票关系确认后的本页 rows refresh 和人工依据展示已由 Browser 覆盖；撤销 Browser recovery、税金抵扣、成本统计和搜索最终页面同步仍需跨模块 smoke。
 - 浏览器真实大数据表格、长文本、下载/导出和视觉布局仍需人工或专项 Playwright smoke；当前 Browser e2e 只覆盖状态/提醒与正式收据主流程。
 - 全角色权限矩阵由 `permissions-and-audit` 模块统一收敛，本模块只覆盖读权限和 admin-only 收据设置入口。

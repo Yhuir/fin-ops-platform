@@ -89,6 +89,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-06-18 | Browser e2e 补齐 Workbench 成本关系 fan-out | 真实 Chromium 证明 open/proposed candidate 不进入成本项目、金额或明细；确认 OA+bank+invoice 成本关系后，成本页重新读取并展示对应项目、金额、流水和详情；不改变业务/read model 状态机 | `cd web && npx playwright test e2e/cost-statistics-relation-fanout.spec.ts` |
 | 2026-06-17 | Browser e2e 补齐项目下钻与导出错误反馈闭环 | 真实 Chromium 保护按时间首屏、按项目视图、`project_scope=all`、项目/费用类型/流水详情下钻、导出 preview 和 row-limit 错误反馈；不改变业务/read model 状态机 | `cd web && npx playwright test e2e/cost-statistics-flow.spec.ts` |
 | 2026-06-12 | Workbench candidate 关系不再计入成本统计 | live 成本查询、cost statistics SQL projection、月份 shard rows | `tests.test_cost_statistics_service`、`tests.test_cost_statistics_sql_runtime` |
 | 2026-06-11 | 补齐测试闭环状态机 | 业务归因、UI、父 scope、月份 shard、App Status 和 worker 状态边界 | `tests.test_cost_statistics_service`、`tests.test_project_costing_service`、`tests.test_project_costing_api`、`tests.test_cost_statistics_api`、`tests.test_cost_statistics_read_model_service`、`tests.test_cost_statistics_runtime_service`、`tests.test_cost_statistics_sql_runtime`、`tests.test_read_model_refresh_gateway`、`tests.test_runtime_worker_read_model_refresh_scopes`、`tests.test_read_model_scope_contract`、`tests.test_app_status_overview_service`、`tests.test_runtime_monitoring`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx` |

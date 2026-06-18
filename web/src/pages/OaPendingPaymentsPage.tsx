@@ -283,6 +283,7 @@ export default function OaPendingPaymentsPage() {
                   onOpenDetail={setDetailTarget}
                   onConfirmPaid={handleConfirmPaid}
                   confirmingRowIds={confirmingRowIds}
+                  viewMode={query.viewMode}
                 />
               </>
             )}

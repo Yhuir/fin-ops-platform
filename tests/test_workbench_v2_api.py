@@ -4454,6 +4454,11 @@ class WorkbenchV2ApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["relation_mode"], "normal_match")
         self.assertEqual(payload["pair_relation"]["exception_case_id"], payload["case"]["id"])
         self.assertCountEqual(payload["affected_row_ids"], ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"])
+        self.assertEqual(payload["affected_scope_keys"], ["2026-05"])
+        self.assertEqual(
+            payload["freshness_targets"],
+            [{"read_model_key": "workbench_relation", "scope_key": "2026-05"}],
+        )
 
     def test_cancel_link_uses_existing_case_members_without_rebuilding_workbench(self) -> None:
         app = build_application()
