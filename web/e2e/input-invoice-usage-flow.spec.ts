@@ -60,7 +60,7 @@ test.describe("input invoice usage browser flow", () => {
       response.url().includes("/api/input-invoice-usage/oa-reverse/batches/input-oa-reverse-batch-e2e-001/manual-oa-status")
         && response.request().method() === "POST",
     );
-    await confirmDialog.getByRole("button", { name: "已提交 OA" }).click();
+    await confirmDialog.getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ }).click();
     expect((await manualStatusResponse).status()).toBe(200);
 
     await expect(workflow.getByText("已进入已提交历史。")).toBeVisible();

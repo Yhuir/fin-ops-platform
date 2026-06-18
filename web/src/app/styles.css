@@ -1649,6 +1649,33 @@ textarea {
   padding: var(--fp-space-4);
 }
 
+.input-invoice-usage-oa-confirmation__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+}
+
+.input-invoice-usage-oa-confirmation__close {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-xs);
+  background: var(--fp-surface);
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+}
+
+.input-invoice-usage-oa-confirmation__close:hover,
+.input-invoice-usage-oa-confirmation__close:focus-visible {
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-primary);
+  outline: none;
+}
+
 .input-invoice-usage-oa-confirmation h3,
 .input-invoice-usage-oa-confirmation p {
   margin: 0;
@@ -1665,6 +1692,21 @@ textarea {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-body);
   line-height: 1.5;
+}
+
+.input-invoice-usage-oa-decision-label {
+  display: grid;
+  gap: 2px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.input-invoice-usage-oa-decision-label span:first-child {
+  font-weight: 900;
+}
+
+.input-invoice-usage-oa-decision-label span:last-child {
+  font-size: var(--fp-text-label);
 }
 
 .input-invoice-usage-oa-history {

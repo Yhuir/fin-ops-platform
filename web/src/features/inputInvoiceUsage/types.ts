@@ -360,6 +360,10 @@ export type InputInvoiceUsageOaReverseSubmittedHistoryResponse = {
   items: InputInvoiceUsageOaReverseSubmittedHistoryItem[];
 };
 
+export type InputInvoiceUsageOaReverseStagedDraftsResponse = {
+  items: InputInvoiceUsageOaReverseBatch[];
+};
+
 export type InputInvoiceUsageExportPreview = {
   fileName: string;
   rowCount: number;

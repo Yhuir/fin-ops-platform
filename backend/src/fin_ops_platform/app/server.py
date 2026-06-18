@@ -1795,6 +1795,8 @@ class Application:
             return self._handle_api_input_invoice_usage_payment_status_rules_update(body, headers)
         if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/preview":
             return self._handle_api_input_invoice_usage_oa_reverse_preview(body, headers)
+        if method == "GET" and route_path == "/api/input-invoice-usage/oa-reverse/staged-drafts":
+            return self._handle_api_input_invoice_usage_oa_reverse_staged_drafts(query, headers)
         if method == "GET" and route_path == "/api/input-invoice-usage/oa-reverse/submitted-history":
             return self._handle_api_input_invoice_usage_oa_reverse_submitted_history(query, headers)
         if method == "POST" and route_path == "/api/input-invoice-usage/oa-reverse/oa-draft":
@@ -2437,6 +2439,7 @@ class Application:
                 "/api/input-invoice-usage/export",
                 "/api/input-invoice-usage/payment-status-rules",
                 "/api/input-invoice-usage/oa-reverse/preview",
+                "/api/input-invoice-usage/oa-reverse/staged-drafts",
                 "/api/input-invoice-usage/oa-reverse/batches",
                 "/api/input-invoice-usage/oa-reverse/batches/{batch_id}",
                 "/api/input-invoice-usage/oa-reverse/batches/{batch_id}/oa-draft",
@@ -9176,6 +9179,30 @@ class Application:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_reverse_history_query", "message": "limit must be a positive integer."},
+            )
+        except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
+            return self._input_invoice_usage_oa_reverse_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _handle_api_input_invoice_usage_oa_reverse_staged_drafts(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Response:
+        _session, auth_error = self._resolve_fin_ops_read_session(
+            headers,
+            denied_message="当前账户没有访问进项发票反提 OA 暂存批次权限。",
+        )
+        if auth_error is not None:
+            return auth_error
+        try:
+            result = self._input_invoice_usage_oa_reverse_service().staged_drafts(
+                limit=int(query.get("limit", ["50"])[0] or 50),
+            )
+        except (ValueError, TypeError):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_oa_reverse_staged_query", "message": "limit must be a positive integer."},
             )
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._input_invoice_usage_oa_reverse_error_response(exc)

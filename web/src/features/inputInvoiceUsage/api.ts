@@ -11,6 +11,7 @@ import type {
   InputInvoiceUsageOaReverseBatch,
   InputInvoiceUsageOaReversePreviewRequest,
   InputInvoiceUsageOaReversePreviewResponse,
+  InputInvoiceUsageOaReverseStagedDraftsResponse,
   InputInvoiceUsageOaReverseSubmittedHistoryResponse,
   InputInvoiceUsagePaymentStatusRulesResponse,
   InputInvoiceUsageQuery,
@@ -737,6 +738,13 @@ function mapOaReverseSubmittedHistory(payload: unknown): InputInvoiceUsageOaReve
   };
 }
 
+function mapOaReverseStagedDrafts(payload: unknown): InputInvoiceUsageOaReverseStagedDraftsResponse {
+  const raw = objectValue(unwrapData(payload));
+  return {
+    items: arrayValue(raw.items).map(mapOaReverseBatch),
+  };
+}
+
 function objectStringMap(value: unknown): Record<string, string> {
   const raw = objectValue(value);
   return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, stringValue(item)]));
@@ -962,6 +970,14 @@ export async function fetchInputInvoiceUsageOaReverseSubmittedHistory(signal?: A
     signal,
   });
   return mapOaReverseSubmittedHistory(payload);
+}
+
+export async function fetchInputInvoiceUsageOaReverseStagedDrafts(signal?: AbortSignal) {
+  const payload = await apiRequestJson<unknown>("/api/input-invoice-usage/oa-reverse/staged-drafts", {
+    method: "GET",
+    signal,
+  });
+  return mapOaReverseStagedDrafts(payload);
 }
 
 export async function fetchInputInvoiceUsageOaReverseBatch(batchId: string, signal?: AbortSignal) {

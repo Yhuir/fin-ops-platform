@@ -22,6 +22,7 @@ import {
   fetchInputInvoiceUsageRows,
   fetchInputInvoiceUsageRowRelationDetail,
   createInputInvoiceUsageOaReverseDraftFromSelection,
+  fetchInputInvoiceUsageOaReverseStagedDrafts,
   fetchInputInvoiceUsageOaReverseSubmittedHistory,
   manualInputInvoiceUsageOaReverseStatus,
   previewInputInvoiceUsageOaReverse,
@@ -477,6 +478,7 @@ export default function InputInvoiceUsagePage() {
         selectedInvoiceIds={[]}
         loadPreview={loadOaReversePreview}
         createDraftFromSelection={createInputInvoiceUsageOaReverseDraftFromSelection}
+        loadStagedDrafts={fetchInputInvoiceUsageOaReverseStagedDrafts}
         loadSubmittedHistory={fetchInputInvoiceUsageOaReverseSubmittedHistory}
         manualStatus={manualInputInvoiceUsageOaReverseStatus}
         onClose={handleCloseWorkflow}

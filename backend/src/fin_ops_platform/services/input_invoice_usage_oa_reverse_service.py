@@ -492,6 +492,13 @@ class InputInvoiceUsageOaReverseService:
         )
         return {"items": [self._submitted_history_item(batch) for batch in batches]}
 
+    def staged_drafts(self, *, limit: int = 50) -> dict[str, object]:
+        batches = self._repository.list_batches_by_status(
+            [InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value],
+            limit=limit,
+        )
+        return {"items": [self.batch_payload(batch) for batch in batches]}
+
     def create_oa_draft(
         self,
         batch_id: str,

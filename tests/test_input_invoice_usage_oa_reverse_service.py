@@ -306,6 +306,47 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(provider.client.requests[0]["payload"]["data"]["applicant"], "周洁莹")
         self.assertIn("input_invoice_usage_oa_reverse_batch_", drafted["batchId"])
 
+    def test_staged_drafts_returns_created_drafts_waiting_for_user_decision(self) -> None:
+        service = self._service(
+            invoices=[
+                self._invoice("inv-staged", "1201", self._counterparty("vendor", "暂存供应商"), total_with_tax="188.00"),
+                self._invoice("inv-submitted", "1202", self._counterparty("vendor-2", "已提交供应商"), total_with_tax="288.00"),
+            ],
+            oa_client=FakeOaDraftClient(),
+        )
+        staged_batch = self._create_batch(service, ["inv-staged"])
+        staged = service.create_oa_draft(
+            str(staged_batch["batchId"]),
+            expected_version=int(staged_batch["version"]),
+            idempotency_key="draft-key-staged",
+            actor_id="user-1",
+            can_mutate=True,
+        )
+        submitted_batch = self._create_batch(service, ["inv-submitted"])
+        submitted_draft = service.create_oa_draft(
+            str(submitted_batch["batchId"]),
+            expected_version=int(submitted_batch["version"]),
+            idempotency_key="draft-key-submitted",
+            actor_id="user-1",
+            can_mutate=True,
+        )
+        service.manual_oa_status(
+            str(submitted_draft["batchId"]),
+            decision="submitted",
+            reason="",
+            expected_version=int(submitted_draft["version"]),
+            idempotency_key="confirm-submitted-for-staged-list",
+            actor_id="user-1",
+            can_mutate=True,
+        )
+
+        payload = service.staged_drafts()
+
+        self.assertEqual([item["batchId"] for item in payload["items"]], [staged["batchId"]])
+        self.assertEqual(payload["items"][0]["status"], InputInvoiceUsageOaReverseStatus.OA_DRAFT_CREATED.value)
+        self.assertTrue(payload["items"][0]["canConfirmSubmission"])
+        self.assertEqual(payload["items"][0]["invoiceRows"][0]["invoiceNo"], "1201")
+
     def test_create_oa_draft_from_selection_missing_target_credential_does_not_create_batch(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
         provider = FakeTargetOaDraftClientProvider(fail=True)

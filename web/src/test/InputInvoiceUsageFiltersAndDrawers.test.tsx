@@ -19,6 +19,7 @@ import PaymentStatusRulesDrawer, {
 } from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import {
   createInputInvoiceUsageOaReverseDraftFromSelection,
+  fetchInputInvoiceUsageOaReverseStagedDrafts,
   fetchInputInvoiceUsageOaReverseSubmittedHistory,
   previewInputInvoiceUsageOaReverse,
 } from "../features/inputInvoiceUsage/api";
@@ -337,6 +338,30 @@ describe("Input invoice usage workflow drawers", () => {
           }],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
+      if (url.pathname === "/api/input-invoice-usage/oa-reverse/staged-drafts") {
+        return new Response(JSON.stringify({
+          items: [{
+            batchId: "batch-staged-backend",
+            version: 2,
+            status: "oa_draft_created",
+            invoiceIds: ["inv-backend-1"],
+            targetApplicantCode: "chen_xiuyun",
+            targetApplicantName: "陈秀云",
+            totalWithTax: "88.00",
+            oaDraftId: "draft-hidden-from-ui",
+            oaDraftUrl: "https://oa.example.test/draft/hidden",
+            invoiceRows: [{
+              invoiceId: "inv-backend-1",
+              invoiceNo: "INV-BACKEND-1",
+              displayNo: "SD-BACKEND-1",
+              sellerName: "后端供应商",
+              invoiceDate: "2026-05-20",
+              totalWithTax: "88.00",
+              paymentStatus: { label: "未付" },
+            }],
+          }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
       return new Response(JSON.stringify({}), { status: 404, headers: { "Content-Type": "application/json" } });
     }));
 
@@ -353,6 +378,7 @@ describe("Input invoice usage workflow drawers", () => {
       targetApplicantCode: "chen_xiuyun",
     });
     const history = await fetchInputInvoiceUsageOaReverseSubmittedHistory();
+    const staged = await fetchInputInvoiceUsageOaReverseStagedDrafts();
 
     expect(preview.invoiceRows?.[0].invoiceId).toBe("inv-backend-1");
     expect(preview.targetApplicants).toEqual([{ code: "chen_xiuyun", name: "陈秀云" }]);
@@ -375,6 +401,9 @@ describe("Input invoice usage workflow drawers", () => {
     expect(batch.oaDraftUrl).toBe("https://oa.example.test/draft/backend");
     expect(history.items[0].targetApplicantName).toBe("陈秀云");
     expect(history.items[0].invoices[0].sellerName).toBe("后端供应商");
+    expect(staged.items[0].batchId).toBe("batch-staged-backend");
+    expect(staged.items[0].status).toBe("oa_draft_created");
+    expect(staged.items[0].invoiceRows[0].displayNo).toBe("SD-BACKEND-1");
   });
 
   const previewPayload: OaReversePreviewPayload = {
@@ -568,7 +597,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(within(confirmDialog).getByRole("link", { name: "打开 OA 草稿" })).toHaveAttribute("href", "https://oa.example.test/draft/oa-draft-001");
     expect(screen.queryByRole("button", { name: "刷新 OA 状态" })).not.toBeInTheDocument();
 
-    await user.click(within(confirmDialog).getByRole("button", { name: "已提交 OA" }));
+    await user.click(within(confirmDialog).getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ }));
     await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("oa_reverse_batch_001", expect.objectContaining({
       decision: "submitted",
       expectedVersion: 4,
@@ -628,8 +657,8 @@ describe("Input invoice usage workflow drawers", () => {
 
     await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(2));
     const confirmDialog = screen.getByRole("dialog", { name: "OA 草稿提交确认" });
-    expect(within(confirmDialog).getByRole("button", { name: "已提交 OA" })).toBeInTheDocument();
-    expect(within(confirmDialog).getByRole("button", { name: "未提交 OA" })).toBeInTheDocument();
+    expect(within(confirmDialog).getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ })).toBeInTheDocument();
+    expect(within(confirmDialog).getByRole("button", { name: /OA提交内容需修改\s+删除本次提交内容/ })).toBeInTheDocument();
 
     rerender(
       <OaReverseWorkspaceDrawer
@@ -641,6 +670,75 @@ describe("Input invoice usage workflow drawers", () => {
 
     await waitFor(() => expect(loadPreview).toHaveBeenCalledTimes(3));
     expect(screen.getByRole("dialog", { name: "OA 草稿提交确认" })).toBeInTheDocument();
+  });
+
+  test("OA reverse staged tab recovers a draft after closing confirmation without exposing draft link", async () => {
+    const user = userEvent.setup();
+    const loadPreview = vi.fn(() => Promise.resolve({ ...previewPayload, canCreateDraft: true, permissions: { canCreateDraft: true } }));
+    const stagedBatch = {
+      batchId: "oa_reverse_batch_staged",
+      version: 2,
+      status: "oa_draft_created",
+      invoiceIds: ["inv-001"],
+      selectedInvoiceIds: ["inv-001"],
+      totalWithTax: "49.86",
+      targetApplicantCode: "chen_xiuyun",
+      targetApplicantName: "陈秀云",
+      invoiceRows: [{
+        invoiceId: "inv-001",
+        invoiceNumber: "SD-STAGED-001",
+        displayNo: "SD-STAGED-001",
+        sellerName: "暂存供应商",
+        issueDate: "2026-05-01",
+        totalWithTax: "49.86",
+        paymentStatusLabel: "待处理",
+      }],
+      invoices: [],
+      rejectedInvoices: [],
+      oaDraftId: "oa-draft-staged",
+      oaDraftUrl: "https://oa.example.test/draft/staged",
+      canConfirmSubmission: true,
+    };
+    const createDraftFromSelection = vi.fn(() => Promise.resolve(stagedBatch));
+    const loadStagedDrafts = vi.fn(() => Promise.resolve({ items: [stagedBatch] }));
+    const manualStatus = vi.fn(() => Promise.resolve({
+      ...stagedBatch,
+      version: 3,
+      status: "submitted_confirmed",
+      oaDetectionStatus: "user_confirmed_submitted",
+    }));
+
+    render(
+      <OaReverseWorkspaceDrawer
+        open
+        sourceFilters={[]}
+        selectedInvoiceIds={["inv-001"]}
+        loadPreview={loadPreview}
+        createDraftFromSelection={createDraftFromSelection}
+        loadStagedDrafts={loadStagedDrafts}
+        manualStatus={manualStatus}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
+    const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
+    expect(within(confirmDialog).getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ })).toBeInTheDocument();
+    expect(within(confirmDialog).getByRole("button", { name: /OA提交内容需修改\s+删除本次提交内容/ })).toBeInTheDocument();
+    await user.click(within(confirmDialog).getByRole("button", { name: "关闭确认弹窗" }));
+
+    expect(screen.queryByRole("dialog", { name: "OA 草稿提交确认" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "暂存" }));
+
+    expect(await screen.findByText("SD-STAGED-001")).toBeInTheDocument();
+    expect(screen.getByText("暂存供应商")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /OA 草稿|打开/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /我已在OA系统提交该草稿\s+OA正在进行中/ }));
+
+    await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("oa_reverse_batch_staged", expect.objectContaining({
+      expectedVersion: 2,
+      decision: "submitted",
+    })));
   });
 
   test("OA reverse drawer marks linked OA invoices as disabled and filters by OA relation status", async () => {
@@ -827,7 +925,7 @@ describe("Input invoice usage workflow drawers", () => {
 
     await user.click(await screen.findByRole("button", { name: "创建 OA 草稿" }));
     const confirmDialog = await screen.findByRole("dialog", { name: "OA 草稿提交确认" });
-    await user.click(within(confirmDialog).getByRole("button", { name: "未提交 OA" }));
+    await user.click(within(confirmDialog).getByRole("button", { name: /OA提交内容需修改\s+删除本次提交内容/ }));
 
     await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("oa_reverse_batch_not_submitted", expect.objectContaining({
       expectedVersion: 2,

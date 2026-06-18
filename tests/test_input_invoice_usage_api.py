@@ -625,6 +625,50 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(client.requests[0]["payload"]["data"]["applicant"], "陈秀云")
         self.assertEqual(client.requests[0]["payload"]["isDraft"], True)
 
+    def test_oa_reverse_staged_drafts_route_returns_created_drafts_for_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            provider = FakeTargetOaDraftClientProvider()
+            app._target_oa_applicant_token_provider_instance = provider
+            self._install_service(
+                app,
+                invoices=[self._invoice("inv-staged-api", "3151", "暂存供应商", total_with_tax="188.00")],
+                oa_projection=StaticOAProjection([]),
+            )
+            preview_payload = json.loads(
+                app.handle_request(
+                    "POST",
+                    "/api/input-invoice-usage/oa-reverse/preview",
+                    body=json.dumps({"invoiceIds": ["inv-staged-api"], "targetApplicantCode": "chen_xiuyun"}),
+                ).body
+            )
+            draft_payload = json.loads(
+                app.handle_request(
+                    "POST",
+                    "/api/input-invoice-usage/oa-reverse/oa-draft",
+                    body=json.dumps(
+                        {
+                            "invoiceIds": ["inv-staged-api"],
+                            "targetApplicantCode": "chen_xiuyun",
+                            "expectedPreviewHash": preview_payload["previewHash"],
+                            "idempotencyKey": "oa-reverse-staged-api",
+                        }
+                    ),
+                ).body
+            )
+            staged_response = app.handle_request(
+                "GET",
+                "/api/input-invoice-usage/oa-reverse/staged-drafts",
+            )
+
+        self.assertEqual(staged_response.status_code, 200)
+        staged_payload = json.loads(staged_response.body)
+        self.assertEqual([item["batchId"] for item in staged_payload["items"]], [draft_payload["batchId"]])
+        self.assertEqual(staged_payload["items"][0]["status"], "oa_draft_created")
+        self.assertTrue(staged_payload["items"][0]["canConfirmSubmission"])
+        self.assertEqual(staged_payload["items"][0]["invoiceRows"][0]["invoiceNo"], "3151")
+        self.assertNotIn("submittedAt", staged_payload["items"][0])
+
     def test_oa_reverse_full_flow_uses_admin_saved_target_applicant_credential(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

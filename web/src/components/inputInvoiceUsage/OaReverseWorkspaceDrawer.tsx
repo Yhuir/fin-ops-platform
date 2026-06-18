@@ -1,4 +1,4 @@
-import { Filter } from "lucide-react";
+import { Filter, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import AppDrawer from "../common/AppDrawer";
@@ -6,6 +6,7 @@ import type {
   CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest,
   InputInvoiceUsageOaReverseBatch,
   InputInvoiceUsageOaReverseInvoice,
+  InputInvoiceUsageOaReverseStagedDraftsResponse,
   InputInvoiceUsageOaReverseSubmittedHistoryResponse,
   InputInvoiceUsageOaReverseTargetApplicant,
   ManualInputInvoiceUsageOaReverseStatusRequest,
@@ -81,6 +82,7 @@ type OaReverseWorkspaceDrawerProps = {
   selectedInvoiceIds: string[];
   loadPreview: (request: OaReversePreviewRequest) => Promise<OaReversePreviewPayload>;
   createDraftFromSelection?: (request: CreateInputInvoiceUsageOaReverseDraftFromSelectionRequest) => Promise<InputInvoiceUsageOaReverseBatch>;
+  loadStagedDrafts?: () => Promise<InputInvoiceUsageOaReverseStagedDraftsResponse>;
   loadSubmittedHistory?: () => Promise<InputInvoiceUsageOaReverseSubmittedHistoryResponse>;
   manualStatus?: (batchId: string, request: ManualInputInvoiceUsageOaReverseStatusRequest) => Promise<InputInvoiceUsageOaReverseBatch>;
   onClose: () => void;
@@ -92,13 +94,17 @@ export default function OaReverseWorkspaceDrawer({
   selectedInvoiceIds,
   loadPreview,
   createDraftFromSelection,
+  loadStagedDrafts,
   loadSubmittedHistory,
   manualStatus,
   onClose,
 }: OaReverseWorkspaceDrawerProps) {
   const [preview, setPreview] = useState<OaReversePreviewPayload | null>(null);
   const [batch, setBatch] = useState<InputInvoiceUsageOaReverseBatch | null>(null);
-  const [activeTab, setActiveTab] = useState<"pending" | "submitted">("pending");
+  const [activeTab, setActiveTab] = useState<"pending" | "staged" | "submitted">("pending");
+  const [stagedDrafts, setStagedDrafts] = useState<InputInvoiceUsageOaReverseStagedDraftsResponse["items"]>([]);
+  const [stagedLoading, setStagedLoading] = useState(false);
+  const [stagedError, setStagedError] = useState<string | null>(null);
   const [submittedHistory, setSubmittedHistory] = useState<InputInvoiceUsageOaReverseSubmittedHistoryResponse["items"]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -138,6 +144,9 @@ export default function OaReverseWorkspaceDrawer({
       setFeedback(null);
       setConfirmationOpen(false);
       setActiveTab("pending");
+      setStagedDrafts([]);
+      setStagedError(null);
+      setStagedLoading(false);
       setSubmittedHistory([]);
       setHistoryError(null);
       setHistoryLoading(false);
@@ -259,21 +268,22 @@ export default function OaReverseWorkspaceDrawer({
     );
   };
 
-  const handleSubmissionDecision = (decision: "submitted" | "not_submitted") => {
-    if (!batch || !manualStatus) {
+  const handleSubmissionDecision = (decision: "submitted" | "not_submitted", targetBatch = batch) => {
+    if (!targetBatch || !manualStatus) {
       return;
     }
     setActionLoading(`submissionDecision:${decision}`);
     setError(null);
     setFeedback(null);
-    manualStatus(batch.batchId, {
-        expectedVersion: batch.version,
-        idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-submission-decision"),
-        decision,
-        reason: decision === "submitted" ? "用户确认已在 OA 提交" : "用户确认暂未提交 OA",
-      })
+    manualStatus(targetBatch.batchId, {
+      expectedVersion: targetBatch.version,
+      idempotencyKey: createIdempotencyKey("input-invoice-usage-oa-reverse-submission-decision"),
+      decision,
+      reason: decision === "submitted" ? "用户确认已在 OA 系统提交该草稿" : "用户确认 OA 提交内容需修改并删除本次提交内容",
+    })
       .then((nextBatch) => {
         setConfirmationOpen(false);
+        setStagedDrafts((current) => current.filter((item) => item.batchId !== targetBatch.batchId));
         if (decision === "submitted") {
           setBatch(nextBatch);
           setFeedback("已进入已提交历史。");
@@ -281,13 +291,42 @@ export default function OaReverseWorkspaceDrawer({
           return;
         }
         setBatch(null);
-        setFeedback("已返回待处理，可重新创建 OA 草稿。");
+        setFeedback("已清除暂存批次，返回待处理后可重新创建 OA 草稿。");
+        setActiveTab("pending");
       })
       .catch((reason: unknown) => {
         setError(reason instanceof Error ? reason.message : "OA 提交状态确认失败。");
       })
       .finally(() => setActionLoading(null));
   };
+
+  useEffect(() => {
+    if (!open || activeTab !== "staged" || !loadStagedDrafts) {
+      return undefined;
+    }
+    let active = true;
+    setStagedLoading(true);
+    setStagedError(null);
+    loadStagedDrafts()
+      .then((payload) => {
+        if (active) {
+          setStagedDrafts(payload.items);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setStagedError(reason instanceof Error ? reason.message : "暂存批次加载失败。");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setStagedLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeTab, loadStagedDrafts, open]);
 
   useEffect(() => {
     if (!open || activeTab !== "submitted" || !loadSubmittedHistory) {
@@ -342,6 +381,9 @@ export default function OaReverseWorkspaceDrawer({
           <TabButton active={activeTab === "pending"} onClick={() => setActiveTab("pending")}>
             待处理
           </TabButton>
+          <TabButton active={activeTab === "staged"} onClick={() => setActiveTab("staged")}>
+            暂存
+          </TabButton>
           <TabButton active={activeTab === "submitted"} onClick={() => setActiveTab("submitted")}>
             已提交
           </TabButton>
@@ -351,6 +393,14 @@ export default function OaReverseWorkspaceDrawer({
             error={historyError}
             items={submittedHistory}
             loading={historyLoading}
+          />
+        ) : activeTab === "staged" ? (
+          <StagedDraftsPanel
+            actionLoading={actionLoading}
+            error={stagedError}
+            items={stagedDrafts}
+            loading={stagedLoading}
+            onDecision={handleSubmissionDecision}
           />
         ) : (
           <>
@@ -579,6 +629,14 @@ export default function OaReverseWorkspaceDrawer({
           <DraftConfirmationDialog
             actionLoading={actionLoading}
             draftUrl={batch.oaDraftUrl}
+            onCancel={() => {
+              if (batch) {
+                setStagedDrafts((current) => upsertStagedDraft(current, batch));
+              }
+              setConfirmationOpen(false);
+              setBatch(null);
+              setActiveTab("staged");
+            }}
             onDecision={handleSubmissionDecision}
           />
         ) : null}
@@ -707,6 +765,13 @@ function firstTargetApplicantCode(preview: OaReversePreviewPayload) {
   return preview.groups.find((group) => group.targetApplicantCode)?.targetApplicantCode ?? null;
 }
 
+function upsertStagedDraft(
+  current: InputInvoiceUsageOaReverseStagedDraftsResponse["items"],
+  batch: InputInvoiceUsageOaReverseBatch,
+) {
+  return [batch, ...current.filter((item) => item.batchId !== batch.batchId)];
+}
+
 function previewUnavailableMessage(preview: OaReversePreviewPayload, candidateCount: number) {
   if (preview.unavailableReason) {
     return preview.unavailableReason;
@@ -772,16 +837,29 @@ function DraftStatusPanel({ batch }: { batch: InputInvoiceUsageOaReverseBatch })
 function DraftConfirmationDialog({
   actionLoading,
   draftUrl,
+  onCancel,
   onDecision,
 }: {
   actionLoading: string | null;
   draftUrl: string;
+  onCancel: () => void;
   onDecision: (decision: "submitted" | "not_submitted") => void;
 }) {
   return (
     <div className="input-invoice-usage-oa-confirmation-backdrop">
       <div aria-label="OA 草稿提交确认" aria-modal="true" className="input-invoice-usage-oa-confirmation" role="dialog">
-        <h3>OA 草稿提交确认</h3>
+        <div className="input-invoice-usage-oa-confirmation__header">
+          <h3>OA 草稿提交确认</h3>
+          <button
+            aria-label="关闭确认弹窗"
+            className="input-invoice-usage-oa-confirmation__close"
+            disabled={Boolean(actionLoading)}
+            onClick={onCancel}
+            type="button"
+          >
+            <X aria-hidden="true" size={16} />
+          </button>
+        </div>
         <p>请在 OA 页面手动提交草稿后，再选择本次处理结果。</p>
         <div className="input-invoice-usage-oa-actions">
           <a className="input-invoice-usage-button" href={draftUrl} rel="noreferrer" target="_blank">
@@ -793,7 +871,12 @@ function DraftConfirmationDialog({
             onClick={() => onDecision("submitted")}
             type="button"
           >
-            {actionLoading === "submissionDecision:submitted" ? "记录中..." : "已提交 OA"}
+            {actionLoading === "submissionDecision:submitted" ? "记录中..." : (
+              <DecisionLabel
+                primary="我已在OA系统提交该草稿"
+                secondary="OA正在进行中"
+              />
+            )}
           </button>
           <button
             className="input-invoice-usage-button"
@@ -801,10 +884,120 @@ function DraftConfirmationDialog({
             onClick={() => onDecision("not_submitted")}
             type="button"
           >
-            {actionLoading === "submissionDecision:not_submitted" ? "回滚中..." : "未提交 OA"}
+            {actionLoading === "submissionDecision:not_submitted" ? "清除中..." : (
+              <DecisionLabel
+                primary="OA提交内容需修改"
+                secondary="删除本次提交内容"
+              />
+            )}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DecisionLabel({ primary, secondary }: { primary: string; secondary: string }) {
+  return (
+    <span className="input-invoice-usage-oa-decision-label">
+      <span>{primary}</span>
+      <span>{secondary}</span>
+    </span>
+  );
+}
+
+function StagedDraftsPanel({
+  actionLoading,
+  error,
+  items,
+  loading,
+  onDecision,
+}: {
+  actionLoading: string | null;
+  error: string | null;
+  items: InputInvoiceUsageOaReverseStagedDraftsResponse["items"];
+  loading: boolean;
+  onDecision: (decision: "submitted" | "not_submitted", batch: InputInvoiceUsageOaReverseBatch) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="input-invoice-usage-drawer-loading">
+        <span aria-label="正在加载暂存批次" className="input-invoice-usage-drawer-spinner" role="progressbar" />
+        <span>正在加载暂存批次</span>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="input-invoice-usage-drawer-alert input-invoice-usage-drawer-alert--error" role="alert">
+        {error}
+      </div>
+    );
+  }
+  if (items.length === 0) {
+    return <p className="input-invoice-usage-rules-empty">暂无暂存批次。</p>;
+  }
+  return (
+    <div className="input-invoice-usage-oa-history">
+      {items.map((item) => (
+        <article className="input-invoice-usage-oa-history-item" key={item.batchId}>
+          <div className="input-invoice-usage-oa-history-item__header">
+            <strong>{item.targetApplicantName || item.targetApplicantCode || "目标申请人"}</strong>
+            <span className="input-invoice-usage-rules-tag">{item.invoiceIds.length || item.invoiceRows.length} 张</span>
+            <span className="input-invoice-usage-rules-tag input-invoice-usage-oa-amount-tag">{item.totalWithTax || "-"}</span>
+          </div>
+          <div className="input-invoice-usage-rules-table-shell">
+            <table aria-label={`${item.targetApplicantName || "目标申请人"}暂存发票`} className="input-invoice-usage-oa-table">
+              <thead>
+                <tr>
+                  <th scope="col">发票号码</th>
+                  <th scope="col">销方</th>
+                  <th scope="col">开票日期</th>
+                  <th scope="col">价税合计</th>
+                </tr>
+              </thead>
+              <tbody>
+                {item.invoiceRows.map((invoice) => (
+                  <tr key={`${invoice.invoiceId}:${invoice.displayNo || invoice.invoiceNumber}`}>
+                    <td>{invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId}</td>
+                    <td>{invoice.sellerName || "-"}</td>
+                    <td>{invoice.issueDate || "-"}</td>
+                    <td className="input-invoice-usage-oa-table__amount">{invoice.totalWithTax || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="input-invoice-usage-oa-actions">
+            <button
+              className="input-invoice-usage-button input-invoice-usage-button--primary"
+              disabled={Boolean(actionLoading)}
+              onClick={() => onDecision("submitted", item)}
+              type="button"
+            >
+              {actionLoading === "submissionDecision:submitted" ? "记录中..." : (
+                <DecisionLabel
+                  primary="我已在OA系统提交该草稿"
+                  secondary="OA正在进行中"
+                />
+              )}
+            </button>
+            <button
+              className="input-invoice-usage-button"
+              disabled={Boolean(actionLoading)}
+              onClick={() => onDecision("not_submitted", item)}
+              type="button"
+            >
+              {actionLoading === "submissionDecision:not_submitted" ? "清除中..." : (
+                <DecisionLabel
+                  primary="OA提交内容需修改"
+                  secondary="删除本次提交内容"
+                />
+              )}
+            </button>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }

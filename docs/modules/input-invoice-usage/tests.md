@@ -18,7 +18,7 @@
 | OA 反提草稿 | `InputInvoiceUsageOaReverseService`、内部 batch repository | 一键创建内部 batch 和 OA draft；不能暴露 `创建本地批次` 用户概念。 |
 | 目标申请人凭据 | `OaApplicantCredentialService`、PG repository、settings UI | admin-only；密码只写不读；API、日志、前端状态和测试快照不得泄漏密码/密文/token。 |
 | 目标申请人 OA 登录 | `TargetOaApplicantTokenProvider`、`OaLoginClient` | 必须使用目标申请人凭据/token，不使用当前操作人 request token。 |
-| 已提交/未提交确认 | 内部 batch status、submitted history API | `已提交 OA` 进入业务历史；`未提交 OA` 清理本地草稿字段后可重新创建，不删除 OA 外部草稿。 |
+| 暂存/已提交/未提交确认 | 内部 batch status、staged drafts API、submitted history API | `oa_draft_created` 进入 `暂存`；用户关闭弹窗后可从暂存继续二选一；`submitted` 进入业务历史；`not_submitted` 清理本地草稿字段后可重新创建，不删除 OA 外部草稿。 |
 | 设置页交叉影响 | `SettingsPage`、独立凭据 API | 普通 `/api/workbench/settings` payload 不能包含密码；非 admin 不展示凭据入口。 |
 | 下游 fan-out | invoice lifecycle、pending invoices、OA pending、tax offset、cost statistics、App Health | 发票导入、规则变化、关系变化和认证状态影响多个页面，需按下游模块继续补 UI/业务流回归。 |
 
@@ -41,7 +41,7 @@
 | OA 反提 relation 写入 | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered | evidence detected 后通过 `WorkbenchRelationCommandService.confirm_relation` 写 `input_invoice_oa_reverse`；缺 command、权限/session、DB/目标写模型不可用或 canonical relation conflict 时 fail fast，不推进本地 batch。 |
 | 目标申请人凭据 service/API/PG | P0 | `tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`、`tests/test_postgres_migrations.py` | covered | admin-only、必填校验、pgcrypto 加密、列表不解密、不泄漏普通 settings payload。 |
 | 目标申请人 token provider | P0 | `tests/test_target_oa_applicant_token_provider.py` | covered | RSA 加密密码、登录失败不暴露密码、目标申请人 draft client、缺凭据不登录。 |
-| 已提交/未提交确认 | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` | covered | `submitted_confirmed` 历史、`not_submitted` 回到可创建状态并可重新创建；真实 Chromium smoke 覆盖 `已提交 OA` 确认后自动进入已提交 tab。 |
+| 暂存/已提交/未提交确认 | P0 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` | covered | `oa_draft_created` 暂存列表、关闭确认弹窗后暂存恢复、`submitted_confirmed` 历史、`not_submitted` 回到可创建状态并可重新创建；真实 Chromium smoke 覆盖确认后进入已提交 tab。 |
 | 已提交历史不暴露内部字段 | P0 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` | covered | 历史只展示申请人、时间、金额、发票摘要，不展示 batch/draft/preview/internal status；Browser e2e 明确断言内部 batch id 不出现在已提交历史。 |
 | 设置页凭据 UI | P1 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | covered | admin 可维护、非 admin 隐藏、密码保存后清空、普通 settings save 不含密码。 |
 | 进项发票页面 UI | P1 | `web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` | covered | loading/empty/refreshing、table、首屏有界 `page_size=20` 请求、filter/sort、drawer、多关系 `+N`、待处理/已提交 tab、一键草稿、确认弹窗、OA 关联三态 chip 和关联状态筛选；Browser e2e 覆盖真实页面 rows 首屏和 OA reverse drawer。 |
@@ -67,6 +67,7 @@
 | 2026-06-10 | 创建 OA 草稿错误使用当前操作人 token，而不是目标申请人凭据。 | `tests/test_target_oa_applicant_token_provider.py`、`tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py` | covered |
 | 2026-06-10 | 凭据可能进入普通 settings payload 或前端回显密码。 | `tests/test_oa_applicant_credentials_api.py`、`web/src/test/SettingsPage.test.tsx`、`tests/test_postgres_oa_applicant_credentials_repository.py` | covered |
 | 2026-06-10 | `未提交 OA` 后不能重新创建草稿，或被误记为已提交历史。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |
+| 2026-06-18 | 用户创建 OA 草稿后关闭确认弹窗，若没有持久化暂存 bucket，会导致本地批次无法继续确认或清理。 | `tests/test_input_invoice_usage_oa_reverse_service.py::InputInvoiceUsageOaReverseServiceTests::test_staged_drafts_returns_created_drafts_waiting_for_user_decision`、`tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_oa_reverse_staged_drafts_route_returns_created_drafts_for_recovery`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx::OA reverse staged tab recovers a draft after closing confirmation without exposing draft link` | covered |
 | 2026-06-10 | 已提交历史展示内部 batch/draft/preview/status 字段。 | `tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` | covered |
 | 2026-06-12 | OA reverse evidence detected 直接写 pair service，导致 relation 事实源绕过 command service/read model freshness。 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_platform_runtime_boundary_guards.py` | covered |
 | 2026-06-12 | 同一 active relation 下多条 OA、流水或发票在进项发票使用情况列表中只显示 primary，未展示合计和 `+N` 详情入口。 | `tests/test_input_invoice_usage_api.py::InputInvoiceUsageApiTests::test_rows_and_relation_details_return_multi_relation_totals_for_oa_bank_and_invoice`、`web/src/test/InputInvoiceUsagePage.test.tsx::shows relation totals with +N entry points for multi OA, bank, and invoice relations` | covered |
@@ -84,12 +85,12 @@
 
 1. `发票导入确认 -> invoice_lifecycle dirty -> input_invoice_usage dirty -> worker refresh -> /api/input-invoice-usage/rows fresh -> 页面表格/筛选/导出`
 2. `管理员保存 OA 申请人凭据 -> full-access 用户打开反提 OA drawer -> preview -> 一键创建 OA 草稿 -> target applicant login -> OA draft created`
-3. `OA draft created -> 用户选择 已提交 OA -> submitted history -> 已提交 tab 只展示业务字段`
-4. `OA draft created -> 用户选择 未提交 OA -> 本地草稿字段清理 -> 待处理页可重新创建`
+3. `OA draft created -> 暂存 -> 用户选择 submitted -> submitted history -> 已提交 tab 只展示业务字段`
+4. `OA draft created -> 暂存 -> 用户选择 not_submitted -> 本地草稿字段清理 -> 待处理页可重新创建`
 5. `关联台 candidate -> input invoice usage 显示候选证据但保持待处理；关联台 confirm -> input invoice usage 重新读取 rows -> linked 证据和已支付状态`
 6. `pending invoice rules / relation confirm / tax certification 变化 -> invoice lifecycle -> input invoice usage / OA pending / tax / cost 下游 read model 收敛`
 
-Browser e2e 当前覆盖：`rows 首屏 -> 以发票反提 OA drawer -> 取消候选子集 -> 子集 preview hash -> 创建 OA 草稿 -> 已提交 OA -> submitted history`，以及 `candidate relation evidence -> OA reverse candidate disabled -> Workbench confirm -> input invoice usage linked evidence`。
+Browser e2e 当前覆盖：`rows 首屏 -> 以发票反提 OA drawer -> 取消候选子集 -> 子集 preview hash -> 创建 OA 草稿 -> 确认 submitted -> submitted history`，以及 `candidate relation evidence -> OA reverse candidate disabled -> Workbench confirm -> input invoice usage linked evidence`。暂存恢复由 service/API/Vitest 覆盖。
 
 ## 本模块验证命令
 
