@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-18 - 发票信息汇总表模板识别
+
+- 目标：支持用户从发票平台导出的 `信息汇总表` Excel，该格式使用 `数电号码`、`购方企业名称`、`购方税号`、`销方企业名称`、`销方税号`、`商品名称` 等表头，旧导入器会因缺少 `购买方名称` / `销方识别号` 判定为无法识别模板。
+- 影响范围：`FileImportService` 发票模板识别、发票行解析、file/session preview、发票导入测试矩阵。
+- 关键决策：不新增前端 API 或独立 batch type；在 `invoice_export` 模板内做发票表头别名归一，保持 normalized row、重复审计、confirm 和下游 lifecycle 语义不变。`信息汇总表` 末尾 `份数：...金额：...` 汇总页脚不是发票明细，解析阶段跳过。
+- 文档影响：更新本实施记录和 `tests.md` 的场景覆盖、历史 bug 回归和 smoke flow；长期 API contract 不变。
+- 测试覆盖：新增 `test_preview_accepts_invoice_summary_header_aliases` 和 `test_preview_detects_invoice_summary_without_template_override`，覆盖表头别名、前端 override 场景、自动识别场景和汇总页脚跳过。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_import_file_service tests.test_import_file_api tests.test_import_api tests.test_import_service tests.test_import_preview_audit -v`；本地还用用户提供的 5 个真实 Excel 跑 `FileImportService.preview_files` smoke，结果均为 `preview_ready` 且 `errors=0`。
+- 未测风险：尚未通过真实浏览器上传和真实 background worker drain 确认完整 confirm -> lifecycle -> 下游 read model 链路；真实业务文件不纳入仓库 fixture。
+- 后续事项：如发票平台继续新增表头口径，优先扩展 alias mapping 并补合成 fixture，不保存真实业务 Excel。
+
 ## 2026-06-16 - 发票导入合成大重复组守护
 
 - 目标：为 P2/P3 发票大文件和超大重复组风险补本地可重复证据，防止同文件重复发票在 preview audit 中被全部当作可确认。

@@ -23,7 +23,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 1 of 18 (完善外部往来款管理页面)
 Plan: 0 of 0 in current phase
 Status: Ready to discuss/plan page-specific phases using Phase 0 as required baseline
-Last activity: 2026-06-18 - Completed quick task 260618-jc8: 进项发票使用情况以发票反提OA新增暂存状态闭环
+Last activity: 2026-06-18 - Completed quick task 260618-m4d: 发票信息汇总表模板识别
 
 Progress: [█░░░░░░░░░] 6%
 
@@ -77,6 +77,7 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 260617-dt6 | 修正免OA流水批量处理提交/撤回状态展示并确认关联台配对收敛 | 2026-06-17 | — | [260617-dt6-oa](./quick/260617-dt6-oa/) |
 | 260618-jc8 | 进项发票使用情况以发票反提OA新增暂存状态闭环 | 2026-06-18 | 2b5f59c5 | [260618-jc8-oa](./quick/260618-jc8-oa/) |
+| 260618-m4d | 发票信息汇总表模板识别 | 2026-06-18 | — | [260618-m4d-excel](./quick/260618-m4d-excel/) |
 
 ## Deferred Items
 
@@ -87,5 +88,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-06-18
-Stopped at: Completed quick task 260618-jc8 and ready for the next scoped GSD task.
-Resume file: .planning/quick/260618-jc8-oa/260618-jc8-SUMMARY.md
+Stopped at: Completed quick task 260618-m4d and ready for the next scoped GSD task.
+Resume file: .planning/quick/260618-m4d-excel/260618-m4d-SUMMARY.md

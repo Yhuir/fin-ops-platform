@@ -14,7 +14,15 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-from mock_import_files import BOCOM_JAN, CEB_JAN, INVOICE_JAN, PINGAN_JAN, icbc_history_file, invoice_export_file
+from mock_import_files import (
+    BOCOM_JAN,
+    CEB_JAN,
+    INVOICE_JAN,
+    PINGAN_JAN,
+    icbc_history_file,
+    invoice_export_file,
+    invoice_summary_file,
+)
 
 
 def repeat_last_xlsx_row(content: bytes, *, total_data_rows: int) -> bytes:
@@ -83,6 +91,55 @@ class ImportFileServiceTests(unittest.TestCase):
         self.assertEqual(preview_file.status, "unrecognized_template")
         self.assertEqual(preview_file.row_count, 0)
         self.assertIn("文件读取失败", preview_file.message)
+
+    def test_preview_accepts_invoice_summary_header_aliases(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = invoice_summary_file()
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[
+                UploadedImportFile(
+                    file_name=upload.name,
+                    content=upload.content,
+                    template_code_override="invoice_export",
+                    batch_type_override="input_invoice",
+                )
+            ],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "invoice_export")
+        self.assertEqual(preview_file.batch_type.value, "input_invoice")
+        self.assertEqual(preview_file.row_count, 1)
+        self.assertEqual(preview_file.success_count, 1)
+        normalized = preview_file.normalized_rows[0]
+        self.assertEqual(normalized["digital_invoice_no"], "26312000002781821596")
+        self.assertEqual(normalized["buyer_name"], "云南溯源科技有限公司")
+        self.assertEqual(normalized["buyer_tax_no"], "915300007194052520")
+        self.assertEqual(normalized["seller_name"], "阿法拉伐（上海）技术有限公司")
+        self.assertEqual(normalized["seller_tax_no"], "91310000607371000G")
+        self.assertEqual(normalized["counterparty_name"], "阿法拉伐（上海）技术有限公司")
+        self.assertEqual(normalized["taxable_item_name"], "*通用设备*垫片板式换热器")
+        self.assertEqual(normalized["invoice_kind"], "数电票(专用发票)")
+        self.assertEqual(normalized["total_with_tax"], "14384.00")
+
+    def test_preview_detects_invoice_summary_without_template_override(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        upload = invoice_summary_file()
+
+        session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=upload.name, content=upload.content)],
+        )
+
+        preview_file = session.files[0]
+        self.assertEqual(preview_file.status, "preview_ready")
+        self.assertEqual(preview_file.template_code, "invoice_export")
+        self.assertEqual(preview_file.batch_type.value, "input_invoice")
 
     def test_preview_skips_existing_session_file_and_batch_ids_when_counters_restart(self) -> None:
         file_store = FakeImportIdStore()

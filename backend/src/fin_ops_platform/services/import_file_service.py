@@ -35,6 +35,17 @@ COMPANY_TAX_NOS = {"91330106589876543T", "915300007194052520"}
 COMPANY_NAME_KEYWORDS = ("云南溯源科技有限公司", "溯源科技有限公司")
 ACCOUNT_METADATA_KEYWORDS = ("账号", "账户", "卡号")
 BANK_TEXT_FIELD_LABELS = ("摘要", "备注", "用途", "交易用途", "客户附言", "附言")
+INVOICE_REQUIRED_HEADERS = {"发票代码", "发票号码", "销方识别号", "购买方名称", "开票日期", "金额", "税额"}
+INVOICE_HEADER_ALIASES = {
+    "数电号码": "数电发票号码",
+    "销方税号": "销方识别号",
+    "销方企业名称": "销方名称",
+    "购方税号": "购方识别号",
+    "购方企业名称": "购买方名称",
+    "商品名称": "货物或应税劳务名称",
+    "规格": "规格型号",
+    "发票类型": "发票票种",
+}
 TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "template_code": "invoice_export",
@@ -42,7 +53,7 @@ TEMPLATE_DEFINITIONS: list[dict[str, Any]] = [
         "file_extensions": [".xlsx"],
         "record_type": "invoice",
         "allowed_batch_types": [BatchType.INPUT_INVOICE.value, BatchType.OUTPUT_INVOICE.value],
-        "required_headers": ["发票代码", "发票号码", "销方识别号", "购买方名称", "开票日期", "金额", "税额"],
+        "required_headers": sorted(INVOICE_REQUIRED_HEADERS),
     },
     {
         "template_code": "icbc_historydetail",
@@ -768,7 +779,8 @@ class TemplateDetector:
             if not normalized:
                 continue
             row_set = set(normalized)
-            if {"发票代码", "发票号码", "销方识别号", "购买方名称", "开票日期", "金额", "税额"}.issubset(row_set):
+            invoice_row_set = {canonical_invoice_header(value) for value in normalized}
+            if INVOICE_REQUIRED_HEADERS.issubset(invoice_row_set):
                 return "invoice_export"
             if "[HISTORYDETAIL]" in row_set:
                 return "icbc_historydetail"
@@ -816,15 +828,14 @@ def read_xls_rows(content: bytes) -> list[list[str]]:
 
 
 def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
-    header_index = find_header_index(
-        rows,
-        {"发票代码", "发票号码", "销方识别号", "购买方名称", "开票日期", "金额", "税额"},
-    )
-    header = rows[header_index]
+    header_index = find_invoice_header_index(rows)
+    header = [canonical_invoice_header(cell) for cell in rows[header_index]]
     data_rows = []
     for row in rows[header_index + 1 :]:
         mapped = row_to_dict(header, row)
         if not any(mapped.values()):
+            continue
+        if is_invoice_summary_footer(mapped):
             continue
         data_rows.append(
             {
@@ -858,6 +869,13 @@ def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
             }
         )
     return data_rows
+
+
+def is_invoice_summary_footer(mapped: dict[str, str]) -> bool:
+    invoice_kind = clean(mapped.get("发票票种"))
+    return invoice_kind.startswith("份数：") and not any(
+        clean(mapped.get(key)) for key in ("数电发票号码", "发票代码", "发票号码", "开票日期", "金额", "税额")
+    )
 
 
 def parse_icbc_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
@@ -1110,6 +1128,11 @@ def normalize_header(value: str) -> str:
     return clean(value).replace(" ", "")
 
 
+def canonical_invoice_header(value: str) -> str:
+    normalized = normalize_header(value)
+    return INVOICE_HEADER_ALIASES.get(normalized, normalized)
+
+
 def clean(value: Any) -> str:
     return str(value).strip() if value is not None else ""
 
@@ -1129,6 +1152,14 @@ def find_header_index(rows: list[list[str]], required_headers: set[str]) -> int:
     for index, row in enumerate(rows):
         normalized_row = set(normalize_row(row))
         if normalized_required.issubset(normalized_row):
+            return index
+    raise ValueError("无法识别文件模板。")
+
+
+def find_invoice_header_index(rows: list[list[str]]) -> int:
+    for index, row in enumerate(rows):
+        normalized_row = {canonical_invoice_header(cell) for cell in normalize_row(row)}
+        if INVOICE_REQUIRED_HEADERS.issubset(normalized_row):
             return index
     raise ValueError("无法识别文件模板。")
 
