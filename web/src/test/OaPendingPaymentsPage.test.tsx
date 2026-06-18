@@ -873,7 +873,8 @@ describe("OA pending payments page", () => {
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__project")).toHaveTextContent("红河卷烟厂能源管理系统运维服务");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__project")).toHaveTextContent("2026-01-03");
     expect(oaGrid.querySelector(".oa-pending-payments-oa-grid__amount")).toHaveTextContent("10000.00");
-    expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("对方户名：中招国际招标有限公司云南分公司");
+    expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("中招国际招标有限公司云南分公司");
+    expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).not.toHaveTextContent("对方户名：");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__counterparty")).toHaveTextContent("20260105 09:50:25");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("10000.00");
     expect(bankGrid.querySelector(".oa-pending-payments-bank-grid__amount")).toHaveTextContent("建设银行 1234");
@@ -883,6 +884,7 @@ describe("OA pending payments page", () => {
     expect(groupedCells[0]).toHaveTextContent("4450.00");
     expect(groupedCells[0]).toHaveTextContent("+2");
     expect(groupedCells[1]).toHaveTextContent("已写回");
+    expect(within(page).queryByText("同步状态异常")).not.toBeInTheDocument();
     expect(groupedCells[1]).not.toHaveTextContent("OA写回状态");
     expect(groupedCells[1]).not.toHaveTextContent("写回失败");
     expect(groupedCells[2]).toHaveTextContent("4450.00");
@@ -907,7 +909,7 @@ describe("OA pending payments page", () => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("keyword")).toBe("张三");
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 OA" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 申请人" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "OA申请人：张三 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -937,7 +939,7 @@ describe("OA pending payments page", () => {
       expect(filters).toContainEqual({ field: "payment_status", operator: "in", values: ["partially_paid"] });
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 OA" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 项目" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "项目名称：红河卷烟厂能源管理系统运维服务 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -945,7 +947,7 @@ describe("OA pending payments page", () => {
       expect(filters).toContainEqual({ field: "oa_project_name", operator: "in", values: ["红河卷烟厂能源管理系统运维服务"] });
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 流水" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 对方户名" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "对方户名：中招国际招标有限公司云南分公司 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -957,7 +959,7 @@ describe("OA pending payments page", () => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("sort_field")).toBe("bank_trade_time");
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 流水" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 流水金额" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "银行账户：建设银行 1234 1" }));
     await user.click(screen.getByRole("menuitemcheckbox", { name: "收支：支出 2" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
@@ -967,7 +969,7 @@ describe("OA pending payments page", () => {
       expect(filters).toContainEqual({ field: "bank_direction", operator: "in", values: ["outflow"] });
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 发票" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 发票方" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "发票方：云南恒昆机电设备有限公司 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -997,7 +999,7 @@ describe("OA pending payments page", () => {
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     expect(within(candidateRow).getByText("流程状态：进行中")).toBeInTheDocument();
     expect(within(page).getAllByRole("columnheader", { name: "发票" }).length).toBeGreaterThan(0);
-    expect(within(page).getByRole("button", { name: "筛选 发票" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "筛选 发票方" })).toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "开票日期 排序" })).toBeInTheDocument();
     const candidateCells = candidateRow.querySelectorAll(".oa-pending-payments-table-cell");
     expect(candidateCells[3]?.textContent?.trim()).toBe("-");

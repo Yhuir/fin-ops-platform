@@ -11,6 +11,22 @@ function filtersFromRequest(requestUrl: string) {
   }>;
 }
 
+async function expectMenuInsideViewport(page: import("@playwright/test").Page, name: string) {
+  const menu = page.getByRole("menu", { name });
+  await expect(menu).toBeVisible();
+  const box = await menu.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  if (!box || !viewport) {
+    return;
+  }
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+}
+
 test.describe("OA pending payments browser flow", () => {
   test("filters, sorts, and opens OA, bank, invoice, and rules drawers", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
@@ -60,6 +76,21 @@ test.describe("OA pending payments browser flow", () => {
       values: ["partially_paid"],
     });
 
+    await page.getByRole("button", { name: "筛选 项目" }).click();
+    await expectMenuInsideViewport(page, "项目筛选");
+    await page.getByRole("menuitemcheckbox", { name: "项目名称：浏览器待付款项目 1" }).click();
+    const projectFilterRequest = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return url.pathname.endsWith("/api/oa-pending-payments/rows")
+        && (url.searchParams.get("filters") ?? "").includes("oa_project_name");
+    });
+    await page.getByRole("button", { name: "应用筛选" }).click();
+    expect(filtersFromRequest((await projectFilterRequest).url())).toContainEqual({
+      field: "oa_project_name",
+      operator: "in",
+      values: ["浏览器待付款项目"],
+    });
+
     const sortRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());
       return url.pathname.endsWith("/api/oa-pending-payments/rows")
@@ -67,6 +98,21 @@ test.describe("OA pending payments browser flow", () => {
     });
     await page.getByRole("button", { name: "交易时间 排序" }).click();
     expect(new URL((await sortRequest).url()).searchParams.get("sort_direction")).toBe("desc");
+
+    await page.getByRole("button", { name: "筛选 发票方" }).click();
+    await expectMenuInsideViewport(page, "发票方筛选");
+    await page.getByRole("menuitemcheckbox", { name: "发票方：浏览器待付款供应商 1" }).click();
+    const sellerFilterRequest = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return url.pathname.endsWith("/api/oa-pending-payments/rows")
+        && (url.searchParams.get("filters") ?? "").includes("seller_name");
+    });
+    await page.getByRole("button", { name: "应用筛选" }).click();
+    expect(filtersFromRequest((await sellerFilterRequest).url())).toContainEqual({
+      field: "seller_name",
+      operator: "in",
+      values: ["浏览器待付款供应商"],
+    });
 
     await row.getByRole("button", { name: "查看 OA 浏览器付款申请人 详情" }).click();
     await expect(page.getByRole("heading", { name: "OA详情" })).toBeVisible();

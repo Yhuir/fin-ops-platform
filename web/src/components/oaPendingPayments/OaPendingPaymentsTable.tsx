@@ -1,6 +1,6 @@
 import { ArrowUpDown, CheckCircle2, Filter, Info, Search } from "lucide-react";
-import type { MutableRefObject, ReactNode } from "react";
-import { useEffect, useId, useMemo, useState } from "react";
+import type { CSSProperties, MutableRefObject, ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   EmptyValue,
@@ -55,6 +55,14 @@ type OaPendingPaymentColumn = {
   sortField?: string;
   sortLabel?: string;
   group: "oa" | "status" | "bank" | "invoice";
+};
+
+type HeaderControlConfig = {
+  label: string;
+  filterFields?: OaColumnFilterField[];
+  filterLabel?: string;
+  sortField?: string;
+  sortLabel?: string;
 };
 
 const columns: OaPendingPaymentColumn[] = [
@@ -271,9 +279,6 @@ export default function OaPendingPaymentsTable({
                       <span className="oa-pending-payments-writeback-line">
                         <TableTag>{writebackLabel(row)}</TableTag>
                       </span>
-                      {writebackSyncStatus(row) === "unavailable" ? (
-                        <span className="oa-pending-payments-writeback-sync">同步状态异常</span>
-                      ) : null}
                     </span>
                   </td>
                   <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--bank oa-pending-payments-table-cell--left-border" data-column-role="identity">
@@ -398,24 +403,41 @@ function GroupedSubHeader({
   onFilterClear: (field: string) => void;
   onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
 }) {
-  const control = (label: string) => (
+  const control = (config: HeaderControlConfig) => (
     <HeaderCell
       column={column}
       configsByField={configsByField}
-      displayLabel={label}
+      displayLabel={config.label}
+      filterFields={config.filterFields}
+      filterLabel={config.filterLabel}
       filterOptions={filterOptions}
       filters={filters}
       onFilterApply={onFilterApply}
       onFilterClear={onFilterClear}
       onSortChange={onSortChange}
+      sortField={config.sortField}
+      sortLabel={config.sortLabel}
     />
   );
 
   if (column.group === "oa") {
     return (
       <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--oa">
-        <span>{control("申请人")}</span>
-        <span>项目</span>
+        <span>{control({
+          label: "申请人",
+          filterFields: [
+            { field: "oa_applicant", label: "OA申请人" },
+            { field: "oa_application_type", label: "类型" },
+          ],
+          filterLabel: "申请人",
+          sortField: "oa_applicant",
+          sortLabel: "申请人",
+        })}</span>
+        <span>{control({
+          label: "项目",
+          filterFields: [{ field: "oa_project_name", label: "项目名称" }],
+          filterLabel: "项目",
+        })}</span>
         <span className="oa-pending-payments-subheader-grid__amount">金额</span>
       </span>
     );
@@ -424,7 +446,13 @@ function GroupedSubHeader({
   if (column.group === "status") {
     return (
       <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--status">
-        <span>{control("状态")}</span>
+        <span>{control({
+          label: "状态",
+          filterFields: [{ field: "payment_status", label: "支付状态" }],
+          filterLabel: "支付状态",
+          sortField: "payment_status",
+          sortLabel: "支付状态",
+        })}</span>
         <span>写回</span>
       </span>
     );
@@ -433,8 +461,21 @@ function GroupedSubHeader({
   if (column.group === "bank") {
     return (
       <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--bank">
-        <span>{control("对方户名")}</span>
-        <span>金额</span>
+        <span>{control({
+          label: "对方户名",
+          filterFields: [{ field: "bank_counterparty_name", label: "对方户名" }],
+          filterLabel: "对方户名",
+          sortField: "bank_trade_time",
+          sortLabel: "交易时间",
+        })}</span>
+        <span>{control({
+          label: "金额",
+          filterFields: [
+            { field: "bank_account", label: "银行账户" },
+            { field: "bank_direction", label: "收支" },
+          ],
+          filterLabel: "流水金额",
+        })}</span>
         <span>流水摘要</span>
       </span>
     );
@@ -442,9 +483,17 @@ function GroupedSubHeader({
 
   return (
     <span className="oa-pending-payments-subheader-grid oa-pending-payments-subheader-grid--invoice">
-      <span>{control("发票号")}</span>
-      <span>发票方</span>
-      <span>日期</span>
+      <span>{control({ label: "发票号" })}</span>
+      <span>{control({
+        label: "发票方",
+        filterFields: [{ field: "seller_name", label: "发票方" }],
+        filterLabel: "发票方",
+      })}</span>
+      <span>{control({
+        label: "日期",
+        sortField: "invoice_date",
+        sortLabel: "开票日期",
+      })}</span>
       <span className="oa-pending-payments-subheader-grid__amount">金额</span>
     </span>
   );
@@ -453,36 +502,49 @@ function GroupedSubHeader({
 function HeaderCell({
   column,
   displayLabel,
+  filterFields,
+  filterLabel,
   configsByField,
   filterOptions,
   filters,
   onFilterApply,
   onFilterClear,
   onSortChange,
+  sortField,
+  sortLabel,
 }: {
   column: OaPendingPaymentColumn;
   displayLabel?: ReactNode;
+  filterFields?: OaColumnFilterField[];
+  filterLabel?: string;
   configsByField: Map<string, OaPendingPaymentFieldConfig>;
   filterOptions: Record<string, OaPendingPaymentFilterOption[]>;
   filters: OaPendingPaymentFilter[];
   onFilterApply: (filter: OaColumnFilterValue) => void;
   onFilterClear: (field: string) => void;
   onSortChange: (field: string, direction?: OaPendingPaymentSortDirection) => void;
+  sortField?: string;
+  sortLabel?: string;
 }) {
+  const effectiveSortField = sortField;
+  const effectiveSortLabel = sortLabel ?? column.sortLabel ?? column.label;
+  const effectiveFilterFields = filterFields;
+  const effectiveFilterLabel = filterLabel ?? column.label;
+
   return (
     <span className="oa-pending-payments-header-control">
       <span className="oa-pending-payments-header-control__label">{displayLabel ?? column.label}</span>
-      {column.sortField ? (
+      {effectiveSortField ? (
         <SortButton
-          label={column.sortLabel ?? column.label}
-          onClick={() => column.sortField && onSortChange(column.sortField)}
+          label={effectiveSortLabel}
+          onClick={() => onSortChange(effectiveSortField)}
         />
       ) : null}
-      {column.filterFields ? (
+      {effectiveFilterFields ? (
         <OaColumnFilterMenu
-          columnLabel={column.label}
+          columnLabel={effectiveFilterLabel}
           configsByField={configsByField}
-          fieldRefs={column.filterFields}
+          fieldRefs={effectiveFilterFields}
           filterOptions={filterOptions}
           filters={filters}
           onApply={onFilterApply}
@@ -511,15 +573,63 @@ function OaColumnFilterMenu({
   onClear: (field: string) => void;
 }) {
   const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Record<string, string[]>>(() => selectedValuesByField(filters, fieldRefs));
+  const [panelStyle, setPanelStyle] = useState<CSSProperties | undefined>();
   const active = fieldRefs.some((fieldRef) => selectedValues(filters, fieldRef.field).length > 0);
+
+  const updatePanelPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) {
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const panelWidth = Math.min(320, Math.max(240, window.innerWidth - 24));
+    const left = Math.min(Math.max(12, rect.right - panelWidth), window.innerWidth - panelWidth - 12);
+    const top = Math.min(rect.bottom + 8, window.innerHeight - 88);
+    setPanelStyle({
+      left,
+      maxHeight: `min(360px, calc(100vh - ${Math.max(24, top + 12)}px))`,
+      top,
+      width: panelWidth,
+    });
+  }, []);
 
   useEffect(() => {
     if (open) {
       setDraft(selectedValuesByField(filters, fieldRefs));
+      updatePanelPosition();
     }
-  }, [fieldRefs, filters, open]);
+  }, [fieldRefs, filters, open, updatePanelPosition]);
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (triggerRef.current?.contains(target)) {
+        return;
+      }
+      const panel = document.getElementById(menuId);
+      if (panel?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+    window.addEventListener("resize", updatePanelPosition);
+    window.addEventListener("scroll", updatePanelPosition, true);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      window.removeEventListener("resize", updatePanelPosition);
+      window.removeEventListener("scroll", updatePanelPosition, true);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [menuId, open, updatePanelPosition]);
 
   const toggleValue = (field: string, value: string) => {
     setDraft((current) => {
@@ -561,6 +671,7 @@ function OaColumnFilterMenu({
           "oa-pending-payments-column-filter__trigger",
           active && "oa-pending-payments-column-filter__trigger--active",
         )}
+        ref={triggerRef}
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
@@ -571,6 +682,7 @@ function OaColumnFilterMenu({
           aria-label={`${columnLabel}筛选`}
           className="oa-pending-payments-column-filter__panel"
           id={menuId}
+          style={panelStyle}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               setOpen(false);
@@ -825,10 +937,6 @@ function writebackLabel(row: OaPendingPaymentRow): string {
   return row.oaPaymentWriteback?.code === "written" ? "已写回" : "未写回";
 }
 
-function writebackSyncStatus(row: OaPendingPaymentRow): string {
-  return row.oaPaymentWriteback?.syncStatus || "not_required";
-}
-
 function workflowStatusLabel(row: OaPendingPaymentRow): string {
   const status = String(row.oa.workflowStatus || "").trim();
   if (status === "in_progress") {
@@ -846,7 +954,7 @@ function workflowStatusTagLabel(row: OaPendingPaymentRow): string {
 
 function counterpartyDisplay(row: OaPendingPaymentRow): string {
   const counterparty = String(row.bankTransaction.counterpartyName || "").trim();
-  return counterparty ? `对方户名：${counterparty}` : "";
+  return counterparty;
 }
 
 function confirmBankTransactionId(row: OaPendingPaymentRow): string {

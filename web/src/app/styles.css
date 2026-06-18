@@ -2287,12 +2287,6 @@ textarea {
   font-weight: 750;
 }
 
-.oa-pending-payments-writeback-sync {
-  color: var(--fp-warning);
-  font-size: var(--fp-text-label);
-  font-weight: 800;
-}
-
 .oa-pending-payments-empty-bank-cell {
   display: flex;
   min-height: 44px;
@@ -2471,13 +2465,9 @@ textarea {
 }
 
 .oa-pending-payments-column-filter__panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 20;
+  position: fixed;
+  z-index: 1200;
   display: grid;
-  width: min(310px, calc(100vw - 40px));
-  max-height: 390px;
   overflow: auto;
   gap: var(--fp-space-2);
   border: 1px solid var(--fp-border);
