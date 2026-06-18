@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-18 - 服务器发票预览 500 修复
+
+- 目标：修复服务器 `/imports/files/preview` 在发票 Excel 预览完成后返回 `接口处理失败` 的问题。
+- 影响范围：发票导入预览后的 PostgreSQL import facts 持久化、`job.outbox_events` 的 import-fact changed 入队、下游 read model dirty/outbox fan-out。
+- 关键决策：不改 Excel 解析和模板识别；真实异常来自 `PostgresCoreRepository._mark_import_fact_read_models_dirty()` 中 `job.outbox_events` 的 `ON CONFLICT` predicate 仍使用旧合同 `status in ('pending', 'processing')`，而当前 `0016` 后的 `outbox_events_dedupe_uidx` 只覆盖 `status = 'pending'`。修复为与 schema 一致的 predicate。
+- 文档影响：更新本实施记录和 `tests.md`；API contract 和业务状态不变。
+- 测试覆盖：新增 `tests/test_postgres_repositories_core.py::test_save_imports_marks_read_models_dirty_and_outbox_event` 断言 import fact outbox 使用 `status = 'pending'`，并用用户提供的 5 个真实 Excel 在本地一次性 PostgreSQL schema 中跑 `/imports/files/preview` smoke。
+- 验证命令：本地 PostgreSQL 临时库 `fin_ops_preview_test_260618` 完整迁移后，通过同一 HTTP handler 上传 5 个真实 Excel，返回 `status=200`、session `preview_ready`、391 行、错误 0，并写入 `app.import_batches=5`、`app.import_batch_rows=391`、`app.import_files=5`、`app.file_objects=5`、`job.outbox_events(import.fact.changed)=14`。
+- 未测风险：尚未在服务器用真实 OA 登录态重新点击页面确认；当前 SSH 用户不能读取 `fin-ops.service` journal traceback，生产验证需要发布本修复后再看 `/health/ready.api_performance["POST /imports/files/preview"].last_status_code` 和页面上传结果。
+- 后续事项：发布后如果仍报错，优先查看服务器 journal 中新的 traceback；不要再按模板识别方向排查。
+
 ## 2026-06-18 - 发票信息汇总表模板识别
 
 - 目标：支持用户从发票平台导出的 `信息汇总表` Excel，该格式使用 `数电号码`、`购方企业名称`、`购方税号`、`销方企业名称`、`销方税号`、`商品名称` 等表头，旧导入器会因缺少 `购买方名称` / `销方识别号` 判定为无法识别模板。

@@ -464,3 +464,5 @@ def test_save_imports_marks_read_models_dirty_and_outbox_event() -> None:
     assert "tax_offset" in joined_sql
     assert "tax" in joined_sql
     assert "search" in joined_sql
+    assert "where dedupe_key is not null and status = 'pending'" in joined_sql
+    assert "where dedupe_key is not null and status in ('pending', 'processing')" not in joined_sql

@@ -714,7 +714,7 @@ class PostgresCoreRepository:
                     )
                     values ('default', 'import.fact.changed', 'import_fact', %s, %s, %s, %s, %s)
                     on conflict (tenant_id, dedupe_key)
-                    where dedupe_key is not null and status in ('pending', 'processing')
+                    where dedupe_key is not null and status = 'pending'
                     do update set updated_at = job.outbox_events.updated_at
                     """,
                     (
