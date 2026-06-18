@@ -2330,9 +2330,10 @@ describe("Workbench row selection and detail modal", () => {
     });
     renderWorkbenchPage();
 
-    expect(await screen.findByText("关联台待刷新，当前结果可能不是完整最新数据。")).toBeInTheDocument();
+    await screen.findByTestId("zone-open");
+    expect(screen.queryByText("关联台待刷新，当前结果可能不是完整最新数据。")).not.toBeInTheDocument();
     expect(screen.queryByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).not.toBeInTheDocument();
-    expect(within(await screen.findByTestId("zone-open")).getByText("未配对 0 项")).toBeInTheDocument();
+    expect(within(screen.getByTestId("zone-open")).getByText("未配对 0 项")).toBeInTheDocument();
   });
 
   test("requeued workbench refresh failure does not show the stale failure banner", async () => {

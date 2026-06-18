@@ -472,7 +472,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         handlers.update(import_handlers.handlers)
         if IMPORT_PROCESS_REQUESTED_EVENT not in config.event_types:
             config.event_types.append(IMPORT_PROCESS_REQUESTED_EVENT)
-        if queue_settings.backend == "postgres" and IMPORT_FACT_CHANGED_EVENT not in config.event_types:
+        if IMPORT_FACT_CHANGED_EVENT not in config.event_types:
             config.event_types.append(IMPORT_FACT_CHANGED_EVENT)
 
     if args.check:

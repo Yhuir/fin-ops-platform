@@ -26,6 +26,28 @@
 
 ## 历史记录
 
+## 2026-06-19 - Runtime Read Model closure repair
+
+- 目标：在发票导入 worker 修复后，把生产遗留的 dead-letter、dirty scope 和非 fresh readiness 收敛到干净状态，并保留可审计的运维证据。
+- 影响范围：`bank_detail`、`no_oa_bank_batch`、`invoice_lifecycle`、`pending_invoice` read model refresh 事件；生产 `runtime_queue_ops` 受控 dead-letter resolution；不改变 worker handler 的业务投影逻辑。
+- 关键决策：先通过 `ReadModelRefreshGateway` 对真实依赖 scope 重新入队，让 worker 自然发布 fresh readiness 和 complete dirty scope；只有在 `fresh_readiness` / `later_done` / `active_dirty_count=0` 证明成立后，才用 `runtime_queue_ops resolve-covered-dead-letters --execute` 归档历史 dead-letter。无效 `pending_invoice` 裸月份 readiness 是非 canonical 残留，按 repository 边界删除，不重放。
+- 文档影响：同步 read-models 和 app-health-operations 实施记录；生产运维原则仍以 `docs/operations/runtime-worker-governance.md` 为准。
+- 测试覆盖：本轮代码测试覆盖 `pending_invoice` scope policy，防止同类非法 scope 再次入队；生产修复通过只读 SQL 和受控 CLI 证明运行状态收敛。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：生产修复证明现有 runtime state 已闭环；仍需用户执行真实发票重新导入来验证业务入口从上传到下游页面的完整用户链路。
+- 后续事项：遇到 `*_read_model_not_fresh` 历史残留时，优先重放已收敛依赖 scope，再归档 covered dead-letter；不要绕过 queue/readiness 直接写 fresh。
+
+## 2026-06-19 - RabbitMQ import fact changed drain 闭环
+
+- 目标：修复发票上传/导入成功后，关联台和下游 read model 长时间显示同步中的问题。
+- 影响范围：`import` worker registration、RabbitMQ dispatcher event types、`--enable-import-job-processing --check` 输出、发票导入到关联台 refresh 的后台链路；不改变 PostgreSQL durable queue / dirty scope / readiness 事实源。
+- 关键决策：`import.fact.changed` 是导入事实写入后下游 read model dirty/outbox fan-out 的确认事件。RabbitMQ transport 下 import worker 不能只 claim `import.process.requested`，否则 `import.fact.changed` 会长期停留在 PostgreSQL `pending`，App Status 和关联台 freshness 都不会收敛。import worker 现在在所有 transport 下同时 claim `import.process.requested` 与 `import.fact.changed`，RabbitMQ dispatcher route/env 也覆盖 `import.fact.changed`。
+- 文档影响：更新 runtime-workers、imports-invoices、reconciliation-workbench 和 app-health-operations 模块文档。
+- 测试覆盖：`tests/test_runtime_worker_registry.py` 覆盖 import worker 在 PostgreSQL/RabbitMQ 下的 claim event types 与 registry-derived dispatch events；`tests/test_import_job_queue.py` 覆盖 RabbitMQ 模式 worker check 输出两个 event type 和 `finops.import.fact.changed` route。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地测试证明 registry/worker check contract；真实生产仍需发布后观察历史 `import.fact.changed` backlog、`job.read_model_dirty_scopes` 和关联台 read model 是否自然 drain。
+- 后续事项：发布后优先只读核对 `job.outbox_events(event_type='import.fact.changed')` 非 done 数量是否归零，再重新导入少量发票验证完整链路。
+
 ## 2026-06-16 - P2/P3 一秒级 SLO 门禁口径
 
 - 目标：把 runtime worker/read model 当前维护口径从历史 5 秒基线收紧到 17 页面 P2/P3 closure 的一秒级门禁，避免后续无人值守流程继续按旧阈值验收。

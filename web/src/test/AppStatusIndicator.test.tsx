@@ -102,6 +102,23 @@ const globalAppStatus = {
       attention: false,
       updated_at: "2026-06-04T10:00:00+08:00",
     },
+    {
+      job_id: "job_invoice_001",
+      type: "file_import",
+      status: "running",
+      label: "导入发票",
+      short_label: "导入发票",
+      message: "正在导入发票。",
+      phase: "persist_items",
+      current: 210,
+      total: 500,
+      percent: 42,
+      affected_domains: ["imports_invoices"],
+      affected_scopes: ["2026-06"],
+      route: "/imports/invoices",
+      attention: false,
+      updated_at: "2026-06-04T10:00:00+08:00",
+    },
   ],
   alerts: [],
 };
@@ -135,7 +152,8 @@ describe("global app status indicator", () => {
     expect(await screen.findByText("运行状态")).toBeInTheDocument();
     expect(document.querySelector(".MuiPopover-root")).not.toBeInTheDocument();
     const statusDialog = screen.getByRole("dialog", { name: "全局运行状态" });
-    expect(within(statusDialog).getByText("正在导入 ETC发票 3/31")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("正在导入ETC发票 3/31")).toBeInTheDocument();
+    expect(within(statusDialog).getByText("正在导入发票 210/500")).toBeInTheDocument();
     expect(within(statusDialog).getByText("银行明细")).toBeInTheDocument();
     expect(within(statusDialog).getByRole("link", { name: "银行明细 已同步" })).toBeInTheDocument();
     expect(within(statusDialog).getByText("税金抵扣")).toBeInTheDocument();
@@ -155,7 +173,8 @@ describe("global app status indicator", () => {
     await waitFor(() => {
       const stableDialog = screen.getByRole("dialog", { name: "全局运行状态" });
       expect(within(stableDialog).getByText("运行状态")).toBeInTheDocument();
-      expect(within(stableDialog).getByText("正在导入 ETC发票 3/31")).toBeInTheDocument();
+      expect(within(stableDialog).getByText("正在导入ETC发票 3/31")).toBeInTheDocument();
+      expect(within(stableDialog).getByText("正在导入发票 210/500")).toBeInTheDocument();
       expect(within(stableDialog).getByText("银行明细")).toBeInTheDocument();
     });
 

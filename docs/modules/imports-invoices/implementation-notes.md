@@ -26,6 +26,17 @@
 
 ## 历史记录
 
+## 2026-06-19 - 发票导入后台链路闭环
+
+- 目标：修复发票文件上传/预览/确认后，用户看到导入成功但关联台仍长期刷新中的闭环缺口。
+- 影响范围：发票导入确认后的 background job、`import.fact.changed` durable event、下游 workbench/workbench_relation/tax/cost/invoice lifecycle/search read model refresh，以及 App Status 导入进度展示。
+- 关键决策：发票导入成功的用户口径必须同时满足三段链路：文件导入 job 完成、`import.fact.changed` 被 import worker claim/ack、下游 read model dirty scope 被各自 worker 刷新并通过 freshness/readiness 暴露。RabbitMQ 模式下 `import.fact.changed` 不得只注册在 PostgreSQL claim override；它必须进入 import worker 的统一 claim event types 和 RabbitMQ dispatch route。
+- 文档影响：同步 runtime worker、关联台和系统状态模块实施记录；发票导入 API contract 与业务字段不变。
+- 测试覆盖：`tests/test_import_job_queue.py` 覆盖 RabbitMQ import worker check 暴露 `import.fact.changed` route；`tests/test_runtime_worker_registry.py` 覆盖 import worker 所有 transport claim event types；`web/src/test/AppStatusIndicator.test.tsx` 覆盖发票导入进度在全局状态框显示为“正在导入发票 210/500”。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地测试不执行真实 RabbitMQ broker/systemd 长跑，也不证明生产历史 pending 自动 drain；发布后需只读观察 backlog 并重新导入小批量发票 smoke。
+- 后续事项：重新导入验证前，只能清理本次导入批次对应发票/source links/import rows，不能删除历史发票事实；清理前必须用 import session/batch/job 精确圈定范围。
+
 ## 2026-06-18 - 服务器发票预览 500 修复
 
 - 目标：修复服务器 `/imports/files/preview` 在发票 Excel 预览完成后返回 `接口处理失败` 的问题。

@@ -362,12 +362,6 @@ function workbenchReadModelStatusMessage(status: string | null, lastError?: stri
   if (status === "unavailable") {
     return "关联台读模型不可用";
   }
-  if (status === "refreshing") {
-    return "关联台刷新中，当前结果可能不是完整最新数据。";
-  }
-  if (status === "stale") {
-    return "关联台待刷新，当前结果可能不是完整最新数据。";
-  }
   return null;
 }
 
@@ -387,23 +381,6 @@ function workbenchRefreshStatusMessage(status: WorkbenchRefreshStatus | null) {
     return null;
   }
   return workbenchReadModelStatusMessage(status.readModelStatus, status.lastError);
-}
-
-function workbenchRefreshStatusPanelTone(status: WorkbenchRefreshStatus | null) {
-  if (!status) {
-    return "";
-  }
-  return workbenchReadModelStatusPanelTone(status.readModelStatus);
-}
-
-function workbenchReadModelStatusPanelTone(status: string | null) {
-  if (status === "failed" || status === "unavailable") {
-    return " error";
-  }
-  if (status === "refreshing" || status === "stale") {
-    return " pending";
-  }
-  return "";
 }
 
 export default function ReconciliationWorkbenchPage() {
@@ -2114,12 +2091,6 @@ export default function ReconciliationWorkbenchPage() {
   const isOpenVisible = expandedZoneId === null || expandedZoneId === "open";
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
   const openZoneItemCount = resolveZoneItemCount(zonePages.open, workbenchData?.summary.zoneCounts.open);
-  const workbenchRefreshPanelMessage = workbenchRefreshStatusMessage(workbenchRefreshStatus)
-    ?? workbenchReadModelStatusMessage(workbenchPageReadModelStatus);
-  const workbenchRefreshPanelTone = workbenchRefreshStatusMessage(workbenchRefreshStatus)
-    ? workbenchRefreshStatusPanelTone(workbenchRefreshStatus)
-    : workbenchReadModelStatusPanelTone(workbenchPageReadModelStatus);
-
   const pairedZoneElement = (
     <WorkbenchZone
       canMutateData={canWriteWorkbench}
@@ -2213,11 +2184,6 @@ export default function ReconciliationWorkbenchPage() {
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
-        ) : null}
-        {!loadError && workbenchRefreshPanelMessage ? (
-          <div className={`state-panel workbench-refresh-status${workbenchRefreshPanelTone}`}>
-            {workbenchRefreshPanelMessage}
-          </div>
         ) : null}
         {!isLoading && !loadError && isEmpty && isOaReady && isWorkbenchPageFresh ? (
           <div className="state-panel">当前没有可展示的 OA / 银行流水 / 发票记录。</div>

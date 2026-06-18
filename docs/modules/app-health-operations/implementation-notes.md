@@ -28,6 +28,27 @@
 
 ## 历史记录
 
+## 2026-06-19 - Ready 与 Runtime Read Model 闭环边界
+
+- 目标：明确 `/health/ready` 返回 ready 不等于所有 read model 都已完成业务同步，并补齐本次发票导入后 Runtime Read Model 残留的状态框闭环。
+- 影响范围：App Health/App Status 运行口径、`read_model.app_status_readiness` 非 fresh 诊断、生产 ready smoke；不改变 `/health/ready` contract。
+- 关键决策：ready endpoint 仍是部署和基础运行门禁；完整同步闭环必须同时证明 `job.outbox_events` 无 dead-letter/current backlog、`job.read_model_dirty_scopes` 无 active dirty scope、`read_model.app_status_readiness` 无 current non-fresh 记录。历史 dead-letter 只有在后续 fresh/done 证明覆盖后才能归档。
+- 文档影响：同步 read-models/runtime-workers 实施记录；App Status 产品文案不变。
+- 测试覆盖：本轮新增 `pending_invoice` scope policy 单测，避免非法 readiness 进入状态框；生产验证用只读 SQL 和 `runtime_queue_ops` dry-run/execute 证明 current state 收敛。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：真实 App Status popover 的浏览器可见性仍需用户重新导入发票后观察；后端状态事实已经清零。
+- 后续事项：排查“同步中”问题时，先区分 ready gate、App Status current-effective state、以及页面级 read model freshness，不要只凭 `/health/ready` 下结论。
+
+## 2026-06-19 - App Status 导入任务进度文案
+
+- 目标：把上传/导入过程的用户可见状态集中放进运行状态框，并显示导入对象与进度，例如“正在导入发票 210/500”。
+- 影响范围：`AppStatusIndicator` background task 展示、发票/ETC/银行流水导入页的 `file_import` job feedback；不改变后端 job payload contract。
+- 关键决策：前端状态框优先使用 job `type`、`affected_domains` 与 `route` 推断导入对象名：发票、ETC发票、银行流水。`current/total` 存在且 `total > 0` 时显示为 `正在导入<对象> current/total`；缺少进度时显示 `正在导入<对象>`，避免依赖后端 `short_label` 中的历史空格或泛化文案。
+- 文档影响：同步发票导入和关联台实施记录；系统状态 API contract 不变。
+- 测试覆盖：`web/src/test/AppStatusIndicator.test.tsx` 覆盖发票导入 `210/500` 和 ETC 导入进度在状态框中的展示。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地测试覆盖状态框 DOM；真实 SSE/轮询延迟、生产 task current/total 是否随导入阶段稳定推进仍需发布后导入 smoke。
+
 ## 2026-06-18 - App Status requeued failure current-effective merge
 
 - 目标：修复同一 read model scope 旧 `failed` 记录被新 `pending/processing` 重试覆盖后，App Health 仍把旧错误显示为当前失败的问题；本次现场表现为 `cost_statistics active:2026-03` 重新 processing 时仍显示 `deadlock detected`。

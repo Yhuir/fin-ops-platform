@@ -110,7 +110,7 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["cost_statistics"].worker_instance, "cost-statistics")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
 
-    def test_import_claim_events_include_postgres_local_ack_event_but_rabbitmq_dispatch_does_not(self) -> None:
+    def test_import_claim_events_include_import_fact_changed_in_all_transports(self) -> None:
         registration = registration_by_instance_name()["import"]
 
         self.assertEqual(
@@ -119,10 +119,10 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             worker_claim_event_types(registration, transport="rabbitmq"),
-            ("import.process.requested",),
+            ("import.process.requested", "import.fact.changed"),
         )
         self.assertIn("import.process.requested", rabbitmq_dispatch_event_types())
-        self.assertNotIn("import.fact.changed", rabbitmq_dispatch_event_types())
+        self.assertIn("import.fact.changed", rabbitmq_dispatch_event_types())
 
     def test_read_model_monitoring_events_are_covered_by_registry(self) -> None:
         registry_events = set(rabbitmq_dispatch_event_types())

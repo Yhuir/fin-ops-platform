@@ -64,6 +64,14 @@ def _month_or_all_scope_policy(scope_type: str) -> ReadModelScopePolicy:
     )
 
 
+def _pending_invoice_scope_policy() -> ReadModelScopePolicy:
+    return ReadModelScopePolicy(
+        scope_type="pending_invoice",
+        normalize_many=_dedupe_text,
+        validate_one=_validate_pending_invoice_scope_key,
+    )
+
+
 def _normalize_cost_statistics_scope_keys(raw_scope_keys: list[str]) -> list[str]:
     from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 
@@ -97,6 +105,22 @@ def _validate_month_or_all_scope_key(scope_type: str, scope_key: str) -> None:
     raise ReadModelScopeError(f"Invalid {scope_type} read model scope_key: {scope_key}")
 
 
+def _validate_pending_invoice_scope_key(scope_key: str) -> None:
+    normalized_scope_key = str(scope_key or "").strip()
+    if normalized_scope_key == "all":
+        return
+    parts = [part.strip() for part in normalized_scope_key.split(":")]
+    if len(parts) not in {2, 3}:
+        raise ReadModelScopeError(f"Invalid pending_invoice read model scope_key: {scope_key}")
+    direction, filter_group = parts[0], parts[1]
+    if direction not in {"expense", "income"}:
+        raise ReadModelScopeError("pending_invoice read model scope direction must be expense or income.")
+    if not filter_group:
+        raise ReadModelScopeError(f"Invalid pending_invoice read model scope_key: {scope_key}")
+    if len(parts) == 3 and not MONTH_RE.match(parts[2]):
+        raise ReadModelScopeError(f"Invalid pending_invoice read model month scope_key: {scope_key}")
+
+
 def _validate_non_empty(scope_type: str, scope_key: str) -> None:
     if not str(scope_key or "").strip():
         raise ReadModelScopeError(f"{scope_type} read model refresh scope_key is required.")
@@ -115,5 +139,6 @@ DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY = ReadModelScopePolicyRegistry(
     {
         "cost_statistics": _cost_statistics_scope_policy(),
         "no_oa_bank_batch": _month_or_all_scope_policy("no_oa_bank_batch"),
+        "pending_invoice": _pending_invoice_scope_policy(),
     }
 )

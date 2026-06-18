@@ -27,6 +27,16 @@
 
 ## 历史记录
 
+## 2026-06-19 - 关联台刷新提示归口 App Status
+
+- 目标：移除关联台页内“刷新中/待刷新，当前结果可能不是完整最新数据”的横幅，避免同一运行状态在页面和状态框重复展示。
+- 影响范围：`ReconciliationWorkbenchPage` 的 read model non-fresh 展示、stale empty 防 false-empty 断言、App Status popover 作为统一状态入口；不改变 Workbench active generation、freshness 判断、写入口 gate 或 read model refresh 行为。
+- 关键决策：关联台页面继续用 `read_model_status` 防止 stale/refreshing 空 payload 被误显示为业务空态；但普通 stale/refreshing 不再渲染页内横幅。失败/不可用仍作为错误状态进入页面 status reason；全局运行状态框负责展示 read model/worker/import 的同步状态。
+- 文档影响：本记录同步系统状态模块导入进度展示说明；长期 API/worker contract 不变。
+- 测试覆盖：更新 `web/src/test/WorkbenchSelection.test.tsx`，锁定 stale empty payload 不显示全局空态且不再显示旧页内提示。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地前端测试覆盖 DOM contract；真实生产 App Status 是否足够醒目仍需发布后人工 smoke。
+
 ## 2026-06-18 - App Health write-safety Browser E2E
 
 - 目标：补齐 `RECON-WB-E2E-012`，用真实 Chromium 覆盖 App Health 系统级写保护与关联台逐角色写入口组合。

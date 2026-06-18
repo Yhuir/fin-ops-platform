@@ -13,6 +13,15 @@
 
 ## 历史记录
 
+## 2026-06-19 - RabbitMQ dispatcher import fact route
+
+- 目标：让 release/env 示例与 runtime worker registry 保持一致，确保 RabbitMQ dispatcher 会发布 `import.fact.changed` wakeup。
+- 影响范围：`deploy/oa/env/fin-ops.rabbitmq-dispatcher.env.example`、runtime worker manifest/registry 派生事件；不改变发布脚本、systemd 模板或 root-owned deploy helper 流程。
+- 关键决策：`import.fact.changed` 仍以 PostgreSQL durable queue 为事实源，RabbitMQ 只负责 envelope/wakeup；dispatcher event list 必须包含该事件，否则生产 RabbitMQ transport 下 import worker 即使能 claim，也缺少正常 publish/consume wakeup。
+- 文档影响：同步 runtime-workers 与 imports-invoices 实施记录。
+- 测试覆盖：`tests/test_runtime_worker_registry.py` 覆盖 dispatcher env 示例包含 registry-derived RabbitMQ events。
+- 未测风险：本地测试不连接真实 RabbitMQ；发布后需通过 worker check、queue backlog 和 App Status 观察真实 drain。
+
 ## 2026-06-11 - verify clean-state 回归修复
 
 - 目标：修复 `bash scripts/verify.sh all` 因读取本地 legacy app Mongo 旧 ETC pickle 而失败的问题，让日常回归验证只验证代码和测试闭环。

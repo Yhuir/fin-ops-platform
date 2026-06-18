@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-06-19 - Pending invoice scope contract 防复发与运行状态闭环
+
+- 目标：关闭发票导入修复后的 Runtime Read Model 残留，防止非法 `pending_invoice` 裸月份 scope 再次进入 durable queue/readiness。
+- 影响范围：`ReadModelRefreshGateway` scope policy registry、`pending_invoice.read_model.refresh` 入队边界、生产 `job.outbox_events` / `job.read_model_dirty_scopes` / `read_model.app_status_readiness` 运行状态；不改变 pending invoice projection 业务字段。
+- 关键决策：`pending_invoice` 不再使用 generic non-empty scope policy。合法 scope 只能是 `all` 聚合命令，或 `expense|income:<filter>`，或 `expense|income:<filter>:YYYY-MM`；裸月份如 `2026-02`、错误 direction 和非规范月份必须 fail-fast。生产历史残留通过真实 refresh 重新收敛后再用 `runtime_queue_ops resolve-covered-dead-letters` 归档，禁止直接把 dead-letter 改为 done。
+- 文档影响：同步 runtime-workers、app-health-operations 和本实施记录；长期事实源仍是 runtime worker governance。
+- 测试覆盖：`tests/test_read_model_refresh_gateway.py` 覆盖 pending invoice 合法聚合/base/month scope，以及裸月份、错误 direction、缺 filter、非规范月份的拒绝。
+- 验证命令：见本轮最终交付说明。
+- 未测风险：本地测试证明未来入队边界；真实重新导入发票还需要用户在清理后的生产环境重新上传文件验证完整业务链路。
+- 后续事项：新增 read model scope type 时必须在 scope policy registry 中明确选择 generic 或专用 policy；不能让业务含义明确的 scope 默默落到 generic 非空校验。
+
 ## 2026-06-18 - Read model payload contract validator
 
 - 目标：修复 App Health 显示 read model fresh/已同步，但业务页面因旧 Redis 或 SQL payload 缺少当前 API 必需字段而加载失败的问题。

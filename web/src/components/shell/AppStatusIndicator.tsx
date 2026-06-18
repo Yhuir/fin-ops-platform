@@ -46,6 +46,39 @@ function taskStatusLabel(task: AppStatusTask) {
   return task.status || "后台任务";
 }
 
+function importTaskObjectName(task: AppStatusTask) {
+  const domains = new Set(task.affectedDomains);
+  if (task.type === "invoice_import" || domains.has("imports_invoices") || task.route === "/imports/invoices") {
+    return "发票";
+  }
+  if (
+    task.type === "etc_invoice_import"
+    || domains.has("imports_etc_invoices")
+    || task.route === "/imports/etc-invoices"
+  ) {
+    return "ETC发票";
+  }
+  if (
+    task.type === "bank_transaction_import"
+    || domains.has("imports_bank_transactions")
+    || task.route === "/imports/bank-transactions"
+  ) {
+    return "银行流水";
+  }
+  return null;
+}
+
+function taskPrimaryLabel(task: AppStatusTask) {
+  const importObjectName = importTaskObjectName(task);
+  if (importObjectName && task.total > 0) {
+    return `正在导入${importObjectName} ${task.current}/${task.total}`;
+  }
+  if (importObjectName) {
+    return `正在导入${importObjectName}`;
+  }
+  return task.shortLabel;
+}
+
 function overallStatusLabel(level: string) {
   if (level === "blocked") {
     return "阻断";
@@ -265,7 +298,7 @@ export default function AppStatusIndicator() {
                     {tasks.map((task) => (
                       <RouterLink key={task.jobId} to={task.route} className="app-status-task-link">
                         <span className="app-status-task-main">
-                          <span className="app-status-task-label">{task.shortLabel}</span>
+                          <span className="app-status-task-label">{taskPrimaryLabel(task)}</span>
                           <Chip size="sm" variant="soft">{taskStatusLabel(task)}</Chip>
                         </span>
                         {task.percent !== null ? (

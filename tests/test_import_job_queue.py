@@ -271,11 +271,15 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["worker_kind"], "import-job")
-        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT])
+        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT, "import.fact.changed"])
         self.assertEqual(payload["handlers"], ["import.fact.changed", IMPORT_PROCESS_REQUESTED_EVENT])
         self.assertEqual(
             payload["rabbitmq_event_routes"][IMPORT_PROCESS_REQUESTED_EVENT]["queue"],
             "finops.import.process.requested",
+        )
+        self.assertEqual(
+            payload["rabbitmq_event_routes"]["import.fact.changed"]["queue"],
+            "finops.import.fact.changed",
         )
 
     def test_worker_check_claims_import_fact_changed_in_postgres_mode(self) -> None:

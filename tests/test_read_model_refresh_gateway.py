@@ -94,6 +94,63 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
         with self.assertRaises(ReadModelScopeError):
             gateway.enqueue_many("no_oa_bank_batch", ["active:2026-06"], reason="unit_test")
 
+    def test_pending_invoice_policy_accepts_aggregate_base_and_month_scopes(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = QueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "pending_invoice",
+            [
+                "all",
+                "expense:all",
+                "income:cash_income",
+                "expense:bank_statement_as_invoice:2026-02",
+                "income:all:2026-02",
+                "income:all:2026-02",
+            ],
+            reason="unit_test",
+        )
+
+        self.assertEqual(
+            enqueued,
+            [
+                "all",
+                "expense:all",
+                "income:cash_income",
+                "expense:bank_statement_as_invoice:2026-02",
+                "income:all:2026-02",
+            ],
+        )
+        self.assertEqual(
+            queue.refreshes,
+            [
+                {"scope_type": "pending_invoice", "scope_key": "all", "reason": "unit_test"},
+                {"scope_type": "pending_invoice", "scope_key": "expense:all", "reason": "unit_test"},
+                {"scope_type": "pending_invoice", "scope_key": "income:cash_income", "reason": "unit_test"},
+                {
+                    "scope_type": "pending_invoice",
+                    "scope_key": "expense:bank_statement_as_invoice:2026-02",
+                    "reason": "unit_test",
+                },
+                {"scope_type": "pending_invoice", "scope_key": "income:all:2026-02", "reason": "unit_test"},
+            ],
+        )
+
+    def test_pending_invoice_policy_rejects_bare_month_and_invalid_direction(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+        from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
+
+        queue = QueueRecorder()
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        for invalid_scope_key in ["2026-02", "global", "refund:all", "income", "income:all:202602"]:
+            with self.subTest(invalid_scope_key=invalid_scope_key):
+                with self.assertRaises(ReadModelScopeError):
+                    gateway.enqueue_many("pending_invoice", [invalid_scope_key], reason="unit_test")
+        self.assertEqual(queue.refreshes, [])
+
     def test_metadata_is_passed_to_queue_repository(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
