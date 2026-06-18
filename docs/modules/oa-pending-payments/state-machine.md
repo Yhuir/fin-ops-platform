@@ -30,7 +30,7 @@
 - “确认已支付”必须先校验 OA 为 `in_progress`、银行流水为 outflow、支出流水合计等于 OA 金额、可解析 OA Mongo 文档 ID，再确认 Workbench relation 并写回 `t_payment_simple.pay_status=1`。
 - 支出流水付款合计使用所有有效 outflow relation 的 decimal total；收入流水、缺失银行事实或无效 relation 进入 `pending_review`。
 - OA、支出流水和发票的 `relationCount`/`summaries` 必须完全来自 Workbench relation payload，不得由金额、日期或名称相似度推断。
-- 进行中 OA 视图不展示发票列；原 completed 视图仍保留 relation detail 的 invoice 能力。
+- completed 与 in-progress 视图使用同一套四分组表格 UI；进行中 OA 没有发票证据时发票列显示 `-`，不影响确认已支付主链路。
 - all scope 允许聚合月份 rows/source versions，不要求存在单独 `all` scope row。
 - all scope 有实际 rows 时，source version freshness 优先由 rows 表证明；历史空月份 scope 不得把默认视图污染为 stale。
 - detail lookup 使用 read model native columns：`oa_id`、`bank_transaction_id`、`invoice_id`、`row_id`。
@@ -62,13 +62,14 @@
 | detail unavailable | detail API 返回 202 / `detailAvailable=false` | drawer 展示“详情暂不可用”和后端业务原因。 |
 | rules drawer | 用户打开“支出流水无需开票规则设置” | 复用 pending invoice rules endpoint，保存后不重挂载父页面。 |
 | view toggle | 用户切换“已完成 OA / 进行中 OA” | rows/filter-options 带 `view_mode`，切换时 page reset 为 1。 |
-| completed invoice display | `view_mode=completed` 且 row payload 含发票证据 | 表格显示发票情况列，支持单发票详情和多发票 relation 明细。 |
-| in-progress invoice display | `view_mode=in_progress` | 隐藏发票列；候选流水确认前不把发票证据作为进行中 OA 主操作。 |
+| invoice display | row payload 含发票证据 | completed 与 in-progress 表格都显示发票列；发票号、发票方、日期 chip 和金额纵向展示，支持单发票详情和多发票 relation 明细。 |
+| missing invoice display | row payload 缺少发票证据 | 发票列显示 `-`；候选流水确认前不把发票证据作为进行中 OA 主操作。 |
 | confirm paid | 进行中 OA 有候选或可确认支出流水 | 点击后调用 `POST /api/oa-pending-payments/confirm-paid`；成功提示“已确认支付并写回 OA”或等待写回状态刷新。 |
 | OA writeback display | rows payload 的 `oaPaymentWriteback` | 展示“未写回 / 已写回”；外部依赖不可用只展示同步状态异常，不暴露数据库错误。 |
 | filters/sort | 表头筛选菜单和排序按钮 | 参数必须映射到后端支持字段；多筛选为 AND 语义。 |
 | grouped relation display | row payload 的 `relationCount` / `summaries` | 多 OA、流水或发票只显示合计金额和 `+N`，点击 `+N` 打开对应 `kind=oa|bank|invoice` 的关联明细。 |
 | missing bank/invoice display | row payload 缺少银行或发票详情 | 表格显示 `-`，不显示 `0.00`、方向 chip、空日期提示或详情按钮。 |
+| compact table fit | 页面表格容器 | 四分组表格应在常见桌面宽度内完整显示；优先换行和紧凑控件，不用横向滚动承载核心信息。 |
 | permission denied | API 403 | 页面显示错误；后端必须强制权限，前端隐藏不是权限事实。 |
 
 前端事件：
@@ -132,5 +133,7 @@ Worker 流程：
 | 2026-06-18 | `oa.sync` 增加 OA 待付款 read model fan-out | 进行中 OA 进入 OA projection 后，`oa_pending_payment` 月份和 all scope 必须自动刷新，避免页面空数据 | `PYTHONPATH=backend/src python3 -m unittest tests.test_oa_projection_sync_service -v` |
 | 2026-06-18 | completed 视图恢复发票证据列，in-progress 继续隐藏发票列 | 真实浏览器首屏必须看到发票号并可打开发票详情；进行中 OA 仍只展示候选流水确认主链路 | `cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx`、`cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts` |
 | 2026-06-18 | OA/状态/流水主体表格改为内部三栏布局 | OA 单元格按申请人/项目/金额三栏展示，流水单元格按对方户名/金额/摘要三栏展示，支付状态列收窄并只显示未写回/已写回 | `cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx` |
+| 2026-06-18 | completed/in-progress 统一四分组表格 UI | 两种流程视图都显示 OA、支付状态、流水、发票四个大分组；发票列纵向展示并移除价税合计 chip | `cd web && npm test -- --run src/test/OaPendingPaymentsPage.test.tsx` |
+| 2026-06-18 | OA pending 四分组表格取消横向滚动 | 表格改为 100% 自适应百分比列宽，局部缩小字号/chip/按钮并允许换行 | `cd web && npx playwright test e2e/oa-pending-payments-flow.spec.ts` |
 | 2026-06-11 | 关联台分组关系收敛 | 移除 `overpaid`/`merged_paid` 展示口径；多 OA/流水/发票 relation 合并为一条核对行；详情支持 `kind=oa` | `tests.test_oa_pending_payment_service`、`tests.test_invoice_lifecycle_policy`、`tests.test_oa_pending_payment_api`、`tests.test_invoice_usage_collection_sql_runtime`、`web/src/test/OaPendingPaymentsPage.test.tsx` 通过 |
 | 2026-06-11 | 补齐测试闭环状态机 | OA 主行、付款状态、详情、UI、read model 和 worker 状态边界 | `tests.test_oa_pending_payment_service`、`tests.test_oa_pending_payment_api`、`tests.test_invoice_lifecycle_page_integration`、`tests.test_invoice_usage_collection_sql_runtime`、`tests.test_derived_data_lifecycle_service`、`tests.test_app_status_overview_service`、`tests.test_runtime_worker_registry`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/src/test/TableAlignmentStyles.test.ts` 通过 |

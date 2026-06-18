@@ -22,6 +22,11 @@ test.describe("OA pending payments browser flow", () => {
 
     const row = page.getByRole("row", { name: /浏览器付款申请人/ });
     await expect(row).toBeVisible();
+    const tableShellSize = await page.getByTestId("oa-pending-payments-table-shell").evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(tableShellSize.scrollWidth).toBeLessThanOrEqual(tableShellSize.clientWidth + 1);
     await expect(row).toContainText("浏览器待付款项目");
     await expect(row).toContainText("支付少了");
     await expect(row).toContainText("浏览器待付款供应商");

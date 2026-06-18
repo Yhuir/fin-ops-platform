@@ -38,7 +38,7 @@
 页面支持 `view_mode=completed|in_progress`：
 
 - `completed` 是原 OA 待付款视图，只展示已完成或历史未带 workflow status 的 OA，并继续展示 OA、支付状态、支出流水和进项发票 relation 证据。
-- `in_progress` 只展示 OA 系统仍为进行中的支付申请/日常报销。表格主体为 OA、支付状态、流水三列；候选流水只作为证据展示，必须由用户点击“确认已支付”后才允许确认 relation 并写回 OA MySQL。
+- `in_progress` 只展示 OA 系统仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；候选流水只作为证据展示，必须由用户点击“确认已支付”后才允许确认 relation 并写回 OA MySQL。
 - OA 投影/read model 的统一事实源必须同时保留 `completed` 和 `in_progress`，再由 `view_mode` 过滤；设置页的手工搜索/导入状态筛选不能把进行中 OA 从本页面事实源中过滤掉。
 - 进行中 OA 视图中的 OA 写回状态来自 `t_payment_simple.flow_id`。2026-06-17 实机验证显示该字段对应 OA Mongo `form_data._id`，平台用 Mongo OA detail fields 中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀解析；流程实例 ID 和流程请求 ID 只保留为详情/诊断字段。
 - 应用正常运行时通过 MySQL 连接配置写回 OA 支付状态，不要求应用进程登录服务器 SSH；SSH 只属于人工运维/排障通道。

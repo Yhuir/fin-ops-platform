@@ -722,6 +722,7 @@ describe("OA pending payments page", () => {
     const statusColumn = cssRule(styles, ".oa-pending-payments-col-paymentStatus");
     const oaGrid = cssRule(styles, ".oa-pending-payments-oa-grid");
     const bankGrid = cssRule(styles, ".oa-pending-payments-bank-grid");
+    const invoiceStack = cssRule(styles, ".oa-pending-payments-invoice-stack");
     const statusActionLine = cssRule(styles, ".oa-pending-payments-status-action-line");
     const successAlert = cssRule(styles, ".oa-pending-payments-alert--success");
     const groupOa = cssRule(styles, ".oa-pending-payments-table-group-header--oa");
@@ -740,11 +741,12 @@ describe("OA pending payments page", () => {
     expect(viewToggle).toContain("display: inline-flex");
     expect(confirmButton).toContain("var(--fp-success");
     expect(writebackLine).toContain("flex-wrap: wrap");
-    expect(statusColumn).toContain("width: 114px");
+    expect(statusColumn).toContain("width: 9%");
     expect(oaGrid).toContain("display: grid");
     expect(oaGrid).toContain("grid-template-columns");
     expect(bankGrid).toContain("display: grid");
     expect(bankGrid).toContain("grid-template-columns");
+    expect(invoiceStack).toContain("display: grid");
     expect(statusActionLine).toContain("flex-wrap: wrap");
     expect(successAlert).toContain("var(--fp-success-soft)");
     expect(groupOa).toContain("color-mix(in srgb, var(--fp-surface-muted)");
@@ -829,15 +831,15 @@ describe("OA pending payments page", () => {
     expect(await within(page).findByRole("table", { name: "OA待付款核对表格" })).toBeInTheDocument();
 
     const groupHeader = within(page).getAllByRole("row")[0];
-    for (const label of ["OA", "支付状态", "流水", "发票情况"]) {
+    for (const label of ["OA", "支付状态", "流水", "发票"]) {
       expect(within(groupHeader).getByRole("columnheader", { name: label })).toBeInTheDocument();
     }
     expect(within(groupHeader).queryByRole("columnheader", { name: "凭证信息" })).not.toBeInTheDocument();
-    for (const label of ["OA", "支付状态", "流水", "发票情况"]) {
+    for (const label of ["OA", "支付状态", "流水", "发票"]) {
       expect(within(page).getAllByText(label).length).toBeGreaterThan(0);
     }
-    expect(within(page).getByText("发票号码/发票方")).toBeInTheDocument();
-    expect(within(page).getAllByText("价税合计").length).toBeGreaterThan(0);
+    expect(within(page).queryByText("发票号码/发票方")).not.toBeInTheDocument();
+    expect(within(page).queryByText("价税合计")).not.toBeInTheDocument();
     expect(within(page).queryByRole("columnheader", { name: "日期" })).not.toBeInTheDocument();
     expect(within(page).queryByText("交易开始")).not.toBeInTheDocument();
     expect(within(page).queryByText("交易结束")).not.toBeInTheDocument();
@@ -853,6 +855,8 @@ describe("OA pending payments page", () => {
     expect(within(page).getAllByText("支付少了").some((element) => element.closest(".oa-pending-payment-status-cell"))).toBe(true);
     expect(within(page).getByText("26532000000123456789")).toBeInTheDocument();
     expect(within(page).getByText("2026-01-08")).toBeInTheDocument();
+    const invoiceSeller = within(page).getByText("云南恒昆机电设备有限公司");
+    expect(invoiceSeller.closest(".oa-pending-payments-table-tag")).toBeNull();
     expect(within(page).queryByText("进项发票方名称")).not.toBeInTheDocument();
     expect(within(page).getByText("建设银行 1234")).toBeInTheDocument();
     const paidRow = within(page).getByRole("row", { name: /张三/ });
@@ -959,7 +963,7 @@ describe("OA pending payments page", () => {
       expect(filters).toContainEqual({ field: "bank_direction", operator: "in", values: ["outflow"] });
     });
 
-    await user.click(within(page).getByRole("button", { name: "筛选 发票号码/发票方" }));
+    await user.click(within(page).getByRole("button", { name: "筛选 发票" }));
     await user.click(await screen.findByRole("menuitemcheckbox", { name: "发票方：云南恒昆机电设备有限公司 1" }));
     await user.click(screen.getByRole("button", { name: "应用筛选" }));
     await waitFor(() => {
@@ -988,9 +992,11 @@ describe("OA pending payments page", () => {
 
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     expect(within(candidateRow).getByText("流程状态：进行中")).toBeInTheDocument();
-    expect(within(page).queryByRole("columnheader", { name: "发票情况" })).not.toBeInTheDocument();
-    expect(within(page).queryByRole("button", { name: "筛选 发票号码/发票方" })).not.toBeInTheDocument();
-    expect(within(page).queryByRole("button", { name: "开票日期 排序" })).not.toBeInTheDocument();
+    expect(within(page).getAllByRole("columnheader", { name: "发票" }).length).toBeGreaterThan(0);
+    expect(within(page).getByRole("button", { name: "筛选 发票" })).toBeInTheDocument();
+    expect(within(page).getByRole("button", { name: "开票日期 排序" })).toBeInTheDocument();
+    const candidateCells = candidateRow.querySelectorAll(".oa-pending-payments-table-cell");
+    expect(candidateCells[3]?.textContent?.trim()).toBe("-");
     await user.click(within(candidateRow).getByRole("button", { name: "确认已支付" }));
 
     await waitFor(() => expect(confirmPaidRequests(fetchMock)).toHaveLength(1));

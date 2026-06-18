@@ -16,7 +16,6 @@ import type {
   OaPendingPaymentFilterOption,
   OaPendingPaymentRow,
   OaPendingPaymentSortDirection,
-  OaPendingPaymentViewMode,
 } from "../../features/oaPendingPayments/types";
 
 type OaColumnFilterValue = InputInvoiceUsageFilterValue;
@@ -41,7 +40,6 @@ type OaPendingPaymentsTableProps = {
   onConfirmPaid?: (row: OaPendingPaymentRow) => void;
   confirmingRowIds?: Set<string>;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
-  viewMode: OaPendingPaymentViewMode;
 };
 
 type OaColumnFilterField = {
@@ -92,7 +90,7 @@ const columns: OaPendingPaymentColumn[] = [
   },
   {
     id: "invoice",
-    label: "发票号码/发票方",
+    label: "发票",
     filterFields: [
       { field: "seller_name", label: "发票方" },
       { field: "invoice_date", label: "开票日期" },
@@ -127,14 +125,8 @@ export default function OaPendingPaymentsTable({
   onConfirmPaid,
   confirmingRowIds = new Set(),
   tableWrapRef,
-  viewMode,
 }: OaPendingPaymentsTableProps) {
   const configsByField = useMemo(() => new Map(filterConfigs.map((config) => [config.field, config])), [filterConfigs]);
-  const showInvoiceColumn = viewMode === "completed";
-  const visibleColumns = useMemo(
-    () => showInvoiceColumn ? columns : columns.filter((column) => column.group !== "invoice"),
-    [showInvoiceColumn],
-  );
 
   return (
     <div className="oa-pending-payments-table-frame" data-testid="oa-pending-payments-table-frame">
@@ -160,7 +152,7 @@ export default function OaPendingPaymentsTable({
       <div ref={tableWrapRef} className="oa-pending-payments-table-shell" data-testid="oa-pending-payments-table-shell">
         <table aria-label="OA待付款核对表格" className="oa-pending-payments-table">
           <colgroup>
-            {visibleColumns.map((column) => (
+            {columns.map((column) => (
               <col className={`oa-pending-payments-col-${column.id}`} key={column.id} />
             ))}
           </colgroup>
@@ -169,10 +161,10 @@ export default function OaPendingPaymentsTable({
               <GroupHeader group="oa" label="OA" span={1} />
               <GroupHeader group="status" label="支付状态" span={1} />
               <GroupHeader group="bank" label="流水" span={1} />
-              {showInvoiceColumn ? <GroupHeader group="invoice" label="发票情况" span={1} /> : null}
+              <GroupHeader group="invoice" label="发票" span={1} />
             </tr>
             <tr>
-              {visibleColumns.map((column) => (
+              {columns.map((column) => (
                 <th
                   className={cx(
                     "oa-pending-payments-table-sub-header",
@@ -199,7 +191,7 @@ export default function OaPendingPaymentsTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td className="oa-pending-payments-table-state-cell" colSpan={visibleColumns.length}>
+                <td className="oa-pending-payments-table-state-cell" colSpan={columns.length}>
                   暂无 OA 待付款核对数据
                 </td>
               </tr>
@@ -325,11 +317,9 @@ export default function OaPendingPaymentsTable({
                       </span>
                     )}
                   </td>
-                  {showInvoiceColumn ? (
-                    <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--invoice oa-pending-payments-table-cell--left-border" data-column-role="identity">
-                      <InvoiceCell row={row} onOpenDetail={onOpenDetail} />
-                    </td>
-                  ) : null}
+                  <td className="oa-pending-payments-table-cell oa-pending-payments-table-cell--invoice oa-pending-payments-table-cell--left-border" data-column-role="identity">
+                    <InvoiceCell row={row} onOpenDetail={onOpenDetail} />
+                  </td>
                 </tr>
               );
             })}
@@ -363,7 +353,7 @@ function InvoiceCell({
   }
   const invoiceTarget = invoiceDetailTarget(row);
   return (
-    <>
+    <div className="oa-pending-payments-invoice-stack">
       <span className="oa-pending-payments-inline-row">
         <TextLine strong value={invoiceDisplayNo(row)} />
         <DetailButton
@@ -377,16 +367,17 @@ function InvoiceCell({
           text={invoiceRelationButtonText(row)}
         />
       </span>
-      <span className="oa-pending-payments-tag-row">
-        {row.invoice.sellerName ? <TableTag>{row.invoice.sellerName}</TableTag> : null}
-        {row.invoice.invoiceDate ? <TableTag>{row.invoice.invoiceDate}</TableTag> : null}
-        {hasCandidateInvoiceRelation(row) ? <RelationStatusTag status="candidate" /> : null}
-      </span>
+      {row.invoice.sellerName ? <TextLine value={row.invoice.sellerName} /> : null}
+      {row.invoice.invoiceDate || hasCandidateInvoiceRelation(row) ? (
+        <span className="oa-pending-payments-tag-row">
+          {row.invoice.invoiceDate ? <TableTag>{row.invoice.invoiceDate}</TableTag> : null}
+          {hasCandidateInvoiceRelation(row) ? <RelationStatusTag status="candidate" /> : null}
+        </span>
+      ) : null}
       <span className="oa-pending-payments-invoice-amount-line">
         <TextLine numeric strong value={invoiceAmount(row)} />
-        <TableTag>价税合计</TableTag>
       </span>
-    </>
+    </div>
   );
 }
 
